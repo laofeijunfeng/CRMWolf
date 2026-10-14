@@ -17,7 +17,6 @@ from app.core.list_query import (
     build_optional_list_query,
     SortCondition,
     without_filter_field,
-    paginate_optional_list_query,
     uses_unified_list_query,
 )
 from app.core.list_query.catalogs import OPPORTUNITIES_LIST_QUERY_CATALOG
@@ -214,6 +213,101 @@ class OpportunityCRUD:
         return opportunities
 
 
+    def build_population_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        stage_id: int | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        customer_id: int | None = None,
+        keyword: str | None = None,
+        customer_keyword: str | None = None,
+        search: str | None = None,
+        license_type: str | None = None,
+        license_type_exclude: str | None = None,
+        purchase_type: str | None = None,
+        purchase_type_exclude: str | None = None,
+        stage_name: str | None = None,
+        expected_closing_date_start: date | None = None,
+        expected_closing_date_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> Query[Opportunity]:
+        query = self._query(db).filter(Opportunity.team_id == team_id)
+        context = ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = filters
+            status_values = _split_int_csv(status)
+            if status_values:
+                query = query.filter(Opportunity.status.in_(status_values))
+                effective_filters = without_filter_field(filters, "status")
+            if owner_id is not None:
+                query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
+            if customer_id is not None:
+                query = query.filter(Opportunity.customer_id == customer_id)
+            _, ordered = build_optional_list_query(
+                query, OPPORTUNITIES_LIST_QUERY_CATALOG, filters=effective_filters,
+                sorts=sorts, context=context, search=search,
+            )
+            return ordered.order_by(Opportunity.id.asc())
+
+        status_values = _split_int_csv(status)
+        if status_values:
+            query = query.filter(Opportunity.status.in_(status_values))
+        status_exclude_values = _split_int_csv(status_exclude)
+        if status_exclude_values:
+            query = query.filter(Opportunity.status.notin_(status_exclude_values))
+        if stage_id is not None:
+            query = query.filter(Opportunity.procurement_stage_id == stage_id)
+        if owner_id is not None:
+            query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
+        if owner_id_exclude:
+            query = query.filter(Opportunity.owner_id.notin_(_split_csv(owner_id_exclude)))
+        if customer_id is not None:
+            query = query.filter(Opportunity.customer_id == customer_id)
+        if keyword:
+            query = query.filter(Opportunity.opportunity_name.like(f"%{keyword}%"))
+        if customer_keyword:
+            query = query.filter(Opportunity.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
+        query = apply_search(query, OPPORTUNITIES_LIST_QUERY_CATALOG, search, context=context)
+        if license_type:
+            query = query.filter(Opportunity.license_type.in_(_split_csv(license_type)))
+        if license_type_exclude:
+            query = query.filter(Opportunity.license_type.notin_(_split_csv(license_type_exclude)))
+        if purchase_type:
+            query = query.filter(Opportunity.purchase_type.in_(_split_csv(purchase_type)))
+        if purchase_type_exclude:
+            query = query.filter(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude)))
+        if stage_name:
+            query = query.filter(Opportunity.current_stage_name.like(f"%{stage_name}%"))
+        if expected_closing_date_start:
+            query = query.filter(Opportunity.expected_closing_date >= expected_closing_date_start)
+        if expected_closing_date_end:
+            query = query.filter(Opportunity.expected_closing_date <= expected_closing_date_end)
+        allowed = {
+            "created_time", "opportunity_name", "customer_name", "total_amount",
+            "status", "license_type", "purchase_type", "expected_closing_date",
+            "stage_name", "owner_id",
+        }
+        if order_by in allowed and order_dir:
+            if order_by == "customer_name":
+                query = query.join(Customer, Opportunity.customer_id == Customer.id)
+                column = Customer.account_name
+            elif order_by == "stage_name":
+                column = Opportunity.current_stage_name
+            else:
+                column = getattr(Opportunity, order_by)
+            query = query.order_by(column.desc() if order_dir.lower() == "desc" else column.asc())
+        else:
+            query = query.order_by(Opportunity.created_time.desc())
+        return query
+
     def build_list_query(
         self,
         db: Session,
@@ -225,30 +319,23 @@ class OpportunityCRUD:
         search: Optional[str] = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> "Query":
+    ) -> Query[Opportunity]:
         """Return the filtered, ordered opportunity query without count or pagination."""
-        query = self._query(db).filter(Opportunity.team_id == team_id)
-
+        effective_status = status
         effective_filters = filters
-        if status is not None:
-            status_values = _split_int_csv(status)
-            if status_values:
-                query = query.filter(Opportunity.status.in_(status_values))
+        if status is not None and not _split_int_csv(status):
+            effective_status = None
             effective_filters = without_filter_field(filters, "status")
-        if owner_id:
-            query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
-        if customer_id is not None:
-            query = query.filter(Opportunity.customer_id == customer_id)
-
-        _, ordered = build_optional_list_query(
-            query,
-            OPPORTUNITIES_LIST_QUERY_CATALOG,
+        return self.build_population_query(
+            db,
+            team_id=team_id,
+            status=effective_status,
+            owner_id=owner_id,
+            customer_id=customer_id,
+            search=search,
             filters=effective_filters,
             sorts=sorts,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-            search=search,
         )
-        return ordered.order_by(Opportunity.id.asc())
 
     def get_multi(
         self,
@@ -277,100 +364,32 @@ class OpportunityCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Opportunity], int]:
-        query = self._query(db).filter(Opportunity.team_id == team_id)
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = filters
-            if status is not None:
-                status_values = _split_int_csv(status)
-                if status_values:
-                    query = query.filter(Opportunity.status.in_(status_values))
-                effective_filters = without_filter_field(filters, "status")
-            if owner_id is not None:
-                query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
-            if customer_id is not None:
-                query = query.filter(Opportunity.customer_id == customer_id)
-            return paginate_optional_list_query(
-                query,
-                OPPORTUNITIES_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-                search=search,
-            )
-
-        status_values = _split_int_csv(status)
-        if status_values:
-            query = query.filter(Opportunity.status.in_(status_values))
-        status_exclude_values = _split_int_csv(status_exclude)
-        if status_exclude_values:
-            query = query.filter(Opportunity.status.notin_(status_exclude_values))
-        if stage_id is not None:
-            query = query.filter(Opportunity.procurement_stage_id == stage_id)
-        if owner_id is not None:
-            query = query.filter(Opportunity.owner_id.in_(_split_csv(owner_id)))
-        if owner_id_exclude:
-            query = query.filter(Opportunity.owner_id.notin_(_split_csv(owner_id_exclude)))
-        if customer_id is not None:
-            query = query.filter(Opportunity.customer_id == customer_id)
-        if keyword:
-            query = query.filter(Opportunity.opportunity_name.like(f"%{keyword}%"))
-        if customer_keyword:
-            query = query.filter(Opportunity.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
-        query = apply_search(
-            query,
-            OPPORTUNITIES_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        query = self.build_population_query(
+            db,
+            team_id=team_id,
+            status=status,
+            status_exclude=status_exclude,
+            stage_id=stage_id,
+            owner_id=owner_id,
+            owner_id_exclude=owner_id_exclude,
+            customer_id=customer_id,
+            keyword=keyword,
+            customer_keyword=customer_keyword,
+            search=search,
+            license_type=license_type,
+            license_type_exclude=license_type_exclude,
+            purchase_type=purchase_type,
+            purchase_type_exclude=purchase_type_exclude,
+            stage_name=stage_name,
+            expected_closing_date_start=expected_closing_date_start,
+            expected_closing_date_end=expected_closing_date_end,
+            order_by=order_by,
+            order_dir=order_dir,
+            filters=filters,
+            sorts=sorts,
         )
-        if license_type:
-            query = query.filter(Opportunity.license_type.in_(_split_csv(license_type)))
-        if license_type_exclude:
-            query = query.filter(Opportunity.license_type.notin_(_split_csv(license_type_exclude)))
-        if purchase_type:
-            query = query.filter(Opportunity.purchase_type.in_(_split_csv(purchase_type)))
-        if purchase_type_exclude:
-            query = query.filter(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude)))
-        if stage_name:
-            query = query.filter(Opportunity.current_stage_name.like(f"%{stage_name}%"))
-        if expected_closing_date_start:
-            query = query.filter(Opportunity.expected_closing_date >= expected_closing_date_start)
-        if expected_closing_date_end:
-            query = query.filter(Opportunity.expected_closing_date <= expected_closing_date_end)
-
-        total = query.count()
-
-        allowed_sort_fields = [
-            'created_time',
-            'opportunity_name',
-            'customer_name',
-            'total_amount',
-            'status',
-            'license_type',
-            'purchase_type',
-            'expected_closing_date',
-            'stage_name',
-            'owner_id',
-        ]
-        if order_by and order_dir and order_by in allowed_sort_fields:
-            if order_by == 'customer_name':
-                query = query.join(Customer, Opportunity.customer_id == Customer.id)
-                order_column = Customer.account_name
-            elif order_by == 'stage_name':
-                order_column = Opportunity.current_stage_name
-            else:
-                order_column = getattr(Opportunity, order_by)
-            if order_dir.lower() == 'desc':
-                query = query.order_by(order_column.desc())
-            else:
-                query = query.order_by(order_column.asc())
-        else:
-            query = query.order_by(Opportunity.created_time.desc())
-
+        total = query.order_by(None).count()
         opportunities = query.offset(skip).limit(limit).all()
-
         return opportunities, total
 
     def create(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:

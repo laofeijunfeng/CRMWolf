@@ -21,7 +21,6 @@ from app.core.list_query import (
     SortCondition,
     apply_search,
     build_optional_list_query,
-    paginate_optional_list_query,
     uses_unified_list_query,
     without_filter_field,
 )
@@ -167,6 +166,169 @@ class ContractCRUD:
             Contract.deleted_at.is_(None)
         ).first() is not None
 
+    def build_population_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int | None = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        contract_number: str | None = None,
+        license_type: str | None = None,
+        license_type_exclude: str | None = None,
+        purchase_type: str | None = None,
+        purchase_type_exclude: str | None = None,
+        subscription_years: int | None = None,
+        subscription_years_exclude: int | None = None,
+        license_authorized_users: int | None = None,
+        license_authorized_users_exclude: int | None = None,
+        standard_unit_price: Decimal | None = None,
+        standard_unit_price_exclude: Decimal | None = None,
+        keyword: str | None = None,
+        customer_keyword: str | None = None,
+        opportunity_keyword: str | None = None,
+        search: str | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        signing_date_start: date | None = None,
+        signing_date_end: date | None = None,
+        effective_date_start: date | None = None,
+        effective_date_end: date | None = None,
+        expiry_date_start: date | None = None,
+        expiry_date_end: date | None = None,
+        license_expiry_date_start: date | None = None,
+        license_expiry_date_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        include_deleted: bool = False,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> Query[Contract]:
+        query = db.query(Contract).filter(Contract.team_id == team_id)
+        latest_license_authorized_users = db.query(LicenseApplication.authorized_users).filter(
+            LicenseApplication.contract_id == Contract.id,
+            LicenseApplication.license_type == "OFFICIAL",
+            LicenseApplication.status == "ISSUED",
+        ).order_by(
+            LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc(),
+        ).limit(1).correlate(Contract).scalar_subquery()
+        latest_license_expiry_date = db.query(LicenseApplication.expiry_date).filter(
+            LicenseApplication.contract_id == Contract.id,
+            LicenseApplication.license_type == "OFFICIAL",
+            LicenseApplication.status == "ISSUED",
+        ).order_by(
+            LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc(),
+        ).limit(1).correlate(Contract).scalar_subquery()
+        displayed_authorized_users = func.coalesce(latest_license_authorized_users, Contract.user_count)
+        customer_name_sort = db.query(Customer.account_name).filter(
+            Customer.id == Contract.customer_id,
+        ).limit(1).correlate(Contract).scalar_subquery()
+        opportunity_name_sort = db.query(Opportunity.opportunity_name).filter(
+            Opportunity.id == Contract.opportunity_id,
+        ).limit(1).correlate(Contract).scalar_subquery()
+        purchase_type_sort = db.query(Opportunity.purchase_type).filter(
+            Opportunity.id == Contract.opportunity_id,
+        ).limit(1).correlate(Contract).scalar_subquery()
+        if not include_deleted:
+            query = query.filter(Contract.deleted_at.is_(None))
+
+        context = ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            effective_filters = filters
+            if customer_id:
+                query = query.filter(Contract.customer_id == customer_id)
+            if status:
+                query = query.filter(Contract.status.in_(_split_csv(status)))
+                effective_filters = without_filter_field(filters, "status")
+            if owner_id:
+                query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+            _, ordered = build_optional_list_query(
+                query, CONTRACTS_LIST_QUERY_CATALOG, filters=effective_filters,
+                sorts=sorts, context=context, search=search,
+            )
+            return ordered
+
+        if customer_id:
+            query = query.filter(Contract.customer_id == customer_id)
+        if status:
+            query = query.filter(Contract.status.in_(_split_csv(status)))
+        if status_exclude:
+            query = query.filter(Contract.status.notin_(_split_csv(status_exclude)))
+        if contract_number:
+            query = query.filter(Contract.contract_number.like(f"%{contract_number}%"))
+        if license_type:
+            query = query.filter(Contract.license_type.in_(_split_csv(license_type)))
+        if license_type_exclude:
+            query = query.filter(Contract.license_type.notin_(_split_csv(license_type_exclude)))
+        if purchase_type:
+            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.in_(_split_csv(purchase_type))))
+        if purchase_type_exclude:
+            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude))))
+        if subscription_years is not None:
+            query = query.filter(Contract.subscription_years == subscription_years)
+        if subscription_years_exclude is not None:
+            query = query.filter(Contract.subscription_years != subscription_years_exclude)
+        if license_authorized_users is not None:
+            query = query.filter(displayed_authorized_users == license_authorized_users)
+        if license_authorized_users_exclude is not None:
+            query = query.filter(displayed_authorized_users != license_authorized_users_exclude)
+        if standard_unit_price is not None:
+            query = query.filter(Contract.standard_unit_price == standard_unit_price)
+        if standard_unit_price_exclude is not None:
+            query = query.filter(Contract.standard_unit_price != standard_unit_price_exclude)
+        if keyword:
+            query = query.filter(Contract.contract_name.like(f"%{keyword}%"))
+        if customer_keyword:
+            query = query.filter(Contract.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
+        if opportunity_keyword:
+            query = query.filter(Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%")))
+        query = apply_search(query, CONTRACTS_LIST_QUERY_CATALOG, search, context=context)
+        if owner_id:
+            query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+        if owner_id_exclude:
+            query = query.filter(Contract.owner_id.notin_(_split_csv(owner_id_exclude)))
+        if signing_date_start:
+            query = query.filter(Contract.signing_date >= signing_date_start)
+        if signing_date_end:
+            query = query.filter(Contract.signing_date <= signing_date_end)
+        if effective_date_start:
+            query = query.filter(Contract.effective_date >= effective_date_start)
+        if effective_date_end:
+            query = query.filter(Contract.effective_date <= effective_date_end)
+        if expiry_date_start:
+            query = query.filter(Contract.expiry_date >= expiry_date_start)
+        if expiry_date_end:
+            query = query.filter(Contract.expiry_date <= expiry_date_end)
+        if license_expiry_date_start:
+            query = query.filter(latest_license_expiry_date >= license_expiry_date_start)
+        if license_expiry_date_end:
+            query = query.filter(latest_license_expiry_date <= license_expiry_date_end)
+        sort_columns = {
+            "contract_number": Contract.contract_number,
+            "contract_name": Contract.contract_name,
+            "customer_name": customer_name_sort,
+            "opportunity_name": opportunity_name_sort,
+            "total_amount": Contract.total_amount,
+            "license_type": Contract.license_type,
+            "purchase_type": purchase_type_sort,
+            "subscription_years": Contract.subscription_years,
+            "license_authorized_users": displayed_authorized_users,
+            "standard_unit_price": Contract.standard_unit_price,
+            "license_expiry_date": latest_license_expiry_date,
+            "status": Contract.status,
+            "signing_date": Contract.signing_date,
+            "effective_date": Contract.effective_date,
+            "expiry_date": Contract.expiry_date,
+            "created_time": Contract.created_time,
+        }
+        if order_by in sort_columns and order_dir:
+            column = sort_columns[order_by]
+            query = query.order_by(column.desc() if order_dir.lower() == "desc" else column.asc())
+        else:
+            query = query.order_by(Contract.created_time.desc())
+        return query
+
     def build_list_query(
         self,
         db: Session,
@@ -178,28 +340,18 @@ class ContractCRUD:
         search: Optional[str] = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> "Query":
+    ) -> Query[Contract]:
         """Return the filtered, ordered contract query without count or pagination."""
-        query = db.query(Contract).filter(Contract.team_id == team_id, Contract.deleted_at.is_(None))
-
-        effective_filters = filters
-        if customer_id:
-            query = query.filter(Contract.customer_id == customer_id)
-        if status:
-            query = query.filter(Contract.status.in_(_split_csv(status)))
-            effective_filters = without_filter_field(filters, "status")
-        if owner_id:
-            query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
-
-        _, ordered = build_optional_list_query(
-            query,
-            CONTRACTS_LIST_QUERY_CATALOG,
-            filters=effective_filters,
-            sorts=sorts,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
+        return self.build_population_query(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            status=status,
+            owner_id=owner_id,
             search=search,
-        )
-        return ordered.order_by(Contract.id.asc())
+            filters=filters,
+            sorts=sorts,
+        ).order_by(Contract.id.asc())
 
     def get_multi(
         self,
@@ -241,201 +393,45 @@ class ContractCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Contract], int]:
-        """
-        查询合同列表
-
-        Args:
-            db: 数据库会话
-            team_id: 团队ID
-            skip: 跳过记录数
-            limit: 返回记录数上限
-            customer_id: 客户ID筛选
-            status: 合同状态筛选
-            contract_number: 合同编号筛选
-            license_type: 授权类型筛选
-            keyword: 关键词筛选
-            owner_id: 负责人ID筛选
-            order_by: 排序字段
-            order_dir: 排序方向
-            include_deleted: 是否包含已删除的合同（默认不包含）
-
-        Returns:
-            Tuple[List[Contract], int]: 合同列表和总数
-        """
-        query = db.query(Contract).filter(Contract.team_id == team_id)
-
-        latest_license_authorized_users = (
-            db.query(LicenseApplication.authorized_users)
-            .filter(
-                LicenseApplication.contract_id == Contract.id,
-                LicenseApplication.license_type == 'OFFICIAL',
-                LicenseApplication.status == 'ISSUED'
-            )
-            .order_by(LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc())
-            .limit(1)
-            .correlate(Contract)
-            .scalar_subquery()
+        query = self.build_population_query(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+            status=status,
+            status_exclude=status_exclude,
+            contract_number=contract_number,
+            license_type=license_type,
+            license_type_exclude=license_type_exclude,
+            purchase_type=purchase_type,
+            purchase_type_exclude=purchase_type_exclude,
+            subscription_years=subscription_years,
+            subscription_years_exclude=subscription_years_exclude,
+            license_authorized_users=license_authorized_users,
+            license_authorized_users_exclude=license_authorized_users_exclude,
+            standard_unit_price=standard_unit_price,
+            standard_unit_price_exclude=standard_unit_price_exclude,
+            keyword=keyword,
+            customer_keyword=customer_keyword,
+            opportunity_keyword=opportunity_keyword,
+            search=search,
+            owner_id=owner_id,
+            owner_id_exclude=owner_id_exclude,
+            signing_date_start=signing_date_start,
+            signing_date_end=signing_date_end,
+            effective_date_start=effective_date_start,
+            effective_date_end=effective_date_end,
+            expiry_date_start=expiry_date_start,
+            expiry_date_end=expiry_date_end,
+            license_expiry_date_start=license_expiry_date_start,
+            license_expiry_date_end=license_expiry_date_end,
+            order_by=order_by,
+            order_dir=order_dir,
+            include_deleted=include_deleted,
+            filters=filters,
+            sorts=sorts,
         )
-        latest_license_expiry_date = (
-            db.query(LicenseApplication.expiry_date)
-            .filter(
-                LicenseApplication.contract_id == Contract.id,
-                LicenseApplication.license_type == 'OFFICIAL',
-                LicenseApplication.status == 'ISSUED'
-            )
-            .order_by(LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc())
-            .limit(1)
-            .correlate(Contract)
-            .scalar_subquery()
-        )
-        displayed_authorized_users = func.coalesce(latest_license_authorized_users, Contract.user_count)
-        customer_name_sort = (
-            db.query(Customer.account_name)
-            .filter(Customer.id == Contract.customer_id)
-            .limit(1)
-            .correlate(Contract)
-            .scalar_subquery()
-        )
-        opportunity_name_sort = (
-            db.query(Opportunity.opportunity_name)
-            .filter(Opportunity.id == Contract.opportunity_id)
-            .limit(1)
-            .correlate(Contract)
-            .scalar_subquery()
-        )
-        purchase_type_sort = (
-            db.query(Opportunity.purchase_type)
-            .filter(Opportunity.id == Contract.opportunity_id)
-            .limit(1)
-            .correlate(Contract)
-            .scalar_subquery()
-        )
-
-        # 默认不包含已删除的合同
-        if not include_deleted:
-            query = query.filter(Contract.deleted_at.is_(None))
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            effective_filters = filters
-            if customer_id:
-                query = query.filter(Contract.customer_id == customer_id)
-            if status:
-                query = query.filter(Contract.status.in_(_split_csv(status)))
-                effective_filters = without_filter_field(filters, "status")
-            if owner_id:
-                query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
-            return paginate_optional_list_query(
-                query,
-                CONTRACTS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=effective_filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-                search=search,
-            )
-
-        if customer_id:
-            query = query.filter(Contract.customer_id == customer_id)
-
-        if status:
-            query = query.filter(Contract.status.in_(_split_csv(status)))
-        if status_exclude:
-            query = query.filter(Contract.status.notin_(_split_csv(status_exclude)))
-
-        if contract_number:
-            query = query.filter(Contract.contract_number.like(f"%{contract_number}%"))
-
-        if license_type:
-            query = query.filter(Contract.license_type.in_(_split_csv(license_type)))
-        if license_type_exclude:
-            query = query.filter(Contract.license_type.notin_(_split_csv(license_type_exclude)))
-
-        if purchase_type:
-            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.in_(_split_csv(purchase_type))))
-        if purchase_type_exclude:
-            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude))))
-        if subscription_years is not None:
-            query = query.filter(Contract.subscription_years == subscription_years)
-        if subscription_years_exclude is not None:
-            query = query.filter(Contract.subscription_years != subscription_years_exclude)
-        if license_authorized_users is not None:
-            query = query.filter(displayed_authorized_users == license_authorized_users)
-        if license_authorized_users_exclude is not None:
-            query = query.filter(displayed_authorized_users != license_authorized_users_exclude)
-        if standard_unit_price is not None:
-            query = query.filter(Contract.standard_unit_price == standard_unit_price)
-        if standard_unit_price_exclude is not None:
-            query = query.filter(Contract.standard_unit_price != standard_unit_price_exclude)
-
-        if keyword:
-            query = query.filter(Contract.contract_name.like(f"%{keyword}%"))
-
-        if customer_keyword:
-            query = query.filter(Contract.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
-
-        if opportunity_keyword:
-            query = query.filter(Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%")))
-        query = apply_search(
-            query,
-            CONTRACTS_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=owner_id),
-        )
-
-        if owner_id:
-            query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
-        if owner_id_exclude:
-            query = query.filter(Contract.owner_id.notin_(_split_csv(owner_id_exclude)))
-
-        if signing_date_start:
-            query = query.filter(Contract.signing_date >= signing_date_start)
-        if signing_date_end:
-            query = query.filter(Contract.signing_date <= signing_date_end)
-        if effective_date_start:
-            query = query.filter(Contract.effective_date >= effective_date_start)
-        if effective_date_end:
-            query = query.filter(Contract.effective_date <= effective_date_end)
-        if expiry_date_start:
-            query = query.filter(Contract.expiry_date >= expiry_date_start)
-        if expiry_date_end:
-            query = query.filter(Contract.expiry_date <= expiry_date_end)
-        if license_expiry_date_start:
-            query = query.filter(latest_license_expiry_date >= license_expiry_date_start)
-        if license_expiry_date_end:
-            query = query.filter(latest_license_expiry_date <= license_expiry_date_end)
-
-        total = query.count()
-
-        sort_columns = {
-            'contract_number': Contract.contract_number,
-            'contract_name': Contract.contract_name,
-            'customer_name': customer_name_sort,
-            'opportunity_name': opportunity_name_sort,
-            'total_amount': Contract.total_amount,
-            'license_type': Contract.license_type,
-            'purchase_type': purchase_type_sort,
-            'subscription_years': Contract.subscription_years,
-            'license_authorized_users': displayed_authorized_users,
-            'standard_unit_price': Contract.standard_unit_price,
-            'license_expiry_date': latest_license_expiry_date,
-            'status': Contract.status,
-            'signing_date': Contract.signing_date,
-            'effective_date': Contract.effective_date,
-            'expiry_date': Contract.expiry_date,
-            'created_time': Contract.created_time,
-        }
-        if order_by and order_dir and order_by in sort_columns:
-            order_column = sort_columns[order_by]
-            if order_dir.lower() == 'desc':
-                query = query.order_by(order_column.desc())
-            else:
-                query = query.order_by(order_column.asc())
-        else:
-            query = query.order_by(Contract.created_time.desc())
-
+        total = query.order_by(None).count()
         contracts = query.offset(skip).limit(limit).all()
-
         return contracts, total
 
     def create(

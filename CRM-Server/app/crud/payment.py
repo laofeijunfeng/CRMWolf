@@ -2,7 +2,7 @@ from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, or_, func, text, case, cast, Integer, inspect
 from sqlalchemy.orm import contains_eager, joinedload
 from typing import Any, Dict, Optional, List, Tuple
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 import hashlib
 import json
@@ -165,6 +165,93 @@ class PaymentPlanCRUD:
             .filter(PaymentPlan.team_id == team_id)
         )
 
+    def build_population_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        owner_id: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        due_date_start: date | None = None,
+        due_date_end: date | None = None,
+        sort: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        current_user_id: str | None = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> Query[PaymentPlan]:
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+
+        plans_query = self._base_plans_query(db, team_id)
+        context = ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if status:
+                plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
+            if current_user_id:
+                plans_query = plans_query.filter(Contract.owner_id == current_user_id)
+            _, ordered = build_optional_list_query(
+                plans_query, PAYMENT_PLANS_LIST_QUERY_CATALOG,
+                filters=without_filter_field(filters, "status") if status else filters,
+                sorts=sorts, context=context, search=search,
+            )
+            return ordered.order_by(PaymentPlan.id.asc())
+
+        if status:
+            plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
+        if current_user_id:
+            plans_query = plans_query.filter(Contract.owner_id == current_user_id)
+        plans_query = apply_search(plans_query, PAYMENT_PLANS_LIST_QUERY_CATALOG, search, context=context)
+        if status_exclude:
+            plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
+        if due_date_start:
+            plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
+        if due_date_end:
+            plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
+        if owner_id:
+            plans_query = plans_query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
+        if keyword and keyword.strip():
+            like_keyword = f"%{keyword.strip()}%"
+            plans_query = plans_query.filter(or_(
+                PaymentPlan.stage_name.ilike(like_keyword),
+                Contract.contract_name.ilike(like_keyword),
+                Customer.account_name.ilike(like_keyword),
+                Opportunity.opportunity_name.ilike(like_keyword),
+            ))
+        status_order = case(
+            (PaymentPlan.status == PaymentPlanStatus.PENDING, 0),
+            (PaymentPlan.status == PaymentPlanStatus.PARTIAL, 1),
+            (PaymentPlan.status == PaymentPlanStatus.COMPLETED, 2),
+            (PaymentPlan.status == PaymentPlanStatus.OVERDUE, 3),
+            else_=99,
+        )
+        allowed = {
+            "plan_number": PaymentPlan.plan_number,
+            "stage_name": PaymentPlan.stage_name,
+            "customer_name": Customer.account_name,
+            "contract_name": Contract.contract_name,
+            "planned_amount": PaymentPlan.planned_amount,
+            "due_date": PaymentPlan.due_date,
+            "status": status_order,
+            "created_time": PaymentPlan.created_time,
+        }
+        clauses = []
+        used: set[str] = set()
+        for field, direction in _parse_sort(sort, order_by, order_dir):
+            if field in used or field not in allowed:
+                continue
+            column = allowed[field]
+            clauses.append(column.desc() if direction == "desc" else column.asc())
+            used.add(field)
+        if clauses:
+            return plans_query.order_by(*clauses, PaymentPlan.id.desc())
+        return plans_query.order_by(PaymentPlan.due_date.asc(), PaymentPlan.id.desc())
+
     def build_list_query(
         self,
         db: Session,
@@ -175,30 +262,17 @@ class PaymentPlanCRUD:
         search: str | None,
         filters: list[FilterCondition],
         sorts: list[SortCondition],
-    ) -> Query:
+    ) -> Query[PaymentPlan]:
         """Return ordered payment plans without pagination."""
-        from app.models.contract import Contract
-
-        plans_query = self._base_plans_query(db, team_id)
-        if status:
-            plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
-        if current_user_id:
-            plans_query = plans_query.filter(Contract.owner_id == current_user_id)
-
-        effective_filters = without_filter_field(filters, "status") if status else filters
-        _, ordered = build_optional_list_query(
-            plans_query,
-            PAYMENT_PLANS_LIST_QUERY_CATALOG,
-            filters=effective_filters,
-            sorts=sorts,
-            context=ListQueryContext(
-                db=db,
-                team_id=team_id,
-                current_user_id=current_user_id,
-            ),
+        return self.build_population_query(
+            db,
+            team_id=team_id,
+            status=status,
+            current_user_id=current_user_id,
             search=search,
+            filters=filters,
+            sorts=sorts,
         )
-        return ordered.order_by(PaymentPlan.id.asc())
 
     def list_plans(
         self,
@@ -220,98 +294,24 @@ class PaymentPlanCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[PaymentPlan], int]:
-        from app.models.contract import Contract
-        from app.models.customer import Customer
-        from app.models.opportunity import Opportunity
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            query = self.build_list_query(
-                db,
-                team_id=team_id,
-                status=status,
-                current_user_id=current_user_id,
-                search=search,
-                filters=filters or [],
-                sorts=sorts or [],
-            )
-            total = query.order_by(None).count()
-            return query.offset(skip).limit(limit).all(), total
-
-        plans_query = self._base_plans_query(db, team_id)
-
-        if status:
-            plans_query = plans_query.filter(PaymentPlan.status.in_(_split_csv(status)))
-        if current_user_id:
-            plans_query = plans_query.filter(Contract.owner_id == current_user_id)
-
-        list_context = ListQueryContext(
-            db=db,
+        plans_query = self.build_population_query(
+            db,
             team_id=team_id,
+            status=status,
+            status_exclude=status_exclude,
+            owner_id=owner_id,
+            keyword=keyword,
+            search=search,
+            due_date_start=due_date_start,
+            due_date_end=due_date_end,
+            sort=sort,
+            order_by=order_by,
+            order_dir=order_dir,
             current_user_id=current_user_id,
+            filters=filters,
+            sorts=sorts,
         )
-        plans_query = apply_search(
-            plans_query,
-            PAYMENT_PLANS_LIST_QUERY_CATALOG,
-            search,
-            context=list_context,
-        )
-
-        if status_exclude:
-            plans_query = plans_query.filter(PaymentPlan.status.notin_(_split_csv(status_exclude)))
-
-        if due_date_start:
-            plans_query = plans_query.filter(PaymentPlan.due_date >= due_date_start)
-
-        if due_date_end:
-            plans_query = plans_query.filter(PaymentPlan.due_date <= due_date_end)
-
-        if owner_id:
-            plans_query = plans_query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
-
-        if keyword and keyword.strip():
-            like_keyword = f"%{keyword.strip()}%"
-            plans_query = plans_query.filter(
-                or_(
-                    PaymentPlan.stage_name.ilike(like_keyword),
-                    Contract.contract_name.ilike(like_keyword),
-                    Customer.account_name.ilike(like_keyword),
-                    Opportunity.opportunity_name.ilike(like_keyword),
-                )
-            )
-
-        total = plans_query.count()
-
-        status_order = case(
-            (PaymentPlan.status == PaymentPlanStatus.PENDING, 0),
-            (PaymentPlan.status == PaymentPlanStatus.PARTIAL, 1),
-            (PaymentPlan.status == PaymentPlanStatus.COMPLETED, 2),
-            (PaymentPlan.status == PaymentPlanStatus.OVERDUE, 3),
-            else_=99
-        )
-        allowed_sort_fields = {
-            "plan_number": PaymentPlan.plan_number,
-            "stage_name": PaymentPlan.stage_name,
-            "customer_name": Customer.account_name,
-            "contract_name": Contract.contract_name,
-            "planned_amount": PaymentPlan.planned_amount,
-            "due_date": PaymentPlan.due_date,
-            "status": status_order,
-            "created_time": PaymentPlan.created_time,
-        }
-        order_clauses = []
-        used_sort_fields = set()
-        for field, direction in _parse_sort(sort, order_by, order_dir):
-            if field in used_sort_fields or field not in allowed_sort_fields:
-                continue
-            column = allowed_sort_fields[field]
-            order_clauses.append(column.desc() if direction == "desc" else column.asc())
-            used_sort_fields.add(field)
-
-        if order_clauses:
-            plans_query = plans_query.order_by(*order_clauses, PaymentPlan.id.desc())
-        else:
-            plans_query = plans_query.order_by(PaymentPlan.due_date.asc(), PaymentPlan.id.desc())
-
+        total = plans_query.order_by(None).count()
         return plans_query.offset(skip).limit(limit).all(), total
 
     
@@ -655,21 +655,207 @@ class PaymentRecordCRUD:
 
     def _apply_record_scope(self, query, *, approval_status: str | None, current_user_id: str | None):
         from app.models.contract import Contract
+        from app.services.payment_approval_status import payment_approval_status_expression
 
-        approval_status_values = _split_csv(approval_status)
-        if approval_status_values:
-            include_predicates = [
-                predicate
-                for predicate in (
-                    _payment_approval_status_predicate(value) for value in approval_status_values
-                )
-                if predicate is not None
-            ]
-            if include_predicates:
-                query = query.filter(or_(*include_predicates))
+        approval_expression = payment_approval_status_expression(ListQueryContext())
+        approval_values = _split_csv(approval_status)
+        if approval_values:
+            predicates = []
+            for value in approval_values:
+                predicates.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
+            query = query.filter(or_(*predicates))
         if current_user_id:
             query = query.filter(Contract.creator_id == current_user_id)
         return query
+
+    def build_population_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        contract_id: int | None = None,
+        payment_plan_id: int | None = None,
+        payment_date_start: date | None = None,
+        payment_date_end: date | None = None,
+        min_amount: float | None = None,
+        actual_amount: float | None = None,
+        creator_id: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        record_number: str | None = None,
+        record_number_exclude: str | None = None,
+        customer_name: str | None = None,
+        customer_name_exclude: str | None = None,
+        actual_payer_name: str | None = None,
+        actual_payer_name_exclude: str | None = None,
+        invoice_title_text: str | None = None,
+        invoice_title_text_exclude: str | None = None,
+        contract_name: str | None = None,
+        contract_name_exclude: str | None = None,
+        owner_name: str | None = None,
+        owner_name_exclude: str | None = None,
+        commission_member_name: str | None = None,
+        commission_member_name_exclude: str | None = None,
+        confirmation_status: str | None = None,
+        confirmation_status_exclude: str | None = None,
+        created_time_start: date | None = None,
+        created_time_end: date | None = None,
+        current_user_id: str | None = None,
+        approval_status: str | None = None,
+        approval_status_exclude: str | None = None,
+        sort: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+    ) -> Query[PaymentRecord]:
+        from sqlalchemy.sql.elements import ColumnElement
+
+        from app.models.contract import Contract
+        from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
+        from app.models.invoice import InvoiceApplication
+        from app.models.user import User
+        from app.services.payment_approval_status import payment_approval_status_expression
+
+        records_query = self._base_records_query(db, team_id)
+        context = ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            records_query = self._apply_record_scope(
+                records_query, approval_status=approval_status, current_user_id=current_user_id,
+            )
+            _, ordered = build_optional_list_query(
+                records_query, PAYMENT_RECORDS_LIST_QUERY_CATALOG,
+                filters=without_filter_field(filters, "approval_status") if approval_status else filters,
+                sorts=sorts, context=context, search=search,
+            )
+            return ordered.order_by(PaymentRecord.id.asc())
+
+        owner_id_expr = func.coalesce(Opportunity.owner_id, Contract.owner_id)
+        has_invoice_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
+        latest_invoice_title_expr = None
+        if has_invoice_table:
+            explicit_link = InvoiceApplication.payment_record_id == PaymentRecord.id
+            latest_invoice_title_expr = db.query(InvoiceApplication.invoice_title_text).filter(
+                InvoiceApplication.team_id == team_id,
+                or_(
+                    explicit_link,
+                    and_(
+                        InvoiceApplication.payment_record_id.is_(None),
+                        InvoiceApplication.payment_plan_id == PaymentRecord.payment_plan_id,
+                    ),
+                ),
+            ).order_by(
+                case((explicit_link, 0), else_=1),
+                InvoiceApplication.created_time.desc(),
+                InvoiceApplication.id.desc(),
+            ).limit(1).correlate(PaymentRecord).scalar_subquery()
+        owner_name_expr = db.query(User.name).filter(
+            User.id == cast(owner_id_expr, Integer),
+        ).limit(1).correlate(Contract, Opportunity).scalar_subquery()
+
+        approval_expression = payment_approval_status_expression(context)
+        approval_values = _split_csv(approval_status)
+        if approval_values:
+            predicates = []
+            for value in approval_values:
+                predicates.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
+            records_query = records_query.filter(or_(*predicates))
+        if current_user_id:
+            records_query = records_query.filter(Contract.creator_id == current_user_id)
+        records_query = apply_search(records_query, PAYMENT_RECORDS_LIST_QUERY_CATALOG, search, context=context)
+        excluded_values = _split_csv(approval_status_exclude)
+        if excluded_values:
+            excluded = []
+            for value in excluded_values:
+                excluded.append(approval_expression.is_(None) if value == "unclassified" else approval_expression == value)
+            records_query = records_query.filter(~or_(*excluded))
+        if contract_id:
+            records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
+        if payment_plan_id:
+            records_query = records_query.filter(PaymentRecord.payment_plan_id == payment_plan_id)
+        if payment_date_start:
+            records_query = records_query.filter(PaymentRecord.payment_date >= payment_date_start)
+        if payment_date_end:
+            records_query = records_query.filter(PaymentRecord.payment_date <= payment_date_end)
+        if min_amount:
+            records_query = records_query.filter(PaymentRecord.actual_amount >= Decimal(str(min_amount)))
+        if actual_amount is not None:
+            records_query = records_query.filter(PaymentRecord.actual_amount == Decimal(str(actual_amount)))
+        if creator_id:
+            records_query = records_query.filter(PaymentRecord.creator_id == creator_id)
+        if keyword and keyword.strip():
+            like_keyword = f"%{keyword.strip()}%"
+            predicates = [
+                PaymentRecord.record_number.ilike(like_keyword),
+                PaymentPlan.stage_name.ilike(like_keyword),
+                Contract.contract_name.ilike(like_keyword),
+                Customer.account_name.ilike(like_keyword),
+                PaymentRecord.actual_payer_name.ilike(like_keyword),
+                owner_name_expr.ilike(like_keyword),
+                PaymentRecord.commission_member_name.ilike(like_keyword),
+            ]
+            if latest_invoice_title_expr is not None:
+                predicates.append(latest_invoice_title_expr.ilike(like_keyword))
+            records_query = records_query.filter(or_(*predicates))
+
+        def apply_text(query: Query, expression: ColumnElement, include_value: str | None, exclude_value: str | None) -> Query:
+            if include_value and include_value.strip():
+                query = query.filter(expression.ilike(f"%{include_value.strip()}%"))
+            if exclude_value and exclude_value.strip():
+                query = query.filter(or_(expression.is_(None), ~expression.ilike(f"%{exclude_value.strip()}%")))
+            return query
+
+        records_query = apply_text(records_query, PaymentRecord.record_number, record_number, record_number_exclude)
+        records_query = apply_text(records_query, Customer.account_name, customer_name, customer_name_exclude)
+        records_query = apply_text(records_query, PaymentRecord.actual_payer_name, actual_payer_name, actual_payer_name_exclude)
+        if latest_invoice_title_expr is not None:
+            records_query = apply_text(records_query, latest_invoice_title_expr, invoice_title_text, invoice_title_text_exclude)
+        records_query = apply_text(records_query, Contract.contract_name, contract_name, contract_name_exclude)
+        records_query = apply_text(records_query, owner_name_expr, owner_name, owner_name_exclude)
+        records_query = apply_text(records_query, PaymentRecord.commission_member_name, commission_member_name, commission_member_name_exclude)
+        confirmation_values = _split_csv(confirmation_status)
+        if confirmation_values:
+            records_query = records_query.filter(PaymentRecord.confirmation_status.in_(confirmation_values))
+        confirmation_excluded = _split_csv(confirmation_status_exclude)
+        if confirmation_excluded:
+            records_query = records_query.filter(PaymentRecord.confirmation_status.notin_(confirmation_excluded))
+        if created_time_start:
+            records_query = records_query.filter(PaymentRecord.created_time >= datetime.combine(created_time_start, time.min))
+        if created_time_end:
+            records_query = records_query.filter(PaymentRecord.created_time <= datetime.combine(created_time_end, time.max))
+        confirmation_order = case(
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING, 0),
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED, 1),
+            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.DISPUTED, 2),
+            else_=99,
+        )
+        allowed = {
+            "record_number": PaymentRecord.record_number,
+            "contract_name": Contract.contract_name,
+            "customer_name": Customer.account_name,
+            "actual_payer_name": PaymentRecord.actual_payer_name,
+            "stage_name": PaymentPlan.stage_name,
+            "actual_amount": PaymentRecord.actual_amount,
+            "owner_name": owner_name_expr,
+            "commission_member_name": PaymentRecord.commission_member_name,
+            "payment_date": PaymentRecord.payment_date,
+            "confirmation_status": confirmation_order,
+            "created_time": PaymentRecord.created_time,
+        }
+        if latest_invoice_title_expr is not None:
+            allowed["invoice_title_text"] = latest_invoice_title_expr
+        clauses = []
+        used: set[str] = set()
+        for field, direction in _parse_sort(sort, order_by, order_dir):
+            if field in used or field not in allowed:
+                continue
+            column = allowed[field]
+            clauses.append(column.desc() if direction == "desc" else column.asc())
+            used.add(field)
+        if clauses:
+            return records_query.order_by(*clauses, PaymentRecord.id.desc())
+        return records_query.order_by(PaymentRecord.payment_date.desc(), PaymentRecord.id.desc())
 
     def build_list_query(
         self,
@@ -681,29 +867,17 @@ class PaymentRecordCRUD:
         search: str | None,
         filters: list[FilterCondition],
         sorts: list[SortCondition],
-    ) -> Query:
+    ) -> Query[PaymentRecord]:
         """Return ordered payment records without pagination."""
-        records_query = self._apply_record_scope(
-            self._base_records_query(db, team_id),
+        return self.build_population_query(
+            db,
+            team_id=team_id,
             approval_status=approval_status,
             current_user_id=current_user_id,
-        )
-        effective_filters = (
-            without_filter_field(filters, "approval_status") if approval_status else filters
-        )
-        _, ordered = build_optional_list_query(
-            records_query,
-            PAYMENT_RECORDS_LIST_QUERY_CATALOG,
-            filters=effective_filters,
-            sorts=sorts,
-            context=ListQueryContext(
-                db=db,
-                team_id=team_id,
-                current_user_id=current_user_id,
-            ),
             search=search,
+            filters=filters,
+            sorts=sorts,
         )
-        return ordered.order_by(PaymentRecord.id.asc())
 
     def list_records(
         self,
@@ -747,224 +921,47 @@ class PaymentRecordCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[PaymentRecord], int]:
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            query = self.build_list_query(
-                db,
-                team_id=team_id,
-                approval_status=approval_status,
-                current_user_id=current_user_id,
-                search=search,
-                filters=filters or [],
-                sorts=sorts or [],
-            )
-            total = query.order_by(None).count()
-            return query.offset(skip).limit(limit).all(), total
-
-        from app.models.contract import Contract
-        from app.models.customer import Customer
-        from app.models.opportunity import Opportunity
-        from app.models.invoice import InvoiceApplication
-        from app.models.user import User
-        from sqlalchemy.orm import contains_eager, joinedload
-
-
-        # Query with eager loading for customer_name, contract_name, stage_name, approval info
-        owner_id_expr = func.coalesce(Opportunity.owner_id, Contract.owner_id)
-        has_invoice_application_table = inspect(db.bind).has_table(InvoiceApplication.__tablename__) if db.bind else True
-        latest_invoice_title_expr = None
-        if has_invoice_application_table:
-            is_explicit_record_link = InvoiceApplication.payment_record_id == PaymentRecord.id
-            latest_invoice_title_expr = db.query(InvoiceApplication.invoice_title_text).filter(
-                InvoiceApplication.team_id == team_id,
-                or_(
-                    is_explicit_record_link,
-                    and_(
-                        InvoiceApplication.payment_record_id.is_(None),
-                        InvoiceApplication.payment_plan_id == PaymentRecord.payment_plan_id,
-                    ),
-                ),
-            ).order_by(
-                case((is_explicit_record_link, 0), else_=1),
-                InvoiceApplication.created_time.desc(),
-                InvoiceApplication.id.desc(),
-            ).limit(1).correlate(PaymentRecord).scalar_subquery()
-        owner_name_expr = db.query(User.name).filter(
-            User.id == cast(owner_id_expr, Integer)
-        ).limit(1).correlate(Contract, Opportunity).scalar_subquery()
-
-        records_query = db.query(PaymentRecord).join(
-            PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
-        ).join(
-            Contract, PaymentPlan.contract_id == Contract.id
-        ).outerjoin(
-            Customer, Contract.customer_id == Customer.id
-        ).outerjoin(
-            Opportunity, Contract.opportunity_id == Opportunity.id
-        ).options(
-            # Eager load payment_plan (contains_eager since we joined)
-            contains_eager(PaymentRecord.payment_plan).contains_eager(
-                PaymentPlan.contract
-            ).contains_eager(
-                Contract.customer
-            ),
-            contains_eager(PaymentRecord.payment_plan).contains_eager(
-                PaymentPlan.contract
-            ).contains_eager(
-                Contract.opportunity
-            ),
-            # Eager load approval for current_approver_name
-            joinedload(PaymentRecord.approval)
-        )
-        records_query = records_query.filter(PaymentRecord.team_id == team_id)
-
-        # 页签审批状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
-        approval_status_values = _split_csv(approval_status)
-        if approval_status_values:
-            include_predicates = [
-                predicate
-                for predicate in (
-                    _payment_approval_status_predicate(value) for value in approval_status_values
-                )
-                if predicate is not None
-            ]
-            if include_predicates:
-                records_query = records_query.filter(or_(*include_predicates))
-
-        if current_user_id:
-            records_query = records_query.filter(Contract.creator_id == current_user_id)
-
-        list_context = ListQueryContext(
-            db=db,
+        records_query = self.build_population_query(
+            db,
             team_id=team_id,
+            contract_id=contract_id,
+            payment_plan_id=payment_plan_id,
+            payment_date_start=payment_date_start,
+            payment_date_end=payment_date_end,
+            min_amount=min_amount,
+            actual_amount=actual_amount,
+            creator_id=creator_id,
+            keyword=keyword,
+            search=search,
+            record_number=record_number,
+            record_number_exclude=record_number_exclude,
+            customer_name=customer_name,
+            customer_name_exclude=customer_name_exclude,
+            actual_payer_name=actual_payer_name,
+            actual_payer_name_exclude=actual_payer_name_exclude,
+            invoice_title_text=invoice_title_text,
+            invoice_title_text_exclude=invoice_title_text_exclude,
+            contract_name=contract_name,
+            contract_name_exclude=contract_name_exclude,
+            owner_name=owner_name,
+            owner_name_exclude=owner_name_exclude,
+            commission_member_name=commission_member_name,
+            commission_member_name_exclude=commission_member_name_exclude,
+            confirmation_status=confirmation_status,
+            confirmation_status_exclude=confirmation_status_exclude,
+            created_time_start=created_time_start,
+            created_time_end=created_time_end,
             current_user_id=current_user_id,
+            approval_status=approval_status,
+            approval_status_exclude=approval_status_exclude,
+            sort=sort,
+            order_by=order_by,
+            order_dir=order_dir,
+            filters=filters,
+            sorts=sorts,
         )
-        records_query = apply_search(
-            records_query,
-            PAYMENT_RECORDS_LIST_QUERY_CATALOG,
-            search,
-            context=list_context,
-        )
-
-        approval_status_exclude_values = _split_csv(approval_status_exclude)
-        if approval_status_exclude_values:
-            exclude_predicates = [
-                predicate
-                for predicate in (
-                    _payment_approval_status_predicate(value, exclude=True)
-                    for value in approval_status_exclude_values
-                )
-                if predicate is not None
-            ]
-            if exclude_predicates:
-                records_query = records_query.filter(*exclude_predicates)
-
-        if contract_id:
-            records_query = records_query.filter(PaymentPlan.contract_id == contract_id)
-        
-        if payment_plan_id:
-            records_query = records_query.filter(PaymentRecord.payment_plan_id == payment_plan_id)
-        
-        if payment_date_start:
-            records_query = records_query.filter(PaymentRecord.payment_date >= payment_date_start)
-        
-        if payment_date_end:
-            records_query = records_query.filter(PaymentRecord.payment_date <= payment_date_end)
-        
-        if min_amount:
-            records_query = records_query.filter(PaymentRecord.actual_amount >= min_amount)
-
-        if actual_amount is not None:
-            records_query = records_query.filter(PaymentRecord.actual_amount == actual_amount)
-        
-        if creator_id:
-            records_query = records_query.filter(PaymentRecord.creator_id == creator_id)
-        
-        if keyword and keyword.strip():
-            like_keyword = f"%{keyword.strip()}%"
-            keyword_predicates = [
-                PaymentRecord.record_number.ilike(like_keyword),
-                PaymentPlan.stage_name.ilike(like_keyword),
-                Contract.contract_name.ilike(like_keyword),
-                Customer.account_name.ilike(like_keyword),
-                PaymentRecord.actual_payer_name.ilike(like_keyword),
-                owner_name_expr.ilike(like_keyword),
-                PaymentRecord.commission_member_name.ilike(like_keyword),
-            ]
-            if latest_invoice_title_expr is not None:
-                keyword_predicates.append(latest_invoice_title_expr.ilike(like_keyword))
-            records_query = records_query.filter(or_(*keyword_predicates))
-
-        def apply_text_filter(query, expression, include_value: Optional[str], exclude_value: Optional[str]):
-            if include_value and include_value.strip():
-                query = query.filter(expression.ilike(f"%{include_value.strip()}%"))
-            if exclude_value and exclude_value.strip():
-                query = query.filter(or_(expression.is_(None), ~expression.ilike(f"%{exclude_value.strip()}%")))
-            return query
-
-        records_query = apply_text_filter(records_query, PaymentRecord.record_number, record_number, record_number_exclude)
-        records_query = apply_text_filter(records_query, Customer.account_name, customer_name, customer_name_exclude)
-        records_query = apply_text_filter(records_query, PaymentRecord.actual_payer_name, actual_payer_name, actual_payer_name_exclude)
-        if latest_invoice_title_expr is not None:
-            records_query = apply_text_filter(records_query, latest_invoice_title_expr, invoice_title_text, invoice_title_text_exclude)
-        records_query = apply_text_filter(records_query, Contract.contract_name, contract_name, contract_name_exclude)
-        records_query = apply_text_filter(records_query, owner_name_expr, owner_name, owner_name_exclude)
-        records_query = apply_text_filter(records_query, PaymentRecord.commission_member_name, commission_member_name, commission_member_name_exclude)
-
-        confirmation_status_values = _split_csv(confirmation_status)
-        confirmation_status_exclude_values = _split_csv(confirmation_status_exclude)
-        if confirmation_status_values:
-            records_query = records_query.filter(PaymentRecord.confirmation_status.in_(confirmation_status_values))
-        if confirmation_status_exclude_values:
-            records_query = records_query.filter(PaymentRecord.confirmation_status.notin_(confirmation_status_exclude_values))
-
-        if created_time_start:
-            records_query = records_query.filter(PaymentRecord.created_time >= datetime.combine(created_time_start, datetime.min.time()))
-        if created_time_end:
-            records_query = records_query.filter(PaymentRecord.created_time <= datetime.combine(created_time_end, datetime.max.time()))
-        
-        total = records_query.count()
-
-        confirmation_status_order = case(
-            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING, 0),
-            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED, 1),
-            (PaymentRecord.confirmation_status == PaymentConfirmationStatus.DISPUTED, 2),
-            else_=99
-        )
-        allowed_sort_fields = {
-            "record_number": PaymentRecord.record_number,
-            "contract_name": Contract.contract_name,
-            "customer_name": Customer.account_name,
-            "actual_payer_name": PaymentRecord.actual_payer_name,
-            "stage_name": PaymentPlan.stage_name,
-            "actual_amount": PaymentRecord.actual_amount,
-            "owner_name": owner_name_expr,
-            "commission_member_name": PaymentRecord.commission_member_name,
-            "payment_date": PaymentRecord.payment_date,
-            "confirmation_status": confirmation_status_order,
-            "created_time": PaymentRecord.created_time,
-        }
-        if latest_invoice_title_expr is not None:
-            allowed_sort_fields["invoice_title_text"] = latest_invoice_title_expr
-        order_clauses = []
-        used_sort_fields = set()
-        for field, direction in _parse_sort(sort, order_by, order_dir):
-            if field in used_sort_fields or field not in allowed_sort_fields:
-                continue
-            column = allowed_sort_fields[field]
-            order_clauses.append(column.desc() if direction == "desc" else column.asc())
-            used_sort_fields.add(field)
-
-        if order_clauses:
-            records_query = records_query.order_by(*order_clauses, PaymentRecord.id.desc())
-        else:
-            records_query = records_query.order_by(PaymentRecord.payment_date.desc(), PaymentRecord.id.desc())
-
-        records = records_query.offset(skip).limit(limit).all()
-
-        # Records now have eager-loaded: payment_plan, contract, customer, approval
-        # No need for manual filling
-
-        return records, total
+        total = records_query.order_by(None).count()
+        return records_query.offset(skip).limit(limit).all(), total
     
     def create(
         self,

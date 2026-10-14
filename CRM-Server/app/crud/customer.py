@@ -1,5 +1,5 @@
 from datetime import date, datetime, time, timedelta
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Query, Session, selectinload
@@ -116,6 +116,134 @@ class CustomerCRUD:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
 
+    def build_population_query(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        industry: str | None = None,
+        industry_exclude: str | None = None,
+        city: str | None = None,
+        source_ids: Sequence[int] | None = None,
+        source_ids_exclude: Sequence[int] | None = None,
+        company_scale: str | None = None,
+        company_scale_exclude: str | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        created_time_start: date | None = None,
+        created_time_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        scope: str | None = None,
+        current_user_id: str | None = None,
+        include_collaborated: bool = False,
+        filters: list[FilterCondition] | None = None,
+        sorts: list[SortCondition] | None = None,
+        chart_question: str | None = None,
+        chart_bucket: str | None = None,
+    ) -> Query[Customer]:
+        query = db.query(Customer).options(
+            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
+        ).filter(Customer.team_id == team_id)
+        current_user_id = str(current_user_id) if current_user_id is not None else None
+        if scope == "collaborated" and current_user_id:
+            query = query.filter(db.query(CustomerMember.id).filter(
+                CustomerMember.team_id == team_id,
+                CustomerMember.customer_id == Customer.id,
+                CustomerMember.user_id == current_user_id,
+                CustomerMember.is_active.is_(True),
+            ).exists())
+        elif include_collaborated and current_user_id:
+            query = query.filter(or_(
+                Customer.owner_id == current_user_id,
+                db.query(CustomerMember.id).filter(
+                    CustomerMember.team_id == team_id,
+                    CustomerMember.customer_id == Customer.id,
+                    CustomerMember.user_id == current_user_id,
+                    CustomerMember.is_active.is_(True),
+                ).exists(),
+            ))
+
+        context = ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id)
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            if owner_id:
+                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+            _, ordered = build_optional_list_query(
+                query, CUSTOMERS_LIST_QUERY_CATALOG, filters=filters, sorts=sorts,
+                context=context, search=search,
+            )
+        else:
+            status_values = _split_int_csv(status)
+            if status_values:
+                query = query.filter(Customer.status.in_(status_values))
+            status_exclude_values = _split_int_csv(status_exclude)
+            if status_exclude_values:
+                query = query.filter(Customer.status.notin_(status_exclude_values))
+            if industry:
+                query = query.filter(Customer.industry.in_(_split_csv(industry)))
+            if industry_exclude:
+                query = query.filter(Customer.industry.notin_(_split_csv(industry_exclude)))
+            if city:
+                query = query.filter(Customer.city == city)
+            if source_ids is not None:
+                query = query.filter(Customer.source_id.in_(source_ids))
+            if source_ids_exclude is not None:
+                query = query.filter(or_(
+                    Customer.source_id.is_(None), Customer.source_id.notin_(source_ids_exclude),
+                ))
+            if company_scale:
+                query = query.filter(Customer.company_scale.in_(_split_csv(company_scale)))
+            if company_scale_exclude:
+                query = query.filter(Customer.company_scale.notin_(_split_csv(company_scale_exclude)))
+            if owner_id:
+                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+            if owner_id_exclude:
+                query = query.filter(Customer.owner_id.notin_(_split_csv(owner_id_exclude)))
+            if keyword:
+                query = query.filter(or_(
+                    Customer.account_name.like(f"%{keyword}%"),
+                    Customer.industry.like(f"%{keyword}%"),
+                    Customer.city.like(f"%{keyword}%"),
+                    exists().where(
+                        CustomerProduct.customer_id == Customer.id,
+                        CustomerProduct.team_id == Customer.team_id,
+                        Product.id == CustomerProduct.product_id,
+                        Product.name.like(f"%{keyword}%"),
+                    ),
+                ))
+            query = apply_search(query, CUSTOMERS_LIST_QUERY_CATALOG, search, context=context)
+            if created_time_start:
+                query = query.filter(Customer.created_time >= datetime.combine(created_time_start, time.min))
+            if created_time_end:
+                query = query.filter(Customer.created_time <= datetime.combine(created_time_end, time.max))
+            allowed = {
+                "created_time", "account_name", "status", "industry",
+                "source", "city", "company_scale", "owner_id",
+            }
+            if order_by in allowed and order_dir:
+                column = getattr(Customer, order_by)
+                query = query.order_by(column.desc() if order_dir.lower() == "desc" else column.asc())
+            else:
+                query = query.order_by(Customer.created_time.desc())
+            ordered = query
+        return self._apply_chart_bucket(db, team_id, ordered, chart_question, chart_bucket)
+
+    def _apply_chart_bucket(
+        self,
+        db: Session,
+        team_id: int,
+        query: Query[Customer],
+        chart_question: str | None,
+        chart_bucket: str | None,
+    ) -> Query[Customer]:
+        """Preserve the existing unfiltered chart population until its route owns this filter."""
+        del db, team_id, chart_question, chart_bucket
+        return query
+
     def build_list_query(
         self,
         db: Session,
@@ -128,72 +256,21 @@ class CustomerCRUD:
         search: str | None,
         filters: list[FilterCondition] | None,
         sorts: list[SortCondition] | None,
-    ) -> Query:
+    ) -> Query[Customer]:
         """Return the filtered, ordered customer query without count or pagination."""
-        query = db.query(Customer).options(
-            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
-        ).filter(Customer.team_id == team_id)
-
-        current_user_id = str(current_user_id) if current_user_id is not None else None
-        if scope == "collaborated" and current_user_id:
-            query = query.filter(
-                db.query(CustomerMember.id)
-                .filter(
-                    CustomerMember.team_id == team_id,
-                    CustomerMember.customer_id == Customer.id,
-                    CustomerMember.user_id == current_user_id,
-                    CustomerMember.is_active == True,
-                )
-                .exists()
-            )
-        elif include_collaborated and current_user_id:
-            query = query.filter(
-                or_(
-                    Customer.owner_id == current_user_id,
-                    db.query(CustomerMember.id)
-                    .filter(
-                        CustomerMember.team_id == team_id,
-                        CustomerMember.customer_id == Customer.id,
-                        CustomerMember.user_id == current_user_id,
-                        CustomerMember.is_active == True,
-                    )
-                    .exists(),
-                )
-            )
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            if owner_id:
-                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
-            _, ordered = build_optional_list_query(
-                query,
-                CUSTOMERS_LIST_QUERY_CATALOG,
-                filters=filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
-                search=search,
-            )
-            return ordered.order_by(Customer.id.asc())
-
-        return self._apply_legacy_filters_and_sort(query, owner_id=owner_id, search=search)
-
-    def _apply_legacy_filters_and_sort(
-        self,
-        query: Query,
-        *,
-        owner_id: str | None,
-        search: str | None,
-        created_time_start: Optional[date] = None,
-        created_time_end: Optional[date] = None,
-    ) -> Query:
-        """Legacy get_multi parameter branches; unified protocol bypasses this."""
-        query = apply_search(
-            query,
-            CUSTOMERS_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(),
+        query = self.build_population_query(
+            db,
+            team_id=team_id,
+            owner_id=owner_id,
+            scope=scope,
+            current_user_id=current_user_id,
+            include_collaborated=include_collaborated,
+            search=search,
+            filters=filters,
+            sorts=sorts,
         )
-        if owner_id:
-            query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
+        if uses_unified_list_query(filters=filters, sorts=sorts):
+            return query.order_by(Customer.id.asc())
         return query
 
     def get_multi(
@@ -225,125 +302,34 @@ class CustomerCRUD:
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Tuple[List[Customer], int]:
-        query = db.query(Customer).options(
-            selectinload(Customer.product_links).selectinload(CustomerProduct.product)
-        ).filter(Customer.team_id == team_id)
-
-        current_user_id = str(current_user_id) if current_user_id is not None else None
-        if scope == "collaborated" and current_user_id:
-            query = query.filter(
-                db.query(CustomerMember.id)
-                .filter(
-                    CustomerMember.team_id == team_id,
-                    CustomerMember.customer_id == Customer.id,
-                    CustomerMember.user_id == current_user_id,
-                    CustomerMember.is_active == True,
-                )
-                .exists()
-            )
-        elif include_collaborated and current_user_id:
-            query = query.filter(
-                or_(
-                    Customer.owner_id == current_user_id,
-                    db.query(CustomerMember.id)
-                    .filter(
-                        CustomerMember.team_id == team_id,
-                        CustomerMember.customer_id == Customer.id,
-                        CustomerMember.user_id == current_user_id,
-                        CustomerMember.is_active == True,
-                    )
-                    .exists(),
-                )
-            )
-
-        if uses_unified_list_query(filters=filters, sorts=sorts):
-            if owner_id:
-                query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
-            return paginate_optional_list_query(
-                query,
-                CUSTOMERS_LIST_QUERY_CATALOG,
-                skip=skip,
-                limit=limit,
-                filters=filters,
-                sorts=sorts,
-                context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
-                search=search,
-            )
-
-        status_values = _split_int_csv(status)
-        if status_values:
-            query = query.filter(Customer.status.in_(status_values))
-        status_exclude_values = _split_int_csv(status_exclude)
-        if status_exclude_values:
-            query = query.filter(Customer.status.notin_(status_exclude_values))
-        if industry:
-            query = query.filter(Customer.industry.in_(_split_csv(industry)))
-        if industry_exclude:
-            query = query.filter(Customer.industry.notin_(_split_csv(industry_exclude)))
-        if city:
-            query = query.filter(Customer.city == city)
-        if source_ids is not None:
-            query = query.filter(Customer.source_id.in_(source_ids))
-        if source_ids_exclude is not None:
-            query = query.filter(
-                or_(Customer.source_id.is_(None), Customer.source_id.notin_(source_ids_exclude))
-            )
-        if company_scale:
-            query = query.filter(Customer.company_scale.in_(_split_csv(company_scale)))
-        if company_scale_exclude:
-            query = query.filter(Customer.company_scale.notin_(_split_csv(company_scale_exclude)))
-        if owner_id:
-            query = query.filter(Customer.owner_id.in_(_split_csv(owner_id)))
-        if owner_id_exclude:
-            query = query.filter(Customer.owner_id.notin_(_split_csv(owner_id_exclude)))
-        if keyword:
-            query = query.filter(
-                or_(
-                    Customer.account_name.like(f"%{keyword}%"),
-                    Customer.industry.like(f"%{keyword}%"),
-                    Customer.city.like(f"%{keyword}%"),
-                    exists().where(
-                        CustomerProduct.customer_id == Customer.id,
-                        CustomerProduct.team_id == Customer.team_id,
-                        Product.id == CustomerProduct.product_id,
-                        Product.name.like(f"%{keyword}%"),
-                    ),
-                )
-            )
-        query = apply_search(
-            query,
-            CUSTOMERS_LIST_QUERY_CATALOG,
-            search,
-            context=ListQueryContext(db=db, team_id=team_id, current_user_id=current_user_id),
+        query = self.build_population_query(
+            db,
+            team_id=team_id,
+            status=status,
+            status_exclude=status_exclude,
+            industry=industry,
+            industry_exclude=industry_exclude,
+            city=city,
+            source_ids=source_ids,
+            source_ids_exclude=source_ids_exclude,
+            company_scale=company_scale,
+            company_scale_exclude=company_scale_exclude,
+            owner_id=owner_id,
+            owner_id_exclude=owner_id_exclude,
+            keyword=keyword,
+            search=search,
+            created_time_start=created_time_start,
+            created_time_end=created_time_end,
+            order_by=order_by,
+            order_dir=order_dir,
+            scope=scope,
+            current_user_id=current_user_id,
+            include_collaborated=include_collaborated,
+            filters=filters,
+            sorts=sorts,
         )
-        if created_time_start:
-            query = query.filter(Customer.created_time >= datetime.combine(created_time_start, time.min))
-        if created_time_end:
-            query = query.filter(Customer.created_time <= datetime.combine(created_time_end, time.max))
-
-        total = query.count()
-
-        allowed_sort_fields = [
-            "created_time",
-            "account_name",
-            "status",
-            "industry",
-            "source",
-            "city",
-            "company_scale",
-            "owner_id",
-        ]
-        if order_by and order_dir and order_by in allowed_sort_fields:
-            order_column = getattr(Customer, order_by)
-            if order_dir.lower() == "desc":
-                query = query.order_by(order_column.desc())
-            else:
-                query = query.order_by(order_column.asc())
-        else:
-            query = query.order_by(Customer.created_time.desc())
-
+        total = query.order_by(None).count()
         customers = query.offset(skip).limit(limit).all()
-
         return customers, total
 
     def create(
