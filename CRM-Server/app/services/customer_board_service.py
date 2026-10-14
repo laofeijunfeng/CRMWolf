@@ -38,6 +38,7 @@ from app.services.customer_derived_status import (
 
 
 COLUMN_KEYS = ("not_started", "following", "repurchasing", "won", "lost")
+_LIFECYCLE_SORT_RANK = {key: rank for rank, key in enumerate(COLUMN_KEYS)}
 COLUMN_LABELS = {
     "not_started": "未启动",
     "following": "跟进中",
@@ -214,7 +215,7 @@ def _column(
     order_by: str | None,
     order_dir: str | None,
 ) -> CustomerBoardColumn:
-    ordered = _preview_order(rows, explicit_sort, sorts, order_by, order_dir)
+    ordered = _preview_order(rows, derived, explicit_sort, sorts, order_by, order_dir)
     shown = ordered[:BOARD_PREVIEW_LIMIT]
     remaining = len(ordered) - len(shown)
     return CustomerBoardColumn(
@@ -294,6 +295,7 @@ def _action_state(
 
 def _preview_order(
     rows: Sequence[Customer],
+    derived: dict[int, DerivedCustomerStatus],
     explicit_sort: bool,
     sorts: Sequence[SortCondition] | None,
     order_by: str | None,
@@ -306,8 +308,8 @@ def _preview_order(
             for _, row in sorted(
                 indexed,
                 key=lambda item: (
-                    -(item[1].created_time.timestamp() if isinstance(item[1].created_time, datetime) else float("-inf")),
-                    -(item[1].last_modified_time.timestamp() if isinstance(item[1].last_modified_time, datetime) else float("-inf")),
+                    _descending_timestamp(item[1].created_time),
+                    _descending_timestamp(item[1].last_modified_time),
                     item[1].public_id,
                 ),
             )
@@ -320,33 +322,40 @@ def _preview_order(
             indexed,
             key=lambda item: (
                 tuple(
-                    _directed(_sort_value(item[1], field), ascending)
+                    _directed(_sort_value(item[1], derived, field), ascending)
                     for field, ascending in requested
                 ),
                 item[1].public_id,
-                item[0],
             ),
         )
     ]
 
 
+def _descending_timestamp(value: datetime | None) -> float:
+    if not isinstance(value, datetime):
+        return float("inf")
+    return -value.timestamp()
+
+
 def _directed(value, ascending: bool):
+    if value is None:
+        return (1,)
     if isinstance(value, datetime):
         stamp = value.timestamp()
         return (0, stamp if ascending else -stamp)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return (0, value if ascending else -value)
-    text = "" if value is None else str(value)
+    text = str(value)
     if text == "":
         return (1,)
     ordered = text if ascending else tuple(-ord(char) for char in text)
     return (0, ordered)
 
-def _sort_value(row: Customer, field: str):
+def _sort_value(row: Customer, derived: dict[int, DerivedCustomerStatus], field: str):
     if field == "account_name":
         return row.account_name or ""
     if field == "status":
-        return row.status if row.status is not None else -1
+        return _LIFECYCLE_SORT_RANK.get(derived[int(row.id)].status.value, len(COLUMN_KEYS))
     if field == "industry":
         return row.industry or ""
     if field == "source":

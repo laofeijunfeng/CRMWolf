@@ -16,6 +16,9 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateTable
 
 from app.api import customers as customers_api
+from app.core.list_query.types import SortCondition
+from app.services.customer_board_service import _preview_order
+from app.services.customer_derived_status import derive_customer_statuses_for_list
 from app.core import database, deps
 from app.models.acquisition_source import AcquisitionSource
 from app.models.contract import Contract
@@ -673,3 +676,93 @@ def test_descending_text_sort_places_null_and_empty_after_real_values(api_env) -
     ]
     assert _columns(body)["not_started"]["count"] == 5
     assert _counts(body)["total_count"] == 5
+
+
+def test_descending_datetime_sort_places_missing_values_last(api_env) -> None:
+    del api_env
+    rows = [
+        _customer(1, name="缺失甲", owner_id="7", created_time=datetime(2026, 5, 1), public_id="cus_missing_b"),
+        _customer(2, name="缺失乙", owner_id="7", created_time=datetime(2026, 5, 2), public_id="cus_missing_a"),
+        _customer(3, name="较早", owner_id="7", created_time=datetime(2026, 6, 1), public_id="cus_early", last_modified_time=datetime(2026, 6, 1)),
+        _customer(4, name="较晚甲", owner_id="7", created_time=datetime(2026, 8, 1), public_id="cus_late_b", last_modified_time=datetime(2026, 8, 1)),
+        _customer(5, name="较晚乙", owner_id="7", created_time=datetime(2026, 8, 1), public_id="cus_late_a", last_modified_time=datetime(2026, 8, 1)),
+    ]
+    rows[0].created_time = None
+    rows[0].last_modified_time = None
+    rows[1].created_time = None
+    rows[1].last_modified_time = None
+
+    def ordered(field: str, direction: str) -> list[str]:
+        return [
+            row.public_id
+            for row in _preview_order(
+                rows,
+                {},
+                True,
+                [SortCondition(field=field, direction=direction)],
+                None,
+                None,
+            )
+        ]
+
+    assert ordered("last_modified_time", "desc") == [
+        "cus_late_a", "cus_late_b", "cus_early", "cus_missing_a", "cus_missing_b",
+    ]
+    assert ordered("last_modified_time", "asc") == [
+        "cus_early", "cus_late_a", "cus_late_b", "cus_missing_a", "cus_missing_b",
+    ]
+    assert ordered("created_time", "desc") == [
+        "cus_late_a", "cus_late_b", "cus_early", "cus_missing_a", "cus_missing_b",
+    ]
+    assert ordered("created_time", "asc") == [
+        "cus_early", "cus_late_a", "cus_late_b", "cus_missing_a", "cus_missing_b",
+    ]
+    assert [
+        row.public_id for row in _preview_order(rows, {}, False, None, None, None)
+    ] == ["cus_late_a", "cus_late_b", "cus_early", "cus_missing_a", "cus_missing_b"]
+
+
+def test_status_sort_uses_derived_lifecycle_order(api_env) -> None:
+    db = api_env.db
+    db.add_all([
+        _customer(1, name="甲", owner_id="7", created_time=datetime(2026, 5, 1), status=1, public_id="cus_not_started"),
+        _customer(2, name="甲", owner_id="7", created_time=datetime(2026, 5, 2), status=0, public_id="cus_won"),
+        _customer(3, name="公海客户", owner_id=None, created_time=datetime(2026, 5, 3), status=3, public_id="cus_public"),
+        _opportunity(21, customer_id=2, purchase_type="NEW"),
+        _journey(201, customer_id=2, status=DealJourneyStatus.COMPLETED, opportunity_id=21),
+    ])
+    db.commit()
+    _grant(db, 7, "customer:view:all")
+
+    response = _board(api_env.client, sorts='[{"field":"status","dir":"asc"}]')
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    columns = _columns(body)
+    assert [item["id"] for item in columns["not_started"]["items"]] == ["cus_not_started"]
+    assert [item["id"] for item in columns["won"]["items"]] == ["cus_won"]
+    assert columns["not_started"]["items"][0]["status"] == "not_started"
+    assert columns["won"]["items"][0]["status"] == "won"
+    assert _counts(body)["total_count"] == 2
+    assert columns["lost"]["count"] == 0
+
+    owned = db.query(Customer).filter(Customer.owner_id.is_not(None)).all()
+    derived = derive_customer_statuses_for_list(db, 1, owned)
+    ascending = _preview_order(
+        owned,
+        derived,
+        True,
+        [SortCondition(field="status", direction="asc")],
+        None,
+        None,
+    )
+    descending = _preview_order(
+        owned,
+        derived,
+        True,
+        [SortCondition(field="status", direction="desc")],
+        None,
+        None,
+    )
+    assert [row.public_id for row in ascending] == ["cus_not_started", "cus_won"]
+    assert [row.public_id for row in descending] == ["cus_won", "cus_not_started"]
