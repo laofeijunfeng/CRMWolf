@@ -123,6 +123,8 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectSourceType,
     customer_business_object_intelligence_service,
 )
+from app.schemas.customer_board import CustomerBoardResponse
+from app.services.customer_board_service import build_customer_board
 from app.services.customer_derived_status import (
     CUSTOMER_DERIVED_STATUS_LABELS,
     derive_customer_statuses_for_list,
@@ -2177,6 +2179,125 @@ async def update_customer_license_snapshot(
         },
     )
     return _customer_response(db, updated_customer)
+
+
+@router.get("/board", response_model=CustomerBoardResponse, summary="查询客户看板")
+def get_customer_board(
+    customer_status: str | None = Query(None, alias="status"),
+    status_exclude: str | None = Query(None),
+    industry: str | None = Query(None),
+    industry_exclude: str | None = Query(None),
+    city: str | None = Query(None),
+    source_public_id: str | None = Query(None),
+    source_public_id_exclude: str | None = Query(None),
+    company_scale: str | None = Query(None),
+    company_scale_exclude: str | None = Query(None),
+    owner_id: str | None = Query(None),
+    owner_id_exclude: str | None = Query(None),
+    keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    created_time_start: date | None = Query(None),
+    created_time_end: date | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    scope: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    chart_question: str | None = Query(None),
+    chart_bucket: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CustomerBoardResponse:
+    from app.crud.permission import permission_crud
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {permission.code for permission in user_permissions}
+    has_view_all = "customer:view:all" in permission_codes
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    allowed_scopes = {None, "collaborated", "accessible"}
+    if scope not in allowed_scopes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope 仅支持 collaborated/accessible",
+        )
+
+    current_user_id = str(current_user.id)
+    include_collaborated = scope == "accessible" and not has_view_all
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
+            default_to_self=scope not in {"collaborated", "accessible"},
+        )
+    else:
+        actual_owner_id = owner_id
+        if owner_id in ["me", "my"]:
+            actual_owner_id = current_user_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
+            )
+        if scope in {"collaborated", "accessible"}:
+            actual_owner_id = None
+        elif actual_owner_id is None and not has_view_all:
+            actual_owner_id = current_user_id
+
+    source_ids = None
+    if source_public_id is not None:
+        source_ids = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id))
+    source_ids_exclude = None
+    if source_public_id_exclude is not None:
+        source_ids_exclude = resolve_public_ids_to_ids(db, team_id, _split_csv(source_public_id_exclude))
+
+    rows = run_or_400(lambda: customer_crud.build_population_query(
+        db,
+        team_id=team_id,
+        status=customer_status,
+        industry=industry,
+        industry_exclude=industry_exclude,
+        city=city,
+        source_ids=source_ids,
+        source_ids_exclude=source_ids_exclude,
+        company_scale=company_scale,
+        company_scale_exclude=company_scale_exclude,
+        owner_id=actual_owner_id,
+        owner_id_exclude=owner_id_exclude,
+        keyword=keyword,
+        search=search,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        order_by=order_by,
+        order_dir=order_dir,
+        scope=scope,
+        current_user_id=current_user_id,
+        include_collaborated=include_collaborated,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+        chart_question=chart_question,
+        chart_bucket=chart_bucket,
+    ).all())
+    return build_customer_board(
+        db,
+        team_id=team_id,
+        current_user_id=current_user_id,
+        permission_codes=permission_codes,
+        rows=rows,
+        legacy_branch_active=not uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts),
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        filters=parsed_filters,
+        order_by=order_by,
+        order_dir=order_dir,
+        sorts=parsed_sorts,
+    )
 
 
 @router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")

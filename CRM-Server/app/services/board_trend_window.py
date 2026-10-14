@@ -80,3 +80,7 @@ def resolve_board_trend_window(
         months.append(month_key(cursor))
         cursor = _shift_month(cursor, 1)
     return BoardTrendWindow(start, end, tuple(months))
+
+
+def fill_month_counts(window: BoardTrendWindow) -> dict[str, int]:
+    return {month: 0 for month in window.months}
