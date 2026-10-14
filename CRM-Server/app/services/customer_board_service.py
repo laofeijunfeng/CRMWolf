@@ -119,6 +119,9 @@ def build_customer_board(
             current_user_id,
             permission_codes,
             explicit_sort,
+            sorts,
+            order_by,
+            order_dir,
         )
         for key in COLUMN_KEYS
     ]
@@ -207,8 +210,11 @@ def _column(
     current_user_id: str,
     permission_codes: set[str],
     explicit_sort: bool,
+    sorts: Sequence[SortCondition] | None,
+    order_by: str | None,
+    order_dir: str | None,
 ) -> CustomerBoardColumn:
-    ordered = _preview_order(rows, explicit_sort)
+    ordered = _preview_order(rows, explicit_sort, sorts, order_by, order_dir)
     shown = ordered[:BOARD_PREVIEW_LIMIT]
     remaining = len(ordered) - len(shown)
     return CustomerBoardColumn(
@@ -286,26 +292,85 @@ def _action_state(
     )
 
 
-def _preview_order(rows: Sequence[Customer], explicit_sort: bool) -> list[Customer]:
-    indexed = list(enumerate(rows))
-    if explicit_sort:
+def _preview_order(
+    rows: Sequence[Customer],
+    explicit_sort: bool,
+    sorts: Sequence[SortCondition] | None,
+    order_by: str | None,
+    order_dir: str | None,
+) -> list[Customer]:
+    if not explicit_sort:
+        indexed = list(enumerate(rows))
         return [
             row
-            for _, row in sorted(indexed, key=lambda item: (item[0], item[1].public_id))
+            for _, row in sorted(
+                indexed,
+                key=lambda item: (
+                    -(item[1].created_time.timestamp() if isinstance(item[1].created_time, datetime) else float("-inf")),
+                    -(item[1].last_modified_time.timestamp() if isinstance(item[1].last_modified_time, datetime) else float("-inf")),
+                    item[1].public_id,
+                ),
+            )
         ]
+    requested = _requested_sorts(sorts, order_by, order_dir)
+    indexed = list(enumerate(rows))
     return [
         row
         for _, row in sorted(
             indexed,
             key=lambda item: (
-                -(item[1].created_time.timestamp() if isinstance(item[1].created_time, datetime) else float("-inf")),
-                -(item[1].last_modified_time.timestamp() if isinstance(item[1].last_modified_time, datetime) else float("-inf")),
+                tuple(
+                    _directed(_sort_value(item[1], field), ascending)
+                    for field, ascending in requested
+                ),
                 item[1].public_id,
+                item[0],
             ),
         )
     ]
 
 
+def _directed(value, ascending: bool):
+    if isinstance(value, datetime):
+        stamp = value.timestamp()
+        return stamp if ascending else -stamp
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value if ascending else -value
+    text = "" if value is None else str(value)
+    return text if ascending else tuple(-ord(char) for char in text)
+
+def _sort_value(row: Customer, field: str):
+    if field == "account_name":
+        return row.account_name or ""
+    if field == "status":
+        return row.status if row.status is not None else -1
+    if field == "industry":
+        return row.industry or ""
+    if field == "source":
+        return row.source or ""
+    if field == "city":
+        return row.city or ""
+    if field == "company_scale":
+        return row.company_scale or ""
+    if field == "owner_id":
+        return row.owner_id or ""
+    if field == "created_time":
+        return row.created_time if isinstance(row.created_time, datetime) else None
+    if field in {"last_modified_time", "updated_time"}:
+        return row.last_modified_time if isinstance(row.last_modified_time, datetime) else None
+    return ""
+
+
+def _requested_sorts(
+    sorts: Sequence[SortCondition] | None,
+    order_by: str | None,
+    order_dir: str | None,
+) -> list[tuple[str, bool]]:
+    if sorts:
+        return [(sort.field, sort.direction != "desc") for sort in sorts]
+    if order_by and order_dir:
+        return [(order_by, order_dir.lower() != "desc")]
+    return []
 def _has_explicit_sort(
     order_by: str | None,
     order_dir: str | None,

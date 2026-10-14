@@ -176,8 +176,6 @@ class CustomerCRUD:
                 query, CUSTOMERS_LIST_QUERY_CATALOG, filters=filters, sorts=sorts,
                 context=context, search=search,
             )
-            if sorts:
-                ordered = ordered.order_by(Customer.public_id.asc())
         else:
             status_values = _split_int_csv(status)
             if status_values:
@@ -235,7 +233,7 @@ class CustomerCRUD:
             if order_by in allowed and order_dir:
                 column = allowed[order_by]
                 direction = column.desc() if order_dir.lower() == "desc" else column.asc()
-                query = query.order_by(direction, Customer.public_id.asc())
+                query = query.order_by(direction)
             else:
                 query = query.order_by(Customer.created_time.desc())
             ordered = query
