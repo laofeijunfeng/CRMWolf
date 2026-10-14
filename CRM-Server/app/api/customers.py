@@ -2261,6 +2261,7 @@ def get_customer_board(
         db,
         team_id=team_id,
         status=customer_status,
+        status_exclude=status_exclude,
         industry=industry,
         industry_exclude=industry_exclude,
         city=city,
@@ -2297,6 +2298,7 @@ def get_customer_board(
         order_by=order_by,
         order_dir=order_dir,
         sorts=parsed_sorts,
+        today=date.today(),
     )
 
 

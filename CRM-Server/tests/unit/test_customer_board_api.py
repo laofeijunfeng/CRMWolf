@@ -360,7 +360,7 @@ def test_board_groups_derived_lifecycle_and_excludes_public_pool(api_env) -> Non
     assert all("amount" not in point for point in body["trends"])
     recent = next(metric for metric in body["summary"] if metric["key"] == "recent_new_count")
     assert recent["secondary_label"] == "上月"
-    assert recent["secondary_value"] == 0
+    assert recent["secondary_value"] == 1
 
 
 def test_board_preview_uses_full_column_totals(api_env) -> None:
@@ -555,3 +555,84 @@ def test_collaborated_scope_uses_membership_not_owner_permission(api_env) -> Non
         "can_create_opportunity": True,
     }
     assert _counts(body)["total_count"] == 1
+
+
+def test_recent_new_count_uses_approved_six_complete_month_window(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="窗口前", owner_id="7", created_time=datetime(2026, 3, 31), public_id="cus_before"),
+        _customer(2, name="窗口首月", owner_id="7", created_time=datetime(2026, 4, 1), public_id="cus_april"),
+        _customer(3, name="上月", owner_id="7", created_time=datetime(2026, 8, 15), public_id="cus_august"),
+        _customer(4, name="窗口末月", owner_id="7", created_time=datetime(2026, 9, 30, 23, 59), public_id="cus_september"),
+        _customer(5, name="当前未完成月", owner_id="7", created_time=datetime(2026, 10, 2), public_id="cus_october"),
+        _customer(6, name="公海新增", owner_id=None, created_time=datetime(2026, 9, 2), public_id="cus_public", status=3),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client)
+
+    assert response.status_code == 200, response.text
+    recent = next(metric for metric in response.json()["summary"] if metric["key"] == "recent_new_count")
+    assert recent["value"] == 1
+    assert recent["secondary_label"] == "上月"
+    assert recent["secondary_value"] == 1
+
+
+def test_recent_new_comparison_is_omitted_when_previous_month_is_outside_window(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="窗口内", owner_id="7", created_time=datetime(2026, 9, 12), public_id="cus_inside"),
+        _customer(2, name="窗口外上月", owner_id="7", created_time=datetime(2026, 8, 12), public_id="cus_outside"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client, created_time_start="2026-09-01", created_time_end="2026-09-30")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    recent = next(metric for metric in body["summary"] if metric["key"] == "recent_new_count")
+    assert recent["value"] == 1
+    assert recent["secondary_label"] is None
+    assert recent["secondary_value"] is None
+    assert [point["date"] for point in body["trends"]] == ["2026-09"]
+
+
+def test_status_exclude_filters_legacy_population(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="跟进中", owner_id="7", created_time=datetime(2026, 5, 1), status=0, public_id="cus_following"),
+        _customer(2, name="已赢单", owner_id="7", created_time=datetime(2026, 6, 1), status=1, public_id="cus_won"),
+        _customer(3, name="已输单", owner_id="7", created_time=datetime(2026, 7, 1), status=2, public_id="cus_lost"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client, status_exclude="1,2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert _counts(body)["total_count"] == 1
+    assert _columns(body)["not_started"]["items"][0]["id"] == "cus_following"
+    assert _columns(body)["lost"]["count"] == 0
+
+
+def test_explicit_source_sort_uses_source_name_then_public_id(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="甲", owner_id="7", created_time=datetime(2026, 5, 1), source="expo", source_id=30, public_id="cus_z"),
+        _customer(2, name="乙", owner_id="7", created_time=datetime(2026, 5, 2), source="web", source_id=10, public_id="cus_b"),
+        _customer(3, name="丙", owner_id="7", created_time=datetime(2026, 5, 3), source="web", source_id=20, public_id="cus_a"),
+        _customer(4, name="丁", owner_id="7", created_time=datetime(2026, 5, 4), source="referral", source_id=5, public_id="cus_d"),
+        _customer(5, name="戊", owner_id="7", created_time=datetime(2026, 5, 5), source="phone", source_id=40, public_id="cus_e"),
+        _customer(6, name="己", owner_id="7", created_time=datetime(2026, 5, 6), source="ad", source_id=50, public_id="cus_f"),
+        _customer(7, name="庚", owner_id="7", created_time=datetime(2026, 5, 7), source="partner", source_id=60, public_id="cus_g"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client, order_by="source", order_dir="asc")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["id"] for item in _columns(body)["not_started"]["items"]] == [
+        "cus_f", "cus_z", "cus_g", "cus_e", "cus_d",
+    ]
+    assert _counts(body)["total_count"] == 7

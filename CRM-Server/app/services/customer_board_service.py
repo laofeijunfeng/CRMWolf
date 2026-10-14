@@ -104,6 +104,10 @@ def build_customer_board(
         denominator,
         non_public,
         today or date.today(),
+        legacy_branch_active=legacy_branch_active,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        filters=filters,
     )
     columns = [
         _column(
@@ -137,11 +141,34 @@ def _summary(
     denominator: int,
     non_public: Sequence[Customer],
     today: date,
+    *,
+    legacy_branch_active: bool,
+    created_time_start: date | None,
+    created_time_end: date | None,
+    filters: Sequence[FilterCondition] | None,
 ) -> list[CustomerBoardMetric]:
-    current_month = month_key(today)
-    previous_month = month_key(_shift_month(today.replace(day=1), -1))
-    recent_current = _created_in_month(non_public, current_month)
-    recent_previous = _created_in_month(non_public, previous_month)
+    window = _creation_window(
+        rows=non_public,
+        legacy_branch_active=legacy_branch_active,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        filters=filters,
+        today=today,
+    )
+    recent_current = 0
+    recent_previous = 0
+    previous_month = window.months[-2] if window is not None and len(window.months) >= 2 else None
+    latest_month = window.months[-1] if window is not None else None
+    if window is not None:
+        for row in non_public:
+            event_day = row.created_time.date() if row.created_time else None
+            if event_day is None or not window.event_start <= event_day <= window.event_end:
+                continue
+            month = month_key(event_day)
+            if month == latest_month:
+                recent_current += 1
+            elif month == previous_month:
+                recent_previous += 1
     counts = {
         "total_count": denominator,
         "following_count": len(buckets["following"]),
@@ -153,7 +180,7 @@ def _summary(
     for key, label in COUNT_LABELS.items():
         secondary = (
             {"secondary_label": "上月", "secondary_value": recent_previous}
-            if key == "recent_new_count" and denominator
+            if key == "recent_new_count" and previous_month is not None
             else {}
         )
         metrics.append(CustomerCountMetric(
@@ -263,9 +290,12 @@ def _action_state(
 
 
 def _preview_order(rows: Sequence[Customer], explicit_sort: bool) -> list[Customer]:
-    if explicit_sort:
-        return list(rows)
     indexed = list(enumerate(rows))
+    if explicit_sort:
+        return [
+            row
+            for _, row in sorted(indexed, key=lambda item: (item[0], item[1].public_id))
+        ]
     return [
         row
         for _, row in sorted(
@@ -287,6 +317,25 @@ def _has_explicit_sort(
     return bool(sorts) or bool(order_by and order_dir)
 
 
+def _creation_window(
+    *,
+    rows: Sequence[Customer],
+    legacy_branch_active: bool,
+    created_time_start: date | None,
+    created_time_end: date | None,
+    filters: Sequence[FilterCondition] | None,
+    today: date,
+):
+    if not rows:
+        return None
+    if legacy_branch_active:
+        start_bound, end_bound = created_time_start, created_time_end
+    else:
+        start_bound, end_bound = extract_board_date_bounds(filters, "created_time")
+    window = resolve_board_trend_window(today=today, start_bound=start_bound, end_bound=end_bound)
+    return None if window.empty else window
+
+
 def _trends(
     rows: Sequence[Customer],
     *,
@@ -296,14 +345,15 @@ def _trends(
     filters: Sequence[FilterCondition] | None,
     today: date,
 ) -> list[CustomerBoardTrendPoint]:
-    if not rows:
-        return []
-    if legacy_branch_active:
-        start_bound, end_bound = created_time_start, created_time_end
-    else:
-        start_bound, end_bound = extract_board_date_bounds(filters, "created_time")
-    window = resolve_board_trend_window(today=today, start_bound=start_bound, end_bound=end_bound)
-    if window.empty:
+    window = _creation_window(
+        rows=rows,
+        legacy_branch_active=legacy_branch_active,
+        created_time_start=created_time_start,
+        created_time_end=created_time_end,
+        filters=filters,
+        today=today,
+    )
+    if window is None:
         return []
     counts = fill_month_counts(window)
     for row in rows:
@@ -316,14 +366,6 @@ def _trends(
     ]
 
 
-def _created_in_month(rows: Sequence[Customer], month: str) -> int:
-    return sum(1 for row in rows if row.created_time and month_key(row.created_time.date()) == month)
-
-
-def _shift_month(value: date, offset: int) -> date:
-    ordinal = value.year * 12 + value.month - 1 + offset
-    year, zero_based_month = divmod(ordinal, 12)
-    return date(year, zero_based_month + 1, 1)
 
 
 def _owner_map(db: Session, rows: Sequence[Customer]) -> dict[str, BoardOwner]:

@@ -176,6 +176,8 @@ class CustomerCRUD:
                 query, CUSTOMERS_LIST_QUERY_CATALOG, filters=filters, sorts=sorts,
                 context=context, search=search,
             )
+            if sorts:
+                ordered = ordered.order_by(Customer.public_id.asc())
         else:
             status_values = _split_int_csv(status)
             if status_values:
@@ -221,12 +223,19 @@ class CustomerCRUD:
             if created_time_end:
                 query = query.filter(Customer.created_time <= datetime.combine(created_time_end, time.max))
             allowed = {
-                "created_time", "account_name", "status", "industry",
-                "source", "city", "company_scale", "owner_id",
+                "created_time": Customer.created_time,
+                "account_name": Customer.account_name,
+                "status": Customer.status,
+                "industry": Customer.industry,
+                "source": Customer.source,
+                "city": Customer.city,
+                "company_scale": Customer.company_scale,
+                "owner_id": Customer.owner_id,
             }
             if order_by in allowed and order_dir:
-                column = getattr(Customer, order_by)
-                query = query.order_by(column.desc() if order_dir.lower() == "desc" else column.asc())
+                column = allowed[order_by]
+                direction = column.desc() if order_dir.lower() == "desc" else column.asc()
+                query = query.order_by(direction, Customer.public_id.asc())
             else:
                 query = query.order_by(Customer.created_time.desc())
             ordered = query
