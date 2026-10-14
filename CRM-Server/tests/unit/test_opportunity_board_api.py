@@ -368,7 +368,13 @@ def test_board_route_precedes_dynamic_opportunity_route() -> None:
     assert "page_size" not in board_route.dependant.query_params
 
 
-def test_board_groups_stable_stage_identity_and_terminal_overrides(api_env) -> None:
+def test_board_groups_stable_stage_identity_and_terminal_overrides(api_env, monkeypatch) -> None:
+    class _FrozenDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return date(2026, 10, 12)
+
+    monkeypatch.setattr(opportunities_api, "date", _FrozenDate)
     _seed_stage_population(api_env.db)
     _grant(
         api_env.db,
