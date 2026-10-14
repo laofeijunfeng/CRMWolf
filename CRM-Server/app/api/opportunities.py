@@ -91,6 +91,21 @@ APPROVAL_PHASE_LABELS = {
 
 
 
+
+CONTRACT_NOT_READY_REASON = "需要先推进到 100%"
+
+
+def _contract_unavailable_reason(db: Session, opportunity, team_id: int | None) -> str | None:
+    from app.models.opportunity import Opportunity, OpportunityStatus
+
+    if (
+        opportunity.status == OpportunityStatus.WON.value
+        and _resolve_opportunity_approval_phase(db, opportunity, team_id) == ApprovalPhase.APPROVED.value
+    ):
+        return None
+    return CONTRACT_NOT_READY_REASON
+
+
 def _ensure_opportunity_not_pending(db: Session, opportunity, team_id: Optional[int]) -> None:
     if _resolve_opportunity_approval_phase(db, opportunity, team_id) == ApprovalPhase.PENDING_REVIEW.value:
         raise HTTPException(
@@ -573,33 +588,12 @@ def export_opportunities(
     return list_export_file_response(generated)
 
 
-@router.get("/available-for-contract", response_model=List[OpportunityListResponse], summary="获取可创建合同的商机列表", description="""
-
-**功能说明：**
-- 获取客户可创建合同的商机
-- 只返回"已赢单"（status=1）的商机
-- 排除已经创建合同的商机
-- 不需要分页，返回所有符合条件的商机
-
-**业务场景：**
-- 创建合同时，在商机下拉框中选择
-- 避免选择已输单的商机
-- 避免重复创建合同
-
-**路径参数：**
-- customer_id: 客户对外ID（必填）
-
-**业务规则：**
-- 只返回已赢单（status=1）的商机
-- 排除已经有关联合同的商机（opportunity_id在contracts表中存在）
-- 不需要分页，返回所有符合条件的商机
-
-**返回字段：**
-- 商机基本信息：对外ID、名称、实际金额等
-- 当前阶段信息：阶段名称、赢率
-- 客户信息：客户名称
-- 负责人信息：负责人姓名
-""")
+@router.get(
+    "/available-for-contract",
+    response_model=list[OpportunityListResponse],
+    summary="获取新建合同可选的商机列表",
+    description="返回新建合同时可见的商机。可创建项无不可选原因。跟进中项带原因。输单和已有合同不返回。",
+)
 def get_available_opportunities_for_contract(
     customer_id: str,
     team_id: int = Depends(get_current_user_team),
@@ -681,7 +675,8 @@ def get_available_opportunities_for_contract(
             "stage_info": None,
             "customer_info": customer_info,
             "owner_info": owner_info,
-            "creator_info": creator_info
+            "creator_info": creator_info,
+            "contract_unavailable_reason": _contract_unavailable_reason(db, opp, team_id),
         }))
 
     return result

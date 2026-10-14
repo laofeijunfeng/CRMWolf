@@ -148,6 +148,23 @@ def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Op
     }
 
 
+
+def _ensure_opportunity_ready_for_contract(db: Session, opportunity, team_id: int) -> None:
+    from app.models.opportunity import OpportunityStatus
+    from app.services.opportunity_presenter import resolve_opportunity_approval_phase
+
+    if opportunity.status != OpportunityStatus.WON.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只能从赢单商机创建合同"
+        )
+    if resolve_opportunity_approval_phase(db, opportunity, team_id) != "approved":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="商机审批通过后才能创建合同"
+        )
+
+
 def _get_opportunity_by_public_id_or_404(db: Session, opportunity_id: str, team_id: int):
     if not is_opportunity_public_id(opportunity_id):
         raise HTTPException(
@@ -382,6 +399,8 @@ async def create_contract(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="商机关联的客户与合同客户不一致"
         )
+
+    _ensure_opportunity_ready_for_contract(db, opportunity, team_id)
 
     internal_contract = ContractInternalCreate(
         contract_name=contract.contract_name,

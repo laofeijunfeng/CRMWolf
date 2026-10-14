@@ -161,7 +161,8 @@ export const OpportunityListItemApiSchema = z.object({
   created_time: z.string(),
   last_modified_time: z.string(),
   customer_name: OptionalStringFromNullableSchema,
-  owner_info: OpportunityOwnerInfoSchema.optional()
+  owner_info: OpportunityOwnerInfoSchema.optional(),
+  contract_unavailable_reason: z.string().nullable().optional()
 }).passthrough()
 
 export const OpportunityPaginatedListApiSchema = z.object({

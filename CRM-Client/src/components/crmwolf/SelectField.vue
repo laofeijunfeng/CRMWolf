@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
@@ -21,6 +22,7 @@ interface SelectFieldOption {
   value: string | number
   label: string
   disabled?: boolean
+  disabledReason?: string
 }
 
 interface Props {
@@ -124,8 +126,19 @@ function handleUpdate(value: unknown): void {
           :key="String(option.value)"
           :value="String(option.value)"
           :disabled="option.disabled === true"
+          :allow-disabled-hover="Boolean(option.disabledReason)"
+          :title="option.disabledReason"
         >
-          {{ option.label }}
+          <Tooltip v-if="option.disabledReason">
+            <TooltipTrigger as-child>
+              <span class="flex min-w-0 items-center gap-2">
+                <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
+                <span class="shrink-0 text-wolf-caption text-wolf-text-secondary">{{ option.disabledReason }}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{{ option.disabledReason }}</TooltipContent>
+          </Tooltip>
+          <template v-else>{{ option.label }}</template>
         </SelectItem>
         <SelectSeparator v-if="hasAddAction" />
         <SelectItem

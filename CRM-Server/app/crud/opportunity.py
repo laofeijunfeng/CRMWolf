@@ -1,6 +1,6 @@
 from decimal import Decimal
 from sqlalchemy.orm import Query, Session, selectinload
-from sqlalchemy import and_, func, cast, Integer
+from sqlalchemy import and_, func, cast, Integer, or_
 from typing import Optional, List, Tuple
 from datetime import date, datetime
 from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus
@@ -1226,31 +1226,27 @@ class OpportunityCRUD:
         customer_id: int,
         team_id: Optional[int] = None
     ) -> List[Opportunity]:
-        """
-        获取客户可创建合同的商机列表
+        """返回新建合同下拉里要看到的商机。
 
-        业务规则：
-        - 只返回"已赢单"（status=1）的商机
-        - 只返回审批已通过（approval_phase=approved）的商机
-        - 排除已经创建合同的商机
-        - 不需要分页，返回所有符合条件的商机
-
-        参数：
-        - customer_id: 客户ID（必填）
-        - team_id: 团队ID（可选，用于团队过滤）
+        已赢单且审批通过、没有未删除合同的可以创建。跟进中且没有未删除合同的只展示。
+        已输单和已有未删除合同不返回。
         """
         from app.models.contract import Contract
 
         query = db.query(Opportunity).filter(
             Opportunity.customer_id == customer_id,
-            Opportunity.status == 1,  # 已赢单
-            Opportunity.approval_phase == "approved",
+            or_(
+                Opportunity.status == OpportunityStatus.FOLLOWING.value,
+                and_(
+                    Opportunity.status == OpportunityStatus.WON.value,
+                    Opportunity.approval_phase == "approved",
+                ),
+            ),
         )
 
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
-        
-        # 排除已经创建未删除合同的商机
+
         contract_query = db.query(Contract.opportunity_id).filter(
             Contract.opportunity_id.isnot(None),
             Contract.deleted_at.is_(None)
@@ -1258,16 +1254,12 @@ class OpportunityCRUD:
         if team_id is not None:
             contract_query = contract_query.filter(Contract.team_id == team_id)
 
-        opportunity_ids_with_contract = contract_query.all()
-        
-        contract_opportunity_ids = {opp.opportunity_id for opp in opportunity_ids_with_contract}
-        
+        contract_opportunity_ids = {row.opportunity_id for row in contract_query.all()}
         if contract_opportunity_ids:
             query = query.filter(Opportunity.id.not_in(contract_opportunity_ids))
-        
-        opportunities = query.order_by(Opportunity.created_time.desc()).all()
-        
-        return opportunities
+
+        return query.order_by(Opportunity.created_time.desc()).all()
+
 
 opportunity_stage_crud = OpportunityStageCRUD()
 opportunity_crud = OpportunityCRUD()

@@ -126,7 +126,12 @@ interface ContractOpportunityOption {
   user_count: number
   license_type: string
   subscription_years: number | null
+  contract_unavailable_reason?: string | null
 }
+
+const NO_OPPORTUNITY_VALUE = '__contract_no_opportunity__'
+const NO_OPPORTUNITY_LABEL = '没有商机'
+
 
 type CustomerListResponse = CustomerResponse[] | { data?: { items?: CustomerResponse[] }; items?: CustomerResponse[] }
 
@@ -225,12 +230,24 @@ const customerSelectOptions = computed(() =>
     label: customer.account_name,
   }))
 )
-const opportunitySelectOptions = computed(() =>
-  opportunities.value.map(opportunity => ({
-    value: opportunity.id,
-    label: opportunity.opportunity_name,
-  }))
-)
+const opportunitySelectOptions = computed(() => {
+  if (opportunities.value.length === 0) {
+    return [{
+      value: NO_OPPORTUNITY_VALUE,
+      label: NO_OPPORTUNITY_LABEL,
+      disabled: true,
+    }]
+  }
+  return opportunities.value.map(opportunity => {
+    const reason = opportunity.contract_unavailable_reason?.trim() ?? ''
+    return {
+      value: opportunity.id,
+      label: opportunity.opportunity_name,
+      disabled: reason !== '',
+      disabledReason: reason === '' ? undefined : reason,
+    }
+  })
+})
 const contactSelectOptions = computed(() =>
   contacts.value.map(contact => {
     const position = contact.position?.trim()
@@ -380,10 +397,11 @@ function applyOpportunityDefaults(opportunity: ContractOpportunityOption, option
 
 function handleOpportunityChange(value: unknown): void {
   const opportunityId = String(value ?? '')
-  if (opportunityId === '') return
-  setFieldValue('opportunity_id', opportunityId)
+  if (opportunityId === '' || opportunityId === NO_OPPORTUNITY_VALUE) return
 
   const opportunity = opportunities.value.find((item) => item.id === opportunityId)
+  if ((opportunity?.contract_unavailable_reason?.trim() ?? '') !== '') return
+  setFieldValue('opportunity_id', opportunityId)
   if (opportunity !== undefined) {
     applyOpportunityDefaults(opportunity, { forceName: true })
   }
@@ -475,7 +493,7 @@ watch(() => props.open, async (newOpen) => {
         }
       }
 
-      if (props.fixedOpportunity !== null) {
+      if (props.fixedOpportunity !== null && (props.fixedOpportunity.contract_unavailable_reason?.trim() ?? '') === '') {
         applyOpportunityDefaults(props.fixedOpportunity, { forceName: true })
       }
     }

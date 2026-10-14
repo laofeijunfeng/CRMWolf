@@ -11,7 +11,7 @@ import {
 } from "reka-ui"
 import { cn, omitUndefined } from "@/lib/utils"
 
-const props = defineProps<SelectItemProps & { class?: HTMLAttributes["class"] }>()
+const props = defineProps<SelectItemProps & { class?: HTMLAttributes["class"]; allowDisabledHover?: boolean }>()
 
 const delegatedProps = reactiveOmit(props, "class")
 
@@ -23,7 +23,8 @@ const forwardedProps = useForwardProps(delegatedProps)
     v-bind="omitUndefined(forwardedProps)"
     :class="
       cn(
-        'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:opacity-50',
+        props.allowDisabledHover === true ? 'data-[disabled]:pointer-events-auto' : 'data-[disabled]:pointer-events-none',
         props.class,
       )
     "

@@ -541,6 +541,61 @@ async def test_delete_contract_does_not_trigger_business_object_intelligence_whe
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_value", "approval_phase", "detail"),
+    [
+        (0, "approved", "只能从赢单商机创建合同"),
+        (1, "pending_review", "商机审批通过后才能创建合同"),
+    ],
+)
+async def test_create_contract_rejects_opportunity_that_cannot_create(
+    monkeypatch, status_value, approval_phase, detail,
+) -> None:
+    monkeypatch.setattr(
+        contracts_api, "check_customer_edit_permission", lambda customer_id, team_id, current_user, db: _customer()
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_get_opportunity_by_public_id_or_404",
+        lambda db, opportunity_id, team_id: SimpleNamespace(
+            id=301, customer_id=101, status=status_value, approval_phase=approval_phase,
+        ),
+    )
+    monkeypatch.setattr(
+        contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)
+    )
+    monkeypatch.setattr(
+        contracts_api,
+        "_parse_contract_payload",
+        lambda contract_payload: ContractCreate(
+            customer_id="cus_101",
+            opportunity_id="opp_301",
+            signing_contact_id=201,
+            contract_name="企业版采购合同",
+            user_count=100,
+            total_amount=Decimal("120000"),
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+        ),
+    )
+    created = []
+    monkeypatch.setattr(contracts_api.contract_crud, "create", lambda **kwargs: created.append(kwargs))
+
+    with pytest.raises(contracts_api.HTTPException) as exc:
+        await contracts_api.create_contract(
+            contract_payload="{}",
+            file=_FakeUploadFile(),
+            team_id=2,
+            current_user=SimpleNamespace(id=9, name="张三"),
+            db=_FakeDb(),
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == detail
+    assert created == []
+
+
+@pytest.mark.asyncio
 async def test_create_contract_resolves_public_ids_into_internal_create(monkeypatch) -> None:
     contract = _contract()
     captured = []
@@ -552,7 +607,9 @@ async def test_create_contract_resolves_public_ids_into_internal_create(monkeypa
     monkeypatch.setattr(
         contracts_api,
         "_get_opportunity_by_public_id_or_404",
-        lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101),
+        lambda db, opportunity_id, team_id: SimpleNamespace(
+            id=301, customer_id=101, status=1, approval_phase="approved",
+        ),
     )
     monkeypatch.setattr(
         contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)
@@ -625,7 +682,9 @@ async def test_create_contract_value_error_has_no_post_create_side_effect(monkey
     monkeypatch.setattr(
         contracts_api,
         "_get_opportunity_by_public_id_or_404",
-        lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101),
+        lambda db, opportunity_id, team_id: SimpleNamespace(
+            id=301, customer_id=101, status=1, approval_phase="approved",
+        ),
     )
     monkeypatch.setattr(
         contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)
@@ -695,7 +754,9 @@ async def test_create_contract_triggers_business_object_intelligence(monkeypatch
     monkeypatch.setattr(
         contracts_api,
         "_get_opportunity_by_public_id_or_404",
-        lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101),
+        lambda db, opportunity_id, team_id: SimpleNamespace(
+            id=301, customer_id=101, status=1, approval_phase="approved",
+        ),
     )
     monkeypatch.setattr(
         contracts_api.contact_crud, "get_by_id", lambda db, contact_id, team_id: SimpleNamespace(customer_id=101)

@@ -325,6 +325,7 @@ class OpportunityListResponse(OpportunityResponse):
     stage_info: Optional[OpportunityStageInfo] = Field(None, description="当前阶段信息，兼容旧前端字段")
     customer_name: Optional[str] = Field(None, description="客户名称")
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
+    contract_unavailable_reason: str | None = Field(None, description="新建合同时不可选的原因。可创建时为空")
 
 
 class MessageResponse(BaseModel):

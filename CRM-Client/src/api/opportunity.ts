@@ -331,6 +331,7 @@ export interface OpportunityListResponse {
     name: string
     avatar_url?: string | null
   }
+  contract_unavailable_reason?: string | null
 }
 
 export function parseOpportunityApiResponse(raw: unknown): Opportunity {
