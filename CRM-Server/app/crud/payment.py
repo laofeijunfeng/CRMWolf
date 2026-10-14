@@ -37,6 +37,29 @@ def sum_approved_payment_amount(records: List[PaymentRecord]) -> float:
     return sum(float(r.actual_amount) for r in records if _is_approved_payment_record(r))
 
 
+def _payment_approval_status_predicate(status_value: str, *, exclude: bool = False):
+    from sqlalchemy import or_
+
+    from app.core.list_query.types import ListQueryContext
+    from app.services.payment_approval_status import (
+        PaymentApprovalReadStatus,
+        payment_approval_status_expression,
+    )
+
+    expression = payment_approval_status_expression(ListQueryContext())
+    if status_value == PaymentApprovalReadStatus.UNCLASSIFIED:
+        return expression.isnot(None) if exclude else expression.is_(None)
+    if status_value in {
+        PaymentApprovalReadStatus.PENDING_SUBMIT,
+        PaymentApprovalReadStatus.PENDING_APPROVAL,
+        PaymentApprovalReadStatus.REJECTED,
+        PaymentApprovalReadStatus.APPROVED,
+    }:
+        matched = expression == status_value
+        return or_(expression.is_(None), ~matched) if exclude else matched
+    return None
+
+
 def _split_csv(value: Optional[str]) -> List[str]:
     if value is None:
         return []
@@ -631,36 +654,15 @@ class PaymentRecordCRUD:
         )
 
     def _apply_record_scope(self, query, *, approval_status: str | None, current_user_id: str | None):
-        from app.models.approval import Approval, ApprovalStatus
         from app.models.contract import Contract
-
-        def approval_status_predicate(status_value: str):
-            if status_value == "pending_submit":
-                return and_(
-                    PaymentRecord.approval_id.is_(None),
-                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
-                )
-            if status_value == "pending_approval":
-                return and_(
-                    PaymentRecord.approval_id.isnot(None),
-                    Approval.status == ApprovalStatus.PENDING,
-                )
-            if status_value == "approved":
-                return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
-            if status_value == "rejected":
-                return Approval.status == ApprovalStatus.REJECTED
-            return None
 
         approval_status_values = _split_csv(approval_status)
         if approval_status_values:
-            needs_approval_join = any(
-                value in {"pending_approval", "rejected"} for value in approval_status_values
-            )
-            if needs_approval_join:
-                query = query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
             include_predicates = [
                 predicate
-                for predicate in (approval_status_predicate(value) for value in approval_status_values)
+                for predicate in (
+                    _payment_approval_status_predicate(value) for value in approval_status_values
+                )
                 if predicate is not None
             ]
             if include_predicates:
@@ -761,7 +763,6 @@ class PaymentRecordCRUD:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
-        from app.models.approval import Approval, ApprovalStatus
         from app.models.invoice import InvoiceApplication
         from app.models.user import User
         from sqlalchemy.orm import contains_eager, joinedload
@@ -816,28 +817,16 @@ class PaymentRecordCRUD:
         )
         records_query = records_query.filter(PaymentRecord.team_id == team_id)
 
-        def approval_status_predicate(status_value: str):
-            if status_value == 'pending_submit':
-                return and_(
-                    PaymentRecord.approval_id.is_(None),
-                    PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING
-                )
-            if status_value == 'pending_approval':
-                return and_(
-                    PaymentRecord.approval_id.isnot(None),
-                    Approval.status == ApprovalStatus.PENDING
-                )
-            if status_value == 'approved':
-                return PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED
-            if status_value == 'rejected':
-                return Approval.status == ApprovalStatus.REJECTED
-            return None
-
         # 页签审批状态与数据范围属于固定 scope；显式统一协议下其余旧参数不再混入。
         approval_status_values = _split_csv(approval_status)
         if approval_status_values:
-            records_query = records_query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
-            include_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_values) if predicate is not None]
+            include_predicates = [
+                predicate
+                for predicate in (
+                    _payment_approval_status_predicate(value) for value in approval_status_values
+                )
+                if predicate is not None
+            ]
             if include_predicates:
                 records_query = records_query.filter(or_(*include_predicates))
 
@@ -858,11 +847,16 @@ class PaymentRecordCRUD:
 
         approval_status_exclude_values = _split_csv(approval_status_exclude)
         if approval_status_exclude_values:
-            if not approval_status_values:
-                records_query = records_query.outerjoin(Approval, PaymentRecord.approval_id == Approval.id)
-            exclude_predicates = [predicate for predicate in (approval_status_predicate(value) for value in approval_status_exclude_values) if predicate is not None]
+            exclude_predicates = [
+                predicate
+                for predicate in (
+                    _payment_approval_status_predicate(value, exclude=True)
+                    for value in approval_status_exclude_values
+                )
+                if predicate is not None
+            ]
             if exclude_predicates:
-                records_query = records_query.filter(~or_(*exclude_predicates))
+                records_query = records_query.filter(*exclude_predicates)
 
         if contract_id:
             records_query = records_query.filter(PaymentPlan.contract_id == contract_id)

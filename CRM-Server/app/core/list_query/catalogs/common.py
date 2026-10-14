@@ -23,7 +23,7 @@ from app.models.invoice import (
 )
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.opportunity import Opportunity
-from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentRecord
+from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
@@ -287,33 +287,11 @@ def invoice_effective_status_expression(context: ListQueryContext):
 
 
 def payment_approval_status_expression(context: ListQueryContext):
-    pending_approval = exists().where(
-        and_(
-            Approval.id == PaymentRecord.approval_id,
-            Approval.team_id == PaymentRecord.team_id,
-            Approval.status == ApprovalStatus.PENDING,
-        )
+    from app.services.payment_approval_status import (
+        payment_approval_status_expression as canonical_payment_approval_status_expression,
     )
-    rejected = exists().where(
-        and_(
-            Approval.id == PaymentRecord.approval_id,
-            Approval.team_id == PaymentRecord.team_id,
-            Approval.status == ApprovalStatus.REJECTED,
-        )
-    )
-    return case(
-        (PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED, "approved"),
-        (rejected, "rejected"),
-        (pending_approval, "pending_approval"),
-        (
-            and_(
-                PaymentRecord.approval_id.is_(None),
-                PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING,
-            ),
-            "pending_submit",
-        ),
-        else_=None,
-    )
+
+    return canonical_payment_approval_status_expression(context)
 
 
 def payment_invoice_title_expression():
