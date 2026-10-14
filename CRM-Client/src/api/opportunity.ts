@@ -9,6 +9,8 @@ import {
   StageDurationDataSchema
 } from '@/schemas/opportunity'
 import { z } from 'zod'
+import { OpportunityBoardResponseSchema, type OpportunityBoardResponse } from '@/schemas/opportunityBoard'
+import { serializeListQuery } from '@/utils/listQuery'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
 
 export type OpportunityExportTab = 'all' | 'active' | 'won' | 'lost'
@@ -233,6 +235,8 @@ export interface OpportunityListParams {
   order_dir?: 'asc' | 'desc'
 }
 
+export type OpportunityBoardParams = Omit<OpportunityListParams, 'skip' | 'limit'>
+
 export interface SalesFunnelData {
   stage_id: number
   stage_name: string
@@ -346,6 +350,19 @@ export const opportunityApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response = await request.get<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>>(`/v1/opportunities/`, { params })
     return OpportunityListApiResponseSchema.parse(response) as OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>
+  },
+
+  getOpportunityBoard: async (params: OpportunityBoardParams): Promise<OpportunityBoardResponse> => {
+    const serialized = serializeListQuery()
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/opportunities/board', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return OpportunityBoardResponseSchema.parse(response)
   },
 
   getOpportunity: async (opportunityId: string): Promise<Opportunity> => {

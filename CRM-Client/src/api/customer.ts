@@ -19,6 +19,8 @@ import {
   CustomerAssignmentPreviewResponseSchema,
   CustomerIndustryHierarchySchema,
 } from '@/schemas/customer'
+import { CustomerBoardResponseSchema, type CustomerBoardResponse } from '@/schemas/customerBoard'
+import { serializeListQuery } from '@/utils/listQuery'
 import type { CustomerIndustryHierarchy } from '@/schemas/customer'
 
 /**
@@ -373,6 +375,8 @@ export interface CustomerQueryParams {
   scope?: 'collaborated' | 'accessible'
 }
 
+export type CustomerBoardParams = Omit<CustomerQueryParams, 'skip' | 'limit'>
+
 export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期未跟进' | '预算不足' | '其他'
 
 export interface CustomerReturnRequest {
@@ -566,6 +570,19 @@ const customerApi = {
 
   getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/', { params }),
+
+  getCustomerBoard: async (params: CustomerBoardParams): Promise<CustomerBoardResponse> => {
+    const serialized = serializeListQuery()
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/customers/board', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return CustomerBoardResponseSchema.parse(response)
+  },
 
   exportCustomers: (payload: ListExportPayload<CustomerExportTab>): Promise<Blob> =>
     postListExport('/v1/customers/export', payload),

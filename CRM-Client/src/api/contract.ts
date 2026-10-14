@@ -2,6 +2,8 @@ import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
 import { OptionalNullableStringSchema, OptionalStringFromNullableSchema } from '@/schemas/common'
 import { z } from 'zod'
+import { ContractBoardResponseSchema, type ContractBoardResponse } from '@/schemas/contractBoard'
+import { serializeListQuery } from '@/utils/listQuery'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
 
 export type ContractExportTab = 'all' | 'DRAFT' | 'PENDING_REVIEW' | 'SIGNED'
@@ -186,6 +188,8 @@ export interface ContractQueryParams {
   order_dir?: 'asc' | 'desc'
 }
 
+export type ContractBoardParams = Omit<ContractQueryParams, 'skip' | 'limit'>
+
 export interface ContractFromOpportunityParams {
   contract_name: string
   signing_contact_id: number
@@ -288,7 +292,7 @@ const OwnerFilterOptionsResponseSchema = z.object({
   data: z.array(OwnerFilterOptionSchema)
 })
 
-const contractApi = {
+export const contractApi = {
   exportContracts: (payload: ListExportPayload<ContractExportTab>): Promise<Blob> =>
     postListExport('/v1/contracts/export', payload),
 
@@ -306,6 +310,19 @@ const contractApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get('/v1/contracts/', { params })
     return ContractListApiResponseSchema.parse(response) as ContractListResponse[] | PaginatedResponse<ContractListResponse>
+  },
+
+  getContractBoard: async (params: ContractBoardParams): Promise<ContractBoardResponse> => {
+    const serialized = serializeListQuery()
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/contracts/board', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return ContractBoardResponseSchema.parse(response)
   },
 
   getContract: async (contractId: number): Promise<ContractResponse> => {

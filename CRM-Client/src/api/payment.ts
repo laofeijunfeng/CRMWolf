@@ -3,6 +3,9 @@ import type { LicenseType, PurchaseType } from '@/api/contract'
 import type { CommandRequestOptions } from '@/api/command'
 import type { RequestConfig } from '@/utils/request'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
+import { PaymentPlanBoardResponseSchema, type PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
+import { PaymentRecordBoardResponseSchema, type PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
+import { serializeListQuery } from '@/utils/listQuery'
 
 export type PaymentPlanExportTab = 'all' | 'pending' | 'partial' | 'completed'
 export type PaymentRecordExportTab = 'all' | 'pending_submit' | 'pending_approval' | 'rejected' | 'confirmed'
@@ -218,6 +221,8 @@ export interface PaymentPlanListParams {
   page_size?: number
 }
 
+export type PaymentPlanBoardParams = Omit<PaymentPlanListParams, 'page' | 'page_size'>
+
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
@@ -272,6 +277,8 @@ export interface PaymentRecordListParams {
   page?: number
   page_size?: number
 }
+
+export type PaymentRecordBoardParams = Omit<PaymentRecordListParams, 'page' | 'page_size'>
 
 export interface PaymentRecordWithDetails extends PaymentRecordResponse {
   contract_name?: string
@@ -418,6 +425,32 @@ const paymentApi = {
 
   listPaymentRecords: (params: PaymentRecordListParams) => {
     return request.get<PaginatedResponse<PaymentRecordWithDetails>>('/v1/payments/payment-records', { params })
+  },
+
+  getPaymentPlanBoard: async (params: PaymentPlanBoardParams): Promise<PaymentPlanBoardResponse> => {
+    const serialized = serializeListQuery()
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/payments/payment-plans/board', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return PaymentPlanBoardResponseSchema.parse(response)
+  },
+
+  getPaymentRecordBoard: async (params: PaymentRecordBoardParams): Promise<PaymentRecordBoardResponse> => {
+    const serialized = serializeListQuery()
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/payments/payment-records/board', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return PaymentRecordBoardResponseSchema.parse(response)
   },
 
   getBadgeCounts: (): Promise<BadgeCounts> => {
