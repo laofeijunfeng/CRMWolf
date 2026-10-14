@@ -557,7 +557,13 @@ def test_collaborated_scope_uses_membership_not_owner_permission(api_env) -> Non
     assert _counts(body)["total_count"] == 1
 
 
-def test_recent_new_count_uses_approved_six_complete_month_window(api_env) -> None:
+def test_recent_new_count_uses_approved_six_complete_month_window(api_env, monkeypatch) -> None:
+    class _FrozenDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return date(2026, 10, 12)
+
+    monkeypatch.setattr(customers_api, "date", _FrozenDate)
     api_env.db.add_all([
         _customer(1, name="窗口前", owner_id="7", created_time=datetime(2026, 3, 31), public_id="cus_before"),
         _customer(2, name="窗口首月", owner_id="7", created_time=datetime(2026, 4, 1), public_id="cus_april"),
