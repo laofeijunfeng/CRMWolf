@@ -62,8 +62,8 @@ const response: OpportunityBoardResponse = {
           },
         },
       ],
-      has_more: false,
-      remaining_count: 0,
+      has_more: true,
+      remaining_count: 4,
     },
     {
       key: 'stage:19:77',
@@ -165,11 +165,13 @@ describe('OpportunityBoardProjection', () => {
     expect(first.text()).toContain('续购')
     expect(first.text()).toContain('订阅')
     expect(first.text()).toContain('opp_public_1')
+    expect(first.text()).toContain('还有 4 条')
     expect(first.findComponent({ name: 'AmountText' }).props('value')).toBe('8800.00')
 
     const second = wrapper.get('[data-column-key="stage:19:77"]')
     expect(second.text()).toContain('北辰新购')
     expect(second.text()).not.toContain('%')
+    expect(second.text()).not.toContain('还有')
   })
 
   it('emits the public opportunity id and method/template view-all identity', async () => {

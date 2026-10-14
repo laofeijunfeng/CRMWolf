@@ -141,6 +141,7 @@ const projection = computed<BoardProjection>(() => ({
     tone: column.tone,
     countLabel: String(column.count),
     amountLabel: column.amount,
+    hasMore: column.has_more,
     remainingCount: column.remaining_count,
     cards: column.items.map((item) => presentCard(column, item)),
   })),

@@ -10,7 +10,7 @@ import type {
   BoardTrendSeriesPresentation,
 } from '@/components/crmwolf/boardTypes'
 import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
-import { formatLocalDate } from '@/utils/format'
+import { formatCurrency, formatLocalDate } from '@/utils/format'
 
 const props = defineProps<{ response: PaymentPlanBoardResponse }>()
 
@@ -66,10 +66,10 @@ function localDateLabel(value: string): string {
 
 function metadataRows(column: PaymentPlanColumn, item: PaymentPlanItem): BoardMetadataRow[] {
   const rows: Array<[string, string, string]> = [
-    ['planned_amount', '计划金额', item.planned_amount],
-    ['paid_amount', '已回款', item.paid_amount],
-    ['remaining_amount', '待回款', item.remaining_amount],
-    ['overdue_remaining_amount', '逾期待回款', column.overdue_remaining_amount],
+    ['planned_amount', '计划金额', formatCurrency(item.planned_amount)],
+    ['paid_amount', '已回款', formatCurrency(item.paid_amount)],
+    ['remaining_amount', '待回款', formatCurrency(item.remaining_amount)],
+    ['overdue_remaining_amount', '逾期待回款', formatCurrency(column.overdue_remaining_amount)],
     ['customer_name', '客户', item.metadata.customer_name ?? '-'],
     ['contract_name', '合同', item.metadata.contract_name ?? '-'],
     ['opportunity_name', '商机', item.metadata.opportunity_name ?? '-'],

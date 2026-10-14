@@ -88,7 +88,6 @@ function confirmationLabel(item: PaymentRecordItem): string | null {
 function metadataRows(item: PaymentRecordItem): BoardMetadataRow[] {
   const confirmation = confirmationLabel(item)
   const rows: Array<[string, string, string | null]> = [
-    ['actual_amount', '实收金额', item.actual_amount],
     ['customer_name', '客户', item.metadata.customer_name],
     ['contract_name', '合同', item.metadata.contract_name],
     ['actual_payer_name', '付款方', item.metadata.actual_payer_name],

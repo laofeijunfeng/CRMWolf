@@ -132,7 +132,9 @@ describe('PaymentRecordBoardProjection', () => {
     const approved = wrapper.get('[data-column-key="approved"]')
 
     expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
-    expect(approved.text()).toContain('6400.00')
+    expect(approved.text()).toContain('¥6,400.00')
+    expect(approved.text()).not.toContain('实收金额')
+    expect(approved.text()).not.toContain('6400.00')
     expect(approved.text()).toContain('2026-09-18')
     expect(approved.text()).toContain('星河科技')
     expect(approved.text()).toContain('星河年度合同')
@@ -143,7 +145,10 @@ describe('PaymentRecordBoardProjection', () => {
     expect(approved.text()).toContain('已确认')
     expect(approved.text()).toContain('91')
     expect(approved.text()).not.toContain('confirmed')
-    expect(approved.findComponent({ name: 'AmountText' }).props('value')).toBe('6400.00')
+    expect(approved.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))).toEqual([
+      '6400.00',
+      '6400.00',
+    ])
   })
 
   it('emits the numeric record id and canonical approved column key', async () => {

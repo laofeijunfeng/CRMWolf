@@ -103,9 +103,12 @@ describe('PaymentPlanBoardProjection', () => {
     const column = wrapper.get('[data-column-key="OVERDUE"]')
 
     expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
-    expect(column.text()).toContain('10000.00')
-    expect(column.text()).toContain('2500.00')
-    expect(column.text()).toContain('7500.00')
+    expect(column.text()).toContain('¥10,000.00')
+    expect(column.text()).toContain('¥2,500.00')
+    expect(column.text()).toContain('¥7,500.00')
+    expect(column.text()).not.toContain('10000.00')
+    expect(column.text()).not.toContain('2500.00')
+    expect(column.text()).not.toContain('7500.00')
     expect(column.text()).toContain('2026-07-31')
     expect(column.text()).toContain('星河科技')
     expect(column.text()).toContain('星河年度合同')
@@ -113,6 +116,14 @@ describe('PaymentPlanBoardProjection', () => {
     expect(column.text()).toContain('已逾期')
     expect(column.text()).toContain('陈晨')
     expect(column.text()).toContain('7')
+    const card = column.get('.board-card')
+    expect(card.text()).toContain('计划金额')
+    expect(card.text()).toContain('已回款')
+    expect(card.text()).toContain('待回款')
+    expect(card.text()).toContain('逾期待回款')
+    expect(card.text()).toContain('¥10,000.00')
+    expect(card.text()).toContain('¥2,500.00')
+    expect(card.text()).toContain('¥7,500.00')
     expect(column.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))).toEqual([
       '7500.00',
       '10000.00',
