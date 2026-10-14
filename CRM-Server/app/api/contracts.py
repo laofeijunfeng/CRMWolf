@@ -54,6 +54,8 @@ from app.schemas.contract import (
     ContractUpdate,
     MessageResponse,
 )
+from app.schemas.contract_board import ContractBoardResponse
+from app.services.contract_board_service import build_contract_board
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
@@ -962,6 +964,136 @@ def get_contract_by_opportunity(
         opportunity_info=opportunity_info,
     )
     return ContractListResponse(**contract_dict)
+
+
+@router.get("/board", response_model=ContractBoardResponse)
+def get_contract_board(
+    customer_public_id: str | None = Query(None, alias="customer_id"),
+    status: str | None = Query(None),
+    status_exclude: str | None = Query(None),
+    contract_number: str | None = Query(None),
+    license_type: str | None = Query(None),
+    license_type_exclude: str | None = Query(None),
+    purchase_type: str | None = Query(None),
+    purchase_type_exclude: str | None = Query(None),
+    subscription_years: int | None = Query(None),
+    subscription_years_exclude: int | None = Query(None),
+    license_authorized_users: int | None = Query(None),
+    license_authorized_users_exclude: int | None = Query(None),
+    standard_unit_price: Decimal | None = Query(None),
+    standard_unit_price_exclude: Decimal | None = Query(None),
+    keyword: str | None = Query(None),
+    customer_keyword: str | None = Query(None),
+    opportunity_keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    owner_id: str | None = Query(None),
+    owner_id_exclude: str | None = Query(None),
+    signing_date_start: date | None = Query(None),
+    signing_date_end: date | None = Query(None),
+    effective_date_start: date | None = Query(None),
+    effective_date_end: date | None = Query(None),
+    expiry_date_start: date | None = Query(None),
+    expiry_date_end: date | None = Query(None),
+    license_expiry_date_start: date | None = Query(None),
+    license_expiry_date_end: date | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ContractBoardResponse:
+    from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {permission.code for permission in user_permissions}
+    has_view_all = "contract:view:all" in permission_codes
+    role_codes = {role.code for role in role_crud.get_user_roles(db, current_user.id, team_id)}
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    current_user_id = str(current_user.id)
+    resolved_customer_id = None
+    if customer_public_id:
+        customer = check_customer_view_permission(customer_public_id, team_id, current_user, db)
+        resolved_customer_id = customer.id
+
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+        )
+    else:
+        actual_owner_id = owner_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(
+                status_code=403,
+                detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+            )
+        if customer_public_id is not None:
+            actual_owner_id = None
+        elif actual_owner_id is None and not has_view_all:
+            actual_owner_id = current_user_id
+
+    rows = run_or_400(lambda: contract_crud.build_population_query(
+        db,
+        team_id=team_id,
+        customer_id=resolved_customer_id,
+        status=status,
+        status_exclude=status_exclude,
+        contract_number=contract_number,
+        license_type=license_type,
+        license_type_exclude=license_type_exclude,
+        purchase_type=purchase_type,
+        purchase_type_exclude=purchase_type_exclude,
+        subscription_years=subscription_years,
+        subscription_years_exclude=subscription_years_exclude,
+        license_authorized_users=license_authorized_users,
+        license_authorized_users_exclude=license_authorized_users_exclude,
+        standard_unit_price=standard_unit_price,
+        standard_unit_price_exclude=standard_unit_price_exclude,
+        keyword=keyword,
+        customer_keyword=customer_keyword,
+        opportunity_keyword=opportunity_keyword,
+        search=search,
+        owner_id=actual_owner_id,
+        owner_id_exclude=owner_id_exclude,
+        signing_date_start=signing_date_start,
+        signing_date_end=signing_date_end,
+        effective_date_start=effective_date_start,
+        effective_date_end=effective_date_end,
+        expiry_date_start=expiry_date_start,
+        expiry_date_end=expiry_date_end,
+        license_expiry_date_start=license_expiry_date_start,
+        license_expiry_date_end=license_expiry_date_end,
+        order_by=order_by,
+        order_dir=order_dir,
+        include_deleted=False,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+    return build_contract_board(
+        db,
+        team_id=team_id,
+        current_user_id=current_user_id,
+        permission_codes=permission_codes,
+        role_codes=role_codes,
+        rows=rows,
+        legacy_branch_active=not uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts),
+        signing_date_start=signing_date_start,
+        signing_date_end=signing_date_end,
+        filters=parsed_filters,
+        order_by=order_by,
+        order_dir=order_dir,
+        sorts=parsed_sorts,
+        today=date.today(),
+    )
 
 
 @router.get("/{contract_id}", response_model=ContractDetailResponse, summary="获取合同详情", description="""
