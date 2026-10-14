@@ -100,10 +100,17 @@ function viewAll(columnKey: string): void {
   emit('view-all', columnKey)
 }
 
-function chartPoints(points: readonly BoardTrendPointPresentation[]): AreaTrendDatum[] {
+function chartPoints(
+  points: readonly BoardTrendPointPresentation[],
+  series: BoardProjection['trend'],
+): AreaTrendDatum[] {
+  const seriesKeys = new Set(series?.series.map((item) => item.key) ?? [])
   return points.map((point) => {
     const datum: AreaTrendDatum = { month: point.month }
-    for (const [key, value] of Object.entries(point.values)) datum[key] = value
+    for (const key of seriesKeys) {
+      if (!Object.prototype.hasOwnProperty.call(point.values, key)) continue
+      datum[key] = point.values[key]
+    }
     return datum
   })
 }
@@ -264,7 +271,7 @@ function metricValueType(valueType: BoardValueType): string {
         v-if="trend"
         :title="trend.title"
         :description="trend.description"
-        :data="chartPoints(trend.points)"
+        :data="chartPoints(trend.points, trend)"
         :series="chartSeries(trend)"
         x-key="month"
       />

@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { compileStyle, parse } from '@vue/compiler-sfc'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import BoardView from '../BoardView.vue'
@@ -56,7 +60,7 @@ const projection: BoardProjection = {
   trend: {
     title: '近六月趋势',
     description: '按完整月份统计',
-    points: [{ month: '2026-09', values: { count: 2, amount: '800.00' } }],
+    points: [{ month: '2026-09', values: { count: 2, amount: '800.00', month: 'not-a-month' } }],
     series: [{ key: 'count', label: '数量', color: 'hsl(var(--primary))' }],
   },
 }
@@ -170,12 +174,18 @@ describe('BoardView', () => {
     const desktop = mountBoard()
     const columns = desktop.get('.board-columns')
     expect(columns.classes()).not.toContain('board-columns--narrow')
-    expect(columns.element.className).toContain('board-columns')
-    const style = document.createElement('style')
-    style.textContent = '.board-columns { overflow-x: auto; overflow-y: hidden; }'
-    document.head.append(style)
-    expect(getComputedStyle(columns.element).overflowX).toBe('auto')
-    style.remove()
+    const scopeId = columns.element.getAttributeNames().find((name) => name.startsWith('data-v-'))
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../BoardView.vue'), 'utf8')
+    const descriptor = parse(source).descriptor
+    const compiled = compileStyle({
+      source: descriptor.styles[0]?.content ?? '',
+      filename: 'BoardView.vue',
+      id: scopeId ?? '',
+      scoped: true,
+    })
+    expect(compiled.errors).toEqual([])
+    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-x:\\s*auto;`))
+    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-y:\\s*hidden;`))
     desktop.unmount()
 
     width = 390
@@ -213,7 +223,7 @@ describe('BoardView', () => {
 
     const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
     expect(chart.props('xKey')).toBe('month')
-    expect(chart.props('data')).toEqual([{ month: '2026-09', count: 2, amount: '800.00' }])
+    expect(chart.props('data')).toEqual([{ month: '2026-09', count: 2 }])
     expect(chart.props('series')).toEqual(projection.trend?.series)
   })
 })
