@@ -335,7 +335,7 @@ def test_board_groups_derived_lifecycle_and_excludes_public_pool(api_env) -> Non
         "following_count": 1,
         "repurchasing_count": 1,
         "won_count": 1,
-        "recent_new_count": 0,
+        "recent_new_count": 4,
     }
     assert body["summary"][-1]["key"] == "lost_percentage"
     assert [metric["label"] for metric in body["summary"][:5]] == list(COUNT_LABELS.values())
@@ -572,10 +572,19 @@ def test_recent_new_count_uses_approved_six_complete_month_window(api_env) -> No
     response = _board(api_env.client)
 
     assert response.status_code == 200, response.text
-    recent = next(metric for metric in response.json()["summary"] if metric["key"] == "recent_new_count")
-    assert recent["value"] == 1
+    body = response.json()
+    recent = next(metric for metric in body["summary"] if metric["key"] == "recent_new_count")
+    assert recent["value"] == 3
     assert recent["secondary_label"] == "上月"
     assert recent["secondary_value"] == 1
+    assert {point["date"]: point["count"] for point in body["trends"]} == {
+        "2026-04": 1,
+        "2026-05": 0,
+        "2026-06": 0,
+        "2026-07": 0,
+        "2026-08": 1,
+        "2026-09": 1,
+    }
 
 
 def test_recent_new_comparison_is_omitted_when_previous_month_is_outside_window(api_env) -> None:

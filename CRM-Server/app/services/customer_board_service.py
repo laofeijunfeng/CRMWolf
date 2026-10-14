@@ -158,16 +158,13 @@ def _summary(
     recent_current = 0
     recent_previous = 0
     previous_month = window.months[-2] if window is not None and len(window.months) >= 2 else None
-    latest_month = window.months[-1] if window is not None else None
     if window is not None:
         for row in non_public:
             event_day = row.created_time.date() if row.created_time else None
             if event_day is None or not window.event_start <= event_day <= window.event_end:
                 continue
-            month = month_key(event_day)
-            if month == latest_month:
-                recent_current += 1
-            elif month == previous_month:
+            recent_current += 1
+            if previous_month is not None and month_key(event_day) == previous_month:
                 recent_previous += 1
     counts = {
         "total_count": denominator,
