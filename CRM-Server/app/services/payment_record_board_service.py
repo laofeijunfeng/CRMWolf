@@ -326,22 +326,18 @@ def _action_state(
     permission_codes: set[str],
 ) -> PaymentRecordBoardActionState:
     phase = _text(record.approval_phase)
-    confirmation = _text(record.confirmation_status)
     approval = _valid_linked_approval(record, team_id)
     approval_status = _text(approval.status) if approval is not None else None
     is_creator = str(record.creator_id) == current_user_id
-    confirmed = confirmation == PaymentConfirmationStatus.CONFIRMED
     pending_approval = approval_status == ApprovalStatus.PENDING or key == PaymentApprovalReadStatus.PENDING_APPROVAL
     can_edit = (
         not pending_approval
         and phase in _EDITABLE_PHASES
-        and not confirmed
         and ("payment:record:edit" in permission_codes or "payment:edit" in permission_codes or is_creator)
     )
     delete_locked = (
         approval_status in _LOCKED_DELETE_STATUSES
         or phase in _LOCKED_DELETE_PHASES
-        or confirmed
     )
     can_delete = (
         ("payment:record:delete" in permission_codes or "payment:delete" in permission_codes)
@@ -351,7 +347,6 @@ def _action_state(
         "payment:submit" in permission_codes
         and is_creator
         and key == PaymentApprovalReadStatus.REJECTED
-        and not confirmed
     )
     return PaymentRecordBoardActionState(
         can_edit=can_edit,

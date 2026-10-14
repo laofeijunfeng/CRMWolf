@@ -542,7 +542,7 @@ def test_board_groups_canonical_columns_and_keeps_confirmation_independent(api_e
     assert by_id[3]["action_state"]["can_resubmit"] is True
     assert by_id[4]["status"] == "approved"
     assert by_id[4]["metadata"]["confirmation_status"] == "CONFIRMED"
-    assert by_id[4]["action_state"] == {"can_edit": False, "can_delete": False, "can_resubmit": False}
+    assert by_id[4]["action_state"] == {"can_edit": True, "can_delete": False, "can_resubmit": False}
     assert by_id[5]["status"] == "unclassified"
     assert by_id[5]["metadata"]["confirmation_status"] is None
     assert by_id[7]["status"] == "approved"
@@ -583,7 +583,7 @@ def test_confirmed_without_approval_evidence_stays_pending_submit(api_env) -> No
         ),
     ])
     api_env.db.commit()
-    _grant(api_env.db, 7, "payment:view:all")
+    _grant(api_env.db, 7, "payment:view:all", "payment:record:edit", "payment:record:delete", "payment:submit")
 
     response = _board(api_env.client)
 
@@ -593,6 +593,7 @@ def test_confirmed_without_approval_evidence_stays_pending_submit(api_env) -> No
     assert column["count"] == 1
     assert column["confirmed_amount"] == "15.00"
     assert column["items"][0]["status"] == "pending_submit"
+    assert column["items"][0]["action_state"] == {"can_edit": True, "can_delete": True, "can_resubmit": False}
     assert column["items"][0]["metadata"]["confirmation_status"] == "CONFIRMED"
     assert _columns(body)["approved"]["count"] == 0
     assert _metric(body, "confirmed_amount")["value"] == "15.00"
