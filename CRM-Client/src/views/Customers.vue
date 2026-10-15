@@ -48,6 +48,7 @@ import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 import CustomerBoardProjection from '@/components/customer/CustomerBoardProjection.vue'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
@@ -896,39 +897,39 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -969,7 +970,7 @@ const handleViewDetail = (record: CustomerResponse): void => {
 }
 
 const handleSheetRefresh = (): void => {
-  fetchCustomerList()
+  void refreshActiveCustomerView()
 }
 
 const handleEdit = async (record: CustomerResponse): Promise<void> => {
@@ -1384,7 +1385,7 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    fetchCustomerList()
+    void refreshActiveCustomerView()
   }
 })
 
@@ -1456,7 +1457,7 @@ defineExpose({
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
-      @retry="fetchCustomerList"
+      @retry="refreshActiveCustomerView"
       @update:view-display-mode="handleDisplayModeChange"
     >
       <template v-if="boardEligible" #replacement>

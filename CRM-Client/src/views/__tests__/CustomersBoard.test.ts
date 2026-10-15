@@ -57,10 +57,12 @@ const stubs = vi.hoisted(() => {
     detail: defineStub({
       name: 'CustomerDetailSheet',
       props: { visible: { type: Boolean, default: false }, customerId: { type: String, default: null } },
-      setup: (props: { visible: boolean, customerId: string | null }): (() => unknown) => () => render('section', {
+      emits: ['refresh'],
+      setup: (props: { visible: boolean, customerId: string | null }, { emit }: { emit: (event: 'refresh') => void }): (() => unknown) => () => render('section', {
         'data-testid': 'customer-detail-sheet',
         'data-visible': String(props.visible),
         'data-customer-id': props.customerId ?? '',
+        onClick: (): void => emit('refresh'),
       }),
     }),
     form: defineStub({
@@ -253,6 +255,9 @@ const customer: CustomerResponse = {
   account_name: '北方客户',
   city: '北京',
   status: 0,
+  derived_status: 'following',
+  industry_info: { name: '金融' },
+  source_info: { name: '展会' },
   owner_id: '42',
   owner_info: { id: '42', name: '王销售' },
   version: 3,
@@ -314,7 +319,11 @@ function mountPage(): VueWrapper {
       stubs: {
         StatusBadge: defineComponent({
           name: 'StatusBadge',
-          setup: (): (() => VNode) => () => h('span'),
+          props: { status: { type: String, default: '' }, type: { type: String, default: '' } },
+          setup: (props: { status: string, type: string }): (() => VNode) => () => h('span', {
+            'data-badge-type': props.type,
+            'data-badge-status': props.status,
+          }),
         }),
       },
     },
@@ -360,7 +369,9 @@ describe('Customers board integration', () => {
     expect(table.props('data')).toEqual([customer])
     expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, limit: 20 }))
     expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
-    expect(wrapper.findComponent({ name: 'CustomerBoardProjection' }).exists()).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'StatusBadge' }).map((badge) => badge.props('type'))).toEqual(
+      expect.arrayContaining(['customerDerived', 'industry', 'source']),
+    )
     wrapper.unmount()
   })
 
@@ -529,6 +540,58 @@ describe('Customers board integration', () => {
     wrapper.unmount()
   })
 
+  it('refreshes the ordinary board from rendered search, filter, sort, tab, and detail-sheet handlers', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await switchMode(wrapper, 'board')
+    mocks.getCustomers.mockClear()
+    mocks.getPublicCustomers.mockClear()
+
+    const table = wrapper.getComponent({ name: 'DataTable' })
+    const latestBoardQuery = (): CustomerBoardParams => {
+      const calls = mocks.getCustomerBoard.mock.calls
+      return calls[calls.length - 1]?.[0] as CustomerBoardParams
+    }
+
+    mocks.getCustomerBoard.mockClear()
+    table.vm.$emit('search-apply', '北方')
+    await flushPromises()
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({ search: '北方' }))
+
+    mocks.getCustomerBoard.mockClear()
+    table.vm.$emit('filter-apply', [{ field: 'city', op: 'eq', value: '北京' }])
+    await flushPromises()
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({
+      search: '北方',
+      filters: JSON.stringify([{ field: 'city', op: 'eq', value: '北京' }]),
+    }))
+
+    mocks.getCustomerBoard.mockClear()
+    table.vm.$emit('sort-apply', [{ field: 'created_time', direction: 'desc' }])
+    await flushPromises()
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({
+      search: '北方',
+      filters: JSON.stringify([{ field: 'city', op: 'eq', value: '北京' }]),
+      sorts: JSON.stringify([{ field: 'created_time', direction: 'desc' }]),
+    }))
+
+    mocks.getCustomerBoard.mockClear()
+    headerStore.activeTab = 'collaborated'
+    await flushPromises()
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({ scope: 'collaborated' }))
+    expect(latestBoardQuery()).not.toHaveProperty('search')
+
+    mocks.getCustomerBoard.mockClear()
+    await wrapper.get('[data-testid="customer-detail-sheet"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({ scope: 'collaborated' }))
+    expect(mocks.getCustomers).not.toHaveBeenCalled()
+    expect(mocks.getPublicCustomers).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+
   it('drills an exact derived status back to page one while preserving search', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -636,7 +699,7 @@ describe('Customers board integration', () => {
     expect(wrapper.getComponent({ name: 'CustomerBoardProjection' }).props('response')).toEqual(boardResponse)
     const listCallsBeforeRefresh = mocks.getCustomers.mock.calls.length
 
-    mocks.getCustomerBoard.mockRejectedValueOnce(new Error('board refresh failed'))
+    mocks.getCustomerBoard.mockRejectedValue(new Error('board refresh failed'))
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:search', '失败刷新')
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '失败刷新')
     await flushPromises()
