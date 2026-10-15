@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import BoardView from '@/components/crmwolf/BoardView.vue'
+import { Button } from '@/components/ui/button'
 import type {
   BoardCardActivation,
   BoardCardPresentation,
@@ -12,11 +13,27 @@ import type {
 import type { PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
 import { formatLocalDate } from '@/utils/format'
 
-const props = defineProps<{ response: PaymentRecordBoardResponse }>()
+const props = withDefaults(defineProps<{
+  response?: PaymentRecordBoardResponse | null
+  loading?: boolean
+  refreshing?: boolean
+  stale?: boolean
+  error?: Error | null
+  canDrillThrough?: boolean
+}>(), {
+  response: null,
+  loading: false,
+  refreshing: false,
+  stale: false,
+  error: null,
+  canDrillThrough: true,
+})
 
 const emit = defineEmits<{
   'activate-card': [payload: BoardCardActivation]
   'view-all': [columnKey: string]
+  'card-action': [payload: { id: number, action: 'edit' | 'delete' | 'resubmit' }]
+  retry: []
 }>()
 
 type PaymentRecordColumn = PaymentRecordBoardResponse['columns'][number]
@@ -126,45 +143,83 @@ function recordChartPoint(source: PaymentRecordTrend): BoardTrendPointPresentati
   }
 }
 
-const projection = computed<BoardProjection>(() => ({
-  metrics: props.response.summary.map((metric) => ({
-    key: metric.key,
-    label: metric.label,
-    value: metric.value,
-    valueType: metric.value_type,
-    ...(metric.secondary_label == null || metric.secondary_value == null
-      ? {}
+const projection = computed<BoardProjection | null>(() => {
+  const response = props.response
+  if (response === null) return null
+  return {
+    metrics: response.summary.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      value: metric.value,
+      valueType: metric.value_type,
+      ...(metric.secondary_label == null || metric.secondary_value == null
+        ? {}
+        : {
+            secondaryLabel: metric.secondary_label,
+            secondaryValue: metric.secondary_value,
+          }),
+    })),
+    columns: response.columns.map((column) => ({
+      key: column.key,
+      label: approvalLabels[column.key],
+      tone: column.tone,
+      countLabel: String(column.count),
+      amountLabel: column.actual_amount,
+      hasMore: column.has_more,
+      remainingCount: column.remaining_count,
+      cards: column.items.map((item) => presentCard(column, item)),
+    })),
+    trend: response.trends.length === 0
+      ? null
       : {
-          secondaryLabel: metric.secondary_label,
-          secondaryValue: metric.secondary_value,
-        }),
-  })),
-  columns: props.response.columns.map((column) => ({
-    key: column.key,
-    label: approvalLabels[column.key],
-    tone: column.tone,
-    countLabel: String(column.count),
-    amountLabel: column.actual_amount,
-    hasMore: column.has_more,
-    remainingCount: column.remaining_count,
-    cards: column.items.map((item) => presentCard(column, item)),
-  })),
-  trend: props.response.trends.length === 0
-    ? null
-    : {
-        title: '回款记录趋势',
-        description: '按完整月份统计回款金额和确认金额',
-        series: trendSeries,
-        points: props.response.trends.map(recordChartPoint),
-      },
-}))
+          title: '回款记录趋势',
+          description: '按完整月份统计回款金额和确认金额',
+          series: trendSeries,
+          points: response.trends.map(recordChartPoint),
+        },
+  }
+})
+
+function recordActions(cardId: string | number): Array<{ action: 'edit' | 'delete' | 'resubmit', label: string }> {
+  const response = props.response
+  if (response === null || typeof cardId !== 'number') return []
+  for (const column of response.columns) {
+    const item = column.items.find((candidate) => candidate.id === cardId)
+    if (item === undefined) continue
+    const actions: Array<{ action: 'edit' | 'delete' | 'resubmit', label: string }> = []
+    if (item.action_state.can_edit) actions.push({ action: 'edit', label: '编辑' })
+    if (item.action_state.can_delete) actions.push({ action: 'delete', label: '删除' })
+    if (item.action_state.can_resubmit) actions.push({ action: 'resubmit', label: '重新提交' })
+    return actions
+  }
+  return []
+}
 </script>
 
 <template>
   <BoardView
     :projection="projection"
-    :can-drill-through="true"
+    :loading="props.loading"
+    :refreshing="props.refreshing"
+    :stale="props.stale"
+    :error="props.error"
+    :can-drill-through="props.canDrillThrough"
     @activate-card="emit('activate-card', $event)"
     @view-all="emit('view-all', $event)"
-  />
+    @retry="emit('retry')"
+  >
+    <template #card-actions="{ card }">
+      <Button
+        v-for="action in recordActions(card.id)"
+        :key="action.action"
+        type="button"
+        variant="outline"
+        size="sm"
+        :data-testid="`board-card-action-${action.action}`"
+        @click="emit('card-action', { id: Number(card.id), action: action.action })"
+      >
+        {{ action.label }}
+      </Button>
+    </template>
+  </BoardView>
 </template>

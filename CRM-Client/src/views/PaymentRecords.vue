@@ -20,17 +20,21 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
+import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
+import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
+import PaymentRecordBoardProjection from '@/components/payment/PaymentRecordBoardProjection.vue'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type PaymentRecordWithDetails,
   type PaymentRecordListParams,
+  type PaymentRecordBoardParams,
   type PaymentRecordUpdate,
   type PaymentRecordExportTab,
 } from '@/api/payment'
@@ -38,11 +42,13 @@ import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
+import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
+import type { PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -54,6 +60,7 @@ const router = useRouter()
 const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
 const headerStore = useHeaderStore()
+const teamStore = useTeamStore()
 const userStore = useUserStore()
 
 // ==================== State ====================
@@ -62,6 +69,7 @@ const loadError = ref<FeedbackError | null>(null)
 const listRequestId = ref<number>(0)
 const tableData = ref<PaymentRecordWithDetails[]>([])
 const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
+const selectedBoardRecordId = ref<number | null>(null)
 const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
@@ -71,7 +79,8 @@ const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const search = ref('')
-
+const displayMode = ref<'table' | 'board'>('table')
+const ownRecordScope = ref(false)
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -231,6 +240,7 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 
 // ==================== Methods ====================
 const fetchPaymentRecords = async (): Promise<boolean> => {
+  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -268,28 +278,134 @@ const fetchPaymentRecords = async (): Promise<boolean> => {
     }
   }
 }
+
+const recordTabApprovalStatus = computed<string | null>(() => (
+  activeTab.value === 'confirmed'
+    ? 'approved'
+    : activeTab.value === 'pending_submit'
+      || activeTab.value === 'pending_approval'
+      || activeTab.value === 'rejected'
+      ? activeTab.value
+      : null
+))
+
+const recordEffectiveFilters = computed(() => (
+  recordTabApprovalStatus.value === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['approval_status'])
+))
+
+const boardParams = computed<PaymentRecordBoardParams>(() => {
+  const serialized = serializeListQuery({
+    filters: recordEffectiveFilters.value,
+    sorts: activeSorts.value,
+  })
+  return {
+    ...(recordTabApprovalStatus.value === null ? {} : { approval_status: recordTabApprovalStatus.value }),
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...(ownRecordScope.value ? { me: true } : {}),
+    ...serialized,
+  }
+})
+
+const boardScopeKey = computed(() => {
+  const team = teamStore.currentTeam
+  const user = userStore.userInfo
+  const permissionItems = permissionStore.permissions
+  return {
+    teamId: team?.id ?? null,
+    userId: user?.id === undefined || user.id === null ? null : String(user.id),
+    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
+  }
+})
+
+const paymentRecordBoard = useBoardSnapshot<PaymentRecordBoardParams, PaymentRecordBoardResponse>({
+  fetchBoard: (query) => paymentApi.getPaymentRecordBoard(query),
+  getCurrentQuery: () => boardParams.value,
+  getQuerySignature: (query) => JSON.stringify({
+    tab: activeTab.value,
+    search: search.value.trim(),
+    filters: recordEffectiveFilters.value,
+    sorts: activeSorts.value,
+    ownRecordScope: ownRecordScope.value,
+    query,
+  }),
+  getScopeKey: () => boardScopeKey.value,
+  isPermissionReady: () => permissionStore.loadState === 'ready',
+})
+
+const refreshActivePaymentRecordView = (): Promise<boolean> => {
+  if (displayMode.value !== 'board') return fetchPaymentRecords()
+  return paymentRecordBoard.refresh(boardParams.value).then(() => true, () => false)
+}
+
+const refreshTableQuery = (): void => {
+  if (displayMode.value !== 'board') void refreshActivePaymentRecordView()
+}
+
+const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+  if (mode === displayMode.value) return
+  displayMode.value = mode
+  void refreshActivePaymentRecordView()
+}
+
+watch([activeTab, activeFilters, activeSorts, search, ownRecordScope], () => {
+  if (displayMode.value === 'board') void refreshActivePaymentRecordView()
+})
+
+const recordDrillStatuses = ['pending_submit', 'pending_approval', 'rejected', 'approved', 'unclassified'] as const
+
+const isRecordDrillStatus = (value: string): value is typeof recordDrillStatuses[number] => (
+  recordDrillStatuses.some((status) => status === value)
+)
+
+const handleBoardViewAll = (columnKey: string): void => {
+  if (!paymentRecordBoard.canDrillThrough || !isRecordDrillStatus(columnKey)) return
+  activeFilters.value = [columnKey === 'unclassified'
+    ? { field: 'approval_status', op: 'is_empty', value: null }
+    : { field: 'approval_status', op: 'eq', value: columnKey }]
+  pagination.current = 1
+  displayMode.value = 'table'
+  void fetchPaymentRecords()
+}
+
+const handleBoardCardActivate = (payload: BoardCardActivation): void => {
+  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
+  selectedRecord.value = null
+  selectedBoardRecordId.value = payload.id
+  detailSheetVisible.value = true
+}
+
+const boardRecordItem = (recordId: number): PaymentRecordBoardResponse['columns'][number]['items'][number] | null => {
+  const response = paymentRecordBoard.data
+  if (response === null) return null
+  for (const column of response.columns) {
+    const item = column.items.find((candidate) => candidate.id === recordId)
+    if (item !== undefined) return item
+  }
+  return null
+}
+
+const handleBoardCardAction = (payload: { id: number, action: 'edit' | 'delete' | 'resubmit' }): void => {
+  const item = boardRecordItem(payload.id)
+  if (item === null) return
+  if (payload.action === 'edit' && !item.action_state.can_edit) return
+  if (payload.action === 'delete' && !item.action_state.can_delete) return
+  if (payload.action === 'resubmit' && !item.action_state.can_resubmit) return
+}
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-records.list',
   activeTab,
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchPaymentRecords,
+  activeDisplayMode: displayMode,
+  refresh: refreshActivePaymentRecordView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
-const effectiveFilters = computed(() => {
-  const tabApprovalStatus = activeTab.value === 'confirmed'
-    ? 'approved'
-    : activeTab.value === 'pending_submit'
-      || activeTab.value === 'pending_approval'
-      || activeTab.value === 'rejected'
-        ? activeTab.value
-        : null
-  return tabApprovalStatus === null
-    ? activeFilters.value
-    : withoutFilterFields(activeFilters.value, ['approval_status'])
-})
+const effectiveFilters = computed(() => recordEffectiveFilters.value)
 const customFilterViewSaving = computed(() => customFilterViews.saving.value)
 const activeColumnPreferenceConfig = computed<ViewPreferenceConfig>(() => ({
   version: 1,
@@ -307,39 +423,39 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   }
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -366,13 +482,13 @@ const handleColumnConfigCurrentChange = (config: ViewPreferenceConfig): void => 
 
 const handlePageChange = (page: number): void => {
   pagination.current = page
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handlePageSizeChange = (pageSize: number): void => {
   pagination.pageSize = pageSize
   pagination.current = 1
-  fetchPaymentRecords()
+  refreshTableQuery()
 }
 
 const handleCreateRecord = (): void => {
@@ -382,6 +498,7 @@ const handleCreateRecord = (): void => {
 }
 
 const handleViewDetail = (record: PaymentRecordWithDetails): void => {
+  selectedBoardRecordId.value = null
   selectedRecord.value = record
   detailSheetVisible.value = true
 }
@@ -414,12 +531,13 @@ const handleDetailSheetVisibleChange = (visible: boolean): void => {
   detailSheetVisible.value = visible
   if (!visible && !editDialogOpen.value) {
     selectedRecord.value = null
+    selectedBoardRecordId.value = null
   }
 }
 
 const refreshRecordsAndSyncSelection = async (): Promise<boolean> => {
   const selectedId = selectedRecord.value?.id
-  const refreshed = await fetchPaymentRecords()
+  const refreshed = await refreshActivePaymentRecordView()
   if (selectedId !== undefined) {
     selectedRecord.value = tableData.value.find((record) => record.id === selectedId) ?? selectedRecord.value
   }
@@ -490,13 +608,14 @@ const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => 
   deletingRecordIds.value = new Set(deletingRecordIds.value).add(record.id)
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    if (selectedRecord.value?.id === record.id) {
+    if (selectedRecord.value?.id === record.id || selectedBoardRecordId.value === record.id) {
       detailSheetVisible.value = false
       editDialogOpen.value = false
       isResubmitMode.value = false
       selectedRecord.value = null
+      selectedBoardRecordId.value = null
     }
-    const refreshed = await fetchPaymentRecords()
+    const refreshed = await refreshActivePaymentRecordView()
     toast.success(`回款记录“${recordLabel}”已删除`, refreshed ? undefined : {
       description: '回款记录已删除，但列表刷新失败，请稍后重试。',
     })
@@ -594,10 +713,22 @@ watchEffect(() => {
     }
     const restoredBuiltInState = customFilterViews.applyBuiltInTab(headerStore.activeTab)
     if (!restoredBuiltInState) {
+      activeTab.value = headerStore.activeTab
       activeSorts.value = []
     }
-    fetchPaymentRecords()
+    void refreshActivePaymentRecordView()
   }
+})
+defineExpose({
+  activeTab,
+  tabs,
+  activeFilters,
+  activeSorts,
+  displayMode,
+  selectedRecord,
+  selectedBoardRecordId,
+  detailSheetVisible,
+  ownRecordScope,
 })
 
 // ✅ 不调用 headerStore.clear()
@@ -622,6 +753,8 @@ watchEffect(() => {
       :page-size="pagination.pageSize"
       :total="pagination.total"
       view-key="payment-records.list"
+      view-display-mode-enabled
+      :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -660,9 +793,24 @@ watchEffect(() => {
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
-      @retry="fetchPaymentRecords"
+      @retry="refreshActivePaymentRecordView"
       @row-click="handleViewDetail"
+      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template v-if="displayMode === 'board'" #replacement>
+        <PaymentRecordBoardProjection
+          :response="paymentRecordBoard.data"
+          :loading="paymentRecordBoard.loading"
+          :refreshing="paymentRecordBoard.refreshing"
+          :stale="paymentRecordBoard.stale"
+          :error="paymentRecordBoard.error"
+          :can-drill-through="paymentRecordBoard.canDrillThrough"
+          @activate-card="handleBoardCardActivate"
+          @view-all="handleBoardViewAll"
+          @card-action="handleBoardCardAction"
+          @retry="paymentRecordBoard.retry"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="payment-record-mobile-card-header">
           <div class="payment-record-mobile-card-number">
@@ -770,7 +918,7 @@ watchEffect(() => {
     </DataTable>
 
     <PaymentRecordDetailSheet
-      :record-id="selectedRecord?.id ?? null"
+      :record-id="selectedBoardRecordId ?? selectedRecord?.id ?? null"
       :visible="detailSheetVisible"
       :record="selectedRecord"
       :stage-name="selectedRecord?.stage_name ?? ''"
