@@ -47,6 +47,8 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const activeFieldKey = ref('')
+const panelTop = ref(0)
+const fieldListRef = ref<HTMLElement | null>(null)
 const narrow = ref(false)
 const optionQuery = ref('')
 const textDraft = ref('')
@@ -177,7 +179,16 @@ function replaceField(fieldKey: string, next: ListFilterCondition | null): void 
   emit('apply', conditions)
 }
 
+function fieldOffset(fieldKey: string): number {
+  const list = fieldListRef.value
+  const item = list?.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(fieldKey)}"]`)
+  const anchor = list?.parentElement?.querySelector<HTMLElement>('.filter-panel-anchor')
+  if (item === null || item === undefined || anchor === null || anchor === undefined) return 0
+  return item.getBoundingClientRect().top - anchor.getBoundingClientRect().top
+}
+
 function showField(fieldKey: string): void {
+  panelTop.value = fieldOffset(fieldKey)
   const previous = activeField.value
   if (previous !== undefined && previous.key !== fieldKey) {
     if (previous.type === 'text') commitText(previous)
@@ -344,10 +355,11 @@ watch(open, (isOpen) => {
       class="list-filter-popover"
     >
       <div class="filter-menu">
-        <ul class="filter-field-list">
+        <ul ref="fieldListRef" class="filter-field-list">
           <li
             v-for="field in fields"
             :key="field.key"
+            class="filter-field-item" :data-field-key="field.key"
           >
             <button
               type="button"
@@ -363,10 +375,10 @@ watch(open, (isOpen) => {
             </button>
           </li>
         </ul>
-
+        <div class="filter-panel-anchor">
         <section
           v-if="activeField"
-          class="filter-field-panel"
+          class="filter-field-panel" :style="{ '--filter-panel-top': `${panelTop}px` }"
           :aria-label="activeField.label"
           @mouseenter="cancelHover"
         >
@@ -460,6 +472,7 @@ watch(open, (isOpen) => {
             </Button>
           </div>
         </section>
+        </div>
       </div>
     </PopoverContent>
   </Popover>
@@ -472,18 +485,26 @@ watch(open, (isOpen) => {
 :global(.list-filter-popover) {
   width: max-content;
   max-width: calc(100vw - #{$wolf-space-xl-v2});
-  max-height: calc(100vh - #{$wolf-space-xl-v2});
   padding: 0;
-  overflow: auto;
+  overflow: visible;
+}
+
+.filter-panel-anchor {
+  position: relative;
+  align-self: flex-start;
 }
 
 .filter-menu {
+  position: relative;
   display: flex;
   align-items: flex-start;
 }
 
+
 .filter-field-list {
   width: 180px;
+  background: $wolf-bg-card-v2;
+  border-radius: $wolf-radius-overlay-v2;
   max-height: 360px;
   margin: 0;
   padding: $wolf-space-xs-v2;
@@ -518,13 +539,19 @@ watch(open, (isOpen) => {
 }
 
 .filter-field-panel {
+  position: absolute;
+  top: var(--filter-panel-top, 0);
+  left: calc(100% + #{$wolf-space-xs-v2});
   width: max-content;
   min-width: 240px;
   max-width: min(360px, calc(100vw - 220px));
   max-height: calc(100vh - #{$wolf-space-xl-v2});
   padding: $wolf-space-sm-v2;
   overflow: auto;
-  border-left: 1px solid $wolf-border-light-v2;
+  border: 1px solid $wolf-border-light-v2;
+  border-radius: $wolf-radius-overlay-v2;
+  background: $wolf-bg-card-v2;
+  box-shadow: $wolf-shadow-overlay-v2;
 }
 
 .filter-field-panel :deep(.date-picker-calendar) {
@@ -598,6 +625,10 @@ watch(open, (isOpen) => {
     display: block;
   }
 
+  .filter-panel-anchor {
+    position: static;
+  }
+
   :global(.list-filter-popover) {
     max-height: calc(100dvh - #{$wolf-space-xl-v2});
   }
@@ -609,11 +640,17 @@ watch(open, (isOpen) => {
   }
 
   .filter-field-list {
-    overflow: visible;
+    max-height: 180px;
+    overflow: auto;
   }
 
   .filter-field-panel {
-    border-left: 0;
+    position: static;
+    width: 100%;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
     border-top: 1px solid $wolf-border-light-v2;
   }
 }
