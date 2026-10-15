@@ -373,8 +373,11 @@ describe('Customers board integration', () => {
     table.vm.$emit('sort-apply', [{ field: 'created_time', direction: 'desc' }])
     await flushPromises()
     mocks.getCustomerBoard.mockClear()
+    const listCallsBeforeBoard = mocks.getCustomers.mock.calls.length
 
     await switchMode(wrapper, 'board')
+
+    expect(mocks.getCustomers.mock.calls.length).toBe(listCallsBeforeBoard)
 
     expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
     const params = mocks.getCustomerBoard.mock.calls[0]?.[0] as CustomerBoardParams
@@ -460,10 +463,7 @@ describe('Customers board integration', () => {
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    wrapper.getComponent({ name: 'CustomerBoardProjection' }).vm.$emit('activate-card', {
-      id: 'cus_public_1',
-      columnKey: 'following',
-    })
+    await wrapper.get('[data-column-key="following"] .board-card').trigger('click')
     await nextTick()
 
     const sheet = wrapper.getComponent({ name: 'CustomerDetailSheet' })
@@ -476,24 +476,28 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
-    const projection = wrapper.getComponent({ name: 'CustomerBoardProjection' })
+    const board = wrapper.get('[data-column-key="following"]')
+    expect(board.find('[data-testid="board-card-action-edit"]').exists()).toBe(true)
+    expect(board.find('[data-testid="board-card-action-assign"]').exists()).toBe(true)
+    expect(board.find('[data-testid="board-card-action-create-opportunity"]').exists()).toBe(true)
+    expect(board.find('[data-testid="board-card-action-delete"]').exists()).toBe(true)
 
-    projection.vm.$emit('card-action', { id: 'cus_public_1', action: 'edit' })
+    await board.get('[data-testid="board-card-action-edit"]').trigger('click')
     await flushPromises()
     expect(mocks.getCustomerDetail).toHaveBeenCalledWith('cus_public_1')
     expect(wrapper.get('[data-testid="customer-form-dialog"]').attributes('data-open')).toBe('true')
     expect(wrapper.get('[data-testid="customer-form-dialog"]').attributes('data-mode')).toBe('edit')
 
-    projection.vm.$emit('card-action', { id: 'cus_public_1', action: 'assign' })
+    await board.get('[data-testid="board-card-action-assign"]').trigger('click')
     await nextTick()
     expect(wrapper.get('[data-testid="customer-transfer-dialog"]').attributes('data-open')).toBe('true')
     expect(wrapper.get('[data-testid="customer-transfer-dialog"]').attributes('data-customer-id')).toBe('cus_public_1')
 
-    projection.vm.$emit('card-action', { id: 'cus_public_1', action: 'create-opportunity' })
+    await board.get('[data-testid="board-card-action-create-opportunity"]').trigger('click')
     await nextTick()
     expect(wrapper.get('[data-testid="opportunity-form-dialog"]').attributes('data-open')).toBe('true')
 
-    projection.vm.$emit('card-action', { id: 'cus_public_1', action: 'delete' })
+    await board.get('[data-testid="board-card-action-delete"]').trigger('click')
     await flushPromises()
     expect(mocks.deleteCustomer).toHaveBeenCalledWith('cus_public_1')
     wrapper.unmount()
@@ -510,7 +514,7 @@ describe('Customers board integration', () => {
     await switchMode(wrapper, 'board')
     mocks.getCustomers.mockClear()
 
-    wrapper.getComponent({ name: 'CustomerBoardProjection' }).vm.$emit('view-all', 'following')
+    await wrapper.get('[data-column-key="following"] .board-column__footer button').trigger('click')
     await flushPromises()
 
     const drilled = wrapper.getComponent({ name: 'DataTable' })
@@ -526,15 +530,24 @@ describe('Customers board integration', () => {
     wrapper.unmount()
   })
 
-  it('rejects public pool and unknown column keys without changing the board', async () => {
+  it('rejects rendered public pool and unknown column keys without changing the board', async () => {
+    const following = boardResponse.columns[0]
+    if (following === undefined) throw new Error('missing following column')
+    mocks.getCustomerBoard.mockResolvedValue({
+      ...boardResponse,
+      columns: [
+        following,
+        { ...following, key: 'public_pool', label: '公海', items: [], has_more: false, remaining_count: 0 },
+        { ...following, key: 'unclassified', label: '未分类', items: [], has_more: false, remaining_count: 0 },
+      ],
+    })
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
     const filtersBefore = wrapper.getComponent({ name: 'DataTable' }).props('filters')
 
-    wrapper.getComponent({ name: 'CustomerBoardProjection' }).vm.$emit('view-all', 'public_pool')
-    wrapper.getComponent({ name: 'CustomerBoardProjection' }).vm.$emit('view-all', 'unclassified')
-    await flushPromises()
+    await wrapper.get('[data-column-key="public_pool"] .board-column__footer button').trigger('click')
+    await wrapper.get('[data-column-key="unclassified"] .board-column__footer button').trigger('click')
 
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('board')
@@ -595,20 +608,71 @@ describe('Customers board integration', () => {
     await flushPromises()
     await switchMode(wrapper, 'board')
     expect(wrapper.getComponent({ name: 'CustomerBoardProjection' }).props('response')).toEqual(boardResponse)
+    const listCallsBeforeRefresh = mocks.getCustomers.mock.calls.length
 
     mocks.getCustomerBoard.mockRejectedValueOnce(new Error('board refresh failed'))
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:search', '失败刷新')
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '失败刷新')
     await flushPromises()
 
+    expect(mocks.getCustomers.mock.calls.length).toBe(listCallsBeforeRefresh)
     const projection = wrapper.getComponent({ name: 'CustomerBoardProjection' })
     expect(projection.props('response')).toEqual(boardResponse)
     expect(projection.props('stale')).toBe(true)
     expect(projection.props('canDrillThrough')).toBe(false)
+    expect(wrapper.text()).toContain('北方客户')
 
     teamState.currentTeam = { id: 99 }
     await nextTick()
-    expect(wrapper.findComponent({ name: 'CustomerBoardProjection' }).exists()).toBe(false)
+    expect(wrapper.getComponent({ name: 'CustomerBoardProjection' }).props('response')).toBeNull()
+    expect(wrapper.text()).not.toContain('北方客户')
+    wrapper.unmount()
+  })
+
+  it('renders the board skeleton before any board data exists', async () => {
+    let resolveBoard: ((value: CustomerBoardResponse) => void) | undefined
+    mocks.getCustomerBoard.mockReturnValue(new Promise<CustomerBoardResponse>((resolve) => {
+      resolveBoard = resolve
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const listCallsBeforeBoard = mocks.getCustomers.mock.calls.length
+
+    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', 'board')
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="board-skeleton"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="data-table-retry"]').exists()).toBe(false)
+    expect(mocks.getCustomers.mock.calls.length).toBe(listCallsBeforeBoard)
+    expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
+
+    const finishBoard = resolveBoard
+    if (finishBoard === undefined) throw new Error('board request did not start')
+    finishBoard(boardResponse)
+    await flushPromises()
+    expect(wrapper.text()).toContain('北方客户')
+    wrapper.unmount()
+  })
+
+  it('shows an initial board error through the replacement instead of the list error', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    mocks.getCustomers.mockRejectedValueOnce(new Error('list failed'))
+    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '列表失败')
+    await flushPromises()
+    expect(wrapper.text()).toContain('客户列表加载失败')
+
+    mocks.getCustomers.mockClear()
+    mocks.getCustomerBoard.mockRejectedValueOnce(new Error('board load failed'))
+    await switchMode(wrapper, 'board')
+
+    expect(mocks.getCustomers).not.toHaveBeenCalled()
+    expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent({ name: 'CustomerBoardProjection' }).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="board-blocking-retry"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('board load failed')
+    expect(wrapper.text()).not.toContain('客户列表加载失败')
+    expect(wrapper.find('[data-testid="data-table-retry"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

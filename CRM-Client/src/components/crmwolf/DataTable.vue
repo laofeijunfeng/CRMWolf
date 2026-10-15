@@ -1109,8 +1109,12 @@ onBeforeUnmount(() => {
       />
 
       <!-- 表格内容区（可滚动） -->
+      <!-- 看板替换区优先于列表错误，避免列表失败盖住看板 -->
+      <div v-if="props.viewDisplayMode === 'board'" class="data-table-content data-table-content--board">
+        <slot name="replacement" />
+      </div>
       <div
-        v-if="hasBlockingError"
+        v-else-if="hasBlockingError"
         class="data-table-state"
       >
         <ErrorState
@@ -1129,9 +1133,6 @@ onBeforeUnmount(() => {
             </Button>
           </template>
         </ErrorState>
-      </div>
-      <div v-else-if="props.viewDisplayMode === 'board'" class="data-table-content data-table-content--board">
-        <slot name="replacement" />
       </div>
       <div
         v-else-if="props.viewDisplayMode !== 'board'"

@@ -144,11 +144,28 @@ describe('CustomerBoardProjection', () => {
     expect(lost.text()).toContain('北辰制造')
     expect(lost.findComponent({ name: 'AmountText' }).exists()).toBe(false)
 
-    await following.get('[role="button"]').trigger('keydown', { key: 'Enter' })
+    await following.get('.board-card').trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 'cus_public_1', columnKey: 'following' }]])
 
-    await lost.get('button').trigger('click')
+    await lost.get('.board-column__footer button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['lost']])
+  })
+
+  it('emits only the rendered card action and does not activate the card', async () => {
+    const wrapper = mountProjection()
+    const following = wrapper.get('[data-column-key="following"]')
+    const lost = wrapper.get('[data-column-key="lost"]')
+
+    expect(following.find('[data-testid="board-card-action-edit"]').exists()).toBe(true)
+    expect(following.find('[data-testid="board-card-action-assign"]').exists()).toBe(true)
+    expect(following.find('[data-testid="board-card-action-create-opportunity"]').exists()).toBe(true)
+    expect(following.find('[data-testid="board-card-action-delete"]').exists()).toBe(false)
+    expect(lost.find('[data-testid^="board-card-action-"]').exists()).toBe(false)
+
+    await following.get('[data-testid="board-card-action-edit"]').trigger('click')
+
+    expect(wrapper.emitted('card-action')).toEqual([[{ id: 'cus_public_1', action: 'edit' }]])
+    expect(wrapper.emitted('activate-card')).toBeUndefined()
   })
 
   it('passes numeric customer trend counts through BoardView without changing the response', () => {

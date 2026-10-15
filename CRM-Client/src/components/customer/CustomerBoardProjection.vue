@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import BoardView from '@/components/crmwolf/BoardView.vue'
+import { Button } from '@/components/ui/button'
 import type {
   BoardCardActivation,
   BoardCardPresentation,
@@ -13,13 +14,14 @@ import type { CustomerBoardResponse } from '@/schemas/customerBoard'
 import { formatDateRelative, formatLocalDate } from '@/utils/format'
 
 const props = withDefaults(defineProps<{
-  response: CustomerBoardResponse
+  response?: CustomerBoardResponse | null
   loading?: boolean
   refreshing?: boolean
   stale?: boolean
   error?: Error | null
   canDrillThrough?: boolean
 }>(), {
+  response: null,
   loading: false,
   refreshing: false,
   stale: false,
@@ -105,40 +107,61 @@ function customerChartPoint(source: CustomerTrend): BoardTrendPointPresentation 
   }
 }
 
-const projection = computed<BoardProjection>(() => ({
-  metrics: props.response.summary.map((metric) => ({
-    key: metric.key,
-    label: metric.label,
-    value: metric.value_type === 'percentage'
-      ? (metric.value === null ? '-' : `${metric.value}%`)
-      : String(metric.value),
-    valueType: metric.value_type,
-    ...(metric.secondary_label == null || metric.secondary_value == null
-      ? {}
+const projection = computed<BoardProjection | null>(() => {
+  const response = props.response
+  if (response === null) return null
+  return {
+    metrics: response.summary.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      value: metric.value_type === 'percentage'
+        ? (metric.value === null ? '-' : `${metric.value}%`)
+        : String(metric.value),
+      valueType: metric.value_type,
+      ...(metric.secondary_label == null || metric.secondary_value == null
+        ? {}
+        : {
+            secondaryLabel: metric.secondary_label,
+            secondaryValue: String(metric.secondary_value),
+          }),
+    })),
+    columns: response.columns.map((column) => ({
+      key: column.key,
+      label: column.label,
+      tone: column.tone,
+      countLabel: String(column.count),
+      amountLabel: column.amount,
+      hasMore: column.has_more,
+      remainingCount: column.remaining_count,
+      cards: column.items.map((item) => presentCard(column, item)),
+    })),
+    trend: response.trends.length === 0
+      ? null
       : {
-          secondaryLabel: metric.secondary_label,
-          secondaryValue: String(metric.secondary_value),
-        }),
-  })),
-  columns: props.response.columns.map((column) => ({
-    key: column.key,
-    label: column.label,
-    tone: column.tone,
-    countLabel: String(column.count),
-    amountLabel: column.amount,
-    hasMore: column.has_more,
-    remainingCount: column.remaining_count,
-    cards: column.items.map((item) => presentCard(column, item)),
-  })),
-  trend: props.response.trends.length === 0
-    ? null
-    : {
-        title: '客户趋势',
-        description: '按完整月份统计客户数',
-        series: [countSeries],
-        points: props.response.trends.map(customerChartPoint),
-      },
-}))
+          title: '客户趋势',
+          description: '按完整月份统计客户数',
+          series: [countSeries],
+          points: response.trends.map(customerChartPoint),
+        },
+  }
+})
+
+function cardActions(cardId: string | number): Array<{ action: 'edit' | 'delete' | 'assign' | 'create-opportunity', label: string }> {
+  const response = props.response
+  if (response === null) return []
+  const publicId = String(cardId)
+  for (const column of response.columns) {
+    const item = column.items.find((candidate) => candidate.id === publicId)
+    if (item === undefined) continue
+    const actions: Array<{ action: 'edit' | 'delete' | 'assign' | 'create-opportunity', label: string }> = []
+    if (item.action_state.can_edit) actions.push({ action: 'edit', label: '编辑' })
+    if (item.action_state.can_assign) actions.push({ action: 'assign', label: '分配' })
+    if (item.action_state.can_create_opportunity) actions.push({ action: 'create-opportunity', label: '新建商机' })
+    if (item.action_state.can_delete) actions.push({ action: 'delete', label: '删除' })
+    return actions
+  }
+  return []
+}
 </script>
 
 <template>
@@ -152,5 +175,19 @@ const projection = computed<BoardProjection>(() => ({
     @activate-card="emit('activate-card', $event)"
     @view-all="emit('view-all', $event)"
     @retry="emit('retry')"
-  />
+  >
+    <template #card-actions="{ card }">
+      <Button
+        v-for="action in cardActions(card.id)"
+        :key="action.action"
+        type="button"
+        variant="outline"
+        size="sm"
+        :data-testid="`board-card-action-${action.action}`"
+        @click="emit('card-action', { id: card.id, action: action.action })"
+      >
+        {{ action.label }}
+      </Button>
+    </template>
+  </BoardView>
 </template>

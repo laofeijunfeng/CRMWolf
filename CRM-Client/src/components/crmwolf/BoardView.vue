@@ -251,6 +251,9 @@ function metricValueType(valueType: BoardValueType): string {
                   <dd>{{ row.value }}</dd>
                 </div>
               </dl>
+              <div v-if="$slots['card-actions']" class="board-card__actions" @click.stop @keydown.stop>
+                <slot name="card-actions" :card="card" :column="column" />
+              </div>
             </article>
             <p v-if="column.cards.length === 0" class="board-column__empty">暂无记录</p>
           </div>
@@ -394,6 +397,13 @@ function metricValueType(valueType: BoardValueType): string {
 .board-card:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
+}
+
+.board-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .board-column__empty {

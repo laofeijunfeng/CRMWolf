@@ -247,7 +247,8 @@ const displayMode = ref<'table' | 'board'>('table')
 
 const search = ref('')
 
-watch(activeTab, () => {
+watch(activeTab, (tab) => {
+  if (tab === 'public') displayMode.value = 'table'
   search.value = ''
 }, { flush: 'sync' })
 
@@ -697,6 +698,7 @@ const fetchIndustryFilterOptions = async (): Promise<void> => {
 }
 
 const fetchCustomerList = async (): Promise<boolean> => {
+  if (displayMode.value === 'board' && activeTab.value !== 'public') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -1452,7 +1454,7 @@ defineExpose({
       @retry="fetchCustomerList"
       @update:view-display-mode="handleDisplayModeChange"
     >
-      <template v-if="boardEligible && customerBoard.data" #replacement>
+      <template v-if="boardEligible" #replacement>
         <CustomerBoardProjection
           :response="customerBoard.data"
           :loading="customerBoard.loading"
