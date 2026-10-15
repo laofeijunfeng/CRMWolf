@@ -1968,9 +1968,12 @@ def _payment_record_detail_response(
     team_id: int,
     current_user,
     db: Session,
+    *,
+    authorized: bool = False,
 ) -> PaymentRecordDetailResponse:
     """Build the authoritative payment detail response used by recovery flows."""
-    check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
+    if not authorized:
+        check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
     plan = record.payment_plan
     if plan is None:
         raise HTTPException(
@@ -2168,12 +2171,36 @@ def get_payment_record_detail(
     db: Session = Depends(get_db),
 ):
     record = payment_record_crud.get_by_id(db, record_id, team_id)
-    if record is None:
+    if record is None or not _payment_record_visible_to_caller(record, team_id, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款记录不存在",
         )
-    return _payment_record_detail_response(record, team_id, current_user, db)
+    return _payment_record_detail_response(record, team_id, current_user, db, authorized=True)
+
+
+def _payment_record_visible_to_caller(record: PaymentRecord, team_id: int, current_user, db: Session) -> bool:
+    """Own-scope callers may read only records on contracts they created."""
+    from app.models.contract import Contract
+
+    scope_user_id = resolve_payment_scope_user_id(
+        db,
+        current_user,
+        team_id,
+        me=False,
+        missing_detail="没有查看回款记录的权限",
+    )
+    if scope_user_id is None:
+        return True
+    plan = record.payment_plan
+    contract = plan.contract if plan is not None else None
+    if contract is None and plan is not None and plan.contract_id is not None:
+        contract = (
+            db.query(Contract)
+            .filter(Contract.id == plan.contract_id, Contract.team_id == team_id)
+            .first()
+        )
+    return contract is not None and contract.creator_id == scope_user_id
 
 
 @router.put("/payment-records/{record_id}", response_model=PaymentRecordResponse, summary="更新回款记录", description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。")

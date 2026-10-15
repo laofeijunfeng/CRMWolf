@@ -635,13 +635,35 @@ def test_owner_permission_uses_contract_view_scope(api_env) -> None:
     assert _columns(own.json())["DRAFT"]["items"][0]["id"] == 1
 
 
+def test_own_scope_customer_filter_excludes_another_owners_contracts(api_env) -> None:
+    api_env.db.add_all([
+        _contract(1, name="自己的合同", customer_id=2, opportunity_id=2, owner_id="7"),
+        _contract(2, name="别人的合同", customer_id=2, opportunity_id=2, owner_id="8", status="SIGNED", total_amount="250.00"),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "contract:view:own", "customer:view:all")
+
+    response = _board(api_env.client, customer_id="cus_2")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    columns = _columns(body)
+    assert columns["DRAFT"]["count"] == 1
+    assert columns["DRAFT"]["items"][0]["id"] == 1
+    assert columns["SIGNED"]["count"] == 0
+    assert columns["SIGNED"]["items"] == []
+    assert all(item["id"] != 2 for column in columns.values() for item in column["items"])
+    assert _metric(body, "total_count")["value"] == 1
+    assert _metric(body, "total_amount")["value"] == "100.00"
+
+
 def test_customer_filter_resolves_public_id_before_population_query(api_env) -> None:
     api_env.db.add_all([
         _contract(1, name="甲的合同", customer_id=1, opportunity_id=1, owner_id="7"),
         _contract(2, name="乙的合同", customer_id=2, opportunity_id=2, owner_id="8", status="SIGNED"),
     ])
     api_env.db.commit()
-    _grant(api_env.db, 7, "customer:view:all")
+    _grant(api_env.db, 7, "contract:view:all", "customer:view:all")
 
     response = _board(api_env.client, customer_id="cus_2")
 

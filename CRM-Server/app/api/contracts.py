@@ -1036,9 +1036,7 @@ def get_contract_board(
                 status_code=403,
                 detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
             )
-        if customer_public_id is not None:
-            actual_owner_id = None
-        elif actual_owner_id is None and not has_view_all:
+        if actual_owner_id is None and not has_view_all:
             actual_owner_id = current_user_id
 
     rows = run_or_400(lambda: contract_crud.build_population_query(

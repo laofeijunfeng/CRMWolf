@@ -807,3 +807,63 @@ def test_approval_exclude_removes_approved_from_counts_amounts_and_trends(api_en
     assert june["actual_amount"] == "15.25"
     assert june["confirmed_amount"] == "0.00"
     assert june["unconfirmed_amount"] == "15.25"
+
+
+def test_excluding_unclassified_keeps_approved_rows(api_env, monkeypatch) -> None:
+    _freeze(monkeypatch, date(2026, 10, 12))
+    api_env.db.add_all([
+        _contract(1, name="甲合同"),
+        _plan(1, contract_id=1),
+        _record(
+            1,
+            plan_id=1,
+            amount="40.00",
+            payment_date=date(2026, 6, 5),
+            approval_phase="draft",
+            confirmation_status=PaymentConfirmationStatus.CONFIRMED,
+        ),
+        _approval(22, record_id=1, status=ApprovalStatus.APPROVED),
+        _record(2, plan_id=1, amount="15.25", payment_date=date(2026, 6, 6), approval_phase="withdrawn"),
+        _record(3, plan_id=1, amount="8.00", payment_date=date(2026, 6, 7), approval_phase="rejected"),
+        _approval(23, record_id=3, status=ApprovalStatus.REJECTED),
+    ])
+    api_env.db.flush()
+    _link(api_env.db, 1, 22)
+    _link(api_env.db, 3, 23)
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:all")
+
+    response = _board(api_env.client, approval_status_exclude="unclassified")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    columns = _columns(body)
+    assert columns["approved"]["count"] == 1
+    assert columns["approved"]["items"][0]["id"] == 1
+    assert columns["rejected"]["count"] == 1
+    assert columns["rejected"]["items"][0]["id"] == 3
+    assert columns["unclassified"]["count"] == 0
+    assert all(item["id"] != 2 for column in columns.values() for item in column["items"])
+    assert _metric(body, "total_count")["value"] == 2
+    assert _metric(body, "actual_total")["value"] == "48.00"
+    assert _metric(body, "confirmed_amount")["value"] == "40.00"
+
+
+def test_own_scope_detail_hides_another_creators_record(api_env) -> None:
+    api_env.db.add_all([
+        _contract(1, name="自己的合同", owner_id="8", creator_id="7"),
+        _contract(2, name="别人的合同", customer_id=2, opportunity_id=2, owner_id="7", creator_id="8"),
+        _plan(1, contract_id=1),
+        _plan(2, contract_id=2),
+        _record(1, plan_id=1, amount="10.00", payment_date=date(2026, 6, 2)),
+        _record(2, plan_id=2, amount="90.00", payment_date=date(2026, 6, 3)),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:own")
+
+    hidden = api_env.client.get("/v1/payments/payment-records/2")
+    visible = api_env.client.get("/v1/payments/payment-records/1")
+
+    assert hidden.status_code == 404
+    assert visible.status_code == 200, visible.text
+    assert visible.json()["id"] == 1

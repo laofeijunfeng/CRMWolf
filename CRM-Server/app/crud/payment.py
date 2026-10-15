@@ -773,7 +773,10 @@ class PaymentRecordCRUD:
                 if value == PaymentApprovalReadStatus.UNCLASSIFIED:
                     excluded.append(approval_expression.is_not(None))
                 elif value in known_statuses:
-                    excluded.append(~and_(approval_expression.is_not(None), approval_expression == value))
+                    excluded.append(or_(
+                        approval_expression.is_(None),
+                        approval_expression != value,
+                    ))
             if excluded:
                 records_query = records_query.filter(and_(*excluded))
         if contract_id:
