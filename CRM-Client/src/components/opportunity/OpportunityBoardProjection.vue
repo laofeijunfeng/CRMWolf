@@ -12,13 +12,29 @@ import type {
 import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 
-const props = defineProps<{ response: OpportunityBoardResponse }>()
+const props = withDefaults(defineProps<{
+  response?: OpportunityBoardResponse | null
+  loading?: boolean
+  refreshing?: boolean
+  stale?: boolean
+  error?: Error | null
+  canDrillThrough?: boolean
+  drillThroughColumnKeys?: readonly string[] | null
+}>(), {
+  response: null,
+  loading: false,
+  refreshing: false,
+  stale: false,
+  error: null,
+  canDrillThrough: true,
+  drillThroughColumnKeys: null,
+})
 
 const emit = defineEmits<{
   'activate-card': [payload: BoardCardActivation]
   'view-all': [payload: string]
+  retry: []
 }>()
-
 type OpportunityColumn = OpportunityBoardResponse['columns'][number]
 type OpportunityItem = OpportunityColumn['items'][number]
 type OpportunityTrend = OpportunityBoardResponse['trends'][number]
@@ -99,7 +115,7 @@ function presentCard(column: OpportunityColumn, item: OpportunityItem): BoardCar
 }
 
 function viewAllPayloadForKey(columnKey: string): string {
-  const column = props.response.columns.find((item) => item.key === columnKey)
+  const column = props.response?.columns.find((item) => item.key === columnKey)
   if (
     column !== undefined
     && column.procurement_method_id !== null
@@ -120,47 +136,62 @@ function opportunityChartPoint(source: OpportunityTrend): BoardTrendPointPresent
   }
 }
 
-const projection = computed<BoardProjection>(() => ({
-  metrics: props.response.summary.map((metric) => ({
-    key: metric.key,
-    label: metric.label,
-    value: metric.value_type === 'amount' ? metric.value : String(metric.value),
-    valueType: metric.value_type,
-    ...(metric.secondary_label == null || metric.secondary_value == null
-      ? {}
+function columnDrillEnabled(columnKey: string): boolean {
+  const allowed = props.drillThroughColumnKeys
+  return allowed === null || allowed.includes(columnKey)
+}
+
+const projection = computed<BoardProjection | null>(() => {
+  const response = props.response
+  if (response === null) return null
+  return {
+    metrics: response.summary.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      value: metric.value_type === 'amount' ? metric.value : String(metric.value),
+      valueType: metric.value_type,
+      ...(metric.secondary_label == null || metric.secondary_value == null
+        ? {}
+        : {
+            secondaryLabel: metric.secondary_label,
+            secondaryValue: metric.value_type === 'amount'
+              ? metric.secondary_value
+              : String(metric.secondary_value),
+          }),
+    })),
+    columns: response.columns.map((column) => ({
+      key: column.key,
+      label: column.label,
+      tone: column.tone,
+      countLabel: String(column.count),
+      amountLabel: column.amount,
+      hasMore: column.has_more,
+      remainingCount: column.remaining_count,
+      drillThroughEnabled: columnDrillEnabled(column.key),
+      cards: column.items.map((item) => presentCard(column, item)),
+    })),
+    trend: response.trends.length === 0
+      ? null
       : {
-          secondaryLabel: metric.secondary_label,
-          secondaryValue: metric.value_type === 'amount'
-            ? metric.secondary_value
-            : String(metric.secondary_value),
-        }),
-  })),
-  columns: props.response.columns.map((column) => ({
-    key: column.key,
-    label: column.label,
-    tone: column.tone,
-    countLabel: String(column.count),
-    amountLabel: column.amount,
-    hasMore: column.has_more,
-    remainingCount: column.remaining_count,
-    cards: column.items.map((item) => presentCard(column, item)),
-  })),
-  trend: props.response.trends.length === 0
-    ? null
-    : {
-        title: '商机趋势',
-        description: '按完整月份统计商机数和金额',
-        series: trendSeries,
-        points: props.response.trends.map(opportunityChartPoint),
-      },
-}))
+          title: '商机趋势',
+          description: '按完整月份统计商机数和金额',
+          series: trendSeries,
+          points: response.trends.map(opportunityChartPoint),
+        },
+  }
+})
 </script>
 
 <template>
   <BoardView
     :projection="projection"
-    :can-drill-through="true"
+    :loading="props.loading"
+    :refreshing="props.refreshing"
+    :stale="props.stale"
+    :error="props.error"
+    :can-drill-through="props.canDrillThrough"
     @activate-card="emit('activate-card', $event)"
     @view-all="emit('view-all', viewAllPayloadForKey($event))"
+    @retry="emit('retry')"
   />
 </template>

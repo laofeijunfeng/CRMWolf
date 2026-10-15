@@ -24,9 +24,13 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
+import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
+import ContractBoardProjection from '@/components/contract/ContractBoardProjection.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import contractApi, {
+  type ContractBoardParams,
   type ContractListResponse,
   type ContractQueryParams,
   type OwnerFilterOption,
@@ -37,8 +41,10 @@ import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
+import type { ContractBoardResponse } from '@/schemas/contractBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
@@ -57,6 +63,7 @@ interface ContractDetailSheetExpose {
 usePageTitle()
 
 const permissionStore = usePermissionStore()
+const teamStore = useTeamStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
 
@@ -67,6 +74,7 @@ const listRequestId = ref<number>(0)
 const tableData = ref<ContractListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
+const displayMode = ref<'table' | 'board'>('table')
 
 const search = ref('')
 
@@ -278,6 +286,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 const fetchContractList = async (): Promise<boolean> => {
+  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -312,13 +321,98 @@ const fetchContractList = async (): Promise<boolean> => {
     }
   }
 }
+
+const contractTabStatuses = ['DRAFT', 'PENDING_REVIEW', 'SIGNED'] as const
+const contractLifecycleStatuses = ['DRAFT', 'PENDING_REVIEW', 'SIGNED', 'EFFECTIVE', 'EXPIRED', 'TERMINATED'] as const
+
+const contractTabStatus = computed<string | null>(() => (
+  contractTabStatuses.some((status) => status === activeTab.value) ? activeTab.value : null
+))
+
+const contractEffectiveFilters = computed(() => (
+  contractTabStatus.value === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status'])
+))
+
+const boardParams = computed<ContractBoardParams>(() => {
+  const serialized = serializeListQuery({
+    filters: contractEffectiveFilters.value,
+    sorts: activeSorts.value,
+  })
+  return {
+    status: contractTabStatus.value,
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...serialized,
+  }
+})
+
+const boardScopeKey = computed(() => {
+  const team = teamStore.currentTeam
+  const user = userStore.userInfo
+  const permissionItems = permissionStore.permissions
+  return {
+    teamId: team?.id ?? null,
+    userId: user?.id === undefined || user.id === null ? null : String(user.id),
+    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
+  }
+})
+
+const contractBoard = useBoardSnapshot<ContractBoardParams, ContractBoardResponse>({
+  fetchBoard: (query) => contractApi.getContractBoard(query),
+  getCurrentQuery: () => boardParams.value,
+  getQuerySignature: (query) => JSON.stringify({
+    tab: activeTab.value,
+    search: search.value.trim(),
+    filters: contractEffectiveFilters.value,
+    sorts: activeSorts.value,
+    query,
+  }),
+  getScopeKey: () => boardScopeKey.value,
+  isPermissionReady: () => permissionStore.loadState === 'ready',
+})
+
+const refreshActiveContractView = (): Promise<boolean> => {
+  if (displayMode.value !== 'board') return fetchContractList()
+  return contractBoard.refresh(boardParams.value).then(() => true, () => false)
+}
+
+const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+  if (mode === displayMode.value) return
+  displayMode.value = mode
+  void refreshActiveContractView()
+}
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'board') void refreshActiveContractView()
+})
+
+const isContractLifecycleStatus = (value: string): value is typeof contractLifecycleStatuses[number] => (
+  contractLifecycleStatuses.some((status) => status === value)
+)
+
+const handleBoardViewAll = (columnKey: string): void => {
+  if (!contractBoard.canDrillThrough || !isContractLifecycleStatus(columnKey)) return
+  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey }]
+  pagination.current = 1
+  displayMode.value = 'table'
+  void fetchContractList()
+}
+
+const handleBoardCardActivate = (payload: BoardCardActivation): void => {
+  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
+  viewingContractId.value = payload.id
+}
+
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'contracts.list',
   activeTab,
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchContractList,
+  activeDisplayMode: displayMode,
+  refresh: refreshActiveContractView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -339,6 +433,10 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
   isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
 )
 
+const refreshTableQuery = (): void => {
+  if (displayMode.value !== 'board') void refreshActiveContractView()
+}
+
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   // 使用筛选弹层状态条件时，清除 Tab 状态
@@ -347,40 +445,40 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   }
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchContractList()
+  refreshTableQuery()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   activeTab.value = 'all'
   pagination.current = 1
-  fetchContractList()
+  refreshTableQuery()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchContractList()
+  refreshTableQuery()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchContractList()
+  refreshTableQuery()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchContractList()
+  refreshTableQuery()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchContractList()
+  refreshTableQuery()
 }
 
 const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -451,7 +549,7 @@ function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, deta
 }
 
 const handleContractSheetRefresh = async (): Promise<void> => {
-  const refreshed = await fetchContractList()
+  const refreshed = await refreshActiveContractView()
   if (!refreshed) {
     toast.warning('合同详情已更新，但列表刷新失败，请稍后重试。')
   }
@@ -655,8 +753,16 @@ watchEffect(() => {
       activeFilters.value = activeFilters.value.filter((filter) => filter.field !== 'status')
       activeSorts.value = []
     }
-    fetchContractList()
+    void refreshActiveContractView()
   }
+})
+
+defineExpose({
+  activeTab,
+  activeFilters,
+  activeSorts,
+  displayMode,
+  viewingContractId,
 })
 
 // ✅ 不调用 headerStore.clear()
@@ -694,6 +800,8 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       :sorts="activeSorts"
       view-key="contracts.list"
+      view-display-mode-enabled
+      :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -717,12 +825,27 @@ watchEffect(() => {
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
-      @retry="fetchContractList"
+      @retry="refreshActiveContractView"
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
+      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template v-if="displayMode === 'board'" #replacement>
+        <ContractBoardProjection
+          :response="contractBoard.data"
+          :loading="contractBoard.loading"
+          :refreshing="contractBoard.refreshing"
+          :stale="contractBoard.stale"
+          :error="contractBoard.error"
+          :can-drill-through="contractBoard.canDrillThrough"
+          :drill-through-column-keys="contractLifecycleStatuses"
+          @activate-card="handleBoardCardActivate"
+          @view-all="handleBoardViewAll"
+          @retry="contractBoard.retry"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="contract-mobile-card-header">
           <div class="contract-mobile-card-title">

@@ -37,6 +37,7 @@ export interface BoardColumnPresentation {
   cards: readonly BoardCardPresentation[]
   hasMore: boolean
   remainingCount: number
+  drillThroughEnabled?: boolean
 }
 
 export interface BoardCardActivation {

@@ -25,16 +25,21 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
+import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
+import OpportunityBoardProjection from '@/components/opportunity/OpportunityBoardProjection.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption, type OpportunityExportTab } from '@/api/opportunity'
+import { opportunityApi, type Opportunity, type OpportunityBoardParams, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption, type OpportunityExportTab } from '@/api/opportunity'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
+import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { formatOpportunityModuleNames, formatOpportunityProductName, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
@@ -60,6 +65,7 @@ usePageTitle()
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
+const teamStore = useTeamStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
 
@@ -109,6 +115,7 @@ const tabs = [
 const tabLabel = (key: string): string => tabs.find((tab) => tab.key === key)?.label ?? '全部商机'
 
 const activeTab = ref('all')
+const displayMode = ref<'table' | 'board'>('table')
 const search = ref('')
 
 watch(activeTab, () => {
@@ -338,6 +345,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 
 // ==================== Methods ====================
 const fetchOpportunities = async (): Promise<boolean> => {
+  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -376,13 +384,104 @@ const fetchOpportunities = async (): Promise<boolean> => {
     }
   }
 }
+
+const opportunityTabStatus = computed<number | null>(() => (
+  activeTab.value === 'active'
+    ? 0
+    : activeTab.value === 'won'
+      ? 1
+      : activeTab.value === 'lost'
+        ? 2
+        : null
+))
+
+const opportunityEffectiveFilters = computed(() => (
+  opportunityTabStatus.value === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status'])
+))
+
+const boardParams = computed<OpportunityBoardParams>(() => {
+  const serialized = serializeListQuery({
+    filters: opportunityEffectiveFilters.value,
+    sorts: activeSorts.value,
+  })
+  return {
+    status: opportunityTabStatus.value,
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...serialized,
+  }
+})
+
+const boardScopeKey = computed(() => {
+  const team = teamStore.currentTeam
+  const user = userStore.userInfo
+  const permissionItems = permissionStore.permissions
+  return {
+    teamId: team?.id ?? null,
+    userId: user?.id === undefined || user.id === null ? null : String(user.id),
+    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
+  }
+})
+
+const opportunityBoard = useBoardSnapshot<OpportunityBoardParams, OpportunityBoardResponse>({
+  fetchBoard: (query) => opportunityApi.getOpportunityBoard(query),
+  getCurrentQuery: () => boardParams.value,
+  getQuerySignature: (query) => JSON.stringify({
+    tab: activeTab.value,
+    search: search.value.trim(),
+    filters: opportunityEffectiveFilters.value,
+    sorts: activeSorts.value,
+    query,
+  }),
+  getScopeKey: () => boardScopeKey.value,
+  isPermissionReady: () => permissionStore.loadState === 'ready',
+})
+
+const refreshActiveOpportunityView = (): Promise<boolean> => {
+  if (displayMode.value !== 'board') return fetchOpportunities()
+  return opportunityBoard.refresh(boardParams.value).then(() => true, () => false)
+}
+
+const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+  if (mode === displayMode.value) return
+  displayMode.value = mode
+  void refreshActiveOpportunityView()
+}
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'board') void refreshActiveOpportunityView()
+})
+
+const opportunityExactDrillColumns = ['won', 'lost'] as const
+
+const opportunityDrillThroughColumnKeys = computed(() => (
+  opportunityExactDrillColumns.filter(() => true)
+))
+
+const handleBoardViewAll = (columnKey: string): void => {
+  if (!opportunityBoard.canDrillThrough) return
+  if (columnKey !== 'won' && columnKey !== 'lost') return
+  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey === 'won' ? '1' : '2' }]
+  pagination.current = 1
+  displayMode.value = 'table'
+  void fetchOpportunities()
+}
+
+const handleBoardCardActivate = (payload: BoardCardActivation): void => {
+  if (typeof payload.id !== 'string' || !isOpportunityPublicId(payload.id)) return
+  openOpportunitySheet(payload.id)
+}
+
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'opportunities.list',
   activeTab,
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchOpportunities,
+  activeDisplayMode: displayMode,
+  refresh: refreshActiveOpportunityView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -407,43 +506,47 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
   isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
 )
 
+const refreshTableQuery = (): void => {
+  if (displayMode.value !== 'board') void refreshActiveOpportunityView()
+}
+
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchOpportunities()
+  refreshTableQuery()
 }
 
 const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -521,7 +624,7 @@ function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, deta
 
 // 抽屉刷新后刷新列表
 const handleSheetRefresh = async (): Promise<void> => {
-  const refreshed = await fetchOpportunities()
+  const refreshed = await refreshActiveOpportunityView()
   if (!refreshed) {
     toast.warning('商机详情已更新，但列表刷新失败，请稍后重试。')
   }
@@ -869,8 +972,17 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    fetchOpportunities()
+    void refreshActiveOpportunityView()
   }
+})
+
+defineExpose({
+  activeTab,
+  activeFilters,
+  activeSorts,
+  displayMode,
+  selectedOpportunityId,
+  sheetVisible,
 })
 
 // ✅ 不调用 headerStore.clear()
@@ -907,6 +1019,8 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="opportunities.list"
+      view-display-mode-enabled
+      :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -933,8 +1047,23 @@ watchEffect(() => {
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
-      @retry="fetchOpportunities"
+      @retry="refreshActiveOpportunityView"
+      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template v-if="displayMode === 'board'" #replacement>
+        <OpportunityBoardProjection
+          :response="opportunityBoard.data"
+          :loading="opportunityBoard.loading"
+          :refreshing="opportunityBoard.refreshing"
+          :stale="opportunityBoard.stale"
+          :error="opportunityBoard.error"
+          :can-drill-through="opportunityBoard.canDrillThrough"
+          :drill-through-column-keys="opportunityDrillThroughColumnKeys"
+          @activate-card="handleBoardCardActivate"
+          @view-all="handleBoardViewAll"
+          @retry="opportunityBoard.retry"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="opportunity-mobile-card-header">
           <div class="opportunity-mobile-card-title">

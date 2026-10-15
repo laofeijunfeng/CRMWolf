@@ -33,6 +33,9 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
+import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
+import PaymentPlanBoardProjection from '@/components/payment/PaymentPlanBoardProjection.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -41,13 +44,17 @@ import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vu
 import paymentApi, {
   type PaymentRecordCreate,
   type PaymentRecordResponse,
+  type PaymentPlanBoardParams,
   type PaymentPlanWithDetails,
   type PaymentPlanListParams,
   type PaymentPlanExportTab,
 } from '@/api/payment'
 import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
+import { useTeamStore } from '@/stores/team'
+import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
+import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useDataTableExport } from '@/composables/useDataTableExport'
@@ -61,6 +68,8 @@ import type { FormSuccessPayload } from '@/types/actionOutcome'
 usePageTitle()
 
 const permissionStore = usePermissionStore()
+const teamStore = useTeamStore()
+const userStore = useUserStore()
 const headerStore = useHeaderStore()
 const route = useRoute()
 
@@ -100,6 +109,7 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+const displayMode = ref<'table' | 'board'>('table')
 
 watch(activeTab, () => {
   search.value = ''
@@ -194,6 +204,7 @@ const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.valu
 
 // ==================== Methods ====================
 const fetchPaymentPlans = async (): Promise<boolean> => {
+  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -231,13 +242,104 @@ const fetchPaymentPlans = async (): Promise<boolean> => {
     }
   }
 }
+
+const paymentPlanKnownStatuses = ['PENDING', 'OVERDUE', 'PARTIAL', 'COMPLETED'] as const
+
+const paymentPlanTabStatus = computed<string | null>(() => (
+  activeTab.value === 'pending'
+    ? 'PENDING'
+    : activeTab.value === 'partial'
+      ? 'PARTIAL'
+      : activeTab.value === 'completed'
+        ? 'COMPLETED'
+        : null
+))
+
+const paymentPlanEffectiveFilters = computed(() => (
+  paymentPlanTabStatus.value === null
+    ? activeFilters.value
+    : withoutFilterFields(activeFilters.value, ['status'])
+))
+
+const boardParams = computed<PaymentPlanBoardParams>(() => {
+  const serialized = serializeListQuery({
+    filters: paymentPlanEffectiveFilters.value,
+    sorts: activeSorts.value,
+  })
+  return {
+    ...(paymentPlanTabStatus.value === null ? {} : { status: paymentPlanTabStatus.value }),
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...serialized,
+  }
+})
+
+const boardScopeKey = computed(() => {
+  const team = teamStore.currentTeam
+  const user = userStore.userInfo
+  const permissionItems = permissionStore.permissions
+  return {
+    teamId: team?.id ?? null,
+    userId: user?.id === undefined || user.id === null ? null : String(user.id),
+    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
+  }
+})
+
+const paymentPlanBoard = useBoardSnapshot<PaymentPlanBoardParams, PaymentPlanBoardResponse>({
+  fetchBoard: (query) => paymentApi.getPaymentPlanBoard(query),
+  getCurrentQuery: () => boardParams.value,
+  getQuerySignature: (query) => JSON.stringify({
+    tab: activeTab.value,
+    search: search.value.trim(),
+    filters: paymentPlanEffectiveFilters.value,
+    sorts: activeSorts.value,
+    query,
+  }),
+  getScopeKey: () => boardScopeKey.value,
+  isPermissionReady: () => permissionStore.loadState === 'ready',
+})
+
+const refreshActivePaymentPlanView = (): Promise<boolean> => {
+  if (displayMode.value !== 'board') return fetchPaymentPlans()
+  return paymentPlanBoard.refresh(boardParams.value).then(() => true, () => false)
+}
+
+const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+  if (mode === displayMode.value) return
+  displayMode.value = mode
+  void refreshActivePaymentPlanView()
+}
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'board') void refreshActivePaymentPlanView()
+})
+
+const isKnownPaymentPlanStatus = (value: string): value is typeof paymentPlanKnownStatuses[number] => (
+  paymentPlanKnownStatuses.some((status) => status === value)
+)
+
+const handleBoardViewAll = (columnKey: string): void => {
+  if (!paymentPlanBoard.canDrillThrough || !isKnownPaymentPlanStatus(columnKey)) return
+  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey }]
+  pagination.current = 1
+  displayMode.value = 'table'
+  void fetchPaymentPlans()
+}
+
+const handleBoardCardActivate = (payload: BoardCardActivation): void => {
+  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
+  selectedPlanId.value = payload.id
+  planSheetVisible.value = true
+}
+
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-plans.list',
   activeTab,
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchPaymentPlans,
+  activeDisplayMode: displayMode,
+  refresh: refreshActivePaymentPlanView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -262,6 +364,10 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
   isCustomFilterViewTab(activeTab.value) ? 'custom' : 'default'
 )
 
+const refreshTableQuery = (): void => {
+  if (displayMode.value !== 'board') void refreshActivePaymentPlanView()
+}
+
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
   activeFilters.value = filters
   if (!isCustomFilterViewTab(activeTab.value) && filters.some((filter) => filter.field === 'status')) {
@@ -270,39 +376,39 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   }
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchPaymentPlans()
+  refreshTableQuery()
 }
 
 const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -382,7 +488,7 @@ const handlePlanSheetVisibleChange = (visible: boolean): void => {
 }
 
 const handlePlanSheetRefresh = async (): Promise<void> => {
-  const refreshed = await fetchPaymentPlans()
+  const refreshed = await refreshActivePaymentPlanView()
   if (!refreshed) {
     toast.warning('操作已完成，但回款计划列表刷新失败，请稍后重试。')
   }
@@ -631,7 +737,7 @@ watchEffect(() => {
       return
     }
     customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    fetchPaymentPlans()
+    void refreshActivePaymentPlanView()
   }
 })
 
@@ -642,6 +748,15 @@ watch(
   },
   { immediate: true }
 )
+
+defineExpose({
+  activeTab,
+  activeFilters,
+  activeSorts,
+  displayMode,
+  selectedPlanId,
+  planSheetVisible,
+})
 
 // ✅ 不调用 headerStore.clear()
 // 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
@@ -665,6 +780,8 @@ watch(
       :total="pagination.total"
       :sorts="activeSorts"
       view-key="payment-plans.list"
+      view-display-mode-enabled
+      :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -704,9 +821,24 @@ watch(
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
-      @retry="fetchPaymentPlans"
+      @retry="refreshActivePaymentPlanView"
       @row-click="handleViewDetail"
+      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template v-if="displayMode === 'board'" #replacement>
+        <PaymentPlanBoardProjection
+          :response="paymentPlanBoard.data"
+          :loading="paymentPlanBoard.loading"
+          :refreshing="paymentPlanBoard.refreshing"
+          :stale="paymentPlanBoard.stale"
+          :error="paymentPlanBoard.error"
+          :can-drill-through="paymentPlanBoard.canDrillThrough"
+          :drill-through-column-keys="paymentPlanKnownStatuses"
+          @activate-card="handleBoardCardActivate"
+          @view-all="handleBoardViewAll"
+          @retry="paymentPlanBoard.retry"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="payment-plan-mobile-card-header">
           <div class="payment-plan-mobile-card-number">

@@ -95,9 +95,13 @@ function activateCard(column: BoardColumnPresentation, card: BoardCardPresentati
   emit('activate-card', activation(column, card))
 }
 
-function viewAll(columnKey: string): void {
-  if (!props.canDrillThrough) return
-  emit('view-all', columnKey)
+function columnDrillEnabled(column: BoardColumnPresentation): boolean {
+  return props.canDrillThrough && column.drillThroughEnabled !== false
+}
+
+function viewAll(column: BoardColumnPresentation): void {
+  if (!columnDrillEnabled(column)) return
+  emit('view-all', column.key)
 }
 
 function chartPoints(
@@ -261,8 +265,8 @@ function metricValueType(valueType: BoardValueType): string {
             <span v-if="column.hasMore">还有 {{ column.remainingCount }} 条</span>
             <button
               type="button"
-              :disabled="!canDrillThrough"
-              @click.stop="viewAll(column.key)"
+              :disabled="!columnDrillEnabled(column)"
+              @click.stop="viewAll(column)"
             >
               查看全部
             </button>

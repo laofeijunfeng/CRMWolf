@@ -12,11 +12,28 @@ import type {
 import type { ContractBoardResponse } from '@/schemas/contractBoard'
 import { formatLocalDate } from '@/utils/format'
 
-const props = defineProps<{ response: ContractBoardResponse }>()
+const props = withDefaults(defineProps<{
+  response?: ContractBoardResponse | null
+  loading?: boolean
+  refreshing?: boolean
+  stale?: boolean
+  error?: Error | null
+  canDrillThrough?: boolean
+  drillThroughColumnKeys?: readonly string[] | null
+}>(), {
+  response: null,
+  loading: false,
+  refreshing: false,
+  stale: false,
+  error: null,
+  canDrillThrough: true,
+  drillThroughColumnKeys: null,
+})
 
 const emit = defineEmits<{
   'activate-card': [payload: BoardCardActivation]
   'view-all': [columnKey: string]
+  retry: []
 }>()
 
 type ContractColumn = ContractBoardResponse['columns'][number]
@@ -91,45 +108,60 @@ function contractChartPoint(source: ContractTrend): BoardTrendPointPresentation 
   }
 }
 
-const projection = computed<BoardProjection>(() => ({
-  metrics: props.response.summary.map((metric) => ({
-    key: metric.key,
-    label: metric.label,
-    value: metric.value,
-    valueType: metric.value_type,
-    ...(metric.secondary_label == null || metric.secondary_value == null
-      ? {}
+function columnDrillEnabled(columnKey: string): boolean {
+  const allowed = props.drillThroughColumnKeys
+  return allowed === null || allowed.includes(columnKey)
+}
+
+const projection = computed<BoardProjection | null>(() => {
+  const response = props.response
+  if (response === null) return null
+  return {
+    metrics: response.summary.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      value: metric.value,
+      valueType: metric.value_type,
+      ...(metric.secondary_label == null || metric.secondary_value == null
+        ? {}
+        : {
+            secondaryLabel: metric.secondary_label,
+            secondaryValue: metric.secondary_value,
+          }),
+    })),
+    columns: response.columns.map((column) => ({
+      key: column.key,
+      label: column.label,
+      tone: column.tone,
+      countLabel: String(column.count),
+      amountLabel: column.amount,
+      hasMore: column.has_more,
+      remainingCount: column.remaining_count,
+      drillThroughEnabled: columnDrillEnabled(column.key),
+      cards: column.items.map((item) => presentCard(column, item)),
+    })),
+    trend: response.trends.length === 0
+      ? null
       : {
-          secondaryLabel: metric.secondary_label,
-          secondaryValue: metric.secondary_value,
-        }),
-  })),
-  columns: props.response.columns.map((column) => ({
-    key: column.key,
-    label: column.label,
-    tone: column.tone,
-    countLabel: String(column.count),
-    amountLabel: column.amount,
-    hasMore: column.has_more,
-    remainingCount: column.remaining_count,
-    cards: column.items.map((item) => presentCard(column, item)),
-  })),
-  trend: props.response.trends.length === 0
-    ? null
-    : {
-        title: '合同趋势',
-        description: '按完整月份统计合同数和金额',
-        series: trendSeries,
-        points: props.response.trends.map(contractChartPoint),
-      },
-}))
+          title: '合同趋势',
+          description: '按完整月份统计合同数和金额',
+          series: trendSeries,
+          points: response.trends.map(contractChartPoint),
+        },
+  }
+})
 </script>
 
 <template>
   <BoardView
     :projection="projection"
-    :can-drill-through="true"
+    :loading="props.loading"
+    :refreshing="props.refreshing"
+    :stale="props.stale"
+    :error="props.error"
+    :can-drill-through="props.canDrillThrough"
     @activate-card="emit('activate-card', $event)"
     @view-all="emit('view-all', $event)"
+    @retry="emit('retry')"
   />
 </template>
