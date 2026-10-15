@@ -861,9 +861,12 @@ const handleBoardCardAction = (payload: { id: string | number, action: 'edit' | 
   else if (payload.action === 'create-opportunity' && item.action_state.can_create_opportunity) handleCreateOpportunity(record, true)
 }
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
-  const refreshed = await fetchCustomerList()
+  const refreshed = boardEligible.value
+    ? await refreshActiveCustomerView()
+    : await fetchCustomerList()
   if (!refreshed) {
-    toast.warning(`${operationLabel}已成功，但客户列表刷新失败，请稍后重试。`)
+    const viewLabel = boardEligible.value ? '客户看板' : '客户列表'
+    toast.warning(`${operationLabel}已成功，但${viewLabel}刷新失败，请稍后重试。`)
   }
   return refreshed
 }
@@ -1015,7 +1018,9 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
     }
   }
 
-  const refreshed = await fetchCustomerList()
+  const refreshed = boardEligible.value
+    ? await refreshActiveCustomerView()
+    : await fetchCustomerList()
   const detailMatches = payload?.entityType === 'customer'
     && selectedCustomerId.value !== null
     && String(payload.entityId) === String(selectedCustomerId.value)
@@ -1025,7 +1030,7 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
 
   if (!refreshed || !detailRefreshed) {
     const failedScopes: string[] = []
-    if (!refreshed) failedScopes.push('客户列表')
+    if (!refreshed) failedScopes.push(boardEligible.value ? '客户看板' : '客户列表')
     if (!detailRefreshed) failedScopes.push('客户详情')
     toast.warning(`客户已保存，但${failedScopes.join('和')}刷新失败，请稍后重试。`)
   }

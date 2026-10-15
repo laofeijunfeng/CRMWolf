@@ -6,6 +6,7 @@ import { normalizeCustomerDisplayMode, type ViewDisplayMode } from '@/api/viewPr
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
+import { toast } from 'vue-sonner'
 
 const mocks = vi.hoisted(() => ({
   getCustomers: vi.fn(),
@@ -500,6 +501,31 @@ describe('Customers board integration', () => {
     await board.get('[data-testid="board-card-action-delete"]').trigger('click')
     await flushPromises()
     expect(mocks.deleteCustomer).toHaveBeenCalledWith('cus_public_1')
+    wrapper.unmount()
+  })
+
+  it('refreshes the ordinary board after a rendered delete without a list request or false failure warning', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await switchMode(wrapper, 'board')
+
+    const refreshedBoard: CustomerBoardResponse = {
+      ...boardResponse,
+      columns: boardResponse.columns.map((column) => ({ ...column, count: 0, items: [] })),
+    }
+    mocks.getCustomers.mockClear()
+    mocks.getCustomerBoard.mockClear()
+    mocks.getCustomerBoard.mockResolvedValueOnce(refreshedBoard)
+
+    await wrapper.get('[data-column-key="following"] [data-testid="board-card-action-delete"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.deleteCustomer).toHaveBeenCalledWith('cus_public_1')
+    expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
+    expect(mocks.getCustomers).not.toHaveBeenCalled()
+    expect(mocks.getPublicCustomers).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('北方客户')
     wrapper.unmount()
   })
 

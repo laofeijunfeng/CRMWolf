@@ -20,8 +20,10 @@ describe('critical list mutation refresh contract', () => {
     const source = viewSources.customers
 
     expect(source).toContain('const refreshCustomerListAfterMutation = async')
-    expect(declarationBody(source, 'const refreshCustomerListAfterMutation = async'))
-      .toContain('const refreshed = await fetchCustomerList()')
+    const refreshBody = declarationBody(source, 'const refreshCustomerListAfterMutation = async')
+    expect(refreshBody).toContain('await fetchCustomerList()')
+    expect(refreshBody).toContain('boardEligible.value')
+    expect(refreshBody).toContain('await refreshActiveCustomerView()')
 
     for (const declaration of [
       'const handleOpportunitySuccess = async',
