@@ -443,34 +443,38 @@ watch(open, (isOpen) => {
             @update:model-value="handleDateSelect(activeField, $event)"
             @update:placeholder="handlePlaceholderChange"
           />
-        </section>
-      </div>
 
-      <div v-if="activeFilterCount > 0" class="filter-footer">
-        <Button type="button" variant="ghost" size="sm" @click="resetFilters">
-          清空
-        </Button>
-        <Button
-          v-if="canSaveView"
-          type="button"
-          variant="ghost"
-          size="sm"
-          :disabled="saveViewLoading"
-          @click="saveAsView"
-        >
-          另存为视图
-        </Button>
+          <div v-if="activeFilterCount > 0" class="filter-footer">
+            <Button type="button" variant="ghost" size="sm" @click="resetFilters">
+              清空
+            </Button>
+            <Button
+              v-if="canSaveView"
+              type="button"
+              variant="ghost"
+              size="sm"
+              :disabled="saveViewLoading"
+              @click="saveAsView"
+            >
+              另存为视图
+            </Button>
+          </div>
+        </section>
       </div>
     </PopoverContent>
   </Popover>
 </template>
 
+
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
 :global(.list-filter-popover) {
-  width: auto;
+  width: max-content;
+  max-width: calc(100vw - #{$wolf-space-xl-v2});
+  max-height: calc(100vh - #{$wolf-space-xl-v2});
   padding: 0;
+  overflow: auto;
 }
 
 .filter-menu {
@@ -514,11 +518,18 @@ watch(open, (isOpen) => {
 }
 
 .filter-field-panel {
-  width: 280px;
-  max-height: 420px;
+  width: max-content;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 220px));
+  max-height: calc(100vh - #{$wolf-space-xl-v2});
   padding: $wolf-space-sm-v2;
   overflow: auto;
   border-left: 1px solid $wolf-border-light-v2;
+}
+
+.filter-field-panel :deep(.date-picker-calendar) {
+  width: 100%;
+  max-width: 100%;
 }
 
 .filter-field-panel h3 {
@@ -554,7 +565,20 @@ watch(open, (isOpen) => {
   display: flex;
   align-items: center;
   gap: $wolf-space-xs-v2;
-  min-height: 32px;
+  min-height: 44px;
+}
+
+.filter-option-row :deep(button) {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+}
+
+.filter-field-panel :deep(.date-picker-calendar__cell-trigger),
+.filter-field-panel :deep(.date-picker-calendar__year-trigger),
+.filter-field-panel :deep(.date-picker-calendar__month-trigger) {
+  min-width: 0;
 }
 
 .filter-option-empty {
@@ -564,18 +588,28 @@ watch(open, (isOpen) => {
 .filter-footer {
   display: flex;
   justify-content: space-between;
-  padding: $wolf-space-xs-v2;
+  margin: $wolf-space-sm-v2 (-$wolf-space-sm-v2) (-$wolf-space-sm-v2);
+  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
   border-top: 1px solid $wolf-border-light-v2;
 }
 
 @media (max-width: 767px) {
   .filter-menu {
-    flex-direction: column;
+    display: block;
+  }
+
+  :global(.list-filter-popover) {
+    max-height: calc(100dvh - #{$wolf-space-xl-v2});
   }
 
   .filter-field-list,
   .filter-field-panel {
     width: min(320px, calc(100vw - #{$wolf-space-xl-v2}));
+    max-height: none;
+  }
+
+  .filter-field-list {
+    overflow: visible;
   }
 
   .filter-field-panel {
