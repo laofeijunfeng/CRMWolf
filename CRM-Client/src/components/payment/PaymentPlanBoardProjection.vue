@@ -149,13 +149,13 @@ const projection = computed<BoardProjection | null>(() => {
     metrics: response.summary.map((metric) => ({
       key: metric.key,
       label: metric.label,
-      value: metric.value,
+      value: metric.value_type === 'amount' ? metric.value : String(metric.value),
       valueType: metric.value_type,
       ...(metric.secondary_label == null || metric.secondary_value == null
         ? {}
         : {
             secondaryLabel: metric.secondary_label,
-            secondaryValue: metric.secondary_value,
+            secondaryValue: metric.value_type === 'amount' ? metric.secondary_value : String(metric.secondary_value),
           }),
     })),
     columns: response.columns.map((column) => ({

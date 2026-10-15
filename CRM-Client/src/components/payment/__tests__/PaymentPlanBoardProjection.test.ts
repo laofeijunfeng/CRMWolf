@@ -163,7 +163,7 @@ describe('PaymentPlanBoardProjection', () => {
     expect(card.text()).toContain('¥10,000.00')
     expect(card.text()).toContain('¥2,500.00')
     expect(card.text()).toContain('¥7,500.00')
-    expect(column.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))).toEqual([
+    expect(column.findAllComponents({ name: 'AmountText' }).map((amount: { props: (name: string) => unknown }) => amount.props('value'))).toEqual([
       '7500.00',
       '10000.00',
     ])

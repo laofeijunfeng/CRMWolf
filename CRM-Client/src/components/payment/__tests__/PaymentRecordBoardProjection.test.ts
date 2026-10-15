@@ -145,7 +145,7 @@ describe('PaymentRecordBoardProjection', () => {
     expect(approved.text()).toContain('已确认')
     expect(approved.text()).toContain('91')
     expect(approved.text()).not.toContain('confirmed')
-    expect(approved.findAllComponents({ name: 'AmountText' }).map((amount) => amount.props('value'))).toEqual([
+    expect(approved.findAllComponents({ name: 'AmountText' }).map((amount: { props: (name: string) => unknown }) => amount.props('value'))).toEqual([
       '6400.00',
       '6400.00',
     ])

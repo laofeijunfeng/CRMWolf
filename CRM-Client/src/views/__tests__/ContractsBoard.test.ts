@@ -4,7 +4,6 @@ import { nextTick, ref, type Ref } from 'vue'
 import type { ContractBoardParams, ContractListResponse } from '@/api/contract'
 import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ContractBoardResponse } from '@/schemas/contractBoard'
 import { toast } from 'vue-sonner'
 
@@ -152,10 +151,19 @@ const contract: ContractListResponse = {
   customer_name: '星河科技',
   opportunity_id: 'opp_1',
   opportunity_name: '星河续购',
-  total_amount: 8800,
+  signing_contact_id: 7,
+  user_count: 20,
+  total_amount: '8800.00',
+  license_type: 'SUBSCRIPTION',
+  subscription_years: null,
+  standard_unit_price: '440.00',
   status: 'SIGNED',
   approval_phase: 'approved',
+  signing_date: null,
+  effective_date: null,
+  expiry_date: null,
   owner_id: '42',
+  creator_id: '42',
   owner_info: { id: '42', name: '李娜' },
   created_time: '2026-09-01T00:00:00',
   last_modified_time: '2026-09-02T00:00:00',

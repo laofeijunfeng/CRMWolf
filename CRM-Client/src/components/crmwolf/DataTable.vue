@@ -175,6 +175,8 @@ interface Props {
   /** 导出弹窗标题与文件名前缀 */
   exportTitle?: string
   /** 异步导出处理器；组件等待 Promise，成功后关闭弹窗，失败时保留弹窗与已选字段 */
+  // exactOptionalPropertyTypes rejects an undefined default for a function prop.
+  // eslint-disable-next-line vue/require-default-prop
   exportHandler?: (fieldKeys: string[]) => Promise<void>
 }
 
@@ -221,7 +223,6 @@ const props = withDefaults(defineProps<Props>(), {
   viewSaveLoading: false,
   exportEnabled: false,
   exportTitle: '列表',
-  exportHandler: undefined,
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -1135,7 +1136,7 @@ onBeforeUnmount(() => {
         </ErrorState>
       </div>
       <div
-        v-else-if="props.viewDisplayMode !== 'board'"
+        v-else
         class="data-table-content"
         :class="[
           { 'has-mobile-cards': mobileMode === 'card' },

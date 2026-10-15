@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h, nextTick, reactive, ref, type Ref, type VNode } from 'vue'
+import { defineComponent, h, nextTick, ref, type Ref, type VNode } from 'vue'
 import type { CustomerBoardParams, CustomerResponse } from '@/api/customer'
 import { normalizeCustomerDisplayMode, type ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -52,7 +52,7 @@ const stubs = vi.hoisted(() => {
   return {
     journey: defineStub({
       name: 'CustomerDealJourneyHoverCard',
-      setup: (_props: unknown, { slots }: { slots: { trigger?: () => unknown } }): (() => unknown) => () => render('div', slots.trigger?.()),
+      setup: (_props: unknown, { slots }: { slots: { trigger?: () => VNode | null } }): (() => VNode | null) => () => slots.trigger?.() ?? null,
     }),
     detail: defineStub({
       name: 'CustomerDetailSheet',
@@ -253,25 +253,43 @@ const customer: CustomerResponse = {
   id: 'cus_public_1',
   public_id: 'cus_public_1',
   account_name: '北方客户',
+  industry: 'finance',
+  industry_info: { code: 'finance', name: '金融' },
   city: '北京',
+  address: null,
+  company_scale: null,
+  source: 'event',
+  source_info: { name: '展会', is_active: true, public_id: 'src_event' },
   status: 0,
   derived_status: 'following',
-  industry_info: { name: '金融' },
-  source_info: { name: '展会' },
   owner_id: '42',
-  owner_info: { id: '42', name: '王销售' },
+  owner_info: { id: 42, name: '王销售', feishu_open_id: 'ou_42' },
+  source_lead_id: null,
+  default_procurement_method_id: null,
+  loss_reason: null,
+  return_reason: null,
+  returned_time: null,
+  creator_id: '42',
   version: 3,
+  license_expiry_date: null,
+  license_authorized_users: null,
+  license_type: null,
   created_time: '2026-09-01T00:00:00',
   last_modified_time: '2026-09-02T00:00:00',
 }
 
+function withoutOwner(source: CustomerResponse): CustomerResponse {
+  const rest: CustomerResponse = { ...source }
+  delete rest.owner_info
+  return rest
+}
+
 const publicCustomer: CustomerResponse = {
-  ...customer,
+  ...withoutOwner(customer),
   id: 'cus_public_pool',
   public_id: 'cus_public_pool',
   account_name: '公海客户',
   owner_id: null,
-  owner_info: null,
 }
 
 const boardResponse: CustomerBoardResponse = {

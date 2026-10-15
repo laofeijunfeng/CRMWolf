@@ -839,7 +839,6 @@ const boardCustomerRecord = (id: string | number): CustomerResponse | null => {
       license_expiry_date: item.metadata.license_expiry_date,
       license_authorized_users: null,
       license_type: item.metadata.license_type,
-      owner_info: item.owner === null ? undefined : { id: item.owner.id, name: item.owner.name },
     }
   }
   return null

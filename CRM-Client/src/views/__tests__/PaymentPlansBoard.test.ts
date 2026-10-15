@@ -4,7 +4,6 @@ import { nextTick, ref, type Ref } from 'vue'
 import type { PaymentPlanBoardParams, PaymentPlanWithDetails } from '@/api/payment'
 import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
-import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
 import { toast } from 'vue-sonner'
 
@@ -152,6 +151,7 @@ import PaymentPlans from '@/views/PaymentPlans.vue'
 
 const plan: PaymentPlanWithDetails = {
   id: 64,
+  contract_id: 81,
   plan_number: 'PP-064',
   stage_name: '首期',
   planned_amount: 5000,

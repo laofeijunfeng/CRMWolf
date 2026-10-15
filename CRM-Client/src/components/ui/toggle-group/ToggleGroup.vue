@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 const props = defineProps<{
   class?: HTMLAttributes['class']
   type?: 'single'
-  modelValue?: string
+  modelValue?: string | undefined
   disabled?: boolean
 }>()
 
@@ -22,7 +22,7 @@ function emitModelValue(value: unknown): void {
 <template>
   <ToggleGroupRoot
     type="single"
-    :model-value="props.modelValue"
+    :model-value="props.modelValue ?? ''"
     :disabled="props.disabled"
     :class="cn(props.class)"
     @update:model-value="emitModelValue"

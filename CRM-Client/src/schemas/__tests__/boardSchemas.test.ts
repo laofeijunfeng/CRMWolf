@@ -30,7 +30,6 @@ import {
 } from '@/schemas/customerBoard'
 import {
   OpportunityBoardResponseSchema,
-  type OpportunityBoardResponse,
 } from '@/schemas/opportunityBoard'
 import {
   PaymentPlanBoardResponseSchema,
@@ -439,14 +438,24 @@ const cases: readonly BoardCase[] = [
 ]
 
 
+function recordList(payload: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const value = payload[key]
+  if (!Array.isArray(value)) throw new Error(`${key} is not a list`)
+  return value.filter((item): item is Record<string, unknown> => (
+    typeof item === 'object' && item !== null && !Array.isArray(item)
+  ))
+}
+
 function firstColumn(payload: Record<string, unknown>): Record<string, unknown> {
-  const columns = payload.columns as Record<string, unknown>[]
-  return columns[0]
+  const column = recordList(payload, 'columns')[0]
+  if (column === undefined) throw new Error('board column is missing')
+  return column
 }
 
 function firstMetric(payload: Record<string, unknown>): Record<string, unknown> {
-  const summary = payload.summary as Record<string, unknown>[]
-  return summary[0]
+  const metric = recordList(payload, 'summary')[0]
+  if (metric === undefined) throw new Error('board metric is missing')
+  return metric
 }
 
 describe('strict board response schemas', () => {
@@ -458,25 +467,27 @@ describe('strict board response schemas', () => {
   it.each(cases)('rejects malformed $name counts, amounts, and status keys', ({ name, schema, populated, columnKeys }) => {
     for (const count of [true, 1.5, -1]) {
       const payload = structuredClone(populated)
-      firstColumn(payload).count = count
+      firstColumn(payload)['count'] = count
       expect(schema.safeParse(payload).success, `${name} count ${String(count)}`).toBe(false)
     }
 
     const amountPayload = structuredClone(populated)
-    firstColumn(amountPayload).amount = '12'
+    firstColumn(amountPayload)['amount'] = '12'
     expect(schema.safeParse(amountPayload).success).toBe(false)
 
     const unknownPayload = structuredClone(populated)
-    unknownPayload.unexpected = true
+    unknownPayload['unexpected'] = true
     expect(schema.safeParse(unknownPayload).success).toBe(false)
 
     const statusPayload = structuredClone(populated)
     const column = firstColumn(statusPayload)
     if (name === 'opportunity') {
-      const items = column.items as Record<string, unknown>[]
-      items[0].status = 'not-a-status'
+      const items = recordList(column, 'items')
+      const item = items[0]
+      if (item === undefined) throw new Error('board item is missing')
+      item['status'] = 'not-a-status'
     } else {
-      column.key = 'not-a-column'
+      column['key'] = 'not-a-column'
     }
     expect(schema.safeParse(statusPayload).success).toBe(false)
     expect(columnKeys).not.toContain('not-a-column')
@@ -488,8 +499,9 @@ describe('strict board response schemas', () => {
 
     for (const value of [Number.POSITIVE_INFINITY, Number.NaN, -0.1, 100.1]) {
       const payload = structuredClone(customerPayload(true))
-      const percentage = (payload.summary as Record<string, unknown>[])[1]
-      percentage.value = value
+      const percentage = recordList(payload, 'summary')[1]
+      if (percentage === undefined) throw new Error('percentage metric is missing')
+      percentage['value'] = value
       expect(CustomerBoardResponseSchema.safeParse(payload).success).toBe(false)
     }
   })
@@ -497,9 +509,9 @@ describe('strict board response schemas', () => {
   it.each(cases)('rejects a $name secondary label without its value', ({ schema, populated, secondaryKey }) => {
     const payload = structuredClone(populated)
     const metric = firstMetric(payload)
-    metric.key = secondaryKey
-    metric.secondary_label = '对比'
-    metric.secondary_value = null
+    metric['key'] = secondaryKey
+    metric['secondary_label'] = '对比'
+    metric['secondary_value'] = null
     expect(schema.safeParse(payload).success).toBe(false)
   })
 })

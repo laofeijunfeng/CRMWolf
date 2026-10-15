@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -18,6 +18,7 @@ from sqlalchemy.types import BigInteger
 
 from app.api.payments import router as payments_router
 from app.core import deps
+from app.models.approval import Approval
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
@@ -47,6 +48,13 @@ def db_session():
         PaymentRecord.__table__,
         InvoiceApplication.__table__,
     ]
+    approval_metadata = MetaData()
+    approval_table = Approval.__table__.to_metadata(approval_metadata)
+    approval_table.indexes.clear()
+    for foreign_key_constraint in list(approval_table.foreign_key_constraints):
+        approval_table.constraints.remove(foreign_key_constraint)
+    approval_table.foreign_keys.clear()
+    tables.append(approval_table)
     with engine.begin() as connection:
         for table in tables:
             connection.execute(CreateTable(table))
@@ -317,6 +325,7 @@ def test_payment_record_export_maps_confirmed_tab_to_approved(
         db_session,
         record_number="PR-CONFIRMED",
         confirmation_status=PaymentConfirmationStatus.CONFIRMED,
+        approval_phase="approved",
         payment_date=date(2026, 8, 11),
     )
     db_session.commit()

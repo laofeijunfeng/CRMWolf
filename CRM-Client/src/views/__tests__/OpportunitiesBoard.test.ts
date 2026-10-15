@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { nextTick, reactive, ref, type Ref } from 'vue'
+import { nextTick, ref, type Ref } from 'vue'
 import type { OpportunityBoardParams, OpportunityListResponse } from '@/api/opportunity'
 import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -125,20 +125,6 @@ interface SavedViewOptions {
   refresh: () => Promise<unknown>
 }
 
-interface OpportunityPageState {
-  activeFilters: ListFilterCondition[]
-  activeSorts: ListSortCondition[]
-  displayMode: 'table' | 'board'
-}
-
-function pageState(wrapper: VueWrapper): OpportunityPageState {
-  const exposed = wrapper.vm as object
-  if (!('displayMode' in exposed) || !('activeFilters' in exposed)) {
-    throw new Error('opportunity page state is not exposed')
-  }
-  return exposed as OpportunityPageState
-}
-
 vi.mock('@/composables/useCustomFilterViews', () => ({
   isCustomFilterViewTab: (tabKey: string): boolean => tabKey.startsWith('custom-view:'),
   useCustomFilterViews: (options: SavedViewOptions): Record<string, unknown> => ({
@@ -165,17 +151,27 @@ import Opportunities from '@/views/Opportunities.vue'
 const opportunity: OpportunityListResponse = {
   id: 'opp_public_1',
   public_id: 'opp_public_1',
+  opportunity_number: 'OP-001',
   opportunity_name: '星河续购',
   customer_id: 'cus_1',
   customer_name: '星河科技',
+  procurement_method_id: null,
+  procurement_method_info: null,
   total_amount: 8800,
   user_count: 20,
+  unit_price: 440,
   license_type: 'SUBSCRIPTION',
+  subscription_years: null,
   purchase_type: 'RENEWAL',
+  decision_maker_count: null,
   expected_closing_date: '2026-11-30',
+  stage_id: null,
+  stage: null,
+  stage_info: null,
   status: 0,
   approval_phase: 'approved',
   owner_id: '42',
+  creator_id: '42',
   owner_info: { id: '42', name: '李娜' },
   created_time: '2026-09-01T00:00:00',
   last_modified_time: '2026-09-02T00:00:00',

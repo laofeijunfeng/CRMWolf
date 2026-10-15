@@ -8,6 +8,8 @@ import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
 import SelectField from '../SelectField.vue'
 import type { ListFieldDefinition } from '../listFieldCatalog'
+import type { ListFilterCondition } from '../listFilterTypes'
+import type { ListSortCondition } from '../listSortTypes'
 
 const fields: ListFieldDefinition[] = [{ key: 'name', label: '名称', type: 'text', column: true }]
 const data = [{ id: 1, name: '审批单' }]
@@ -786,11 +788,10 @@ describe('customer display mode normalization and saved-view rollback', () => {
 
   it('saves normalized board after a successful customer view apply and rolls back synchronously', async () => {
     const activeTab = ref('all')
-    const activeFilters = ref([{ field: 'status', op: 'eq', value: 'following' }])
-    const activeSorts = ref([{ field: 'updated_time', direction: 'desc' }])
+    const activeFilters = ref<ListFilterCondition[]>([{ field: 'status', op: 'eq', value: 'following' }])
+    const activeSorts = ref<ListSortCondition[]>([{ field: 'updated_time', direction: 'desc' }])
     const activeColumns = ref([{ key: 'name', order: 0, visible: true }])
     const displayMode = ref<'table' | 'board'>('table')
-    const page = ref(3)
     let resolveRefresh: ((value: boolean) => void) | undefined
     const refresh = vi.fn(() => new Promise<boolean>((resolve) => {
       resolveRefresh = resolve
@@ -831,7 +832,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
     resolveRefresh = undefined
     const retryPromise = views.retryViewApply()
     await Promise.resolve()
-    const resolveRetry = resolveRefresh
+    const resolveRetry = resolveRefresh as ((value: boolean) => void) | undefined
     if (resolveRetry === undefined) throw new Error('retry was not started')
     resolveRetry(true)
     await retryPromise

@@ -32,7 +32,9 @@ const props = withDefaults(defineProps<{
   exportEnabled?: boolean
   exportTitle?: string
   exportTotal?: number
-  exportHandler?: (fieldKeys: string[]) => Promise<void>
+  // exactOptionalPropertyTypes rejects an undefined default for a function prop.
+  // eslint-disable-next-line vue/require-default-prop
+  exportHandler?: ((fieldKeys: string[]) => Promise<void>) | undefined
 }>(), {
   viewDisplayMode: null,
   viewDisplayModeEnabled: false,
@@ -44,12 +46,11 @@ const props = withDefaults(defineProps<{
   exportEnabled: false,
   exportTitle: '列表',
   exportTotal: 0,
-  exportHandler: undefined,
 })
 
 const emit = defineEmits<{
   'update:sorts': [value: ListSortCondition[]]
-  'update:view-display-mode': [value: ViewDisplayMode]
+  'update:view-display-mode': [value: 'table' | 'board']
   'save-current-view': []
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -186,7 +187,7 @@ watch(isCompactToolbar, async (compact) => {
     />
 
     <DataTableExportDialog
-      v-if="exportEnabled && exportHandler !== undefined"
+      v-if="exportEnabled && exportFields !== undefined && exportTotal !== undefined && exportTitle !== undefined && exportHandler !== undefined"
       :fields="exportFields"
       :total="exportTotal"
       :title="exportTitle"
