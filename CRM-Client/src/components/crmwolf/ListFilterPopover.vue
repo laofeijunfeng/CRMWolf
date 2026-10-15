@@ -1,34 +1,31 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { Filter, Plus, Trash2 } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date'
+import { Filter } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { DatePicker } from '@/components/ui/date-picker'
-import MultiSelect from './MultiSelect.vue'
+import Calendar from '@/components/ui/calendar/Calendar.vue'
 import TableToolbarButton from './TableToolbarButton.vue'
-import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger
 } from '@/components/ui/popover'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select'
 import { formatLocalDate } from '@/utils/format'
-import { listFilterOperatorsByType, normalizeListFilterOperator } from './listFilterTypes'
-import type { ListFilterCondition, ListFilterField, ListFilterOperator, ListFilterOperatorOption } from './listFilterTypes'
+import {
+  isDatePresetOperator,
+  listFilterOperatorsByType,
+  normalizeListFilterOperator,
+  operatorNeedsValue
+} from './listFilterTypes'
+import type {
+  ListFilterCondition,
+  ListFilterField,
+  ListFilterOperator
+} from './listFilterTypes'
 
-interface EditableCondition {
-  id: string
-  field: string
-  op: ListFilterOperator
-  value: string | string[]
-}
+const NARROW_QUERY = '(max-width: 767px)'
 
 const props = withDefaults(defineProps<{
   fields: ListFilterField[]
@@ -49,160 +46,285 @@ const emit = defineEmits<{
 }>()
 
 const open = ref(false)
-const localConditions = ref<EditableCondition[]>([])
+const activeFieldKey = ref('')
+const narrow = ref(false)
+const optionQuery = ref('')
+const textDraft = ref('')
+const numberDraft = ref('')
+const draftOperator = ref<ListFilterOperator | ''>('')
+const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
+let hoverTimer: ReturnType<typeof setTimeout> | undefined
+let mediaQuery: MediaQueryList | undefined
 
-const firstField = computed(() => props.fields[0])
-
-const activeFilterCount = computed(() => normalizeConditions(props.modelValue).length)
-const localValidConditions = computed(() => normalizeConditions(localConditions.value))
-const canSaveView = computed(() => props.saveViewEnabled && localValidConditions.value.length > 0)
+const activeConditions = computed(() => normalizeConditions(props.modelValue))
+const activeFilterCount = computed(() => activeConditions.value.length)
+const canSaveView = computed(() => props.saveViewEnabled && activeConditions.value.length > 0)
+const activeField = computed(() => props.fields.find((field) => field.key === activeFieldKey.value))
+const activeOperatorOptions = computed(() => {
+  if (activeField.value === undefined) return []
+  const operators = listFilterOperatorsByType[activeField.value.type]
+  const allowed = activeField.value.operators
+  return allowed === undefined ? operators : operators.filter((operator) => allowed.includes(operator.value))
+})
+const filteredOptions = computed(() => {
+  const options = activeField.value?.options ?? []
+  const query = optionQuery.value.trim().toLowerCase()
+  if (query === '') return options
+  return options.filter((option) => option.label.toLowerCase().includes(query))
+})
 
 function getField(fieldKey: string): ListFilterField | undefined {
   return props.fields.find((field) => field.key === fieldKey)
 }
 
-function getOperatorOptions(fieldKey: string): readonly ListFilterOperatorOption[] {
-  const field = getField(fieldKey) ?? firstField.value
-  return field ? listFilterOperatorsByType[field.type] : []
+function conditionFor(fieldKey: string): ListFilterCondition | undefined {
+  return [...activeConditions.value].reverse().find((condition) => condition.field === fieldKey)
+}
+function activeOperator(field: ListFilterField): ListFilterOperator {
+  if (draftOperator.value !== '' && activeFieldKey.value === field.key) return draftOperator.value
+  const current = conditionFor(field.key)
+  if (current === undefined) return listFilterOperatorsByType[field.type][0]?.value ?? 'eq'
+  return normalizeListFilterOperator(field.type, current.op) ?? listFilterOperatorsByType[field.type][0]?.value ?? 'eq'
 }
 
-function hasValueInput(condition: EditableCondition): boolean {
-  return condition.op !== 'is_empty' && condition.op !== 'is_not_empty'
+function selectedEnumValues(field: ListFilterField): string[] {
+  const current = conditionFor(field.key)
+  if (current === undefined || !Array.isArray(current.value)) return []
+  return current.value.map((item) => String(item))
 }
 
-function isEnumCondition(condition: EditableCondition): boolean {
-  return getField(condition.field)?.type === 'enum'
+function selectedDate(field: ListFilterField): DateValue | undefined {
+  const current = conditionFor(field.key)
+  if (current === undefined || current.op !== 'eq' || typeof current.value !== 'string') return undefined
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(current.value)) return undefined
+  const [year, month, day] = current.value.split('-').map(Number)
+  if (year === undefined || month === undefined || day === undefined) return undefined
+  return new CalendarDate(year, month, day)
 }
 
-function getConditionTextValue(condition: EditableCondition): string {
-  return Array.isArray(condition.value) ? '' : condition.value
-}
-
-function selectedEnumValues(condition: EditableCondition): string[] {
-  if (Array.isArray(condition.value)) return condition.value
-  return condition.value === '' ? [] : [condition.value]
-}
-
-function handleEnumValueChange(condition: EditableCondition, value: string[]): void {
-  condition.value = value
-}
-
-function createCondition(condition?: ListFilterCondition): EditableCondition {
-  const field = getField(condition?.field ?? '') ?? firstField.value
-  const operatorOptions = field ? listFilterOperatorsByType[field.type] : []
-  const op = field !== undefined && condition?.op !== undefined
-    ? normalizeListFilterOperator(field.type, condition.op) ?? operatorOptions[0]?.value ?? 'contains'
-    : operatorOptions[0]?.value ?? 'contains'
-  const rawValue = condition?.value
-  const value = Array.isArray(rawValue)
-    ? rawValue.map((item) => String(item))
-    : rawValue == null
-      ? ''
-      : field?.type === 'enum'
-        ? [String(rawValue)]
-        : String(rawValue)
-
-  return {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    field: field?.key ?? '',
-    op,
-    value
-  }
-}
-
-function normalizeConditions(conditions: ListFilterCondition[] | EditableCondition[]): ListFilterCondition[] {
+function normalizeConditions(conditions: ListFilterCondition[]): ListFilterCondition[] {
   const result: ListFilterCondition[] = []
-
   for (const condition of conditions) {
     const field = getField(condition.field)
     if (!field) continue
-
+    const allowed = field.operators
     const op = normalizeListFilterOperator(field.type, condition.op)
-    if (op === undefined) continue
-
-    if (op === 'is_empty' || op === 'is_not_empty') {
+    if (op === undefined || (allowed !== undefined && !allowed.includes(op))) continue
+    if (!operatorNeedsValue(op)) {
       result.push({ field: field.key, op, value: null })
       continue
     }
-
-    const value = 'value' in condition ? condition.value : ''
+    const value = condition.value
     if (Array.isArray(value) && value.length === 0) continue
     if (!Array.isArray(value) && (value === '' || value == null)) continue
-
     result.push({
       field: field.key,
       op,
       value: field.type === 'number' && !Array.isArray(value) ? Number(value) : value
     })
   }
-
   return result
 }
 
-function syncLocalConditions(): void {
-  localConditions.value = props.modelValue.length
-    ? props.modelValue.map((condition) => createCondition(condition))
-    : [createCondition()]
-}
-
-function handleFieldChange(condition: EditableCondition, fieldKey: string): void {
-  condition.field = fieldKey
-  condition.op = getOperatorOptions(fieldKey)[0]?.value ?? 'contains'
-  condition.value = getField(fieldKey)?.type === 'enum' ? [] : ''
-}
-
-function addCondition(): void {
-  localConditions.value.push(createCondition())
-}
-
-function removeCondition(id: string): void {
-  localConditions.value = localConditions.value.filter((condition) => condition.id !== id)
-  if (localConditions.value.length === 0) {
-    addCondition()
+function syncDrafts(field: ListFilterField, keepOperator = false): void {
+  optionQuery.value = ''
+  if (!keepOperator) draftOperator.value = ''
+  const current = conditionFor(field.key)
+  const operator = activeOperator(field)
+  if (field.type === 'text') {
+    textDraft.value = current !== undefined && operatorNeedsValue(operator) && !Array.isArray(current.value)
+      ? String(current.value ?? '')
+      : ''
+  }
+  if (field.type === 'number') {
+    numberDraft.value = current !== undefined && operatorNeedsValue(operator) && !Array.isArray(current.value)
+      ? String(current.value ?? '')
+      : ''
+  }
+  if (field.type === 'date') {
+    calendarPlaceholder.value = selectedDate(field) ?? today(getLocalTimeZone())
   }
 }
 
-function parseLocalDate(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
-
-  const [year, month, day] = value.split('-').map(Number)
-  if (year === undefined || month === undefined || day === undefined) return null
-
-  const date = new Date(year, month - 1, day)
-  return Number.isNaN(date.getTime()) ? null : date
+function filterValuesEqual(
+  left: ListFilterCondition['value'],
+  right: ListFilterCondition['value']
+): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+    return left.every((value, index) => value === right[index])
+  }
+  return left === right
 }
 
-function handleDateChange(condition: EditableCondition, date: Date | null): void {
-  condition.value = date !== null ? formatLocalDate(date) : ''
+function conditionsEqual(left: ListFilterCondition[], right: ListFilterCondition[]): boolean {
+  if (left.length !== right.length) return false
+  return left.every((condition, index) => {
+    const other = right[index]
+    return other !== undefined
+      && condition.field === other.field
+      && condition.op === other.op
+      && filterValuesEqual(condition.value, other.value)
+  })
 }
 
-function applyFilters(): void {
-  const conditions = normalizeConditions(localConditions.value)
+function replaceField(fieldKey: string, next: ListFilterCondition | null): void {
+  const current = activeConditions.value
+  const rest = current.filter((condition) => condition.field !== fieldKey)
+  const conditions = next === null ? rest : [...rest, next]
+  if (conditionsEqual(current, conditions)) return
   emit('update:modelValue', conditions)
   emit('apply', conditions)
-  open.value = false
 }
 
+function showField(fieldKey: string): void {
+  const previous = activeField.value
+  if (previous !== undefined && previous.key !== fieldKey) {
+    if (previous.type === 'text') commitText(previous)
+    if (previous.type === 'number') commitNumber(previous)
+  }
+  activeFieldKey.value = fieldKey
+  const field = getField(fieldKey)
+  if (field !== undefined) syncDrafts(field)
+}
+
+function scheduleShow(fieldKey: string): void {
+  if (narrow.value) return
+  if (hoverTimer !== undefined) clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => showField(fieldKey), 80)
+}
+
+function cancelHover(): void {
+  if (hoverTimer !== undefined) clearTimeout(hoverTimer)
+}
+
+function handleFieldFocus(fieldKey: string): void {
+  if (narrow.value) return
+  showField(fieldKey)
+}
+
+function handleFieldClick(fieldKey: string): void {
+  if (!narrow.value) return
+  if (activeFieldKey.value === fieldKey) {
+    activeFieldKey.value = ''
+    return
+  }
+  showField(fieldKey)
+}
+
+function commitText(field: ListFilterField): void {
+  const value = textDraft.value.trim()
+  const op = activeOperator(field)
+  if (!operatorNeedsValue(op)) {
+    replaceField(field.key, { field: field.key, op, value: null })
+    return
+  }
+  if (value === '') {
+    replaceField(field.key, null)
+    return
+  }
+  replaceField(field.key, { field: field.key, op, value })
+}
+
+function commitNumber(field: ListFilterField): void {
+  const op = activeOperator(field)
+  if (!operatorNeedsValue(op)) {
+    replaceField(field.key, { field: field.key, op, value: null })
+    return
+  }
+  if (numberDraft.value.trim() === '') {
+    replaceField(field.key, null)
+    return
+  }
+  const parsed = Number(numberDraft.value)
+  if (!Number.isFinite(parsed)) return
+  replaceField(field.key, { field: field.key, op, value: parsed })
+}
+
+function handleOperatorChange(field: ListFilterField, op: ListFilterOperator): void {
+  if (field.type === 'enum') {
+    if (!operatorNeedsValue(op)) {
+      replaceField(field.key, { field: field.key, op, value: null })
+      return
+    }
+    const values = selectedEnumValues(field)
+    replaceField(field.key, values.length > 0 ? { field: field.key, op, value: values } : null)
+    return
+  }
+  if (field.type === 'date') {
+    draftOperator.value = op
+    if (isDatePresetOperator(op) || !operatorNeedsValue(op)) {
+      replaceField(field.key, { field: field.key, op, value: null })
+      return
+    }
+    const current = conditionFor(field.key)
+    const value = current !== undefined && typeof current.value === 'string' ? current.value : ''
+    replaceField(field.key, value === '' ? null : { field: field.key, op, value })
+    return
+  }
+  if (field.type === 'text' || field.type === 'number') {
+    draftOperator.value = op
+    if (!operatorNeedsValue(op)) {
+      replaceField(field.key, { field: field.key, op, value: null })
+    }
+  }
+}
+
+function toggleEnumValue(field: ListFilterField, value: string): void {
+  const op = activeOperator(field)
+  const selected = selectedEnumValues(field)
+  const values = selected.includes(value)
+    ? selected.filter((item) => item !== value)
+    : [...selected, value]
+  replaceField(field.key, values.length > 0 ? { field: field.key, op, value: values } : null)
+}
+
+function handleDateSelect(field: ListFilterField, value: DateValue | undefined): void {
+  if (value === undefined) return
+  const op = activeOperator(field)
+  const effectiveOp = operatorNeedsValue(op) ? op : 'eq'
+  replaceField(field.key, {
+    field: field.key,
+    op: effectiveOp,
+    value: formatLocalDate(value.toDate(getLocalTimeZone()))
+  })
+}
+
+
+
 function resetFilters(): void {
-  localConditions.value = [createCondition()]
-  emit('update:modelValue', [])
+  activeFieldKey.value = ''
   emit('reset')
-  open.value = false
 }
 
 function saveAsView(): void {
-  const conditions = localValidConditions.value
-  if (conditions.length === 0) return
-  emit('update:modelValue', conditions)
-  emit('save-view', conditions)
-  open.value = false
+  if (activeConditions.value.length === 0) return
+  emit('save-view', activeConditions.value)
 }
 
-watch(
-  () => props.modelValue,
-  () => syncLocalConditions(),
-  { immediate: true, deep: true }
-)
+function handlePlaceholderChange(value: DateValue | undefined): void {
+  calendarPlaceholder.value = value ?? today(getLocalTimeZone())
+}
+
+function handleMediaChange(event: MediaQueryListEvent): void {
+  narrow.value = event.matches
+}
+
+
+onMounted(() => {
+  mediaQuery = window.matchMedia(NARROW_QUERY)
+  narrow.value = mediaQuery.matches
+  mediaQuery.addEventListener('change', handleMediaChange)
+})
+
+onBeforeUnmount(() => {
+  cancelHover()
+  mediaQuery?.removeEventListener('change', handleMediaChange)
+})
+
+watch(open, (isOpen) => {
+  if (!isOpen) activeFieldKey.value = ''
+})
 </script>
 
 <template>
@@ -217,135 +339,128 @@ watch(
       </TableToolbarButton>
     </PopoverTrigger>
 
-    <PopoverContent align="start" class="list-filter-popover">
-      <TableToolbarBuilderPanel title="筛选条件" @close="open = false">
-        <div class="filter-condition-list">
-          <div
-            v-for="condition in localConditions"
-            :key="condition.id"
-            class="filter-condition-row"
+    <PopoverContent
+      align="start"
+      class="list-filter-popover"
+    >
+      <div class="filter-menu">
+        <ul class="filter-field-list">
+          <li
+            v-for="field in fields"
+            :key="field.key"
           >
-            <Select
-              :model-value="condition.field"
-              @update:model-value="handleFieldChange(condition, String($event))"
-            >
-              <SelectTrigger class="filter-field-select">
-                <SelectValue placeholder="字段" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="field in fields"
-                  :key="field.key"
-                  :value="field.key"
-                >
-                  {{ field.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select v-model="condition.op">
-              <SelectTrigger class="filter-op-select">
-                <SelectValue placeholder="判断" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="operator in getOperatorOptions(condition.field)"
-                  :key="operator.value"
-                  :value="operator.value"
-                >
-                  {{ operator.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-
-            <template v-if="hasValueInput(condition)">
-              <div
-                v-if="isEnumCondition(condition)"
-                class="filter-value-control"
-              >
-                <MultiSelect
-                  :model-value="selectedEnumValues(condition)"
-                  :options="getField(condition.field)?.options ?? []"
-                  placeholder="请选择"
-                  @update:model-value="handleEnumValueChange(condition, $event)"
-                />
-              </div>
-
-              <DatePicker
-                v-else-if="getField(condition.field)?.type === 'date'"
-                :model-value="parseLocalDate(getConditionTextValue(condition))"
-                class="filter-value-control"
-                placeholder="请选择日期"
-                @update:model-value="handleDateChange(condition, $event)"
-              />
-
-              <Input
-                v-else
-                :model-value="getConditionTextValue(condition)"
-                :type="getField(condition.field)?.type === 'number' ? 'number' : 'text'"
-                class="filter-value-control"
-                placeholder="请输入"
-                @update:model-value="condition.value = String($event)"
-              />
-            </template>
-
-            <div v-else class="filter-empty-placeholder" />
-
-            <Button
+            <button
               type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label="删除筛选条件"
-              @click="removeCondition(condition.id)"
+              class="filter-field-button"
+              :class="{ 'filter-field-button-active': activeFieldKey === field.key || conditionFor(field.key) }"
+              :aria-expanded="activeFieldKey === field.key"
+              @mouseenter="scheduleShow(field.key)"
+              @focus="handleFieldFocus(field.key)"
+              @click.stop="handleFieldClick(field.key)"
             >
-              <Trash2 class="w-4 h-4" aria-hidden="true" />
-            </Button>
-          </div>
-        </div>
+              <span>{{ field.label }}</span>
+              <span aria-hidden="true">›</span>
+            </button>
+          </li>
+        </ul>
 
-        <template #footer>
-          <div class="filter-secondary-actions">
-            <Button
+        <section
+          v-if="activeField"
+          class="filter-field-panel"
+          :aria-label="activeField.label"
+          @mouseenter="cancelHover"
+        >
+          <h3>{{ activeField.label }}</h3>
+          <div class="filter-operator-list" role="group" :aria-label="`${activeField.label}判断`">
+            <button
+              v-for="operator in activeOperatorOptions"
+              :key="operator.value"
               type="button"
-              variant="ghost"
-              size="sm"
-              @click="addCondition"
+              class="filter-operator-button"
+              :class="{ 'filter-operator-button-active': activeOperator(activeField) === operator.value }"
+              @click="handleOperatorChange(activeField, operator.value)"
             >
-              <Plus class="w-4 h-4" aria-hidden="true" />
-              添加条件
-            </Button>
-
-            <Button
-              v-if="canSaveView"
-              type="button"
-              variant="ghost"
-              size="sm"
-              :disabled="saveViewLoading"
-              @click="saveAsView"
-            >
-              另存为视图
-            </Button>
+              {{ operator.label }}
+            </button>
           </div>
 
-          <div class="filter-actions">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              @click="resetFilters"
-            >
-              清空
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              @click="applyFilters"
-            >
-              应用
-            </Button>
-          </div>
-        </template>
-      </TableToolbarBuilderPanel>
+          <template v-if="activeField.type === 'enum' && operatorNeedsValue(activeOperator(activeField))">
+            <Input
+              :model-value="optionQuery"
+              class="filter-option-search"
+              placeholder="搜索选项"
+              aria-label="搜索选项"
+              @update:model-value="optionQuery = String($event)"
+            />
+            <ul class="filter-option-list">
+              <li v-for="option in filteredOptions" :key="String(option.value)">
+                <label class="filter-option-row">
+                  <Checkbox
+                    :checked="selectedEnumValues(activeField).includes(String(option.value))"
+                    @update:checked="toggleEnumValue(activeField, String(option.value))"
+                  />
+                  <span>{{ option.label }}</span>
+                </label>
+              </li>
+              <li v-if="filteredOptions.length === 0" class="filter-option-empty">没有匹配选项</li>
+            </ul>
+          </template>
+
+          <form
+            v-else-if="activeField.type === 'text' && operatorNeedsValue(activeOperator(activeField))"
+            @submit.prevent="commitText(activeField)"
+          >
+            <Input
+              :model-value="textDraft"
+              placeholder="请输入"
+              :aria-label="activeField.label"
+              @update:model-value="textDraft = String($event)"
+              @keydown.enter.prevent="commitText(activeField)"
+              @blur="commitText(activeField)"
+            />
+          </form>
+
+          <form
+            v-else-if="activeField.type === 'number' && operatorNeedsValue(activeOperator(activeField))"
+            @submit.prevent="commitNumber(activeField)"
+          >
+            <Input
+              :model-value="numberDraft"
+              type="number"
+              placeholder="请输入"
+              :aria-label="activeField.label"
+              @update:model-value="numberDraft = String($event)"
+              @keydown.enter.prevent="commitNumber(activeField)"
+              @blur="commitNumber(activeField)"
+            />
+          </form>
+
+          <Calendar
+            v-else-if="activeField.type === 'date' && !isDatePresetOperator(activeOperator(activeField)) && operatorNeedsValue(activeOperator(activeField))"
+            :model-value="selectedDate(activeField)"
+            :placeholder="calendarPlaceholder"
+            locale="zh-CN"
+            @update:model-value="handleDateSelect(activeField, $event)"
+            @update:placeholder="handlePlaceholderChange"
+          />
+        </section>
+      </div>
+
+      <div v-if="activeFilterCount > 0" class="filter-footer">
+        <Button type="button" variant="ghost" size="sm" @click="resetFilters">
+          清空
+        </Button>
+        <Button
+          v-if="canSaveView"
+          type="button"
+          variant="ghost"
+          size="sm"
+          :disabled="saveViewLoading"
+          @click="saveAsView"
+        >
+          另存为视图
+        </Button>
+      </div>
     </PopoverContent>
   </Popover>
 </template>
@@ -354,59 +469,118 @@ watch(
 @use '@/styles/variables-v2.scss' as *;
 
 :global(.list-filter-popover) {
-  width: min(680px, calc(100vw - #{$wolf-space-xl-v2}));
+  width: auto;
   padding: 0;
 }
 
-.filter-condition-list {
+.filter-menu {
   display: flex;
-  flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  align-items: flex-start;
 }
 
-.filter-condition-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) 108px minmax(160px, 1.3fr) $wolf-button-height-sm-v2;
-  gap: $wolf-space-sm-v2;
+.filter-field-list {
+  width: 180px;
+  max-height: 360px;
+  margin: 0;
+  padding: $wolf-space-xs-v2;
+  overflow: auto;
+  list-style: none;
+}
+
+.filter-field-button,
+.filter-operator-button {
+  display: flex;
+  width: 100%;
   align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 $wolf-space-sm-v2;
+  border: 0;
+  border-radius: $wolf-radius-control-v2;
+  background: transparent;
+  color: $wolf-text-primary-v2;
+  text-align: left;
 }
 
-.filter-field-select,
-.filter-op-select,
-.filter-value-control,
-.filter-empty-placeholder {
-  height: $wolf-input-height-v2;
+.filter-field-button-active,
+.filter-operator-button-active,
+.filter-field-button:hover,
+.filter-operator-button:hover {
+  background: $wolf-bg-muted-v2;
+}
+
+.filter-operator-button-active {
+  color: $wolf-primary-v2;
+}
+
+.filter-field-panel {
+  width: 280px;
+  max-height: 420px;
+  padding: $wolf-space-sm-v2;
+  overflow: auto;
+  border-left: 1px solid $wolf-border-light-v2;
+}
+
+.filter-field-panel h3 {
+  margin: 0 0 $wolf-space-xs-v2;
+  font-size: $wolf-font-size-body-v2;
+  font-weight: $wolf-font-weight-medium-v2;
+}
+
+.filter-operator-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $wolf-space-xs-v2;
+  margin-bottom: $wolf-space-sm-v2;
+}
+
+.filter-operator-button {
+  width: auto;
+}
+
+.filter-option-search {
+  margin-bottom: $wolf-space-xs-v2;
+}
+
+.filter-option-list {
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.filter-option-row {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-xs-v2;
+  min-height: 32px;
+}
+
+.filter-option-empty {
+  color: $wolf-text-tertiary-v2;
+}
+
+.filter-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: $wolf-space-xs-v2;
+  border-top: 1px solid $wolf-border-light-v2;
 }
 
 @media (max-width: 767px) {
-  .filter-field-select,
-  .filter-op-select,
-  .filter-value-control,
-  .filter-empty-placeholder {
-    height: $wolf-input-height-mobile-v2;
-  }
-}
-
-.filter-actions {
-  display: flex;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-}
-
-.filter-secondary-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: $wolf-space-sm-v2;
-}
-
-@media (max-width: 640px) {
-  .filter-condition-row {
-    grid-template-columns: 1fr;
+  .filter-menu {
+    flex-direction: column;
   }
 
-  .filter-secondary-actions {
-    width: 100%;
+  .filter-field-list,
+  .filter-field-panel {
+    width: min(320px, calc(100vw - #{$wolf-space-xl-v2}));
+  }
+
+  .filter-field-panel {
+    border-left: 0;
+    border-top: 1px solid $wolf-border-light-v2;
   }
 }
 </style>

@@ -270,14 +270,24 @@ const someSelectableRowsSelected = computed<boolean>(() =>
   selectableRows.value.some(({ key }) => selectedRowKeySet.value.has(key)) && !allSelectableRowsSelected.value
 )
 const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize))
+const hasDisplayedContent = ref(false)
 const effectiveViewState = computed<DataViewState>(() =>
   resolveDataViewState({
     loading: props.loading,
     dataCount: props.data.length,
     hasError: props.loadError !== null,
-    explicitState: props.viewState
+    explicitState: props.viewState,
+    hasDisplayedContent: hasDisplayedContent.value
   })
 )
+watch(
+  () => props.data.length,
+  (count) => {
+    if (count > 0) hasDisplayedContent.value = true
+  },
+  { immediate: true }
+)
+
 const effectiveScrollMode = computed<'contained' | 'page' | 'none'>(() => {
   if (props.scrollMode !== undefined) return props.scrollMode
   if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') return 'page'

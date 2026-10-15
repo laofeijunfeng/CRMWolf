@@ -37,7 +37,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "entity_amount": {
@@ -137,7 +144,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "customer_name": {
@@ -162,7 +176,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "journey_name": {
@@ -187,7 +208,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "owner_id": {
@@ -238,13 +266,9 @@
       "filterable": true,
       "sortable": false,
       "ops": [
-        "contains",
         "eq",
         "in",
-        "is_empty",
-        "is_not_empty",
         "neq",
-        "not_contains",
         "not_in"
       ]
     },
@@ -257,7 +281,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "status": {
@@ -312,7 +343,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "customer_name": {
@@ -337,7 +375,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "expiry_date": {
@@ -349,7 +394,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "license_authorized_users": {
@@ -376,7 +428,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "license_type": {
@@ -446,7 +505,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "standard_unit_price": {
@@ -531,6 +597,7 @@
       "ops": [
         "contains",
         "eq",
+        "in",
         "is_empty",
         "is_not_empty",
         "neq",
@@ -574,7 +641,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "creator": {
@@ -627,7 +701,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "license_authorized_users": {
@@ -654,7 +735,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "license_status": {
@@ -735,7 +823,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "source": {
@@ -758,13 +853,9 @@
       "filterable": true,
       "sortable": true,
       "ops": [
-        "contains",
         "eq",
         "in",
-        "is_empty",
-        "is_not_empty",
         "neq",
-        "not_contains",
         "not_in"
       ]
     }
@@ -833,7 +924,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     }
   },
@@ -886,7 +984,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "customer_name": {
@@ -969,7 +1074,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "keyword": {
@@ -1065,7 +1177,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "last_modified_time": {
@@ -1077,7 +1196,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "lead_name": {
@@ -1177,7 +1303,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "customer_name": {
@@ -1202,7 +1335,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "last_modified_time": {
@@ -1214,7 +1354,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "license_type": {
@@ -1398,7 +1545,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "keyword": {
@@ -1565,7 +1719,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "customer_name": {
@@ -1644,7 +1805,14 @@
         "before",
         "eq",
         "is_empty",
-        "is_not_empty"
+        "is_not_empty",
+        "past_1_day",
+        "past_1_month",
+        "past_1_week",
+        "past_1_year",
+        "past_3_days",
+        "past_3_months",
+        "past_6_months"
       ]
     },
     "purchase_type": {

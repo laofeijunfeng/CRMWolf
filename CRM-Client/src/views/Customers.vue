@@ -282,7 +282,7 @@ const fields = computed<ListFieldDefinition[]>(() => [
     type: 'enum',
     options: customerStatusFilterOptions,
     column: { width: '200px' },
-    filter: true,
+    filter: { operators: ['in', 'not_in'] },
     sort: true
   },
   {
