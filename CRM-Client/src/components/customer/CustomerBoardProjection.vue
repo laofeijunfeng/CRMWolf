@@ -12,11 +12,26 @@ import type {
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
 import { formatDateRelative, formatLocalDate } from '@/utils/format'
 
-const props = defineProps<{ response: CustomerBoardResponse }>()
+const props = withDefaults(defineProps<{
+  response: CustomerBoardResponse
+  loading?: boolean
+  refreshing?: boolean
+  stale?: boolean
+  error?: Error | null
+  canDrillThrough?: boolean
+}>(), {
+  loading: false,
+  refreshing: false,
+  stale: false,
+  error: null,
+  canDrillThrough: true,
+})
 
 const emit = defineEmits<{
   'activate-card': [payload: BoardCardActivation]
   'view-all': [columnKey: string]
+  'card-action': [payload: { id: string | number, action: 'edit' | 'delete' | 'assign' | 'create-opportunity' }]
+  retry: []
 }>()
 
 type CustomerColumn = CustomerBoardResponse['columns'][number]
@@ -129,8 +144,13 @@ const projection = computed<BoardProjection>(() => ({
 <template>
   <BoardView
     :projection="projection"
-    :can-drill-through="true"
+    :loading="props.loading"
+    :refreshing="props.refreshing"
+    :stale="props.stale"
+    :error="props.error"
+    :can-drill-through="props.canDrillThrough"
     @activate-card="emit('activate-card', $event)"
     @view-all="emit('view-all', $event)"
+    @retry="emit('retry')"
   />
 </template>

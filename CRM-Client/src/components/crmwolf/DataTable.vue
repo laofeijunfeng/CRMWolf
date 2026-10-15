@@ -1130,6 +1130,9 @@ onBeforeUnmount(() => {
           </template>
         </ErrorState>
       </div>
+      <div v-else-if="props.viewDisplayMode === 'board'" class="data-table-content data-table-content--board">
+        <slot name="replacement" />
+      </div>
       <div
         v-else-if="props.viewDisplayMode !== 'board'"
         class="data-table-content"

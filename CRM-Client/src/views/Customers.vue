@@ -18,6 +18,7 @@
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
 import { ref, reactive, computed, onMounted, watch, watchEffect, type Component } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -29,7 +30,7 @@ import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import { normalizeCustomerDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -47,8 +48,11 @@ import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import CustomerBoardProjection from '@/components/customer/CustomerBoardProjection.vue'
+import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
+import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import customerApi, {
+  type CustomerBoardParams,
   type CustomerResponse,
   type CustomerDetailResponse,
   type CustomerStatus,
@@ -58,6 +62,7 @@ import customerApi, {
   type OwnerFilterOption,
   type CustomerExportTab,
 } from '@/api/customer'
+import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -67,6 +72,7 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { companyScaleOptions } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
+import type { CustomerBoardResponse } from '@/schemas/customerBoard'
 import { serializeListQuery } from '@/utils/listQuery'
 import { isCustomerPublicId } from '@/utils/customerRoutes'
 import { isDealJourneyPublicId } from '@/utils/dealJourney'
@@ -86,8 +92,12 @@ import {
 usePageTitle()
 
 const userStore = useUserStore()
+const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
+const { currentTeam } = storeToRefs(teamStore)
+const { userInfo } = storeToRefs(userStore)
+const { permissions, loadState: permissionLoadState } = storeToRefs(permissionStore)
 const route = useRoute()
 
 type CustomerTableRow = CustomerResponse
@@ -233,6 +243,7 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
+const displayMode = ref<'table' | 'board'>('table')
 
 const search = ref('')
 
@@ -725,6 +736,128 @@ const fetchCustomerList = async (): Promise<boolean> => {
     }
   }
 }
+
+const boardEligible = computed(() => activeTab.value !== 'public' && displayMode.value === 'board')
+
+const boardParams = computed<CustomerBoardParams>(() => {
+  const serialized = serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
+  return {
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...serialized,
+    ...(activeTab.value === 'collaborated' ? { scope: 'collaborated' as const } : {}),
+  }
+})
+
+const boardScopeKey = computed(() => {
+  const team = currentTeam?.value ?? teamStore.currentTeam
+  const user = userInfo?.value ?? userStore.userInfo
+  const permissionItems = (permissions?.value.length ?? 0) > 0 ? permissions.value : permissionStore.permissions
+  return {
+    teamId: team?.id ?? null,
+    userId: user?.id === undefined || user.id === null ? null : String(user.id),
+    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
+  }
+})
+
+const customerBoard = useBoardSnapshot<CustomerBoardParams, CustomerBoardResponse>({
+  fetchBoard: (query) => customerApi.getCustomerBoard(query),
+  getCurrentQuery: () => boardParams.value,
+  getQuerySignature: (query) => JSON.stringify({
+    tab: activeTab.value,
+    search: search.value.trim(),
+    filters: activeFilters.value,
+    sorts: activeSorts.value,
+    query,
+  }),
+  getScopeKey: () => boardScopeKey.value,
+  isPermissionReady: () => (permissionLoadState?.value ?? permissionStore.loadState) === 'ready',
+})
+
+const refreshActiveCustomerView = (): Promise<boolean> => {
+  if (!boardEligible.value) return fetchCustomerList()
+  return customerBoard.refresh(boardParams.value).then(() => true, () => false)
+}
+
+const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+  if (activeTab.value === 'public') {
+    displayMode.value = 'table'
+    return
+  }
+  if (mode === displayMode.value) return
+  displayMode.value = mode
+  void refreshActiveCustomerView()
+}
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'board' && activeTab.value !== 'public') void refreshActiveCustomerView()
+})
+
+const customerDerivedStatuses = ['not_started', 'following', 'repurchasing', 'won', 'lost'] as const
+type CustomerDerivedStatus = typeof customerDerivedStatuses[number]
+
+const isCustomerDerivedStatus = (value: string): value is CustomerDerivedStatus => (
+  customerDerivedStatuses.some((status) => status === value)
+)
+
+const handleBoardViewAll = (columnKey: string): void => {
+  if (!customerBoard.canDrillThrough || !isCustomerDerivedStatus(columnKey)) return
+  activeFilters.value = [{ field: 'derived_status', op: 'eq', value: columnKey }]
+  pagination.current = 1
+  displayMode.value = 'table'
+  void fetchCustomerList()
+}
+
+const boardCustomerRecord = (id: string | number): CustomerResponse | null => {
+  const publicId = String(id)
+  const columns = customerBoard.data?.columns ?? []
+  for (const column of columns) {
+    const item = column.items.find((candidate) => candidate.id === publicId)
+    if (item === undefined) continue
+    return {
+      id: item.id,
+      public_id: item.id,
+      account_name: item.title,
+      industry: item.metadata.industry,
+      city: item.metadata.city ?? '',
+      address: null,
+      company_scale: item.metadata.company_scale,
+      source: null,
+      status: 0,
+      owner_id: item.owner?.id ?? null,
+      source_lead_id: null,
+      default_procurement_method_id: null,
+      loss_reason: null,
+      return_reason: null,
+      returned_time: null,
+      creator_id: '',
+      created_time: item.date ?? '',
+      last_modified_time: item.date ?? '',
+      version: 0,
+      license_expiry_date: item.metadata.license_expiry_date,
+      license_authorized_users: null,
+      license_type: item.metadata.license_type,
+      owner_info: item.owner === null ? undefined : { id: item.owner.id, name: item.owner.name },
+    }
+  }
+  return null
+}
+
+const handleBoardCardActivate = (payload: BoardCardActivation): void => {
+  if (typeof payload.id !== 'string' || !isCustomerPublicId(payload.id)) return
+  openCustomerDetail(payload.id)
+}
+
+const handleBoardCardAction = (payload: { id: string | number, action: 'edit' | 'delete' | 'assign' | 'create-opportunity' }): void => {
+  const record = boardCustomerRecord(payload.id)
+  if (record === null) return
+  const column = customerBoard.data?.columns.find((candidate) => candidate.items.some((item) => item.id === record.id))
+  const item = column?.items.find((candidate) => candidate.id === record.id)
+  if (item === undefined) return
+  if (payload.action === 'edit' && item.action_state.can_edit) void handleEdit(record)
+  else if (payload.action === 'delete' && item.action_state.can_delete) void handleDelete(record)
+  else if (payload.action === 'assign' && item.action_state.can_assign) handleTransfer(record)
+  else if (payload.action === 'create-opportunity' && item.action_state.can_create_opportunity) handleCreateOpportunity(record, true)
+}
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
   const refreshed = await fetchCustomerList()
   if (!refreshed) {
@@ -739,7 +872,9 @@ const customFilterViews = useCustomFilterViews({
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchCustomerList,
+  activeDisplayMode: displayMode,
+  normalizeDisplayMode: normalizeCustomerDisplayMode,
+  refresh: refreshActiveCustomerView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -899,8 +1034,8 @@ const clearOpportunityCustomer = (): void => {
   opportunityCustomerName.value = ''
 }
 
-const handleCreateOpportunity = (record: CustomerResponse): void => {
-  if (!canCreateOpportunityForRow(record)) {
+const handleCreateOpportunity = (record: CustomerResponse, authorized = false): void => {
+  if (!authorized && !canCreateOpportunityForRow(record)) {
     toast.error('你没有在该客户下新建商机的权限')
     return
   }
@@ -1246,6 +1381,13 @@ watchEffect(() => {
   }
 })
 
+defineExpose({
+  activeTab,
+  activeFilters,
+  activeSorts,
+  displayMode,
+  customFilterViews,
+})
 // ✅ 不调用 headerStore.clear()
 // 让新页面直接覆盖旧状态，避免页面切换时 TopBar 短暂显示标题
 </script>
@@ -1282,6 +1424,8 @@ watchEffect(() => {
       v-model:filters="activeFilters"
       v-model:sorts="activeSorts"
       view-key="customers.list"
+      view-display-mode-enabled
+      :view-display-mode="displayMode"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
       @retry-view-apply="customFilterViews.retryViewApply"
@@ -1306,7 +1450,23 @@ watchEffect(() => {
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
       @retry="fetchCustomerList"
+      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template v-if="boardEligible && customerBoard.data" #replacement>
+        <CustomerBoardProjection
+          :response="customerBoard.data"
+          :loading="customerBoard.loading"
+          :refreshing="customerBoard.refreshing"
+          :stale="customerBoard.stale"
+          :error="customerBoard.error"
+          :can-drill-through="customerBoard.canDrillThrough"
+          @activate-card="handleBoardCardActivate"
+          @view-all="handleBoardViewAll"
+          @card-action="handleBoardCardAction"
+          @retry="customerBoard.retry"
+        />
+      </template>
+
       <template #mobile-card="{ row }">
         <div class="customer-mobile-card-header">
           <div class="customer-mobile-card-title">
