@@ -64,21 +64,33 @@ function localDateLabel(value: string): string {
   return formatLocalDate(new Date(year, month - 1, day))
 }
 
+function planOverdueRemaining(item: PaymentPlanItem): BoardMetadataRow | null {
+  if (item.status !== 'OVERDUE') return null
+  const amount = Number(item.remaining_amount)
+  if (!Number.isFinite(amount) || amount === 0) return null
+  return {
+    key: 'overdue_remaining_amount',
+    label: '逾期待回款',
+    value: formatCurrency(item.remaining_amount),
+  }
+}
+
+
 function metadataRows(column: PaymentPlanColumn, item: PaymentPlanItem): BoardMetadataRow[] {
-  const rows: Array<[string, string, string]> = [
-    ['planned_amount', '计划金额', formatCurrency(item.planned_amount)],
-    ['paid_amount', '已回款', formatCurrency(item.paid_amount)],
-    ['remaining_amount', '待回款', formatCurrency(item.remaining_amount)],
-    ['overdue_remaining_amount', '逾期待回款', formatCurrency(column.overdue_remaining_amount)],
-    ['customer_name', '客户', item.metadata.customer_name ?? '-'],
-    ['contract_name', '合同', item.metadata.contract_name ?? '-'],
-    ['opportunity_name', '商机', item.metadata.opportunity_name ?? '-'],
-    ['stage', '阶段', column.label],
-    ['owner', '负责人', item.owner?.name ?? '-'],
-    ['status_text', '状态', column.label],
-    ['plan_id', '计划编号', String(item.id)],
+  const rows: Array<BoardMetadataRow | null> = [
+    { key: 'planned_amount', label: '计划金额', value: formatCurrency(item.planned_amount) },
+    { key: 'paid_amount', label: '已回款', value: formatCurrency(item.paid_amount) },
+    { key: 'remaining_amount', label: '待回款', value: formatCurrency(item.remaining_amount) },
+    planOverdueRemaining(item),
+    { key: 'customer_name', label: '客户', value: item.metadata.customer_name ?? '-' },
+    { key: 'contract_name', label: '合同', value: item.metadata.contract_name ?? '-' },
+    { key: 'opportunity_name', label: '商机', value: item.metadata.opportunity_name ?? '-' },
+    { key: 'stage', label: '阶段', value: column.label },
+    { key: 'owner', label: '负责人', value: item.owner?.name ?? '-' },
+    { key: 'status_text', label: '状态', value: column.label },
+    { key: 'plan_id', label: '计划编号', value: String(item.id) },
   ]
-  return rows.map(([key, label, value]) => ({ key, label, value }))
+  return rows.filter((row): row is BoardMetadataRow => row !== null)
 }
 
 function presentCard(column: PaymentPlanColumn, item: PaymentPlanItem): BoardCardPresentation {

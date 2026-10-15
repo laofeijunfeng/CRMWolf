@@ -70,6 +70,45 @@ const response: PaymentPlanBoardResponse = {
       has_more: false,
       remaining_count: 0,
     },
+    {
+      key: 'PENDING',
+      label: '待回款',
+      tone: 'neutral',
+      count: 1,
+      amount: '4000.00',
+      planned_amount: '4000.00',
+      paid_amount: '0.00',
+      remaining_amount: '4000.00',
+      overdue_remaining_amount: '7500.00',
+      items: [
+        {
+          id: 8,
+          title: 'PP-2026-008',
+          subtitle: '二期',
+          amount: '4000.00',
+          planned_amount: '4000.00',
+          paid_amount: '0.00',
+          remaining_amount: '4000.00',
+          date: '2026-08-31',
+          owner: { id: 'user-5', name: '林岚', avatar_url: null },
+          status: 'PENDING',
+          metadata: {
+            customer_name: '北辰制造',
+            contract_name: '北辰采购合同',
+            opportunity_name: '北辰扩容',
+            paid_amount: '0.00',
+            remaining_amount: '4000.00',
+          },
+          action_state: {
+            can_edit: false,
+            can_delete: false,
+            can_view_detail: true,
+          },
+        },
+      ],
+      has_more: false,
+      remaining_count: 0,
+    },
   ],
   trends: [
     {
@@ -128,6 +167,23 @@ describe('PaymentPlanBoardProjection', () => {
       '7500.00',
       '10000.00',
     ])
+  })
+
+  it('keeps the column overdue total off a non-overdue card', () => {
+    const wrapper = mountProjection()
+    const column = wrapper.get('[data-column-key="PENDING"]')
+    const card = column.get('.board-card')
+
+    expect(column.findComponent({ name: 'AmountText' }).props('value')).toBe('7500.00')
+    expect(column.text()).toContain('¥7,500.00')
+    expect(card.text()).not.toContain('逾期待回款')
+    expect(card.text()).not.toContain('¥7,500.00')
+    expect(card.text()).toContain('计划金额')
+    expect(card.text()).toContain('¥4,000.00')
+    expect(card.text()).toContain('已回款')
+    expect(card.text()).toContain('¥0.00')
+    expect(card.text()).toContain('待回款')
+    expect(card.text()).toContain('¥4,000.00')
   })
 
   it('emits the numeric payment plan id', async () => {
