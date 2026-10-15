@@ -16,10 +16,21 @@ VALUE_REQUIRED_OPS = frozenset(
     {"eq", "neq", "contains", "not_contains", "in", "not_in", "before", "after", "gt", "gte", "lt", "lte"}
 )
 EMPTY_OPS = frozenset({"is_empty", "is_not_empty"})
+DATE_PRESET_OPS = frozenset(
+    {
+        "past_1_day",
+        "past_3_days",
+        "past_1_week",
+        "past_1_month",
+        "past_3_months",
+        "past_6_months",
+        "past_1_year",
+    }
+)
 DEFAULT_OPS: dict[str, frozenset[str]] = {
     "text": frozenset({"eq", "neq", "contains", "not_contains", "is_empty", "is_not_empty"}),
     "enum": frozenset({"eq", "neq", "contains", "not_contains", "in", "not_in", "is_empty", "is_not_empty"}),
-    "date": frozenset({"eq", "before", "after", "is_empty", "is_not_empty"}),
+    "date": frozenset({"eq", "before", "after", "is_empty", "is_not_empty"}) | DATE_PRESET_OPS,
     "number": frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "is_empty", "is_not_empty"}),
 }
 

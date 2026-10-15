@@ -160,6 +160,31 @@ def db_session():
     engine.dispose()
 
 
+@pytest.fixture
+def date_preset_session(db_session):
+    db_session.add_all(
+        [
+            Item(
+                name=name,
+                created_on=created_at.date(),
+                created_at=created_at,
+            )
+            for name, created_at in [
+                ("Before Week Start", datetime(2026, 8, 9, 23, 59, 59, 999999)),
+                ("Week Start", datetime(2026, 8, 10)),
+                ("Week Today", datetime(2026, 8, 16, 23, 59, 59, 999999)),
+                ("After Week Today", datetime(2026, 8, 17)),
+                ("Before Month Start", datetime(2026, 2, 27, 23, 59, 59, 999999)),
+                ("Month Clamp Start", datetime(2026, 2, 28)),
+                ("Month Today", datetime(2026, 3, 31, 23, 59, 59, 999999)),
+                ("After Month Today", datetime(2026, 4, 1)),
+            ]
+        ]
+    )
+    db_session.flush()
+    return db_session
+
+
 def _names(session: Session, filters=None, sorts=None, context=None):
     query = session.query(Item)
     query = apply_filters(query, _catalog(), filters or [], context=context)
@@ -261,6 +286,23 @@ def test_exclusive_datetime_after_keeps_legacy_strict_comparison(db_session):
     assert names == ["Trial Co"]
 
 
+def test_past_week_includes_exact_start_and_today_but_excludes_outside(date_preset_session):
+    names = _names(
+        date_preset_session,
+        [{"field": "created_at", "op": "past_1_week"}],
+        context=ListQueryContext(today=date(2026, 8, 16)),
+    )
+    assert names == ["Acme", "Beta Co", "Week Start", "Week Today"]
+
+
+def test_past_month_clamps_start_to_last_valid_day(date_preset_session):
+    names = _names(
+        date_preset_session,
+        [{"field": "created_on", "op": "past_1_month"}],
+        context=ListQueryContext(today=date(2026, 3, 31)),
+    )
+    assert names == ["Month Clamp Start", "Month Today"]
+
 def test_person_alias_resolves_to_current_user(db_session):
     names = _names(
         db_session,
@@ -268,6 +310,7 @@ def test_person_alias_resolves_to_current_user(db_session):
         context=ListQueryContext(current_user_id="1"),
     )
     assert names == ["Acme", "Trial Co"]
+
 
 
 def test_license_status_case_matches_classifier(db_session):

@@ -1,5 +1,6 @@
 import type { ColumnConfigOption } from './columnConfigTypes'
 import {
+  isDatePresetOperator,
   listFilterOperatorsByType,
   type ListFilterCondition,
   type ListFilterField,
@@ -38,8 +39,8 @@ function formatOptionValue(value: string | number, options: ListFilterOption[]):
   return options.find((option) => String(option.value) === String(value))?.label ?? String(value)
 }
 
-function isEmptyOperator(operator: ListFilterCondition['op']): boolean {
-  return operator === 'is_empty' || operator === 'is_not_empty'
+function isValuelessOperator(operator: ListFilterCondition['op']): boolean {
+  return operator === 'is_empty' || operator === 'is_not_empty' || isDatePresetOperator(operator)
 }
 
 function isMeaningfulValue(value: ListFilterCondition['value']): boolean {
@@ -98,12 +99,12 @@ export function buildFilterSummaryItems(
     const operatorLabel = operatorLabelByType.get(`${field.type}:${condition.op}`)
     if (operatorLabel === undefined) return []
 
-    if (!isEmptyOperator(condition.op) && !isMeaningfulValue(condition.value)) return []
+    if (!isValuelessOperator(condition.op) && !isMeaningfulValue(condition.value)) return []
 
-    const valueLabel = isEmptyOperator(condition.op)
+    const valueLabel = isValuelessOperator(condition.op)
       ? undefined
       : formatFilterValue(field, condition.value)
-    if (!isEmptyOperator(condition.op) && valueLabel === undefined) return []
+    if (!isValuelessOperator(condition.op) && valueLabel === undefined) return []
 
     return [{
       id: buildFilterItemId(condition, index),

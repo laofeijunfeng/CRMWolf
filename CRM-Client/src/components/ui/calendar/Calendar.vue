@@ -233,7 +233,7 @@ const calendarRootProps = computed(() => {
 
 <style scoped lang="scss">
 .date-picker-calendar {
-  width: 306px;
+  width: min(306px, 100%);
 }
 
 .date-picker-calendar__year-trigger {
@@ -252,17 +252,17 @@ const calendarRootProps = computed(() => {
 
 .date-picker-calendar__row {
   display: grid;
-  grid-template-columns: repeat(7, 40px);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   justify-content: center;
 }
 
 .date-picker-calendar__head-cell,
 .date-picker-calendar__cell {
-  width: 40px;
+  width: auto;
 }
 
 .date-picker-calendar__cell-trigger {
-  width: 40px;
-  height: 40px;
+  width: 100%;
+  height: 36px;
 }
 </style>

@@ -270,14 +270,25 @@ const someSelectableRowsSelected = computed<boolean>(() =>
   selectableRows.value.some(({ key }) => selectedRowKeySet.value.has(key)) && !allSelectableRowsSelected.value
 )
 const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize))
+const hasDisplayedContent = ref(false)
+const hasDisplayedTable = ref(false)
 const effectiveViewState = computed<DataViewState>(() =>
   resolveDataViewState({
     loading: props.loading,
     dataCount: props.data.length,
     hasError: props.loadError !== null,
-    explicitState: props.viewState
+    explicitState: props.viewState,
+    hasDisplayedContent: hasDisplayedContent.value || hasDisplayedTable.value
   })
 )
+watch(
+  () => props.data.length,
+  (count) => {
+    if (count > 0) hasDisplayedContent.value = true
+  },
+  { immediate: true }
+)
+
 const effectiveScrollMode = computed<'contained' | 'page' | 'none'>(() => {
   if (props.scrollMode !== undefined) return props.scrollMode
   if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') return 'page'
@@ -313,6 +324,10 @@ const tableCardClass = computed(() => ({
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
 const isInitialLoading = computed(() => effectiveViewState.value === 'loading')
+
+watch(isInitialLoading, (loading) => {
+  if (!loading) hasDisplayedTable.value = true
+})
 const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
 const hasBlockingError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length === 0

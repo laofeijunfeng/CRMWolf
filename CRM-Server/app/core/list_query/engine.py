@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql.elements import ColumnElement
 
 from sqlalchemy import and_, or_
 
@@ -12,6 +15,7 @@ from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.errors import ListQueryError
 from app.core.list_query.parse import parse_filters, parse_sorts, uses_unified_list_query
 from app.core.list_query.types import (
+    DATE_PRESET_OPS,
     EMPTY_OPS,
     JoinSpec,
     ListQueryContext,
@@ -50,7 +54,7 @@ def apply_filters(
         if condition.op not in field.ops():
             raise ListQueryError(f"字段 {field.key} 不支持操作符 {condition.op}")
         parsed_value = None
-        if condition.op not in EMPTY_OPS:
+        if condition.op not in EMPTY_OPS and condition.op not in DATE_PRESET_OPS:
             if _is_blank_raw_value(condition.value):
                 continue
             parsed_value = _prepare_value(field, condition.value, ctx)
@@ -345,6 +349,8 @@ def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any,
             return and_(expression.is_not(None), expression != "")
         return expression.is_not(None)
 
+    if field.type == "date" and op in DATE_PRESET_OPS:
+        return _date_preset_clause(field, expression, op, context)
     if field.type == "date":
         return _date_clause(field, expression, op, parsed_value, context)
 
@@ -416,3 +422,45 @@ def _date_clause(field: ListQueryField, expression, op: str, parsed_value: datet
     if op == "before":
         return expression <= end if field.date_semantics == "day_bounds" else expression < parsed_value
     raise ListQueryError(f"字段 {field.key} 不支持操作符 {op}")
+
+
+def _shift_months(day: date, months: int) -> date:
+    month_index = day.month - 1 + months
+    year = day.year + month_index // 12
+    month = month_index % 12 + 1
+    next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last_day = (next_month - timedelta(days=1)).day
+    return date(year, month, min(day.day, last_day))
+
+
+def _date_preset_start(op: str, today: date) -> date:
+    if op == "past_1_day":
+        return today
+    if op == "past_3_days":
+        return today - timedelta(days=2)
+    if op == "past_1_week":
+        return today - timedelta(days=6)
+    if op == "past_1_month":
+        return _shift_months(today, -1)
+    if op == "past_3_months":
+        return _shift_months(today, -3)
+    if op == "past_6_months":
+        return _shift_months(today, -6)
+    if op == "past_1_year":
+        return _shift_months(today, -12)
+    raise ListQueryError(f"不支持的日期快捷项 {op}")
+
+
+def _date_preset_clause(
+    field: ListQueryField,
+    expression: ColumnElement[object],
+    op: str,
+    context: ListQueryContext,
+) -> ColumnElement[bool]:
+    today = context.business_today()
+    start_day = _date_preset_start(op, today)
+    if field.date_kind == "date":
+        return and_(expression >= start_day, expression <= today)
+    start = datetime.combine(start_day, time.min)
+    end = datetime.combine(today, time.max)
+    return and_(expression >= start, expression <= end)

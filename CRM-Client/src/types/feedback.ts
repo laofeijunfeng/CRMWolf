@@ -77,9 +77,10 @@ export function resolveDataViewState(options: {
   dataCount: number
   hasError: boolean
   explicitState?: DataViewState | null
+  hasDisplayedContent?: boolean
 }): DataViewState {
   if (options.explicitState !== undefined && options.explicitState !== null) return options.explicitState
-  if (options.loading) return options.dataCount > 0 ? 'refreshing' : 'loading'
+  if (options.loading) return options.dataCount > 0 || options.hasDisplayedContent === true ? 'refreshing' : 'loading'
   if (options.hasError) return 'error'
   return options.dataCount > 0 ? 'ready' : 'empty'
 }

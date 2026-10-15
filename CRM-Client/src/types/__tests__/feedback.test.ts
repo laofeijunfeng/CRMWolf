@@ -5,6 +5,7 @@ describe('feedback state protocol', () => {
   it('keeps existing data visible while a refresh is in progress', () => {
     expect(resolveDataViewState({ loading: true, dataCount: 3, hasError: false })).toBe('refreshing')
     expect(resolveDataViewState({ loading: true, dataCount: 0, hasError: false })).toBe('loading')
+    expect(resolveDataViewState({ loading: true, dataCount: 0, hasError: false, hasDisplayedContent: true })).toBe('refreshing')
   })
 
   it('does not represent a failed first load as an empty state', () => {
