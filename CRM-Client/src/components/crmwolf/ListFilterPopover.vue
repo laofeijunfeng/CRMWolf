@@ -396,8 +396,10 @@ watch(open, (isOpen) => {
               @focus="handleFieldFocus(field.key)"
               @click.stop="handleFieldClick(field.key)"
             >
-              <component :is="fieldIcon(field.type, field.label)" class="filter-field-icon" aria-hidden="true" />
-              <span>{{ field.label }}</span>
+              <span class="filter-field-label">
+                <component :is="fieldIcon(field.type, field.label)" class="filter-field-icon" aria-hidden="true" />
+                <span>{{ field.label }}</span>
+              </span>
               <span aria-hidden="true">›</span>
             </button>
           </li>
@@ -537,6 +539,13 @@ watch(open, (isOpen) => {
   padding: $wolf-space-xs-v2;
   overflow: auto;
   list-style: none;
+}
+
+.filter-field-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: $wolf-space-xs-v2;
 }
 
 .filter-field-icon {
