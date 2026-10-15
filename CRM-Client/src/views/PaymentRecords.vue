@@ -392,6 +392,39 @@ const handleBoardCardAction = (payload: { id: number, action: 'edit' | 'delete' 
   if (payload.action === 'edit' && !item.action_state.can_edit) return
   if (payload.action === 'delete' && !item.action_state.can_delete) return
   if (payload.action === 'resubmit' && !item.action_state.can_resubmit) return
+  void openBoardRecordAction(payload.id, payload.action)
+}
+
+const openBoardRecordAction = async (
+  recordId: number,
+  action: 'edit' | 'delete' | 'resubmit',
+): Promise<void> => {
+  let record: PaymentRecordWithDetails
+  try {
+    record = await paymentApi.getPaymentRecordDetail(recordId)
+  } catch (error) {
+    handleApiError(
+      error,
+      action === 'delete' ? '删除回款记录' : action === 'resubmit' ? '重新提交审批' : '编辑回款记录',
+    )
+    return
+  }
+  if (record.id !== recordId) return
+  const current = boardRecordItem(recordId)
+  if (current === null) return
+  if (action === 'edit') {
+    if (!current.action_state.can_edit) return
+    handleEdit(record)
+    return
+  }
+  if (action === 'delete') {
+    if (!current.action_state.can_delete) return
+    await handleDelete(record)
+    return
+  }
+  if (!current.action_state.can_resubmit) return
+  handleEdit(record)
+  isResubmitMode.value = true
 }
 
 const customFilterViews = useCustomFilterViews({

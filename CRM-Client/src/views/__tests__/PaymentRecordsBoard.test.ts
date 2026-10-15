@@ -11,6 +11,7 @@ import { toast } from 'vue-sonner'
 const mocks = vi.hoisted(() => ({
   listPaymentRecords: vi.fn(),
   getPaymentRecordBoard: vi.fn(),
+  getPaymentRecordDetail: vi.fn(),
   exportPaymentRecords: vi.fn(),
   updatePaymentRecord: vi.fn(),
   deletePaymentRecord: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('@/api/payment', () => ({
   default: {
     listPaymentRecords: mocks.listPaymentRecords,
     getPaymentRecordBoard: mocks.getPaymentRecordBoard,
+    getPaymentRecordDetail: mocks.getPaymentRecordDetail,
     exportPaymentRecords: mocks.exportPaymentRecords,
     updatePaymentRecord: mocks.updatePaymentRecord,
     deletePaymentRecord: mocks.deletePaymentRecord,
@@ -121,7 +123,16 @@ vi.mock('@/views/PaymentRecordDetailSheet.vue', () => ({
 }))
 
 vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
-  default: { name: 'EditRecordDialog', template: '<div data-testid="edit-record-dialog" />' },
+  default: {
+    name: 'EditRecordDialog',
+    props: {
+      open: { type: Boolean, default: false },
+      record: { type: Object, default: null },
+      submitting: { type: Boolean, default: false },
+    },
+    emits: ['update:open', 'submit'],
+    template: '<div data-testid="edit-record-dialog" :data-open="String(open)" :data-record-id="record?.id ?? \'\'" />',
+  },
 }))
 
 interface SavedViewOptions {
@@ -271,6 +282,8 @@ describe('Payment records board integration', () => {
     permissionState.permissions = ['payment:record:view', 'payment:record:export', 'payment:record:edit', 'payment:record:delete', 'payment:submit'].map((code) => ({ code }))
     mocks.listPaymentRecords.mockResolvedValue({ items: [record], total: 1 })
     mocks.getPaymentRecordBoard.mockResolvedValue(boardResponse)
+    mocks.getPaymentRecordDetail.mockResolvedValue({ ...record, id: 92, record_number: 'PR-2026-092' })
+    mocks.deletePaymentRecord.mockResolvedValue(undefined)
   })
 
   it('defaults to the existing payment-record table and does not request the board', async () => {
@@ -403,9 +416,23 @@ describe('Payment records board integration', () => {
     expect(rejected.find('[data-testid="board-card-action-resubmit"]').exists()).toBe(true)
 
     await rejected.get('[data-testid="board-card-action-edit"]').trigger('click')
+    await flushPromises()
     expect(wrapper.emitted('activate-card')).toBeUndefined()
+    expect(mocks.getPaymentRecordDetail).toHaveBeenCalledWith(92)
+    expect(wrapper.get('[data-testid="edit-record-dialog"]').attributes('data-open')).toBe('true')
+    expect(wrapper.get('[data-testid="edit-record-dialog"]').attributes('data-record-id')).toBe('92')
     expect(mocks.updatePaymentRecord).not.toHaveBeenCalled()
-    expect(mocks.deletePaymentRecord).not.toHaveBeenCalled()
+
+    await rejected.get('[data-testid="board-card-action-delete"]').trigger('click')
+    await flushPromises()
+    expect(mocks.deletePaymentRecord).toHaveBeenCalledWith(92)
+
+    mocks.getPaymentRecordDetail.mockClear()
+    await rejected.get('[data-testid="board-card-action-resubmit"]').trigger('click')
+    await flushPromises()
+    expect(mocks.getPaymentRecordDetail).toHaveBeenCalledWith(92)
+    expect(wrapper.get('[data-testid="edit-record-dialog"]').attributes('data-open')).toBe('true')
+    expect(wrapper.get('[data-testid="edit-record-dialog"]').attributes('data-record-id')).toBe('92')
     wrapper.unmount()
   })
 
