@@ -6,6 +6,7 @@ import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
+import { toast } from 'vue-sonner'
 
 const mocks = vi.hoisted(() => ({
   getOpportunities: vi.fn(),
@@ -410,6 +411,24 @@ describe('Opportunities board integration', () => {
     await nextTick()
     expect(wrapper.getComponent({ name: 'OpportunityBoardProjection' }).props('response')).toBeNull()
     expect(wrapper.text()).not.toContain('星河续购')
+    wrapper.unmount()
+  })
+
+  it('refreshes the board after a rendered detail update without a list request or false failure warning', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await switchMode(wrapper, 'board')
+    await wrapper.get('[data-column-key="stage:18:42"] .board-card').trigger('click')
+    await nextTick()
+
+    mocks.getOpportunities.mockClear()
+    mocks.getOpportunityBoard.mockClear()
+    wrapper.getComponent({ name: 'OpportunityDetailSheet' }).vm.$emit('refresh')
+    await flushPromises()
+
+    expect(mocks.getOpportunityBoard).toHaveBeenCalledTimes(1)
+    expect(mocks.getOpportunities).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

@@ -608,10 +608,15 @@ async function refreshOpportunityDetailIfOpen(opportunityId: string | null): Pro
   return opportunityDetailSheetRef.value?.refresh() ?? false
 }
 
-function getRefreshFailureDescription(listRefreshed: boolean, detailRefreshed: boolean): string | undefined {
-  if (listRefreshed && detailRefreshed) return undefined
-  if (!listRefreshed && !detailRefreshed) return '列表和详情刷新失败，请稍后重试。'
-  if (!listRefreshed) return '列表刷新失败，请稍后重试。'
+function opportunityViewLabel(): string {
+  return displayMode.value === 'board' ? '商机看板' : '商机列表'
+}
+
+function getRefreshFailureDescription(viewRefreshed: boolean, detailRefreshed: boolean): string | undefined {
+  const viewLabel = opportunityViewLabel()
+  if (viewRefreshed && detailRefreshed) return undefined
+  if (!viewRefreshed && !detailRefreshed) return `${viewLabel}和详情刷新失败，请稍后重试。`
+  if (!viewRefreshed) return `${viewLabel}刷新失败，请稍后重试。`
   return '详情刷新失败，请稍后重试。'
 }
 
@@ -626,7 +631,7 @@ function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, deta
 const handleSheetRefresh = async (): Promise<void> => {
   const refreshed = await refreshActiveOpportunityView()
   if (!refreshed) {
-    toast.warning('商机详情已更新，但列表刷新失败，请稍后重试。')
+    toast.warning(`商机详情已更新，但${opportunityViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
@@ -634,9 +639,9 @@ const handleSheetRefresh = async (): Promise<void> => {
 const handleOpportunitySuccess = async (payload?: FormSuccessPayload): Promise<void> => {
   opportunityDialogOpen.value = false
   toast.success(payload?.operation === 'update' ? '商机更新成功' : '商机已创建并提交审批')
-  const refreshed = await fetchOpportunities()
+  const refreshed = await refreshActiveOpportunityView()
   if (!refreshed) {
-    toast.warning('商机已保存，但列表刷新失败，请稍后重试。')
+    toast.warning(`商机已保存，但${opportunityViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
@@ -645,7 +650,7 @@ const handleEditSuccess = async (_payload?: FormSuccessPayload): Promise<void> =
   const editedOpportunityId = editingOpportunity.value?.id ?? null
   editDialogOpen.value = false
   editingOpportunity.value = null
-  const refreshed = await fetchOpportunities()
+  const refreshed = await refreshActiveOpportunityView()
   const detailRefreshed = await refreshOpportunityDetailIfOpen(editedOpportunityId)
   warnIfRefreshFailed('商机已保存', refreshed, detailRefreshed)
 }
@@ -679,9 +684,9 @@ const handleDelete = async (record: OpportunityListResponse): Promise<void> => {
       sheetVisible.value = false
       selectedOpportunityId.value = null
     }
-    const refreshed = await fetchOpportunities()
+    const refreshed = await refreshActiveOpportunityView()
     toast.success(`商机“${record.opportunity_name}”已删除`, refreshed ? undefined : {
-      description: '商机已删除，但列表刷新失败，请稍后重试。',
+      description: `商机已删除，但${opportunityViewLabel()}刷新失败，请稍后重试。`,
     })
   } catch (error) {
     handleApiError(error, '删除商机')
@@ -727,7 +732,7 @@ const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void
         stage_template_id: defaultStage.id
       })
 
-      const refreshed = await fetchOpportunities()
+      const refreshed = await refreshActiveOpportunityView()
       const detailRefreshed = await refreshOpportunityDetailIfOpen(record.id)
       const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
       toast.success('起始阶段已设置', {
@@ -761,7 +766,7 @@ const handleAdvanceStage = async (record: OpportunityListResponse): Promise<void
       stage_template_id: nextStage.id
     })
 
-    const refreshed = await fetchOpportunities()
+    const refreshed = await refreshActiveOpportunityView()
     const detailRefreshed = await refreshOpportunityDetailIfOpen(record.id)
     const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
     toast.success('阶段已推进', {
@@ -792,7 +797,7 @@ const handleWinSuccess = async (): Promise<void> => {
   const opportunityId = selectedOpportunityIdForWin.value
   winDialogOpen.value = false
   selectedOpportunityIdForWin.value = null
-  const refreshed = await fetchOpportunities()
+  const refreshed = await refreshActiveOpportunityView()
   const detailRefreshed = await refreshOpportunityDetailIfOpen(opportunityId)
   warnIfRefreshFailed('商机已标记为赢单', refreshed, detailRefreshed)
 }
@@ -801,7 +806,7 @@ const handleLoseSuccess = async (): Promise<void> => {
   const opportunityId = selectedOpportunityIdForLose.value
   loseDialogOpen.value = false
   selectedOpportunityIdForLose.value = null
-  const refreshed = await fetchOpportunities()
+  const refreshed = await refreshActiveOpportunityView()
   const detailRefreshed = await refreshOpportunityDetailIfOpen(opportunityId)
   warnIfRefreshFailed('商机已标记为输单', refreshed, detailRefreshed)
 }

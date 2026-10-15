@@ -6,6 +6,7 @@ import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
+import { toast } from 'vue-sonner'
 
 const mocks = vi.hoisted(() => ({
   listPaymentPlans: vi.fn(),
@@ -343,6 +344,22 @@ describe('Payment plans board integration', () => {
     userState.userInfo = { id: '99' }
     await nextTick()
     expect(wrapper.getComponent({ name: 'PaymentPlanBoardProjection' }).props('response')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('refreshes the board after a rendered payment-plan save without a list request or false failure warning', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await switchMode(wrapper, 'board')
+
+    mocks.listPaymentPlans.mockClear()
+    mocks.getPaymentPlanBoard.mockClear()
+    wrapper.getComponent({ name: 'PaymentPlanFormDialog' }).vm.$emit('success')
+    await flushPromises()
+
+    expect(mocks.getPaymentPlanBoard).toHaveBeenCalledTimes(1)
+    expect(mocks.listPaymentPlans).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

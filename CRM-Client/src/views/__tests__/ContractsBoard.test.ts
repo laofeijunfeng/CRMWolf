@@ -6,6 +6,7 @@ import type { ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ContractBoardResponse } from '@/schemas/contractBoard'
+import { toast } from 'vue-sonner'
 
 const mocks = vi.hoisted(() => ({
   getContracts: vi.fn(),
@@ -360,6 +361,23 @@ describe('Contracts board integration', () => {
     permissionState.permissions = [{ code: 'contract:view:own' }]
     await nextTick()
     expect(wrapper.getComponent({ name: 'ContractBoardProjection' }).props('response')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('refreshes the board after a rendered contract save without a list request or false failure warning', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await switchMode(wrapper, 'board')
+
+    mocks.getContracts.mockClear()
+    mocks.getContractBoard.mockClear()
+    const dialogs = wrapper.findAllComponents({ name: 'ContractFormDialog' })
+    dialogs[dialogs.length - 1]?.vm.$emit('success')
+    await flushPromises()
+
+    expect(mocks.getContractBoard).toHaveBeenCalledTimes(1)
+    expect(mocks.getContracts).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

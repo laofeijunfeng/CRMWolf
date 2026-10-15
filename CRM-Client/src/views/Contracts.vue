@@ -519,9 +519,9 @@ const handleCreate = (): void => {
 }
 
 const handleCreateSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
-  const refreshed = await fetchContractList()
+  const refreshed = await refreshActiveContractView()
   if (!refreshed) {
-    toast.warning('合同已保存，但列表刷新失败，请稍后重试。')
+    toast.warning(`合同已保存，但${contractViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
@@ -534,10 +534,15 @@ async function refreshContractDetailIfOpen(contractId: number | null): Promise<b
   return contractDetailSheetRef.value?.refresh() ?? false
 }
 
-function getRefreshFailureDescription(listRefreshed: boolean, detailRefreshed: boolean): string | undefined {
-  if (listRefreshed && detailRefreshed) return undefined
-  if (!listRefreshed && !detailRefreshed) return '列表和详情刷新失败，请稍后重试。'
-  if (!listRefreshed) return '列表刷新失败，请稍后重试。'
+function contractViewLabel(): string {
+  return displayMode.value === 'board' ? '合同看板' : '合同列表'
+}
+
+function getRefreshFailureDescription(viewRefreshed: boolean, detailRefreshed: boolean): string | undefined {
+  const viewLabel = contractViewLabel()
+  if (viewRefreshed && detailRefreshed) return undefined
+  if (!viewRefreshed && !detailRefreshed) return `${viewLabel}和详情刷新失败，请稍后重试。`
+  if (!viewRefreshed) return `${viewLabel}刷新失败，请稍后重试。`
   return '详情刷新失败，请稍后重试。'
 }
 
@@ -551,7 +556,7 @@ function warnIfRefreshFailed(actionMessage: string, listRefreshed: boolean, deta
 const handleContractSheetRefresh = async (): Promise<void> => {
   const refreshed = await refreshActiveContractView()
   if (!refreshed) {
-    toast.warning('合同详情已更新，但列表刷新失败，请稍后重试。')
+    toast.warning(`合同详情已更新，但${contractViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
@@ -564,7 +569,7 @@ const handleEditSuccess = async (_payload?: FormSuccessPayload): Promise<void> =
   const editedContractId = editingContract.value?.id ?? null
   showEditDialog.value = false
   editingContract.value = null
-  const refreshed = await fetchContractList()
+  const refreshed = await refreshActiveContractView()
   const detailRefreshed = await refreshContractDetailIfOpen(editedContractId)
   warnIfRefreshFailed('合同已保存', refreshed, detailRefreshed)
 }
@@ -587,9 +592,9 @@ const handleDelete = async (record: ContractListResponse): Promise<void> => {
     if (viewingContractId.value === record.id) {
       viewingContractId.value = null
     }
-    const refreshed = await fetchContractList()
+    const refreshed = await refreshActiveContractView()
     toast.success(`合同“${record.contract_name}”已删除`, refreshed ? undefined : {
-      description: '合同已删除，但列表刷新失败，请稍后重试。',
+      description: `合同已删除，但${contractViewLabel()}刷新失败，请稍后重试。`,
     })
   } catch (error) {
     handleApiError(error, '删除合同')
@@ -606,7 +611,7 @@ const handleSubmitApproval = async (record: ContractListResponse): Promise<void>
   submittingApprovalIds.value = new Set(submittingApprovalIds.value).add(record.id)
   try {
     await approvalGenericApi.submitApproval('CONTRACT', record.id)
-    const refreshed = await fetchContractList()
+    const refreshed = await refreshActiveContractView()
     const detailRefreshed = await refreshContractDetailIfOpen(record.id)
     const refreshFailure = getRefreshFailureDescription(refreshed, detailRefreshed)
     toast.success('合同已提交审批', {

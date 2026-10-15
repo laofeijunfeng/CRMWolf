@@ -487,17 +487,21 @@ const handlePlanSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
+function paymentPlanViewLabel(): string {
+  return displayMode.value === 'board' ? '回款计划看板' : '回款计划列表'
+}
+
 const handlePlanSheetRefresh = async (): Promise<void> => {
   const refreshed = await refreshActivePaymentPlanView()
   if (!refreshed) {
-    toast.warning('操作已完成，但回款计划列表刷新失败，请稍后重试。')
+    toast.warning(`操作已完成，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
 const handlePlanFormSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
-  const refreshed = await fetchPaymentPlans()
+  const refreshed = await refreshActivePaymentPlanView()
   if (!refreshed) {
-    toast.warning('回款计划已保存，但列表刷新失败，请稍后重试。')
+    toast.warning(`回款计划已保存，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`)
   }
 }
 
@@ -600,11 +604,12 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
     selectedConfirmPlan.value = null
     paymentRecordIdempotencyKey.value = null
     paymentRecordCommandOptions.value = null
-    const refreshed = await fetchPaymentPlans()
+    const refreshed = await refreshActivePaymentPlanView()
+    const viewLabel = paymentPlanViewLabel()
     toast.success(`回款登记成功，${resultMessage}`, {
       description: refreshed
-        ? '回款计划列表已同步。'
-        : '回款已登记，但列表刷新失败，请稍后重试。',
+        ? `${viewLabel}已同步。`
+        : `回款已登记，但${viewLabel}刷新失败，请稍后重试。`,
     })
   } catch (error) {
     handleApiError(error, '登记回款')
@@ -632,9 +637,9 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
       planSheetVisible.value = false
       selectedPlanId.value = null
     }
-    const refreshed = await fetchPaymentPlans()
+    const refreshed = await refreshActivePaymentPlanView()
     toast.success(`回款计划“${row.stage_name}”已删除`, refreshed ? undefined : {
-      description: '回款计划已删除，但列表刷新失败，请稍后重试。',
+      description: `回款计划已删除，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`,
     })
   } catch (error) {
     handleApiError(error, '删除回款计划')
