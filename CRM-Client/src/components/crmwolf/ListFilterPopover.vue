@@ -194,6 +194,13 @@ function fieldOffset(fieldKey: string): number {
   return Math.max(margin - anchor.getBoundingClientRect().top, raw - (projectedBottom - viewportBottom))
 }
 
+function selectedCount(field: ListFilterField): number {
+  const current = conditionFor(field.key)
+  if (current === undefined) return 0
+  if (Array.isArray(current.value)) return current.value.length
+  return 1
+}
+
 function fieldIcon(type: ListFilterField['type'], label: string): typeof Circle {
   if (label.includes('城市')) return MapPin
   if (label.includes('负责人') || label.includes('成员') || label.includes('创建人') || label.includes('联系人')) return UserRound
@@ -400,6 +407,7 @@ watch(open, (isOpen) => {
                 <component :is="fieldIcon(field.type, field.label)" class="filter-field-icon" aria-hidden="true" />
                 <span>{{ field.label }}</span>
               </span>
+              <span v-if="selectedCount(field) > 0" class="filter-field-count">{{ selectedCount(field) }}</span>
               <span aria-hidden="true">›</span>
             </button>
           </li>
@@ -546,6 +554,13 @@ watch(open, (isOpen) => {
   min-width: 0;
   align-items: center;
   gap: $wolf-space-xs-v2;
+}
+
+.filter-field-count {
+  margin-left: auto;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  font-variant-numeric: tabular-nums;
 }
 
 .filter-field-icon {
