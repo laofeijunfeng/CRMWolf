@@ -182,6 +182,7 @@ def _record(
     confirmation_status: str | None = PaymentConfirmationStatus.PENDING,
     approval_id: int | None = None,
     creator_id: str = "7",
+    idempotency_key: str | None = None,
     creator_name: str = "销售张",
     payer: str | None = None,
     commission_member_name: str | None = None,
@@ -196,6 +197,7 @@ def _record(
         actual_payer_name=payer,
         payment_date=payment_date,
         creator_id=creator_id,
+        idempotency_key=idempotency_key,
         creator_name=creator_name,
         commission_member_name=commission_member_name,
         confirmation_status=confirmation_status,
@@ -867,3 +869,41 @@ def test_own_scope_detail_hides_another_creators_record(api_env) -> None:
     assert hidden.status_code == 404
     assert visible.status_code == 200, visible.text
     assert visible.json()["id"] == 1
+
+
+def test_owner_not_creator_cannot_resolve_or_read_payment_record(api_env) -> None:
+    api_env.db.add_all([
+        _contract(1, name="别人创建自己负责", owner_id="7", creator_id="8"),
+        _plan(1, contract_id=1),
+        _record(
+            1,
+            plan_id=1,
+            amount="90.00",
+            payment_date=date(2026, 6, 3),
+            idempotency_key="owner-not-creator-key",
+        ),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "payment:view:own")
+
+    detail = api_env.client.get("/v1/payments/payment-records/1")
+    resolved = api_env.client.get(
+        "/v1/payments/payment-records/resolve",
+        params={"idempotency_key": "owner-not-creator-key"},
+    )
+
+    assert detail.status_code == 404
+    assert detail.json()["detail"] == "回款记录不存在"
+    assert resolved.status_code == 404
+    assert resolved.json()["detail"] == "回款登记结果尚未确认"
+
+    _grant(api_env.db, 7, "payment:view:all")
+    detail = api_env.client.get("/v1/payments/payment-records/1")
+    resolved = api_env.client.get(
+        "/v1/payments/payment-records/resolve",
+        params={"idempotency_key": "owner-not-creator-key"},
+    )
+
+    assert detail.status_code == 200, detail.text
+    assert resolved.status_code == 200, resolved.text
+    assert detail.json()["id"] == resolved.json()["id"] == 1

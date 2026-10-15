@@ -2030,12 +2030,12 @@ def resolve_payment_record(
     db: Session = Depends(get_db),
 ):
     record = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key.strip())
-    if record is None:
+    if record is None or not _payment_record_visible_to_caller(record, team_id, current_user, db):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="回款登记结果尚未确认",
         )
-    return _payment_record_detail_response(record, team_id, current_user, db)
+    return _payment_record_detail_response(record, team_id, current_user, db, authorized=True)
 
 
 @router.get("/payment-records/board", response_model=PaymentRecordBoardResponse)
