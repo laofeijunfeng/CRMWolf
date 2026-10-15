@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date'
-import { Filter } from 'lucide-vue-next'
+import { CalendarDays, Circle, Hash, Type, UserRound, MapPin } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -183,12 +183,34 @@ function fieldOffset(fieldKey: string): number {
   const list = fieldListRef.value
   const item = list?.querySelector<HTMLElement>(`[data-field-key="${CSS.escape(fieldKey)}"]`)
   const anchor = list?.parentElement?.querySelector<HTMLElement>('.filter-panel-anchor')
+  const panel = anchor?.querySelector<HTMLElement>('.filter-field-panel')
   if (item === null || item === undefined || anchor === null || anchor === undefined) return 0
-  return item.getBoundingClientRect().top - anchor.getBoundingClientRect().top
+  const raw = item.getBoundingClientRect().top - anchor.getBoundingClientRect().top
+  if (panel === null || panel === undefined) return raw
+  const margin = 8
+  const viewportBottom = window.innerHeight - margin
+  const projectedBottom = anchor.getBoundingClientRect().top + raw + panel.offsetHeight
+  if (projectedBottom <= viewportBottom) return raw
+  return Math.max(margin - anchor.getBoundingClientRect().top, raw - (projectedBottom - viewportBottom))
+}
+
+function fieldIcon(type: ListFilterField['type'], label: string): typeof Circle {
+  if (label.includes('城市')) return MapPin
+  if (label.includes('负责人') || label.includes('成员') || label.includes('创建人') || label.includes('联系人')) return UserRound
+  if (type === 'enum') return Circle
+  if (type === 'date') return CalendarDays
+  if (type === 'number') return Hash
+  return Type
+}
+
+function placePanel(): void {
+  if (activeFieldKey.value === '') return
+  panelTop.value = fieldOffset(activeFieldKey.value)
 }
 
 function showField(fieldKey: string): void {
   panelTop.value = fieldOffset(fieldKey)
+  void nextTick(placePanel)
   const previous = activeField.value
   if (previous !== undefined && previous.key !== fieldKey) {
     if (previous.type === 'text') commitText(previous)
@@ -333,6 +355,10 @@ onBeforeUnmount(() => {
   mediaQuery?.removeEventListener('change', handleMediaChange)
 })
 
+watch([activeFieldKey, draftOperator, calendarPlaceholder], () => {
+  void nextTick(placePanel)
+})
+
 watch(open, (isOpen) => {
   if (!isOpen) activeFieldKey.value = ''
 })
@@ -370,6 +396,7 @@ watch(open, (isOpen) => {
               @focus="handleFieldFocus(field.key)"
               @click.stop="handleFieldClick(field.key)"
             >
+              <component :is="fieldIcon(field.type, field.label)" class="filter-field-icon" aria-hidden="true" />
               <span>{{ field.label }}</span>
               <span aria-hidden="true">›</span>
             </button>
@@ -512,9 +539,17 @@ watch(open, (isOpen) => {
   list-style: none;
 }
 
+.filter-field-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: $wolf-text-tertiary-v2;
+}
+
 .filter-field-button,
 .filter-operator-button {
   display: flex;
+  gap: $wolf-space-xs-v2;
   width: 100%;
   align-items: center;
   justify-content: space-between;
