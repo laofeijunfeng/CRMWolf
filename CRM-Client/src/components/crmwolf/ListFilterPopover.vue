@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date'
-import { CalendarDays, Circle, Hash, Type, UserRound, MapPin } from 'lucide-vue-next'
+import { CalendarDays, Circle, Filter, Hash, MapPin, Type, UserRound } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
