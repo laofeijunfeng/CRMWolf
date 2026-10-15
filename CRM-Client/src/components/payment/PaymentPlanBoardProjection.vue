@@ -66,12 +66,14 @@ function localDateLabel(value: string): string {
 
 function planOverdueRemaining(item: PaymentPlanItem): BoardMetadataRow | null {
   if (item.status !== 'OVERDUE') return null
-  const amount = Number(item.remaining_amount)
-  if (!Number.isFinite(amount) || amount === 0) return null
-  return {
-    key: 'overdue_remaining_amount',
-    label: '逾期待回款',
-    value: formatCurrency(item.remaining_amount),
+  try {
+    return {
+      key: 'overdue_remaining_amount',
+      label: '逾期待回款',
+      value: formatCurrency(chartAmount(item.remaining_amount)),
+    }
+  } catch {
+    return null
   }
 }
 
