@@ -520,3 +520,122 @@ def test_board_schemas_use_public_ids_and_report_truncation():
     )
     assert response.summary.total_count == 3
     assert response.truncated is True
+
+
+def test_chart_counts_every_visible_journey_once(db):
+    _seed_query_case(db)
+
+    chart = service.chart(db, request=_request(), today=date(2026, 10, 16))
+
+    cards = {card.key: card for card in chart.cards}
+    assert chart.summary.total_count == 6
+    assert chart.summary.total_amount == 2800.0
+    assert [card.key for card in chart.cards] == [
+        "stage",
+        "purchase_type",
+        "amount_band",
+        "product",
+        "recent_activity",
+        "expected_closing",
+    ]
+    assert sum(segment.count for segment in cards["stage"].segments) == 6
+    assert sum(segment.count for segment in cards["amount_band"].segments) == 6
+    purchase = {segment.key: segment for segment in cards["purchase_type"].segments}
+    assert purchase["NEW"].count == 5
+    assert purchase["unset"].count == 1
+    product = {segment.key: segment for segment in cards["product"].segments}
+    assert product["Hifox"].count == 2
+    assert product["Apifox"].count == 3
+    assert product["unset"].count == 1
+    assert product["other"].count == 0
+    activity = {segment.key: segment for segment in cards["recent_activity"].segments}
+    assert activity["none"].count == 0
+    assert sum(segment.count for segment in cards["recent_activity"].segments) == 6
+    closing = {segment.key: segment for segment in cards["expected_closing"].segments}
+    assert [segment.key for segment in cards["expected_closing"].segments[:6]] == [
+        "2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03",
+    ]
+    assert closing["2026-12"].count == 5
+    assert closing["unscheduled"].count == 1
+    assert closing["2026-10"].count == 0
+
+    segment = service.chart_segment(
+        db,
+        request=_request(),
+        card="expected_closing",
+        segment="unscheduled",
+        today=date(2026, 10, 16),
+        skip=0,
+        limit=20,
+    )
+    assert segment.total == 1
+    assert segment.label == "未排期"
+    assert segment.items[0].name == "Journey no_opportunity"
+
+
+def test_chart_segment_boundaries_and_product_overflow(db):
+    _seed_query_case(db)
+    journey = db.query(CustomerDealJourney).filter(CustomerDealJourney.name == "Journey no_opportunity").one()
+    product = db.query(Product).filter(Product.name == "Hifox").one()
+    opportunity = db.query(Opportunity).filter(Opportunity.opportunity_name == "Opportunity customer_owned").one()
+    opportunity.total_amount = Decimal("100000")
+    opportunity.expected_closing_date = date(2026, 9, 30)
+    journey.last_event_at = None
+    for index in range(8):
+        customer = Customer(
+            team_id=1,
+            account_name=f"Overflow {index}",
+            city="Shanghai",
+            owner_id="1",
+            creator_id="1",
+        )
+        db.add(customer)
+        db.flush()
+        extra_product = Product(team_id=1, code=f"EXTRA-{index}", name=f"Extra {index}", created_by="1")
+        db.add(extra_product)
+        db.flush()
+        extra_opportunity = Opportunity(
+            team_id=1,
+            opportunity_number=f"EXTRA-{index}",
+            opportunity_name=f"Extra {index}",
+            customer_id=customer.id,
+            product_id=extra_product.id,
+            total_amount=Decimal("1000000"),
+            user_count=1,
+            unit_price=Decimal("1"),
+            license_type="SUBSCRIPTION",
+            subscription_years=1,
+            purchase_type="EXPANSION",
+            expected_closing_date=date(2027, 4, 1),
+            owner_id="1",
+            creator_id="1",
+            approval_phase=ApprovalPhase.APPROVED.value,
+            win_probability=10,
+        )
+        db.add(extra_opportunity)
+        db.flush()
+        db.add(
+            CustomerDealJourney(
+                team_id=1,
+                customer_id=customer.id,
+                primary_opportunity_id=extra_opportunity.id,
+                name=f"Overflow {index}",
+                status=DealJourneyStatus.ACTIVE,
+                started_at=datetime(2026, 10, 1),
+                last_event_at=datetime(2026, 10, 16),
+            )
+        )
+    db.commit()
+
+    chart = service.chart(db, request=_request(), today=date(2026, 10, 16))
+    cards = {card.key: card for card in chart.cards}
+    amount = {segment.key: segment.count for segment in cards["amount_band"].segments}
+    assert amount["100k_500k"] == 1
+    assert amount["over_1m"] == 8
+    product = cards["product"].segments
+    assert len([segment for segment in product if segment.key not in {"other", "unset"}]) == 8
+    assert next(segment for segment in product if segment.key == "other").count == 2
+    assert next(segment for segment in cards["recent_activity"].segments if segment.key == "none").count == 1
+    closing = {segment.key: segment.count for segment in cards["expected_closing"].segments}
+    assert closing["unscheduled"] == 10
+    assert closing["2026-10"] == 0

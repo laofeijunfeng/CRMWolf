@@ -65,6 +65,10 @@ function handleDisplayModeChange(checked: boolean): void {
   emit('update:view-display-mode', checked ? 'board' : 'table')
 }
 
+function selectChart(): void {
+  emit('update:view-display-mode', 'chart')
+}
+
 function cloneColumns(columns: ColumnConfigOption[]): ColumnConfigOption[] {
   return columns.map((column) => ({ ...column }))
 }
@@ -165,6 +169,18 @@ watch(() => props.scope, (scope) => {
               aria-label="看板视图"
               @update:model-value="handleDisplayModeChange"
             />
+          </div>
+          <div class="column-config-view-row">
+            <span>图表视图</span>
+            <Button
+              type="button"
+              size="sm"
+              :variant="viewDisplayMode === 'chart' ? 'default' : 'outline'"
+              :aria-pressed="viewDisplayMode === 'chart'"
+              @click="selectChart"
+            >
+              图表
+            </Button>
           </div>
         </div>
 

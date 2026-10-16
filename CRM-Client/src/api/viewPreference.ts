@@ -4,7 +4,7 @@ import request from '@/utils/request'
 
 export type ViewPreferenceScope = 'personal' | 'team'
 
-export type ViewDisplayMode = 'table' | 'board'
+export type ViewDisplayMode = 'table' | 'board' | 'chart'
 
 export interface ViewPreferenceColumn {
   key: string
@@ -84,7 +84,7 @@ const ViewPreferenceConfigSchema: z.ZodType<ViewPreferenceConfig> = z.object({
   sorts: z.array(z.record(z.string(), z.unknown())).optional(),
   filters: z.array(z.record(z.string(), z.unknown())).optional(),
   density: z.string().nullable().optional(),
-  display_mode: z.enum(['table', 'board']).nullable().optional(),
+  display_mode: z.enum(['table', 'board', 'chart']).nullable().optional(),
 })
 const ViewPreferenceItemSchema: z.ZodType<ViewPreferenceItem> = z.object({
   id: z.number(),

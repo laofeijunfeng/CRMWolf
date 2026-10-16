@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import { dealJourneyApi, type BusinessJourneyTab } from '@/api/dealJourney'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
+import BusinessJourneyChartView from '@/components/business-journey/BusinessJourneyChartView.vue'
 import BusinessJourneyListTools from '@/components/business-journey/BusinessJourneyListTools.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
@@ -15,6 +16,10 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import type {
   BusinessJourneyBoardResponse,
+  BusinessJourneyChartCard,
+  BusinessJourneyChartPreview,
+  BusinessJourneyChartResponse,
+  BusinessJourneyChartSegment,
   BusinessJourneyListItem
 } from '@/schemas/dealJourney'
 import { useHeaderStore } from '@/stores/header'
@@ -45,6 +50,18 @@ const boardErrorMessage = ref('')
 const board = ref<BusinessJourneyBoardResponse | null>(null)
 const boardRequestSequence = ref(0)
 const boardHasSuccess = ref(false)
+const chartLoading = ref(false)
+const chartErrorMessage = ref('')
+const chart = ref<BusinessJourneyChartResponse | null>(null)
+const chartRequestSequence = ref(0)
+const chartHasSuccess = ref(false)
+const segmentOpen = ref(false)
+const segmentLoading = ref(false)
+const segmentError = ref('')
+const segmentLabel = ref('')
+const segmentTotal = ref(0)
+const segmentItems = ref<BusinessJourneyChartPreview[]>([])
+const segmentRequestSequence = ref(0)
 const selectedJourneyCustomerId = ref<string | null>(null)
 const selectedJourneyCustomerName = ref<string | undefined>(undefined)
 const selectedJourneyName = ref<string | undefined>(undefined)
@@ -154,18 +171,88 @@ async function loadBoard(): Promise<boolean> {
   }
 }
 
+async function loadChart(): Promise<boolean> {
+  const requestId = ++chartRequestSequence.value
+  chartLoading.value = true
+  chartErrorMessage.value = ''
+  try {
+    const response = await dealJourneyApi.getChart(projectionQuery())
+    if (requestId !== chartRequestSequence.value || displayMode.value !== 'chart') return false
+    chart.value = response
+    chartHasSuccess.value = true
+    return true
+  } catch (error) {
+    if (requestId !== chartRequestSequence.value || displayMode.value !== 'chart') return false
+    logger.error('[BusinessJourneys]', '加载业务旅程图表失败', { error })
+    chartErrorMessage.value = chartHasSuccess.value
+      ? '旅程图表刷新失败，当前显示上次成功加载的数据'
+      : '旅程图表加载失败，请重试'
+    return false
+  } finally {
+    if (requestId === chartRequestSequence.value) chartLoading.value = false
+  }
+}
+
 function invalidateInactiveProjection(nextMode: ViewDisplayMode): void {
-  if (nextMode === 'table') {
-    boardRequestSequence.value += 1
-    boardLoading.value = false
-  } else {
+  if (nextMode !== 'table') {
     tableRequestSequence.value += 1
     tableLoading.value = false
+  }
+  if (nextMode !== 'board') {
+    boardRequestSequence.value += 1
+    boardLoading.value = false
+  }
+  if (nextMode !== 'chart') {
+    chartRequestSequence.value += 1
+    chartLoading.value = false
+    segmentRequestSequence.value += 1
+    segmentOpen.value = false
   }
 }
 
 function refreshActiveProjection(): Promise<boolean> {
-  return displayMode.value === 'table' ? loadTable() : loadBoard()
+  if (displayMode.value === 'board') return loadBoard()
+  if (displayMode.value === 'chart') return loadChart()
+  return loadTable()
+}
+
+async function openChartSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): Promise<void> {
+  const requestId = ++segmentRequestSequence.value
+  segmentOpen.value = true
+  segmentLoading.value = true
+  segmentError.value = ''
+  segmentLabel.value = segment.label
+  segmentTotal.value = segment.count
+  segmentItems.value = []
+  try {
+    const items: BusinessJourneyChartPreview[] = []
+    let skip = 0
+    let total = segment.count
+    do {
+      const response = await dealJourneyApi.getChartSegment({
+        ...projectionQuery(),
+        card: card.key,
+        segment: segment.key,
+        skip,
+        limit: 200
+      })
+      if (requestId !== segmentRequestSequence.value) return
+      items.push(...response.items)
+      total = response.total
+      segmentLabel.value = response.label
+      skip += response.items.length
+      if (response.items.length === 0) break
+    } while (items.length < total)
+    if (requestId !== segmentRequestSequence.value) return
+    segmentItems.value = items
+    segmentTotal.value = total
+  } catch (error) {
+    if (requestId !== segmentRequestSequence.value) return
+    logger.error('[BusinessJourneys]', '加载图表分段失败', { error })
+    segmentError.value = '这一段加载失败，请重试'
+  } finally {
+    if (requestId === segmentRequestSequence.value) segmentLoading.value = false
+  }
 }
 
 const customFilterViews = useCustomFilterViews({
@@ -365,7 +452,7 @@ onMounted(() => {
 <template>
   <div class="business-journeys-page">
     <BusinessJourneyListTools
-      v-if="displayMode === 'board'"
+      v-if="displayMode !== 'table'"
       :fields="fields"
       :filters="activeFilters"
       :sorts="activeSorts"
@@ -430,12 +517,29 @@ onMounted(() => {
     />
 
     <BusinessJourneyBoardView
-      v-else
+      v-else-if="displayMode === 'board'"
       :board="board"
       :loading="boardLoading"
       :error-message="boardErrorMessage"
       @retry="loadBoard"
       @row-click="handleRowClick"
+    />
+
+    <BusinessJourneyChartView
+      v-else
+      :chart="chart"
+      :loading="chartLoading"
+      :error-message="chartErrorMessage"
+      :segment-open="segmentOpen"
+      :segment-loading="segmentLoading"
+      :segment-error="segmentError"
+      :segment-label="segmentLabel"
+      :segment-total="segmentTotal"
+      :segment-items="segmentItems"
+      @retry="loadChart"
+      @open-segment="openChartSegment($event.card, $event.segment)"
+      @update:segment-open="segmentOpen = $event"
+      @open-journey="handleRowClick({ customerId: $event.customerId, journeyPublicId: $event.journeyPublicId })"
     />
   </div>
 

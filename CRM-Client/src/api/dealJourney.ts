@@ -3,6 +3,8 @@ import { parseOpportunityApiResponse } from '@/api/opportunity'
 import request from '@/utils/request'
 import {
   BusinessJourneyBoardResponseSchema,
+  BusinessJourneyChartResponseSchema,
+  BusinessJourneyChartSegmentResponseSchema,
   BusinessJourneyDetailResponseSchema,
   BusinessJourneyListResponseSchema,
   BusinessJourneyOwnerFilterOptionsResponseSchema,
@@ -10,6 +12,8 @@ import {
   type DealJourney,
   DealJourneySchema,
   type BusinessJourneyBoardResponse,
+  type BusinessJourneyChartResponse,
+  type BusinessJourneyChartSegmentResponse,
   type BusinessJourneyListResponse,
   type BusinessJourneyOwnerFilterOptionsResponse,
 } from '@/schemas/dealJourney'
@@ -62,6 +66,23 @@ export const dealJourneyApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const raw: unknown = await request.get('/v1/business-journeys/board', { params })
     return BusinessJourneyBoardResponseSchema.parse(raw)
+  },
+
+  async getChart(params: BusinessJourneyBoardParams): Promise<BusinessJourneyChartResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/business-journeys/chart', { params })
+    return BusinessJourneyChartResponseSchema.parse(raw)
+  },
+
+  async getChartSegment(params: BusinessJourneyBoardParams & {
+    card: BusinessJourneyChartResponse['cards'][number]['key']
+    segment: string
+    skip: number
+    limit: number
+  }): Promise<BusinessJourneyChartSegmentResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const raw: unknown = await request.get('/v1/business-journeys/chart/segment', { params })
+    return BusinessJourneyChartSegmentResponseSchema.parse(raw)
   },
 
   async getOwnerFilterOptions(): Promise<BusinessJourneyOwnerFilterOptionsResponse> {
