@@ -859,3 +859,36 @@ class CustomerLoseRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError('输单原因不能为空')
         return v.strip()
+
+class CustomerChartPreview(BaseModel):
+    id: str
+    name: str
+    owner_name: str | None = None
+
+
+class CustomerChartBucket(BaseModel):
+    key: str
+    label: str
+    count: int = Field(..., ge=0)
+    ratio: int = Field(..., ge=0, le=100)
+    preview: list[CustomerChartPreview]
+    preview_total: int = Field(..., ge=0)
+
+
+class CustomerChartCard(BaseModel):
+    key: Literal["status", "license", "scale", "industry", "city", "created_month"]
+    title: str
+    description: str
+    buckets: list[CustomerChartBucket]
+
+
+class CustomerChartResponse(BaseModel):
+    population: int = Field(..., ge=0)
+    cards: list[CustomerChartCard]
+
+
+class CustomerChartBucketCustomersResponse(BaseModel):
+    chart: Literal["status", "license", "scale", "industry", "city", "created_month"]
+    bucket: str
+    total: int = Field(..., ge=0)
+    customers: list[CustomerChartPreview]

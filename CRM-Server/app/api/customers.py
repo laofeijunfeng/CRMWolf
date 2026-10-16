@@ -86,6 +86,8 @@ from app.schemas.customer import (
     CustomerLicenseSnapshotUpdate,
     CustomerLifecycleStatusUpdate,
     CustomerListResponse,
+    CustomerChartBucketCustomersResponse,
+    CustomerChartResponse,
     CustomerLoseRequest,
     CustomerMemberCandidate,
     CustomerMemberCreate,
@@ -1836,6 +1838,96 @@ def export_customers(
     ))
     return list_export_file_response(generated)
 
+
+def _customer_chart_population(
+    db: Session,
+    team_id: int,
+    current_user,
+    *,
+    scope: str | None,
+    search: str | None,
+    filters: list | None,
+    sorts: list | None,
+) -> list:
+    from app.crud.permission import permission_crud
+
+    if scope not in {None, "collaborated", "accessible", "public"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope 仅支持 collaborated/accessible/public",
+        )
+    permission_codes = {p.code for p in permission_crud.get_user_permissions(db, current_user.id, team_id)}
+    has_view_all = "customer:view:all" in permission_codes
+    if scope == "public":
+        return customer_crud.build_public_list_query(
+            db,
+            team_id=team_id,
+            search=search,
+            filters=filters,
+            sorts=sorts,
+        ).all()
+    owner_id = enforce_owner_view_scope(
+        filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的客户, 或需要 customer:view:all 权限查看他人数据",
+        default_to_self=scope not in {"collaborated", "accessible"},
+    )
+    return customer_crud.build_list_query(
+        db,
+        team_id=team_id,
+        owner_id=owner_id,
+        scope=scope if scope in {"collaborated", "accessible"} else None,
+        current_user_id=str(current_user.id),
+        include_collaborated=scope == "accessible" and not has_view_all,
+        search=search,
+        filters=filters,
+        sorts=sorts,
+    ).all()
+
+
+@router.get("/chart", response_model=CustomerChartResponse, summary="查询客户图表")
+def get_customer_chart(
+    scope: str | None = Query(None, description="客户范围: collaborated/accessible/public"),
+    search: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user: Any = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CustomerChartResponse:
+    from app.services.customer_chart_stats import build_customer_chart
+
+    parsed_filters, parsed_sorts = optional_request_list_query(filters_raw=filters, sorts_raw=sorts)
+    customers = run_or_400(lambda: _customer_chart_population(
+        db, team_id, current_user, scope=scope, search=search, filters=parsed_filters, sorts=parsed_sorts,
+    ))
+    return CustomerChartResponse.model_validate(build_customer_chart(db, team_id, customers))
+
+
+@router.get("/chart/customers", response_model=CustomerChartBucketCustomersResponse, summary="查询图表一段里的客户")
+def get_customer_chart_bucket_customers(
+    chart: str = Query(..., description="图表键"),
+    bucket: str = Query(..., description="段键"),
+    scope: str | None = Query(None),
+    search: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user: Any = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> CustomerChartBucketCustomersResponse:
+    from app.services.customer_chart_stats import list_chart_bucket_customers
+
+    parsed_filters, parsed_sorts = optional_request_list_query(filters_raw=filters, sorts_raw=sorts)
+    customers = run_or_400(lambda: _customer_chart_population(
+        db, team_id, current_user, scope=scope, search=search, filters=parsed_filters, sorts=parsed_sorts,
+    ))
+    try:
+        listed = list_chart_bucket_customers(db, team_id, customers, chart, bucket)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
+    return CustomerChartBucketCustomersResponse(chart=chart, bucket=bucket, total=len(listed), customers=listed)
 
 @router.get(
     "/identity-resolution",

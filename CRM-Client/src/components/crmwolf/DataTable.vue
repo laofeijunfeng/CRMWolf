@@ -9,7 +9,7 @@
  * - 桌面行操作采用“主操作 + 更多菜单”，右键作为快捷入口
  * - 统一样式（行高 44px、语义表头背景等）
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   Pagination,
@@ -289,10 +289,11 @@ const hasDesktopRowActions = computed(() =>
 const desktopActionsColumnWidth = computed(() =>
   getDesktopTableRowActionsWidth(rowActionSets.value)
 )
+const slots = useSlots()
 const tableCardStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {}
-  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') {
-    // no-op: 页面高度由外层布局负责
+  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto' || slots['replacement']) {
+    // 图表替换表格时按内容增高。
   } else {
     // 固定高度优先于 fill：列表页显式传入的 height 是防止页面随行数增长的
     // 关键约束。fill 只负责让表格内容区在这个固定卡片内占满剩余空间。
@@ -1102,9 +1103,11 @@ onBeforeUnmount(() => {
         @retry-view-apply="emit('retry-view-apply')"
       />
 
-      <!-- 表格内容区（可滚动） -->
+      <div v-if="$slots['replacement']" class="data-table-content data-table-content--replacement">
+        <slot name="replacement" />
+      </div>
       <div
-        v-if="hasBlockingError"
+        v-else-if="hasBlockingError"
         class="data-table-state"
       >
         <ErrorState
@@ -1357,7 +1360,8 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 分页区（固定在卡片底部） -->
-      <div class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
+      <div v-if="!$slots['replacement']" class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
+
         <span class="total-text">共 {{ total }} 条</span>
         <Pagination
           :page="page"
@@ -1506,6 +1510,17 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: auto;  // 支持横向滚动（固定列模式）
+}
+
+.data-table-content--replacement {
+  flex: 0 0 auto;
+  height: auto;
+  overflow: visible;
+}
+
+.data-table-card:has(.data-table-content--replacement) {
+  height: auto !important;
+  overflow: visible;
 }
 
 .data-table-content--page {
