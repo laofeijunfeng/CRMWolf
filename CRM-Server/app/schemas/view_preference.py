@@ -33,6 +33,7 @@ class ViewPreferenceSaveRequest(BaseModel):
 
 class ViewPreferenceCustomViewCreateRequest(BaseModel):
     config: ViewPreferenceConfig
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class ViewPreferenceCustomViewUpdateRequest(BaseModel):

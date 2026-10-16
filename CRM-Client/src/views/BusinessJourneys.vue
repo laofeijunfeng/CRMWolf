@@ -380,14 +380,12 @@ onMounted(() => {
       @update:filters="activeFilters = $event"
       @filter-apply="handleFilterApply"
       @filter-reset="handleFilterReset"
-      @filter-save-view="customFilterViews.saveAsCustomView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @update:view-display-mode="handleDisplayModeChange"
-      @save-current-view="customFilterViews.saveCurrentAsCustomView"
       @refresh="refreshActiveProjection"
     />
 
@@ -417,7 +415,6 @@ onMounted(() => {
       @update:filters="activeFilters = $event"
       @filter-apply="handleFilterApply"
       @filter-reset="handleFilterReset"
-      @filter-save-view="customFilterViews.saveAsCustomView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

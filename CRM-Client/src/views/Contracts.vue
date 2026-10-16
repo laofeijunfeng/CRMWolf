@@ -352,7 +352,6 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
 
 const handleReset = (): void => {
   activeFilters.value = []
-  activeTab.value = 'all'
   pagination.current = 1
   fetchContractList()
 }
@@ -383,10 +382,8 @@ const handleSortReset = (): void => {
   fetchContractList()
 }
 
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  pagination.current = 1
-  await customFilterViews.saveAsCustomView(filters)
+const handleSaveCurrentView = async (): Promise<void> => {
+  await customFilterViews.saveCurrentAsCustomView()
 }
 
 const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
@@ -713,7 +710,7 @@ watchEffect(() => {
       @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
-      @filter-save-view="handleSaveFilterView"
+      @save-current-view="handleSaveCurrentView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

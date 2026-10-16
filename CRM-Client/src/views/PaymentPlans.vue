@@ -305,10 +305,8 @@ const handleSortReset = (): void => {
   fetchPaymentPlans()
 }
 
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  pagination.current = 1
-  await customFilterViews.saveAsCustomView(filters)
+const handleSaveCurrentView = async (): Promise<void> => {
+  await customFilterViews.saveCurrentAsCustomView()
 }
 
 const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
@@ -697,7 +695,7 @@ watch(
       @search-apply="handleSearchApply"
       @search-clear="handleSearchClear"
       @filter-reset="handleReset"
-      @filter-save-view="handleSaveFilterView"
+      @save-current-view="handleSaveCurrentView"
       @update:sorts="activeSorts = $event"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"

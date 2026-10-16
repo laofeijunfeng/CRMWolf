@@ -239,11 +239,14 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     ])
   }
 
-  async function createCustomView(filters: ListFilterCondition[]): Promise<void> {
+  async function createCustomView(filters: ListFilterCondition[], name: string): Promise<void> {
+    const trimmedName = name.trim()
+    if (trimmedName === '') return
     const source = captureCurrentSnapshot()
     saving.value = true
     try {
       const view = await viewPreferenceApi.createCustomView(options.viewKey, {
+        name: trimmedName,
         config: buildViewConfig(
           materializeSnapshotFilters(filters),
           options.activeSorts.value,
@@ -271,13 +274,28 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     }
   }
 
+  async function promptAndCreate(filters: ListFilterCondition[]): Promise<void> {
+    const name = await renameDialog({
+      title: '另存为视图',
+      description: '保存当前筛选、排序和隐藏列。搜索词不保存。',
+      initialName: '',
+      confirmText: '确定',
+      cancelText: '取消',
+      maxLength: 100,
+    })
+    if (name === null) return
+    await createCustomView(filters, name)
+  }
+
   async function saveAsCustomView(filters: ListFilterCondition[]): Promise<void> {
-    if (filters.length === 0) return
-    await createCustomView(filters)
+    const hasSorts = options.activeSorts.value.length > 0
+    const hasHiddenColumns = options.activeColumns.value.some((column) => column.visible === false)
+    if (filters.length === 0 && !hasSorts && !hasHiddenColumns) return
+    await promptAndCreate(filters)
   }
 
   async function saveCurrentAsCustomView(): Promise<void> {
-    await createCustomView(options.activeFilters.value)
+    await promptAndCreate(options.activeFilters.value)
   }
 
   function mergeTabs(builtInTabs: TabItem[]): TabItem[] {

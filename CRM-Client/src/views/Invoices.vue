@@ -347,10 +347,8 @@ const handleSortReset = (): void => {
   fetchInvoiceApplications()
 }
 
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  pagination.current = 1
-  await customFilterViews.saveAsCustomView(filters)
+const handleSaveCurrentView = async (): Promise<void> => {
+  await customFilterViews.saveCurrentAsCustomView()
 }
 
 const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
@@ -792,7 +790,7 @@ watchEffect(() => {
       @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
-      @filter-save-view="handleSaveFilterView"
+      @save-current-view="handleSaveCurrentView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @retry="fetchInvoiceApplications"

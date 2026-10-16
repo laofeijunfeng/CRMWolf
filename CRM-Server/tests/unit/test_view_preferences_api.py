@@ -219,10 +219,11 @@ def test_rejects_oversized_column_preference_payload(client):
     assert response.status_code == 422
 
 
-def test_creates_personal_custom_filter_view_with_generated_name(client):
+def test_creates_personal_custom_filter_view_with_provided_name(client):
     response = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
         json={
+            "name": "  跟进中的我的客户  ",
             "config": {
                 "version": 1,
                 "columns": [],
@@ -234,7 +235,7 @@ def test_creates_personal_custom_filter_view_with_generated_name(client):
 
     assert response.status_code == 201
     body = response.json()
-    assert body["name"] == "视图 1"
+    assert body["name"] == "跟进中的我的客户"
     assert body["scope"] == "personal"
     assert body["user_id"] == 1
     assert body["is_default"] is False
@@ -242,20 +243,55 @@ def test_creates_personal_custom_filter_view_with_generated_name(client):
     assert body["config"]["filters"][0]["field"] == "status"
 
 
+def test_rejects_blank_custom_view_name(client):
+    response = client.post(
+        "/api/v1/view-preferences/customers.list/custom-views",
+        json={"name": "   ", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+    )
+
+    assert response.status_code == 422
+
+
 def test_custom_view_round_trips_business_journey_display_mode(client):
     response = client.post(
         "/api/v1/view-preferences/business-journeys.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "board"}},
+        json={"name": "看板视图", "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "board"}},
     )
 
     assert response.status_code == 201
     assert response.json()["config"]["display_mode"] == "board"
 
 
+def test_custom_view_list_skips_a_stored_display_mode_this_contract_cannot_read(client, db_session):
+    db_session.add(ViewPreference(
+        team_id=1,
+        user_id=1,
+        view_key="business-journeys.list",
+        scope="personal",
+        preference_key="custom:chart",
+        name="图表视图",
+        is_default=0,
+        config_json='{"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "chart"}',
+        created_by=1,
+        updated_by=1,
+    ))
+    db_session.commit()
+    created = client.post(
+        "/api/v1/view-preferences/business-journeys.list/custom-views",
+        json={"name": "表格视图", "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "table"}},
+    )
+    assert created.status_code == 201
+
+    response = client.get("/api/v1/view-preferences/business-journeys.list/custom-views")
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["表格视图"]
+
+
 def test_view_preference_rejects_unknown_display_mode(client):
     response = client.post(
         "/api/v1/view-preferences/business-journeys.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "display_mode": "cards"}},
+        json={"name": "错误展示", "config": {"version": 1, "columns": [], "display_mode": "cards"}},
     )
 
     assert response.status_code == 422
@@ -264,25 +300,25 @@ def test_view_preference_rejects_unknown_display_mode(client):
 def test_old_view_config_without_display_mode_still_parses(client):
     response = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
-        json={"config": {"version": 1, "columns": []}},
+        json={"name": "旧配置", "config": {"version": 1, "columns": []}},
     )
 
     assert response.status_code == 201
     assert response.json()["config"]["display_mode"] is None
 
 
-def test_custom_filter_view_name_uses_current_effective_count_plus_one(client):
+def test_custom_filter_views_keep_the_names_supplied_at_creation(client):
     for _ in range(2):
         response = client.post(
             "/api/v1/view-preferences/customers.list/custom-views",
-            json={"config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+            json={"name": "跟进中的我的客户", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
         )
         assert response.status_code == 201
 
     response = client.get("/api/v1/view-preferences/customers.list/custom-views")
 
     assert response.status_code == 200
-    assert [item["name"] for item in response.json()["items"]] == ["视图 1", "视图 2"]
+    assert [item["name"] for item in response.json()["items"]] == ["跟进中的我的客户", "跟进中的我的客户"]
 
 
 def test_custom_filter_views_are_only_visible_to_creator(client, db_session):
@@ -309,7 +345,7 @@ def test_custom_filter_views_are_only_visible_to_creator(client, db_session):
 def test_renames_and_deletes_owned_custom_filter_view(client):
     created = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+        json={"name": "跟进中的我的客户", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
     ).json()
 
     rename_response = client.patch(
@@ -330,7 +366,7 @@ def test_renames_and_deletes_owned_custom_filter_view(client):
 def test_rejects_blank_custom_filter_view_name(client):
     created = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+        json={"name": "跟进中的我的客户", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
     ).json()
 
     response = client.patch(
@@ -368,11 +404,11 @@ def test_rejects_updating_other_users_custom_filter_view(client, db_session):
 def test_custom_filter_view_can_move_to_front(client):
     first = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+        json={"name": "跟进中的我的客户", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
     ).json()
     second = client.post(
         "/api/v1/view-preferences/customers.list/custom-views",
-        json={"config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
+        json={"name": "跟进中的我的客户", "config": {"version": 1, "columns": [], "filters": [], "sorts": []}},
     ).json()
 
     response = client.patch(

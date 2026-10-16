@@ -62,6 +62,7 @@ export interface ViewPreferenceCustomViewListResponse {
 
 export interface ViewPreferenceCustomViewCreateRequest {
   config: ViewPreferenceConfig
+  name: string
 }
 
 export interface ViewPreferenceCustomViewUpdateRequest {

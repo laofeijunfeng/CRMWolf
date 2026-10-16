@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,7 +14,6 @@ from app.schemas.view_preference import (
     ViewPreferenceResponse,
     ViewPreferenceSaveRequest,
 )
-
 
 router = APIRouter(prefix="/v1/view-preferences", tags=["视图偏好"])
 
@@ -37,6 +37,10 @@ def _ensure_can_manage_team_view(db: Session, team_id: int, user_id: int) -> Non
 def _to_item(preference: ViewPreference | None) -> ViewPreferenceItem | None:
     if preference is None:
         return None
+    try:
+        config = parse_config(preference.config_json)
+    except (ValidationError, ValueError, TypeError):
+        return None
     return ViewPreferenceItem(
         id=preference.id,
         team_id=preference.team_id,
@@ -47,7 +51,7 @@ def _to_item(preference: ViewPreference | None) -> ViewPreferenceItem | None:
         name=preference.name,
         is_default=bool(preference.is_default),
         sort_order=preference.sort_order,
-        config=parse_config(preference.config_json),
+        config=config,
         created_by=preference.created_by,
         updated_by=preference.updated_by,
         created_time=preference.created_time,
@@ -107,6 +111,10 @@ def create_custom_view(
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    normalized_name = payload.name.strip()
+    if normalized_name == "":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="视图名称不能为空")
+
     preference = view_preference_crud.create_custom_view(
         db,
         team_id=team_id,
@@ -114,6 +122,7 @@ def create_custom_view(
         user_id=current_user.id,
         config=payload.config,
         actor_id=current_user.id,
+        name=normalized_name,
     )
     item = _to_item(preference)
     if item is None:

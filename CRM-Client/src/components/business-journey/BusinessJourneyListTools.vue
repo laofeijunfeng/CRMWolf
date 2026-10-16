@@ -38,14 +38,12 @@ const emit = defineEmits<{
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
-  'filter-save-view': [value: ListFilterCondition[]]
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
   'column-config-save': [value: ViewPreferenceConfig]
   'column-config-reset': []
   'update:view-display-mode': [value: ViewDisplayMode]
-  'save-current-view': []
   refresh: []
 }>()
 
@@ -94,12 +92,9 @@ function handleColumnConfigSave(): void {
     <ListFilterPopover
       :model-value="filters"
       :fields="projected.filterFields"
-      save-view-enabled
-      :save-view-loading="saving ?? false"
       @update:model-value="emit('update:filters', $event)"
       @apply="emit('filter-apply', $event)"
       @reset="emit('filter-reset')"
-      @save-view="emit('filter-save-view', $event)"
     />
     <ListAdvancedTools
       :sorts="sorts"
@@ -116,8 +111,6 @@ function handleColumnConfigSave(): void {
       view-display-mode-enabled
       view-config-trigger-label="视图配置"
       view-config-panel-title="视图配置"
-      can-save-current-view
-      :view-save-loading="saving ?? false"
       @update:sorts="emit('update:sorts', $event)"
       @sort-apply="emit('sort-apply', $event)"
       @sort-reset="emit('sort-reset')"
@@ -125,7 +118,6 @@ function handleColumnConfigSave(): void {
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="emit('column-config-reset')"
       @update:view-display-mode="emit('update:view-display-mode', $event)"
-      @save-current-view="emit('save-current-view')"
     />
     <TableToolbarButton :disabled="loading" aria-label="刷新业务旅程" @click="emit('refresh')">
       <RefreshCw class="refresh-icon" :class="{ spinning: loading }" aria-hidden="true" />

@@ -51,7 +51,6 @@ const emit = defineEmits<{
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
-  'filter-save-view': [value: ListFilterCondition[]]
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -116,7 +115,6 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
     column-config-enabled
     :column-preference-config="activeColumnPreferenceConfig"
     column-preference-mode="custom"
-    filter-view-save-enabled
     search-enabled
     :search="search"
     search-placeholder="搜索旅程、客户或商机"
@@ -139,7 +137,6 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
     @update:filters="emit('update:filters', $event)"
     @filter-apply="emit('filter-apply', $event)"
     @filter-reset="emit('filter-reset')"
-    @filter-save-view="emit('filter-save-view', $event)"
     @update:sorts="emit('update:sorts', $event)"
     @sort-apply="emit('sort-apply', $event)"
     @sort-reset="emit('sort-reset')"

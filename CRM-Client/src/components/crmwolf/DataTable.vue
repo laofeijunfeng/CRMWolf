@@ -241,7 +241,6 @@ const emit = defineEmits<{
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
   'filter-reset': []
-  'filter-save-view': [value: ListFilterCondition[]]
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -270,25 +269,14 @@ const someSelectableRowsSelected = computed<boolean>(() =>
   selectableRows.value.some(({ key }) => selectedRowKeySet.value.has(key)) && !allSelectableRowsSelected.value
 )
 const totalPages = computed<number>(() => Math.ceil(props.total / props.pageSize))
-const hasDisplayedContent = ref(false)
-const hasDisplayedTable = ref(false)
 const effectiveViewState = computed<DataViewState>(() =>
   resolveDataViewState({
     loading: props.loading,
     dataCount: props.data.length,
     hasError: props.loadError !== null,
-    explicitState: props.viewState,
-    hasDisplayedContent: hasDisplayedContent.value || hasDisplayedTable.value
+    explicitState: props.viewState
   })
 )
-watch(
-  () => props.data.length,
-  (count) => {
-    if (count > 0) hasDisplayedContent.value = true
-  },
-  { immediate: true }
-)
-
 const effectiveScrollMode = computed<'contained' | 'page' | 'none'>(() => {
   if (props.scrollMode !== undefined) return props.scrollMode
   if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') return 'page'
@@ -324,10 +312,6 @@ const tableCardClass = computed(() => ({
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
 const isInitialLoading = computed(() => effectiveViewState.value === 'loading')
-
-watch(isInitialLoading, (loading) => {
-  if (!loading) hasDisplayedTable.value = true
-})
 const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
 const hasBlockingError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length === 0
@@ -774,10 +758,6 @@ function handleFilterReset(): void {
   emit('filter-reset')
 }
 
-function handleFilterSaveView(filters: ListFilterCondition[]): void {
-  emit('filter-save-view', filters)
-}
-
 function areFilterValuesEqual(
   left: ListFilterCondition['value'],
   right: ListFilterCondition['value'],
@@ -805,8 +785,16 @@ function handleRemoveFilter(id: string): void {
 
 function handleClearFilters(): void {
   emit('update:filters', [])
+  emit('update:sorts', [])
+  emit('sort-reset')
   emit('filter-reset')
   emit('clear-filters')
+  if (hiddenColumnCount.value === 0) return
+  if (props.columnPreferenceMode === 'custom') {
+    emit('column-config-reset')
+    return
+  }
+  void handleColumnConfigReset('personal')
 }
 
 function handleSearchUpdate(value: string): void {
@@ -1064,12 +1052,9 @@ onBeforeUnmount(() => {
           v-if="normalizedFilterFields.length > 0"
           :model-value="normalizedFilters"
           :fields="normalizedFilterFields"
-          :save-view-enabled="filterViewSaveAvailable"
-          :save-view-loading="filterViewSaving"
           @update:model-value="handleFilterUpdate"
           @apply="handleFilterApply"
           @reset="handleFilterReset"
-          @save-view="handleFilterSaveView"
         />
         <ListAdvancedTools
           v-if="hasAdvancedTools"
@@ -1087,8 +1072,6 @@ onBeforeUnmount(() => {
           :view-display-mode-enabled="props.viewDisplayModeEnabled"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
-          :can-save-current-view="props.canSaveCurrentView"
-          :view-save-loading="props.viewSaveLoading"
           :export-fields="exportDialogFields"
           :export-enabled="exportAvailable"
           :export-title="props.exportTitle"
@@ -1101,7 +1084,6 @@ onBeforeUnmount(() => {
           @column-config-save="handleColumnConfigSave"
           @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
           @update:view-display-mode="emit('update:view-display-mode', $event)"
-          @save-current-view="emit('save-current-view')"
         />
         <slot name="tableTools" />
       </div>
@@ -1112,8 +1094,11 @@ onBeforeUnmount(() => {
         :hidden-column-count="hiddenColumnCount"
         :applying="viewApplying ?? false"
         :apply-error="viewApplyError ?? null"
+        :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
+        :save-view-loading="filterViewSaving || props.viewSaveLoading"
         @remove-filter="handleRemoveFilter"
         @clear-filters="handleClearFilters"
+        @save-view="emit('save-current-view')"
         @retry-view-apply="emit('retry-view-apply')"
       />
 

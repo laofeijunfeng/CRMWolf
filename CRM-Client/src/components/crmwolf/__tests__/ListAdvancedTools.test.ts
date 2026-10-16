@@ -210,8 +210,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'table',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })
@@ -231,7 +229,7 @@ describe('ListAdvancedTools', () => {
     expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
   })
 
-  it('emits save-current-view from the same config surface', async () => {
+  it('does not offer save-as-view inside the config surface', async () => {
     const wrapper = mount(ListAdvancedTools, {
       props: {
         ...props,
@@ -239,8 +237,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'board',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })
@@ -252,10 +248,7 @@ describe('ListAdvancedTools', () => {
     trigger?.click()
     await flushPromises()
     const save = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.replace(/\s+/g, '') === '另存为视图')
-    expect(save).toBeDefined()
-    save?.click()
-    await flushPromises()
-    expect(wrapper.emitted('save-current-view')).toHaveLength(1)
+    expect(save).toBeUndefined()
   })
 
   it('keeps existing pages free of the board switch and view label', async () => {
@@ -276,8 +269,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'table',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })

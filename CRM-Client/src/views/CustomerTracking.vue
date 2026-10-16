@@ -933,7 +933,7 @@ watchEffect(() => {
       @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleFilterReset"
-      @filter-save-view="customFilterViews.saveAsCustomView"
+      @save-current-view="customFilterViews.saveCurrentAsCustomView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @column-config-current-change="activeColumns = $event.columns"

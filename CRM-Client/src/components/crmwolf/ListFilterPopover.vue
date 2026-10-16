@@ -30,19 +30,14 @@ const NARROW_QUERY = '(max-width: 767px)'
 const props = withDefaults(defineProps<{
   fields: ListFilterField[]
   modelValue?: ListFilterCondition[]
-  saveViewEnabled?: boolean
-  saveViewLoading?: boolean
 }>(), {
   modelValue: () => [],
-  saveViewEnabled: false,
-  saveViewLoading: false
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: ListFilterCondition[]]
   apply: [value: ListFilterCondition[]]
   reset: []
-  'save-view': [value: ListFilterCondition[]]
 }>()
 
 const open = ref(false)
@@ -60,7 +55,6 @@ let mediaQuery: MediaQueryList | undefined
 
 const activeConditions = computed(() => normalizeConditions(props.modelValue))
 const activeFilterCount = computed(() => activeConditions.value.length)
-const canSaveView = computed(() => props.saveViewEnabled && activeConditions.value.length > 0)
 const activeField = computed(() => props.fields.find((field) => field.key === activeFieldKey.value))
 const activeOperatorOptions = computed(() => {
   if (activeField.value === undefined) return []
@@ -330,16 +324,9 @@ function handleDateSelect(field: ListFilterField, value: DateValue | undefined):
   })
 }
 
-
-
 function resetFilters(): void {
   activeFieldKey.value = ''
   emit('reset')
-}
-
-function saveAsView(): void {
-  if (activeConditions.value.length === 0) return
-  emit('save-view', activeConditions.value)
 }
 
 function handlePlaceholderChange(value: DateValue | undefined): void {
@@ -496,16 +483,6 @@ watch(open, (isOpen) => {
           <div v-if="activeFilterCount > 0" class="filter-footer">
             <Button type="button" variant="ghost" size="sm" @click="resetFilters">
               清空
-            </Button>
-            <Button
-              v-if="canSaveView"
-              type="button"
-              variant="ghost"
-              size="sm"
-              :disabled="saveViewLoading"
-              @click="saveAsView"
-            >
-              另存为视图
             </Button>
           </div>
         </section>
