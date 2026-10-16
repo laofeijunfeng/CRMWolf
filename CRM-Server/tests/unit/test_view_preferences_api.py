@@ -255,7 +255,10 @@ def test_rejects_blank_custom_view_name(client):
 def test_custom_view_round_trips_business_journey_display_mode(client):
     response = client.post(
         "/api/v1/view-preferences/business-journeys.list/custom-views",
-        json={"name": "看板视图", "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "board"}},
+        json={
+            "name": "看板视图",
+            "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "board"},
+        },
     )
 
     assert response.status_code == 201
@@ -278,7 +281,10 @@ def test_custom_view_list_skips_a_stored_display_mode_this_contract_cannot_read(
     db_session.commit()
     created = client.post(
         "/api/v1/view-preferences/business-journeys.list/custom-views",
-        json={"name": "表格视图", "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "table"}},
+        json={
+            "name": "表格视图",
+            "config": {"version": 1, "columns": [], "filters": [], "sorts": [], "display_mode": "table"},
+        },
     )
     assert created.status_code == 201
 
