@@ -47,11 +47,16 @@ const openToolbarPopover = async (wrapper: VueWrapper, triggerLabel: string): Pr
 
 describe('overlay panel chrome', () => {
   beforeAll(() => {
+    vi.stubGlobal('CSS', { escape: (value: string) => value.replace(/["\\]/g, '\\$&') })
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: mediaMatches,
       media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
       addEventListener: vi.fn(),
-      removeEventListener: vi.fn()
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
     })))
   })
 
@@ -75,6 +80,8 @@ describe('overlay panel chrome', () => {
     expect(wrapper.emitted('close')).toEqual([[]])
     expect(wrapper.emitted('reset')).toBeUndefined()
   })
+
+
 
   it('clears cascade filters from the footer without an apply button', async () => {
     const wrapper = mountAttached(ListFilterPopover, {
@@ -265,22 +272,19 @@ describe('overlay panel chrome', () => {
     expect(document.querySelector('.filter-operator-button-active')?.textContent?.trim()).toBe('等于')
   })
 
-  it('keeps sort reset on the footer apply row and does not reset when closing', async () => {
+  it('closes the sort menu without clearing a selected direction', async () => {
     const wrapper = mountAttached(ListSortPopover, {
       fields: [{ key: 'name', label: '名称', type: 'text' }],
       modelValue: [{ field: 'name', direction: 'asc' }]
     })
 
     await openToolbarPopover(wrapper, '排序')
-    findButton('关闭').click()
+    expect(document.body.textContent).not.toContain('应用')
+    expect(document.body.textContent).not.toContain('清空')
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
     expect(wrapper.emitted('reset')).toBeUndefined()
-
-    await openToolbarPopover(wrapper, '排序')
-    expect(findButton('应用').querySelector('svg')).toBeNull()
-    findButton('清空').click()
-    await flushPromises()
-    expect(wrapper.emitted('reset')).toHaveLength(1)
+    expect(wrapper.emitted('apply')).toBeUndefined()
   })
 
   it('gives column config the same close control and text-only footer actions', async () => {
