@@ -206,7 +206,6 @@ def _named_card(
     segments.append((BLANK_KEY, BLANK_LABEL, blank))
     return _card(chart_key, segments, len(rows), owners)
 
-
 def _fixed_card(
     chart_key: str,
     rows: Sequence[ChartCustomer],
@@ -295,7 +294,9 @@ def _industry_label(row: ChartCustomer, industry_names: dict[str, str]) -> str |
     if code == "":
         return None
     name = industry_names.get(code, "").strip()
-    return name or code
+    if name == "" or name == BLANK_LABEL or name == OTHER_LABEL:
+        return None
+    return name
 
 
 def _city_label(row: ChartCustomer) -> str | None:
@@ -317,7 +318,8 @@ def _industry_names(db: Session, codes: Iterable[str | None]) -> dict[str, str]:
             names[code] = code
             continue
         secondary = industry.name if getattr(industry, "level", None) == 2 else None
-        names[code] = str(secondary or industry.name or code).strip() or code
+        label = str(secondary or industry.name or "").strip()
+        names[code] = label or BLANK_LABEL
     return names
 
 

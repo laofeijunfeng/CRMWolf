@@ -1513,14 +1513,14 @@ onBeforeUnmount(() => {
 }
 
 .data-table-content--replacement {
-  flex: 0 0 auto;
-  height: auto;
-  overflow: visible;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .data-table-card:has(.data-table-content--replacement) {
-  height: auto !important;
-  overflow: visible;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .data-table-content--page {
@@ -1751,6 +1751,7 @@ onBeforeUnmount(() => {
 .data-table-tools {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   min-height: 40px;
   padding: 6px 12px;

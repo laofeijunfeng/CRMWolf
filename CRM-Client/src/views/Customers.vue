@@ -21,8 +21,8 @@ import { ref, reactive, computed, onMounted, watch, watchEffect, type Component 
 import { useRoute } from 'vue-router'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
-import { BarChart3, List, Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
-import { DataTable, TableRowActions, TableToolbarButton, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
+import { Plus, Sparkles, ArrowRightLeft, TrendingUp, TrendingDown, XCircle, Trash2, Pencil, UserRoundCheck } from 'lucide-vue-next'
+import { DataTable, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
@@ -31,6 +31,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -730,8 +731,10 @@ const refreshVisibleCustomers = (): Promise<boolean> => (
   displayMode.value === 'chart' ? fetchCustomerChart() : fetchCustomerList()
 )
 
-const toggleCustomerChart = (): void => {
-  displayMode.value = displayMode.value === 'chart' ? 'table' : 'chart'
+const setCustomerDisplayMode = (value: string): void => {
+  if (value !== 'table' && value !== 'chart') return
+  if (displayMode.value === value) return
+  displayMode.value = value
   chartBucket.value = null
   chartBucketError.value = ''
   void refreshVisibleCustomers()
@@ -1388,15 +1391,12 @@ watchEffect(() => {
 
     >
       <template #tableTools>
-        <TableToolbarButton
-          :active="displayMode === 'chart'"
-          :aria-pressed="displayMode === 'chart'"
-          @click="toggleCustomerChart"
-        >
-          <List v-if="displayMode === 'chart'" class="h-4 w-4" aria-hidden="true" />
-          <BarChart3 v-else class="h-4 w-4" aria-hidden="true" />
-          <span>{{ displayMode === 'chart' ? '列表' : '图表' }}</span>
-        </TableToolbarButton>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
+          <TabsList aria-label="客户展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </template>
       <template v-if="displayMode === 'chart'" #replacement>
         <CustomerChartPage

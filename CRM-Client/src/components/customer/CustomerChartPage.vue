@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { VisArea, VisAxis, VisDonut, VisSingleContainer, VisXYContainer } from '@unovis/vue'
+import { computed } from 'vue'
+import { Area, Donut } from '@unovis/ts'
+import { VisArea, VisAxis, VisDonut, VisLine, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  ChartContainer,
+  ChartCrosshair,
+  ChartTooltip,
+  ChartTooltipContent,
+  componentToString,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import {
   Dialog,
   DialogContent,
@@ -16,6 +25,9 @@ import type {
   CustomerChartCard,
   CustomerChartResponse,
 } from '@/schemas/customer'
+const CHART_COLOR = 'hsl(var(--chart-1))'
+const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))']
+
 
 const props = defineProps<{
   chart: CustomerChartResponse | null
@@ -33,15 +45,14 @@ const emit = defineEmits<{
   'close-bucket': []
 }>()
 
-const selected = ref<{ cardKey: string; bucketKey: string } | null>(null)
+interface PieDatum { key: string, label: string, count: number, ratio: number, fill: string }
+interface RankDatum { index: number, label: string, count: number, ratio: number }
+
 const population = computed(() => props.chart?.population ?? 0)
-const selectedCard = computed(() => props.chart?.cards.find((card) => card.key === selected.value?.cardKey) ?? null)
-const selectedBucket = computed(() => selectedCard.value?.buckets.find((bucket) => bucket.key === selected.value?.bucketKey) ?? null)
 const pieCards = computed(() => (props.chart?.cards ?? []).filter((card) => card.key === 'status' || card.key === 'license' || card.key === 'scale'))
 const industryCard = computed(() => props.chart?.cards.find((card) => card.key === 'industry') ?? null)
 const cityCard = computed(() => props.chart?.cards.find((card) => card.key === 'city') ?? null)
 const monthCard = computed(() => props.chart?.cards.find((card) => card.key === 'created_month') ?? null)
-const monthData = computed(() => (monthCard.value?.buckets ?? []).map((bucket) => ({ label: bucket.label, count: bucket.count })))
 const dialogOpen = computed({
   get: () => props.bucketCustomers !== null || props.bucketLoading || props.bucketError !== '',
   set: (open: boolean) => {
@@ -49,53 +60,66 @@ const dialogOpen = computed({
   },
 })
 
-
-
-function themeColor(alpha: number, muted = false): string {
-  if (typeof document === 'undefined') return muted ? 'hsl(215 16% 47% / 0.45)' : `hsl(221 83% 53% / ${alpha})`
-  const root = getComputedStyle(document.documentElement)
-  const primary = root.getPropertyValue('--primary').trim() || '221 83% 53%'
-  const quiet = root.getPropertyValue('--muted-foreground').trim() || '215 16% 47%'
-  return muted ? `hsl(${quiet} / 0.45)` : `hsl(${primary} / ${alpha})`
-}
-
-const SLICE_ALPHA = [1, 0.82, 0.66, 0.52, 0.4, 0.3, 0.22]
-
-function bucketColor(card: CustomerChartCard, bucket: CustomerChartBucket): string {
-  if (bucket.key === 'other' || bucket.key === 'blank') return themeColor(1, true)
-  const index = Math.max(card.buckets.findIndex((item) => item.key === bucket.key), 0)
-  return themeColor(SLICE_ALPHA[index % SLICE_ALPHA.length] ?? 1)
-}
-
-function selectBucket(card: CustomerChartCard, bucket: CustomerChartBucket): void {
-  if (bucket.count === 0) return
-  selected.value = { cardKey: card.key, bucketKey: bucket.key }
-}
-
-function visibleSlices(card: CustomerChartCard): CustomerChartBucket[] {
-  return card.buckets.filter((bucket) => bucket.count > 0)
-}
-
-function pieValue(bucket: CustomerChartBucket): number {
-  return bucket.count
-}
-
-function pieColor(card: CustomerChartCard): (bucket: CustomerChartBucket) => string {
-  return (bucket) => bucketColor(card, bucket)
-}
-
-function barWidth(card: CustomerChartCard, bucket: CustomerChartBucket): string {
-  const max = Math.max(...card.buckets.map((item) => item.count), 1)
-  return `${Math.round((bucket.count / max) * 100)}%`
-}
-
 function countText(bucket: CustomerChartBucket): string {
   return `${bucket.count} 家 · ${bucket.ratio}%`
 }
 
-const monthX = (_datum: { label: string }, index: number): number => index
-const monthY = (datum: { count: number }): number => datum.count
-const monthTick = (value: number): string => monthData.value[Math.round(value)]?.label ?? ''
+function sliceColor(index: number, key: string): string {
+  if (key === 'blank' || key === 'other') return 'hsl(var(--muted-foreground))'
+  return CHART_COLORS[index % CHART_COLORS.length] ?? CHART_COLOR
+}
+
+function pieData(card: CustomerChartCard): PieDatum[] {
+  return card.buckets
+    .filter((bucket) => bucket.count > 0)
+    .map((bucket) => ({
+      key: bucket.key,
+      label: bucket.label,
+      count: bucket.count,
+      ratio: bucket.ratio,
+      fill: `var(--color-${bucket.key})`,
+      [bucket.key]: bucket.count,
+    }))
+}
+
+function pieConfig(card: CustomerChartCard): ChartConfig {
+  return Object.fromEntries(card.buckets.map((bucket, index) => [
+    bucket.key,
+    { label: bucket.label, color: sliceColor(index, bucket.key) },
+  ]))
+}
+
+
+
+function namedBuckets(card: CustomerChartCard): CustomerChartBucket[] {
+  return card.buckets.filter((bucket) => bucket.key !== 'other' && bucket.key !== 'blank')
+}
+
+function chartRows(card: CustomerChartCard): CustomerChartBucket[] {
+  return card.key === 'created_month' ? card.buckets : namedBuckets(card)
+}
+
+function rankData(card: CustomerChartCard): RankDatum[] {
+  return chartRows(card).map((bucket, index) => ({
+    index,
+    label: bucket.label,
+    count: bucket.count,
+    ratio: bucket.ratio,
+  }))
+}
+
+
+
+
+const monthConfig = {
+  count: { label: '客户', color: CHART_COLOR },
+} satisfies ChartConfig
+
+function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
+  const bucket = card?.buckets[datum.index]
+  if (!bucket || bucket.count === 0) return
+  emit('view-bucket', card, bucket)
+}
 </script>
 
 <template>
@@ -112,103 +136,160 @@ const monthTick = (value: number): string => monthData.value[Math.round(value)]?
       </header>
       <p v-if="error" class="customer-chart-page__refresh-error" role="alert">{{ error }}</p>
       <div class="customer-chart-page__grid">
-        <Card v-for="card in pieCards" :key="card.key">
-          <CardHeader>
+        <Card v-for="card in pieCards" :key="card.key" class="flex flex-col">
+          <CardHeader class="items-start pb-0">
             <CardTitle>{{ card.title }}</CardTitle>
             <CardDescription>{{ card.description }}</CardDescription>
           </CardHeader>
-          <CardContent class="customer-chart-pie">
-            <VisSingleContainer :data="visibleSlices(card)" :height="180">
-              <VisDonut :value="pieValue" :color="pieColor(card)" :arc-width="28" />
-            </VisSingleContainer>
-            <ul>
-              <li v-for="bucket in card.buckets" :key="bucket.key">
-                <button type="button" :disabled="bucket.count === 0" @click="selectBucket(card, bucket)">
-                  <i :style="{ background: bucketColor(card, bucket) }" />
-                  <span>{{ bucket.label }}</span>
-                  <strong>{{ countText(bucket) }}</strong>
-                </button>
-              </li>
-            </ul>
+          <CardContent class="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-6 pb-6">
+            <ChartContainer
+              :config="pieConfig(card)"
+              class="aspect-square h-[220px] w-[220px]"
+              :style="{
+                '--vis-donut-central-label-font-size': '22px',
+                '--vis-donut-central-label-font-weight': '600',
+                '--vis-donut-central-label-text-color': 'hsl(var(--foreground))',
+                '--vis-donut-central-sub-label-text-color': 'hsl(var(--muted-foreground))',
+              }"
+            >
+              <VisSingleContainer :data="pieData(card)" :margin="{ top: 8, bottom: 8 }">
+                <VisDonut
+                  :value="(datum: PieDatum) => datum.count"
+                  :color="(datum: PieDatum) => datum.fill"
+                  :arc-width="30"
+                  :central-label-offset-y="10"
+                  :central-label="String(population)"
+                  central-sub-label="客户"
+                  :events="{
+                    [Donut.selectors.segment]: {
+                      click: (datum: PieDatum) => {
+                        const bucket = card.buckets.find((item) => item.key === datum.key)
+                        if (bucket) emit('view-bucket', card, bucket)
+                      },
+                    },
+                  }"
+                />
+                <ChartTooltip
+                  :triggers="{
+                    [Donut.selectors.segment]: componentToString(pieConfig(card), ChartTooltipContent, { hideLabel: true })!,
+                  }"
+                />
+              </VisSingleContainer>
+            </ChartContainer>
+            <div class="grid gap-2 text-sm">
+              <div v-for="bucket in card.buckets" :key="bucket.key" class="grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2">
+                <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: sliceColor(card.buckets.indexOf(bucket), bucket.key) }" />
+                <span>{{ bucket.label }}</span>
+                <span class="text-muted-foreground tabular-nums">{{ countText(bucket) }}</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
+
         <Card v-if="industryCard">
           <CardHeader>
             <CardTitle>{{ industryCard.title }}</CardTitle>
             <CardDescription>{{ industryCard.description }}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ul class="customer-chart-bars">
-              <li v-for="bucket in industryCard.buckets" :key="bucket.key">
-                <button type="button" :disabled="bucket.count === 0" @click="selectBucket(industryCard, bucket)">
-                  <span>{{ bucket.label }}</span>
-                  <b><i :style="{ width: barWidth(industryCard, bucket), background: bucketColor(industryCard, bucket) }" /></b>
-                  <strong>{{ countText(bucket) }}</strong>
-                </button>
-              </li>
-            </ul>
+            <div class="grid gap-2">
+              <button
+                v-for="bucket in namedBuckets(industryCard)"
+                :key="bucket.key"
+                type="button"
+                class="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
+                :disabled="bucket.count === 0"
+                @click="emit('view-bucket', industryCard, bucket)"
+              >
+                <span class="truncate">{{ bucket.label }}</span>
+                <span class="h-2 overflow-hidden rounded-full bg-muted">
+                  <span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round((bucket.count / Math.max(...namedBuckets(industryCard).map((item) => item.count), 1)) * 100)}%` }" />
+                </span>
+                <span class="text-muted-foreground tabular-nums">{{ countText(bucket) }}</span>
+              </button>
+            </div>
           </CardContent>
         </Card>
+
         <Card v-if="cityCard" class="customer-chart-page__wide">
           <CardHeader>
             <CardTitle>{{ cityCard.title }}</CardTitle>
             <CardDescription>{{ cityCard.description }}</CardDescription>
           </CardHeader>
           <CardContent>
-            <ul class="customer-chart-bars">
-              <li v-for="bucket in cityCard.buckets" :key="bucket.key">
-                <button type="button" :disabled="bucket.count === 0" @click="selectBucket(cityCard, bucket)">
-                  <span>{{ bucket.label }}</span>
-                  <b><i :style="{ width: barWidth(cityCard, bucket), background: bucketColor(cityCard, bucket) }" /></b>
-                  <strong>{{ countText(bucket) }}</strong>
-                </button>
-              </li>
-            </ul>
+            <div class="grid gap-2">
+              <button
+                v-for="bucket in namedBuckets(cityCard)"
+                :key="bucket.key"
+                type="button"
+                class="grid grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
+                :disabled="bucket.count === 0"
+                @click="emit('view-bucket', cityCard, bucket)"
+              >
+                <span class="truncate">{{ bucket.label }}</span>
+                <span class="h-2 overflow-hidden rounded-full bg-muted">
+                  <span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round((bucket.count / Math.max(...namedBuckets(cityCard).map((item) => item.count), 1)) * 100)}%` }" />
+                </span>
+                <span class="text-muted-foreground tabular-nums">{{ countText(bucket) }}</span>
+              </button>
+            </div>
           </CardContent>
         </Card>
+
+
+
         <Card v-if="monthCard" class="customer-chart-page__wide">
           <CardHeader>
             <CardTitle>{{ monthCard.title }}</CardTitle>
             <CardDescription>{{ monthCard.description }}</CardDescription>
           </CardHeader>
           <CardContent>
-            <VisXYContainer :data="monthData" :height="220">
-              <VisArea :x="monthX" :y="monthY" :color="themeColor(0.22)" :line-color="themeColor(1)" curve-type="monotoneX" :line="true" :opacity="1" />
-              <VisAxis type="x" :tick-format="monthTick" :grid-line="false" />
-              <VisAxis type="y" />
-            </VisXYContainer>
-            <ul class="customer-chart-months">
-              <li v-for="bucket in monthCard.buckets" :key="bucket.key">
-                <button type="button" :disabled="bucket.count === 0" @click="selectBucket(monthCard, bucket)">
-                  {{ bucket.label }} {{ countText(bucket) }}
-                </button>
-              </li>
-            </ul>
+            <ChartContainer :config="monthConfig" class="aspect-auto h-[240px]">
+              <VisXYContainer :data="rankData(monthCard)" :height="220">
+                <VisArea
+                  :x="(datum: RankDatum) => datum.index"
+                  :y="(datum: RankDatum) => datum.count"
+                  :color="monthConfig.count.color"
+                  :opacity="0.4"
+                  :events="{
+                    [Area.selectors.area]: {
+                      click: (datum: RankDatum) => openRank(monthCard, datum),
+                    },
+                  }"
+                />
+                <VisLine
+                  :x="(datum: RankDatum) => datum.index"
+                  :y="(datum: RankDatum) => datum.count"
+                  :color="monthConfig.count.color"
+                  :line-width="1"
+                />
+                <VisAxis
+                  type="x"
+                  :tick-line="false"
+                  :domain-line="false"
+                  :grid-line="false"
+                  :num-ticks="monthCard.buckets.length"
+                  :tick-values="rankData(monthCard).map((datum) => datum.index)"
+                  :tick-format="(value: number) => monthCard?.buckets[Math.round(value)]?.label ?? ''"
+                />
+                <VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" />
+                <ChartTooltip />
+                <ChartCrosshair
+                  :template="componentToString(monthConfig, ChartTooltipContent, { labelKey: 'label' })"
+                  :color="monthConfig.count.color"
+                />
+              </VisXYContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
       </div>
-      <aside v-if="selectedBucket && selectedCard" class="customer-chart-preview" aria-live="polite">
-        <header>
-          <strong>{{ selectedBucket.label }}</strong>
-          <span>{{ countText(selectedBucket) }}</span>
-          <Button type="button" variant="outline" size="sm" @click="emit('view-bucket', selectedCard, selectedBucket)">查看详情</Button>
-        </header>
-        <button
-          v-for="customer in selectedBucket.preview"
-          :key="customer.id"
-          type="button"
-          @click="emit('open-customer', customer.id)"
-        >
-          <span>{{ customer.name }}</span>
-          <small>{{ customer.owner_name || '无负责人' }}</small>
-        </button>
-      </aside>
+
       <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
         <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
           <DialogHeader>
-            <DialogTitle>{{ selectedBucket?.label ?? '这一段' }}</DialogTitle>
+            <DialogTitle>{{ bucketCustomers ? `${bucketCustomers.total} 家` : '客户' }}</DialogTitle>
             <DialogDescription>
-              {{ bucketLoading ? '正在读取这一段客户' : bucketError || `共 ${bucketCustomers?.total ?? 0} 家` }}
+              {{ bucketLoading ? '正在读取这一组客户…' : bucketError || '这一组里的客户。' }}
             </DialogDescription>
           </DialogHeader>
           <div v-if="bucketCustomers" class="customer-chart-dialog-list">
@@ -232,104 +313,59 @@ const monthTick = (value: number): string => monthData.value[Math.round(value)]?
 @use '@/styles/variables-v2.scss' as *;
 
 .customer-chart-page {
-  --customer-chart-1: hsl(var(--primary));
-  --customer-chart-2: hsl(var(--primary) / 0.78);
-  --customer-chart-3: hsl(var(--primary) / 0.62);
-  --customer-chart-4: hsl(var(--primary) / 0.48);
-  --customer-chart-5: hsl(var(--primary) / 0.36);
-  --customer-chart-6: hsl(var(--primary) / 0.24);
-  --customer-chart-7: hsl(var(--muted-foreground));
-  --customer-chart-muted: hsl(var(--muted-foreground) / 0.45);
-  min-height: 0;
-  padding: $wolf-space-lg-v2;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
+  min-width: 0;
+  padding: $wolf-space-md-v2;
+}
+
+.customer-chart-page__state,
+.customer-chart-page__refresh-error {
+  display: flex;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  color: $wolf-text-secondary-v2;
 }
 
 .customer-chart-page__heading h2 {
   margin: 0;
-  color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-title-v2;
+  line-height: 1.25;
 }
 
 .customer-chart-page__heading p,
-.customer-chart-page__state,
 .customer-chart-page__refresh-error {
+  margin: $wolf-space-xs-v2 0 0;
   color: $wolf-text-tertiary-v2;
 }
 
-.customer-chart-pie button,
-.customer-chart-bars button,
-.customer-chart-months button,
-.customer-chart-preview button,
+.customer-chart-page__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: $wolf-space-md-v2;
+}
+
+.customer-chart-page__wide {
+  grid-column: 1 / -1;
+}
+
+.customer-chart-dialog-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 24rem;
+  overflow: auto;
+}
+
 .customer-chart-dialog-list button {
   display: flex;
-  align-items: center;
-  gap: $wolf-space-sm-v2;
-  width: 100%;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
   border: 0;
+  border-bottom: 1px solid $wolf-border-default-v2;
   background: transparent;
+  padding: $wolf-space-sm-v2 0;
   text-align: left;
-  color: $wolf-text-primary-v2;
-}
-
-.customer-chart-pie button span,
-.customer-chart-bars button span {
-  flex: 1;
-  min-width: 0;
-}
-
-.customer-chart-pie button strong,
-.customer-chart-bars button strong,
-.customer-chart-preview header strong,
-.customer-chart-preview header span {
-  white-space: nowrap;
-}
-.customer-chart-bars,
-.customer-chart-months,
-.customer-chart-pie ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.customer-chart-bars button,
-.customer-chart-pie button,
-.customer-chart-months button,
-.customer-chart-preview button,
-.customer-chart-dialog-list button {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  text-align: left;
-  color: $wolf-text-primary-v2;
-}
-
-.customer-chart-bars b {
-  flex: 1;
-  height: 8px;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-bg-muted-v2;
-}
-
-.customer-chart-bars i,
-.customer-chart-pie i {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: inherit;
-}
-
-.customer-chart-bars i {
-  width: auto;
-  height: 100%;
-}
-
-.customer-chart-preview {
-  margin-top: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  padding: $wolf-space-md-v2;
-  background: $wolf-bg-card-v2;
 }
 
 @media (max-width: 900px) {
