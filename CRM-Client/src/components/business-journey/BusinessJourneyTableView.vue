@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useSlots } from 'vue'
 import { AmountText, Badge, DataTable, Progress, StatusBadge } from '@/components/crmwolf'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
@@ -91,6 +91,8 @@ const getJourneyProgressPercent = (row: BusinessJourneyListItem): number =>
 const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
   dealJourneyProgressColorClass(getJourneyProgressPercent(row))
 
+const slots = useSlots()
+
 const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
   `${row.name} 当前进度 ${getJourneyProgressPercent(row)}%`
 
@@ -166,7 +168,7 @@ function setDisplayMode(value: string): void {
         </TabsList>
       </Tabs>
     </template>
-    <template #replacement>
+    <template v-if="slots.replacement" #replacement>
       <slot name="replacement" />
     </template>
     <template #mobile-card="{ row }">

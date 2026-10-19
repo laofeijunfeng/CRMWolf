@@ -16,10 +16,12 @@ import {
   CustomerDetailResponseSchema,
   ContactResponseSchema,
   CustomerStatisticsSchema,
+  CustomerChartResponseSchema,
+  CustomerChartBucketCustomersSchema,
   CustomerAssignmentPreviewResponseSchema,
   CustomerIndustryHierarchySchema,
 } from '@/schemas/customer'
-import type { CustomerIndustryHierarchy } from '@/schemas/customer'
+import type { CustomerChartBucketCustomers, CustomerChartResponse, CustomerIndustryHierarchy } from '@/schemas/customer'
 
 /**
  * 验证 API 响应数据
@@ -369,8 +371,10 @@ export interface CustomerQueryParams {
   created_time_start?: string
   created_time_end?: string
   order_by?: string
-  order_dir?: 'asc' | 'desc'
-  scope?: 'collaborated' | 'accessible'
+  scope?: 'collaborated' | 'accessible' | 'public'
+
+  chart?: 'status' | 'license' | 'scale' | 'industry' | 'city' | 'created_month'
+  bucket?: string
 }
 
 export type ReturnReasonEnum = '丢单' | '无意向' | '信息错误' | '长期未跟进' | '预算不足' | '其他'
@@ -566,6 +570,12 @@ const customerApi = {
 
   getCustomers: (params?: CustomerQueryParams): Promise<CustomerResponse[] | PaginatedResponse<CustomerResponse>> =>
     api.get<CustomerResponse[] | PaginatedResponse<CustomerResponse>>('/v1/customers/', { params }),
+
+  getCustomerChart: (params?: CustomerQueryParams): Promise<CustomerChartResponse> =>
+    api.get('/v1/customers/chart', { params }, CustomerChartResponseSchema),
+
+  getCustomerChartBucket: (params: CustomerQueryParams): Promise<CustomerChartBucketCustomers> =>
+    api.get('/v1/customers/chart/customers', { params }, CustomerChartBucketCustomersSchema),
 
   exportCustomers: (payload: ListExportPayload<CustomerExportTab>): Promise<Blob> =>
     postListExport('/v1/customers/export', payload),

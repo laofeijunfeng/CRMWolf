@@ -31,6 +31,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,7 @@ import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
+import CustomerChartPage from '@/components/customer/CustomerChartPage.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
@@ -57,7 +59,9 @@ import customerApi, {
   type CustomerLoseRequest,
   type OwnerFilterOption,
   type CustomerExportTab,
+  type CustomerQueryParams,
 } from '@/api/customer'
+import type { CustomerChartBucket, CustomerChartBucketCustomers, CustomerChartCard, CustomerChartResponse } from '@/schemas/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -685,6 +689,85 @@ const fetchIndustryFilterOptions = async (): Promise<void> => {
   }
 }
 
+const displayMode = ref<'table' | 'chart'>('table')
+const chart = ref<CustomerChartResponse | null>(null)
+const chartLoading = ref(false)
+const chartError = ref('')
+const chartBucket = ref<CustomerChartBucketCustomers | null>(null)
+const chartBucketLoading = ref(false)
+const chartBucketError = ref('')
+let chartRequestId = 0
+let chartBucketRequestId = 0
+
+const chartQuery = (): CustomerQueryParams => {
+  const params: CustomerQueryParams = {
+    ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value }),
+  }
+  const keyword = search.value.trim()
+  if (keyword !== '') params.search = keyword
+  if (activeTab.value === 'public' || activeTab.value === 'collaborated') params.scope = activeTab.value
+  return params
+}
+
+const fetchCustomerChart = async (): Promise<boolean> => {
+  const requestId = ++chartRequestId
+  chartError.value = ''
+  chartLoading.value = true
+  try {
+    const response = await customerApi.getCustomerChart(chartQuery())
+    if (requestId !== chartRequestId) return false
+    chart.value = response
+    return true
+  } catch (error) {
+    if (requestId !== chartRequestId) return false
+    chartError.value = toFeedbackError(error, '客户图表').description || '客户图表加载失败，请重试'
+    return false
+  } finally {
+    if (requestId === chartRequestId) chartLoading.value = false
+  }
+}
+
+const refreshVisibleCustomers = (): Promise<boolean> => (
+  displayMode.value === 'chart' ? fetchCustomerChart() : fetchCustomerList()
+)
+
+const setCustomerDisplayMode = (value: string): void => {
+  if (value !== 'table' && value !== 'chart') return
+  if (displayMode.value === value) return
+  displayMode.value = value
+  chartBucket.value = null
+  chartBucketError.value = ''
+  void refreshVisibleCustomers()
+}
+
+const openChartBucket = async (card: CustomerChartCard, bucket: CustomerChartBucket): Promise<void> => {
+  const requestId = ++chartBucketRequestId
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = true
+  try {
+    const response = await customerApi.getCustomerChartBucket({
+      ...chartQuery(),
+      chart: card.key,
+      bucket: bucket.key,
+    })
+    if (requestId !== chartBucketRequestId) return
+    chartBucket.value = response
+  } catch (error) {
+    if (requestId !== chartBucketRequestId) return
+    chartBucketError.value = toFeedbackError(error, '客户图表').description || '这一段客户加载失败，请重试'
+  } finally {
+    if (requestId === chartBucketRequestId) chartBucketLoading.value = false
+  }
+}
+
+const closeChartBucket = (): void => {
+  chartBucketRequestId += 1
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = false
+}
+
 const fetchCustomerList = async (): Promise<boolean> => {
   const requestId = ++listRequestId.value
   loadError.value = null
@@ -726,9 +809,10 @@ const fetchCustomerList = async (): Promise<boolean> => {
   }
 }
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
-  const refreshed = await fetchCustomerList()
+  const refreshed = await refreshVisibleCustomers()
   if (!refreshed) {
-    toast.warning(`${operationLabel}已成功，但客户列表刷新失败，请稍后重试。`)
+    const viewLabel = displayMode.value === 'chart' ? '客户图表' : '客户列表'
+    toast.warning(`${operationLabel}已成功，但${viewLabel}刷新失败，请稍后重试。`)
   }
   return refreshed
 }
@@ -739,7 +823,7 @@ const customFilterViews = useCustomFilterViews({
   activeFilters,
   activeSorts,
   activeColumns,
-  refresh: fetchCustomerList,
+  refresh: refreshVisibleCustomers,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -756,39 +840,39 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleSaveCurrentView = async (): Promise<void> => {
@@ -827,7 +911,7 @@ const handleViewDetail = (record: CustomerResponse): void => {
 }
 
 const handleSheetRefresh = (): void => {
-  fetchCustomerList()
+  void refreshVisibleCustomers()
 }
 
 const handleEdit = async (record: CustomerResponse): Promise<void> => {
@@ -876,7 +960,7 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
     }
   }
 
-  const refreshed = await fetchCustomerList()
+  const refreshed = await refreshVisibleCustomers()
   const detailMatches = payload?.entityType === 'customer'
     && selectedCustomerId.value !== null
     && String(payload.entityId) === String(selectedCustomerId.value)
@@ -886,7 +970,7 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
 
   if (!refreshed || !detailRefreshed) {
     const failedScopes: string[] = []
-    if (!refreshed) failedScopes.push('客户列表')
+    if (!refreshed) failedScopes.push(displayMode.value === 'chart' ? '客户图表' : '客户列表')
     if (!detailRefreshed) failedScopes.push('客户详情')
     toast.warning(`客户已保存，但${failedScopes.join('和')}刷新失败，请稍后重试。`)
   }
@@ -1240,7 +1324,7 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    fetchCustomerList()
+    void refreshVisibleCustomers()
   }
 })
 
@@ -1249,7 +1333,7 @@ watchEffect(() => {
 </script>
 
 <template>
-  <div class="customers-page">
+  <div class="customers-page" :class="{ 'customers-page--chart': displayMode === 'chart' }">
     <!-- DataTable -->
     <DataTable
       column-config-enabled
@@ -1299,12 +1383,35 @@ watchEffect(() => {
       @save-current-view="handleSaveCurrentView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
-      @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
-      @retry="fetchCustomerList"
+      @retry="refreshVisibleCustomers"
+      @column-config-current-change="handleColumnConfigCurrentChange"
+
     >
+      <template #tableTools>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
+          <TabsList aria-label="客户展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </template>
+      <template v-if="displayMode === 'chart'" #replacement>
+        <CustomerChartPage
+          :chart="chart"
+          :loading="chartLoading"
+          :error="chartError"
+          :bucket-customers="chartBucket"
+          :bucket-loading="chartBucketLoading"
+          :bucket-error="chartBucketError"
+          @retry="fetchCustomerChart"
+          @open-customer="openCustomerDetail"
+          @view-bucket="openChartBucket"
+          @close-bucket="closeChartBucket"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="customer-mobile-card-header">
           <div class="customer-mobile-card-title">
@@ -1550,6 +1657,11 @@ watchEffect(() => {
   gap: $wolf-section-gap-v2;
   min-height: 0;
   flex: 1;
+}
+
+.customers-page--chart {
+  height: auto;
+  overflow: visible;
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
