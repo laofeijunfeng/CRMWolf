@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Donut, GroupedBar } from '@unovis/ts'
+import { VisAxis, VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ChartContainer, ChartTooltip, ChartTooltipContent, componentToString, type ChartConfig } from '@/components/ui/chart'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { AmountText, TableToolbarButton } from '@/components/crmwolf'
 import type {
@@ -10,6 +13,34 @@ import type {
   BusinessJourneyChartResponse,
   BusinessJourneyChartSegment
 } from '@/schemas/dealJourney'
+
+const CHART_COLOR = 'hsl(var(--primary))'
+const MUTED_COLOR = 'hsl(var(--muted-foreground))'
+const CHART_COLORS = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))'
+]
+
+interface PieDatum {
+  key: string
+  label: string
+  count: number
+  amount: number
+  fill: string
+  [key: string]: string | number
+}
+
+interface ClosingDatum {
+  index: number
+  key: string
+  label: string
+  count: number
+  amount: number
+  fill: string
+}
 
 const props = withDefaults(defineProps<{
   chart: BusinessJourneyChartResponse | null
@@ -49,6 +80,10 @@ const largestPie = computed(() => pieCard.value?.segments.reduce<BusinessJourney
   null
 ) ?? null)
 
+const closingConfig = {
+  amount: { label: '金额', color: CHART_COLOR }
+} satisfies ChartConfig
+
 function formatWan(value: number): string {
   const amount = Number.isFinite(value) ? value : 0
   if (Math.abs(amount) >= 10000) {
@@ -57,9 +92,61 @@ function formatWan(value: number): string {
   return `¥ ${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(amount)}`
 }
 
+function formatAxisAmount(value: number): string {
+  return formatWan(value)
+}
+
 function share(segment: BusinessJourneyChartSegment): string {
   if (pieTotal.value <= 0) return '0%'
   return `${Math.round(segment.amount / pieTotal.value * 100)}%`
+}
+
+function isMutedKey(key: string): boolean {
+  return key === 'unset' || key === 'other' || key === 'unscheduled'
+}
+
+function sliceColor(index: number, key: string): string {
+  if (key === 'unset' || key === 'other') return MUTED_COLOR
+  return CHART_COLORS[index % CHART_COLORS.length] ?? CHART_COLOR
+}
+
+function pieData(card: BusinessJourneyChartCard): PieDatum[] {
+  return card.segments.map((segment, index) => {
+    const datum = {
+      key: segment.key,
+      label: segment.label,
+      count: segment.count,
+      amount: segment.amount,
+      fill: sliceColor(index, segment.key)
+    } as PieDatum
+    datum[segment.key] = segment.amount
+    return datum
+  })
+}
+
+function pieConfig(card: BusinessJourneyChartCard): ChartConfig {
+  return Object.fromEntries(card.segments.map((segment, index) => [
+    segment.key,
+    { label: segment.label, color: sliceColor(index, segment.key) }
+  ]))
+}
+
+function donutPayload(datum: unknown): PieDatum | null {
+  if (typeof datum !== 'object' || datum === null) return null
+  const candidate = 'data' in datum ? (datum as { data?: unknown }).data : datum
+  if (typeof candidate !== 'object' || candidate === null || !('key' in candidate) || typeof candidate.key !== 'string') return null
+  return candidate as PieDatum
+}
+
+function closingData(card: BusinessJourneyChartCard): ClosingDatum[] {
+  return card.segments.map((segment, index) => ({
+    index,
+    key: segment.key,
+    label: segment.label,
+    count: segment.count,
+    amount: segment.amount,
+    fill: segment.key === 'unscheduled' ? MUTED_COLOR : CHART_COLOR
+  }))
 }
 
 function barWidth(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): string {
@@ -67,33 +154,19 @@ function barWidth(card: BusinessJourneyChartCard, segment: BusinessJourneyChartS
   return `${segment.amount / maximum * 100}%`
 }
 
-function columnHeight(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): string {
-  const maximum = Math.max(...card.segments.map(item => item.amount), 1)
-  return `${Math.max(segment.amount / maximum * 100, segment.amount > 0 ? 8 : 0)}%`
+function segmentText(segment: BusinessJourneyChartSegment): string {
+  return `${segment.count} 条 · ${formatWan(segment.amount)}`
 }
 
-const pieSlices = computed(() => {
-  const segments = pieCard.value?.segments ?? []
-  let cursor = -Math.PI / 2
-  return segments.flatMap(segment => {
-    const sweep = pieTotal.value <= 0 ? 0 : segment.amount / pieTotal.value * Math.PI * 2
-    const start = cursor
-    cursor += sweep
-    if (sweep <= 0) return []
-    const arc = (angle: number): [number, number] => [50 + Math.cos(angle) * 34, 50 + Math.sin(angle) * 34]
-    const [x1, y1] = arc(start)
-    const [x2, y2] = arc(cursor)
-    const path = sweep >= Math.PI * 2 - 0.0001
-      ? 'M50 16 A34 34 0 1 1 49.99 16 Z'
-      : `M50 50 L${x1} ${y1} A34 34 0 ${sweep > Math.PI ? 1 : 0} 1 ${x2} ${y2} Z`
-    return [{ key: segment.key, path }]
-  })
-})
+function isSelected(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): boolean {
+  return selectedKey.value === `${card.key}:${segment.key}`
+}
 
 const selectedKey = ref<string | null>(null)
 const selectedSegment = computed(() => cards.value.flatMap(card => card.segments.map(segment => ({ card, segment }))).find(item => `${item.card.key}:${item.segment.key}` === selectedKey.value) ?? null)
 
 function selectSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): void {
+  if (segment.count === 0) return
   selectedKey.value = `${card.key}:${segment.key}`
   emit('select-segment', { card, segment })
 }
@@ -126,43 +199,165 @@ function openJourney(item: BusinessJourneyChartPreview): void {
         <p>当前筛选范围内的业务旅程。</p>
       </header>
       <div class="journey-chart-grid">
-        <Card v-for="card in cards" :key="card.key" class="journey-chart-card" :data-graphic="card.graphic">
-          <CardHeader>
+        <Card
+          v-for="card in cards"
+          :key="card.key"
+          class="journey-chart-card"
+          :data-graphic="card.graphic"
+        >
+          <CardHeader :class="card.graphic === 'pie' ? 'items-start pb-0' : undefined">
             <CardTitle>{{ card.title }}</CardTitle>
             <CardDescription>{{ card.description }}</CardDescription>
           </CardHeader>
           <CardContent>
             <div v-if="card.graphic === 'pie'" class="journey-chart-pie">
-              <svg viewBox="0 0 100 100" role="img" aria-label="采购类型金额占比">
-                <path v-for="slice in pieSlices" :key="slice.key" :d="slice.path" />
-              </svg>
-              <strong v-if="largestPie">{{ largestPie.label }} {{ share(largestPie) }}</strong>
+              <ChartContainer
+                :config="pieConfig(card)"
+                class="journey-chart-donut"
+                role="img"
+                aria-label="采购类型金额占比"
+                :style="{
+                  '--vis-donut-central-label-font-size': '22px',
+                  '--vis-donut-central-label-font-weight': '600',
+                  '--vis-donut-central-label-text-color': 'hsl(var(--foreground))',
+                  '--vis-donut-central-sub-label-text-color': 'hsl(var(--muted-foreground))'
+                }"
+              >
+                <VisSingleContainer :data="pieData(card)" :margin="{ top: 8, bottom: 8 }">
+                  <VisDonut
+                    :value="(datum: PieDatum) => datum.amount"
+                    :color="(datum: PieDatum) => datum.fill"
+                    :arc-width="30"
+                    :central-label="largestPie ? share(largestPie) : '0%'"
+                    :central-sub-label="largestPie?.label ?? '金额占比'"
+                    :central-label-offset-y="10"
+                    :events="{
+                      [Donut.selectors.segment]: {
+                        click: (datum: unknown) => {
+                          const payload = donutPayload(datum)
+                          const segment = payload === null ? undefined : card.segments.find(item => item.key === payload.key)
+                          if (segment) selectSegment(card, segment)
+                        }
+                      }
+                    }"
+                  />
+                  <ChartTooltip
+                    :triggers="{
+                      [Donut.selectors.segment]: componentToString(pieConfig(card), ChartTooltipContent, { hideLabel: true })!
+                    }"
+                  />
+                </VisSingleContainer>
+              </ChartContainer>
               <div class="journey-chart-legend">
-                <button v-for="segment in card.segments" :key="segment.key" type="button" @click="selectSegment(card, segment)">
-                  <b>{{ segment.label }}</b>
-                  <small>{{ segment.count }} 条 · {{ formatWan(segment.amount) }}</small>
+                <button
+                  v-for="(segment, index) in card.segments"
+                  :key="segment.key"
+                  type="button"
+                  class="grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2 text-left text-sm disabled:cursor-default"
+                  :class="{ 'is-selected': isSelected(card, segment) }"
+                  :disabled="segment.count === 0"
+                  @click="selectSegment(card, segment)"
+                >
+                  <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: sliceColor(index, segment.key) }" />
+                  <span class="truncate">{{ segment.label }}</span>
+                  <span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ segmentText(segment) }}</span>
                 </button>
               </div>
             </div>
-            <div v-else-if="card.graphic === 'vertical_bar'" class="journey-chart-columns">
-              <button v-for="segment in card.segments" :key="segment.key" type="button" :data-segment="segment.key" @click="selectSegment(card, segment)">
-                <b>{{ formatWan(segment.amount) }}</b>
-                <span><i :style="{ height: columnHeight(card, segment) }"></i></span>
-                <small>{{ segment.label }} · {{ segment.count }} 条</small>
-              </button>
+            <div v-else-if="card.graphic === 'vertical_bar'" class="journey-chart-closing">
+              <ChartContainer :config="closingConfig" class="journey-chart-closing-plot" role="img" aria-label="预计成交金额柱状图">
+                <VisXYContainer
+                  :data="closingData(card)"
+                  :height="220"
+                  :margin="{ top: 20, right: 12, bottom: 36, left: 56 }"
+                  :auto-margin="false"
+                >
+                  <VisGroupedBar
+                    :x="(datum: ClosingDatum) => datum.index"
+                    :y="(datum: ClosingDatum) => datum.amount"
+                    :color="(datum: ClosingDatum) => datum.fill"
+                    :group-max-width="64"
+                    :bar-min-height="1"
+                    :rounded-corners="4"
+                    :events="{
+                      [GroupedBar.selectors.bar]: {
+                        click: (datum: ClosingDatum) => {
+                          const segment = card.segments[datum.index]
+                          if (segment) selectSegment(card, segment)
+                        }
+                      }
+                    }"
+                  />
+                  <VisAxis
+                    type="x"
+                    :tick-line="false"
+                    :domain-line="false"
+                    :grid-line="false"
+                    :tick-values="closingData(card).map(datum => datum.index)"
+                    :tick-format="(value: number) => closingData(card)[Math.round(value)]?.label ?? ''"
+                  />
+                  <VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" :tick-format="formatAxisAmount" />
+                  <ChartTooltip
+                    :triggers="{
+                      [GroupedBar.selectors.bar]: componentToString(closingConfig, ChartTooltipContent, { hideLabel: true })!
+                    }"
+                  />
+                </VisXYContainer>
+              </ChartContainer>
+              <div class="journey-chart-closing-summary" aria-label="预计成交明细">
+                <button
+                  v-for="segment in card.segments"
+                  :key="segment.key"
+                  type="button"
+                  class="text-sm disabled:cursor-default"
+                  :class="{ 'is-selected': isSelected(card, segment) }"
+                  :data-segment="segment.key"
+                  :disabled="segment.count === 0"
+                  @click="selectSegment(card, segment)"
+                >
+                  <span>{{ segment.label }}</span>
+                  <small>{{ segmentText(segment) }}</small>
+                </button>
+              </div>
             </div>
             <div v-else class="journey-chart-bars">
-              <button v-for="segment in card.segments" :key="segment.key" type="button" @click="selectSegment(card, segment)">
-                <b>{{ segment.label }}</b>
-                <span><i :style="{ width: barWidth(card, segment) }"></i></span>
-                <small>{{ segment.count }} 条 · {{ formatWan(segment.amount) }}</small>
+              <button
+                v-for="segment in card.segments"
+                :key="segment.key"
+                type="button"
+                class="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
+                :class="{ 'is-selected': isSelected(card, segment) }"
+                :disabled="segment.count === 0"
+                :title="segment.label"
+                @click="selectSegment(card, segment)"
+              >
+                <span class="truncate">{{ segment.label }}</span>
+                <span class="h-2 overflow-hidden rounded-full bg-muted">
+                  <span
+                    class="block h-full rounded-full"
+                    :class="isMutedKey(segment.key) ? 'bg-muted-foreground' : 'bg-primary'"
+                    :style="{ width: barWidth(card, segment) }"
+                  />
+                </span>
+                <span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ segmentText(segment) }}</span>
               </button>
             </div>
             <div v-if="selectedSegment?.card.key === card.key" class="journey-chart-preview">
               <button v-for="item in selectedSegment.segment.preview" :key="item.public_id" type="button" @click="openJourney(item)">
-                <b>{{ item.name }}</b><small>{{ item.customer_name }}</small>
+                <span class="min-w-0">
+                  <span class="block truncate">{{ item.name }}</span>
+                  <small class="block truncate">{{ item.customer_name }}</small>
+                </span>
+                <AmountText :value="item.amount" size="sm" />
               </button>
-              <button v-if="selectedSegment.segment.count > selectedSegment.segment.preview.length" type="button" @click="openSelected">查看详情</button>
+              <button
+                v-if="selectedSegment.segment.count > selectedSegment.segment.preview.length"
+                type="button"
+                class="journey-chart-preview__more"
+                @click="openSelected"
+              >
+                查看详情
+              </button>
             </div>
           </CardContent>
         </Card>
@@ -170,7 +365,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
       <p v-if="errorMessage" class="journey-chart-note" role="alert">{{ errorMessage }}</p>
     </template>
 
-    <Sheet :open="segmentOpen" @update:open="emit('update:segment-open', $event)">
+    <Sheet :open="segmentOpen ?? false" @update:open="emit('update:segment-open', $event)">
       <SheetContent side="right" class="journey-chart-sheet">
         <SheetHeader>
           <SheetTitle>{{ segmentLabel }}</SheetTitle>
@@ -180,7 +375,10 @@ function openJourney(item: BusinessJourneyChartPreview): void {
         <div v-else-if="segmentError" class="journey-chart-state" role="alert">{{ segmentError }}</div>
         <div v-else class="journey-chart-segment-list">
           <button v-for="item in segmentItems" :key="item.public_id" type="button" @click="openJourney(item)">
-            <span><b>{{ item.name }}</b><small>{{ item.customer_name }}</small></span>
+            <span class="min-w-0">
+              <span class="block">{{ item.name }}</span>
+              <small class="block">{{ item.customer_name }}</small>
+            </span>
             <AmountText :value="item.amount" size="sm" />
           </button>
         </div>
@@ -192,30 +390,198 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.journey-chart { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 16px; overflow: auto; }
-.journey-chart-summary h2 { margin: 0; color: $wolf-text-primary-v2; font-size: 28px; line-height: 1.3; }
-.journey-chart-summary p, .journey-chart-note { margin: 4px 0 0; color: $wolf-text-tertiary-v2; }
-.journey-chart-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; }
-.journey-chart-card { grid-column: span 2; min-width: 0; }
-.journey-chart-card:nth-child(4), .journey-chart-card:nth-child(5) { grid-column: span 3; }
-.journey-chart-card[data-graphic='vertical_bar'] { grid-column: 1 / -1; }
-.journey-chart-bars, .journey-chart-columns, .journey-chart-legend, .journey-chart-segment-list { display: grid; gap: 8px; }
-.journey-chart-bars button, .journey-chart-legend button, .journey-chart-segment-list button { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 4px 10px; border: 0; border-radius: 8px; background: transparent; padding: 4px; text-align: left; }
-.journey-chart-bars button span, .journey-chart-columns button span { height: 8px; overflow: hidden; border-radius: 999px; background: $wolf-bg-muted-v2; }
-.journey-chart-bars i, .journey-chart-columns i { display: block; height: 100%; border-radius: inherit; background: #2563eb; }
-.journey-chart-bars small, .journey-chart-columns small, .journey-chart-legend small { grid-column: 2; color: $wolf-text-tertiary-v2; }
-.journey-chart-legend button { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.journey-chart-legend small { white-space: nowrap; }
-.journey-chart-pie { display: grid; justify-items: center; gap: 12px; }
-.journey-chart-legend { width: 100%; }
-.journey-chart-pie svg { width: 132px; height: 132px; fill: #2563eb; }
-.journey-chart-columns { grid-template-columns: repeat(7, minmax(0, 1fr)); align-items: end; }
-.journey-chart-columns button { display: flex; min-height: 180px; flex-direction: column; justify-content: flex-end; gap: 6px; border: 0; background: transparent; text-align: center; }
-.journey-chart-columns button span { display: flex; height: 112px; align-items: flex-end; background: transparent; }
-.journey-chart-columns i { width: 100%; }
-.journey-chart-columns button[data-segment='unscheduled'] i { background: #94a3b8; }
-.journey-chart-state, .journey-chart-refreshing { display: flex; min-height: 48px; align-items: center; justify-content: center; gap: 8px; color: $wolf-text-tertiary-v2; }
-.journey-chart-segment-list button { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-@media (max-width: 1100px) { .journey-chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .journey-chart-card, .journey-chart-card:nth-child(4), .journey-chart-card:nth-child(5), .journey-chart-card[data-graphic='vertical_bar'] { grid-column: span 1; } }
-@media (max-width: 720px) { .journey-chart-grid, .journey-chart-pie, .journey-chart-columns { grid-template-columns: 1fr; } }
+.journey-chart {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: $wolf-space-md-v2;
+  overflow: auto;
+  padding: $wolf-space-md-v2;
+}
+
+.journey-chart-summary h2 {
+  margin: 0;
+  color: $wolf-text-primary-v2;
+  font-size: $wolf-font-size-title-v2;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.journey-chart-summary p,
+.journey-chart-note {
+  margin: $wolf-space-xs-v2 0 0;
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-body-v2;
+}
+
+.journey-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: $wolf-space-md-v2;
+}
+
+.journey-chart-card {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.journey-chart-card:nth-child(4),
+.journey-chart-card:nth-child(5) {
+  grid-column: span 3;
+}
+
+.journey-chart-card[data-graphic='vertical_bar'] {
+  grid-column: 1 / -1;
+}
+
+.journey-chart-bars,
+.journey-chart-legend {
+  display: grid;
+  gap: $wolf-space-sm-v2;
+}
+
+.journey-chart-bars button,
+.journey-chart-legend button,
+.journey-chart-closing-summary button,
+.journey-chart-preview button,
+.journey-chart-segment-list button {
+  border: 0;
+  background: transparent;
+}
+
+.journey-chart-bars button.is-selected,
+.journey-chart-legend button.is-selected,
+.journey-chart-closing-summary button.is-selected {
+  border-radius: $wolf-radius-v2;
+  background: hsl(var(--primary) / 0.08);
+}
+
+.journey-chart-pie {
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  align-items: center;
+  gap: $wolf-space-md-v2;
+}
+
+.journey-chart-donut {
+  width: 156px;
+  height: 156px;
+}
+
+.journey-chart-closing-plot {
+  width: 100%;
+  height: 240px;
+}
+
+.journey-chart-closing-summary {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: $wolf-space-sm-v2;
+  margin-right: 12px;
+  margin-left: 56px;
+}
+
+.journey-chart-closing-summary button {
+  display: grid;
+  gap: 2px;
+  padding: $wolf-space-xs-v2;
+  text-align: center;
+}
+
+.journey-chart-closing-summary small,
+.journey-chart-preview small,
+.journey-chart-segment-list small {
+  color: $wolf-text-tertiary-v2;
+  font-size: 12px;
+}
+
+.journey-chart-state,
+.journey-chart-refreshing {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: $wolf-space-sm-v2;
+  color: $wolf-text-tertiary-v2;
+}
+
+.journey-chart-preview,
+.journey-chart-segment-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.journey-chart-preview {
+  margin-top: $wolf-space-md-v2;
+  border-top: 1px solid $wolf-border-default-v2;
+}
+
+.journey-chart-preview button,
+.journey-chart-segment-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $wolf-space-md-v2;
+  width: 100%;
+  border-bottom: 1px solid $wolf-border-default-v2;
+  padding: $wolf-space-sm-v2 0;
+  text-align: left;
+  font-size: $wolf-font-size-body-v2;
+}
+
+.journey-chart-preview__more {
+  color: hsl(var(--primary));
+}
+
+.journey-chart-sheet {
+  display: flex;
+  width: min(28rem, 100vw);
+  flex-direction: column;
+}
+
+.journey-chart-segment-list {
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-width: 1100px) {
+  .journey-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .journey-chart-card,
+  .journey-chart-card:nth-child(4),
+  .journey-chart-card:nth-child(5),
+  .journey-chart-card[data-graphic='vertical_bar'] {
+    grid-column: span 1;
+  }
+
+  .journey-chart-pie,
+  .journey-chart-donut {
+    width: 100%;
+  }
+
+  .journey-chart-pie {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .journey-chart-donut {
+    width: 220px;
+    height: 220px;
+  }
+}
+
+@media (max-width: 720px) {
+  .journey-chart-grid,
+  .journey-chart-pie,
+  .journey-chart-closing-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .journey-chart-closing-summary {
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
 </style>

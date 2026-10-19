@@ -1,6 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { Donut } from '@unovis/ts'
+import { VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import BusinessJourneyChartView from '@/components/business-journey/BusinessJourneyChartView.vue'
+import { ChartContainer } from '@/components/ui/chart'
 import type { BusinessJourneyChartResponse, BusinessJourneyChartSegment } from '@/schemas/dealJourney'
 
 function segment(key: string, label: string, count: number, amount: number): BusinessJourneyChartSegment {
@@ -47,7 +50,7 @@ const chart: BusinessJourneyChartResponse = {
 }
 
 describe('BusinessJourneyChartView', () => {
-  it('shows six cards and closed stage counts without chart tabs', () => {
+  it('shows six cards and closing labels without chart tabs', () => {
     const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
 
     expect(wrapper.findAll('.journey-chart-card')).toHaveLength(6)
@@ -59,10 +62,69 @@ describe('BusinessJourneyChartView', () => {
     expect(wrapper.text()).toContain('产品')
     expect(wrapper.text()).toContain('最近动态')
     expect(wrapper.text()).toContain('预计成交')
-    expect(wrapper.text()).toContain('未排期 · 24 条')
+    expect(wrapper.text()).toContain('未排期')
     expect(wrapper.text()).toContain('不提示该联系谁')
-expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
     const stage = chart.cards[0]
     expect(stage?.segments.reduce((sum, item) => sum + item.count, 0)).toBe(86)
+  })
+
+  it('uses official chart primitives with stable color and tooltip data contracts', () => {
+    const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
+
+    const containers = wrapper.findAllComponents(ChartContainer)
+    expect(containers).toHaveLength(2)
+    expect(wrapper.findComponent(VisDonut).props('arcWidth')).toBe(30)
+    expect(wrapper.findComponent(VisGroupedBar).exists()).toBe(true)
+
+    const pieConfig = containers[0]?.props('config') as Record<string, { color?: string }>
+    expect(pieConfig.NEW?.color).toBe('hsl(var(--chart-1))')
+    expect(pieConfig.unset?.color).toBe('hsl(var(--muted-foreground))')
+
+    const pieData = wrapper.findComponent(VisSingleContainer).props('data') as Array<Record<string, unknown>>
+    expect(pieData[0]?.NEW).toBe(5900000)
+    expect(pieData[0]?.amount).toBe(5900000)
+
+    const closingConfig = containers[1]?.props('config') as Record<string, { color?: string }>
+    expect(closingConfig.amount?.color).toBe('hsl(var(--primary))')
+    const closingData = wrapper.findComponent(VisXYContainer).props('data') as Array<{ key: string; fill: string }>
+    expect(closingData.at(-1)).toMatchObject({ key: 'unscheduled', fill: 'hsl(var(--muted-foreground))' })
+  })
+  it('selects a segment from the wrapped Unovis donut datum', () => {
+    const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
+    const events = wrapper.findComponent(VisDonut).props('events') as Record<string, { click?: (datum: unknown) => void }>
+
+    events[Donut.selectors.segment]?.click?.({ data: { key: 'NEW' } })
+
+    expect(wrapper.emitted('select-segment')?.[0]?.[0]).toMatchObject({
+      segment: { key: 'NEW' }
+    })
+  })
+
+  it('exposes the expected-closing chart as a named graphic', () => {
+    const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
+
+    expect(wrapper.find('.journey-chart-closing-plot').attributes('role')).toBe('img')
+  })
+  it('shows the selected segment preview and emits detail opening', async () => {
+    const preview = {
+      public_id: 'journey-1',
+      customer_id: 'customer-1',
+      customer_name: '示例客户',
+      name: '示例旅程',
+      amount: 120000
+    }
+    const chartWithPreview = structuredClone(chart)
+    const stage = chartWithPreview.cards[0]
+    if (!stage) throw new Error('missing stage card')
+    stage.segments[0] = { ...stage.segments[0], preview: [preview] }
+    const wrapper = mount(BusinessJourneyChartView, { props: { chart: chartWithPreview } })
+
+    await wrapper.find('.journey-chart-bars button').trigger('click')
+
+    expect(wrapper.find('.journey-chart-preview').exists()).toBe(true)
+    expect(wrapper.emitted('select-segment')).toHaveLength(1)
+    const detailButton = wrapper.find('.journey-chart-preview button:last-child')
+    await detailButton.trigger('click')
+    expect(wrapper.emitted('open-segment')).toHaveLength(1)
   })
 })

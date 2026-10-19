@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { AmountText, Badge, DataTable, Progress, StatusBadge } from '@/components/crmwolf'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -29,8 +30,8 @@ interface Props {
   viewApplying?: boolean
   viewApplyError?: FeedbackError | null
   filterViewSaveLoading?: boolean
+  contentHidden?: boolean
   viewSaveLoading?: boolean
-  ownerOptions?: { value: string; label: string }[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -40,7 +41,6 @@ const props = withDefaults(defineProps<Props>(), {
   viewApplyError: null,
   filterViewSaveLoading: false,
   viewSaveLoading: false,
-  ownerOptions: () => []
 })
 
 const emit = defineEmits<{
@@ -93,6 +93,12 @@ const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
 
 const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
   `${row.name} 当前进度 ${getJourneyProgressPercent(row)}%`
+
+function setDisplayMode(value: string): void {
+  if (value !== 'table' && value !== 'board' && value !== 'chart') return
+  if (value === props.displayMode) return
+  emit('update:view-display-mode', value)
+}
 </script>
 
 <template>
@@ -123,13 +129,13 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
     :filters="filters"
     :sorts="sorts"
     :view-display-mode="displayMode"
-    view-display-mode-enabled
     view-config-trigger-label="视图配置"
     view-config-panel-title="视图配置"
     can-save-current-view
     :view-save-loading="viewSaveLoading ?? false"
     :view-applying="viewApplying ?? false"
     :view-apply-error="viewApplyError ?? null"
+    :content-hidden="contentHidden ?? false"
     @update:page="emit('update:page', $event)"
     @update:page-size="emit('update:page-size', $event)"
     @retry="emit('retry')"
@@ -150,6 +156,19 @@ const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
     @search-apply="emit('search-apply', $event)"
     @search-clear="emit('search-clear')"
   >
+    <template #tableTools>
+      <slot name="tableTools" />
+      <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setDisplayMode">
+        <TabsList aria-label="展示模式" class="h-8 p-0.5">
+          <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+          <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
+          <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    </template>
+    <template #replacement>
+      <slot name="replacement" />
+    </template>
     <template #mobile-card="{ row }">
       <div class="business-journey-mobile-card-header">
         <div class="business-journey-mobile-card-title">

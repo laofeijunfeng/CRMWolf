@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, watchEffect } from 'vue'
+import { RefreshCw } from 'lucide-vue-next'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import { dealJourneyApi, type BusinessJourneyTab } from '@/api/dealJourney'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
 import BusinessJourneyChartView from '@/components/business-journey/BusinessJourneyChartView.vue'
-import BusinessJourneyListTools from '@/components/business-journey/BusinessJourneyListTools.vue'
+import { TableToolbarButton } from '@/components/crmwolf'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
@@ -451,50 +452,28 @@ onMounted(() => {
 
 <template>
   <div class="business-journeys-page">
-    <BusinessJourneyListTools
-      v-if="displayMode !== 'table'"
-      :fields="fields"
-      :filters="activeFilters"
-      :sorts="activeSorts"
-      :columns="activeColumns"
-      :search="search"
-      :display-mode="displayMode"
-      :loading="boardLoading"
-      :saving="customFilterViews.saving.value"
-      @update:search="search = $event"
-      @search-apply="handleSearchApply"
-      @search-clear="handleSearchClear"
-      @update:filters="activeFilters = $event"
-      @filter-apply="handleFilterApply"
-      @filter-reset="handleFilterReset"
-      @update:sorts="activeSorts = $event"
-      @sort-apply="handleSortApply"
-      @sort-reset="handleSortReset"
-      @column-config-save="handleColumnConfigSave"
-      @column-config-reset="handleColumnConfigReset"
-      @update:view-display-mode="handleDisplayModeChange"
-      @refresh="refreshActiveProjection"
-    />
-
     <BusinessJourneyTableView
-      v-if="displayMode === 'table'"
       :fields="fields"
       :data="tableItems"
       :total="pagination.total"
       :page="pagination.current"
       :page-size="pagination.pageSize"
-      :loading="tableLoading"
-      :load-error="tableError"
+      :loading="displayMode === 'table'
+        ? tableLoading
+        : displayMode === 'board'
+          ? boardLoading
+          : chartLoading"
+      :load-error="displayMode === 'table' ? tableError : null"
       :filters="activeFilters"
       :sorts="activeSorts"
       :columns="activeColumns"
       :search="search"
       :display-mode="displayMode"
+      :content-hidden="displayMode !== 'table'"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
       :filter-view-save-loading="customFilterViews.saving.value"
       :view-save-loading="customFilterViews.saving.value"
-      :owner-options="ownerOptions"
       @update:page="handlePageChange"
       @update:page-size="handlePageSizeChange"
       @retry="loadTable"
@@ -514,33 +493,50 @@ onMounted(() => {
       @update:search="search = $event"
       @search-apply="handleSearchApply"
       @search-clear="handleSearchClear"
-    />
+    >
+      <template #tableTools>
+        <TableToolbarButton
+          :disabled="displayMode === 'table' ? tableLoading : displayMode === 'board' ? boardLoading : chartLoading"
+          aria-label="刷新业务旅程"
+          @click="refreshActiveProjection"
+        >
+          <RefreshCw
+            class="refresh-icon"
+            :class="{ spinning: displayMode === 'table' ? tableLoading : displayMode === 'board' ? boardLoading : chartLoading }"
+            aria-hidden="true"
+          />
+          刷新
+        </TableToolbarButton>
+      </template>
 
-    <BusinessJourneyBoardView
-      v-else-if="displayMode === 'board'"
-      :board="board"
-      :loading="boardLoading"
-      :error-message="boardErrorMessage"
-      @retry="loadBoard"
-      @row-click="handleRowClick"
-    />
+      <template v-if="displayMode === 'board'" #replacement>
+        <BusinessJourneyBoardView
+          :board="board"
+          :loading="boardLoading"
+          :error-message="boardErrorMessage"
+          @retry="loadBoard"
+          @row-click="handleRowClick"
+        />
+      </template>
 
-    <BusinessJourneyChartView
-      v-else
-      :chart="chart"
-      :loading="chartLoading"
-      :error-message="chartErrorMessage"
-      :segment-open="segmentOpen"
-      :segment-loading="segmentLoading"
-      :segment-error="segmentError"
-      :segment-label="segmentLabel"
-      :segment-total="segmentTotal"
-      :segment-items="segmentItems"
-      @retry="loadChart"
-      @open-segment="openChartSegment($event.card, $event.segment)"
-      @update:segment-open="segmentOpen = $event"
-      @open-journey="handleRowClick({ customerId: $event.customerId, journeyPublicId: $event.journeyPublicId })"
-    />
+      <template v-else-if="displayMode === 'chart'" #replacement>
+        <BusinessJourneyChartView
+          :chart="chart"
+          :loading="chartLoading"
+          :error-message="chartErrorMessage"
+          :segment-open="segmentOpen"
+          :segment-loading="segmentLoading"
+          :segment-error="segmentError"
+          :segment-label="segmentLabel"
+          :segment-total="segmentTotal"
+          :segment-items="segmentItems"
+          @retry="loadChart"
+          @open-segment="openChartSegment($event.card, $event.segment)"
+          @update:segment-open="segmentOpen = $event"
+          @open-journey="handleRowClick({ customerId: $event.customerId, journeyPublicId: $event.journeyPublicId })"
+        />
+      </template>
+    </BusinessJourneyTableView>
   </div>
 
   <DealJourneyDetailSheet
@@ -582,5 +578,17 @@ onMounted(() => {
     padding: $wolf-page-padding-mobile-v2;
     padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
   }
+}
+.refresh-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.spinning {
+  animation: business-journey-spin 0.8s linear infinite;
+}
+
+@keyframes business-journey-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

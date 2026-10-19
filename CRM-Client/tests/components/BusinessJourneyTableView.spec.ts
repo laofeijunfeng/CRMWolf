@@ -1,5 +1,16 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.stubGlobal('matchMedia', (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  dispatchEvent: vi.fn(() => false),
+}))
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import { createBusinessJourneyListFields } from '@/components/business-journey/businessJourneyListFields'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
@@ -185,5 +196,35 @@ describe('BusinessJourneyTableView layout', () => {
     const wrapper = mountJourneyTable([{ ...journeyFixture, current_board_stage: stage }])
     const badge = wrapper.get('[data-testid="business-journey-stage-badge"]')
     expect(badge.classes()).toEqual(expect.arrayContaining([...classes]))
+  })
+
+  it('offers list, board, and chart modes from the shared DataTable toolbar', () => {
+    const wrapper = mountJourneyTable([])
+
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).toEqual(['列表', '看板', '图表'])
+  })
+
+  it('renders non-list replacement content inside the DataTable frame', () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: {
+        fields: [],
+        data: [],
+        total: 0,
+        page: 1,
+        pageSize: 20,
+        filters: [],
+        sorts: [],
+        columns: [],
+        search: '',
+        displayMode: 'board',
+      },
+      slots: {
+        replacement: '<div data-testid="journey-replacement">看板内容</div>',
+      },
+    })
+
+    const card = wrapper.get('.data-table-card')
+    expect(card.get('[data-testid="journey-replacement"]').text()).toBe('看板内容')
+    expect(card.find('.data-table').exists()).toBe(false)
   })
 })

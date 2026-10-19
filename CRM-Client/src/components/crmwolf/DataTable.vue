@@ -158,9 +158,9 @@ interface Props {
   searchLoading?: boolean
   /** 筛选视图保存中 */
   filterViewSaveLoading?: boolean
-  /** 可选的列表展示模式控制 */
+  /** 当前展示模式 */
   viewDisplayMode?: ViewDisplayMode | null
-  /** 是否在字段配置浮层显示展示模式 */
+  /** 是否在视图配置里提供展示模式；工具栏切换由页面使用 Tabs */
   viewDisplayModeEnabled?: boolean
   /** 配置入口标签 */
   viewConfigTriggerLabel?: string
@@ -176,6 +176,8 @@ interface Props {
   exportTitle?: string
   /** 异步导出处理器；组件等待 Promise，成功后关闭弹窗，失败时保留弹窗与已选字段 */
   exportHandler?: (fieldKeys: string[]) => Promise<void>
+  /** 用页面内容替换表格、状态和分页，仅保留工具栏 */
+  contentHidden?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -222,6 +224,7 @@ const props = withDefaults(defineProps<Props>(), {
   exportEnabled: false,
   exportTitle: '列表',
   exportHandler: undefined,
+  contentHidden: false,
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -311,7 +314,7 @@ const tableCardClass = computed(() => ({
   'data-table-card--compact-pagination': props.compactPagination,
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
-const isInitialLoading = computed(() => effectiveViewState.value === 'loading')
+const isInitialLoading = computed(() => !props.contentHidden && effectiveViewState.value === 'loading')
 const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
 const hasBlockingError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length === 0
@@ -1068,8 +1071,6 @@ onBeforeUnmount(() => {
           :column-preference-mode="columnPreferenceMode ?? 'default'"
           :column-config-loading="columnConfigLoading"
           :column-config-saving="columnConfigSaving"
-          :view-display-mode="props.viewDisplayMode"
-          :view-display-mode-enabled="props.viewDisplayModeEnabled"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
           :export-fields="exportDialogFields"
@@ -1083,28 +1084,39 @@ onBeforeUnmount(() => {
           @column-config-change="handleColumnConfigChange"
           @column-config-save="handleColumnConfigSave"
           @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
-          @update:view-display-mode="emit('update:view-display-mode', $event)"
         />
         <slot name="tableTools" />
       </div>
 
-      <ListViewStateSummary
-        :filters="filterSummaryItems"
-        :sorts="sortSummaryItems"
-        :hidden-column-count="hiddenColumnCount"
-        :applying="viewApplying ?? false"
-        :apply-error="viewApplyError ?? null"
-        :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
-        :save-view-loading="filterViewSaving || props.viewSaveLoading"
-        @remove-filter="handleRemoveFilter"
-        @clear-filters="handleClearFilters"
-        @save-view="emit('save-current-view')"
-        @retry-view-apply="emit('retry-view-apply')"
-      />
+      <div v-if="contentHidden" class="data-table-replacement">
+        <slot name="replacement" />
+      </div>
+
+      <template v-else>
+        <ListViewStateSummary
+          :filters="filterSummaryItems"
+          :sorts="sortSummaryItems"
+          :hidden-column-count="hiddenColumnCount"
+          :applying="viewApplying ?? false"
+          :apply-error="viewApplyError ?? null"
+          :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
+          :save-view-loading="filterViewSaving || props.viewSaveLoading"
+          @remove-filter="handleRemoveFilter"
+          @clear-filters="handleClearFilters"
+          @save-view="emit('save-current-view')"
+          @retry-view-apply="emit('retry-view-apply')"
+        />
 
       <!-- 表格内容区（可滚动） -->
+      <!-- 非列表展示优先于列表错误，避免列表失败盖住看板或图表 -->
       <div
-        v-if="hasBlockingError"
+        v-if="props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'"
+        class="data-table-content data-table-content--board"
+      >
+        <slot name="replacement" />
+      </div>
+      <div
+        v-else-if="hasBlockingError"
         class="data-table-state"
       >
         <ErrorState
@@ -1357,7 +1369,11 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 分页区（固定在卡片底部） -->
-      <div class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
+      <div
+        v-if="!contentHidden && props.viewDisplayMode !== 'board' && props.viewDisplayMode !== 'chart'"
+        class="data-table-footer"
+        :class="{ 'data-table-footer--compact': compactPagination }"
+      >
         <span class="total-text">共 {{ total }} 条</span>
         <Pagination
           :page="page"
@@ -1391,6 +1407,7 @@ onBeforeUnmount(() => {
           @update:model-value="handlePageSizeChange"
         />
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -1742,6 +1759,19 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid $wolf-border-light-v2;
   background: $wolf-bg-card-v2;
   flex-shrink: 0;
+}
+.data-table-replacement {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: $wolf-bg-card-v2;
+}
+
+.data-table-content--board {
+  min-height: 0;
+  overflow: hidden;
 }
 
 // 表格行

@@ -3,9 +3,21 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, nextTick } from 'vue'
 
+vi.stubGlobal('matchMedia', (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  dispatchEvent: vi.fn(() => false),
+}))
+
 const journeyApiMocks = vi.hoisted(() => ({
   list: vi.fn(),
   getBoard: vi.fn(),
+  getChart: vi.fn(),
   getOwnerFilterOptions: vi.fn(),
 }))
 const viewPreferenceMocks = vi.hoisted(() => ({
@@ -71,6 +83,7 @@ vi.mock('@/views/CustomerDetailSheet.vue', () => ({
 import BusinessJourneys from '@/views/BusinessJourneys.vue'
 import BusinessJourneyTableView from '@/components/business-journey/BusinessJourneyTableView.vue'
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
+import BusinessJourneyChartView from '@/components/business-journey/BusinessJourneyChartView.vue'
 import { useHeaderStore } from '@/stores/header'
 import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
 import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
@@ -92,6 +105,10 @@ const emptyBoard = {
     lost_count: 0,
   },
   truncated: false,
+}
+const emptyChart = {
+  summary: { total_count: 0, total_amount: 0 },
+  cards: [],
 }
 const customLostBoardViewResponse = {
   view_key: 'business-journeys.list',
@@ -160,15 +177,32 @@ const TableStub = defineComponent({
   name: 'BusinessJourneyTableView',
   props: {
     viewApplyError: { type: Object, default: null },
+    displayMode: { type: String, default: 'table' },
+    contentHidden: { type: Boolean, default: false },
+    loading: { type: Boolean, default: false },
   },
   emits: ['update:view-display-mode', 'row-click', 'retry-view-apply'],
-  setup(_, { emit }) {
-    return () => h('button', {
-      'data-testid': 'table-projection',
+  setup: (props, { emit, slots }) => () => h('section', {
+    'data-testid': 'table-projection',
+    'data-display-mode': props.displayMode,
+    'data-content-hidden': String(props.contentHidden),
+    'data-loading': String(props.loading),
+  }, [
+    h('button', {
+      type: 'button',
+      'data-testid': 'switch-to-board',
       onClick: () => emit('update:view-display-mode', 'board'),
-    }, 'table')
-  },
+    }, 'table'),
+    h('button', {
+      type: 'button',
+      'data-testid': 'switch-to-chart',
+      onClick: () => emit('update:view-display-mode', 'chart'),
+    }, 'chart'),
+    slots.tableTools?.(),
+    props.contentHidden ? slots.replacement?.() : null,
+  ]),
 })
+
 const BoardStub = defineComponent({
   name: 'BusinessJourneyBoardView',
   props: {
@@ -177,9 +211,40 @@ const BoardStub = defineComponent({
     errorMessage: { type: String, default: '' },
   },
   emits: ['retry', 'row-click'],
-  setup() {
-    return () => h('div', { 'data-testid': 'board-projection' }, 'board')
+  setup: (_, { emit }) => () => h('div', {
+    'data-testid': 'board-projection',
+    onClick: () => emit('row-click', boardItemFixture),
+  }, 'board'),
+})
+
+const ChartStub = defineComponent({
+  name: 'BusinessJourneyChartView',
+  props: {
+    chart: { type: Object, default: null },
+    loading: { type: Boolean, default: false },
+    errorMessage: { type: String, default: '' },
+    segmentOpen: { type: Boolean, default: false },
   },
+  emits: ['retry', 'open-segment', 'update:segment-open', 'open-journey'],
+  setup: (props, { emit }) => () => h('div', {
+    'data-testid': 'chart-projection',
+    'data-loading': String(props.loading),
+    'data-has-chart': String(props.chart !== null),
+    'data-error': props.errorMessage,
+  }, [
+    props.errorMessage && props.chart === null
+      ? h('button', {
+          type: 'button',
+          'data-testid': 'chart-retry',
+          onClick: () => emit('retry'),
+        }, '重新加载')
+      : null,
+    h('button', {
+      type: 'button',
+      'data-testid': 'chart-open-journey',
+      onClick: () => emit('open-journey', boardItemFixture),
+    }, 'chart'),
+  ]),
 })
 
 function mountPage() {
@@ -189,7 +254,7 @@ function mountPage() {
       stubs: {
         BusinessJourneyTableView: TableStub,
         BusinessJourneyBoardView: BoardStub,
-        BusinessJourneyListTools: true,
+        BusinessJourneyChartView: ChartStub,
         DealJourneyDetailSheet: false,
         CustomerDetailSheet: false,
       },
@@ -203,6 +268,7 @@ describe('BusinessJourneys', () => {
     vi.clearAllMocks()
     journeyApiMocks.list.mockResolvedValue(emptyList)
     journeyApiMocks.getBoard.mockResolvedValue(emptyBoard)
+    journeyApiMocks.getChart.mockResolvedValue(emptyChart)
     journeyApiMocks.getOwnerFilterOptions.mockResolvedValue({ data: [] })
     viewPreferenceMocks.listCustomViews.mockResolvedValue({ view_key: 'business-journeys.list', items: [] })
     viewPreferenceMocks.updateCustomView.mockImplementation(async (_key, _id, payload) => ({
@@ -217,6 +283,55 @@ describe('BusinessJourneys', () => {
 
     expect(journeyApiMocks.list).toHaveBeenCalledOnce()
     expect(journeyApiMocks.getBoard).not.toHaveBeenCalled()
+  })
+
+  it('keeps one table frame and renders board and chart through replacement slots', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const table = wrapper.getComponent(BusinessJourneyTableView)
+
+    table.vm.$emit('update:view-display-mode', 'board')
+    await flushPromises()
+    expect(wrapper.findAllComponents(BusinessJourneyTableView)).toHaveLength(1)
+    expect(wrapper.getComponent(BusinessJourneyTableView).props('contentHidden')).toBe(true)
+    expect(wrapper.find('[data-testid="board-projection"]').exists()).toBe(true)
+
+    table.vm.$emit('update:view-display-mode', 'chart')
+    await flushPromises()
+    expect(journeyApiMocks.getChart).toHaveBeenCalledOnce()
+    expect(wrapper.findAllComponents(BusinessJourneyTableView)).toHaveLength(1)
+    expect(wrapper.find('[data-testid="chart-projection"]').exists()).toBe(true)
+  })
+
+  it('passes chart loading state through the persistent table frame', async () => {
+    let resolveChart: (value: typeof emptyChart) => void = () => undefined
+    journeyApiMocks.getChart.mockReturnValueOnce(new Promise<typeof emptyChart>((resolve) => {
+      resolveChart = resolve
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('update:view-display-mode', 'chart')
+    await nextTick()
+
+    expect(wrapper.getComponent(BusinessJourneyTableView).props('loading')).toBe(true)
+    expect(wrapper.getComponent(BusinessJourneyChartView).props('loading')).toBe(true)
+
+    resolveChart(emptyChart)
+    await flushPromises()
+    expect(wrapper.getComponent(BusinessJourneyChartView).props('loading')).toBe(false)
+  })
+
+  it('shows chart failure and retries the chart projection', async () => {
+    journeyApiMocks.getChart.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mountPage()
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('update:view-display-mode', 'chart')
+    await flushPromises()
+
+    expect(wrapper.getComponent(BusinessJourneyChartView).props('errorMessage')).toContain('图表加载失败')
+    await wrapper.get('[data-testid="chart-retry"]').trigger('click')
+    await flushPromises()
+    expect(journeyApiMocks.getChart).toHaveBeenCalledTimes(2)
   })
 
   it('switches to board through the existing view config event', async () => {
