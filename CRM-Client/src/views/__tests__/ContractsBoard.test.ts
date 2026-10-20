@@ -235,6 +235,15 @@ function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElemen
 
 describe('Contracts board integration', () => {
   beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
     permissionState.permissions = ['contract:view:all', 'contract:export'].map((code) => ({ code }))
     permissionState.loadState = 'ready'
     teamState.currentTeam = { id: 11 }
@@ -243,6 +252,16 @@ describe('Contracts board integration', () => {
     mocks.getContracts.mockResolvedValue({ items: [contract], total: 1 })
     mocks.getContractBoard.mockResolvedValue(boardResponse)
     mocks.getOwnerFilterOptions.mockResolvedValue({ data: [] })
+  })
+
+  it('shows list and chart in the toolbar and does not offer a board tab', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const tabs = wrapper.get('[aria-label="合同展示"]')
+    expect(tabs.text()).toContain('列表')
+    expect(tabs.text()).toContain('图表')
+    expect(tabs.text()).not.toContain('看板')
+    wrapper.unmount()
   })
 
   it('defaults to the existing contract table and does not request the board', async () => {

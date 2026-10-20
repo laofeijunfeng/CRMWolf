@@ -23,14 +23,20 @@ import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import ContractBoardProjection from '@/components/contract/ContractBoardProjection.vue'
+import ContractChartPage from '@/components/contract/ContractChartPage.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import contractApi, {
   type ContractBoardParams,
+  type ContractChartBucket,
+  type ContractChartBucketContracts,
+  type ContractChartCard,
+  type ContractChartResponse,
   type ContractListResponse,
   type ContractQueryParams,
   type OwnerFilterOption,
@@ -74,7 +80,7 @@ const listRequestId = ref<number>(0)
 const tableData = ref<ContractListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
-const displayMode = ref<'table' | 'board'>('table')
+const displayMode = ref<'table' | 'board' | 'chart'>('table')
 
 const search = ref('')
 
@@ -286,7 +292,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 const fetchContractList = async (): Promise<boolean> => {
-  if (displayMode.value === 'board') return false
+  if (displayMode.value === 'board' || displayMode.value === 'chart') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -372,21 +378,87 @@ const contractBoard = useBoardSnapshot<ContractBoardParams, ContractBoardRespons
   isPermissionReady: () => permissionStore.loadState === 'ready',
 })
 
+const chart = ref<ContractChartResponse | null>(null)
+const chartLoading = ref(false)
+const chartError = ref('')
+const chartBucket = ref<ContractChartBucketContracts | null>(null)
+const chartBucketLoading = ref(false)
+const chartBucketError = ref('')
+const chartBucketFull = ref(false)
+const chartBucketRequest = ref<{ card: ContractChartCard, bucket: ContractChartBucket } | null>(null)
+let chartRequestId = 0
+let chartBucketRequestId = 0
+
+const chartParams = computed<ContractBoardParams>(() => ({ ...boardParams.value }))
+
+const fetchContractChart = async (): Promise<boolean> => {
+  const requestId = ++chartRequestId
+  chartError.value = ''
+  chartLoading.value = true
+  try {
+    const response = await contractApi.getContractChart(chartParams.value)
+    if (requestId !== chartRequestId) return false
+    chart.value = response
+    return true
+  } catch (error) {
+    if (requestId !== chartRequestId) return false
+    chartError.value = toFeedbackError(error, '合同图表').description || '合同图表加载失败，请重试'
+    return false
+  } finally {
+    if (requestId === chartRequestId) chartLoading.value = false
+  }
+}
+
 const refreshActiveContractView = (): Promise<boolean> => {
+  if (displayMode.value === 'chart') return fetchContractChart()
   if (displayMode.value !== 'board') return fetchContractList()
   return contractBoard.refresh(boardParams.value).then(() => true, () => false)
 }
 
-const handleDisplayModeChange = (mode: ViewDisplayMode): void => {
-  if (mode !== 'table' && mode !== 'board') return
+const handleDisplayModeChange = (mode: string | number | undefined): void => {
+  if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
+  chartBucket.value = null
+  chartBucketError.value = ''
   void refreshActiveContractView()
 }
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board') void refreshActiveContractView()
+  if (displayMode.value === 'board' || displayMode.value === 'chart') void refreshActiveContractView()
 })
+
+const loadChartBucket = async (card: ContractChartCard, bucket: ContractChartBucket, full: boolean): Promise<void> => {
+  const requestId = ++chartBucketRequestId
+  chartBucketRequest.value = { card, bucket }
+  chartBucketFull.value = full
+  chartBucketError.value = ''
+  chartBucketLoading.value = true
+  if (!full) chartBucket.value = null
+  try {
+    const response = await contractApi.getContractChartBucket({ ...chartParams.value, chart: card.key, bucket: bucket.key })
+    if (requestId !== chartBucketRequestId) return
+    chartBucket.value = full ? response : { ...response, contracts: response.contracts.slice(0, 5) }
+  } catch (error) {
+    if (requestId !== chartBucketRequestId) return
+    chartBucketError.value = toFeedbackError(error, '合同图表').description || '这一段加载失败，请重试'
+  } finally {
+    if (requestId === chartBucketRequestId) chartBucketLoading.value = false
+  }
+}
+
+const retryChartBucket = (): void => {
+  const request = chartBucketRequest.value
+  if (request) void loadChartBucket(request.card, request.bucket, chartBucketFull.value)
+}
+
+const closeChartBucket = (): void => {
+  chartBucketRequestId += 1
+  chartBucketRequest.value = null
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = false
+}
 
 const isContractLifecycleStatus = (value: string): value is typeof contractLifecycleStatuses[number] => (
   contractLifecycleStatuses.some((status) => status === value)
@@ -533,7 +605,7 @@ async function refreshContractDetailIfOpen(contractId: number | null): Promise<b
 }
 
 function contractViewLabel(): string {
-  return displayMode.value === 'board' ? '合同看板' : '合同列表'
+  return displayMode.value === 'chart' ? '合同图表' : displayMode.value === 'board' ? '合同看板' : '合同列表'
 }
 
 function getRefreshFailureDescription(viewRefreshed: boolean, detailRefreshed: boolean): string | undefined {
@@ -719,7 +791,7 @@ const formatDateTime = (dateStr?: string | null): string => {
 onMounted(() => {
   void fetchOwnerFilterOptions()
   void customFilterViews.loadCustomViews()
-  fetchContractList()
+  void refreshActiveContractView()
 })
 
 useTopBarRegistration({
@@ -835,6 +907,14 @@ defineExpose({
       @row-click="handleViewDetail"
       @update:view-display-mode="handleDisplayModeChange"
     >
+      <template #tableTools>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
+          <TabsList aria-label="合同展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </template>
       <template v-if="displayMode === 'board'" #replacement>
         <ContractBoardProjection
           :response="contractBoard.data"
@@ -847,6 +927,22 @@ defineExpose({
           @activate-card="handleBoardCardActivate"
           @view-all="handleBoardViewAll"
           @retry="contractBoard.retry"
+        />
+      </template>
+      <template v-else-if="displayMode === 'chart'" #replacement>
+        <ContractChartPage
+          :chart="chart"
+          :loading="chartLoading"
+          :error="chartError"
+          :bucket-contracts="chartBucket"
+          :bucket-loading="chartBucketLoading"
+          :bucket-error="chartBucketError"
+          @retry="fetchContractChart"
+          @retry-bucket="retryChartBucket"
+          @open-contract="viewingContractId = $event"
+          @view-bucket="(card, bucket) => loadChartBucket(card, bucket, false)"
+          @view-all="(card, bucket) => loadChartBucket(card, bucket, true)"
+          @close-bucket="closeChartBucket"
         />
       </template>
       <template #mobile-card="{ row }">

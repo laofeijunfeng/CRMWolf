@@ -201,3 +201,43 @@ class ContractDetailResponse(ContractResponse):
 
 class MessageResponse(BaseModel):
     message: str = Field(..., description="响应消息")
+
+
+class ContractChartPreview(BaseModel):
+    id: int
+    name: str
+    customer_name: Optional[str] = None
+    owner_name: Optional[str] = None
+    amount: float
+    signing_date: Optional[date] = None
+
+
+class ContractChartBucket(BaseModel):
+    key: str
+    label: str
+    count: int
+    amount: float
+    ratio: int
+    amount_ratio: int
+    preview: List[ContractChartPreview]
+    preview_total: int
+
+
+class ContractChartCard(BaseModel):
+    key: str
+    title: str
+    description: str
+    buckets: List[ContractChartBucket]
+
+
+class ContractChartResponse(BaseModel):
+    population: int
+    total_amount: float
+    cards: List[ContractChartCard]
+
+
+class ContractChartBucketContracts(BaseModel):
+    chart: str
+    bucket: str
+    total: int
+    contracts: List[ContractChartPreview]

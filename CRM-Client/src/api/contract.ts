@@ -282,6 +282,53 @@ const ContractListApiResponseSchema = z.union([
   PaginatedContractListResponseSchema
 ])
 
+const ContractChartPreviewSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  customer_name: z.string().nullable().optional(),
+  owner_name: z.string().nullable().optional(),
+  amount: z.number(),
+  signing_date: z.string().nullable().optional(),
+})
+
+const ContractChartBucketSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  count: z.number(),
+  amount: z.number(),
+  ratio: z.number(),
+  amount_ratio: z.number(),
+  preview: z.array(ContractChartPreviewSchema),
+  preview_total: z.number(),
+})
+
+const ContractChartCardSchema = z.object({
+  key: z.enum(['license_type', 'purchase_type', 'amount_band', 'signing_month']),
+  title: z.string(),
+  description: z.string(),
+  buckets: z.array(ContractChartBucketSchema),
+})
+
+const ContractChartResponseSchema = z.object({
+  population: z.number(),
+  total_amount: z.number(),
+  cards: z.array(ContractChartCardSchema),
+})
+
+const ContractChartBucketContractsSchema = z.object({
+  chart: z.string(),
+  bucket: z.string(),
+  total: z.number(),
+  contracts: z.array(ContractChartPreviewSchema),
+})
+
+export type ContractChartPreview = z.infer<typeof ContractChartPreviewSchema>
+export type ContractChartBucket = z.infer<typeof ContractChartBucketSchema>
+export type ContractChartCard = z.infer<typeof ContractChartCardSchema>
+export type ContractChartResponse = z.infer<typeof ContractChartResponseSchema>
+export type ContractChartBucketContracts = z.infer<typeof ContractChartBucketContractsSchema>
+export type ContractChartParams = ContractBoardParams & { chart?: string, bucket?: string }
+
 const OwnerFilterOptionSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -323,6 +370,18 @@ export const contractApi = {
       },
     })
     return ContractBoardResponseSchema.parse(response)
+  },
+
+  getContractChart: async (params: ContractBoardParams): Promise<ContractChartResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/contracts/chart', { params })
+    return ContractChartResponseSchema.parse(response)
+  },
+
+  getContractChartBucket: async (params: ContractChartParams): Promise<ContractChartBucketContracts> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/contracts/chart/contracts', { params })
+    return ContractChartBucketContractsSchema.parse(response)
   },
 
   getContract: async (contractId: number): Promise<ContractResponse> => {

@@ -45,6 +45,8 @@ from app.models.opportunity import Opportunity
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.schemas.contract import (
+    ContractChartBucketContracts,
+    ContractChartResponse,
     ContractCreate,
     ContractInternalCreate,
     ContractDetailResponse,
@@ -55,6 +57,7 @@ from app.schemas.contract import (
     MessageResponse,
 )
 from app.schemas.contract_board import ContractBoardResponse
+from app.services import contract_chart_stats
 from app.services.contract_board_service import build_contract_board
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
@@ -1092,6 +1095,232 @@ def get_contract_board(
         sorts=parsed_sorts,
         today=date.today(),
     )
+
+class _ChartQuery:
+    def __init__(
+        self,
+        *,
+        customer_public_id: str | None = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        contract_number: str | None = None,
+        license_type: str | None = None,
+        license_type_exclude: str | None = None,
+        purchase_type: str | None = None,
+        purchase_type_exclude: str | None = None,
+        subscription_years: int | None = None,
+        subscription_years_exclude: int | None = None,
+        license_authorized_users: int | None = None,
+        license_authorized_users_exclude: int | None = None,
+        standard_unit_price: Decimal | None = None,
+        standard_unit_price_exclude: Decimal | None = None,
+        keyword: str | None = None,
+        customer_keyword: str | None = None,
+        opportunity_keyword: str | None = None,
+        search: str | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        signing_date_start: date | None = None,
+        signing_date_end: date | None = None,
+        effective_date_start: date | None = None,
+        effective_date_end: date | None = None,
+        expiry_date_start: date | None = None,
+        expiry_date_end: date | None = None,
+        license_expiry_date_start: date | None = None,
+        license_expiry_date_end: date | None = None,
+        filters: str | None = None,
+        sorts: str | None = None,
+        team_id: int,
+        current_user,
+        db: Session,
+    ) -> None:
+        self.customer_public_id = customer_public_id
+        self.status = status
+        self.status_exclude = status_exclude
+        self.contract_number = contract_number
+        self.license_type = license_type
+        self.license_type_exclude = license_type_exclude
+        self.purchase_type = purchase_type
+        self.purchase_type_exclude = purchase_type_exclude
+        self.subscription_years = subscription_years
+        self.subscription_years_exclude = subscription_years_exclude
+        self.license_authorized_users = license_authorized_users
+        self.license_authorized_users_exclude = license_authorized_users_exclude
+        self.standard_unit_price = standard_unit_price
+        self.standard_unit_price_exclude = standard_unit_price_exclude
+        self.keyword = keyword
+        self.customer_keyword = customer_keyword
+        self.opportunity_keyword = opportunity_keyword
+        self.search = search
+        self.owner_id = owner_id
+        self.owner_id_exclude = owner_id_exclude
+        self.signing_date_start = signing_date_start
+        self.signing_date_end = signing_date_end
+        self.effective_date_start = effective_date_start
+        self.effective_date_end = effective_date_end
+        self.expiry_date_start = expiry_date_start
+        self.expiry_date_end = expiry_date_end
+        self.license_expiry_date_start = license_expiry_date_start
+        self.license_expiry_date_end = license_expiry_date_end
+        self.filters = filters
+        self.sorts = sorts
+        self.team_id = team_id
+        self.current_user = current_user
+        self.db = db
+
+
+def _chart_query(
+    customer_public_id: str | None = Query(None, alias="customer_id"),
+    status: str | None = Query(None),
+    status_exclude: str | None = Query(None),
+    contract_number: str | None = Query(None),
+    license_type: str | None = Query(None),
+    license_type_exclude: str | None = Query(None),
+    purchase_type: str | None = Query(None),
+    purchase_type_exclude: str | None = Query(None),
+    subscription_years: int | None = Query(None),
+    subscription_years_exclude: int | None = Query(None),
+    license_authorized_users: int | None = Query(None),
+    license_authorized_users_exclude: int | None = Query(None),
+    standard_unit_price: Decimal | None = Query(None),
+    standard_unit_price_exclude: Decimal | None = Query(None),
+    keyword: str | None = Query(None),
+    customer_keyword: str | None = Query(None),
+    opportunity_keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    owner_id: str | None = Query(None),
+    owner_id_exclude: str | None = Query(None),
+    signing_date_start: date | None = Query(None),
+    signing_date_end: date | None = Query(None),
+    effective_date_start: date | None = Query(None),
+    effective_date_end: date | None = Query(None),
+    expiry_date_start: date | None = Query(None),
+    expiry_date_end: date | None = Query(None),
+    license_expiry_date_start: date | None = Query(None),
+    license_expiry_date_end: date | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> _ChartQuery:
+    return _ChartQuery(
+        customer_public_id=customer_public_id,
+        status=status,
+        status_exclude=status_exclude,
+        contract_number=contract_number,
+        license_type=license_type,
+        license_type_exclude=license_type_exclude,
+        purchase_type=purchase_type,
+        purchase_type_exclude=purchase_type_exclude,
+        subscription_years=subscription_years,
+        subscription_years_exclude=subscription_years_exclude,
+        license_authorized_users=license_authorized_users,
+        license_authorized_users_exclude=license_authorized_users_exclude,
+        standard_unit_price=standard_unit_price,
+        standard_unit_price_exclude=standard_unit_price_exclude,
+        keyword=keyword,
+        customer_keyword=customer_keyword,
+        opportunity_keyword=opportunity_keyword,
+        search=search,
+        owner_id=owner_id,
+        owner_id_exclude=owner_id_exclude,
+        signing_date_start=signing_date_start,
+        signing_date_end=signing_date_end,
+        effective_date_start=effective_date_start,
+        effective_date_end=effective_date_end,
+        expiry_date_start=expiry_date_start,
+        expiry_date_end=expiry_date_end,
+        license_expiry_date_start=license_expiry_date_start,
+        license_expiry_date_end=license_expiry_date_end,
+        filters=filters,
+        sorts=sorts,
+        team_id=team_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+def _chart_population(query: _ChartQuery):
+    from app.crud.permission import permission_crud
+
+    user_permissions = permission_crud.get_user_permissions(query.db, query.current_user.id, query.team_id)
+    has_view_all = "contract:view:all" in {permission.code for permission in user_permissions}
+    parsed_filters, parsed_sorts = optional_request_list_query(filters_raw=query.filters, sorts_raw=query.sorts)
+    current_user_id = str(query.current_user.id)
+    resolved_customer_id = None
+    if query.customer_public_id:
+        customer = check_customer_view_permission(query.customer_public_id, query.team_id, query.current_user, query.db)
+        resolved_customer_id = customer.id
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+        )
+    else:
+        actual_owner_id = query.owner_id
+        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+            raise HTTPException(status_code=403, detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据")
+        if actual_owner_id is None and not has_view_all:
+            actual_owner_id = current_user_id
+    return run_or_400(lambda: contract_crud.build_population_query(
+        query.db,
+        team_id=query.team_id,
+        customer_id=resolved_customer_id,
+        status=query.status,
+        status_exclude=query.status_exclude,
+        contract_number=query.contract_number,
+        license_type=query.license_type,
+        license_type_exclude=query.license_type_exclude,
+        purchase_type=query.purchase_type,
+        purchase_type_exclude=query.purchase_type_exclude,
+        subscription_years=query.subscription_years,
+        subscription_years_exclude=query.subscription_years_exclude,
+        license_authorized_users=query.license_authorized_users,
+        license_authorized_users_exclude=query.license_authorized_users_exclude,
+        standard_unit_price=query.standard_unit_price,
+        standard_unit_price_exclude=query.standard_unit_price_exclude,
+        keyword=query.keyword,
+        customer_keyword=query.customer_keyword,
+        opportunity_keyword=query.opportunity_keyword,
+        search=query.search,
+        owner_id=actual_owner_id,
+        owner_id_exclude=query.owner_id_exclude,
+        signing_date_start=query.signing_date_start,
+        signing_date_end=query.signing_date_end,
+        effective_date_start=query.effective_date_start,
+        effective_date_end=query.effective_date_end,
+        expiry_date_start=query.expiry_date_start,
+        expiry_date_end=query.expiry_date_end,
+        license_expiry_date_start=query.license_expiry_date_start,
+        license_expiry_date_end=query.license_expiry_date_end,
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+
+
+@router.get("/chart", response_model=ContractChartResponse, summary="查询合同图表")
+def get_contract_chart(query: _ChartQuery = Depends(_chart_query)) -> ContractChartResponse:
+    population = _chart_population(query)
+    payload = contract_chart_stats.build_contract_chart(query.db, query.team_id, population)
+    return ContractChartResponse.model_validate(payload)
+
+
+@router.get("/chart/contracts", response_model=ContractChartBucketContracts, summary="查询图表一段里的合同")
+def get_contract_chart_bucket_contracts(
+    chart: str = Query(...),
+    bucket: str = Query(...),
+    query: _ChartQuery = Depends(_chart_query),
+) -> ContractChartBucketContracts:
+    population = _chart_population(query)
+    try:
+        contracts = contract_chart_stats.list_chart_bucket_contracts(query.db, query.team_id, population, chart, bucket)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
+    return ContractChartBucketContracts(chart=chart, bucket=bucket, total=len(contracts), contracts=contracts)
 
 
 @router.get("/{contract_id}", response_model=ContractDetailResponse, summary="获取合同详情", description="""
