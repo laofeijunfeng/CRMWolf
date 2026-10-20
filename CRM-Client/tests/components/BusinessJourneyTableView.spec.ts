@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.stubGlobal('matchMedia', (query: string) => ({
@@ -226,5 +226,134 @@ describe('BusinessJourneyTableView layout', () => {
     const card = wrapper.get('.data-table-card')
     expect(card.get('[data-testid="journey-replacement"]').text()).toBe('看板内容')
     expect(card.find('.data-table').exists()).toBe(false)
+  })
+
+  const filteredJourneyProps = {
+    fields: createBusinessJourneyListFields([{ value: '7', label: 'Eddie' }]),
+    data: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    filters: [{ field: 'owner_id', op: 'in' as const, value: ['7'] }],
+    sorts: [{ field: 'last_event_at', direction: 'desc' as const }],
+    columns: [{ key: 'product_name', order: 60, visible: false }],
+    search: '续约',
+    contentHidden: true,
+  }
+
+  it('shows only the filter on the chart summary and keeps refresh without sort or view config', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: { ...filteredJourneyProps, displayMode: 'chart' },
+      slots: {
+        tableTools: '<button type="button">刷新</button>',
+        replacement: '<div data-testid="journey-replacement">图表内容</div>',
+      },
+    })
+    await flushPromises()
+
+    const tools = wrapper.get('.data-table-tools').text()
+    expect(tools).toContain('刷新')
+    expect(tools).toContain('筛选')
+    expect(tools).not.toContain('排序')
+    expect(tools).not.toContain('视图配置')
+    expect(wrapper.findAll('button').map(button => button.text()).join(' ')).not.toContain('更多设置')
+
+    const summary = wrapper.get('.list-view-state-summary')
+    expect(summary.text()).toContain('负责人 属于')
+    expect(summary.text()).toContain('“Eddie”')
+    expect(summary.text()).toContain('清除筛选')
+    expect(summary.text()).toContain('另存为视图')
+    expect(summary.text()).not.toContain('排序：')
+    expect(summary.text()).not.toContain('已隐藏')
+    expect(wrapper.get('[data-testid="journey-replacement"]').text()).toBe('图表内容')
+
+    await summary.get('.list-view-state-summary-clear').trigger('click')
+    expect(wrapper.emitted('filter-reset')).toEqual([[]])
+    expect(wrapper.emitted('update:filters')).toEqual([[[]]])
+    expect(wrapper.emitted('sort-reset')).toBeUndefined()
+    expect(wrapper.emitted('column-config-reset')).toBeUndefined()
+  })
+
+  it('removes one chart filter without touching the sort or hidden columns', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: { ...filteredJourneyProps, displayMode: 'chart' },
+    })
+    await flushPromises()
+
+    await wrapper.get('[aria-label="移除筛选：负责人"]').trigger('click')
+
+    const applied = wrapper.emitted('filter-apply')
+    expect(applied?.[0]?.[0]).toEqual([])
+    expect(wrapper.emitted('sort-reset')).toBeUndefined()
+    expect(wrapper.emitted('column-config-reset')).toBeUndefined()
+    expect(wrapper.emitted('update:view-display-mode')).toBeUndefined()
+  })
+
+  it('keeps the chart save action when only a sort remains', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: {
+        ...filteredJourneyProps,
+        displayMode: 'chart',
+        filters: [],
+      },
+    })
+    await flushPromises()
+    const summary = wrapper.get('.list-view-state-summary')
+
+    expect(summary.text()).toContain('无额外筛选')
+    expect(summary.text()).not.toContain('清除筛选')
+    expect(summary.text()).toContain('另存为视图')
+    expect(summary.text()).not.toContain('排序：')
+    expect(wrapper.get('.data-table-tools').text()).not.toContain('排序')
+  })
+
+  it('shows the filter and sort on the board summary without view config', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: { ...filteredJourneyProps, displayMode: 'board' },
+      slots: {
+        tableTools: '<button type="button">刷新</button>',
+        replacement: '<div data-testid="journey-replacement">看板内容</div>',
+      },
+    })
+    await flushPromises()
+
+    const tools = wrapper.get('.data-table-tools').text()
+    expect(tools).toContain('刷新')
+    expect(tools).toContain('排序')
+    expect(tools).not.toContain('视图配置')
+
+    const summary = wrapper.get('.list-view-state-summary')
+    expect(summary.text()).toContain('负责人 属于')
+    expect(summary.text()).toContain('排序：最近动态 ↓')
+    expect(summary.text()).not.toContain('已隐藏')
+    expect(summary.text()).toContain('清除筛选')
+    expect(summary.text()).toContain('另存为视图')
+
+    await summary.get('.list-view-state-summary-clear').trigger('click')
+    expect(wrapper.emitted('filter-reset')).toEqual([[]])
+    expect(wrapper.emitted('sort-reset')).toEqual([[]])
+    expect(wrapper.emitted('update:sorts')).toEqual([[[]]])
+    expect(wrapper.emitted('column-config-reset')).toBeUndefined()
+  })
+
+  it('still clears filters, sorts, and hidden columns together on the list', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: {
+        ...filteredJourneyProps,
+        displayMode: 'table',
+        contentHidden: false,
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.data-table-tools').text()).toContain('视图配置')
+    const summary = wrapper.get('.list-view-state-summary')
+    expect(summary.text()).toContain('排序：最近动态 ↓')
+    expect(summary.text()).toContain('已隐藏 1 列')
+
+    await summary.get('.list-view-state-summary-clear').trigger('click')
+    expect(wrapper.emitted('filter-reset')).toEqual([[]])
+    expect(wrapper.emitted('sort-reset')).toEqual([[]])
+    expect(wrapper.emitted('column-config-reset')).toEqual([[]])
   })
 })

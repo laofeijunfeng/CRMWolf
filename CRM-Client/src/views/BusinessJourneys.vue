@@ -263,6 +263,7 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   activeDisplayMode: displayMode,
+  persistDisplayMode: false,
   builtInDisplayMode: 'table',
   getBuiltInFilters: tabKey => builtInFilters[tabKey] ?? [],
   refresh: refreshActiveProjection,

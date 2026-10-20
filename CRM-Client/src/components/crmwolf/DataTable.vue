@@ -178,8 +178,16 @@ interface Props {
   // exactOptionalPropertyTypes rejects an undefined default for a function prop.
   // eslint-disable-next-line vue/require-default-prop
   exportHandler?: (fieldKeys: string[]) => Promise<void>
-  /** 用页面内容替换表格、状态和分页，仅保留工具栏 */
+  /** 用页面内容替换表格、状态和分页，仅保留工具栏和筛选行 */
   contentHidden?: boolean
+  /** 工具栏是否显示排序。关掉后筛选行仍可读到当前排序 */
+  sortControlsEnabled?: boolean
+  /** 筛选行是否写出排序 */
+  summaryShowsSorts?: boolean
+  /** 筛选行是否写出隐藏列 */
+  summaryShowsHiddenColumns?: boolean
+  /** 筛选行清除范围。all 同时清筛选、排序和隐藏列 */
+  summaryClearScope?: 'all' | 'filters' | 'filters-and-sorts'
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -226,6 +234,10 @@ const props = withDefaults(defineProps<Props>(), {
   exportEnabled: false,
   exportTitle: '列表',
   contentHidden: false,
+  sortControlsEnabled: true,
+  summaryShowsSorts: true,
+  summaryShowsHiddenColumns: true,
+  summaryClearScope: 'all',
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -352,11 +364,13 @@ const sortSummaryItems = computed(() =>
   buildSortSummaryItems(normalizedSorts.value, normalizedSortFields.value)
 )
 const hiddenColumnCount = computed(() => countHiddenColumns(columnConfigOptions.value))
+const toolbarSortFields = computed(() => (
+  props.sortControlsEnabled ? normalizedSortFields.value : []
+))
 const hasAdvancedTools = computed(() =>
-  normalizedSortFields.value.length > 0
+  toolbarSortFields.value.length > 0
   || isColumnConfigAvailable.value
   || props.viewDisplayModeEnabled
-  || props.canSaveCurrentView
   || exportAvailable.value
 )
 const hasTableTools = computed(() =>
@@ -795,12 +809,14 @@ function handleRemoveFilter(id: string): void {
 }
 
 function handleClearFilters(): void {
+  const clearSorts = props.summaryClearScope !== 'filters'
+  const clearColumns = props.summaryClearScope === 'all'
   emit('update:filters', [])
-  emit('update:sorts', [])
-  emit('sort-reset')
+  if (clearSorts) emit('update:sorts', [])
+  if (clearSorts) emit('sort-reset')
   emit('filter-reset')
   emit('clear-filters')
-  if (hiddenColumnCount.value === 0) return
+  if (!clearColumns || hiddenColumnCount.value === 0) return
   if (props.columnPreferenceMode === 'custom') {
     emit('column-config-reset')
     return
@@ -1070,7 +1086,7 @@ onBeforeUnmount(() => {
         <ListAdvancedTools
           v-if="hasAdvancedTools"
           :sorts="normalizedSorts"
-          :sort-fields="normalizedSortFields"
+          :sort-fields="toolbarSortFields"
           :columns="columnConfigOptions"
           :column-config-enabled="isColumnConfigAvailable"
           :column-config-active="columnConfigActive"
@@ -1101,25 +1117,28 @@ onBeforeUnmount(() => {
         <slot name="tableTools" />
       </div>
 
+      <ListViewStateSummary
+        :filters="filterSummaryItems"
+        :sorts="sortSummaryItems"
+        :hidden-column-count="hiddenColumnCount"
+        :show-sorts="summaryShowsSorts !== false"
+        :show-hidden-columns="summaryShowsHiddenColumns !== false"
+        :clear-scope="summaryClearScope ?? 'all'"
+        :applying="viewApplying ?? false"
+        :apply-error="viewApplyError ?? null"
+        :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
+        :save-view-loading="filterViewSaving || props.viewSaveLoading"
+        @remove-filter="handleRemoveFilter"
+        @clear-filters="handleClearFilters"
+        @save-view="emit('save-current-view')"
+        @retry-view-apply="emit('retry-view-apply')"
+      />
+
       <div v-if="contentHidden" class="data-table-replacement">
         <slot name="replacement" />
       </div>
 
       <template v-else>
-        <ListViewStateSummary
-          :filters="filterSummaryItems"
-          :sorts="sortSummaryItems"
-          :hidden-column-count="hiddenColumnCount"
-          :applying="viewApplying ?? false"
-          :apply-error="viewApplyError ?? null"
-          :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
-          :save-view-loading="filterViewSaving || props.viewSaveLoading"
-          @remove-filter="handleRemoveFilter"
-          @clear-filters="handleClearFilters"
-          @save-view="emit('save-current-view')"
-          @retry-view-apply="emit('retry-view-apply')"
-        />
-
       <!-- 非列表展示优先于列表错误，避免列表失败盖住看板或图表 -->
       <div v-if="$slots['replacement']" class="data-table-content data-table-content--replacement">
         <slot name="replacement" />

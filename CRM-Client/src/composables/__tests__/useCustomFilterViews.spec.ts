@@ -616,4 +616,93 @@ describe('useCustomFilterViews', () => {
       }),
     }))
   })
+
+  it('omits display mode when persistence is off and keeps the current mode', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([
+      { field: 'owner_id', op: 'in', value: ['7'] },
+    ])
+    const activeSorts = ref<ListSortCondition[]>([
+      { field: 'last_event_at', direction: 'desc' },
+    ])
+    const activeColumns = ref<ViewPreferenceItem['config']['columns']>([
+      { key: 'product_name', order: 1, visible: false },
+    ])
+    const displayMode = ref<ViewDisplayMode>('chart')
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue({
+      ...customView,
+      config: {
+        version: 1,
+        columns: activeColumns.value,
+        filters: activeFilters.value as unknown as Record<string, unknown>[],
+        sorts: activeSorts.value as unknown as Record<string, unknown>[],
+        display_mode: 'table',
+      },
+    })
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab,
+      activeFilters,
+      activeSorts,
+      activeColumns,
+      activeDisplayMode: displayMode,
+      persistDisplayMode: false,
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveCurrentAsCustomView()
+
+    expect(viewPreferenceApi.createCustomView).toHaveBeenCalledWith('business-journeys.list', {
+      name: '跟进中的我的客户',
+      config: {
+        version: 1,
+        columns: [{ key: 'product_name', order: 1, visible: false }],
+        filters: [{ field: 'owner_id', op: 'in', value: ['7'] }],
+        sorts: [{ field: 'last_event_at', direction: 'desc' }],
+      },
+    })
+    expect(displayMode.value).toBe('chart')
+    expect(activeTab.value).toBe('custom-view:1')
+
+    vi.mocked(viewPreferenceApi.updateCustomView).mockResolvedValue({
+      ...customView,
+      config: {
+        version: 1,
+        columns: activeColumns.value,
+        filters: [],
+        sorts: activeSorts.value as unknown as Record<string, unknown>[],
+        display_mode: 'board',
+      },
+    })
+    activeFilters.value = []
+    await views.updateActiveCustomViewConfig()
+
+    const updated = vi.mocked(viewPreferenceApi.updateCustomView).mock.calls[0]?.[2].config
+    expect(updated).not.toHaveProperty('display_mode')
+    expect(updated?.sorts).toEqual([{ field: 'last_event_at', direction: 'desc' }])
+    expect(displayMode.value).toBe('chart')
+  })
+
+  it('still opens a saved board view when display mode is not persisted', async () => {
+    const displayMode = ref<ViewDisplayMode>('table')
+    const views = useCustomFilterViews({
+      viewKey: 'business-journeys.list',
+      activeTab: ref('all'),
+      activeFilters: ref<ListFilterCondition[]>([]),
+      activeSorts: ref<ListSortCondition[]>([]),
+      activeColumns: ref<ViewPreferenceItem['config']['columns']>([]),
+      activeDisplayMode: displayMode,
+      persistDisplayMode: false,
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+    views.customViews.value = [{
+      ...customView,
+      config: { ...customView.config, display_mode: 'board' },
+    }]
+
+    expect(views.applyCustomViewTab('custom-view:1')).toBe(true)
+    await flushPromises()
+
+    expect(displayMode.value).toBe('board')
+  })
 })

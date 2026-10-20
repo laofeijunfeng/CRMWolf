@@ -368,6 +368,7 @@ describe('BusinessJourneys', () => {
 
     expect(viewPreferenceMocks.updateCustomView).toHaveBeenCalledOnce()
     expect(journeyApiMocks.getBoard).toHaveBeenCalledOnce()
+    expect(viewPreferenceMocks.updateCustomView.mock.calls[0]?.[2].config).not.toHaveProperty('display_mode')
     expect(wrapper.getComponent(BusinessJourneyBoardView).props('loading')).toBe(true)
 
     resolvePersistence({

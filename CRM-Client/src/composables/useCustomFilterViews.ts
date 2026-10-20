@@ -17,6 +17,8 @@ interface UseCustomFilterViewsOptions {
   activeSorts: Ref<ListSortCondition[]>
   activeColumns: Ref<ViewPreferenceConfig['columns']>
   activeDisplayMode?: Ref<ViewDisplayMode>
+  // false：仍读取已保存的展示方式，创建和写回都不带 display_mode
+  persistDisplayMode?: boolean
   builtInDisplayMode?: ViewDisplayMode
   normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => ViewDisplayMode
   getBuiltInFilters?: (tabKey: string) => ListFilterCondition[]
@@ -107,6 +109,11 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       columns: snapshot.columns.map((column) => ({ ...column })),
       ...(snapshot.displayMode === undefined ? {} : { displayMode: snapshot.displayMode }),
     }
+  }
+
+  function writableDisplayMode(): ViewDisplayMode | undefined {
+    if (options.persistDisplayMode === false) return undefined
+    return options.activeDisplayMode?.value
   }
 
   function captureCurrentSnapshot(): ViewApplySnapshot {
@@ -252,7 +259,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
           materializeSnapshotFilters(filters),
           options.activeSorts.value,
           options.activeColumns.value,
-          options.activeDisplayMode?.value,
+          writableDisplayMode(),
         )
       })
       if (!isCustomFilterViewTab(source.activeTab)) {
@@ -262,7 +269,11 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
       options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
       options.activeColumns.value = view.config.columns ?? []
-      if (options.activeDisplayMode !== undefined && view.config.display_mode != null) {
+      if (
+        options.persistDisplayMode !== false
+        && options.activeDisplayMode !== undefined
+        && view.config.display_mode != null
+      ) {
         options.activeDisplayMode.value = options.normalizeDisplayMode === undefined
           ? view.config.display_mode
           : options.normalizeDisplayMode(view.config.display_mode)
@@ -328,7 +339,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
           options.activeFilters.value,
           options.activeSorts.value,
           options.activeColumns.value,
-          options.activeDisplayMode?.value,
+          writableDisplayMode(),
         )
       })
       customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)
@@ -443,7 +454,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
           options.activeFilters.value,
           options.activeSorts.value,
           columns,
-          options.activeDisplayMode?.value,
+          writableDisplayMode(),
         )
       })
       customViews.value = customViews.value.map((item) => item.id === updated.id ? updated : item)

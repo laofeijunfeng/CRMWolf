@@ -110,4 +110,72 @@ describe('ListViewStateSummary', () => {
     expect(hiddenOnly.text()).toContain('清除筛选')
     expect(hiddenOnly.text()).toContain('另存为视图')
   })
+
+  it('keeps sort-only and hidden-only saves when those details are not drawn', () => {
+    const chartSortOnly = mount(ListViewStateSummary, {
+      props: {
+        filters: [],
+        sorts: baseProps.sorts,
+        hiddenColumnCount: 2,
+        saveViewEnabled: true,
+        showSorts: false,
+        showHiddenColumns: false,
+        clearScope: 'filters',
+      },
+    })
+
+    expect(chartSortOnly.text()).toContain('无额外筛选')
+    expect(chartSortOnly.text()).not.toContain('排序：')
+    expect(chartSortOnly.text()).not.toContain('已隐藏')
+    expect(chartSortOnly.text()).not.toContain('清除筛选')
+    expect(chartSortOnly.text()).toContain('另存为视图')
+
+    const chartWithFilter = mount(ListViewStateSummary, {
+      props: {
+        ...baseProps,
+        saveViewEnabled: true,
+        showSorts: false,
+        showHiddenColumns: false,
+        clearScope: 'filters',
+      },
+    })
+    expect(chartWithFilter.text()).toContain('客户名称 包含')
+    expect(chartWithFilter.text()).not.toContain('排序：')
+    expect(chartWithFilter.text()).not.toContain('已隐藏')
+    expect(chartWithFilter.text()).toContain('清除筛选')
+    expect(chartWithFilter.text()).toContain('另存为视图')
+  })
+
+  it('shows the sort on a board summary and clears only when a filter or sort is present', () => {
+    const sortOnly = mount(ListViewStateSummary, {
+      props: {
+        filters: [],
+        sorts: baseProps.sorts,
+        hiddenColumnCount: 2,
+        saveViewEnabled: true,
+        showHiddenColumns: false,
+        clearScope: 'filters-and-sorts',
+      },
+    })
+
+    expect(sortOnly.text()).toContain('无额外筛选')
+    expect(sortOnly.text()).toContain('排序：更新时间 ↓')
+    expect(sortOnly.text()).not.toContain('已隐藏')
+    expect(sortOnly.text()).toContain('清除筛选')
+    expect(sortOnly.text()).toContain('另存为视图')
+
+    const hiddenOnly = mount(ListViewStateSummary, {
+      props: {
+        filters: [],
+        sorts: [],
+        hiddenColumnCount: 2,
+        saveViewEnabled: true,
+        showHiddenColumns: false,
+        clearScope: 'filters-and-sorts',
+      },
+    })
+    expect(hiddenOnly.text()).toContain('无额外筛选')
+    expect(hiddenOnly.text()).not.toContain('清除筛选')
+    expect(hiddenOnly.text()).toContain('另存为视图')
+  })
 })

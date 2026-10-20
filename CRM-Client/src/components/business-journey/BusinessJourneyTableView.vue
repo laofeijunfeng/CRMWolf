@@ -93,6 +93,16 @@ const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
 
 const slots = useSlots()
 
+const sortControlsEnabled = computed(() => props.displayMode !== 'chart')
+const columnConfigEnabled = computed(() => props.displayMode === 'table')
+const summaryShowsSorts = computed(() => props.displayMode !== 'chart')
+const summaryShowsHiddenColumns = computed(() => props.displayMode === 'table')
+const summaryClearScope = computed(() => {
+  if (props.displayMode === 'chart') return 'filters' as const
+  if (props.displayMode === 'board') return 'filters-and-sorts' as const
+  return 'all' as const
+})
+
 const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
   `${row.name} 当前进度 ${getJourneyProgressPercent(row)}%`
 
@@ -120,7 +130,11 @@ function setDisplayMode(value: string): void {
     detail-column-key="name"
     :get-row-label="(row: BusinessJourneyListItem) => row.name"
     view-key="business-journeys.list"
-    column-config-enabled
+    :column-config-enabled="columnConfigEnabled"
+    :sort-controls-enabled="sortControlsEnabled"
+    :summary-shows-sorts="summaryShowsSorts"
+    :summary-shows-hidden-columns="summaryShowsHiddenColumns"
+    :summary-clear-scope="summaryClearScope"
     :column-preference-config="activeColumnPreferenceConfig"
     column-preference-mode="custom"
     search-enabled

@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { X, RotateCw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import type { FeedbackError } from '@/types/feedback'
 import type { FilterSummaryItem, SortSummaryItem } from './listViewState'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   filters: FilterSummaryItem[]
   sorts: SortSummaryItem[]
   hiddenColumnCount: number
@@ -12,12 +13,28 @@ withDefaults(defineProps<{
   applyError?: FeedbackError | null
   saveViewEnabled?: boolean
   saveViewLoading?: boolean
+  showSorts?: boolean
+  showHiddenColumns?: boolean
+  clearScope?: 'all' | 'filters' | 'filters-and-sorts'
 }>(), {
   applying: false,
   applyError: null,
   saveViewEnabled: false,
   saveViewLoading: false,
+  showSorts: true,
+  showHiddenColumns: true,
+  clearScope: 'all',
 })
+
+const showClear = computed(() => {
+  if (props.clearScope === 'filters') return props.filters.length > 0
+  if (props.clearScope === 'filters-and-sorts') return props.filters.length > 0 || props.sorts.length > 0
+  return props.filters.length > 0 || props.sorts.length > 0 || props.hiddenColumnCount > 0
+})
+
+const showSave = computed(() =>
+  props.saveViewEnabled && (props.filters.length > 0 || props.sorts.length > 0 || props.hiddenColumnCount > 0)
+)
 
 const emit = defineEmits<{
   'remove-filter': [id: string]
@@ -64,15 +81,15 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
       </div>
 
       <div class="list-view-state-summary-secondary">
-        <span v-if="sorts.length > 0" class="list-view-state-summary-meta">
+        <span v-if="showSorts && sorts.length > 0" class="list-view-state-summary-meta">
           排序：{{ sorts[0]?.fieldLabel }} {{ sorts[0]?.direction === 'asc' ? '↑' : '↓' }}
           <span v-if="sorts.length > 1">+{{ sorts.length - 1 }}</span>
         </span>
-        <span v-if="hiddenColumnCount > 0" class="list-view-state-summary-meta">
+        <span v-if="showHiddenColumns && hiddenColumnCount > 0" class="list-view-state-summary-meta">
           已隐藏 {{ hiddenColumnCount }} 列
         </span>
         <Button
-          v-if="filters.length > 0 || sorts.length > 0 || hiddenColumnCount > 0"
+          v-if="showClear"
           type="button"
           variant="ghost"
           size="sm"
@@ -82,7 +99,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
           清除筛选
         </Button>
         <Button
-          v-if="saveViewEnabled && (filters.length > 0 || sorts.length > 0 || hiddenColumnCount > 0)"
+          v-if="showSave"
           type="button"
           variant="ghost"
           size="sm"
