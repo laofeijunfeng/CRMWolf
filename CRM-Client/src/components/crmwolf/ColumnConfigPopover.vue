@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   open?: boolean | null
   viewDisplayMode?: ViewDisplayMode | null
   viewDisplayModeEnabled?: boolean
+  viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
   canSaveCurrentView?: boolean
@@ -35,6 +36,7 @@ const props = withDefaults(defineProps<{
   open: null,
   viewDisplayMode: null,
   viewDisplayModeEnabled: false,
+  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
@@ -64,6 +66,12 @@ const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
+const displayModeLabels: Record<ViewDisplayMode, string> = {
+  table: '列表',
+  board: '看板',
+  chart: '图表',
+}
+const allowedDisplayModes = computed(() => props.viewDisplayModes ?? ['table', 'board', 'chart'])
 const selectableDisplayMode = computed<ViewDisplayMode | undefined>(() => (
   props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'
     ? props.viewDisplayMode
@@ -176,9 +184,13 @@ watch(() => props.scope, (scope) => {
           :model-value="selectableDisplayMode"
           @update:model-value="emitMode"
         >
-          <ToggleGroupItem value="table">列表</ToggleGroupItem>
-          <ToggleGroupItem value="board">看板</ToggleGroupItem>
-          <ToggleGroupItem value="chart">图表</ToggleGroupItem>
+          <ToggleGroupItem
+            v-for="mode in allowedDisplayModes"
+            :key="mode"
+            :value="mode"
+          >
+            {{ displayModeLabels[mode] }}
+          </ToggleGroupItem>
         </ToggleGroup>
 
         <div v-if="viewDisplayModeEnabled" class="column-config-section-title column-config-section-title--columns">字段</div>

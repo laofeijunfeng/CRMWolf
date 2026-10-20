@@ -65,8 +65,16 @@ from app.schemas.payment import (
 )
 from app.schemas.payment_plan_board import PaymentPlanBoardResponse
 from app.schemas.payment_record_board import PaymentRecordBoardResponse
+from app.schemas.payment_record_chart import (
+    PaymentRecordChartBucketRecords,
+    PaymentRecordChartResponse,
+)
 from app.services.payment_plan_board_service import build_payment_plan_board
 from app.services.payment_record_board_service import build_payment_record_board
+from app.services.payment_record_chart_stats import (
+    build_payment_record_chart,
+    list_chart_bucket_records,
+)
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
@@ -2156,6 +2164,168 @@ def get_payment_record_board(
         sorts=parsed_sorts,
         today=date.today(),
     )
+
+
+def payment_record_population_filters(
+    contract_id: Optional[int] = Query(None),
+    payment_plan_id: Optional[int] = Query(None),
+    payment_date_start: Optional[date] = Query(None),
+    payment_date_end: Optional[date] = Query(None),
+    min_amount: Optional[float] = Query(None, ge=0),
+    actual_amount: Optional[float] = Query(None, ge=0),
+    creator_id: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    record_number: Optional[str] = Query(None),
+    record_number_exclude: Optional[str] = Query(None),
+    customer_name: Optional[str] = Query(None),
+    customer_name_exclude: Optional[str] = Query(None),
+    actual_payer_name: Optional[str] = Query(None),
+    actual_payer_name_exclude: Optional[str] = Query(None),
+    invoice_title_text: Optional[str] = Query(None),
+    invoice_title_text_exclude: Optional[str] = Query(None),
+    contract_name: Optional[str] = Query(None),
+    contract_name_exclude: Optional[str] = Query(None),
+    owner_name: Optional[str] = Query(None),
+    owner_name_exclude: Optional[str] = Query(None),
+    commission_member_name: Optional[str] = Query(None),
+    commission_member_name_exclude: Optional[str] = Query(None),
+    confirmation_status: Optional[str] = Query(None),
+    confirmation_status_exclude: Optional[str] = Query(None),
+    created_time_start: Optional[date] = Query(None),
+    created_time_end: Optional[date] = Query(None),
+    me: bool = Query(False),
+    approval_status: Optional[str] = Query(None),
+    approval_status_exclude: Optional[str] = Query(None),
+    sort: Optional[str] = Query(None),
+    order_by: Optional[str] = Query(None),
+    order_dir: Optional[str] = Query(None),
+    filters: Optional[str] = Query(None),
+    sorts: Optional[str] = Query(None),
+) -> dict:
+    """列表和图表共用的筛选参数。图表不分页。"""
+    return {
+        "contract_id": contract_id,
+        "payment_plan_id": payment_plan_id,
+        "payment_date_start": payment_date_start,
+        "payment_date_end": payment_date_end,
+        "min_amount": min_amount,
+        "actual_amount": actual_amount,
+        "creator_id": creator_id,
+        "keyword": keyword,
+        "search": search,
+        "record_number": record_number,
+        "record_number_exclude": record_number_exclude,
+        "customer_name": customer_name,
+        "customer_name_exclude": customer_name_exclude,
+        "actual_payer_name": actual_payer_name,
+        "actual_payer_name_exclude": actual_payer_name_exclude,
+        "invoice_title_text": invoice_title_text,
+        "invoice_title_text_exclude": invoice_title_text_exclude,
+        "contract_name": contract_name,
+        "contract_name_exclude": contract_name_exclude,
+        "owner_name": owner_name,
+        "owner_name_exclude": owner_name_exclude,
+        "commission_member_name": commission_member_name,
+        "commission_member_name_exclude": commission_member_name_exclude,
+        "confirmation_status": confirmation_status,
+        "confirmation_status_exclude": confirmation_status_exclude,
+        "created_time_start": created_time_start,
+        "created_time_end": created_time_end,
+        "me": me,
+        "approval_status": approval_status,
+        "approval_status_exclude": approval_status_exclude,
+        "sort": sort,
+        "order_by": order_by,
+        "order_dir": order_dir,
+        "filters": filters,
+        "sorts": sorts,
+    }
+
+
+def _payment_record_chart_rows(db: Session, team_id: int, current_user, population: dict) -> list:
+    current_user_id = resolve_payment_scope_user_id(
+        db,
+        current_user,
+        team_id,
+        me=bool(population["me"]),
+        missing_detail="没有查看回款记录的权限",
+    )
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=population["filters"],
+        sorts_raw=population["sorts"],
+    )
+    return run_or_400(lambda: payment_record_crud.build_population_query(
+        db,
+        team_id=team_id,
+        contract_id=population["contract_id"],
+        payment_plan_id=population["payment_plan_id"],
+        payment_date_start=population["payment_date_start"],
+        payment_date_end=population["payment_date_end"],
+        min_amount=population["min_amount"],
+        actual_amount=population["actual_amount"],
+        creator_id=population["creator_id"],
+        keyword=population["keyword"],
+        search=population["search"],
+        record_number=population["record_number"],
+        record_number_exclude=population["record_number_exclude"],
+        customer_name=population["customer_name"],
+        customer_name_exclude=population["customer_name_exclude"],
+        actual_payer_name=population["actual_payer_name"],
+        actual_payer_name_exclude=population["actual_payer_name_exclude"],
+        invoice_title_text=population["invoice_title_text"],
+        invoice_title_text_exclude=population["invoice_title_text_exclude"],
+        contract_name=population["contract_name"],
+        contract_name_exclude=population["contract_name_exclude"],
+        owner_name=population["owner_name"],
+        owner_name_exclude=population["owner_name_exclude"],
+        commission_member_name=population["commission_member_name"],
+        commission_member_name_exclude=population["commission_member_name_exclude"],
+        confirmation_status=population["confirmation_status"],
+        confirmation_status_exclude=population["confirmation_status_exclude"],
+        created_time_start=population["created_time_start"],
+        created_time_end=population["created_time_end"],
+        current_user_id=current_user_id,
+        approval_status=population["approval_status"],
+        approval_status_exclude=population["approval_status_exclude"],
+        sort=population["sort"],
+        order_by=population["order_by"],
+        order_dir=population["order_dir"],
+        filters=parsed_filters,
+        sorts=parsed_sorts,
+    ).all())
+
+
+@router.get("/payment-records/chart", response_model=PaymentRecordChartResponse, summary="查询回款图表")
+def get_payment_record_chart(
+    population: dict = Depends(payment_record_population_filters),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PaymentRecordChartResponse:
+    rows = _payment_record_chart_rows(db, team_id, current_user, population)
+    return PaymentRecordChartResponse.model_validate(build_payment_record_chart(rows))
+
+
+@router.get(
+    "/payment-records/chart/records",
+    response_model=PaymentRecordChartBucketRecords,
+    summary="查询回款图表一段里的回款",
+)
+def get_payment_record_chart_records(
+    chart: str = Query(..., description="图表键"),
+    bucket: str = Query(..., description="段键"),
+    population: dict = Depends(payment_record_population_filters),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> PaymentRecordChartBucketRecords:
+    rows = _payment_record_chart_rows(db, team_id, current_user, population)
+    try:
+        records = list_chart_bucket_records(rows, chart, bucket)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return PaymentRecordChartBucketRecords(chart=chart, bucket=bucket, total=len(records), records=records)
 
 
 @router.get(

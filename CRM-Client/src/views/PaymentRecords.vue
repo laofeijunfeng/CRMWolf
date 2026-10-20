@@ -25,10 +25,18 @@ import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, type ViewDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentRecordBoardProjection from '@/components/payment/PaymentRecordBoardProjection.vue'
+import PaymentRecordChartPage from '@/components/payment/PaymentRecordChartPage.vue'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type {
+  PaymentRecordChartBucket,
+  PaymentRecordChartBucketRecords,
+  PaymentRecordChartCard,
+  PaymentRecordChartResponse,
+} from '@/schemas/paymentRecordChart'
 import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
@@ -79,7 +87,7 @@ const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const search = ref('')
-const displayMode = ref<'table' | 'board'>('table')
+const displayMode = ref<ViewDisplayMode>('table')
 const ownRecordScope = ref(false)
 const pagination = reactive({
   current: 1,
@@ -240,7 +248,7 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 
 // ==================== Methods ====================
 const fetchPaymentRecords = async (): Promise<boolean> => {
-  if (displayMode.value === 'board') return false
+  if (displayMode.value === 'board' || displayMode.value === 'chart') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -334,7 +342,85 @@ const paymentRecordBoard = useBoardSnapshot<PaymentRecordBoardParams, PaymentRec
   isPermissionReady: () => permissionStore.loadState === 'ready',
 })
 
+const chart = ref<PaymentRecordChartResponse | null>(null)
+const chartLoading = ref(false)
+const chartError = ref('')
+const chartBucket = ref<PaymentRecordChartBucketRecords | null>(null)
+const chartBucketLoading = ref(false)
+const chartBucketError = ref('')
+let chartRequestId = 0
+let chartBucketRequestId = 0
+
+const chartQuery = (): PaymentRecordListParams => {
+  const serialized = serializeListQuery({
+    filters: recordEffectiveFilters.value,
+    sorts: activeSorts.value,
+  })
+  return {
+    ...(recordTabApprovalStatus.value === null ? {} : { approval_status: recordTabApprovalStatus.value }),
+    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
+    ...serialized,
+  }
+}
+
+const closeChartBucket = (): void => {
+  chartBucketRequestId += 1
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = false
+}
+
+const fetchPaymentChart = async (): Promise<boolean> => {
+  const requestId = ++chartRequestId
+  chartError.value = ''
+  chartLoading.value = true
+  try {
+    const response = await paymentApi.getPaymentRecordChart(chartQuery())
+    if (requestId !== chartRequestId) return false
+    chart.value = response
+    return true
+  } catch (error) {
+    if (requestId !== chartRequestId) return false
+    chartError.value = toFeedbackError(error, '回款图表').description || '回款图表加载失败，请重试'
+    return false
+  } finally {
+    if (requestId === chartRequestId) chartLoading.value = false
+  }
+}
+
+const openChartBucket = async (card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket): Promise<void> => {
+  const requestId = ++chartBucketRequestId
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = true
+  try {
+    const response = await paymentApi.getPaymentRecordChartRecords({
+      ...chartQuery(),
+      chart: card.key,
+      bucket: bucket.key,
+    })
+    if (requestId !== chartBucketRequestId) return
+    chartBucket.value = response
+  } catch (error) {
+    if (requestId !== chartBucketRequestId) return
+    chartBucketError.value = toFeedbackError(error, '回款图表').description || '这一段回款加载失败，请重试'
+  } finally {
+    if (requestId === chartBucketRequestId) chartBucketLoading.value = false
+  }
+}
+
+const openChartRecord = (recordId: number): void => {
+  if (!Number.isInteger(recordId) || recordId <= 0) return
+  selectedRecord.value = null
+  selectedBoardRecordId.value = recordId
+  detailSheetVisible.value = true
+}
+
 const refreshActivePaymentRecordView = (): Promise<boolean> => {
+  if (displayMode.value === 'chart') {
+    closeChartBucket()
+    return fetchPaymentChart()
+  }
   if (displayMode.value !== 'board') return fetchPaymentRecords()
   return paymentRecordBoard.refresh(boardParams.value).then(() => true, () => false)
 }
@@ -343,15 +429,16 @@ const refreshTableQuery = (): void => {
   if (displayMode.value !== 'board') void refreshActivePaymentRecordView()
 }
 
-const handleDisplayModeChange = (mode: ViewDisplayMode): void => {
-  if (mode !== 'table' && mode !== 'board') return
+const handleDisplayModeChange = (mode: string | number): void => {
+  if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
+  closeChartBucket()
   void refreshActivePaymentRecordView()
 }
 
 watch([activeTab, activeFilters, activeSorts, search, ownRecordScope], () => {
-  if (displayMode.value === 'board') void refreshActivePaymentRecordView()
+  if (displayMode.value === 'board' || displayMode.value === 'chart') void refreshActivePaymentRecordView()
 })
 
 const recordDrillStatuses = ['pending_submit', 'pending_approval', 'rejected', 'approved', 'unclassified'] as const
@@ -428,6 +515,8 @@ const openBoardRecordAction = async (
   isResubmitMode.value = true
 }
 
+const paymentViewDisplayModes: ViewDisplayMode[] = ['table', 'chart']
+
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-records.list',
   activeTab,
@@ -435,6 +524,7 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   activeDisplayMode: displayMode,
+  normalizeDisplayMode: normalizeListChartDisplayMode,
   refresh: refreshActivePaymentRecordView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
@@ -787,6 +877,7 @@ defineExpose({
       view-key="payment-records.list"
       view-display-mode-enabled
       :view-display-mode="displayMode"
+      :view-display-modes="paymentViewDisplayModes"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -829,6 +920,14 @@ defineExpose({
       @row-click="handleViewDetail"
       @update:view-display-mode="handleDisplayModeChange"
     >
+      <template #tableTools>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
+          <TabsList aria-label="回款展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </template>
       <template v-if="displayMode === 'board'" #replacement>
         <PaymentRecordBoardProjection
           :response="paymentRecordBoard.data"
@@ -841,6 +940,21 @@ defineExpose({
           @view-all="handleBoardViewAll"
           @card-action="handleBoardCardAction"
           @retry="paymentRecordBoard.retry"
+        />
+      </template>
+      <template v-else-if="displayMode === 'chart'" #replacement>
+        <PaymentRecordChartPage
+          :chart="chart"
+          :loading="chartLoading"
+          :error="chartError"
+          :bucket-records="chartBucket"
+          :bucket-loading="chartBucketLoading"
+          :bucket-error="chartBucketError"
+          @retry="fetchPaymentChart"
+          @open-record="openChartRecord"
+          @view-bucket="openChartBucket"
+          @retry-bucket="openChartBucket"
+          @close-bucket="closeChartBucket"
         />
       </template>
       <template #mobile-card="{ row }">

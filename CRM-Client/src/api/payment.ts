@@ -5,6 +5,12 @@ import type { RequestConfig } from '@/utils/request'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
 import { PaymentPlanBoardResponseSchema, type PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
 import { PaymentRecordBoardResponseSchema, type PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
+import {
+  PaymentRecordChartBucketRecordsSchema,
+  PaymentRecordChartResponseSchema,
+  type PaymentRecordChartBucketRecords,
+  type PaymentRecordChartResponse,
+} from '@/schemas/paymentRecordChart'
 import { serializeListQuery } from '@/utils/listQuery'
 
 export type PaymentPlanExportTab = 'all' | 'pending' | 'partial' | 'completed'
@@ -280,6 +286,11 @@ export interface PaymentRecordListParams {
 
 export type PaymentRecordBoardParams = Omit<PaymentRecordListParams, 'page' | 'page_size'>
 
+export interface PaymentRecordChartBucketParams extends Omit<PaymentRecordListParams, 'page' | 'page_size'> {
+  chart: 'license_type' | 'purchase_type' | 'amount_band' | 'payment_month'
+  bucket: string
+}
+
 export interface PaymentRecordWithDetails extends PaymentRecordResponse {
   contract_name?: string
   stage_name?: string
@@ -438,6 +449,30 @@ const paymentApi = {
       },
     })
     return PaymentPlanBoardResponseSchema.parse(response)
+  },
+
+  getPaymentRecordChart: async (params?: PaymentRecordListParams): Promise<PaymentRecordChartResponse> => {
+    const serialized = serializeListQuery()
+    const response: unknown = await request.get('/v1/payments/payment-records/chart', {
+      params: {
+        ...params,
+        filters: params?.filters ?? serialized.filters,
+        sorts: params?.sorts ?? serialized.sorts,
+      },
+    })
+    return PaymentRecordChartResponseSchema.parse(response)
+  },
+
+  getPaymentRecordChartRecords: async (params: PaymentRecordChartBucketParams): Promise<PaymentRecordChartBucketRecords> => {
+    const serialized = serializeListQuery()
+    const response: unknown = await request.get('/v1/payments/payment-records/chart/records', {
+      params: {
+        ...params,
+        filters: params.filters ?? serialized.filters,
+        sorts: params.sorts ?? serialized.sorts,
+      },
+    })
+    return PaymentRecordChartBucketRecordsSchema.parse(response)
   },
 
   getPaymentRecordBoard: async (params: PaymentRecordBoardParams): Promise<PaymentRecordBoardResponse> => {

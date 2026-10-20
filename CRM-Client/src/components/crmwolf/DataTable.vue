@@ -162,6 +162,8 @@ interface Props {
   viewDisplayMode?: ViewDisplayMode | null
   /** 是否在视图配置里提供展示模式；工具栏切换由页面使用 Tabs */
   viewDisplayModeEnabled?: boolean
+  /** 视图配置里可选的展示模式。不传则列表、看板、图表都在 */
+  viewDisplayModes?: ViewDisplayMode[]
   /** 配置入口标签 */
   viewConfigTriggerLabel?: string
   /** 配置面板标题 */
@@ -227,6 +229,7 @@ const props = withDefaults(defineProps<Props>(), {
   filterViewSaveLoading: false,
   viewDisplayMode: null,
   viewDisplayModeEnabled: false,
+  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
@@ -1096,6 +1099,7 @@ onBeforeUnmount(() => {
           :column-config-loading="columnConfigLoading"
           :column-config-saving="columnConfigSaving"
           :view-display-mode-enabled="props.viewDisplayModeEnabled"
+          :view-display-modes="props.viewDisplayModes"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
           :can-save-current-view="props.canSaveCurrentView"

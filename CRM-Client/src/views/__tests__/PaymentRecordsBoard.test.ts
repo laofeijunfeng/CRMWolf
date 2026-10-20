@@ -274,6 +274,12 @@ function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElemen
 
 describe('Payment records board integration', () => {
   beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
     vi.clearAllMocks()
     headerStore.activeTab = 'all'
     teamState.currentTeam = { id: 11 }
@@ -293,6 +299,11 @@ describe('Payment records board integration', () => {
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('table')
     expect(table.props('viewDisplayModeEnabled')).toBe(true)
+    expect(table.props('viewDisplayModes')).toEqual(['table', 'chart'])
+    const tabs = wrapper.get('[aria-label="回款展示"]')
+    expect(tabs.text()).toContain('列表')
+    expect(tabs.text()).toContain('图表')
+    expect(tabs.text()).not.toContain('看板')
     expect(table.props('data')).toEqual([record])
     expect(table.props('exportEnabled')).toBe(true)
     expect(mocks.listPaymentRecords).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }))

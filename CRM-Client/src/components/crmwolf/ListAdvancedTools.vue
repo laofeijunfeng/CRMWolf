@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   columnConfigSaving: boolean
   viewDisplayMode?: ViewDisplayMode | null
   viewDisplayModeEnabled?: boolean
+  viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
   canSaveCurrentView?: boolean
@@ -38,6 +39,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   viewDisplayMode: null,
   viewDisplayModeEnabled: false,
+  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
@@ -174,6 +176,7 @@ watch(isCompactToolbar, async (compact) => {
       :saving="columnConfigSaving"
       :view-display-mode="normalizedViewDisplayMode"
       :view-display-mode-enabled="normalizedViewDisplayModeEnabled"
+      :view-display-modes="viewDisplayModes"
       :view-config-trigger-label="normalizedViewConfigTriggerLabel"
       :view-config-panel-title="normalizedViewConfigPanelTitle"
       :can-save-current-view="normalizedCanSaveCurrentView"
