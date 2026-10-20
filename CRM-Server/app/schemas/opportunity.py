@@ -326,6 +326,43 @@ class OpportunityListResponse(OpportunityResponse):
     customer_name: Optional[str] = Field(None, description="客户名称")
     owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
     contract_unavailable_reason: str | None = Field(None, description="新建合同时不可选的原因。可创建时为空")
+class OpportunityChartPreview(BaseModel):
+    id: str
+    name: str
+    customer_name: Optional[str] = None
+    owner_name: Optional[str] = None
+    amount: float
+    expected_closing_date: Optional[date] = None
+
+
+class OpportunityChartBucket(BaseModel):
+    key: str
+    label: str
+    count: int
+    amount: float
+    ratio: float
+    amount_ratio: float
+    preview: List[OpportunityChartPreview]
+    preview_total: int
+
+
+class OpportunityChartCard(BaseModel):
+    key: str
+    buckets: List[OpportunityChartBucket]
+
+
+class OpportunityChartResponse(BaseModel):
+    population: int
+    total_amount: float
+    cards: List[OpportunityChartCard]
+
+
+class OpportunityChartBucketOpportunities(BaseModel):
+    chart: str
+    bucket: str
+    total: int
+    opportunities: List[OpportunityChartPreview]
+
 
 
 class MessageResponse(BaseModel):

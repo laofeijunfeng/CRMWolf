@@ -43,6 +43,8 @@ from app.services.opportunity_board_service import build_opportunity_board
 from app.schemas.common import PaginatedResponse
 from app.schemas.opportunity import (
     MessageResponse,
+    OpportunityChartBucketOpportunities,
+    OpportunityChartResponse,
     OpportunityCreate,
     OpportunityDealJourneyUpdate,
     OpportunityDetailResponse,
@@ -64,6 +66,7 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.services import opportunity_chart_stats
 from app.services.opportunity_presenter import (
     customer_info_dict as _customer_info_dict,
     customer_public_id as _customer_public_id,
@@ -682,6 +685,110 @@ def get_available_opportunities_for_contract(
         }))
 
     return result
+
+def _chart_population(
+    *,
+    opportunity_status: Optional[str],
+    search: Optional[str],
+    filters: Optional[str],
+    sorts: Optional[str],
+    team_id: int,
+    current_user,
+    db: Session,
+):
+    from app.crud.permission import permission_crud
+
+    user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
+    permission_codes = {permission.code for permission in user_permissions}
+    has_view_all = "opportunity:view:all" in permission_codes
+    parsed_filters, parsed_sorts = optional_request_list_query(
+        filters_raw=filters,
+        sorts_raw=sorts,
+    )
+    actual_owner_id = enforce_owner_view_scope(
+        parsed_filters or [],
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+        default_to_self=True,
+    )
+    return run_or_400(
+        lambda: opportunity_crud.build_list_query(
+            db,
+            team_id=team_id,
+            status=opportunity_status,
+            owner_id=actual_owner_id,
+            search=search,
+            filters=parsed_filters,
+            sorts=parsed_sorts,
+        ).all()
+    )
+
+
+@router.get("/chart", response_model=OpportunityChartResponse, summary="获取商机图表统计")
+def get_opportunity_chart(
+    opportunity_status: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None),
+    filters: Optional[str] = Query(None),
+    sorts: Optional[str] = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    population = _chart_population(
+        opportunity_status=opportunity_status,
+        search=search,
+        filters=filters,
+        sorts=sorts,
+        team_id=team_id,
+        current_user=current_user,
+        db=db,
+    )
+    try:
+        payload = dict(opportunity_chart_stats.build_opportunity_chart(db, team_id, population))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return OpportunityChartResponse.model_validate(payload)
+
+
+@router.get(
+    "/chart/opportunities",
+    response_model=OpportunityChartBucketOpportunities,
+    summary="获取商机图表分桶明细",
+)
+def get_opportunity_chart_bucket_opportunities(
+    chart: str = Query(...),
+    bucket: str = Query(...),
+    opportunity_status: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None),
+    filters: Optional[str] = Query(None),
+    sorts: Optional[str] = Query(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    population = _chart_population(
+        opportunity_status=opportunity_status,
+        search=search,
+        filters=filters,
+        sorts=sorts,
+        team_id=team_id,
+        current_user=current_user,
+        db=db,
+    )
+    try:
+        opportunities = opportunity_chart_stats.list_chart_bucket_opportunities(
+            db, team_id, population, chart, bucket
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return OpportunityChartBucketOpportunities(
+        chart=chart,
+        bucket=bucket,
+        total=len(opportunities),
+        opportunities=opportunities,
+    )
+
 
 
 @router.get("/board", response_model=OpportunityBoardResponse)

@@ -178,7 +178,51 @@ export const OpportunityListApiResponseSchema = z.union([
   OpportunityPaginatedListApiSchema
 ])
 
-export const SalesFunnelDataSchema = z.object({
+export const OpportunityChartPreviewSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  customer_name: z.string().nullable(),
+  owner_name: z.string().nullable(),
+  amount: z.number(),
+  expected_closing_date: BusinessDateStringSchema.nullable()
+})
+
+export const OpportunityChartBucketSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  count: z.number().int().nonnegative(),
+  amount: z.number(),
+  ratio: z.number(),
+  amount_ratio: z.number(),
+  preview: z.array(OpportunityChartPreviewSchema),
+  preview_total: z.number().int().nonnegative()
+})
+
+export const OpportunityChartCardSchema = z.object({
+  key: z.string().min(1),
+  buckets: z.array(OpportunityChartBucketSchema)
+})
+
+export const OpportunityChartResponseSchema = z.object({
+  population: z.number().int().nonnegative(),
+  total_amount: z.number(),
+  cards: z.array(OpportunityChartCardSchema)
+})
+
+export const OpportunityChartBucketOpportunitiesSchema = z.object({
+  chart: z.string().min(1),
+  bucket: z.string().min(1),
+  total: z.number().int().nonnegative(),
+  opportunities: z.array(OpportunityChartPreviewSchema)
+})
+
+export type OpportunityChartPreview = z.infer<typeof OpportunityChartPreviewSchema>
+export type OpportunityChartBucket = z.infer<typeof OpportunityChartBucketSchema>
+export type OpportunityChartCard = z.infer<typeof OpportunityChartCardSchema>
+export type OpportunityChartResponse = z.infer<typeof OpportunityChartResponseSchema>
+export type OpportunityChartBucketOpportunities = z.infer<typeof OpportunityChartBucketOpportunitiesSchema>
+
+ export const SalesFunnelDataSchema = z.object({
   stage_id: z.number().int(),
   stage_name: z.string(),
   opportunity_count: z.number().int(),

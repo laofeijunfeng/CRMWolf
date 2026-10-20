@@ -2,11 +2,17 @@ import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
 import {
   OpportunityApiResponseSchema,
+  OpportunityChartBucketOpportunitiesSchema,
+  OpportunityChartResponseSchema,
   OpportunityListApiResponseSchema,
   OpportunityListItemApiSchema,
   OpportunityOwnerFilterOptionsResponseSchema,
   SalesFunnelDataSchema,
   StageDurationDataSchema
+} from '@/schemas/opportunity'
+import type {
+  OpportunityChartBucketOpportunities,
+  OpportunityChartResponse
 } from '@/schemas/opportunity'
 import { z } from 'zod'
 import { OpportunityBoardResponseSchema, type OpportunityBoardResponse } from '@/schemas/opportunityBoard'
@@ -210,6 +216,18 @@ export interface OpportunityLossRequest {
   loss_reason: string
 }
 
+export interface OpportunityChartParams {
+  status?: string | number | null
+  search?: string | null
+  filters?: string
+  sorts?: string
+}
+
+export interface OpportunityChartBucketParams extends OpportunityChartParams {
+  chart: string
+  bucket: string
+}
+
 export interface OpportunityListParams {
   skip?: number
   limit?: number
@@ -345,6 +363,18 @@ export function parseOpportunityApiResponse(raw: unknown): Opportunity {
 export const opportunityApi = {
   exportOpportunities: (payload: ListExportPayload<OpportunityExportTab>): Promise<Blob> =>
     postListExport('/v1/opportunities/export', payload),
+
+  getOpportunityChart: async (params?: OpportunityChartParams): Promise<OpportunityChartResponse> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/opportunities/chart', { params })
+    return OpportunityChartResponseSchema.parse(response)
+  },
+
+  getOpportunityChartBucket: async (params: OpportunityChartBucketParams): Promise<OpportunityChartBucketOpportunities> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get('/v1/opportunities/chart/opportunities', { params })
+    return OpportunityChartBucketOpportunitiesSchema.parse(response)
+  },
 
   getOpportunities: async (params?: OpportunityListParams): Promise<OpportunityListResponse[] | PaginatedResponse<OpportunityListResponse>> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
