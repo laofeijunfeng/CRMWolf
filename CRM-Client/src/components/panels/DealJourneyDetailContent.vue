@@ -304,7 +304,9 @@ const fixedContractForPaymentPlan = computed(() => {
     id: contract.id,
     contract_name: contract.contract_name,
     total_amount: contract.total_amount,
-    customer_name: displayCustomerName.value
+    customer_name: displayCustomerName.value,
+    opportunity_id: opportunity.value?.id ?? contract.opportunity_id,
+    expected_closing_date: opportunity.value?.expected_closing_date ?? null,
   }
 })
 const paymentRecordDefaultAmount = computed(() => {
