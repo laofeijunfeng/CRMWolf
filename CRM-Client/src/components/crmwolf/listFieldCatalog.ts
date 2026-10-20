@@ -1,4 +1,4 @@
-import type { ListFilterField, ListFilterFieldType } from './listFilterTypes'
+import type { ListFilterField, ListFilterFieldType, ListFilterOperator } from './listFilterTypes'
 import type { ListSortField } from './listSortTypes'
 
 export type ListFieldType = ListFilterFieldType
@@ -23,6 +23,7 @@ export interface ListFieldQueryConfig {
   apiKey?: string
   label?: string
   options?: ListFieldOption[]
+  operators?: readonly ListFilterOperator[]
 }
 
 /**
@@ -205,6 +206,9 @@ function projectQueryField(
   const options = config.options ?? field.options
   if (options !== undefined) {
     projected.options = options
+  }
+  if (config.operators !== undefined) {
+    projected.operators = config.operators
   }
   return projected
 }

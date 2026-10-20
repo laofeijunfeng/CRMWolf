@@ -15,8 +15,11 @@ from app.schemas.common import PaginatedResponse
 from app.schemas.customer import OwnerListResponse
 from app.schemas.deal_journey import (
     BusinessJourneyBoardResponse,
+    BusinessJourneyChartResponse,
+    BusinessJourneyChartSegmentResponse,
     BusinessJourneyDetailResponse,
     BusinessJourneyListItem,
+    ChartCardKey,
 )
 from app.services.business_journey_presenter import board_response, detail_response, list_items
 from app.services.business_journey_query_service import (
@@ -25,6 +28,7 @@ from app.services.business_journey_query_service import (
     business_journey_query_service,
 )
 from app.utils.public_id import is_deal_journey_public_id
+from app.utils.time import business_today
 
 router = APIRouter(prefix="/v1/business-journeys", tags=["业务旅程"])
 _RELEVANT_PERMISSIONS = frozenset(
@@ -224,6 +228,67 @@ def get_business_journey_owner_options(
         lambda: business_journey_query_service.owner_options(db, request=request)
     )
     return OwnerListResponse(data=options)
+
+
+
+@router.get("/chart", response_model=BusinessJourneyChartResponse)
+def get_business_journey_chart(
+    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    search: str | None = Query(None),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> BusinessJourneyChartResponse:
+    request = _authorized_request(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        tab=tab,
+        search=search,
+        filters=filters,
+        sorts=sorts,
+    )
+    return run_or_400(
+        lambda: business_journey_query_service.chart(db, request=request, today=business_today())
+    )
+
+
+@router.get("/chart/segment", response_model=BusinessJourneyChartSegmentResponse)
+def get_business_journey_chart_segment(
+    card: ChartCardKey,
+    segment: str = Query(min_length=1, max_length=100),
+    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    search: str | None = Query(None),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> BusinessJourneyChartSegmentResponse:
+    request = _authorized_request(
+        db,
+        team_id=team_id,
+        user_id=current_user.id,
+        tab=tab,
+        search=search,
+        filters=filters,
+        sorts=sorts,
+    )
+    return run_or_400(
+        lambda: business_journey_query_service.chart_segment(
+            db,
+            request=request,
+            card=card,
+            segment=segment,
+            today=business_today(),
+            skip=skip,
+            limit=limit,
+        )
+    )
 
 
 @router.get("/{journey_public_id}", response_model=BusinessJourneyDetailResponse)

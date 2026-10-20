@@ -18,6 +18,7 @@ type BackendCatalogManifest = Record<
 interface StaticQueryCapability {
   enabled: boolean
   apiKey?: string
+  operators?: string[]
 }
 
 interface StaticListField {
@@ -78,9 +79,22 @@ function queryCapability(expression: ts.Expression | undefined, defaultEnabled: 
   if (!enabled) return { enabled: false }
   if (expression !== undefined && ts.isObjectLiteralExpression(expression)) {
     const apiKey = stringValue(propertyInitializer(expression, 'apiKey'))
-    return apiKey === undefined ? { enabled: true } : { enabled: true, apiKey }
+    const operators = arrayValue(propertyInitializer(expression, 'operators'))
+    return {
+      enabled: true,
+      ...(apiKey === undefined ? {} : { apiKey }),
+      ...(operators === undefined ? {} : { operators })
+    }
   }
   return { enabled: true }
+}
+
+
+
+function arrayValue(expression: ts.Expression | undefined): string[] | undefined {
+  if (expression === undefined || !ts.isArrayLiteralExpression(expression)) return undefined
+  const values = expression.elements.map((element) => stringValue(element))
+  return values.every((value): value is string => value !== undefined) ? values : undefined
 }
 
 function extractFields(viewName: string): StaticListField[] {
@@ -162,10 +176,8 @@ describe('DataTable frontend/backend list-query contract', () => {
           expect(backendField?.type, `${viewName} ${capabilityName} ${key} type`).toBe(field.type)
           if (capabilityName === 'filter') {
             expect(backendField?.filterable, `${viewName} filter ${key} expression`).toBe(true)
-            const expectedOperators: readonly string[] =
-              field.type === undefined
-                ? []
-                : listFilterOperatorsByType[field.type].map((operator) => operator.value)
+            const expectedOperators: readonly string[] = field.filter.operators
+              ?? (field.type === undefined ? [] : listFilterOperatorsByType[field.type].map((operator) => operator.value))
             expect(backendField?.ops, `${viewName} filter ${key} operators`).toEqual(
               expect.arrayContaining([...expectedOperators])
             )
@@ -276,10 +288,10 @@ describe('DataTable frontend/backend list-query contract', () => {
       display_mode: 'chart',
     })
 
-    expect(normalizeCustomerDisplayMode(customer.display_mode)).toBe('board')
+    expect(normalizeCustomerDisplayMode(customer.display_mode)).toBe('chart')
     expect({ ...customer, display_mode: normalizeCustomerDisplayMode(customer.display_mode) }).toEqual({
       ...customer,
-      display_mode: 'board',
+      display_mode: 'chart',
     })
     expect(unrelated.display_mode).toBe('chart')
     expect(customer.filters).toEqual([{ field: 'account_name', op: 'contains', value: '重点' }])

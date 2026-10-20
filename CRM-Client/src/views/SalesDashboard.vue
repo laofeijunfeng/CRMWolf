@@ -294,8 +294,9 @@ onMounted(() => {
   <div class="sales-dashboard-page">
     <div class="dashboard-toolbar" aria-label="销售漏斗工具栏">
       <ListFilterPopover
-        v-model="activeFilters"
+        :model-value="activeFilters"
         :fields="filterFields"
+        @update:model-value="activeFilters = $event"
         @apply="handleFilterApply"
         @reset="handleFilterReset"
       />

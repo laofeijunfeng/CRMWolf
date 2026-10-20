@@ -129,15 +129,15 @@ class ViewPreferenceCRUD:
         user_id: int,
         config: ViewPreferenceConfig,
         actor_id: int,
+        name: str,
     ) -> ViewPreference:
-        custom_view_count = len(self.list_custom_views(db, team_id=team_id, view_key=view_key, user_id=user_id))
         preference = ViewPreference(
             team_id=team_id,
             user_id=user_id,
             view_key=view_key,
             scope=ViewPreferenceScope.PERSONAL.value,
             preference_key=f"custom:pending:{uuid4().hex}",
-            name=f"视图 {custom_view_count + 1}",
+            name=name,
             is_default=0,
             config_json=config.model_dump_json(),
             created_by=actor_id,

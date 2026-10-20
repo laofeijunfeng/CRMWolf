@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -115,3 +116,64 @@ class BusinessJourneyBoardResponse(BaseModel):
     columns: list[BusinessJourneyBoardColumn]
     summary: BusinessJourneyBoardSummary
     truncated: bool
+
+
+ChartCardKey = Literal[
+    "stage",
+    "purchase_type",
+    "amount_band",
+    "product",
+    "recent_activity",
+    "expected_closing",
+]
+ChartGraphic = Literal["horizontal_bar", "pie", "vertical_bar"]
+
+
+class BusinessJourneyChartPreview(BaseModel):
+    public_id: str
+    customer_id: str
+    name: str
+    customer_name: str
+    amount: float
+
+
+class BusinessJourneyChartSegment(BaseModel):
+    key: str
+    label: str
+    count: int
+    amount: float
+    preview: list[BusinessJourneyChartPreview]
+
+
+class BusinessJourneyChartCard(BaseModel):
+    key: ChartCardKey
+    title: str
+    description: str
+    graphic: ChartGraphic
+    segments: list[BusinessJourneyChartSegment]
+
+
+class BusinessJourneyChartSummary(BaseModel):
+    total_count: int
+    total_amount: float
+
+
+class BusinessJourneyChartResponse(BaseModel):
+    summary: BusinessJourneyChartSummary
+    cards: list[BusinessJourneyChartCard]
+
+
+class BusinessJourneyChartSegmentItem(BaseModel):
+    public_id: str
+    customer_id: str
+    name: str
+    customer_name: str
+    amount: float
+
+
+class BusinessJourneyChartSegmentResponse(BaseModel):
+    card: ChartCardKey
+    segment: str
+    label: str
+    total: int
+    items: list[BusinessJourneyChartSegmentItem]

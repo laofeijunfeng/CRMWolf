@@ -1,6 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem, normalizeCustomerDisplayMode } from '@/api/viewPreference'
+import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import type { TabItem } from '@/stores/header'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -18,7 +18,7 @@ interface UseCustomFilterViewsOptions {
   activeColumns: Ref<ViewPreferenceConfig['columns']>
   activeDisplayMode?: Ref<ViewDisplayMode>
   builtInDisplayMode?: ViewDisplayMode
-  normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => 'table' | 'board'
+  normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => ViewDisplayMode
   getBuiltInFilters?: (tabKey: string) => ListFilterCondition[]
   refresh: () => boolean | undefined | Promise<unknown>
   onViewApplySuccess?: (tabKey: string) => void
@@ -240,11 +240,14 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     ])
   }
 
-  async function createCustomView(filters: ListFilterCondition[]): Promise<void> {
+  async function createCustomView(filters: ListFilterCondition[], name: string): Promise<void> {
+    const trimmedName = name.trim()
+    if (trimmedName === '') return
     const source = captureCurrentSnapshot()
     saving.value = true
     try {
       const view = await viewPreferenceApi.createCustomView(options.viewKey, {
+        name: trimmedName,
         config: buildViewConfig(
           materializeSnapshotFilters(filters),
           options.activeSorts.value,
@@ -274,13 +277,28 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     }
   }
 
+  async function promptAndCreate(filters: ListFilterCondition[]): Promise<void> {
+    const name = await renameDialog({
+      title: '另存为视图',
+      description: '保存当前筛选、排序和隐藏列。搜索词不保存。',
+      initialName: '',
+      confirmText: '确定',
+      cancelText: '取消',
+      maxLength: 100,
+    })
+    if (name === null) return
+    await createCustomView(filters, name)
+  }
+
   async function saveAsCustomView(filters: ListFilterCondition[]): Promise<void> {
-    if (filters.length === 0) return
-    await createCustomView(filters)
+    const hasSorts = options.activeSorts.value.length > 0
+    const hasHiddenColumns = options.activeColumns.value.some((column) => column.visible === false)
+    if (filters.length === 0 && !hasSorts && !hasHiddenColumns) return
+    await promptAndCreate(filters)
   }
 
   async function saveCurrentAsCustomView(): Promise<void> {
-    await createCustomView(options.activeFilters.value)
+    await promptAndCreate(options.activeFilters.value)
   }
 
   function mergeTabs(builtInTabs: TabItem[]): TabItem[] {
@@ -339,15 +357,6 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
         committedViewSnapshot.value = cloneSnapshot(target)
         pendingViewApply.value = null
         options.onViewApplySuccess?.(target.activeTab)
-        if (
-          options.normalizeDisplayMode === normalizeCustomerDisplayMode
-          && options.activeDisplayMode?.value === 'board'
-        ) {
-          const appliedView = findViewByTabKey(target.activeTab)
-          if (appliedView?.config.display_mode === 'chart') {
-            await updateActiveCustomViewConfig()
-          }
-        }
       }
     } catch {
       if (sequence !== viewApplySequence) return

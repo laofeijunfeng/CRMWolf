@@ -1,5 +1,5 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ListAdvancedTools from '../ListAdvancedTools.vue'
 
 const wrappers: VueWrapper[] = []
@@ -69,6 +69,19 @@ function mockViewportWidth(initialWidth: number): { setWidth: (width: number) =>
 }
 
 describe('ListAdvancedTools', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    })))
+  })
+
   afterEach(() => {
     while (wrappers.length > 0) wrappers.pop()?.unmount()
     vi.unstubAllGlobals()
@@ -93,7 +106,7 @@ describe('ListAdvancedTools', () => {
     expect(sortButton).toBeDefined()
     sortButton?.click()
     await flushPromises()
-    expect(document.body.textContent).toContain('排序条件')
+    expect(document.body.textContent).toContain('名称')
   })
 
   it('keeps sort and column configuration in more settings on compact screens', async () => {
@@ -117,7 +130,7 @@ describe('ListAdvancedTools', () => {
     ))
     sortButton?.click()
     await flushPromises()
-    expect(document.body.textContent).toContain('排序条件')
+    expect(document.body.textContent).toContain('名称')
   })
 
   it('uses compact tools below 768px and direct tools at 768px', async () => {
@@ -135,11 +148,12 @@ describe('ListAdvancedTools', () => {
     expect(desktopTarget.textContent).toContain('字段配置')
   })
 
-  it('preserves an open sort draft while crossing the compact breakpoint', async () => {
+  it('keeps the selected sort visible while crossing the compact breakpoint', async () => {
     const viewport = mockViewportWidth(1440)
     const wrapper = mount(ListAdvancedTools, {
       props: {
         ...props,
+        sorts: [{ field: 'name', direction: 'asc' }],
         sortFields: [
           ...props.sortFields,
           { key: 'created_at', label: '创建时间', type: 'date' as const },
@@ -155,21 +169,15 @@ describe('ListAdvancedTools', () => {
     ))
     sortTrigger?.click()
     await flushPromises()
-    const addButton = Array.from(document.body.querySelectorAll('button')).find((button) => (
-      button.textContent?.replace(/\s+/g, '') === '添加条件'
-    ))
-    addButton?.click()
-    await flushPromises()
-    expect(document.body.querySelectorAll('button[aria-label="删除排序条件"]')).toHaveLength(2)
+    expect(document.body.querySelector('.sort-field-priority')?.textContent).toBe('1')
 
     viewport.setWidth(390)
     await flushPromises()
 
-    expect(document.body.textContent).toContain('排序条件')
-    expect(document.body.querySelectorAll('button[aria-label="删除排序条件"]')).toHaveLength(2)
+    expect(document.body.querySelector('.sort-field-priority')?.textContent).toBe('1')
+    expect(document.body.textContent).not.toContain('添加条件')
 
-    const closeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')
-    closeButton?.click()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
     expect(wrapper.get('button').text()).toContain('更多设置')
   })
@@ -210,8 +218,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'table',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })
@@ -238,7 +244,7 @@ describe('ListAdvancedTools', () => {
     expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
   })
 
-  it('emits save-current-view from the same config surface', async () => {
+  it('does not offer save-as-view inside the config surface', async () => {
     const wrapper = mount(ListAdvancedTools, {
       props: {
         ...props,
@@ -246,8 +252,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'board',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })
@@ -259,10 +263,7 @@ describe('ListAdvancedTools', () => {
     trigger?.click()
     await flushPromises()
     const save = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.replace(/\s+/g, '') === '另存为视图')
-    expect(save).toBeDefined()
-    save?.click()
-    await flushPromises()
-    expect(wrapper.emitted('save-current-view')).toHaveLength(1)
+    expect(save).toBeUndefined()
   })
 
   it('keeps existing pages free of the board switch and view label', async () => {
@@ -284,8 +285,6 @@ describe('ListAdvancedTools', () => {
         viewDisplayMode: 'table',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
-        canSaveCurrentView: true,
-        viewSaveLoading: false,
       },
       attachTo: document.body,
     })

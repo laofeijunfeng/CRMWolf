@@ -285,6 +285,46 @@ export const CustomerTrendSchema = z.object({
 
 export type CustomerTrend = z.infer<typeof CustomerTrendSchema>
 
+export const CustomerChartPreviewSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  owner_name: z.string().nullable()
+})
+
+export const CustomerChartBucketSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  count: z.number().int().nonnegative(),
+  ratio: z.number().int().min(0).max(100),
+  preview: z.array(CustomerChartPreviewSchema),
+  preview_total: z.number().int().nonnegative()
+})
+
+export const CustomerChartCardSchema = z.object({
+  key: z.enum(['status', 'license', 'scale', 'industry', 'city', 'created_month']),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  buckets: z.array(CustomerChartBucketSchema)
+})
+
+export const CustomerChartResponseSchema = z.object({
+  population: z.number().int().nonnegative(),
+  cards: z.array(CustomerChartCardSchema).length(6)
+})
+
+export const CustomerChartBucketCustomersSchema = z.object({
+  chart: z.enum(['status', 'license', 'scale', 'industry', 'city', 'created_month']),
+  bucket: z.string().min(1),
+  total: z.number().int().nonnegative(),
+  customers: z.array(CustomerChartPreviewSchema)
+})
+
+export type CustomerChartPreview = z.infer<typeof CustomerChartPreviewSchema>
+export type CustomerChartBucket = z.infer<typeof CustomerChartBucketSchema>
+export type CustomerChartCard = z.infer<typeof CustomerChartCardSchema>
+export type CustomerChartResponse = z.infer<typeof CustomerChartResponseSchema>
+export type CustomerChartBucketCustomers = z.infer<typeof CustomerChartBucketCustomersSchema>
+
 // ===== 所有者筛选选项 =====
 export const OwnerFilterOptionSchema = z.object({
   owner_id: z.string().min(1),

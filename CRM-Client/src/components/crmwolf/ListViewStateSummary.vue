@@ -10,14 +10,19 @@ withDefaults(defineProps<{
   hiddenColumnCount: number
   applying?: boolean
   applyError?: FeedbackError | null
+  saveViewEnabled?: boolean
+  saveViewLoading?: boolean
 }>(), {
   applying: false,
   applyError: null,
+  saveViewEnabled: false,
+  saveViewLoading: false,
 })
 
 const emit = defineEmits<{
   'remove-filter': [id: string]
   'clear-filters': []
+  'save-view': []
   'retry-view-apply': []
 }>()
 
@@ -56,16 +61,6 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
             <X class="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </span>
-        <Button
-          v-if="filters.length > 0"
-          type="button"
-          variant="ghost"
-          size="sm"
-          class="list-view-state-summary-clear"
-          @click="emit('clear-filters')"
-        >
-          清除筛选
-        </Button>
       </div>
 
       <div class="list-view-state-summary-secondary">
@@ -76,6 +71,27 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
         <span v-if="hiddenColumnCount > 0" class="list-view-state-summary-meta">
           已隐藏 {{ hiddenColumnCount }} 列
         </span>
+        <Button
+          v-if="filters.length > 0 || sorts.length > 0 || hiddenColumnCount > 0"
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="list-view-state-summary-clear"
+          @click="emit('clear-filters')"
+        >
+          清除筛选
+        </Button>
+        <Button
+          v-if="saveViewEnabled && (filters.length > 0 || sorts.length > 0 || hiddenColumnCount > 0)"
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="list-view-state-summary-save"
+          :disabled="saveViewLoading"
+          @click="emit('save-view')"
+        >
+          另存为视图
+        </Button>
       </div>
     </div>
 
@@ -193,7 +209,8 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   outline-offset: $wolf-focus-ring-offset-v2;
 }
 
-.list-view-state-summary-clear {
+.list-view-state-summary-clear,
+.list-view-state-summary-save {
   height: 28px;
   padding-inline: 6px;
   color: $wolf-primary-v2;

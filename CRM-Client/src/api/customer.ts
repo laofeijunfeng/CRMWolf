@@ -16,12 +16,14 @@ import {
   CustomerDetailResponseSchema,
   ContactResponseSchema,
   CustomerStatisticsSchema,
+  CustomerChartResponseSchema,
+  CustomerChartBucketCustomersSchema,
   CustomerAssignmentPreviewResponseSchema,
   CustomerIndustryHierarchySchema,
 } from '@/schemas/customer'
 import { CustomerBoardResponseSchema, type CustomerBoardResponse } from '@/schemas/customerBoard'
 import { serializeListQuery } from '@/utils/listQuery'
-import type { CustomerIndustryHierarchy } from '@/schemas/customer'
+import type { CustomerChartBucketCustomers, CustomerChartResponse, CustomerIndustryHierarchy } from '@/schemas/customer'
 
 /**
  * 验证 API 响应数据
@@ -371,8 +373,10 @@ export interface CustomerQueryParams {
   created_time_start?: string
   created_time_end?: string
   order_by?: string
-  order_dir?: 'asc' | 'desc'
-  scope?: 'collaborated' | 'accessible'
+  scope?: 'collaborated' | 'accessible' | 'public'
+
+  chart?: 'status' | 'license' | 'scale' | 'industry' | 'city' | 'created_month'
+  bucket?: string
 }
 
 export type CustomerBoardParams = Omit<CustomerQueryParams, 'skip' | 'limit'>
@@ -583,6 +587,11 @@ const customerApi = {
     })
     return CustomerBoardResponseSchema.parse(response)
   },
+  getCustomerChart: (params?: CustomerQueryParams): Promise<CustomerChartResponse> =>
+    api.get('/v1/customers/chart', { params }, CustomerChartResponseSchema),
+
+  getCustomerChartBucket: (params: CustomerQueryParams): Promise<CustomerChartBucketCustomers> =>
+    api.get('/v1/customers/chart/customers', { params }, CustomerChartBucketCustomersSchema),
 
   exportCustomers: (payload: ListExportPayload<CustomerExportTab>): Promise<Blob> =>
     postListExport('/v1/customers/export', payload),

@@ -32,6 +32,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { normalizeCustomerDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,7 @@ import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
+import CustomerChartPage from '@/components/customer/CustomerChartPage.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import CustomerBoardProjection from '@/components/customer/CustomerBoardProjection.vue'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
@@ -62,8 +64,10 @@ import customerApi, {
   type CustomerLoseRequest,
   type OwnerFilterOption,
   type CustomerExportTab,
+  type CustomerQueryParams,
 } from '@/api/customer'
 import { useTeamStore } from '@/stores/team'
+import type { CustomerChartBucket, CustomerChartBucketCustomers, CustomerChartCard, CustomerChartResponse } from '@/schemas/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -244,7 +248,7 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
-const displayMode = ref<'table' | 'board'>('table')
+const displayMode = ref<'table' | 'board' | 'chart'>('table')
 
 const search = ref('')
 
@@ -698,6 +702,91 @@ const fetchIndustryFilterOptions = async (): Promise<void> => {
   }
 }
 
+
+const chart = ref<CustomerChartResponse | null>(null)
+const chartLoading = ref(false)
+const chartError = ref('')
+const chartBucket = ref<CustomerChartBucketCustomers | null>(null)
+const chartBucketLoading = ref(false)
+const chartBucketError = ref('')
+let chartRequestId = 0
+let chartBucketRequestId = 0
+
+const chartQuery = (): CustomerQueryParams => {
+  const params: CustomerQueryParams = {
+    ...serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value }),
+  }
+  const keyword = search.value.trim()
+  if (keyword !== '') params.search = keyword
+  if (activeTab.value === 'public' || activeTab.value === 'collaborated') params.scope = activeTab.value
+  return params
+}
+
+const fetchCustomerChart = async (): Promise<boolean> => {
+  const requestId = ++chartRequestId
+  chartError.value = ''
+  chartLoading.value = true
+  try {
+    const response = await customerApi.getCustomerChart(chartQuery())
+    if (requestId !== chartRequestId) return false
+    chart.value = response
+    return true
+  } catch (error) {
+    if (requestId !== chartRequestId) return false
+    chartError.value = toFeedbackError(error, '客户图表').description || '客户图表加载失败，请重试'
+    return false
+  } finally {
+    if (requestId === chartRequestId) chartLoading.value = false
+  }
+}
+
+const refreshVisibleCustomers = (): Promise<boolean> => {
+  if (displayMode.value === 'chart') return fetchCustomerChart()
+  if (boardEligible.value) return customerBoard.refresh(boardParams.value).then(() => true, () => false)
+  return fetchCustomerList()
+}
+
+const setCustomerDisplayMode = (value: string): void => {
+  if (value !== 'table' && value !== 'board' && value !== 'chart') return
+  if (activeTab.value === 'public' && value !== 'table') {
+    displayMode.value = 'table'
+    return
+  }
+  if (displayMode.value === value) return
+  displayMode.value = value
+  chartBucket.value = null
+  chartBucketError.value = ''
+  void refreshVisibleCustomers()
+}
+
+const openChartBucket = async (card: CustomerChartCard, bucket: CustomerChartBucket): Promise<void> => {
+  const requestId = ++chartBucketRequestId
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = true
+  try {
+    const response = await customerApi.getCustomerChartBucket({
+      ...chartQuery(),
+      chart: card.key,
+      bucket: bucket.key,
+    })
+    if (requestId !== chartBucketRequestId) return
+    chartBucket.value = response
+  } catch (error) {
+    if (requestId !== chartBucketRequestId) return
+    chartBucketError.value = toFeedbackError(error, '客户图表').description || '这一段客户加载失败，请重试'
+  } finally {
+    if (requestId === chartBucketRequestId) chartBucketLoading.value = false
+  }
+}
+
+const closeChartBucket = (): void => {
+  chartBucketRequestId += 1
+  chartBucket.value = null
+  chartBucketError.value = ''
+  chartBucketLoading.value = false
+}
+
 const fetchCustomerList = async (): Promise<boolean> => {
   if (displayMode.value === 'board' && activeTab.value !== 'public') return false
   const requestId = ++listRequestId.value
@@ -776,23 +865,10 @@ const customerBoard = useBoardSnapshot<CustomerBoardParams, CustomerBoardRespons
   isPermissionReady: () => (permissionLoadState?.value ?? permissionStore.loadState) === 'ready',
 })
 
-const refreshActiveCustomerView = (): Promise<boolean> => {
-  if (!boardEligible.value) return fetchCustomerList()
-  return customerBoard.refresh(boardParams.value).then(() => true, () => false)
-}
-
-const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
-  if (activeTab.value === 'public') {
-    displayMode.value = 'table'
-    return
-  }
-  if (mode === displayMode.value) return
-  displayMode.value = mode
-  void refreshActiveCustomerView()
-}
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board' && activeTab.value !== 'public') void refreshActiveCustomerView()
+  if (displayMode.value === 'board' && activeTab.value !== 'public') void refreshVisibleCustomers()
+  if (displayMode.value === 'chart') void refreshVisibleCustomers()
 })
 
 const customerDerivedStatuses = ['not_started', 'following', 'repurchasing', 'won', 'lost'] as const
@@ -861,11 +937,13 @@ const handleBoardCardAction = (payload: { id: string | number, action: 'edit' | 
   else if (payload.action === 'create-opportunity' && item.action_state.can_create_opportunity) handleCreateOpportunity(record, true)
 }
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
-  const refreshed = boardEligible.value
-    ? await refreshActiveCustomerView()
-    : await fetchCustomerList()
+  const refreshed = await refreshVisibleCustomers()
   if (!refreshed) {
-    const viewLabel = boardEligible.value ? '客户看板' : '客户列表'
+    const viewLabel = displayMode.value === 'chart'
+      ? '客户图表'
+      : boardEligible.value
+        ? '客户看板'
+        : '客户列表'
     toast.warning(`${operationLabel}已成功，但${viewLabel}刷新失败，请稍后重试。`)
   }
   return refreshed
@@ -879,7 +957,7 @@ const customFilterViews = useCustomFilterViews({
   activeColumns,
   activeDisplayMode: displayMode,
   normalizeDisplayMode: normalizeCustomerDisplayMode,
-  refresh: refreshActiveCustomerView,
+  refresh: refreshVisibleCustomers,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -896,45 +974,43 @@ const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> 
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleReset = (): void => {
   activeFilters.value = []
   pagination.current = 1
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleSearchApply = (value: string): void => {
   search.value = value.trim()
   pagination.current = 1
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleSearchClear = (): void => {
   search.value = ''
   pagination.current = 1
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleSortApply = (sorts: ListSortCondition[]): void => {
   activeSorts.value = sorts
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleSortReset = (): void => {
   activeSorts.value = []
   pagination.current = 1
   void customFilterViews.updateActiveCustomViewConfig()
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  pagination.current = 1
-  await customFilterViews.saveAsCustomView(filters)
+const handleSaveCurrentView = async (): Promise<void> => {
+  await customFilterViews.saveCurrentAsCustomView()
 }
 
 const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
@@ -969,7 +1045,7 @@ const handleViewDetail = (record: CustomerResponse): void => {
 }
 
 const handleSheetRefresh = (): void => {
-  void refreshActiveCustomerView()
+  void refreshVisibleCustomers()
 }
 
 const handleEdit = async (record: CustomerResponse): Promise<void> => {
@@ -1018,9 +1094,7 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
     }
   }
 
-  const refreshed = boardEligible.value
-    ? await refreshActiveCustomerView()
-    : await fetchCustomerList()
+  const refreshed = await refreshVisibleCustomers()
   const detailMatches = payload?.entityType === 'customer'
     && selectedCustomerId.value !== null
     && String(payload.entityId) === String(selectedCustomerId.value)
@@ -1030,7 +1104,11 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
 
   if (!refreshed || !detailRefreshed) {
     const failedScopes: string[] = []
-    if (!refreshed) failedScopes.push(boardEligible.value ? '客户看板' : '客户列表')
+    if (!refreshed) {
+      failedScopes.push(
+        displayMode.value === 'chart' ? '客户图表' : boardEligible.value ? '客户看板' : '客户列表',
+      )
+    }
     if (!detailRefreshed) failedScopes.push('客户详情')
     toast.warning(`客户已保存，但${failedScopes.join('和')}刷新失败，请稍后重试。`)
   }
@@ -1384,7 +1462,7 @@ watchEffect(() => {
     if (!restoredBuiltInState) {
       activeSorts.value = []
     }
-    void refreshActiveCustomerView()
+    void refreshVisibleCustomers()
   }
 })
 
@@ -1400,7 +1478,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="customers-page">
+  <div class="customers-page" :class="{ 'customers-page--chart': displayMode === 'chart' }">
     <!-- DataTable -->
     <DataTable
       column-config-enabled
@@ -1449,16 +1527,25 @@ defineExpose({
       @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
-      @filter-save-view="handleSaveFilterView"
+      @save-current-view="handleSaveCurrentView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
-      @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
-      @retry="refreshActiveCustomerView"
-      @update:view-display-mode="handleDisplayModeChange"
+      @retry="refreshVisibleCustomers"
+      @update:view-display-mode="setCustomerDisplayMode"
+      @column-config-current-change="handleColumnConfigCurrentChange"
     >
+      <template #tableTools>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
+          <TabsList aria-label="客户展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger v-if="activeTab !== 'public'" value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
+            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </template>
       <template v-if="boardEligible" #replacement>
         <CustomerBoardProjection
           :response="customerBoard.data"
@@ -1473,7 +1560,20 @@ defineExpose({
           @retry="customerBoard.retry"
         />
       </template>
-
+      <template v-else-if="displayMode === 'chart'" #replacement>
+        <CustomerChartPage
+          :chart="chart"
+          :loading="chartLoading"
+          :error="chartError"
+          :bucket-customers="chartBucket"
+          :bucket-loading="chartBucketLoading"
+          :bucket-error="chartBucketError"
+          @retry="fetchCustomerChart"
+          @open-customer="openCustomerDetail"
+          @view-bucket="openChartBucket"
+          @close-bucket="closeChartBucket"
+        />
+      </template>
       <template #mobile-card="{ row }">
         <div class="customer-mobile-card-header">
           <div class="customer-mobile-card-title">
@@ -1719,6 +1819,11 @@ defineExpose({
   gap: $wolf-section-gap-v2;
   min-height: 0;
   flex: 1;
+}
+
+.customers-page--chart {
+  height: auto;
+  overflow: visible;
 }
 
 @media (max-width: $wolf-breakpoint-sm-v2 - 1) {

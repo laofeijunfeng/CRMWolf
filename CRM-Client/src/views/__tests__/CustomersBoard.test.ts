@@ -1,6 +1,6 @@
+import { defineComponent, h, nextTick, reactive, ref, type Ref, type VNode } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h, nextTick, ref, type Ref, type VNode } from 'vue'
 import type { CustomerBoardParams, CustomerResponse } from '@/api/customer'
 import { normalizeCustomerDisplayMode, type ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -21,8 +21,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const teamState = vi.hoisted(() => {
-  const { reactive: vueReactive } = require('vue') as typeof import('vue')
-  return vueReactive({ currentTeam: { id: 11 } as { id: number } | null })
+  return reactive({ currentTeam: { id: 11 } as { id: number } | null })
 })
 
 const userState = vi.hoisted(() => ({
@@ -35,8 +34,7 @@ const permissionState = vi.hoisted(() => ({
 }))
 
 const headerStore = vi.hoisted(() => {
-  const { reactive: vueReactive } = require('vue') as typeof import('vue')
-  const store = vueReactive({
+  const store = reactive({
     activeTab: 'all',
     setActiveTab: (tab: string): void => {
       store.activeTab = tab
@@ -48,50 +46,49 @@ const headerStore = vi.hoisted(() => {
 })
 
 const stubs = vi.hoisted(() => {
-  const { defineComponent: defineStub, h: render } = require('vue') as typeof import('vue')
   return {
-    journey: defineStub({
+    journey: defineComponent({
       name: 'CustomerDealJourneyHoverCard',
       setup: (_props: unknown, { slots }: { slots: { trigger?: () => VNode | null } }): (() => VNode | null) => () => slots.trigger?.() ?? null,
     }),
-    detail: defineStub({
+    detail: defineComponent({
       name: 'CustomerDetailSheet',
       props: { visible: { type: Boolean, default: false }, customerId: { type: String, default: null } },
       emits: ['refresh'],
-      setup: (props: { visible: boolean, customerId: string | null }, { emit }: { emit: (event: 'refresh') => void }): (() => unknown) => () => render('section', {
+      setup: (props: { visible: boolean, customerId: string | null }, { emit }: { emit: (event: 'refresh') => void }): (() => unknown) => () => h('section', {
         'data-testid': 'customer-detail-sheet',
         'data-visible': String(props.visible),
         'data-customer-id': props.customerId ?? '',
         onClick: (): void => emit('refresh'),
       }),
     }),
-    form: defineStub({
+    form: defineComponent({
       name: 'CustomerFormDialog',
       props: {
         open: { type: Boolean, default: false },
         mode: { type: String, default: 'create' },
         customerId: { type: String, default: null },
       },
-      setup: (props: { open: boolean, mode: string, customerId: string | null }): (() => unknown) => () => render('section', {
+      setup: (props: { open: boolean, mode: string, customerId: string | null }): (() => unknown) => () => h('section', {
         'data-testid': 'customer-form-dialog',
         'data-open': String(props.open),
         'data-mode': props.mode,
         'data-customer-id': props.customerId ?? '',
       }),
     }),
-    transfer: defineStub({
+    transfer: defineComponent({
       name: 'CustomerTransferDialog',
       props: { open: { type: Boolean, default: false }, customer: { type: Object, default: null } },
-      setup: (props: { open: boolean, customer: { id?: string } | null }): (() => unknown) => () => render('section', {
+      setup: (props: { open: boolean, customer: { id?: string } | null }): (() => unknown) => () => h('section', {
         'data-testid': 'customer-transfer-dialog',
         'data-open': String(props.open),
         'data-customer-id': props.customer?.id ?? '',
       }),
     }),
-    opportunity: defineStub({
+    opportunity: defineComponent({
       name: 'OpportunityFormDialog',
       props: { open: { type: Boolean, default: false }, customerId: { type: String, default: null } },
-      setup: (props: { open: boolean, customerId: string | null }): (() => unknown) => () => render('section', {
+      setup: (props: { open: boolean, customerId: string | null }): (() => unknown) => () => h('section', {
         'data-testid': 'opportunity-form-dialog',
         'data-open': String(props.open),
         'data-customer-id': props.customerId ?? '',
@@ -195,15 +192,15 @@ interface SavedViewOptions {
   activeFilters: Ref<ListFilterCondition[]>
   activeSorts: Ref<ListSortCondition[]>
   activeDisplayMode?: Ref<ViewDisplayMode>
-  normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => 'table' | 'board'
+  normalizeDisplayMode?: (mode: ViewDisplayMode | null | undefined) => ViewDisplayMode
   refresh: () => Promise<unknown>
 }
 interface CustomerPageState {
   activeTab: string
   activeFilters: ListFilterCondition[]
   activeSorts: ListSortCondition[]
-  displayMode: 'table' | 'board'
-  customFilterViews: { recordedNormalizer?: (mode: ViewDisplayMode | null | undefined) => 'table' | 'board' }
+  displayMode: ViewDisplayMode
+  customFilterViews: { recordedNormalizer?: (mode: ViewDisplayMode | null | undefined) => ViewDisplayMode }
 }
 
 function pageState(wrapper: VueWrapper): CustomerPageState {
@@ -350,6 +347,7 @@ function mountPage(): VueWrapper {
 
 async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise<void> {
   const table = wrapper.getComponent({ name: 'DataTable' })
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
   table.vm.$emit('update:view-display-mode', mode)
   await flushPromises()
 }
@@ -387,6 +385,7 @@ describe('Customers board integration', () => {
     expect(table.props('data')).toEqual([customer])
     expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, limit: 20 }))
     expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     expect(wrapper.findAllComponents({ name: 'StatusBadge' }).map((badge) => badge.props('type'))).toEqual(
       expect.arrayContaining(['customerDerived', 'industry', 'source']),
     )
@@ -397,9 +396,13 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('update:search', '北方')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('search-apply', '北方')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('filter-apply', [{ field: 'city', op: 'eq', value: '北京' }])
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('sort-apply', [{ field: 'created_time', direction: 'desc' }])
     await flushPromises()
     mocks.getCustomerBoard.mockClear()
@@ -572,11 +575,13 @@ describe('Customers board integration', () => {
     }
 
     mocks.getCustomerBoard.mockClear()
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('search-apply', '北方')
     await flushPromises()
     expect(latestBoardQuery()).toEqual(expect.objectContaining({ search: '北方' }))
 
     mocks.getCustomerBoard.mockClear()
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('filter-apply', [{ field: 'city', op: 'eq', value: '北京' }])
     await flushPromises()
     expect(latestBoardQuery()).toEqual(expect.objectContaining({
@@ -585,6 +590,7 @@ describe('Customers board integration', () => {
     }))
 
     mocks.getCustomerBoard.mockClear()
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('sort-apply', [{ field: 'created_time', direction: 'desc' }])
     await flushPromises()
     expect(latestBoardQuery()).toEqual(expect.objectContaining({
@@ -614,8 +620,11 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('update:search', '北方')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('search-apply', '北方')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('update:page', 4)
     await flushPromises()
     await switchMode(wrapper, 'board')
@@ -651,6 +660,7 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const filtersBefore = wrapper.getComponent({ name: 'DataTable' }).props('filters')
 
     await wrapper.get('[data-column-key="public_pool"] .board-column__footer button').trigger('click')
@@ -667,7 +677,9 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('update:search', '北方')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     table.vm.$emit('search-apply', '北方')
     await flushPromises()
 
@@ -718,7 +730,9 @@ describe('Customers board integration', () => {
     const listCallsBeforeRefresh = mocks.getCustomers.mock.calls.length
 
     mocks.getCustomerBoard.mockRejectedValue(new Error('board refresh failed'))
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:search', '失败刷新')
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '失败刷新')
     await flushPromises()
 
@@ -745,6 +759,7 @@ describe('Customers board integration', () => {
     await flushPromises()
     const listCallsBeforeBoard = mocks.getCustomers.mock.calls.length
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', 'board')
     await nextTick()
 
@@ -765,6 +780,7 @@ describe('Customers board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     mocks.getCustomers.mockRejectedValueOnce(new Error('list failed'))
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '列表失败')
     await flushPromises()
     expect(wrapper.text()).toContain('客户列表加载失败')

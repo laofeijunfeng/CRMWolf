@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useCustomFilterViews } from '../useCustomFilterViews'
 import { viewPreferenceApi } from '@/api/viewPreference'
+import { renameDialog } from '@/utils/renameDialog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewDisplayMode, ViewPreferenceItem } from '@/api/viewPreference'
@@ -56,6 +57,7 @@ const customView = {
 describe('useCustomFilterViews', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(renameDialog).mockResolvedValue('跟进中的我的客户')
   })
 
   it('applies the first moved custom view after loading custom views', async () => {
@@ -502,6 +504,7 @@ describe('useCustomFilterViews', () => {
     await views.saveCurrentAsCustomView()
 
     expect(viewPreferenceApi.createCustomView).toHaveBeenCalledWith('business-journeys.list', {
+      name: '跟进中的我的客户',
       config: { version: 1, columns: [], filters: [], sorts: [], display_mode: 'board' },
     })
   })
@@ -558,7 +561,7 @@ describe('useCustomFilterViews', () => {
     expect(config).not.toHaveProperty('display_mode')
   })
 
-  it('keeps the existing empty-filter save guard', async () => {
+  it('keeps the existing empty-state save guard', async () => {
     const views = useCustomFilterViews({
       viewKey: 'customers.list',
       activeTab: ref('all'),
@@ -570,6 +573,47 @@ describe('useCustomFilterViews', () => {
 
     await views.saveAsCustomView([])
 
+    expect(renameDialog).not.toHaveBeenCalled()
     expect(viewPreferenceApi.createCustomView).not.toHaveBeenCalled()
+  })
+
+  it('asks for a name and does not create a view when the dialog is cancelled', async () => {
+    vi.mocked(renameDialog).mockResolvedValueOnce(null)
+    const activeTab = ref('all')
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters: ref<ListFilterCondition[]>([{ field: 'status', op: 'eq', value: 'ACTIVE' }]),
+      activeSorts: ref<ListSortCondition[]>([]),
+      activeColumns: ref([]),
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+
+    await views.saveCurrentAsCustomView()
+
+    expect(viewPreferenceApi.createCustomView).not.toHaveBeenCalled()
+    expect(activeTab.value).toBe('all')
+  })
+
+  it('saves a sort-only snapshot under the entered name', async () => {
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab: ref('all'),
+      activeFilters: ref<ListFilterCondition[]>([]),
+      activeSorts: ref<ListSortCondition[]>([{ field: 'updated_time', direction: 'desc' }]),
+      activeColumns: ref([]),
+      refresh: vi.fn().mockResolvedValue(true),
+    })
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue(customView)
+
+    await views.saveCurrentAsCustomView()
+
+    expect(viewPreferenceApi.createCustomView).toHaveBeenCalledWith('customers.list', expect.objectContaining({
+      name: '跟进中的我的客户',
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      config: expect.objectContaining({
+        sorts: [{ field: 'updated_time', direction: 'desc' }],
+      }),
+    }))
   })
 })

@@ -767,8 +767,8 @@ describe('DataTable display mode selector', () => {
 })
 
 describe('customer display mode normalization and saved-view rollback', () => {
-  it('normalizes only customer chart preferences to board', () => {
-    expect(normalizeCustomerDisplayMode('chart')).toBe('board')
+  it('keeps customer chart preferences as chart', () => {
+    expect(normalizeCustomerDisplayMode('chart')).toBe('chart')
     expect(normalizeCustomerDisplayMode('board')).toBe('board')
     expect(normalizeCustomerDisplayMode('table')).toBe('table')
     expect(normalizeCustomerDisplayMode(null)).toBe('table')
@@ -783,7 +783,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
     })
 
     expect(parsed.display_mode).toBe('chart')
-    expect(normalizeCustomerDisplayMode('chart')).toBe('board')
+    expect(normalizeCustomerDisplayMode('chart')).toBe('chart')
   })
 
   it('saves normalized board after a successful customer view apply and rolls back synchronously', async () => {
@@ -791,7 +791,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
     const activeFilters = ref<ListFilterCondition[]>([{ field: 'status', op: 'eq', value: 'following' }])
     const activeSorts = ref<ListSortCondition[]>([{ field: 'updated_time', direction: 'desc' }])
     const activeColumns = ref([{ key: 'name', order: 0, visible: true }])
-    const displayMode = ref<'table' | 'board'>('table')
+    const displayMode = ref<ViewDisplayMode>('table')
     let resolveRefresh: ((value: boolean) => void) | undefined
     const refresh = vi.fn(() => new Promise<boolean>((resolve) => {
       resolveRefresh = resolve
@@ -813,7 +813,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
 
     expect(views.applyCustomViewTab('custom-view:7')).toBe(true)
     expect(activeTab.value).toBe('custom-view:7')
-    expect(displayMode.value).toBe('board')
+    expect(displayMode.value).toBe('chart')
     expect(update).not.toHaveBeenCalled()
     expect(refresh).toHaveBeenCalledTimes(1)
 
@@ -836,9 +836,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
     if (resolveRetry === undefined) throw new Error('retry was not started')
     resolveRetry(true)
     await retryPromise
-    expect(displayMode.value).toBe('board')
-    expect(update).toHaveBeenCalledWith('customers.list', 7, {
-      config: expect.objectContaining({ display_mode: 'board' }) as unknown,
-    })
+    expect(displayMode.value).toBe('chart')
+    expect(update).not.toHaveBeenCalled()
   })
 })

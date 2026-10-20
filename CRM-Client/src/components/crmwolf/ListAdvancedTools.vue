@@ -50,7 +50,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:sorts': [value: ListSortCondition[]]
-  'update:view-display-mode': [value: 'table' | 'board']
+  'update:view-display-mode': [value: ViewDisplayMode]
   'save-current-view': []
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -163,7 +163,7 @@ watch(isCompactToolbar, async (compact) => {
       @reset="emit('sort-reset')"
     />
     <ColumnConfigPopover
-      v-if="columnConfigEnabled || viewDisplayModeEnabled || canSaveCurrentView"
+      v-if="columnConfigEnabled || viewDisplayModeEnabled"
       :open="columnConfigOpen"
       :columns="columns"
       :active="columnConfigActive"

@@ -170,3 +170,50 @@ export type BusinessJourneyBoardSummary = z.infer<typeof BusinessJourneyBoardSum
 export type BusinessJourneyBoardResponse = z.infer<typeof BusinessJourneyBoardResponseSchema>
 export type BusinessJourneyOwnerFilterOption = z.infer<typeof BusinessJourneyOwnerFilterOptionSchema>
 export type BusinessJourneyOwnerFilterOptionsResponse = z.infer<typeof BusinessJourneyOwnerFilterOptionsResponseSchema>
+
+
+export const BusinessJourneyChartPreviewSchema = z.object({
+  public_id: z.string(),
+  customer_id: z.string(),
+  name: z.string(),
+  customer_name: z.string(),
+  amount: z.number()
+})
+
+export const BusinessJourneyChartSegmentSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  count: z.number().int().nonnegative(),
+  amount: z.number(),
+  preview: z.array(BusinessJourneyChartPreviewSchema)
+})
+
+export const BusinessJourneyChartCardSchema = z.object({
+  key: z.enum(['stage', 'purchase_type', 'amount_band', 'product', 'recent_activity', 'expected_closing']),
+  title: z.string(),
+  description: z.string(),
+  graphic: z.enum(['horizontal_bar', 'pie', 'vertical_bar']),
+  segments: z.array(BusinessJourneyChartSegmentSchema)
+})
+
+export const BusinessJourneyChartResponseSchema = z.object({
+  summary: z.object({
+    total_count: z.number().int().nonnegative(),
+    total_amount: z.number()
+  }),
+  cards: z.array(BusinessJourneyChartCardSchema).length(6)
+})
+
+export const BusinessJourneyChartSegmentResponseSchema = z.object({
+  card: BusinessJourneyChartCardSchema.shape.key,
+  segment: z.string(),
+  label: z.string(),
+  total: z.number().int().nonnegative(),
+  items: z.array(BusinessJourneyChartPreviewSchema)
+})
+
+export type BusinessJourneyChartResponse = z.infer<typeof BusinessJourneyChartResponseSchema>
+export type BusinessJourneyChartCard = z.infer<typeof BusinessJourneyChartCardSchema>
+export type BusinessJourneyChartSegment = z.infer<typeof BusinessJourneyChartSegmentSchema>
+export type BusinessJourneyChartPreview = z.infer<typeof BusinessJourneyChartPreviewSchema>
+export type BusinessJourneyChartSegmentResponse = z.infer<typeof BusinessJourneyChartSegmentResponseSchema>

@@ -62,6 +62,7 @@ export interface ViewPreferenceCustomViewListResponse {
 
 export interface ViewPreferenceCustomViewCreateRequest {
   config: ViewPreferenceConfig
+  name: string
 }
 
 export interface ViewPreferenceCustomViewUpdateRequest {
@@ -113,8 +114,8 @@ const ViewPreferenceCustomViewListResponseSchema: z.ZodType<ViewPreferenceCustom
   items: z.array(ViewPreferenceItemSchema),
 })
 
-export function normalizeCustomerDisplayMode(mode: ViewDisplayMode | null | undefined): 'table' | 'board' {
-  return mode === 'board' || mode === 'chart' ? 'board' : 'table'
+export function normalizeCustomerDisplayMode(mode: ViewDisplayMode | null | undefined): ViewDisplayMode {
+  return mode === 'board' || mode === 'chart' ? mode : 'table'
 }
 
 export const viewPreferenceApi = {

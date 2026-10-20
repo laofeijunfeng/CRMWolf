@@ -740,6 +740,7 @@ watch(
 .dialog-body {
   max-height: min(70vh, 720px);
   overflow-y: auto;
+  padding-left: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
   padding-right: $wolf-space-xs-v2;
 }
 

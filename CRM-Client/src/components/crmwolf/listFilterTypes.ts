@@ -15,7 +15,13 @@ export type ListFilterOperator =
   | 'is_not_empty'
   | 'before'
   | 'after'
-
+  | 'past_1_day'
+  | 'past_3_days'
+  | 'past_1_week'
+  | 'past_1_month'
+  | 'past_3_months'
+  | 'past_6_months'
+  | 'past_1_year'
 export interface ListFilterOperatorOption {
   value: ListFilterOperator
   label: string
@@ -40,6 +46,13 @@ export const listFilterOperatorsByType: Record<
     { value: 'is_not_empty', label: '不为空' }
   ],
   date: [
+    { value: 'past_1_day', label: '过去 1 天' },
+    { value: 'past_3_days', label: '过去 3 天' },
+    { value: 'past_1_week', label: '过去 1 周' },
+    { value: 'past_1_month', label: '过去 1 个月' },
+    { value: 'past_3_months', label: '过去 3 个月' },
+    { value: 'past_6_months', label: '过去 6 个月' },
+    { value: 'past_1_year', label: '过去 1 年' },
     { value: 'eq', label: '等于' },
     { value: 'after', label: '晚于' },
     { value: 'before', label: '早于' },
@@ -71,6 +84,24 @@ export function normalizeListFilterOperator(
   return undefined
 }
 
+const DATE_PRESET_OPERATORS: Record<string, true> = {
+  past_1_day: true,
+  past_3_days: true,
+  past_1_week: true,
+  past_1_month: true,
+  past_3_months: true,
+  past_6_months: true,
+  past_1_year: true
+}
+
+export function isDatePresetOperator(operator: ListFilterOperator): boolean {
+  return DATE_PRESET_OPERATORS[operator] === true
+}
+
+export function operatorNeedsValue(operator: ListFilterOperator): boolean {
+  return operator !== 'is_empty' && operator !== 'is_not_empty' && DATE_PRESET_OPERATORS[operator] !== true
+}
+
 export interface ListFilterOption {
   value: string | number
   label: string
@@ -81,6 +112,7 @@ export interface ListFilterField {
   label: string
   type: ListFilterFieldType
   options?: ListFilterOption[]
+  operators?: readonly ListFilterOperator[]
 }
 
 export interface ListFilterCondition {

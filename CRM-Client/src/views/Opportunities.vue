@@ -24,7 +24,7 @@ import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewPreferenceConfig } from '@/api/viewPreference'
+import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import OpportunityBoardProjection from '@/components/opportunity/OpportunityBoardProjection.vue'
@@ -443,7 +443,8 @@ const refreshActiveOpportunityView = (): Promise<boolean> => {
   return opportunityBoard.refresh(boardParams.value).then(() => true, () => false)
 }
 
-const handleDisplayModeChange = (mode: 'table' | 'board'): void => {
+const handleDisplayModeChange = (mode: ViewDisplayMode): void => {
+  if (mode !== 'table' && mode !== 'board') return
   if (mode === displayMode.value) return
   displayMode.value = mode
   void refreshActiveOpportunityView()
@@ -549,10 +550,8 @@ const handleSortReset = (): void => {
   refreshTableQuery()
 }
 
-const handleSaveFilterView = async (filters: ListFilterCondition[]): Promise<void> => {
-  activeFilters.value = filters
-  pagination.current = 1
-  await customFilterViews.saveAsCustomView(filters)
+const handleSaveCurrentView = async (): Promise<void> => {
+  await customFilterViews.saveCurrentAsCustomView()
 }
 
 const handleColumnConfigSave = (config: ViewPreferenceConfig): void => {
@@ -1045,7 +1044,7 @@ defineExpose({
       @search-clear="handleSearchClear"
       @filter-apply="handleFilterApply"
       @filter-reset="handleReset"
-      @filter-save-view="handleSaveFilterView"
+      @save-current-view="handleSaveCurrentView"
       @sort-apply="handleSortApply"
       @sort-reset="handleSortReset"
       @column-config-current-change="handleColumnConfigCurrentChange"

@@ -43,7 +43,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  'update:view-display-mode': [value: 'table' | 'board']
+  'update:view-display-mode': [value: ViewDisplayMode]
   'save-current-view': []
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
@@ -64,14 +64,14 @@ const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
-const selectableDisplayMode = computed<'table' | 'board' | undefined>(() => (
-  props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board'
+const selectableDisplayMode = computed<ViewDisplayMode | undefined>(() => (
+  props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'
     ? props.viewDisplayMode
     : undefined
 ))
 
 function emitMode(value: unknown): void {
-  if (value === 'table' || value === 'board') {
+  if (value === 'table' || value === 'board' || value === 'chart') {
     emit('update:view-display-mode', value)
   }
 }
@@ -178,6 +178,7 @@ watch(() => props.scope, (scope) => {
         >
           <ToggleGroupItem value="table">列表</ToggleGroupItem>
           <ToggleGroupItem value="board">看板</ToggleGroupItem>
+          <ToggleGroupItem value="chart">图表</ToggleGroupItem>
         </ToggleGroup>
 
         <div v-if="viewDisplayModeEnabled" class="column-config-section-title column-config-section-title--columns">字段</div>
@@ -257,7 +258,7 @@ watch(() => props.scope, (scope) => {
 
 .column-config-mode-selector {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: $wolf-space-xs-v2;
   padding: $wolf-space-xs-v2;
   border-radius: $wolf-radius-v2;

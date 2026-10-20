@@ -54,6 +54,15 @@ describe('list view state summaries', () => {
     ])
   })
 
+  it('labels a date preset without inventing a date value', () => {
+    const [item] = buildFilterSummaryItems([
+      { field: 'created_at', op: 'past_1_week', value: null },
+    ], filterFields)
+    expect(item?.fieldLabel).toBe('创建时间')
+    expect(item?.operatorLabel).toBe('过去 1 周')
+    expect(item).not.toHaveProperty('valueLabel')
+  })
+
   it('ignores invalid fields and incomplete conditions', () => {
     expect(buildFilterSummaryItems([
       { field: 'missing', op: 'eq', value: 'x' },

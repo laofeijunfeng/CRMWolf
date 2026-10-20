@@ -9,7 +9,7 @@
  * - 桌面行操作采用“主操作 + 更多菜单”，右键作为快捷入口
  * - 统一样式（行高 44px、语义表头背景等）
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   Pagination,
@@ -158,9 +158,9 @@ interface Props {
   searchLoading?: boolean
   /** 筛选视图保存中 */
   filterViewSaveLoading?: boolean
-  /** 可选的列表展示模式控制 */
+  /** 当前展示模式 */
   viewDisplayMode?: ViewDisplayMode | null
-  /** 是否在字段配置浮层显示展示模式 */
+  /** 是否在视图配置里提供展示模式；工具栏切换由页面使用 Tabs */
   viewDisplayModeEnabled?: boolean
   /** 配置入口标签 */
   viewConfigTriggerLabel?: string
@@ -178,6 +178,8 @@ interface Props {
   // exactOptionalPropertyTypes rejects an undefined default for a function prop.
   // eslint-disable-next-line vue/require-default-prop
   exportHandler?: (fieldKeys: string[]) => Promise<void>
+  /** 用页面内容替换表格、状态和分页，仅保留工具栏 */
+  contentHidden?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -223,6 +225,7 @@ const props = withDefaults(defineProps<Props>(), {
   viewSaveLoading: false,
   exportEnabled: false,
   exportTitle: '列表',
+  contentHidden: false,
   searchEnabled: false,
   search: '',
   searchPlaceholder: '',
@@ -232,32 +235,31 @@ const props = withDefaults(defineProps<Props>(), {
   effectiveFilters: undefined,
 })
 
-// ==================== Emits ====================
-const emit = defineEmits<{
-  'update:page': [value: number]
-  'update:page-size': [value: number]
-  'update:selectedRowKeys': [value: (string | number)[]]
-  retry: []
-  'row-click': [row: T, index: number]
-  'update:filters': [value: ListFilterCondition[]]
-  'filter-apply': [value: ListFilterCondition[]]
-  'filter-reset': []
-  'filter-save-view': [value: ListFilterCondition[]]
-  'update:sorts': [value: ListSortCondition[]]
-  'sort-apply': [value: ListSortCondition[]]
-  'sort-reset': []
-  'column-config-current-change': [value: ViewPreferenceConfig]
-  'column-config-save': [value: ViewPreferenceConfig]
-  'column-config-reset': []
-  'update:view-display-mode': [value: 'table' | 'board']
-  'save-current-view': []
-  'remove-filter': [id: string]
-  'clear-filters': []
-  'retry-view-apply': []
-  'update:search': [value: string]
-  'search-apply': [value: string]
-  'search-clear': []
-}>()
+  // ==================== Emits ====================
+  const emit = defineEmits<{
+    'update:page': [value: number]
+    'update:page-size': [value: number]
+    'update:selectedRowKeys': [value: (string | number)[]]
+    retry: []
+    'row-click': [row: T, index: number]
+    'update:filters': [value: ListFilterCondition[]]
+    'filter-apply': [value: ListFilterCondition[]]
+    'filter-reset': []
+    'update:sorts': [value: ListSortCondition[]]
+    'sort-apply': [value: ListSortCondition[]]
+    'sort-reset': []
+    'column-config-current-change': [value: ViewPreferenceConfig]
+    'column-config-save': [value: ViewPreferenceConfig]
+    'column-config-reset': []
+    'update:view-display-mode': [value: ViewDisplayMode]
+    'save-current-view': []
+    'remove-filter': [id: string]
+    'clear-filters': []
+    'retry-view-apply': []
+    'update:search': [value: string]
+    'search-apply': [value: string]
+    'search-clear': []
+  }>()
 
 // ==================== Computed ====================
 const selectedRowKeySet = computed<Set<string | number>>(() => new Set(props.selectedRowKeys))
@@ -291,10 +293,11 @@ const hasDesktopRowActions = computed(() =>
 const desktopActionsColumnWidth = computed(() =>
   getDesktopTableRowActionsWidth(rowActionSets.value)
 )
+const slots = useSlots()
 const tableCardStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {}
-  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto') {
-    // no-op: 页面高度由外层布局负责
+  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto' || slots['replacement']) {
+    // 图表替换表格时按内容增高。
   } else {
     // 固定高度优先于 fill：列表页显式传入的 height 是防止页面随行数增长的
     // 关键约束。fill 只负责让表格内容区在这个固定卡片内占满剩余空间。
@@ -313,7 +316,7 @@ const tableCardClass = computed(() => ({
   'data-table-card--compact-pagination': props.compactPagination,
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
-const isInitialLoading = computed(() => effectiveViewState.value === 'loading')
+const isInitialLoading = computed(() => !props.contentHidden && effectiveViewState.value === 'loading')
 const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
 const hasBlockingError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length === 0
@@ -766,10 +769,6 @@ function handleFilterReset(): void {
   emit('filter-reset')
 }
 
-function handleFilterSaveView(filters: ListFilterCondition[]): void {
-  emit('filter-save-view', filters)
-}
-
 function areFilterValuesEqual(
   left: ListFilterCondition['value'],
   right: ListFilterCondition['value'],
@@ -797,8 +796,16 @@ function handleRemoveFilter(id: string): void {
 
 function handleClearFilters(): void {
   emit('update:filters', [])
+  emit('update:sorts', [])
+  emit('sort-reset')
   emit('filter-reset')
   emit('clear-filters')
+  if (hiddenColumnCount.value === 0) return
+  if (props.columnPreferenceMode === 'custom') {
+    emit('column-config-reset')
+    return
+  }
+  void handleColumnConfigReset('personal')
 }
 
 function handleSearchUpdate(value: string): void {
@@ -1056,12 +1063,9 @@ onBeforeUnmount(() => {
           v-if="normalizedFilterFields.length > 0"
           :model-value="normalizedFilters"
           :fields="normalizedFilterFields"
-          :save-view-enabled="filterViewSaveAvailable"
-          :save-view-loading="filterViewSaving"
           @update:model-value="handleFilterUpdate"
           @apply="handleFilterApply"
           @reset="handleFilterReset"
-          @save-view="handleFilterSaveView"
         />
         <ListAdvancedTools
           v-if="hasAdvancedTools"
@@ -1075,7 +1079,6 @@ onBeforeUnmount(() => {
           :column-preference-mode="columnPreferenceMode ?? 'default'"
           :column-config-loading="columnConfigLoading"
           :column-config-saving="columnConfigSaving"
-          :view-display-mode="props.viewDisplayMode"
           :view-display-mode-enabled="props.viewDisplayModeEnabled"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
@@ -1098,20 +1101,27 @@ onBeforeUnmount(() => {
         <slot name="tableTools" />
       </div>
 
-      <ListViewStateSummary
-        :filters="filterSummaryItems"
-        :sorts="sortSummaryItems"
-        :hidden-column-count="hiddenColumnCount"
-        :applying="viewApplying ?? false"
-        :apply-error="viewApplyError ?? null"
-        @remove-filter="handleRemoveFilter"
-        @clear-filters="handleClearFilters"
-        @retry-view-apply="emit('retry-view-apply')"
-      />
+      <div v-if="contentHidden" class="data-table-replacement">
+        <slot name="replacement" />
+      </div>
 
-      <!-- 表格内容区（可滚动） -->
-      <!-- 看板替换区优先于列表错误，避免列表失败盖住看板 -->
-      <div v-if="props.viewDisplayMode === 'board'" class="data-table-content data-table-content--board">
+      <template v-else>
+        <ListViewStateSummary
+          :filters="filterSummaryItems"
+          :sorts="sortSummaryItems"
+          :hidden-column-count="hiddenColumnCount"
+          :applying="viewApplying ?? false"
+          :apply-error="viewApplyError ?? null"
+          :save-view-enabled="filterViewSaveAvailable || props.canSaveCurrentView"
+          :save-view-loading="filterViewSaving || props.viewSaveLoading"
+          @remove-filter="handleRemoveFilter"
+          @clear-filters="handleClearFilters"
+          @save-view="emit('save-current-view')"
+          @retry-view-apply="emit('retry-view-apply')"
+        />
+
+      <!-- 非列表展示优先于列表错误，避免列表失败盖住看板或图表 -->
+      <div v-if="$slots['replacement']" class="data-table-content data-table-content--replacement">
         <slot name="replacement" />
       </div>
       <div
@@ -1368,7 +1378,11 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 分页区（固定在卡片底部） -->
-      <div v-if="props.viewDisplayMode !== 'board'" class="data-table-footer" :class="{ 'data-table-footer--compact': compactPagination }">
+      <div
+        v-if="!$slots['replacement']"
+        class="data-table-footer"
+        :class="{ 'data-table-footer--compact': compactPagination }"
+      >
         <span class="total-text">共 {{ total }} 条</span>
         <Pagination
           :page="page"
@@ -1402,6 +1416,7 @@ onBeforeUnmount(() => {
           @update:model-value="handlePageSizeChange"
         />
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -1517,6 +1532,17 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   overflow-x: auto;  // 支持横向滚动（固定列模式）
+}
+
+.data-table-content--replacement {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.data-table-card:has(.data-table-content--replacement) {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .data-table-content--page {
@@ -1747,12 +1773,26 @@ onBeforeUnmount(() => {
 .data-table-tools {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   min-height: 40px;
   padding: 6px 12px;
   border-bottom: 1px solid $wolf-border-light-v2;
   background: $wolf-bg-card-v2;
   flex-shrink: 0;
+}
+.data-table-replacement {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: $wolf-bg-card-v2;
+}
+
+.data-table-content--board {
+  min-height: 0;
+  overflow: hidden;
 }
 
 // 表格行

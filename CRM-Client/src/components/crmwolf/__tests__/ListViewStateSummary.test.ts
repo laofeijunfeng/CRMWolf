@@ -72,12 +72,42 @@ describe('ListViewStateSummary', () => {
     expect(errorWrapper.emitted('retry-view-apply')).toEqual([[]])
   })
 
-  it('does not render a clear action when there are no filters', () => {
+  it('places clear and save after filters, sorts, and hidden columns', async () => {
     const wrapper = mount(ListViewStateSummary, {
-      props: { ...baseProps, filters: [] },
+      props: { ...baseProps, saveViewEnabled: true },
+    })
+
+    const labels = wrapper.findAll('button').map((button) => button.text())
+    const clearIndex = labels.indexOf('清除筛选')
+    const saveIndex = labels.indexOf('另存为视图')
+    expect(clearIndex).toBeGreaterThan(-1)
+    expect(saveIndex).toBe(clearIndex + 1)
+
+    await wrapper.findAll('button').find((button) => button.text() === '另存为视图')?.trigger('click')
+    expect(wrapper.emitted('save-view')).toEqual([[]])
+  })
+
+  it('hides both actions when only the default list state remains', () => {
+    const wrapper = mount(ListViewStateSummary, {
+      props: { filters: [], sorts: [], hiddenColumnCount: 0, saveViewEnabled: true },
     })
 
     expect(wrapper.text()).toContain('无额外筛选')
     expect(wrapper.text()).not.toContain('清除筛选')
+    expect(wrapper.text()).not.toContain('另存为视图')
+  })
+
+  it('shows both actions when only a sort or a hidden column remains', () => {
+    const sortOnly = mount(ListViewStateSummary, {
+      props: { filters: [], sorts: baseProps.sorts, hiddenColumnCount: 0, saveViewEnabled: true },
+    })
+    expect(sortOnly.text()).toContain('清除筛选')
+    expect(sortOnly.text()).toContain('另存为视图')
+
+    const hiddenOnly = mount(ListViewStateSummary, {
+      props: { filters: [], sorts: [], hiddenColumnCount: 1, saveViewEnabled: true },
+    })
+    expect(hiddenOnly.text()).toContain('清除筛选')
+    expect(hiddenOnly.text()).toContain('另存为视图')
   })
 })
