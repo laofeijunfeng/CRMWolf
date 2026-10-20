@@ -511,9 +511,9 @@ def test_invalid_scope_and_owner_permission_are_rejected(api_env) -> None:
     forbidden = _board(api_env.client, owner_id="8")
 
     assert public_scope.status_code == 400
-    assert public_scope.json()["detail"] == "scope 仅支持 collaborated/accessible"
+    assert public_scope.json()["detail"] == "scope 仅支持 collaborated/accessible/owned_or_collaborated"
     assert unknown_scope.status_code == 400
-    assert unknown_scope.json()["detail"] == "scope 仅支持 collaborated/accessible"
+    assert unknown_scope.json()["detail"] == "scope 仅支持 collaborated/accessible/owned_or_collaborated"
     assert forbidden.status_code == 403
     assert forbidden.json()["detail"] == "只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
 
@@ -558,6 +558,46 @@ def test_collaborated_scope_uses_membership_not_owner_permission(api_env) -> Non
         "can_create_opportunity": True,
     }
     assert _counts(body)["total_count"] == 1
+
+
+
+def test_page_scope_includes_owned_and_active_collaborators_but_not_public_pool(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="自己负责", owner_id="7", created_time=datetime(2026, 5, 1), public_id="cus_owned"),
+        _customer(2, name="协作客户", owner_id="8", created_time=datetime(2026, 6, 1), public_id="cus_collab"),
+        _customer(3, name="无关系客户", owner_id="8", created_time=datetime(2026, 7, 1), public_id="cus_other"),
+        _customer(4, name="公海协作", owner_id=None, created_time=datetime(2026, 8, 1), public_id="cus_public", status=0),
+        _customer(5, name="失效协作", owner_id="8", created_time=datetime(2026, 8, 2), public_id="cus_inactive"),
+        _customer(6, name="其他团队", owner_id="7", created_time=datetime(2026, 8, 3), public_id="cus_other_team", team_id=2),
+        CustomerMember(id=1, team_id=1, customer_id=2, user_id="7", is_active=True, created_by="7"),
+        CustomerMember(id=2, team_id=1, customer_id=4, user_id="7", is_active=True, created_by="7"),
+        CustomerMember(id=3, team_id=1, customer_id=5, user_id="7", is_active=False, created_by="7"),
+    ])
+    api_env.db.commit()
+
+    response = _board(api_env.client, scope="owned_or_collaborated")
+    forbidden = _board(api_env.client, scope="owned_or_collaborated", owner_id="8")
+
+    assert response.status_code == 200, response.text
+    ids = [item["id"] for column in _columns(response.json()).values() for item in column["items"]]
+    assert sorted(ids) == ["cus_collab", "cus_owned"]
+    assert forbidden.status_code == 403
+
+
+def test_page_scope_with_view_all_keeps_the_current_team_population(api_env) -> None:
+    api_env.db.add_all([
+        _customer(1, name="自己负责", owner_id="7", created_time=datetime(2026, 5, 1), public_id="cus_owned"),
+        _customer(2, name="别人负责", owner_id="8", created_time=datetime(2026, 6, 1), public_id="cus_other"),
+        _customer(3, name="没有负责人", owner_id=None, created_time=datetime(2026, 7, 1), public_id="cus_public", status=0),
+    ])
+    api_env.db.commit()
+    _grant(api_env.db, 7, "customer:view:all")
+
+    response = _board(api_env.client, scope="owned_or_collaborated")
+
+    assert response.status_code == 200, response.text
+    ids = [item["id"] for column in _columns(response.json()).values() for item in column["items"]]
+    assert sorted(ids) == ["cus_other", "cus_owned", "cus_public"]
 
 
 def test_recent_new_count_uses_approved_six_complete_month_window(api_env, monkeypatch) -> None:

@@ -40,7 +40,7 @@ describe('customer and lead list export contract', () => {
     expect(customersContext).toContain('[...activeFilters.value]')
     expect(customersContext).toContain('[...activeSorts.value]')
     expect(customersContext).toContain("search.value.trim() || undefined")
-    expect(customersContext).toContain("activeTab.value === 'public' || activeTab.value === 'collaborated' ? activeTab.value : 'all'")
+    expect(customersContext).toContain("activeTab.value === 'public' ? 'public' : 'all'")
 
     const leadsContext = viewSources.leads.slice(
       viewSources.leads.indexOf('const currentLeadListContext'),

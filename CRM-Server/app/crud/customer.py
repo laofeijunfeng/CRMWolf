@@ -157,6 +157,19 @@ class CustomerCRUD:
                 CustomerMember.user_id == current_user_id,
                 CustomerMember.is_active.is_(True),
             ).exists())
+        elif scope == "owned_or_collaborated" and current_user_id:
+            query = query.filter(
+                Customer.owner_id.isnot(None),
+                or_(
+                    Customer.owner_id == current_user_id,
+                    db.query(CustomerMember.id).filter(
+                        CustomerMember.team_id == team_id,
+                        CustomerMember.customer_id == Customer.id,
+                        CustomerMember.user_id == current_user_id,
+                        CustomerMember.is_active.is_(True),
+                    ).exists(),
+                ),
+            )
         elif include_collaborated and current_user_id:
             query = query.filter(or_(
                 Customer.owner_id == current_user_id,

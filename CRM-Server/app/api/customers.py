@@ -1405,6 +1405,83 @@ async def create_customer(
     return _customer_response(db, new_customer)
 
 
+
+_CUSTOMER_PAGE_SCOPE = "owned_or_collaborated"
+_CUSTOMER_LIST_SCOPES = {None, "collaborated", "accessible", _CUSTOMER_PAGE_SCOPE}
+_CUSTOMER_SCOPE_DETAIL = "scope 仅支持 collaborated/accessible/owned_or_collaborated"
+_CUSTOMER_CHART_SCOPE_DETAIL = "scope 仅支持 collaborated/accessible/owned_or_collaborated/public"
+_CUSTOMER_OWNER_PERMISSION_DETAIL = "只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
+
+
+def _reject_unknown_customer_scope(scope: str | None, *, allow_public: bool = False) -> None:
+    allowed = _CUSTOMER_LIST_SCOPES | ({"public"} if allow_public else set())
+    if scope not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_CUSTOMER_CHART_SCOPE_DETAIL if allow_public else _CUSTOMER_SCOPE_DETAIL,
+        )
+
+
+def _customer_population_flags(scope: str | None, *, has_view_all: bool) -> tuple[str | None, bool, bool]:
+    """Return crud scope, include_collaborated, and whether owner defaults to self.
+
+    View-all callers of the customer-page scope keep today's team-wide population.
+    Everyone else on that scope sees owned customers plus active collaborations
+    on customers that still have an owner.
+    """
+    effective_scope = None if scope == _CUSTOMER_PAGE_SCOPE and has_view_all else scope
+    include_collaborated = effective_scope == "accessible" and not has_view_all
+    crud_scope = (
+        effective_scope
+        if effective_scope in {"collaborated", "accessible", _CUSTOMER_PAGE_SCOPE}
+        else None
+    )
+    default_to_self = effective_scope not in {"collaborated", "accessible", _CUSTOMER_PAGE_SCOPE}
+    return crud_scope, include_collaborated, default_to_self
+
+
+def _resolve_listed_customer_owner_id(
+    *,
+    scope: str | None,
+    has_view_all: bool,
+    current_user_id: str,
+    parsed_filters,
+    parsed_sorts,
+    legacy_owner_id: str | None,
+) -> tuple[str | None, str | None, bool]:
+    crud_scope, include_collaborated, default_to_self = _customer_population_flags(
+        scope, has_view_all=has_view_all,
+    )
+    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
+        actual_owner_id = enforce_owner_view_scope(
+            parsed_filters or [],
+            current_user_id=current_user_id,
+            has_view_all=has_view_all,
+            permission_detail=_CUSTOMER_OWNER_PERMISSION_DETAIL,
+            default_to_self=default_to_self,
+        )
+        return actual_owner_id, crud_scope, include_collaborated
+
+    actual_owner_id = legacy_owner_id
+    if legacy_owner_id in ["me", "my"]:
+        actual_owner_id = current_user_id
+    requested_owner_ids = (
+        [item.strip() for item in actual_owner_id.split(",") if item.strip()]
+        if actual_owner_id
+        else []
+    )
+    if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_CUSTOMER_OWNER_PERMISSION_DETAIL,
+        )
+    if crud_scope in {"collaborated", "accessible", _CUSTOMER_PAGE_SCOPE}:
+        actual_owner_id = None
+    elif actual_owner_id is None and not has_view_all:
+        actual_owner_id = current_user_id
+    return actual_owner_id, crud_scope, include_collaborated
+
+
 @router.get("/", response_model=PaginatedResponse[CustomerListResponse], summary="查询客户列表", description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选，支持动态排序，返回负责人和创建人信息")
 def get_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
@@ -1426,7 +1503,7 @@ def get_customers(
     created_time_end: Optional[date] = Query(None, description="创建时间结束"),
     order_by: str = Query(None, description="排序字段（created_time/last_modified_time/account_name/city/status/industry）"),
     order_dir: str = Query(None, description="排序方向（asc/desc）"),
-    scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible"),
+    scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible/owned_or_collaborated"),
     filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
     sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
@@ -1446,37 +1523,17 @@ def get_customers(
         filters_raw=filters,
         sorts_raw=sorts,
     )
-    allowed_scopes = {None, "collaborated", "accessible"}
-    if scope not in allowed_scopes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scope 仅支持 collaborated/accessible"
-        )
+    _reject_unknown_customer_scope(scope)
 
     current_user_id = str(current_user.id)
-    include_collaborated = scope == "accessible" and not has_view_all
-    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
-        actual_owner_id = enforce_owner_view_scope(
-            parsed_filters or [],
-            current_user_id=current_user_id,
-            has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
-            default_to_self=scope not in {"collaborated", "accessible"},
-        )
-    else:
-        actual_owner_id = owner_id
-        if owner_id in ["me", "my"]:
-            actual_owner_id = current_user_id
-        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
-            )
-        if scope in {"collaborated", "accessible"}:
-            actual_owner_id = None
-        elif actual_owner_id is None and not has_view_all:
-            actual_owner_id = current_user_id
+    actual_owner_id, crud_scope, include_collaborated = _resolve_listed_customer_owner_id(
+        scope=scope,
+        has_view_all=has_view_all,
+        current_user_id=current_user_id,
+        parsed_filters=parsed_filters,
+        parsed_sorts=parsed_sorts,
+        legacy_owner_id=owner_id,
+    )
 
     source_ids = None
     if source_public_id is not None:
@@ -1507,7 +1564,7 @@ def get_customers(
         created_time_end=created_time_end,
         order_by=order_by,
         order_dir=order_dir,
-        scope=scope,
+        scope=crud_scope,
         current_user_id=current_user_id,
         include_collaborated=include_collaborated,
         filters=parsed_filters,
@@ -1773,15 +1830,14 @@ def _resolve_customer_export_query(
     }
     has_view_all = "customer:view:all" in permission_codes
 
-    owner_id = enforce_owner_view_scope(
-        request.filters,
-        current_user_id=str(current_user.id),
-        has_view_all=has_view_all,
-        permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
-        default_to_self=request.tab not in {"collaborated"},
-    )
-
     if request.tab == "public":
+        enforce_owner_view_scope(
+            request.filters,
+            current_user_id=str(current_user.id),
+            has_view_all=has_view_all,
+            permission_detail=_CUSTOMER_OWNER_PERMISSION_DETAIL,
+            default_to_self=True,
+        )
         return customer_crud.build_public_list_query(
             db,
             team_id=team_id,
@@ -1790,13 +1846,24 @@ def _resolve_customer_export_query(
             sorts=request.sorts,
         )
 
+    export_scope = _CUSTOMER_PAGE_SCOPE if request.tab == "all" else request.tab
+    crud_scope, include_collaborated, default_to_self = _customer_population_flags(
+        export_scope, has_view_all=has_view_all,
+    )
+    owner_id = enforce_owner_view_scope(
+        request.filters,
+        current_user_id=str(current_user.id),
+        has_view_all=has_view_all,
+        permission_detail=_CUSTOMER_OWNER_PERMISSION_DETAIL,
+        default_to_self=default_to_self,
+    )
     return customer_crud.build_list_query(
         db,
         team_id=team_id,
         owner_id=owner_id,
-        scope=request.tab if request.tab in {"collaborated", "accessible"} else None,
+        scope=crud_scope,
         current_user_id=str(current_user.id),
-        include_collaborated=request.tab == "accessible" and not has_view_all,
+        include_collaborated=include_collaborated,
         search=request.search,
         filters=request.filters,
         sorts=request.sorts,
@@ -1853,11 +1920,7 @@ def _customer_chart_population(
 ) -> list:
     from app.crud.permission import permission_crud
 
-    if scope not in {None, "collaborated", "accessible", "public"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scope 仅支持 collaborated/accessible/public",
-        )
+    _reject_unknown_customer_scope(scope, allow_public=True)
     permission_codes = {p.code for p in permission_crud.get_user_permissions(db, current_user.id, team_id)}
     has_view_all = "customer:view:all" in permission_codes
     if scope == "public":
@@ -1868,20 +1931,23 @@ def _customer_chart_population(
             filters=filters,
             sorts=sorts,
         ).all()
+    crud_scope, include_collaborated, default_to_self = _customer_population_flags(
+        scope, has_view_all=has_view_all,
+    )
     owner_id = enforce_owner_view_scope(
         filters,
         current_user_id=str(current_user.id),
         has_view_all=has_view_all,
         permission_detail="只能查看自己负责的客户, 或需要 customer:view:all 权限查看他人数据",
-        default_to_self=scope not in {"collaborated", "accessible"},
+        default_to_self=default_to_self,
     )
     return customer_crud.build_list_query(
         db,
         team_id=team_id,
         owner_id=owner_id,
-        scope=scope if scope in {"collaborated", "accessible"} else None,
+        scope=crud_scope,
         current_user_id=str(current_user.id),
-        include_collaborated=scope == "accessible" and not has_view_all,
+        include_collaborated=include_collaborated,
         search=search,
         filters=filters,
         sorts=sorts,
@@ -1890,7 +1956,7 @@ def _customer_chart_population(
 
 @router.get("/chart", response_model=CustomerChartResponse, summary="查询客户图表")
 def get_customer_chart(
-    scope: str | None = Query(None, description="客户范围: collaborated/accessible/public"),
+    scope: str | None = Query(None, description="客户范围: collaborated/accessible/owned_or_collaborated/public"),
     search: str | None = Query(None),
     filters: str | None = Query(None),
     sorts: str | None = Query(None),
@@ -2310,37 +2376,17 @@ def get_customer_board(
         filters_raw=filters,
         sorts_raw=sorts,
     )
-    allowed_scopes = {None, "collaborated", "accessible"}
-    if scope not in allowed_scopes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scope 仅支持 collaborated/accessible",
-        )
+    _reject_unknown_customer_scope(scope)
 
     current_user_id = str(current_user.id)
-    include_collaborated = scope == "accessible" and not has_view_all
-    if uses_unified_list_query(filters=parsed_filters, sorts=parsed_sorts):
-        actual_owner_id = enforce_owner_view_scope(
-            parsed_filters or [],
-            current_user_id=current_user_id,
-            has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
-            default_to_self=scope not in {"collaborated", "accessible"},
-        )
-    else:
-        actual_owner_id = owner_id
-        if owner_id in ["me", "my"]:
-            actual_owner_id = current_user_id
-        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-        if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据",
-            )
-        if scope in {"collaborated", "accessible"}:
-            actual_owner_id = None
-        elif actual_owner_id is None and not has_view_all:
-            actual_owner_id = current_user_id
+    actual_owner_id, crud_scope, include_collaborated = _resolve_listed_customer_owner_id(
+        scope=scope,
+        has_view_all=has_view_all,
+        current_user_id=current_user_id,
+        parsed_filters=parsed_filters,
+        parsed_sorts=parsed_sorts,
+        legacy_owner_id=owner_id,
+    )
 
     source_ids = None
     if source_public_id is not None:
@@ -2369,7 +2415,7 @@ def get_customer_board(
         created_time_end=created_time_end,
         order_by=order_by,
         order_dir=order_dir,
-        scope=scope,
+        scope=crud_scope,
         current_user_id=current_user_id,
         include_collaborated=include_collaborated,
         filters=parsed_filters,

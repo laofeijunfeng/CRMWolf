@@ -9,7 +9,7 @@
  *
  * 改动清单：
  * - ✅ TopBar 集成（useHeaderStore）
- * - ✅ ContextTabs 组件（所有客户、协作客户、公海客户）
+ * - ✅ ContextTabs 组件（所有客户、公海客户）
  * - ✅ ListFilterPopover 筛选
  * - ✅ DataTable 组件
  * - ✅ V2 Design Tokens
@@ -243,9 +243,9 @@ const loseForm = reactive<CustomerLoseRequest>({
 // ==================== ContextTabs 配置 ====================
 const tabs = [
   { key: 'all', label: '所有客户' },
-  { key: 'collaborated', label: '协作客户' },
   { key: 'public', label: '公海客户' }
 ]
+const customerPageScope = 'owned_or_collaborated' as const
 
 const activeTab = ref('all')
 const displayMode = ref<'table' | 'board' | 'chart'>('table')
@@ -253,6 +253,10 @@ const displayMode = ref<'table' | 'board' | 'chart'>('table')
 const search = ref('')
 
 watch(activeTab, (tab) => {
+  if (tab === 'collaborated') {
+    activeTab.value = 'all'
+    return
+  }
   if (tab === 'public') displayMode.value = 'table'
   search.value = ''
 }, { flush: 'sync' })
@@ -447,7 +451,7 @@ interface CustomerListExportContext {
 }
 
 const currentCustomerListContext = (): CustomerListExportContext => ({
-  tab: activeTab.value === 'public' || activeTab.value === 'collaborated' ? activeTab.value : 'all',
+  tab: activeTab.value === 'public' ? 'public' : 'all',
   search: search.value.trim() || undefined,
   filters: [...activeFilters.value],
   sorts: [...activeSorts.value],
@@ -464,7 +468,7 @@ const { exportFields: exportCustomerFields } = useDataTableExport({
   },
   fileName: () => buildDataTableExportFileName(
     '客户列表',
-    activeTab.value === 'public' ? '公海客户' : activeTab.value === 'collaborated' ? '协作客户' : '全部客户',
+    activeTab.value === 'public' ? '公海客户' : '全部客户',
     new Date(),
   ),
 })
@@ -718,7 +722,7 @@ const chartQuery = (): CustomerQueryParams => {
   }
   const keyword = search.value.trim()
   if (keyword !== '') params.search = keyword
-  if (activeTab.value === 'public' || activeTab.value === 'collaborated') params.scope = activeTab.value
+  params.scope = activeTab.value === 'public' ? 'public' : customerPageScope
   return params
 }
 
@@ -810,7 +814,7 @@ const fetchCustomerList = async (): Promise<boolean> => {
     } else {
       const response = await customerApi.getCustomers({
         ...params,
-        ...(activeTab.value === 'collaborated' ? { scope: 'collaborated' as const } : {})
+        scope: customerPageScope,
       })
       const normalized = normalizeCustomerListResponse(response)
       if (requestId !== listRequestId.value) return false
@@ -836,7 +840,7 @@ const boardParams = computed<CustomerBoardParams>(() => {
   return {
     ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
     ...serialized,
-    ...(activeTab.value === 'collaborated' ? { scope: 'collaborated' as const } : {}),
+    scope: customerPageScope,
   }
 })
 
@@ -1449,6 +1453,11 @@ useTopBarRegistration({
 
 // Watch activeTab changes from headerStore
 watchEffect(() => {
+  if (headerStore.activeTab === 'collaborated') {
+    headerStore.activeTab = 'all'
+    if (activeTab.value === 'collaborated') activeTab.value = 'all'
+    return
+  }
   if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
     pagination.current = 1
     if (customFilterViews.consumeFailedViewApply(headerStore.activeTab)) {

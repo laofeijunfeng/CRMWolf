@@ -18,6 +18,7 @@ from app.api.leads import router as leads_router
 from app.core import deps
 from app.core.database import Base
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct, CustomerStatus
+from app.models.deal_journey import CustomerDealJourney
 from app.models.lead import Lead, LeadProduct, LeadSource, LeadStatus
 from app.models.product import Product
 from app.models.user import User, UserStatus
@@ -41,6 +42,7 @@ def db_session():
         Customer.__table__,
         CustomerMember.__table__,
         CustomerProduct.__table__,
+        CustomerDealJourney.__table__,
         Lead.__table__,
         Contact.__table__,
         LeadProduct.__table__,
@@ -149,12 +151,47 @@ def test_customer_export_requires_export_permission(client, db_session, monkeypa
     assert response.status_code == 403
 
 
+def _names(response) -> list[str]:
+    rows = _workbook_rows(response)
+    assert rows[0] == ("客户名称",)
+    return [row[0] for row in rows[1:]]
+
+
+def _seed_page_population(db_session):
+    db_session.add(User(id=1, email="sales@example.com", name="销售张", status=UserStatus.ACTIVE))
+    owned = Customer(
+        team_id=1, public_id="cus_mine", account_name="我的客户", city="上海",
+        status=CustomerStatus.FOLLOWING.value, owner_id="1", creator_id="1",
+    )
+    collaborated = Customer(
+        team_id=1, public_id="cus_collab", account_name="协作客户", city="上海",
+        status=CustomerStatus.FOLLOWING.value, owner_id="2", creator_id="1",
+    )
+    outsider = Customer(
+        team_id=1, public_id="cus_other", account_name="他人客户", city="上海",
+        status=CustomerStatus.FOLLOWING.value, owner_id="2", creator_id="1",
+    )
+    public = Customer(
+        team_id=1, public_id="cus_public", account_name="公海客户", city="上海",
+        status=CustomerStatus.FOLLOWING.value, owner_id=None, creator_id="1",
+    )
+    inactive = Customer(
+        team_id=1, public_id="cus_inactive", account_name="失效协作", city="上海",
+        status=CustomerStatus.FOLLOWING.value, owner_id="2", creator_id="1",
+    )
+    db_session.add_all([owned, collaborated, outsider, public, inactive])
+    db_session.flush()
+    db_session.add_all([
+        CustomerMember(team_id=1, customer_id=collaborated.id, user_id="1", is_active=True, created_by="1"),
+        CustomerMember(team_id=1, customer_id=public.id, user_id="1", is_active=True, created_by="1"),
+        CustomerMember(team_id=1, customer_id=inactive.id, user_id="1", is_active=False, created_by="1"),
+    ])
+    db_session.commit()
+
+
 def test_customer_export_keeps_view_scope(client, db_session, monkeypatch):
     _grant(monkeypatch, "customer:export", "customer:view:own")
-    db_session.add(User(id=1, email="sales@example.com", name="销售张", status=UserStatus.ACTIVE))
-    _seed_customer(db_session, account_name="我的客户", owner_id="1")
-    _seed_customer(db_session, account_name="他人客户", owner_id="2")
-    db_session.commit()
+    _seed_page_population(db_session)
 
     response = client.post("/v1/customers/export", json={
         "fields": ["account_name"],
@@ -163,10 +200,44 @@ def test_customer_export_keeps_view_scope(client, db_session, monkeypatch):
         "sorts": [],
     })
 
-    assert response.status_code == 200
-    rows = _workbook_rows(response)
-    assert rows[0] == ("客户名称",)
-    assert [row[0] for row in rows[1:]] == ["我的客户"]
+    assert response.status_code == 200, response.text
+    assert set(_names(response)) == {"我的客户", "协作客户"}
+
+
+def test_customer_page_scope_matches_all_tab_export_and_leaves_default_list_owned(client, db_session, monkeypatch):
+    _grant(monkeypatch, "customer:export", "customer:view:own")
+    _seed_page_population(db_session)
+
+    page = client.get("/v1/customers/", params={"scope": "owned_or_collaborated", "limit": 20})
+    default = client.get("/v1/customers/", params={"limit": 20})
+    own_only = client.post("/v1/customers/export", json={
+        "fields": ["account_name"],
+        "tab": "all",
+        "filters": [{"field": "owner_id", "op": "eq", "value": "1"}],
+        "sorts": [],
+    })
+
+    assert page.status_code == 200, page.text
+    assert {item["account_name"] for item in page.json()["items"]} == {"我的客户", "协作客户"}
+    assert default.status_code == 200, default.text
+    assert {item["account_name"] for item in default.json()["items"]} == {"我的客户"}
+    assert own_only.status_code == 200, own_only.text
+    assert set(_names(own_only)) == {"我的客户"}
+
+
+def test_customer_export_all_tab_with_view_all_still_includes_unowned(client, db_session, monkeypatch):
+    _grant(monkeypatch, "customer:export", "customer:view:all")
+    _seed_page_population(db_session)
+
+    response = client.post("/v1/customers/export", json={
+        "fields": ["account_name"],
+        "tab": "all",
+        "filters": [],
+        "sorts": [],
+    })
+
+    assert response.status_code == 200, response.text
+    assert set(_names(response)) == {"我的客户", "协作客户", "他人客户", "公海客户", "失效协作"}
 
 
 def test_customer_export_public_tab_uses_public_pool_query(client, db_session, monkeypatch):

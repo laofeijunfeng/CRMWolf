@@ -180,7 +180,7 @@ def test_query_customers_rejects_unknown_scope_and_oversized_page(
     oversized_page = client.get("/v1/customers/", params={"limit": 101})
 
     assert unknown_scope.status_code == 400
-    assert unknown_scope.json()["detail"] == "scope 仅支持 collaborated/accessible"
+    assert unknown_scope.json()["detail"] == "scope 仅支持 collaborated/accessible/owned_or_collaborated"
     assert oversized_page.status_code == 422
 
 

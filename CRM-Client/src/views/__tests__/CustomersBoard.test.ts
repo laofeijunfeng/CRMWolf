@@ -39,7 +39,10 @@ const headerStore = vi.hoisted(() => {
     setActiveTab: (tab: string): void => {
       store.activeTab = tab
     },
-    setTabs: (): void => undefined,
+    tabs: null as { key: string, label: string }[] | null,
+    setTabs: (next: { key: string, label: string }[] | null): void => {
+      store.tabs = next
+    },
     setActions: (): void => undefined,
   })
   return store
@@ -383,7 +386,12 @@ describe('Customers board integration', () => {
     expect(table.props('viewDisplayMode')).toBe('table')
     expect(table.props('viewDisplayModeEnabled')).toBe(true)
     expect(table.props('data')).toEqual([customer])
-    expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, limit: 20 }))
+    expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({
+      skip: 0,
+      limit: 20,
+      scope: 'owned_or_collaborated',
+    }))
+    expect(headerStore.tabs?.map((tab) => tab.label)).toEqual(['所有客户', '公海客户'])
     expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     expect(wrapper.findAllComponents({ name: 'StatusBadge' }).map((badge) => badge.props('type'))).toEqual(
@@ -599,17 +607,22 @@ describe('Customers board integration', () => {
       sorts: JSON.stringify([{ field: 'created_time', direction: 'desc' }]),
     }))
 
-    mocks.getCustomerBoard.mockClear()
+    const boardCallsBeforeStaleTab = mocks.getCustomerBoard.mock.calls.length
     headerStore.activeTab = 'collaborated'
     await flushPromises()
-    expect(latestBoardQuery()).toEqual(expect.objectContaining({ scope: 'collaborated' }))
-    expect(latestBoardQuery()).not.toHaveProperty('search')
+    expect(pageState(wrapper).activeTab).toBe('all')
+    expect(headerStore.activeTab).toBe('all')
+    expect(mocks.getCustomerBoard.mock.calls.length).toBe(boardCallsBeforeStaleTab)
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({
+      scope: 'owned_or_collaborated',
+      search: '北方',
+    }))
 
     mocks.getCustomerBoard.mockClear()
     await wrapper.get('[data-testid="customer-detail-sheet"]').trigger('click')
     await flushPromises()
     expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
-    expect(latestBoardQuery()).toEqual(expect.objectContaining({ scope: 'collaborated' }))
+    expect(latestBoardQuery()).toEqual(expect.objectContaining({ scope: 'owned_or_collaborated' }))
     expect(mocks.getCustomers).not.toHaveBeenCalled()
     expect(mocks.getPublicCustomers).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -686,7 +699,7 @@ describe('Customers board integration', () => {
     await switchMode(wrapper, 'board')
     expect(wrapper.getComponent({ name: 'DataTable' }).props('search')).toBe('北方')
 
-    headerStore.activeTab = 'collaborated'
+    headerStore.activeTab = 'public'
     await flushPromises()
     expect(wrapper.getComponent({ name: 'DataTable' }).props('search')).toBe('')
     wrapper.unmount()
@@ -702,9 +715,9 @@ describe('Customers board integration', () => {
 
     applySavedView(wrapper)
     await flushPromises()
-    expect(pageState(wrapper).activeTab).toBe('collaborated')
+    expect(pageState(wrapper).activeTab).toBe('all')
     expect(mocks.getCustomerBoard).toHaveBeenCalledWith(expect.objectContaining({
-      scope: 'collaborated',
+      scope: 'owned_or_collaborated',
       filters: JSON.stringify([{ field: 'owner_id', op: 'eq', value: '42' }]),
       sorts: JSON.stringify([{ field: 'account_name', direction: 'asc' }]),
     }))
@@ -715,7 +728,7 @@ describe('Customers board integration', () => {
     await exportHandler(['account_name'])
     expect(mocks.exportCustomers).toHaveBeenCalledWith(expect.objectContaining({
       fields: ['account_name'],
-      tab: 'collaborated',
+      tab: 'all',
       filters: [{ field: 'owner_id', op: 'eq', value: '42' }],
       sorts: [{ field: 'account_name', direction: 'asc' }],
     }))

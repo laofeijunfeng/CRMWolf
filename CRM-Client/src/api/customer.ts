@@ -373,7 +373,7 @@ export interface CustomerQueryParams {
   created_time_start?: string
   created_time_end?: string
   order_by?: string
-  scope?: 'collaborated' | 'accessible' | 'public'
+  scope?: 'collaborated' | 'accessible' | 'public' | 'owned_or_collaborated'
 
   chart?: 'status' | 'license' | 'scale' | 'industry' | 'city' | 'created_month'
   bucket?: string
