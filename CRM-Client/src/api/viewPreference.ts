@@ -114,8 +114,8 @@ const ViewPreferenceCustomViewListResponseSchema: z.ZodType<ViewPreferenceCustom
   items: z.array(ViewPreferenceItemSchema),
 })
 
-export function normalizeCustomerDisplayMode(mode: ViewDisplayMode | null | undefined): ViewDisplayMode {
-  return mode === 'board' || mode === 'chart' ? mode : 'table'
+export function normalizeListChartDisplayMode(mode: ViewDisplayMode | null | undefined): ViewDisplayMode {
+  return mode === 'chart' ? mode : 'table'
 }
 
 export const viewPreferenceApi = {

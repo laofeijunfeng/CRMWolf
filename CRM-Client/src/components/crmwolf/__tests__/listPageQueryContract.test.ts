@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { listFilterOperatorsByType } from '../listFilterTypes'
-import { normalizeCustomerDisplayMode, viewPreferenceApi } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, viewPreferenceApi } from '@/api/viewPreference'
 
 type BackendCatalogManifest = Record<
   string,
@@ -288,8 +288,8 @@ describe('DataTable frontend/backend list-query contract', () => {
       display_mode: 'chart',
     })
 
-    expect(normalizeCustomerDisplayMode(customer.display_mode)).toBe('chart')
-    expect({ ...customer, display_mode: normalizeCustomerDisplayMode(customer.display_mode) }).toEqual({
+    expect(normalizeListChartDisplayMode(customer.display_mode)).toBe('chart')
+    expect({ ...customer, display_mode: normalizeListChartDisplayMode(customer.display_mode) }).toEqual({
       ...customer,
       display_mode: 'chart',
     })

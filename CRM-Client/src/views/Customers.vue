@@ -30,7 +30,7 @@ import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import { normalizeCustomerDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -960,7 +960,7 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   activeDisplayMode: displayMode,
-  normalizeDisplayMode: normalizeCustomerDisplayMode,
+  normalizeDisplayMode: normalizeListChartDisplayMode,
   refresh: refreshVisibleCustomers,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
@@ -1550,7 +1550,6 @@ defineExpose({
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
           <TabsList aria-label="客户展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger v-if="activeTab !== 'public'" value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>

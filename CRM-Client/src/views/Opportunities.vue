@@ -25,7 +25,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import OpportunityBoardProjection from '@/components/opportunity/OpportunityBoardProjection.vue'
@@ -570,6 +570,7 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   activeDisplayMode: displayMode,
+  normalizeDisplayMode: normalizeListChartDisplayMode,
   refresh: refreshActiveOpportunityView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
@@ -1135,7 +1136,6 @@ defineExpose({
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
           <TabsList aria-label="商机展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>

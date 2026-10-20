@@ -2,7 +2,7 @@ import { defineComponent, h, nextTick, reactive, ref, type Ref, type VNode } fro
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CustomerBoardParams, CustomerResponse } from '@/api/customer'
-import { normalizeCustomerDisplayMode, type ViewDisplayMode } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, type ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
@@ -218,7 +218,7 @@ function applySavedView(wrapper: VueWrapper): void {
   page.activeTab = savedViewState.activeTab
   page.activeFilters = savedViewState.filters.map((filter) => ({ ...filter }))
   page.activeSorts = savedViewState.sorts.map((sort) => ({ ...sort }))
-  page.displayMode = normalizeCustomerDisplayMode(savedViewState.displayMode)
+  page.displayMode = normalizeListChartDisplayMode(savedViewState.displayMode)
 }
 
 
@@ -242,7 +242,7 @@ vi.mock('@/composables/useCustomFilterViews', () => ({
     },
     retryViewApply: vi.fn().mockResolvedValue(undefined),
     recordedNormalizer: options.normalizeDisplayMode,
-    customerNormalizer: normalizeCustomerDisplayMode,
+    customerNormalizer: normalizeListChartDisplayMode,
   }),
 }))
 
@@ -482,21 +482,32 @@ describe('Customers board integration', () => {
     wrapper.unmount()
   })
 
-  it('normalizes a stored customer chart preference to board through the customer normalizer', async () => {
+  it('keeps a stored chart preference on the chart and opens a stored board preference as the list', async () => {
     savedViewState.displayMode = 'chart'
     savedViewState.filters = [{ field: 'city', op: 'eq', value: '上海' }]
-    const wrapper = mountPage()
+    const chartPage = mountPage()
     await flushPromises()
-    const page = pageState(wrapper)
-    expect(page.customFilterViews.recordedNormalizer).toBe(normalizeCustomerDisplayMode)
-    applySavedView(wrapper)
+    expect(pageState(chartPage).customFilterViews.recordedNormalizer).toBe(normalizeListChartDisplayMode)
+    applySavedView(chartPage)
     await flushPromises()
 
-    expect(wrapper.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('board')
-    expect(mocks.getCustomerBoard).toHaveBeenCalledWith(expect.objectContaining({
+    expect(chartPage.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('chart')
+    expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
+    chartPage.unmount()
+
+    savedViewState.displayMode = 'board'
+    const boardPage = mountPage()
+    await flushPromises()
+    mocks.getCustomers.mockClear()
+    applySavedView(boardPage)
+    await flushPromises()
+
+    expect(boardPage.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('table')
+    expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
+    expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({
       filters: JSON.stringify([{ field: 'city', op: 'eq', value: '上海' }]),
     }))
-    wrapper.unmount()
+    boardPage.unmount()
   })
 
   it('opens the existing detail sheet from a board card public id', async () => {
@@ -705,7 +716,7 @@ describe('Customers board integration', () => {
     wrapper.unmount()
   })
 
-  it('applies a saved view to the board query and keeps list export available', async () => {
+  it('applies a saved board view as the customer list and keeps list export available', async () => {
     savedViewState.displayMode = 'board'
     savedViewState.activeTab = 'collaborated'
     savedViewState.filters = [{ field: 'owner_id', op: 'eq', value: '42' }]
@@ -716,7 +727,9 @@ describe('Customers board integration', () => {
     applySavedView(wrapper)
     await flushPromises()
     expect(pageState(wrapper).activeTab).toBe('all')
-    expect(mocks.getCustomerBoard).toHaveBeenCalledWith(expect.objectContaining({
+    expect(pageState(wrapper).displayMode).toBe('table')
+    expect(mocks.getCustomerBoard).not.toHaveBeenCalled()
+    expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({
       scope: 'owned_or_collaborated',
       filters: JSON.stringify([{ field: 'owner_id', op: 'eq', value: '42' }]),
       sorts: JSON.stringify([{ field: 'account_name', direction: 'asc' }]),

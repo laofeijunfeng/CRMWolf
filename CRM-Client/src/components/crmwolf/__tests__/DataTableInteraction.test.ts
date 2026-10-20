@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
-import { normalizeCustomerDisplayMode, viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import DataTable from '../DataTable.vue'
@@ -768,11 +768,11 @@ describe('DataTable display mode selector', () => {
 
 describe('customer display mode normalization and saved-view rollback', () => {
   it('keeps customer chart preferences as chart', () => {
-    expect(normalizeCustomerDisplayMode('chart')).toBe('chart')
-    expect(normalizeCustomerDisplayMode('board')).toBe('board')
-    expect(normalizeCustomerDisplayMode('table')).toBe('table')
-    expect(normalizeCustomerDisplayMode(null)).toBe('table')
-    expect(normalizeCustomerDisplayMode(undefined)).toBe('table')
+    expect(normalizeListChartDisplayMode('chart')).toBe('chart')
+    expect(normalizeListChartDisplayMode('board')).toBe('table')
+    expect(normalizeListChartDisplayMode('table')).toBe('table')
+    expect(normalizeListChartDisplayMode(null)).toBe('table')
+    expect(normalizeListChartDisplayMode(undefined)).toBe('table')
   })
 
   it('keeps a non-customer stored chart value unchanged', () => {
@@ -783,7 +783,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
     })
 
     expect(parsed.display_mode).toBe('chart')
-    expect(normalizeCustomerDisplayMode('chart')).toBe('chart')
+    expect(normalizeListChartDisplayMode('chart')).toBe('chart')
   })
 
   it('saves normalized board after a successful customer view apply and rolls back synchronously', async () => {
@@ -806,7 +806,7 @@ describe('customer display mode normalization and saved-view rollback', () => {
       activeSorts,
       activeColumns,
       activeDisplayMode: displayMode,
-      normalizeDisplayMode: normalizeCustomerDisplayMode,
+      normalizeDisplayMode: normalizeListChartDisplayMode,
       refresh,
     })
     views.customViews.value = [preferenceItem('chart')]
