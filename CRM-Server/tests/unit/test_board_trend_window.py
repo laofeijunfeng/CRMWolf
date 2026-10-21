@@ -216,6 +216,19 @@ def test_extract_intersects_repeated_supported_bounds_for_one_field() -> None:
     )
 
 
+def test_extract_between_uses_both_bounds_and_ignores_other_fields() -> None:
+    filters = [
+        FilterCondition(field="signed_date", op="between", value=["2026-07-20", "2026-05-01"]),
+        FilterCondition(field="other_date", op="between", value=["2026-01-01", "2026-01-31"]),
+        FilterCondition(field="signed_date", op="between", value=["bad", "2026-06-01"]),
+    ]
+
+    assert extract_board_date_bounds(filters, "signed_date") == (
+        date(2026, 5, 1),
+        date(2026, 7, 20),
+    )
+
+
 def test_extract_ignores_other_fields_invalid_values_and_missing_filters() -> None:
     filters = [
         FilterCondition(field="created_time", op="after", value="not-a-date"),

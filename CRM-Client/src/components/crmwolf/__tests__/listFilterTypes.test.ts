@@ -30,4 +30,13 @@ describe('list filter operator catalog', () => {
       'is_not_empty'
     ])
   })
+
+  it('places between after before and before empty for date filters', () => {
+    const labels = listFilterOperatorsByType.date.map((operator) => operator.label)
+    expect(labels.indexOf('介于')).toBe(labels.indexOf('早于') + 1)
+    expect(labels.indexOf('为空')).toBe(labels.indexOf('介于') + 1)
+    expect(labels).toContain('过去 1 年')
+    expect(labels).toContain('晚于')
+    expect(listFilterOperatorsByType.date.some((operator) => operator.value === 'between')).toBe(true)
+  })
 })

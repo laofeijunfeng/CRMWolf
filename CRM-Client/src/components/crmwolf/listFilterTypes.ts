@@ -15,6 +15,7 @@ export type ListFilterOperator =
   | 'is_not_empty'
   | 'before'
   | 'after'
+  | 'between'
   | 'past_1_day'
   | 'past_3_days'
   | 'past_1_week'
@@ -56,6 +57,7 @@ export const listFilterOperatorsByType: Record<
     { value: 'eq', label: '等于' },
     { value: 'after', label: '晚于' },
     { value: 'before', label: '早于' },
+    { value: 'between', label: '介于' },
     { value: 'is_empty', label: '为空' },
     { value: 'is_not_empty', label: '不为空' }
   ],

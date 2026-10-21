@@ -13,7 +13,21 @@ DateKind = Literal["date", "datetime"]
 SortDirection = Literal["asc", "desc"]
 
 VALUE_REQUIRED_OPS = frozenset(
-    {"eq", "neq", "contains", "not_contains", "in", "not_in", "before", "after", "gt", "gte", "lt", "lte"}
+    {
+        "eq",
+        "neq",
+        "contains",
+        "not_contains",
+        "in",
+        "not_in",
+        "before",
+        "after",
+        "between",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+    }
 )
 EMPTY_OPS = frozenset({"is_empty", "is_not_empty"})
 DATE_PRESET_OPS = frozenset(
@@ -30,7 +44,7 @@ DATE_PRESET_OPS = frozenset(
 DEFAULT_OPS: dict[str, frozenset[str]] = {
     "text": frozenset({"eq", "neq", "contains", "not_contains", "is_empty", "is_not_empty"}),
     "enum": frozenset({"eq", "neq", "contains", "not_contains", "in", "not_in", "is_empty", "is_not_empty"}),
-    "date": frozenset({"eq", "before", "after", "is_empty", "is_not_empty"}) | DATE_PRESET_OPS,
+    "date": frozenset({"eq", "before", "after", "between", "is_empty", "is_not_empty"}) | DATE_PRESET_OPS,
     "number": frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "is_empty", "is_not_empty"}),
 }
 

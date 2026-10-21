@@ -281,6 +281,47 @@ def test_datetime_day_bounds_after_includes_that_morning(db_session):
     assert names == ["Beta Co", "Trial Co"]
 
 
+def test_date_between_includes_both_ends_and_swaps_reversed_values(db_session):
+    names = _names(
+        db_session,
+        [{"field": "created_on", "op": "between", "value": ["2026-08-11", "2026-08-10"]}],
+    )
+    assert names == ["Acme", "Beta Co"]
+
+
+def test_date_between_same_day_matches_that_day(db_session):
+    names = _names(
+        db_session,
+        [{"field": "created_on", "op": "between", "value": ["2026-08-11", "2026-08-11"]}],
+    )
+    assert names == ["Beta Co"]
+
+
+def test_datetime_between_includes_the_whole_end_day(date_preset_session):
+    names = _names(
+        date_preset_session,
+        [{"field": "created_at", "op": "between", "value": ["2026-08-10", "2026-08-16"]}],
+    )
+    assert "Week Start" in names
+    assert "Week Today" in names
+    assert "Before Week Start" not in names
+    assert "After Week Today" not in names
+
+
+def test_exclusive_datetime_between_still_includes_both_days(db_session):
+    names = _names(
+        db_session,
+        [{"field": "legacy_created_at", "op": "between", "value": ["2026-08-11", "2026-08-11"]}],
+    )
+    assert names == ["Beta Co"]
+
+
+def test_invalid_between_is_skipped(db_session):
+    everyone = _names(db_session, [])
+    for value in (["2026-08-10"], "2026-08-10", ["not-a-date", "2026-08-10"], []):
+        assert _names(db_session, [{"field": "created_on", "op": "between", "value": value}]) == everyone
+
+
 def test_exclusive_datetime_after_keeps_legacy_strict_comparison(db_session):
     names = _names(db_session, [{"field": "legacy_created_at", "op": "after", "value": "2026-08-11T09:00:00"}])
     assert names == ["Trial Co"]

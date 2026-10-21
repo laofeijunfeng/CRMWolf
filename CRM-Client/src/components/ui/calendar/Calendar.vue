@@ -3,9 +3,9 @@
  * Calendar - 基于 radix-vue Calendar
  * 官方文档：https://www.radix-vue.com/components/calendar
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { getLocalTimeZone, today, type DateValue } from '@internationalized/date'
+import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
   CalendarRoot,
   CalendarCell,
@@ -38,6 +38,9 @@ interface Props {
   initialFocus?: boolean | undefined
   minYear?: number | undefined
   maxYear?: number | undefined
+  range?: boolean | undefined
+  rangeStart?: DateValue | undefined
+  rangeEnd?: DateValue | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -45,7 +48,8 @@ const props = withDefaults(defineProps<Props>(), {
   locale: 'zh-CN',
   initialFocus: false,
   minYear: 1900,
-  maxYear: new Date().getFullYear() + 50
+  maxYear: new Date().getFullYear() + 50,
+  range: false
 })
 
 const emit = defineEmits<{
@@ -116,6 +120,56 @@ function handlePlaceholderChange(value: DateValue): void {
   setCalendarPlaceholder(value)
 }
 
+function compareDates(left: DateValue, right: DateValue): number {
+  return left.compare(right)
+}
+
+const rangePointClass = 'is-range-point !bg-wolf-primary !text-wolf-text-inverse hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
+const rangeStartClass = 'is-range-start !bg-wolf-primary !text-wolf-text-inverse !rounded-l-md !rounded-r-none hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
+const rangeEndClass = 'is-range-end !bg-wolf-primary !text-wolf-text-inverse !rounded-r-md !rounded-l-none hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
+const rangeMiddleClass = 'is-range-middle !rounded-none !bg-wolf-primary/15 !text-wolf-text-primary hover:!bg-wolf-primary/15 hover:!text-wolf-text-primary'
+
+function rangeCellClass(day: DateValue): string {
+  const start = props.rangeStart
+  if (!props.range || start === undefined) return ''
+  const end = props.rangeEnd
+  if (end === undefined) {
+    return compareDates(day, start) === 0 ? rangePointClass : ''
+  }
+  const [lower, upper] = compareDates(start, end) <= 0 ? [start, end] : [end, start]
+  if (compareDates(lower, upper) === 0 && compareDates(day, lower) === 0) return rangePointClass
+  if (compareDates(day, lower) === 0) return rangeStartClass
+  if (compareDates(day, upper) === 0) return rangeEndClass
+  if (compareDates(day, lower) > 0 && compareDates(day, upper) < 0) return rangeMiddleClass
+  return ''
+}
+
+function handleModelValue(value: DateValue | undefined): void {
+  if (props.range) return
+  emit('update:modelValue', value)
+}
+
+const shellRef = ref<HTMLElement | null>(null)
+
+function handleFrameClick(event: MouseEvent): void {
+  if (!props.range) return
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const cell = target.closest<HTMLElement>('[data-radix-vue-calendar-cell-trigger]')
+  if (cell === null || cell.hasAttribute('data-disabled') || cell.hasAttribute('data-outside-view')) return
+  const raw = cell.dataset['value']
+  if (raw === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return
+  emit('update:modelValue', parseDate(raw))
+}
+
+onMounted(() => {
+  shellRef.value?.addEventListener('click', handleFrameClick)
+})
+
+onBeforeUnmount(() => {
+  shellRef.value?.removeEventListener('click', handleFrameClick)
+})
+
 const calendarRootProps = computed(() => {
   const rootProps: Record<string, unknown> = {
     placeholder: displayPlaceholder.value,
@@ -124,7 +178,10 @@ const calendarRootProps = computed(() => {
     initialFocus: props.initialFocus,
   }
 
-  if (props.modelValue !== undefined) {
+  if (props.range) {
+    rootProps['modelValue'] = undefined
+    rootProps['preventDeselect'] = true
+  } else if (props.modelValue !== undefined) {
     rootProps['modelValue'] = props.modelValue
   }
 
@@ -137,12 +194,13 @@ const calendarRootProps = computed(() => {
 </script>
 
 <template>
+  <div ref="shellRef" class="date-picker-calendar-shell">
   <CalendarRoot
     v-slot="{ weekDays, grid }"
     v-bind="calendarRootProps as any"
     :class="cn('date-picker-calendar p-3', props.class)"
     class="rounded-md border bg-white"
-    @update:model-value="emit('update:modelValue', $event as DateValue | undefined)"
+    @update:model-value="handleModelValue($event as DateValue | undefined)"
     @update:placeholder="handlePlaceholderChange($event as DateValue)"
   >
     <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
@@ -222,6 +280,7 @@ const calendarRootProps = computed(() => {
             <CalendarCellTrigger
               :day="weekDate"
               :month="month.value"
+              :class="rangeCellClass(weekDate)"
               class="date-picker-calendar__cell-trigger inline-flex items-center justify-center rounded-md text-sm font-normal transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-wolf-primary data-[selected]:text-wolf-text-inverse data-[today]:bg-wolf-bg-muted data-[today]:text-wolf-text-primary"
             />
           </CalendarCell>
@@ -229,11 +288,16 @@ const calendarRootProps = computed(() => {
       </CalendarGridBody>
     </CalendarGrid>
   </CalendarRoot>
+  </div>
 </template>
 
 <style scoped lang="scss">
-.date-picker-calendar {
+.date-picker-calendar-shell {
   width: min(306px, 100%);
+}
+
+.date-picker-calendar {
+  width: 100%;
 }
 
 .date-picker-calendar__year-trigger {

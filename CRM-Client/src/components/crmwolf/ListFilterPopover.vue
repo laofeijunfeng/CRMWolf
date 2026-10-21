@@ -49,6 +49,7 @@ const optionQuery = ref('')
 const textDraft = ref('')
 const numberDraft = ref('')
 const draftOperator = ref<ListFilterOperator | ''>('')
+const pendingRangeStart = ref('')
 const calendarPlaceholder = shallowRef<DateValue>(today(getLocalTimeZone()))
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let mediaQuery: MediaQueryList | undefined
@@ -89,13 +90,41 @@ function selectedEnumValues(field: ListFilterField): string[] {
   return current.value.map((item) => String(item))
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+function parseCalendarDate(value: string): DateValue | undefined {
+  if (!ISO_DATE.test(value)) return undefined
+  const [year, month, day] = value.split('-').map(Number)
+  if (year === undefined || month === undefined || day === undefined) return undefined
+  return new CalendarDate(year, month, day)
+}
+
+function orderedDateRange(value: ListFilterCondition['value']): [string, string] | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined
+  const dates = value.map((item) => String(item).trim())
+  if (dates.some((item) => !ISO_DATE.test(item))) return undefined
+  const [start, end] = dates[0] <= dates[1] ? [dates[0], dates[1]] : [dates[1], dates[0]]
+  return [start, end]
+}
+
 function selectedDate(field: ListFilterField): DateValue | undefined {
   const current = conditionFor(field.key)
   if (current === undefined || current.op !== 'eq' || typeof current.value !== 'string') return undefined
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(current.value)) return undefined
-  const [year, month, day] = current.value.split('-').map(Number)
-  if (year === undefined || month === undefined || day === undefined) return undefined
-  return new CalendarDate(year, month, day)
+  return parseCalendarDate(current.value)
+}
+
+function visibleRange(field: ListFilterField): { start?: DateValue; end?: DateValue } {
+  if (pendingRangeStart.value !== '') {
+    return { start: parseCalendarDate(pendingRangeStart.value) }
+  }
+  const current = conditionFor(field.key)
+  if (current === undefined || current.op !== 'between') return {}
+  const ordered = orderedDateRange(current.value)
+  if (ordered === undefined) return {}
+  return {
+    start: parseCalendarDate(ordered[0]),
+    end: parseCalendarDate(ordered[1])
+  }
 }
 
 function normalizeConditions(conditions: ListFilterCondition[]): ListFilterCondition[] {
@@ -108,6 +137,12 @@ function normalizeConditions(conditions: ListFilterCondition[]): ListFilterCondi
     if (op === undefined || (allowed !== undefined && !allowed.includes(op))) continue
     if (!operatorNeedsValue(op)) {
       result.push({ field: field.key, op, value: null })
+      continue
+    }
+    if (op === 'between') {
+      const ordered = orderedDateRange(condition.value)
+      if (ordered === undefined) continue
+      result.push({ field: field.key, op, value: ordered })
       continue
     }
     const value = condition.value
@@ -138,7 +173,11 @@ function syncDrafts(field: ListFilterField, keepOperator = false): void {
       : ''
   }
   if (field.type === 'date') {
-    calendarPlaceholder.value = selectedDate(field) ?? today(getLocalTimeZone())
+    const current = conditionFor(field.key)
+    const anchor = current?.op === 'between' && Array.isArray(current.value)
+      ? parseCalendarDate(String(current.value[0]))
+      : selectedDate(field)
+    calendarPlaceholder.value = anchor ?? today(getLocalTimeZone())
   }
 }
 
@@ -191,6 +230,7 @@ function fieldOffset(fieldKey: string): number {
 function selectedCount(field: ListFilterField): number {
   const current = conditionFor(field.key)
   if (current === undefined) return 0
+  if (current.op === 'between') return 1
   if (Array.isArray(current.value)) return current.value.length
   return 1
 }
@@ -212,6 +252,8 @@ function placePanel(): void {
 function showField(fieldKey: string): void {
   panelTop.value = fieldOffset(fieldKey)
   void nextTick(placePanel)
+  if (activeFieldKey.value === fieldKey) return
+  pendingRangeStart.value = ''
   const previous = activeField.value
   if (previous !== undefined && previous.key !== fieldKey) {
     if (previous.type === 'text') commitText(previous)
@@ -287,11 +329,14 @@ function handleOperatorChange(field: ListFilterField, op: ListFilterOperator): v
   }
   if (field.type === 'date') {
     draftOperator.value = op
+    pendingRangeStart.value = ''
+    if (op === 'between') return
     if (isDatePresetOperator(op) || !operatorNeedsValue(op)) {
       replaceField(field.key, { field: field.key, op, value: null })
       return
     }
     const current = conditionFor(field.key)
+    if (current?.op === 'between') return
     const value = current !== undefined && typeof current.value === 'string' ? current.value : ''
     replaceField(field.key, value === '' ? null : { field: field.key, op, value })
     return
@@ -316,15 +361,29 @@ function toggleEnumValue(field: ListFilterField, value: string): void {
 function handleDateSelect(field: ListFilterField, value: DateValue | undefined): void {
   if (value === undefined) return
   const op = activeOperator(field)
+  const day = formatLocalDate(value.toDate(getLocalTimeZone()))
+  if (op === 'between') {
+    if (pendingRangeStart.value === '') {
+      pendingRangeStart.value = day
+      return
+    }
+    const ordered = orderedDateRange([pendingRangeStart.value, day])
+    pendingRangeStart.value = ''
+    if (ordered === undefined) return
+    replaceField(field.key, { field: field.key, op: 'between', value: ordered })
+    return
+  }
   const effectiveOp = operatorNeedsValue(op) ? op : 'eq'
   replaceField(field.key, {
     field: field.key,
     op: effectiveOp,
-    value: formatLocalDate(value.toDate(getLocalTimeZone()))
+    value: day
   })
 }
 
 function resetFilters(): void {
+  pendingRangeStart.value = ''
+  draftOperator.value = ''
   activeFieldKey.value = ''
   emit('reset')
 }
@@ -354,7 +413,11 @@ watch([activeFieldKey, draftOperator, calendarPlaceholder], () => {
 })
 
 watch(open, (isOpen) => {
-  if (!isOpen) activeFieldKey.value = ''
+  if (!isOpen) {
+    activeFieldKey.value = ''
+    pendingRangeStart.value = ''
+    draftOperator.value = ''
+  }
 })
 </script>
 
@@ -473,7 +536,10 @@ watch(open, (isOpen) => {
 
           <Calendar
             v-else-if="activeField.type === 'date' && !isDatePresetOperator(activeOperator(activeField)) && operatorNeedsValue(activeOperator(activeField))"
-            :model-value="selectedDate(activeField)"
+            :model-value="activeOperator(activeField) === 'between' ? undefined : selectedDate(activeField)"
+            :range="activeOperator(activeField) === 'between'"
+            :range-start="activeOperator(activeField) === 'between' ? visibleRange(activeField).start : undefined"
+            :range-end="activeOperator(activeField) === 'between' ? visibleRange(activeField).end : undefined"
             :placeholder="calendarPlaceholder"
             locale="zh-CN"
             @update:model-value="handleDateSelect(activeField, $event)"

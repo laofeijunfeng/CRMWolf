@@ -48,11 +48,25 @@ function isMeaningfulValue(value: ListFilterCondition['value']): boolean {
   return value !== null && value !== undefined && String(value).trim() !== ''
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+function formatDateRange(value: ListFilterCondition['value']): string | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined
+  const dates = value.map((item) => String(item).trim())
+  if (dates.some((item) => !ISO_DATE.test(item))) return undefined
+  const [start, end] = dates[0] <= dates[1] ? dates : [dates[1], dates[0]]
+  return `${start} 至 ${end}`
+}
+
 export function formatFilterValue(
   field: ListFilterField,
   value: ListFilterCondition['value'],
 ): string | undefined {
   if (!isMeaningfulValue(value)) return undefined
+
+  if (field.type === 'date' && Array.isArray(value)) {
+    return formatDateRange(value)
+  }
 
   if (Array.isArray(value)) {
     return value
@@ -98,6 +112,8 @@ export function buildFilterSummaryItems(
 
     const operatorLabel = operatorLabelByType.get(`${field.type}:${condition.op}`)
     if (operatorLabel === undefined) return []
+
+    if (condition.op === 'between' && formatDateRange(condition.value) === undefined) return []
 
     if (!isValuelessOperator(condition.op) && !isMeaningfulValue(condition.value)) return []
 

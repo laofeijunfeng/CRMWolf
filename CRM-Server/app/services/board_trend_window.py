@@ -36,6 +36,19 @@ def _shift_month(value: date, offset: int) -> date:
     return date(year, zero_based_month + 1, 1)
 
 
+def _between_days(value: object) -> tuple[date, date] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    left = parse_date_value(value[0])
+    right = parse_date_value(value[1])
+    if left is None or right is None:
+        return None
+    start, end = left.date(), right.date()
+    if start > end:
+        start, end = end, start
+    return start, end
+
+
 def extract_board_date_bounds(
     filters: Sequence[FilterCondition] | None,
     field: str,
@@ -43,7 +56,17 @@ def extract_board_date_bounds(
     lower: date | None = None
     upper: date | None = None
     for condition in filters or ():
-        if condition.field != field or condition.op not in {"eq", "after", "before"}:
+        if condition.field != field:
+            continue
+        if condition.op == "between":
+            pair = _between_days(condition.value)
+            if pair is None:
+                continue
+            start, end = pair
+            lower = start if lower is None else max(lower, start)
+            upper = end if upper is None else min(upper, end)
+            continue
+        if condition.op not in {"eq", "after", "before"}:
             continue
         parsed = parse_date_value(condition.value)
         if parsed is None:

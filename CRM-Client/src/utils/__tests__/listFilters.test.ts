@@ -23,4 +23,13 @@ describe('getDateBounds', () => {
       end: '2026-10-14'
     })
   })
+
+  it('turns between into inclusive bounds and swaps reversed dates', () => {
+    expect(getDateBounds([
+      { field: 'created_time', op: 'between', value: ['2026-10-20', '2026-10-01'] }
+    ], 'created_time', new Date(2026, 9, 21))).toEqual({
+      start: '2026-10-01',
+      end: '2026-10-20'
+    })
+  })
 })

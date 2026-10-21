@@ -60,6 +60,8 @@ def apply_filters(
             parsed_value = _prepare_value(field, condition.value, ctx)
             if parsed_value is None:
                 continue
+            if condition.op == "between" and _closed_date_pair(parsed_value) is None:
+                continue
         query = _apply_joins(query, field.joins, joined_keys)
         if field.predicate_builder is not None:
             clause = field.predicate_builder(condition, field, ctx, parsed_value)
@@ -323,6 +325,17 @@ def _parse_number(value: Any):
         return None
 
 
+def _closed_date_pair(value: object) -> tuple[datetime, datetime] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    left, right = value
+    if not isinstance(left, datetime) or not isinstance(right, datetime):
+        return None
+    if left <= right:
+        return left, right
+    return right, left
+
+
 def parse_date_value(value: object) -> datetime | None:
     if isinstance(value, datetime):
         return value
@@ -402,7 +415,20 @@ def _enum_value(value: Any, field: ListQueryField) -> Any:
     return value
 
 
-def _date_clause(field: ListQueryField, expression, op: str, parsed_value: datetime, context: ListQueryContext):
+def _date_clause(field: ListQueryField, expression, op: str, parsed_value: object, context: ListQueryContext):
+    if op == "between":
+        pair = _closed_date_pair(parsed_value)
+        if pair is None:
+            raise ListQueryError(f"字段 {field.key} 的介于需要两个日期")
+        start_day = pair[0].date()
+        end_day = pair[1].date()
+        if field.date_kind == "date":
+            return and_(expression >= start_day, expression <= end_day)
+        start = datetime.combine(start_day, time.min)
+        end = datetime.combine(end_day, time.max)
+        return and_(expression >= start, expression <= end)
+    if not isinstance(parsed_value, datetime):
+        raise ListQueryError(f"字段 {field.key} 的日期值无法解析")
     if field.date_kind == "date":
         day = parsed_value.date()
         if op == "eq":

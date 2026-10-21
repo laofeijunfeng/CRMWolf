@@ -88,6 +88,14 @@ export function getDateBounds(
       bounds.end = formatDate(currentDay)
       continue
     }
+    if (condition.op === 'between' && Array.isArray(condition.value) && condition.value.length === 2) {
+      const dates = condition.value.map((item) => String(item))
+      if (dates.some((item) => !/^\d{4}-\d{2}-\d{2}$/.test(item))) continue
+      const [start, end] = dates[0] <= dates[1] ? dates : [dates[1], dates[0]]
+      bounds.start = start
+      bounds.end = end
+      continue
+    }
     if (condition.value === undefined || condition.value === null || condition.value === '') continue
     const value = String(condition.value)
     if (condition.op === 'eq') {

@@ -54,6 +54,23 @@ describe('list view state summaries', () => {
     ])
   })
 
+  it('formats a date range with 至 and drops an incomplete range', () => {
+    const [item] = buildFilterSummaryItems([
+      { field: 'created_at', op: 'between', value: ['2026-10-20', '2026-10-01'] },
+    ], filterFields)
+    expect(item?.operatorLabel).toBe('介于')
+    expect(item?.valueLabel).toBe('2026-10-01 至 2026-10-20')
+
+    const [sameDay] = buildFilterSummaryItems([
+      { field: 'created_at', op: 'between', value: ['2026-10-01', '2026-10-01'] },
+    ], filterFields)
+    expect(sameDay?.valueLabel).toBe('2026-10-01 至 2026-10-01')
+
+    expect(buildFilterSummaryItems([
+      { field: 'created_at', op: 'between', value: ['2026-10-01'] },
+    ], filterFields)).toEqual([])
+  })
+
   it('labels a date preset without inventing a date value', () => {
     const [item] = buildFilterSummaryItems([
       { field: 'created_at', op: 'past_1_week', value: null },
