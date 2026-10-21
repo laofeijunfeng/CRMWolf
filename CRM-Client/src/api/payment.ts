@@ -287,7 +287,7 @@ export interface PaymentRecordListParams {
 export type PaymentRecordBoardParams = Omit<PaymentRecordListParams, 'page' | 'page_size'>
 
 export interface PaymentRecordChartBucketParams extends Omit<PaymentRecordListParams, 'page' | 'page_size'> {
-  chart: 'license_type' | 'purchase_type' | 'amount_band' | 'payment_month'
+  chart: 'license_type' | 'purchase_type' | 'amount_band' | 'payment_month' | 'arr_ratio'
   bucket: string
 }
 

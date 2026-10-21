@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Area, Donut } from '@unovis/ts'
-import { VisArea, VisAxis, VisDonut, VisLine, VisSingleContainer, VisXYContainer } from '@unovis/vue'
+import { VisArea, VisAxis, VisDonut, VisLine, VisScatter, VisSingleContainer, VisXYContainer } from '@unovis/vue'
+import { arrCanOpen, arrLinePoints, arrShowsMarker } from '@/components/payment/paymentRecordArr'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -70,6 +71,19 @@ interface MonthDatum {
   summary: string
 }
 
+interface ArrDatum {
+  index: number
+  key: string
+  label: string
+  ratio: number | null
+  annualizedText: string
+  buyoutText: string
+  ratioText: string
+}
+
+const arrMargin = { top: 16, right: 8, bottom: 28, left: 48 }
+const arrYDomain: [number, number] = [0, 100]
+
 const selectedCard = ref<PaymentRecordChartCard | null>(null)
 const selectedBucket = ref<PaymentRecordChartBucket | null>(null)
 const showingAll = ref(false)
@@ -80,6 +94,7 @@ const licenseCard = computed(() => props.chart?.cards.find((card) => card.key ==
 const purchaseCard = computed(() => props.chart?.cards.find((card) => card.key === 'purchase_type') ?? null)
 const amountCard = computed(() => props.chart?.cards.find((card) => card.key === 'amount_band') ?? null)
 const monthCard = computed(() => props.chart?.cards.find((card) => card.key === 'payment_month') ?? null)
+const arrCard = computed(() => props.chart?.cards.find((card) => card.key === 'arr_ratio') ?? null)
 const pieCards = computed(() => [licenseCard.value, purchaseCard.value].filter((card) => card !== null))
 
 const dialogOpen = computed(() => selectedBucket.value !== null)
@@ -173,6 +188,112 @@ function monthTooltip(): Record<string, (datum: unknown, x: number | Date) => st
   const template = componentToString(monthConfig, ChartTooltipContent, { labelKey: 'label' })
   if (template === undefined) return {}
   return { [Area.selectors.area]: template }
+}
+
+const arrConfig = {
+  annualizedText: { label: '年化订阅', color: CHART_COLOR },
+  buyoutText: { label: '买断', color: CHART_COLOR },
+  ratioText: { label: '占比', color: CHART_COLOR },
+} satisfies ChartConfig
+
+function arrData(card: PaymentRecordChartCard): ArrDatum[] {
+  return card.buckets.map((bucket, index) => {
+    const ratio = bucket.plotted_ratio ?? null
+    const annualized = bucket.annualized_subscription ?? null
+    const buyout = bucket.buyout_amount ?? null
+    return {
+      index,
+      key: bucket.key,
+      label: bucket.label,
+      ratio,
+      annualizedText: annualized === null ? '' : formatSummaryAmount(annualized),
+      buyoutText: buyout === null ? '' : formatSummaryAmount(buyout),
+      ratioText: ratio === null ? '' : `${ratio}%`,
+    }
+  })
+}
+
+const arrXDomain = computed((): [number, number] => {
+  const count = arrCard.value?.buckets.length ?? 1
+  return [0, Math.max(count - 1, 0)]
+})
+
+function arrLabelLeft(index: number, count: number): string {
+  const span = Math.max(count - 1, 1)
+  const horizontal = arrMargin.left + arrMargin.right
+  return `calc(${arrMargin.left}px + (100% - ${horizontal}px) * ${index / span})`
+}
+
+function arrLabelTop(ratio: number): string {
+  const vertical = arrMargin.top + arrMargin.bottom
+  return `calc(${arrMargin.top}px + (100% - ${vertical}px) * ${(100 - ratio) / 100})`
+}
+
+function openArr(datum: ArrDatum): void {
+  const card = arrCard.value
+  if (card === null || !arrCanOpen(datum.ratio)) return
+  const bucket = card.buckets[datum.index]
+  if (bucket === undefined) return
+  selectedCard.value = card
+  selectedBucket.value = bucket
+  showingAll.value = false
+  emit('close-bucket')
+}
+
+const arrHover = ref<ArrDatum | null>(null)
+const arrHoverStyle = ref({ left: '0px', top: '0px' })
+
+function arrIndexFromClientX(clientX: number, plot: HTMLElement): number | null {
+  const count = arrCard.value?.buckets.length ?? 0
+  if (count <= 0) return null
+  const rect = plot.getBoundingClientRect()
+  const plotLeft = rect.left + arrMargin.left
+  const plotWidth = rect.width - arrMargin.left - arrMargin.right
+  if (plotWidth <= 0) return null
+  const span = Math.max(count - 1, 1)
+  const index = Math.round(((clientX - plotLeft) / plotWidth) * span)
+  if (index < 0 || index >= count) return null
+  return index
+}
+
+function arrPointAt(index: number): ArrDatum | null {
+  const card = arrCard.value
+  if (card === null) return null
+  return arrData(card)[index] ?? null
+}
+
+function onArrMove(event: MouseEvent): void {
+  const plot = event.currentTarget
+  if (!(plot instanceof HTMLElement)) return
+  const index = arrIndexFromClientX(event.clientX, plot)
+  const point = index === null ? null : arrPointAt(index)
+  if (point === null || point.ratio === null) {
+    arrHover.value = null
+    return
+  }
+  const rect = plot.getBoundingClientRect()
+  const localX = event.clientX - rect.left
+  const tooltipWidth = 168
+  const left = localX + tooltipWidth + 16 > rect.width ? localX - tooltipWidth - 8 : localX + 12
+  arrHover.value = point
+  arrHoverStyle.value = {
+    left: `${Math.max(left, 8)}px`,
+    top: `${Math.max(event.clientY - rect.top - 72, 8)}px`,
+  }
+}
+
+function onArrLeave(): void {
+  arrHover.value = null
+}
+
+function onArrClick(event: MouseEvent): void {
+  const plot = event.currentTarget
+  if (!(plot instanceof HTMLElement)) return
+  const index = arrIndexFromClientX(event.clientX, plot)
+  if (index === null) return
+  const point = arrPointAt(index)
+  if (point === null) return
+  openArr(point)
 }
 
 function barWidth(card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket): string {
@@ -363,6 +484,102 @@ function retryBucket(): void {
         </CardContent>
       </Card>
 
+      <Card v-if="arrCard" class="payment-record-chart__month" data-testid="payment-chart-card-arr_ratio">
+        <CardHeader>
+          <CardTitle>{{ arrCard.title }}</CardTitle>
+          <CardDescription>{{ arrCard.description }}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div
+            class="payment-record-chart__arr-plot"
+            @mousemove="onArrMove"
+            @mouseleave="onArrLeave"
+            @click="onArrClick"
+          >
+            <ChartContainer :config="arrConfig" class="payment-record-chart__arr-layer payment-record-chart__arr-axis aspect-auto h-[240px]">
+              <VisXYContainer
+                :data="arrData(arrCard)"
+                :height="220"
+                :x-domain="arrXDomain"
+                :y-domain="arrYDomain"
+                :auto-margin="false"
+                :margin="arrMargin"
+              >
+                <VisAxis
+                  type="x"
+                  :tick-line="false"
+                  :domain-line="false"
+                  :grid-line="false"
+                  :num-ticks="arrCard.buckets.length"
+                  :tick-values="arrData(arrCard).map((datum) => datum.index)"
+                  :tick-format="(value: number) => arrCard?.buckets[Math.round(value)]?.label ?? ''"
+                />
+                <VisAxis
+                  type="y"
+                  :num-ticks="3"
+                  :tick-line="false"
+                  :domain-line="false"
+                  :tick-format="(value: number) => `${Math.round(value)}%`"
+                />
+              </VisXYContainer>
+            </ChartContainer>
+            <ChartContainer
+              v-if="arrLinePoints(arrData(arrCard)).length > 0"
+              :config="arrConfig"
+              class="payment-record-chart__arr-layer payment-record-chart__arr-series aspect-auto h-[240px]"
+              :cursor="true"
+            >
+              <VisXYContainer
+                :data="arrLinePoints(arrData(arrCard))"
+                :height="220"
+                :x-domain="arrXDomain"
+                :y-domain="arrYDomain"
+                :auto-margin="false"
+                :margin="arrMargin"
+              >
+                <VisArea
+                  :x="(datum: ArrDatum) => datum.index"
+                  :y="(datum: ArrDatum) => datum.ratio ?? 0"
+                  :color="arrConfig.ratioText.color"
+                  :opacity="0.4"
+                />
+                <VisLine
+                  :x="(datum: ArrDatum) => datum.index"
+                  :y="(datum: ArrDatum) => datum.ratio ?? 0"
+                  :color="arrConfig.ratioText.color"
+                  :line-width="1"
+                />
+                <VisScatter
+                  v-if="arrShowsMarker(arrData(arrCard))"
+                  :x="(datum: ArrDatum) => datum.index"
+                  :y="(datum: ArrDatum) => datum.ratio ?? 0"
+                  :color="arrConfig.ratioText.color"
+                  :size="8"
+                />
+              </VisXYContainer>
+            </ChartContainer>
+            <div
+              v-if="arrHover"
+              class="payment-record-chart__arr-tooltip"
+              :style="arrHoverStyle"
+              data-testid="payment-chart-arr-tooltip"
+            >
+              <strong>{{ arrHover.label }}</strong>
+              <span><em>年化订阅</em><b>{{ arrHover.annualizedText }}</b></span>
+              <span><em>买断</em><b>{{ arrHover.buyoutText }}</b></span>
+              <span><em>占比</em><b>{{ arrHover.ratioText }}</b></span>
+            </div>
+            <span
+              v-for="point in arrData(arrCard).filter((item) => item.ratio !== null)"
+              :key="point.key"
+              class="payment-record-chart__arr-label"
+              :data-testid="`payment-chart-arr-label-${point.key}`"
+              :style="{ left: arrLabelLeft(point.index, arrCard.buckets.length), top: arrLabelTop(point.ratio ?? 0) }"
+            >{{ point.ratio }}%</span>
+          </div>
+        </CardContent>
+      </Card>
+
       <Dialog :open="dialogOpen" @update:open="handleDialogChange">
         <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
           <DialogHeader>
@@ -442,6 +659,68 @@ function retryBucket(): void {
 
 .payment-record-chart__month {
   width: 100%;
+}
+
+.payment-record-chart__arr-plot {
+  position: relative;
+  height: 240px;
+}
+
+.payment-record-chart__arr-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.payment-record-chart__arr-axis,
+.payment-record-chart__arr-series,
+.payment-record-chart__arr-label {
+  pointer-events: none;
+}
+
+.payment-record-chart__arr-series :deep(path),
+.payment-record-chart__arr-series :deep(circle) {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.payment-record-chart__arr-label {
+  position: absolute;
+  color: $wolf-text-primary-v2;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transform: translate(-50%, -170%);
+  white-space: nowrap;
+}
+
+.payment-record-chart__arr-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 4px;
+  min-width: 9rem;
+  border: 1px solid $wolf-border-default-v2;
+  border-radius: 8px;
+  background: $wolf-bg-card-v2;
+  padding: 8px 10px;
+  color: $wolf-text-primary-v2;
+  font-size: 12px;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+}
+
+.payment-record-chart__arr-tooltip strong {
+  font-weight: 600;
+}
+
+.payment-record-chart__arr-tooltip span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.payment-record-chart__arr-tooltip em {
+  color: $wolf-text-tertiary-v2;
+  font-style: normal;
 }
 
 .payment-record-chart__donut-body {

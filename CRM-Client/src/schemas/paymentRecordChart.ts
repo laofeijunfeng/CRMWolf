@@ -7,6 +7,7 @@ export const PaymentRecordChartKeySchema = z.enum([
   'purchase_type',
   'amount_band',
   'payment_month',
+  'arr_ratio',
 ])
 
 export const PaymentRecordChartPreviewSchema = z.object({
@@ -26,6 +27,9 @@ export const PaymentRecordChartBucketSchema = z.object({
   amount_ratio: z.number().int().min(0).max(100),
   preview: z.array(PaymentRecordChartPreviewSchema),
   preview_total: z.number().int().nonnegative(),
+  plotted_ratio: z.number().int().min(0).max(100).nullable().optional(),
+  annualized_subscription: z.number().nullable().optional(),
+  buyout_amount: z.number().nullable().optional(),
 })
 
 export const PaymentRecordChartCardSchema = z.object({
@@ -38,7 +42,7 @@ export const PaymentRecordChartCardSchema = z.object({
 export const PaymentRecordChartResponseSchema = z.object({
   population: z.number().int().nonnegative(),
   total_amount: z.number(),
-  cards: z.array(PaymentRecordChartCardSchema).length(4),
+  cards: z.array(PaymentRecordChartCardSchema).length(5),
 })
 
 export const PaymentRecordChartBucketRecordsSchema = z.object({

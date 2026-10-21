@@ -86,6 +86,7 @@ def test_chart_uses_unpaginated_population_for_the_current_team(
         "purchase_type",
         "amount_band",
         "payment_month",
+        "arr_ratio",
     ]
     assert captured["permission"] == (db, 42, 7)
     assert captured["db"] is db

@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-PaymentRecordChartKey = Literal["license_type", "purchase_type", "amount_band", "payment_month"]
+PaymentRecordChartKey = Literal["license_type", "purchase_type", "amount_band", "payment_month", "arr_ratio"]
 
 
 class PaymentRecordChartPreview(BaseModel):
@@ -27,6 +27,9 @@ class PaymentRecordChartBucket(BaseModel):
     amount_ratio: int
     preview: list[PaymentRecordChartPreview]
     preview_total: int
+    plotted_ratio: int | None = None
+    annualized_subscription: float | None = None
+    buyout_amount: float | None = None
 
 
 class PaymentRecordChartCard(BaseModel):

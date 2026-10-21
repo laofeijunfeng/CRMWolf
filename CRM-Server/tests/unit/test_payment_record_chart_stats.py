@@ -24,6 +24,7 @@ def _record(
     customer_name="甲",
     contract="present",
     opportunity="present",
+    subscription_years=1,
 ):
     if contract is None:
         plan = SimpleNamespace(contract=None)
@@ -38,6 +39,7 @@ def _record(
         plan = SimpleNamespace(
             contract=SimpleNamespace(
                 license_type=license_type,
+                subscription_years=subscription_years,
                 opportunity=opp,
                 customer=customer,
             )
@@ -109,6 +111,7 @@ def test_groups_license_purchase_amount_and_keeps_blank_rows():
         "purchase_type",
         "amount_band",
         "payment_month",
+        "arr_ratio",
     ]
     license_card = _card(chart, "license_type")
     assert [bucket["label"] for bucket in license_card["buckets"]] == ["订阅", "买断", "未填写"]
@@ -229,3 +232,108 @@ def test_amount_ratio_uses_half_up_and_descriptions_stay_factual():
     assert license_card["description"] == "按回款金额看订阅和买断。没关联到的单独列出。"
     assert _card(chart, "payment_month")["description"] == "最近 12 个月，每个月回了多少。更早的不在这张图上。"
     assert _bucket(license_card, "blank")["count"] == 0
+
+
+def test_arr_ratio_annualizes_subscription_and_keeps_buyout_whole():
+    rows = [
+        _record(
+            id=1,
+            amount=Decimal("300000"),
+            subscription_years=3,
+            license_type="SUBSCRIPTION",
+            payment_date=date(2026, 10, 2),
+        ),
+        _record(
+            id=2,
+            amount=Decimal("100000"),
+            subscription_years=1,
+            license_type="SUBSCRIPTION",
+            payment_date=date(2026, 10, 3),
+        ),
+        _record(
+            id=3,
+            amount=Decimal("120000"),
+            subscription_years=2,
+            license_type="SUBSCRIPTION",
+            payment_date=date(2026, 10, 4),
+        ),
+        _record(
+            id=4,
+            amount=Decimal("200000"),
+            license_type="PERPETUAL",
+            subscription_years=5,
+            payment_date=date(2026, 10, 5),
+        ),
+    ]
+    october = _bucket(_card(build_payment_record_chart(rows, today=TODAY), "arr_ratio"), "2026-10")
+    assert october["plotted_ratio"] == 57
+    assert october["annualized_subscription"] == 260000
+    assert october["buyout_amount"] == 200000
+    assert october["amount"] == 720000
+    assert [item["amount"] for item in october["preview"]] == [300000, 100000, 120000, 200000]
+
+
+def test_arr_ratio_excludes_prepaid_years_from_both_sides():
+    rows = [
+        _record(id=1, amount=Decimal("300000"), subscription_years=3, license_type="SUBSCRIPTION"),
+        _record(id=2, amount=Decimal("200000"), license_type="PERPETUAL"),
+    ]
+    october = _bucket(_card(build_payment_record_chart(rows, today=TODAY), "arr_ratio"), "2026-10")
+    assert october["plotted_ratio"] == 33
+    assert october["annualized_subscription"] == 100000
+    assert october["buyout_amount"] == 200000
+
+
+def test_arr_ratio_breaks_empty_months_and_drops_excluded_rows():
+    rows = [
+        _record(id=1, amount=Decimal("200000"), license_type="PERPETUAL", payment_date=date(2026, 4, 2)),
+        _record(id=2, contract=None, amount=Decimal("900000"), payment_date=date(2026, 10, 2)),
+        _record(
+            id=3,
+            license_type="SUBSCRIPTION",
+            subscription_years=None,
+            amount=Decimal("300000"),
+            payment_date=date(2026, 10, 3),
+        ),
+        _record(
+            id=4,
+            license_type="SUBSCRIPTION",
+            subscription_years=0,
+            amount=Decimal("100000"),
+            payment_date=date(2026, 10, 4),
+        ),
+        _record(id=5, license_type="", amount=Decimal("50000"), payment_date=date(2026, 10, 5)),
+        _record(
+            id=6,
+            license_type="SUBSCRIPTION",
+            subscription_years=3,
+            amount=Decimal("300000"),
+            payment_date=date(2026, 5, 2),
+            opportunity=SimpleNamespace(subscription_years=1, purchase_type="NEW"),
+        ),
+    ]
+    chart = build_payment_record_chart(rows, today=TODAY)
+    arr = _card(chart, "arr_ratio")
+    assert arr["title"] == "ARR 占比"
+    assert arr["description"] == (
+        "和回款月份同一种面积加线。纵轴是占比。没有回款的月份也连过去，不写成 0%。只有买断落到 0%。"
+    )
+    assert _card(chart, "payment_month")["description"] == "最近 12 个月，每个月回了多少。更早的不在这张图上。"
+    february = _bucket(arr, "2026-02")
+    assert february["plotted_ratio"] is None
+    assert february["count"] == 0
+    assert february["preview"] == []
+    april = _bucket(arr, "2026-04")
+    assert april["plotted_ratio"] == 0
+    assert april["annualized_subscription"] == 0
+    assert april["buyout_amount"] == 200000
+    assert [item["id"] for item in april["preview"]] == [1]
+    october = _bucket(arr, "2026-10")
+    assert october["plotted_ratio"] is None
+    assert october["count"] == 0
+    may = _bucket(arr, "2026-05")
+    assert may["plotted_ratio"] == 100
+    assert may["annualized_subscription"] == 100000
+    assert [item["id"] for item in list_chart_bucket_records(rows, "arr_ratio", "2026-04", today=TODAY)] == [1]
+    assert list_chart_bucket_records(rows, "arr_ratio", "2026-10", today=TODAY) == []
+    assert list_chart_bucket_records(rows, "arr_ratio", "2026-02", today=TODAY) == []

@@ -7,6 +7,7 @@ import type { PaymentRecordChartBucket, PaymentRecordChartResponse } from '@/sch
 vi.mock('@unovis/ts', () => ({
   Donut: { selectors: { segment: 'segment' } },
   Area: { selectors: { area: 'area' } },
+  Scatter: { selectors: { point: 'point' } },
 }))
 
 vi.mock('@unovis/vue', () => ({
@@ -15,6 +16,7 @@ vi.mock('@unovis/vue', () => ({
   VisXYContainer: { name: 'VisXYContainer', template: '<div><slot /></div>' },
   VisArea: { name: 'VisArea', template: '<div />' },
   VisLine: { name: 'VisLine', template: '<div />' },
+  VisScatter: { name: 'VisScatter', template: '<div />' },
   VisAxis: { name: 'VisAxis', template: '<div />' },
   VisTooltip: { name: 'VisTooltip', template: '<div />' },
   VisCrosshair: { name: 'VisCrosshair', template: '<div />' },
@@ -161,6 +163,58 @@ describe('PaymentRecordChartPage', () => {
     document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-all"]')?.click()
     const events = wrapper.emitted('view-bucket')
     expect(events?.[0]?.[1]).toMatchObject({ key: 'SUBSCRIPTION', preview_total: 6 })
+    wrapper.unmount()
+  })
+
+  it('places the ARR card under the month chart and labels only defined months', () => {
+    const months = Array.from({ length: 12 }, (_item, index) => {
+      const key = `2026-${String(index + 1).padStart(2, '0')}`
+      const label = `${index + 1}月`
+      if (index === 1) return bucket(key, label, 0, 0)
+      if (index === 3) {
+        return {
+          ...bucket(key, label, 1, 200000),
+          plotted_ratio: 0,
+          annualized_subscription: 0,
+          buyout_amount: 200000,
+        }
+      }
+      if (index === 9) {
+        return {
+          ...bucket(key, label, 4, 720000),
+          plotted_ratio: 57,
+          annualized_subscription: 260000,
+          buyout_amount: 200000,
+        }
+      }
+      return {
+        ...bucket(key, label, 1, 100000),
+        plotted_ratio: 40,
+        annualized_subscription: 100000,
+        buyout_amount: 150000,
+      }
+    })
+    const withArr: PaymentRecordChartResponse = {
+      ...chart,
+      cards: [
+        ...chart.cards,
+        {
+          key: 'arr_ratio',
+          title: 'ARR 占比',
+          description: '和回款月份同一种面积加线。纵轴是占比。没有回款的月份也连过去，不写成 0%。只有买断落到 0%。',
+          buckets: months,
+        },
+      ],
+    }
+    const wrapper = mountChart(withArr)
+    const month = wrapper.get('[data-testid="payment-chart-card-payment_month"]')
+    const arr = wrapper.get('[data-testid="payment-chart-card-arr_ratio"]')
+    expect(month.element.compareDocumentPosition(arr.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(arr.text()).toContain('ARR 占比')
+    expect(arr.text()).toContain('没有回款的月份也连过去，不写成 0%。只有买断落到 0%。')
+    expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-04"]').text()).toBe('0%')
+    expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-10"]').text()).toBe('57%')
+    expect(wrapper.find('[data-testid="payment-chart-arr-label-2026-02"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })
