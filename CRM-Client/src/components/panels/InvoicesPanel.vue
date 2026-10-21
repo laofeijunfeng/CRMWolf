@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import type { InvoiceApplicationResponse, InvoiceApplicationStatus, InvoiceTitleResponse, InvoiceType, TitleType } from '@/api/invoice'
+import { hasDownloadableInvoiceFile } from '@/utils/invoiceDownload'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -117,10 +118,7 @@ const getStatusInfo = (status: InvoiceApplicationStatus): { label: string; class
   return statusMap[status] ?? { label: status, className: 'invoice-status invoice-status--draft' }
 }
 
-const canDownloadApplication = (application: InvoiceApplicationResponse): boolean =>
-  application.status === 'ISSUED' &&
-  application.invoice_file_path !== null &&
-  application.invoice_file_path.trim() !== ''
+const canDownloadApplication = hasDownloadableInvoiceFile
 
 const getApplicationCompanyName = (application: InvoiceApplicationResponse): string => {
   const customerName = application.customer_name?.trim()

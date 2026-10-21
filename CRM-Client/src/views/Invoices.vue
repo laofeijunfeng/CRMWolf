@@ -29,10 +29,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
-import {
-  downloadInvoiceFile as downloadInvoiceFileApi,
-  downloadInvoiceReissueFile,
-} from '@/api/fileUpload'
+import { downloadResolvedInvoice, hasDownloadableInvoiceFile, resolveInvoiceDownload } from '@/utils/invoiceDownload'
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams,
@@ -50,7 +47,6 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -600,25 +596,15 @@ const handleInvoiceIssued = async (): Promise<void> => {
 }
 
 const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<void> => {
-  if (row.invoice_effective_status === 'RED_OFFSET') {
-    toast.warning('原蓝字发票已红冲，不能下载')
-    return
-  }
-
-  const filePath = row.current_invoice_file_path ?? row.invoice_file_path
-  if (filePath === null || filePath === undefined || filePath.trim() === '') {
-    toast.warning('该发票暂无可下载文件')
+  const download = resolveInvoiceDownload(row)
+  if (typeof download === 'string') {
+    toast.warning(download)
     return
   }
 
   try {
     toast.info('正在下载发票文件')
-    const fileName = buildInvoiceDownloadFileName(row.customer_name, filePath)
-    if (row.current_invoice_file_kind === 'reissue_new' && row.current_reissue_id !== null && row.current_reissue_id !== undefined) {
-      await downloadInvoiceReissueFile(row.current_reissue_id, 'new', fileName)
-    } else {
-      await downloadInvoiceFileApi(row.id, fileName)
-    }
+    await downloadResolvedInvoice(download)
   } catch (error) {
     handleApiError(error, '下载发票文件')
   }
@@ -677,11 +663,6 @@ const getInvoiceEffectiveStatusClass = (status: InvoiceEffectiveStatus | null | 
   return status === null || status === undefined ? 'status-success' : map[status] ?? 'status-success'
 }
 
-const hasDownloadableInvoiceFile = (row: InvoiceApplicationResponse): boolean => {
-  if (row.invoice_effective_status === 'RED_OFFSET') return false
-  const filePath = row.current_invoice_file_path ?? row.invoice_file_path
-  return row.status === 'ISSUED' && filePath !== null && filePath !== undefined && filePath.trim() !== ''
-}
 
 const formatDateTime = (dateStr: string): string => {
   const date = new Date(dateStr)

@@ -77,7 +77,7 @@ import paymentApi, {
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseType as LicenseApplicationType } from '@/api/licenseApplication'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
-import { downloadInvoiceFile as downloadInvoiceFileApi } from '@/api/fileUpload'
+import { downloadResolvedInvoice, resolveInvoiceDownload } from '@/utils/invoiceDownload'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 
@@ -859,9 +859,15 @@ async function handleInvoiceApplicationSuccess(): Promise<void> {
 
 async function handleDownloadInvoiceApplication(application: InvoiceApplicationResponse): Promise<void> {
   if (downloadingInvoiceApplicationId.value !== null) return
+  const download = resolveInvoiceDownload(application)
+  if (typeof download === 'string') {
+    toast.warning(download)
+    return
+  }
+
   downloadingInvoiceApplicationId.value = application.id
   try {
-    await downloadInvoiceFileApi(application.id, application.invoice_number ?? undefined)
+    await downloadResolvedInvoice(download)
     toast.success('发票文件已开始下载')
   } catch (error) {
     handleApiError(error, '下载发票文件')
