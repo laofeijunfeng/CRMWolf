@@ -408,6 +408,12 @@ class OpportunityCRUD:
         from app.crud.product import product_crud
 
         product_crud.lock_catalog_team(db, team_id)
+        customer = db.query(Customer).filter(
+            Customer.id == obj_in.customer_id,
+            Customer.team_id == team_id,
+        ).one_or_none()
+        if customer is None:
+            raise ValueError("客户不存在")
 
         # 1. 确定采购方式
         if obj_in.procurement_method_id is not None:
