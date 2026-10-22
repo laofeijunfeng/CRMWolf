@@ -8,7 +8,7 @@ import {
 import JourneySearch from '@/components/crmwolf/DataTableSearch.vue'
 import ListAdvancedTools from '@/components/crmwolf/ListAdvancedTools.vue'
 import { projectListFieldCatalog } from '@/components/crmwolf/listFieldCatalog'
-import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -21,7 +21,6 @@ interface Props {
   sorts: ListSortCondition[]
   columns: ViewPreferenceConfig['columns']
   search: string
-  displayMode: ViewDisplayMode
   loading?: boolean
   saving?: boolean
 }
@@ -43,7 +42,6 @@ const emit = defineEmits<{
   'sort-reset': []
   'column-config-save': [value: ViewPreferenceConfig]
   'column-config-reset': []
-  'update:view-display-mode': [value: ViewDisplayMode]
   refresh: []
 }>()
 
@@ -107,8 +105,6 @@ function handleColumnConfigSave(): void {
       :column-config-active-count="columns.filter(column => column.visible === false).length"
       column-config-scope="personal"
       column-preference-mode="custom"
-      :view-display-mode="displayMode"
-      view-display-mode-enabled
       view-config-trigger-label="视图配置"
       view-config-panel-title="视图配置"
       @update:sorts="emit('update:sorts', $event)"
@@ -117,7 +113,6 @@ function handleColumnConfigSave(): void {
       @column-config-change="draftColumns = $event"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="emit('column-config-reset')"
-      @update:view-display-mode="emit('update:view-display-mode', $event)"
     />
     <TableToolbarButton :disabled="loading" aria-label="刷新业务旅程" @click="emit('refresh')">
       <RefreshCw class="refresh-icon" :class="{ spinning: loading }" aria-hidden="true" />

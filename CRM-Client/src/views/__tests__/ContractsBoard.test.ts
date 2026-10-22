@@ -15,16 +15,19 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const teamState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ currentTeam: { id: 11 } as { id: number } | null })
 })
 
 const userState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ userInfo: { id: 42 } as { id: number } | null })
 })
 
 const permissionState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({
     permissions: ['contract:view:all', 'contract:export'].map((code) => ({ code })),
@@ -36,6 +39,7 @@ const permissionState = vi.hoisted(() => {
 })
 
 const headerStore = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   const store = vueReactive({
     activeTab: 'all',
@@ -223,7 +227,10 @@ function mountPage(): VueWrapper {
 }
 
 async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise<void> {
-  wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', mode)
+  const label = mode === 'board' ? '看板' : '列表'
+  const tab = wrapper.get('[aria-label="合同展示"]').findAll('button').find((button) => button.text() === label)
+  if (tab === undefined) throw new Error(`missing contract ${label} tab`)
+  await tab.trigger('mousedown')
   await flushPromises()
 }
 
@@ -231,6 +238,13 @@ function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElemen
   const button = wrapper.get(`[data-column-key="${columnKey}"] .board-column__footer button`).element
   if (!(button instanceof HTMLButtonElement)) throw new Error('view-all control is not a button')
   return button
+}
+
+
+function emitFrom(vm: object, event: string, payload?: unknown): void {
+  const emit = (vm as { $emit: (name: string, value?: unknown) => void }).$emit
+  if (payload === undefined) emit(event)
+  else emit(event, payload)
 }
 
 describe('Contracts board integration', () => {
@@ -254,13 +268,13 @@ describe('Contracts board integration', () => {
     mocks.getOwnerFilterOptions.mockResolvedValue({ data: [] })
   })
 
-  it('shows list and chart in the toolbar and does not offer a board tab', async () => {
+  it('shows list, board, and chart in the toolbar', async () => {
     const wrapper = mountPage()
     await flushPromises()
     const tabs = wrapper.get('[aria-label="合同展示"]')
     expect(tabs.text()).toContain('列表')
+    expect(tabs.text()).toContain('看板')
     expect(tabs.text()).toContain('图表')
-    expect(tabs.text()).not.toContain('看板')
     wrapper.unmount()
   })
 
@@ -270,7 +284,6 @@ describe('Contracts board integration', () => {
 
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('table')
-    expect(table.props('viewDisplayModeEnabled')).toBe(true)
     expect(table.props('data')).toEqual([contract])
     expect(mocks.getContracts).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, limit: 20, status: null }))
     expect(mocks.getContractBoard).not.toHaveBeenCalled()
@@ -281,10 +294,10 @@ describe('Contracts board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('filter-apply', [{ field: 'license_type', op: 'eq', value: 'SUBSCRIPTION' }])
-    table.vm.$emit('sort-apply', [{ field: 'signing_date', direction: 'desc' }])
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'filter-apply', [{ field: 'license_type', op: 'eq', value: 'SUBSCRIPTION' }])
+emitFrom(table.vm, 'sort-apply', [{ field: 'signing_date', direction: 'desc' }])
     await flushPromises()
     mocks.getContractBoard.mockClear()
 
@@ -323,9 +336,9 @@ describe('Contracts board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('update:page', 3)
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'update:page', 3)
     await flushPromises()
     await switchMode(wrapper, 'board')
 
@@ -353,7 +366,7 @@ describe('Contracts board integration', () => {
   it('restores columns, pagination, export, and row actions when returning to table mode', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:page', 2)
+    emitFrom(wrapper.getComponent({ name: 'DataTable' }).vm, 'update:page', 2)
     await flushPromises()
     await switchMode(wrapper, 'board')
     await switchMode(wrapper, 'table')
@@ -378,7 +391,7 @@ describe('Contracts board integration', () => {
     await switchMode(wrapper, 'board')
 
     mocks.getContractBoard.mockRejectedValueOnce(new Error('board refresh failed'))
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '失败刷新')
+    emitFrom(wrapper.getComponent({ name: 'DataTable' }).vm, 'search-apply', '失败刷新')
     await flushPromises()
 
     expect(wrapper.getComponent({ name: 'ContractBoardProjection' }).props('response')).toEqual(boardResponse)
@@ -399,7 +412,8 @@ describe('Contracts board integration', () => {
     mocks.getContracts.mockClear()
     mocks.getContractBoard.mockClear()
     const dialogs = wrapper.findAllComponents({ name: 'ContractFormDialog' })
-    dialogs[dialogs.length - 1]?.vm.$emit('success')
+    const savedDialog = dialogs[dialogs.length - 1]
+    if (savedDialog) emitFrom(savedDialog.vm, 'success')
     await flushPromises()
 
     expect(mocks.getContractBoard).toHaveBeenCalledTimes(1)

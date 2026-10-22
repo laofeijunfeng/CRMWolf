@@ -4,10 +4,9 @@ import { Eye, EyeOff, GripVertical, Lock, Settings2, User, Users } from 'lucide-
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import TableToolbarButton from './TableToolbarButton.vue'
 import TableToolbarBuilderPanel from './TableToolbarBuilderPanel.vue'
-import type { ViewDisplayMode, ViewPreferenceScope } from '@/api/viewPreference'
+import type { ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 
 const props = withDefaults(defineProps<{
@@ -19,9 +18,6 @@ const props = withDefaults(defineProps<{
   scope?: ViewPreferenceScope
   scopeEditable?: boolean
   open?: boolean | null
-  viewDisplayMode?: ViewDisplayMode | null
-  viewDisplayModeEnabled?: boolean
-  viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
 }>(), {
@@ -32,16 +28,12 @@ const props = withDefaults(defineProps<{
   scope: 'personal',
   scopeEditable: true,
   open: null,
-  viewDisplayMode: null,
-  viewDisplayModeEnabled: false,
-  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
 })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  'update:view-display-mode': [value: ViewDisplayMode]
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
   reset: [scope: ViewPreferenceScope]
@@ -61,23 +53,6 @@ const selectedScope = ref<ViewPreferenceScope>(props.scope)
 const normalizedActiveCount = computed(() => props.activeCount ?? 0)
 const isActive = computed(() => props.active || normalizedActiveCount.value > 0)
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
-const displayModeLabels: Record<ViewDisplayMode, string> = {
-  table: '列表',
-  board: '看板',
-  chart: '图表',
-}
-const allowedDisplayModes = computed(() => props.viewDisplayModes ?? ['table', 'board', 'chart'])
-const selectableDisplayMode = computed<ViewDisplayMode | undefined>(() => (
-  props.viewDisplayMode === 'table' || props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'
-    ? props.viewDisplayMode
-    : undefined
-))
-
-function emitMode(value: unknown): void {
-  if (value === 'table' || value === 'board' || value === 'chart') {
-    emit('update:view-display-mode', value)
-  }
-}
 
 function cloneColumns(columns: ColumnConfigOption[]): ColumnConfigOption[] {
   return columns.map((column) => ({ ...column }))
@@ -171,24 +146,6 @@ watch(() => props.scope, (scope) => {
           </Button>
         </div>
 
-        <ToggleGroup
-          v-if="viewDisplayModeEnabled"
-          type="single"
-          class="column-config-mode-selector"
-          aria-label="展示模式"
-          :model-value="selectableDisplayMode"
-          @update:model-value="emitMode"
-        >
-          <ToggleGroupItem
-            v-for="mode in allowedDisplayModes"
-            :key="mode"
-            :value="mode"
-          >
-            {{ displayModeLabels[mode] }}
-          </ToggleGroupItem>
-        </ToggleGroup>
-
-        <div v-if="viewDisplayModeEnabled" class="column-config-section-title column-config-section-title--columns">字段</div>
 
         <ScrollArea class="column-config-list-scroll">
           <div v-if="loading" class="column-config-state">正在读取配置</div>
@@ -253,23 +210,6 @@ watch(() => props.scope, (scope) => {
   gap: $wolf-space-sm-v2;
 }
 
-.column-config-mode-selector {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-xs-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
-}
-
-.column-config-section-title {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-}
-
-.column-config-section-title--columns {
-  margin-top: $wolf-space-sm-v2;
-}
 
 .column-config-list-scroll {
   height: 320px;

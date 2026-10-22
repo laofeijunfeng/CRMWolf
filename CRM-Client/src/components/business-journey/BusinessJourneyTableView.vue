@@ -165,7 +165,6 @@ function setDisplayMode(value: string): void {
     @column-config-current-change="emit('column-config-current-change', $event)"
     @column-config-save="emit('column-config-save', $event)"
     @column-config-reset="emit('column-config-reset')"
-    @update:view-display-mode="emit('update:view-display-mode', $event)"
     @save-current-view="emit('save-current-view')"
     @retry-view-apply="emit('retry-view-apply')"
     @update:search="emit('update:search', $event)"

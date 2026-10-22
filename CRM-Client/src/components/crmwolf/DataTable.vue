@@ -158,12 +158,8 @@ interface Props {
   searchLoading?: boolean
   /** 筛选视图保存中 */
   filterViewSaveLoading?: boolean
-  /** 当前展示模式 */
   viewDisplayMode?: ViewDisplayMode | null
-  /** 是否在视图配置里提供展示模式；工具栏切换由页面使用 Tabs */
-  viewDisplayModeEnabled?: boolean
-  /** 视图配置里可选的展示模式。不传则列表、看板、图表都在 */
-  viewDisplayModes?: ViewDisplayMode[]
+  /** 当前是列表、看板还是图表。看板和图表时隐藏表格与分页，工具栏页签由页面自己画 */
   /** 配置入口标签 */
   viewConfigTriggerLabel?: string
   /** 配置面板标题 */
@@ -228,8 +224,6 @@ const props = withDefaults(defineProps<Props>(), {
   filterViewSaveEnabled: false,
   filterViewSaveLoading: false,
   viewDisplayMode: null,
-  viewDisplayModeEnabled: false,
-  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
   canSaveCurrentView: false,
@@ -266,7 +260,6 @@ const props = withDefaults(defineProps<Props>(), {
     'column-config-current-change': [value: ViewPreferenceConfig]
     'column-config-save': [value: ViewPreferenceConfig]
     'column-config-reset': []
-    'update:view-display-mode': [value: ViewDisplayMode]
     'save-current-view': []
     'remove-filter': [id: string]
     'clear-filters': []
@@ -331,7 +324,10 @@ const tableCardClass = computed(() => ({
   'data-table-card--compact-pagination': props.compactPagination,
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
-const isInitialLoading = computed(() => !props.contentHidden && effectiveViewState.value === 'loading')
+const listBodyHidden = computed(() =>
+  props.contentHidden || props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'
+)
+const isInitialLoading = computed(() => !listBodyHidden.value && effectiveViewState.value === 'loading')
 const isRefreshing = computed(() => effectiveViewState.value === 'refreshing')
 const hasBlockingError = computed(() =>
   effectiveViewState.value === 'error' && props.data.length === 0
@@ -373,7 +369,6 @@ const toolbarSortFields = computed(() => (
 const hasAdvancedTools = computed(() =>
   toolbarSortFields.value.length > 0
   || isColumnConfigAvailable.value
-  || props.viewDisplayModeEnabled
   || exportAvailable.value
 )
 const hasTableTools = computed(() =>
@@ -1098,8 +1093,6 @@ onBeforeUnmount(() => {
           :column-preference-mode="columnPreferenceMode ?? 'default'"
           :column-config-loading="columnConfigLoading"
           :column-config-saving="columnConfigSaving"
-          :view-display-mode-enabled="props.viewDisplayModeEnabled"
-          :view-display-modes="props.viewDisplayModes"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
           :export-fields="exportDialogFields"
@@ -1113,7 +1106,6 @@ onBeforeUnmount(() => {
           @column-config-change="handleColumnConfigChange"
           @column-config-save="handleColumnConfigSave"
           @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
-          @update:view-display-mode="emit('update:view-display-mode', $event)"
         />
         <slot name="tableTools" />
       </div>
@@ -1135,7 +1127,7 @@ onBeforeUnmount(() => {
         @retry-view-apply="emit('retry-view-apply')"
       />
 
-      <div v-if="contentHidden" class="data-table-replacement">
+      <div v-if="listBodyHidden" class="data-table-replacement">
         <slot name="replacement" />
       </div>
 

@@ -29,10 +29,11 @@ import {
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
+import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import PaymentPlanBoardProjection from '@/components/payment/PaymentPlanBoardProjection.vue'
@@ -303,7 +304,7 @@ const refreshActivePaymentPlanView = (): Promise<boolean> => {
   return paymentPlanBoard.refresh(boardParams.value).then(() => true, () => false)
 }
 
-const handleDisplayModeChange = (mode: ViewDisplayMode): void => {
+const handleDisplayModeChange = (mode: string | number | undefined): void => {
   if (mode !== 'table' && mode !== 'board') return
   if (mode === displayMode.value) return
   displayMode.value = mode
@@ -784,7 +785,6 @@ defineExpose({
       :total="pagination.total"
       :sorts="activeSorts"
       view-key="payment-plans.list"
-      view-display-mode-enabled
       :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
@@ -827,8 +827,15 @@ defineExpose({
       @column-config-reset="handleColumnConfigReset"
       @retry="refreshActivePaymentPlanView"
       @row-click="handleViewDetail"
-      @update:view-display-mode="handleDisplayModeChange"
     >
+      <template #tableTools>
+        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
+          <TabsList aria-label="回款计划展示" class="h-8 p-0.5">
+            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </template>
       <template v-if="displayMode === 'board'" #replacement>
         <PaymentPlanBoardProjection
           :response="paymentPlanBoard.data"

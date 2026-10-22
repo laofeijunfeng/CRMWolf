@@ -349,9 +349,10 @@ function mountPage(): VueWrapper {
 }
 
 async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise<void> {
-  const table = wrapper.getComponent({ name: 'DataTable' })
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-  table.vm.$emit('update:view-display-mode', mode)
+  const label = mode === 'board' ? '看板' : '列表'
+  const tab = wrapper.get('[aria-label="客户展示"]').findAll('button').find((button) => button.text() === label)
+  if (tab === undefined) throw new Error(`missing customer ${label} tab`)
+  await tab.trigger('mousedown')
   await flushPromises()
 }
 
@@ -384,7 +385,10 @@ describe('Customers board integration', () => {
 
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('table')
-    expect(table.props('viewDisplayModeEnabled')).toBe(true)
+    const tabs = wrapper.get('[aria-label="客户展示"]')
+    expect(tabs.text()).toContain('列表')
+    expect(tabs.text()).toContain('看板')
+    expect(tabs.text()).toContain('图表')
     expect(table.props('data')).toEqual([customer])
     expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({
       skip: 0,
@@ -446,7 +450,8 @@ describe('Customers board integration', () => {
     await flushPromises()
     mocks.getCustomerBoard.mockClear()
 
-    await switchMode(wrapper, 'board')
+    expect(wrapper.find('[aria-label="客户展示"]').exists()).toBe(false)
+    await flushPromises()
     await flushPromises()
 
 
@@ -785,9 +790,7 @@ describe('Customers board integration', () => {
     await flushPromises()
     const listCallsBeforeBoard = mocks.getCustomers.mock.calls.length
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', 'board')
-    await nextTick()
+    await switchMode(wrapper, 'board')
 
     expect(wrapper.find('[data-testid="board-skeleton"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="data-table-retry"]').exists()).toBe(false)

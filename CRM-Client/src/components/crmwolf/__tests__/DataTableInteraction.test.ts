@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { normalizeListChartDisplayMode, viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, type ViewPreferenceItem } from '@/api/viewPreference'
 import { readFileSync } from 'node:fs'
@@ -605,12 +605,24 @@ function preferenceItem(displayMode: ViewDisplayMode | null): ViewPreferenceItem
 }
 
 describe('DataTable display mode selector', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
+  })
+
   afterEach(() => {
     document.body.innerHTML = ''
     vi.restoreAllMocks()
   })
 
-  async function openModeSelector(mode: ViewDisplayMode | null = 'table'): Promise<VueWrapper> {
+  async function openColumnConfig(mode: ViewDisplayMode | null = 'table'): Promise<VueWrapper> {
     const wrapper = mount(DataTable, {
       attachTo: document.body,
       props: {
@@ -621,7 +633,6 @@ describe('DataTable display mode selector', () => {
         pageSize: 10,
         viewKey: 'customers.list',
         columnConfigEnabled: true,
-        viewDisplayModeEnabled: true,
         viewDisplayMode: mode,
       },
     })
@@ -634,35 +645,17 @@ describe('DataTable display mode selector', () => {
     return wrapper
   }
 
-  it('renders list and board labels and emits only those modes', async () => {
-    const wrapper = await openModeSelector('table')
-
-    expect(document.body.textContent).toContain('列表')
-    expect(document.body.textContent).toContain('看板')
-    expect(document.body.querySelector('[role="switch"]')).toBeNull()
-
-    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
-      item.textContent?.trim() === '看板'
-    ))
-    board?.click()
-    await flushPromises()
-
-    expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
-    expect(wrapper.emitted('update:view-display-mode')?.flat()).not.toContain('chart')
-    wrapper.unmount()
-  })
-
-  it('rejects a chart value in the selector', async () => {
-    const wrapper = await openModeSelector('chart')
-    const options = ['列表', '看板'].map((label) => (
+  it('keeps list board and chart out of column config', async () => {
+    const wrapper = await openColumnConfig('board')
+    const labels = ['列表', '看板', '图表']
+    const buttons = labels.map((label) => (
       Array.from(document.body.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)
     ))
-    const selected = options.filter((item) => (
-      item?.getAttribute('data-state') === 'on' || item?.getAttribute('aria-pressed') === 'true'
-    ))
 
-    expect(options.every((item) => item instanceof HTMLButtonElement)).toBe(true)
-    expect(selected).toEqual([])
+    expect(buttons.every((item) => item === undefined)).toBe(true)
+    expect(document.body.querySelector('.column-config-section-title')).toBeNull()
+    expect(document.body.textContent).toContain('保存')
+    expect(document.body.textContent).toContain('恢复默认')
     expect(wrapper.emitted('update:view-display-mode')).toBeUndefined()
     wrapper.unmount()
   })
@@ -676,7 +669,6 @@ describe('DataTable display mode selector', () => {
         page: 3,
         pageSize: 10,
         viewDisplayMode: 'board',
-        viewDisplayModeEnabled: true,
         searchEnabled: true,
         search: '重点',
         filterFields: [{ key: 'name', label: '名称', type: 'text' }],
@@ -732,7 +724,6 @@ describe('DataTable display mode selector', () => {
         columnConfigEnabled: true,
         fixedLeftCount: 0,
         viewDisplayMode: 'table',
-        viewDisplayModeEnabled: true,
       },
     })
     await flushPromises()

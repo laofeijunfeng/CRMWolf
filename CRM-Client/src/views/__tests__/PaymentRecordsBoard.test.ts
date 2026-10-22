@@ -18,16 +18,19 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const teamState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ currentTeam: { id: 11 } as { id: number } | null })
 })
 
 const userState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ userInfo: { id: '42' } as { id: string } | null })
 })
 
 const permissionState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({
     permissions: ['payment:record:view', 'payment:record:export', 'payment:record:edit', 'payment:record:delete', 'payment:submit'].map((code) => ({ code })),
@@ -42,6 +45,7 @@ const permissionState = vi.hoisted(() => {
 })
 
 const headerStore = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   const store = vueReactive({
     activeTab: 'all',
@@ -261,8 +265,19 @@ function mountPage(): VueWrapper {
   return mount(PaymentRecords, { global: { stubs: { StatusBadge: true } } })
 }
 
-async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise<void> {
-  wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', mode)
+
+async function enterBoard(wrapper: VueWrapper): Promise<void> {
+  const page = pageState(wrapper)
+  page.displayMode = 'board'
+  page.activeFilters = [...page.activeFilters]
+  await flushPromises()
+}
+
+async function switchMode(wrapper: VueWrapper, mode: 'table' | 'chart'): Promise<void> {
+  const label = mode === 'chart' ? '图表' : '列表'
+  const tab = wrapper.get('[aria-label="回款展示"]').findAll('button').find((button) => button.text() === label)
+  if (tab === undefined) throw new Error(`missing payment record ${label} tab`)
+  await tab.trigger('mousedown')
   await flushPromises()
 }
 
@@ -270,6 +285,13 @@ function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElemen
   const button = wrapper.get(`[data-column-key="${columnKey}"] .board-column__footer button`).element
   if (!(button instanceof HTMLButtonElement)) throw new Error('view-all control is not a button')
   return button
+}
+
+
+function emitFrom(vm: object, event: string, payload?: unknown): void {
+  const emit = (vm as { $emit: (name: string, value?: unknown) => void }).$emit
+  if (payload === undefined) emit(event)
+  else emit(event, payload)
 }
 
 describe('Payment records board integration', () => {
@@ -298,8 +320,6 @@ describe('Payment records board integration', () => {
 
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('table')
-    expect(table.props('viewDisplayModeEnabled')).toBe(true)
-    expect(table.props('viewDisplayModes')).toEqual(['table', 'chart'])
     const tabs = wrapper.get('[aria-label="回款展示"]')
     expect(tabs.text()).toContain('列表')
     expect(tabs.text()).toContain('图表')
@@ -318,13 +338,13 @@ describe('Payment records board integration', () => {
     page.ownRecordScope = true
     page.activeFilters = [{ field: 'payment_date', op: 'before', value: '2026-10-01' }]
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('sort-apply', [{ field: 'payment_date', direction: 'asc' }])
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'sort-apply', [{ field: 'payment_date', direction: 'asc' }])
     await flushPromises()
     mocks.getPaymentRecordBoard.mockClear()
 
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     const params = mocks.getPaymentRecordBoard.mock.calls[0]?.[0] as PaymentRecordBoardParams
     expect(params).toEqual(expect.objectContaining({
@@ -347,7 +367,7 @@ describe('Payment records board integration', () => {
     headerStore.activeTab = 'confirmed'
     await flushPromises()
     mocks.listPaymentRecords.mockClear()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     const page = pageState(wrapper)
     expect(page.activeTab).toBe('confirmed')
@@ -364,7 +384,7 @@ describe('Payment records board integration', () => {
   it('keeps approval columns independent from confirmation badges', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     const approved = wrapper.get('[data-column-key="approved"]')
     const approval = approved.findAll('dt').find((term) => term.text() === '审批状态')
@@ -380,7 +400,7 @@ describe('Payment records board integration', () => {
   it('opens board cards through a numeric detail id and leaves the list record empty', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     await wrapper.get('[data-column-key="approved"] .board-card').trigger('click')
     await nextTick()
@@ -400,7 +420,7 @@ describe('Payment records board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('row-click', record)
+    emitFrom(wrapper.getComponent({ name: 'DataTable' }).vm, 'row-click', record)
     await nextTick()
 
     const page = pageState(wrapper)
@@ -415,7 +435,7 @@ describe('Payment records board integration', () => {
   it('shows edit, delete, and resubmit only when the existing action locks allow them', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     const approved = wrapper.get('[data-column-key="approved"]')
     const rejected = wrapper.get('[data-column-key="rejected"]')
@@ -451,11 +471,11 @@ describe('Payment records board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('update:page', 4)
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'update:page', 4)
     await flushPromises()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     expect(viewAllButton(wrapper, 'unclassified').disabled).toBe(false)
     expect(viewAllButton(wrapper, 'approved').disabled).toBe(false)
@@ -474,7 +494,7 @@ describe('Payment records board integration', () => {
       filters: JSON.stringify([{ field: 'approval_status', op: 'is_empty', value: null }]),
     }))
 
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
     await wrapper.get('[data-column-key="approved"] .board-column__footer button').trigger('click')
     await flushPromises()
 
@@ -488,7 +508,7 @@ describe('Payment records board integration', () => {
   it('keeps a successful snapshot stale after refresh failure and disables drill-through', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
     mocks.getPaymentRecordBoard.mockRejectedValueOnce(new Error('board refresh failed'))
     const search = wrapper.get('input[type="search"]')
     await search.setValue('失败刷新')
@@ -511,10 +531,10 @@ describe('Payment records board integration', () => {
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(typeof table.props('exportHandler')).toBe('function')
-    await switchMode(wrapper, 'board')
+    await enterBoard(wrapper)
 
     expect(wrapper.getComponent({ name: 'DataTable' }).props('exportEnabled')).toBe(true)
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', 'table')
+    await switchMode(wrapper, 'table')
     await flushPromises()
 
     const restored = wrapper.getComponent({ name: 'DataTable' })

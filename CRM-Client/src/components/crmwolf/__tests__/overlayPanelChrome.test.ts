@@ -315,18 +315,16 @@ describe('overlay panel chrome', () => {
         configurable: true,
         hideable: true,
       }],
-      viewDisplayModeEnabled: true,
-      viewDisplayMode: 'table',
       viewConfigTriggerLabel: '视图配置',
       viewConfigPanelTitle: '视图配置',
     })
 
     await openToolbarPopover(wrapper, '视图配置')
 
-    expect(document.body.textContent).toContain('列表')
-    expect(document.body.textContent).toContain('看板')
-    expect(document.body.textContent).not.toContain('看板视图')
-    expect(document.body.textContent).toContain('字段')
+    expect(document.body.textContent).not.toContain('列表')
+    expect(document.body.textContent).not.toContain('看板')
+    expect(document.body.textContent).not.toContain('图表')
+    expect(document.body.querySelector('.column-config-section-title')).toBeNull()
     expect(document.body.querySelector('[role="switch"]')).toBeNull()
     expect(findButton('关闭')).toBeTruthy()
   })

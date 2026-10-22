@@ -534,8 +534,6 @@ const openBoardRecordAction = async (
   isResubmitMode.value = true
 }
 
-const paymentViewDisplayModes: ViewDisplayMode[] = ['table', 'chart']
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-records.list',
   activeTab,
@@ -894,9 +892,7 @@ defineExpose({
       :page-size="pagination.pageSize"
       :total="pagination.total"
       view-key="payment-records.list"
-      view-display-mode-enabled
       :view-display-mode="displayMode"
-      :view-display-modes="paymentViewDisplayModes"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -937,7 +933,6 @@ defineExpose({
       @column-config-reset="handleColumnConfigReset"
       @retry="refreshActivePaymentRecordView"
       @row-click="handleViewDetail"
-      @update:view-display-mode="handleDisplayModeChange"
     >
       <template #tableTools>
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">

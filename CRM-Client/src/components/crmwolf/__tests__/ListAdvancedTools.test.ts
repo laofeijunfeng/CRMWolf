@@ -210,12 +210,10 @@ describe('ListAdvancedTools', () => {
     expect(wrapper.emitted('column-config-save')).toEqual([['team']])
   })
 
-  it('shows the optional journey view config and emits board mode', async () => {
+  it('keeps display modes out of the column config surface', async () => {
     const wrapper = mount(ListAdvancedTools, {
       props: {
         ...props,
-        viewDisplayModeEnabled: true,
-        viewDisplayMode: 'table',
         viewConfigTriggerLabel: '视图配置',
         viewConfigPanelTitle: '视图配置',
       },
@@ -230,40 +228,16 @@ describe('ListAdvancedTools', () => {
     expect(trigger).toBeDefined()
     trigger?.click()
     await flushPromises()
-    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
-      item.textContent?.trim() === '看板'
+    const modeButtons = ['列表', '看板', '图表'].map((label) => (
+      Array.from(document.body.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)
     ))
-    const list = Array.from(document.body.querySelectorAll('button')).find((item) => (
-      item.textContent?.trim() === '列表'
-    ))
-    expect(board).toBeInstanceOf(HTMLButtonElement)
-    expect(list).toBeInstanceOf(HTMLButtonElement)
-    expect(document.body.querySelector('[role="switch"]')).toBeNull()
-    board?.click()
-    await flushPromises()
-    expect(wrapper.emitted('update:view-display-mode')).toEqual([['board']])
-  })
-
-  it('does not offer save-as-view inside the config surface', async () => {
-    const wrapper = mount(ListAdvancedTools, {
-      props: {
-        ...props,
-        viewDisplayModeEnabled: true,
-        viewDisplayMode: 'board',
-        viewConfigTriggerLabel: '视图配置',
-        viewConfigPanelTitle: '视图配置',
-      },
-      attachTo: document.body,
-    })
-    wrappers.push(wrapper)
-    await flushPromises()
-    const trigger = Array.from(document.body.querySelectorAll('button')).find(button => (
-      button.textContent?.includes('视图配置') === true
-    ))
-    trigger?.click()
-    await flushPromises()
-    const save = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.replace(/\s+/g, '') === '另存为视图')
-    expect(save).toBeUndefined()
+    expect(modeButtons.every((item) => item === undefined)).toBe(true)
+    expect(document.body.querySelector('.column-config-section-title')).toBeNull()
+    expect(document.body.textContent).toContain('保存')
+    expect(document.body.textContent).toContain('恢复默认')
+    const saveAsView = Array.from(document.body.querySelectorAll('button')).find(button => button.textContent?.replace(/\s+/g, '') === '另存为视图')
+    expect(saveAsView).toBeUndefined()
+    expect(wrapper.emitted('update:view-display-mode')).toBeUndefined()
   })
 
   it('keeps existing pages free of the board switch and view label', async () => {
@@ -274,40 +248,5 @@ describe('ListAdvancedTools', () => {
     expect(document.body.textContent).not.toContain('列表')
     expect(document.body.textContent).not.toContain('视图配置')
     expect(document.body.textContent).toContain('字段配置')
-  })
-
-  it('preserves controlled board mode across the compact breakpoint', async () => {
-    const viewport = mockViewportWidth(767.5)
-    const wrapper = mount(ListAdvancedTools, {
-      props: {
-        ...props,
-        viewDisplayModeEnabled: true,
-        viewDisplayMode: 'table',
-        viewConfigTriggerLabel: '视图配置',
-        viewConfigPanelTitle: '视图配置',
-      },
-      attachTo: document.body,
-    })
-    wrappers.push(wrapper)
-    await flushPromises()
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
-    const trigger = Array.from(document.body.querySelectorAll('button')).find(button => (
-      button.textContent?.includes('视图配置') === true
-    ))
-    trigger?.click()
-    await flushPromises()
-    const board = Array.from(document.body.querySelectorAll('button')).find((item) => (
-      item.textContent?.trim() === '看板'
-    ))
-    board?.click()
-    await wrapper.setProps({ viewDisplayMode: 'board' })
-    viewport.setWidth(768)
-    await flushPromises()
-    const selectedBoard = Array.from(document.body.querySelectorAll('button')).find((item) => (
-      item.textContent?.trim() === '看板'
-    ))
-    expect(selectedBoard?.getAttribute('data-state')).toBe('on')
-    expect(document.body.querySelector('[role="switch"]')).toBeNull()
   })
 })

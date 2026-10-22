@@ -889,7 +889,6 @@ defineExpose({
       v-model:filters="activeFilters"
       :sorts="activeSorts"
       view-key="contracts.list"
-      view-display-mode-enabled
       :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
@@ -919,12 +918,12 @@ defineExpose({
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
       @row-click="handleViewDetail"
-      @update:view-display-mode="handleDisplayModeChange"
     >
       <template #tableTools>
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
           <TabsList aria-label="合同展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>

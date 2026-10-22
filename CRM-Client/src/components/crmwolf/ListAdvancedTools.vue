@@ -7,7 +7,7 @@ import TableToolbarButton from './TableToolbarButton.vue'
 import ListSortPopover from './ListSortPopover.vue'
 import ColumnConfigPopover from './ColumnConfigPopover.vue'
 import DataTableExportDialog, { type DataTableExportDialogField } from './DataTableExportDialog.vue'
-import type { ViewDisplayMode, ViewPreferenceScope } from '@/api/viewPreference'
+import type { ViewPreferenceScope } from '@/api/viewPreference'
 import type { ColumnConfigOption } from './columnConfigTypes'
 import type { ListSortCondition, ListSortField } from './listSortTypes'
 
@@ -22,9 +22,6 @@ const props = withDefaults(defineProps<{
   columnPreferenceMode: 'default' | 'custom'
   columnConfigLoading: boolean
   columnConfigSaving: boolean
-  viewDisplayMode?: ViewDisplayMode | null
-  viewDisplayModeEnabled?: boolean
-  viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
   exportFields?: DataTableExportDialogField[]
@@ -35,9 +32,6 @@ const props = withDefaults(defineProps<{
   // eslint-disable-next-line vue/require-default-prop
   exportHandler?: ((fieldKeys: string[]) => Promise<void>) | undefined
 }>(), {
-  viewDisplayMode: null,
-  viewDisplayModeEnabled: false,
-  viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
   exportFields: () => [],
@@ -48,7 +42,6 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:sorts': [value: ListSortCondition[]]
-  'update:view-display-mode': [value: ViewDisplayMode]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
   'column-config-change': [value: ColumnConfigOption[]]
@@ -66,8 +59,6 @@ const parkedToolsTarget = ref<HTMLElement | null>(null)
 const preserveChildOpenDuringMove = ref(false)
 let toolMoveSequence = 0
 const childToolOpen = computed(() => sortOpen.value || columnConfigOpen.value)
-const normalizedViewDisplayMode = computed<ViewDisplayMode | null>(() => props.viewDisplayMode ?? null)
-const normalizedViewDisplayModeEnabled = computed(() => props.viewDisplayModeEnabled ?? false)
 const normalizedViewConfigTriggerLabel = computed(() => props.viewConfigTriggerLabel ?? '字段配置')
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
 const toolsTarget = computed(() => {
@@ -158,7 +149,7 @@ watch(isCompactToolbar, async (compact) => {
       @reset="emit('sort-reset')"
     />
     <ColumnConfigPopover
-      v-if="columnConfigEnabled || viewDisplayModeEnabled"
+      v-if="columnConfigEnabled"
       :open="columnConfigOpen"
       :columns="columns"
       :active="columnConfigActive"
@@ -167,16 +158,12 @@ watch(isCompactToolbar, async (compact) => {
       :scope-editable="columnPreferenceMode === 'default'"
       :loading="columnConfigLoading"
       :saving="columnConfigSaving"
-      :view-display-mode="normalizedViewDisplayMode"
-      :view-display-mode-enabled="normalizedViewDisplayModeEnabled"
-      :view-display-modes="viewDisplayModes"
       :view-config-trigger-label="normalizedViewConfigTriggerLabel"
       :view-config-panel-title="normalizedViewConfigPanelTitle"
       @update:open="handleColumnConfigOpenChange"
       @change="emit('column-config-change', $event)"
       @save="emit('column-config-save', $event)"
       @reset="emit('column-config-reset')"
-      @update:view-display-mode="emit('update:view-display-mode', $event)"
     />
 
     <DataTableExportDialog

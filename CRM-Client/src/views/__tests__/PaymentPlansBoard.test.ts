@@ -14,16 +14,19 @@ const mocks = vi.hoisted(() => ({
 }))
 
 const teamState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ currentTeam: { id: 11 } as { id: number } | null })
 })
 
 const userState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({ userInfo: { id: '42' } as { id: string } | null })
 })
 
 const permissionState = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   return vueReactive({
     permissions: ['payment:plan:view', 'payment:plan:export'].map((code) => ({ code })),
@@ -35,6 +38,7 @@ const permissionState = vi.hoisted(() => {
 })
 
 const headerStore = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- vi.hoisted runs before imports
   const { reactive: vueReactive } = require('vue') as typeof import('vue')
   const store = vueReactive({
     activeTab: 'all',
@@ -218,7 +222,10 @@ function mountPage(): VueWrapper {
 }
 
 async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise<void> {
-  wrapper.getComponent({ name: 'DataTable' }).vm.$emit('update:view-display-mode', mode)
+  const label = mode === 'board' ? '看板' : '列表'
+  const tab = wrapper.get('[aria-label="回款计划展示"]').findAll('button').find((button) => button.text() === label)
+  if (tab === undefined) throw new Error(`missing payment plan ${label} tab`)
+  await tab.trigger('mousedown')
   await flushPromises()
 }
 
@@ -228,8 +235,24 @@ function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElemen
   return button
 }
 
+
+function emitFrom(vm: object, event: string, payload?: unknown): void {
+  const emit = (vm as { $emit: (name: string, value?: unknown) => void }).$emit
+  if (payload === undefined) emit(event)
+  else emit(event, payload)
+}
+
 describe('Payment plans board integration', () => {
   beforeEach(() => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })))
     vi.clearAllMocks()
     headerStore.activeTab = 'all'
     teamState.currentTeam = { id: 11 }
@@ -245,7 +268,10 @@ describe('Payment plans board integration', () => {
 
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('viewDisplayMode')).toBe('table')
-    expect(table.props('viewDisplayModeEnabled')).toBe(true)
+    const tabs = wrapper.get('[aria-label="回款计划展示"]')
+    expect(tabs.text()).toContain('列表')
+    expect(tabs.text()).toContain('看板')
+    expect(tabs.text()).not.toContain('图表')
     expect(table.props('data')).toEqual([plan])
     expect(mocks.listPaymentPlans).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 20 }))
     expect(mocks.getPaymentPlanBoard).not.toHaveBeenCalled()
@@ -258,9 +284,9 @@ describe('Payment plans board integration', () => {
     const page = pageState(wrapper)
     page.activeFilters = [{ field: 'due_date', op: 'before', value: '2026-10-01' }]
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('sort-apply', [{ field: 'due_date', direction: 'asc' }])
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'sort-apply', [{ field: 'due_date', direction: 'asc' }])
     await flushPromises()
     mocks.getPaymentPlanBoard.mockClear()
 
@@ -301,9 +327,9 @@ describe('Payment plans board integration', () => {
     const wrapper = mountPage()
     await flushPromises()
     const table = wrapper.getComponent({ name: 'DataTable' })
-    table.vm.$emit('update:search', '星河')
-    table.vm.$emit('search-apply', '星河')
-    table.vm.$emit('update:page', 4)
+emitFrom(table.vm, 'update:search', '星河')
+emitFrom(table.vm, 'search-apply', '星河')
+emitFrom(table.vm, 'update:page', 4)
     await flushPromises()
     await switchMode(wrapper, 'board')
 
@@ -334,7 +360,7 @@ describe('Payment plans board integration', () => {
     await switchMode(wrapper, 'board')
 
     mocks.getPaymentPlanBoard.mockRejectedValueOnce(new Error('board refresh failed'))
-    wrapper.getComponent({ name: 'DataTable' }).vm.$emit('search-apply', '失败刷新')
+    emitFrom(wrapper.getComponent({ name: 'DataTable' }).vm, 'search-apply', '失败刷新')
     await flushPromises()
 
     expect(wrapper.getComponent({ name: 'PaymentPlanBoardProjection' }).props('response')).toEqual(boardResponse)
@@ -354,7 +380,7 @@ describe('Payment plans board integration', () => {
 
     mocks.listPaymentPlans.mockClear()
     mocks.getPaymentPlanBoard.mockClear()
-    wrapper.getComponent({ name: 'PaymentPlanFormDialog' }).vm.$emit('success')
+    emitFrom(wrapper.getComponent({ name: 'PaymentPlanFormDialog' }).vm, 'success')
     await flushPromises()
 
     expect(mocks.getPaymentPlanBoard).toHaveBeenCalledTimes(1)
