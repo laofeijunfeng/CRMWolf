@@ -303,6 +303,7 @@ describe('overlay panel chrome', () => {
     expect(findButton('关闭')).toBeTruthy()
     expect(findButton('保存').querySelector('svg')).toBeNull()
     expect(findButton('恢复默认').querySelector('svg')).toBeNull()
+    expect(document.body.querySelector('.table-toolbar-builder-footer')?.textContent).not.toContain('另存为视图')
   })
 
   it('uses optional view config labels without changing the column chrome', async () => {

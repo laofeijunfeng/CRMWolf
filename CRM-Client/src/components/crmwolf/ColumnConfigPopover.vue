@@ -24,8 +24,6 @@ const props = withDefaults(defineProps<{
   viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
-  canSaveCurrentView?: boolean
-  viewSaveLoading?: boolean
 }>(), {
   active: false,
   activeCount: 0,
@@ -39,14 +37,11 @@ const props = withDefaults(defineProps<{
   viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
-  canSaveCurrentView: false,
-  viewSaveLoading: false,
 })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
   'update:view-display-mode': [value: ViewDisplayMode]
-  'save-current-view': []
   change: [value: ColumnConfigOption[]]
   save: [scope: ViewPreferenceScope]
   reset: [scope: ViewPreferenceScope]
@@ -233,16 +228,6 @@ watch(() => props.scope, (scope) => {
         </ScrollArea>
 
         <template #footer>
-          <Button
-            v-if="canSaveCurrentView"
-            type="button"
-            variant="ghost"
-            size="sm"
-            :disabled="viewSaveLoading"
-            @click="emit('save-current-view')"
-          >
-            另存为视图
-          </Button>
           <Button type="button" variant="ghost" size="sm" @click="emit('reset', selectedScope)">
             恢复默认
           </Button>

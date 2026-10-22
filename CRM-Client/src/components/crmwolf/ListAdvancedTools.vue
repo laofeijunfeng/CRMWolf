@@ -27,8 +27,6 @@ const props = withDefaults(defineProps<{
   viewDisplayModes?: ViewDisplayMode[]
   viewConfigTriggerLabel?: string
   viewConfigPanelTitle?: string
-  canSaveCurrentView?: boolean
-  viewSaveLoading?: boolean
   exportFields?: DataTableExportDialogField[]
   exportEnabled?: boolean
   exportTitle?: string
@@ -42,8 +40,6 @@ const props = withDefaults(defineProps<{
   viewDisplayModes: () => ['table', 'board', 'chart'],
   viewConfigTriggerLabel: '字段配置',
   viewConfigPanelTitle: '字段配置',
-  canSaveCurrentView: false,
-  viewSaveLoading: false,
   exportFields: () => [],
   exportEnabled: false,
   exportTitle: '列表',
@@ -53,7 +49,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:sorts': [value: ListSortCondition[]]
   'update:view-display-mode': [value: ViewDisplayMode]
-  'save-current-view': []
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
   'column-config-change': [value: ColumnConfigOption[]]
@@ -75,8 +70,6 @@ const normalizedViewDisplayMode = computed<ViewDisplayMode | null>(() => props.v
 const normalizedViewDisplayModeEnabled = computed(() => props.viewDisplayModeEnabled ?? false)
 const normalizedViewConfigTriggerLabel = computed(() => props.viewConfigTriggerLabel ?? '字段配置')
 const normalizedViewConfigPanelTitle = computed(() => props.viewConfigPanelTitle ?? '字段配置')
-const normalizedCanSaveCurrentView = computed(() => props.canSaveCurrentView ?? false)
-const normalizedViewSaveLoading = computed(() => props.viewSaveLoading ?? false)
 const toolsTarget = computed(() => {
   if (!isCompactToolbar.value) return desktopToolsTarget.value
   if (moreSettingsOpen.value && compactToolsTarget.value !== null) return compactToolsTarget.value
@@ -179,14 +172,11 @@ watch(isCompactToolbar, async (compact) => {
       :view-display-modes="viewDisplayModes"
       :view-config-trigger-label="normalizedViewConfigTriggerLabel"
       :view-config-panel-title="normalizedViewConfigPanelTitle"
-      :can-save-current-view="normalizedCanSaveCurrentView"
-      :view-save-loading="normalizedViewSaveLoading"
       @update:open="handleColumnConfigOpenChange"
       @change="emit('column-config-change', $event)"
       @save="emit('column-config-save', $event)"
       @reset="emit('column-config-reset')"
       @update:view-display-mode="emit('update:view-display-mode', $event)"
-      @save-current-view="emit('save-current-view')"
     />
 
     <DataTableExportDialog

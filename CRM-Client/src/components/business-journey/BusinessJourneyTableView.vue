@@ -145,8 +145,8 @@ function setDisplayMode(value: string): void {
     :filters="filters"
     :sorts="sorts"
     :view-display-mode="displayMode"
-    view-config-trigger-label="视图配置"
-    view-config-panel-title="视图配置"
+    view-config-trigger-label="字段配置"
+    view-config-panel-title="字段配置"
     can-save-current-view
     :view-save-loading="viewSaveLoading ?? false"
     :view-applying="viewApplying ?? false"

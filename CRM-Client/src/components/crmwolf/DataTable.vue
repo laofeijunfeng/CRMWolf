@@ -168,9 +168,9 @@ interface Props {
   viewConfigTriggerLabel?: string
   /** 配置面板标题 */
   viewConfigPanelTitle?: string
-  /** 是否允许从配置浮层另存当前视图 */
+  /** 是否允许从状态条另存当前视图。配置浮层不再提供另存 */
   canSaveCurrentView?: boolean
-  /** 当前视图另存中 */
+  /** 状态条另存进行中 */
   viewSaveLoading?: boolean
   /** 是否启用导出；由页面结合独立导出权限决定 */
   exportEnabled?: boolean
@@ -1102,8 +1102,6 @@ onBeforeUnmount(() => {
           :view-display-modes="props.viewDisplayModes"
           :view-config-trigger-label="props.viewConfigTriggerLabel"
           :view-config-panel-title="props.viewConfigPanelTitle"
-          :can-save-current-view="props.canSaveCurrentView"
-          :view-save-loading="props.viewSaveLoading"
           :export-fields="exportDialogFields"
           :export-enabled="exportAvailable"
           :export-title="props.exportTitle"
@@ -1116,7 +1114,6 @@ onBeforeUnmount(() => {
           @column-config-save="handleColumnConfigSave"
           @column-config-reset="handleColumnConfigReset(activeColumnConfigScope)"
           @update:view-display-mode="emit('update:view-display-mode', $event)"
-          @save-current-view="emit('save-current-view')"
         />
         <slot name="tableTools" />
       </div>

@@ -255,7 +255,7 @@ describe('BusinessJourneyTableView layout', () => {
     expect(tools).toContain('刷新')
     expect(tools).toContain('筛选')
     expect(tools).not.toContain('排序')
-    expect(tools).not.toContain('视图配置')
+    expect(tools).not.toContain('字段配置')
     expect(wrapper.findAll('button').map(button => button.text()).join(' ')).not.toContain('更多设置')
 
     const summary = wrapper.get('.list-view-state-summary')
@@ -320,7 +320,7 @@ describe('BusinessJourneyTableView layout', () => {
     const tools = wrapper.get('.data-table-tools').text()
     expect(tools).toContain('刷新')
     expect(tools).toContain('排序')
-    expect(tools).not.toContain('视图配置')
+    expect(tools).not.toContain('字段配置')
 
     const summary = wrapper.get('.list-view-state-summary')
     expect(summary.text()).toContain('负责人 属于')
@@ -346,7 +346,7 @@ describe('BusinessJourneyTableView layout', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('.data-table-tools').text()).toContain('视图配置')
+    expect(wrapper.get('.data-table-tools').text()).toContain('字段配置')
     const summary = wrapper.get('.list-view-state-summary')
     expect(summary.text()).toContain('排序：最近动态 ↓')
     expect(summary.text()).toContain('已隐藏 1 列')
@@ -355,5 +355,52 @@ describe('BusinessJourneyTableView layout', () => {
     expect(wrapper.emitted('filter-reset')).toEqual([[]])
     expect(wrapper.emitted('sort-reset')).toEqual([[]])
     expect(wrapper.emitted('column-config-reset')).toEqual([[]])
+  })
+
+  it('keeps save-as-view on the status bar and out of the field config footer', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: {
+        ...filteredJourneyProps,
+        displayMode: 'table',
+        contentHidden: false,
+      },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const summary = wrapper.get('.list-view-state-summary')
+    expect(summary.text()).toContain('清除筛选')
+    expect(summary.text()).toContain('另存为视图')
+
+    const trigger = wrapper.findAll('button').find((button) => button.text().includes('字段配置'))
+    expect(trigger).toBeDefined()
+    await trigger?.trigger('click')
+    await flushPromises()
+
+    const footer = document.body.querySelector('.table-toolbar-builder-footer')
+    expect(footer).not.toBeNull()
+    expect(footer?.textContent).toContain('恢复默认')
+    expect(footer?.textContent).toContain('保存')
+    expect(footer?.textContent).not.toContain('另存为视图')
+    wrapper.unmount()
+  })
+
+  it('hides both status actions when only a search term is set', async () => {
+    const wrapper = mount(BusinessJourneyTableView, {
+      props: {
+        ...filteredJourneyProps,
+        displayMode: 'table',
+        contentHidden: false,
+        filters: [],
+        sorts: [],
+        columns: [],
+        search: '续约',
+      },
+    })
+    await flushPromises()
+
+    const summary = wrapper.get('.list-view-state-summary')
+    expect(summary.text()).not.toContain('清除筛选')
+    expect(summary.text()).not.toContain('另存为视图')
   })
 })
