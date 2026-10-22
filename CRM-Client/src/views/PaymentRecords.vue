@@ -348,8 +348,10 @@ const chartError = ref('')
 const chartBucket = ref<PaymentRecordChartBucketRecords | null>(null)
 const chartBucketLoading = ref(false)
 const chartBucketError = ref('')
+const chartBucketRequest = ref<{ card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
+const CHART_PAGE_SIZE = 10
 
 const chartQuery = (): PaymentRecordListParams => {
   const serialized = serializeListQuery({
@@ -365,6 +367,7 @@ const chartQuery = (): PaymentRecordListParams => {
 
 const closeChartBucket = (): void => {
   chartBucketRequestId += 1
+  chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
   chartBucketLoading.value = false
@@ -388,25 +391,41 @@ const fetchPaymentChart = async (): Promise<boolean> => {
   }
 }
 
-const openChartBucket = async (card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket): Promise<void> => {
+const loadChartBucket = async (card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket, append: boolean): Promise<void> => {
   const requestId = ++chartBucketRequestId
-  chartBucket.value = null
+  chartBucketRequest.value = { card, bucket }
   chartBucketError.value = ''
   chartBucketLoading.value = true
+  const skip = append ? (chartBucket.value?.records.length ?? 0) : 0
+  if (!append) chartBucket.value = null
   try {
     const response = await paymentApi.getPaymentRecordChartRecords({
       ...chartQuery(),
       chart: card.key,
       bucket: bucket.key,
+      skip,
+      limit: CHART_PAGE_SIZE,
     })
     if (requestId !== chartBucketRequestId) return
-    chartBucket.value = response
+    chartBucket.value = append && chartBucket.value !== null
+      ? { ...response, records: [...chartBucket.value.records, ...response.records] }
+      : response
   } catch (error) {
     if (requestId !== chartBucketRequestId) return
     chartBucketError.value = toFeedbackError(error, '回款图表').description || '这一段回款加载失败，请重试'
   } finally {
     if (requestId === chartBucketRequestId) chartBucketLoading.value = false
   }
+}
+
+const openChartBucket = (card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket): Promise<void> => (
+  loadChartBucket(card, bucket, false)
+)
+
+const loadMoreChartBucket = (): Promise<void> => {
+  const request = chartBucketRequest.value
+  if (request === null) return Promise.resolve()
+  return loadChartBucket(request.card, request.bucket, true)
 }
 
 const openChartRecord = (recordId: number): void => {
@@ -954,6 +973,7 @@ defineExpose({
           @open-record="openChartRecord"
           @view-bucket="openChartBucket"
           @retry-bucket="openChartBucket"
+          @load-more="loadMoreChartBucket"
           @close-bucket="closeChartBucket"
         />
       </template>
@@ -1066,6 +1086,7 @@ defineExpose({
     <PaymentRecordDetailSheet
       :record-id="selectedBoardRecordId ?? selectedRecord?.id ?? null"
       :visible="detailSheetVisible"
+      :elevated="chartBucket !== null"
       :record="selectedRecord"
       :stage-name="selectedRecord?.stage_name ?? ''"
       :approval="selectedRecord?.approval ?? null"

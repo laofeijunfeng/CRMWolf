@@ -102,6 +102,11 @@ def build_customer_chart(
     return {"population": len(rows), "cards": cards}
 
 
+def _bucket_order(row: ChartCustomer) -> tuple[int, str, str]:
+    created = row.created_time
+    return (-created.toordinal(), row.name, row.public_id)
+
+
 def list_chart_bucket_customers(
     db: Session,
     team_id: int,
@@ -109,7 +114,9 @@ def list_chart_bucket_customers(
     chart_key: str,
     bucket_key: str,
     today: date | None = None,
-) -> list[ChartPreview]:
+    skip: int = 0,
+    limit: int = 10,
+) -> tuple[int, list[ChartPreview]]:
     if chart_key not in CHART_KEYS:
         raise ValueError("未知图表")
     current_day = today or business_now().date()
@@ -117,7 +124,9 @@ def list_chart_bucket_customers(
     owners = _owner_names(db, {row.owner_id for row in rows if row.owner_id})
     industry_names = _industry_names(db, [row.industry_code for row in rows])
     selected = [row for row in rows if _bucket_key(rows, row, chart_key, current_day, industry_names) == bucket_key]
-    return [_preview(row, owners) for row in sorted(selected, key=lambda row: (row.name, row.public_id))]
+    ordered = sorted(selected, key=_bucket_order)
+    window = ordered[skip:skip + limit]
+    return len(ordered), [_preview(row, owners) for row in window]
 
 
 def _chart_rows(db: Session, team_id: int, customers: Sequence[Any]) -> list[ChartCustomer]:

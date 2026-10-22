@@ -30,6 +30,7 @@ const emit = defineEmits<{
   'retry-bucket': [card: OpportunityChartCard, bucket: OpportunityChartBucket]
   'open-opportunity': [opportunityId: string]
   'view-bucket': [card: OpportunityChartCard, bucket: OpportunityChartBucket]
+  'load-more': []
   'close-bucket': []
 }>()
 
@@ -124,23 +125,22 @@ watch(() => props.bucketResetToken, () => {
 })
 
 
+const bucketMatches = computed(() => (
+  props.bucketOpportunities !== null && selectedCard.value !== null && selectedBucket.value !== null
+  && props.bucketOpportunities.chart === selectedCard.value.key
+  && props.bucketOpportunities.bucket === selectedBucket.value.key
+))
 const dialogItems = computed<OpportunityChartPreview[]>(() => {
-  if (props.bucketOpportunities !== null && selectedCard.value !== null && selectedBucket.value !== null
-    && props.bucketOpportunities.chart === selectedCard.value.key
-    && props.bucketOpportunities.bucket === selectedBucket.value.key) {
-    return props.bucketOpportunities.opportunities
-  }
+  if (bucketMatches.value && props.bucketOpportunities !== null) return props.bucketOpportunities.opportunities
+  if (props.bucketError !== '') return []
   return selectedBucket.value?.preview ?? []
 })
 
-const dialogTotal = computed(() => {
-  if (props.bucketOpportunities !== null && selectedCard.value !== null && selectedBucket.value !== null
-    && props.bucketOpportunities.chart === selectedCard.value.key
-    && props.bucketOpportunities.bucket === selectedBucket.value.key) {
-    return props.bucketOpportunities.total
-  }
-  return selectedBucket.value?.preview_total ?? 0
-})
+const dialogTotal = computed(() => (
+  bucketMatches.value && props.bucketOpportunities !== null
+    ? props.bucketOpportunities.total
+    : selectedBucket.value?.count ?? 0
+))
 
 function isCardKey(value: string): value is CardKey {
   return value in cardMeta
@@ -240,7 +240,6 @@ function handleDialogChange(open: boolean): void {
 }
 
 function openOpportunity(id: string): void {
-  handleDialogChange(false)
   emit('open-opportunity', id)
 }
 
@@ -433,15 +432,15 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
         <DialogHeader>
           <DialogTitle>{{ selectedBucket?.label ?? '商机明细' }}</DialogTitle>
           <DialogDescription>
-            {{ selectedCard === null ? '' : metaFor(selectedCard).title }} · 共 {{ dialogTotal }} 条商机
+            {{ selectedCard === null ? '' : metaFor(selectedCard).title }} · 共 {{ dialogTotal }} 条
           </DialogDescription>
         </DialogHeader>
-        <div v-if="bucketLoading" class="opportunity-chart-dialog-state" role="status">正在加载商机明细…</div>
-        <div v-else-if="bucketError" class="opportunity-chart-dialog-state" role="alert">
+        <div v-if="bucketLoading && dialogItems.length === 0" class="opportunity-chart-dialog-state" role="status">正在加载商机明细…</div>
+        <div v-else-if="bucketError && dialogItems.length === 0" class="opportunity-chart-dialog-state" role="alert">
           <span>{{ bucketError }}</span>
           <Button type="button" variant="outline" size="sm" class="opportunity-chart-bucket-retry" @click="retryBucket">重试</Button>
         </div>
-        <div v-else-if="dialogItems.length === 0" class="opportunity-chart-dialog-state">该分组暂无可预览商机</div>
+        <div v-else-if="dialogItems.length === 0" class="opportunity-chart-dialog-state">这一段没有商机。</div>
         <div v-else class="opportunity-chart-opportunity-list">
           <Button
             v-for="item in dialogItems"
@@ -456,6 +455,16 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
               <small>{{ item.customer_name ?? '未关联客户' }} · {{ item.owner_name ?? '未分配负责人' }}</small>
             </span>
             <span>{{ formatCurrency(item.amount) }}</span>
+          </Button>
+          <Button
+            v-if="dialogItems.length < dialogTotal"
+            type="button"
+            variant="outline"
+            class="opportunity-chart-bucket-more"
+            :disabled="bucketLoading"
+            @click="emit('load-more')"
+          >
+            {{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}
           </Button>
         </div>
       </DialogContent>

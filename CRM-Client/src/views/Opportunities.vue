@@ -87,8 +87,10 @@ const chartBucket = ref<OpportunityChartBucketOpportunities | null>(null)
 const chartBucketLoading = ref(false)
 const chartBucketError = ref('')
 const chartBucketResetToken = ref(0)
+const chartBucketRequest = ref<{ card: OpportunityChartCard, bucket: OpportunityChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
+const CHART_PAGE_SIZE = 10
 
 
 // 抽屉状态
@@ -406,19 +408,25 @@ const fetchOpportunityChart = async (): Promise<boolean> => {
   }
 }
 
-const openOpportunityChartBucket = async (card: OpportunityChartCard, bucket: OpportunityChartBucket): Promise<void> => {
+const loadOpportunityChartBucket = async (card: OpportunityChartCard, bucket: OpportunityChartBucket, append: boolean): Promise<void> => {
   const requestId = ++chartBucketRequestId
-  chartBucket.value = null
+  chartBucketRequest.value = { card, bucket }
   chartBucketError.value = ''
   chartBucketLoading.value = true
+  const skip = append ? (chartBucket.value?.opportunities.length ?? 0) : 0
+  if (!append) chartBucket.value = null
   try {
     const response = await opportunityApi.getOpportunityChartBucket({
       ...chartQuery(),
       chart: card.key,
       bucket: bucket.key,
+      skip,
+      limit: CHART_PAGE_SIZE,
     })
     if (requestId !== chartBucketRequestId) return
-    chartBucket.value = response
+    chartBucket.value = append && chartBucket.value !== null
+      ? { ...response, opportunities: [...chartBucket.value.opportunities, ...response.opportunities] }
+      : response
   } catch (error) {
     if (requestId !== chartBucketRequestId) return
     chartBucketError.value = toFeedbackError(error, '商机图表').description || '这一段商机加载失败，请重试'
@@ -427,9 +435,20 @@ const openOpportunityChartBucket = async (card: OpportunityChartCard, bucket: Op
   }
 }
 
+const openOpportunityChartBucket = (card: OpportunityChartCard, bucket: OpportunityChartBucket): Promise<void> => (
+  loadOpportunityChartBucket(card, bucket, false)
+)
+
+const loadMoreOpportunityChartBucket = (): Promise<void> => {
+  const request = chartBucketRequest.value
+  if (request === null) return Promise.resolve()
+  return loadOpportunityChartBucket(request.card, request.bucket, true)
+}
+
 const closeOpportunityChartBucket = (): void => {
   chartBucketRequestId += 1
   chartBucketResetToken.value += 1
+  chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
   chartBucketLoading.value = false
@@ -1167,6 +1186,7 @@ defineExpose({
           @retry-bucket="openOpportunityChartBucket"
           @open-opportunity="openOpportunitySheet"
           @view-bucket="openOpportunityChartBucket"
+          @load-more="loadMoreOpportunityChartBucket"
           @close-bucket="closeOpportunityChartBucket"
         />
       </template>
@@ -1304,6 +1324,7 @@ defineExpose({
       v-model:visible="sheetVisible"
       ref="opportunityDetailSheetRef"
       :opportunity-id="selectedOpportunityId"
+      :elevated="chartBucket !== null"
       @refresh="handleSheetRefresh"
     />
 

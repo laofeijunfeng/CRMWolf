@@ -48,6 +48,7 @@ interface CustomerContext {
 }
 
 interface Props {
+  elevated?: boolean
   opportunityId: string
   embedded?: boolean
   showBreadcrumb?: boolean
@@ -710,21 +711,21 @@ watch(approvalPhase, phase => {
       </Button>
     </div>
 
-    <OpportunityWinDialog
+    <OpportunityWinDialog v-bind="elevated ? { elevated: true } : {}"
       :opportunity-id="opportunity?.id ?? null"
       :open="winDialogOpen"
       @update:open="winDialogOpen = $event"
       @success="handleWinSuccess"
     />
 
-    <OpportunityLoseDialog
+    <OpportunityLoseDialog v-bind="elevated ? { elevated: true } : {}"
       :opportunity-id="opportunity?.id ?? null"
       :open="loseDialogOpen"
       @update:open="loseDialogOpen = $event"
       @success="handleLoseSuccess"
     />
 
-    <OpportunityFormDialog
+    <OpportunityFormDialog v-bind="elevated ? { elevated: true } : {}"
       v-if="opportunity"
       :open="editDialogOpen"
       :opportunity="opportunity"

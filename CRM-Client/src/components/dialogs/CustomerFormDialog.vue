@@ -60,7 +60,7 @@ import ErrorState from '@/components/ErrorState.vue'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 
-interface Props { open: boolean; mode: 'create' | 'edit'; customerId?: string; customer?: CustomerDetailResponse | null }
+interface Props { open: boolean; mode: 'create' | 'edit'; customerId?: string; customer?: CustomerDetailResponse | null; elevated?: boolean }
 interface Emits {
   (e: 'update:open', value: boolean): void
   (e: 'success', payload?: FormSuccessPayload): void
@@ -661,7 +661,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="customer-form-dialog w-[calc(100vw-2rem)] sm:max-w-2xl">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="customer-form-dialog w-[calc(100vw-2rem)] sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建客户' : '编辑客户' }}</DialogTitle>
         <DialogDescription data-testid="customer-dialog-description" class="text-sm text-slate-500">

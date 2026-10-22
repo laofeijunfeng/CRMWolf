@@ -144,8 +144,8 @@ describe('PaymentRecordChartPage', () => {
     expect(document.body.textContent ?? '').not.toContain('HK008')
 
     await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
-    expect(document.body.textContent ?? '').toContain('HK008')
-    expect(document.body.querySelector('[data-testid="payment-chart-view-all"]')).toBeNull()
+    expect(wrapper.emitted('view-bucket')?.[0]?.[1]).toMatchObject({ key: 'SUBSCRIPTION' })
+    expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).toBeNull()
 
     const widePreview: PaymentRecordChartResponse = {
       ...chart,
@@ -160,9 +160,9 @@ describe('PaymentRecordChartPage', () => {
     }
     await wrapper.setProps({ chart: widePreview })
     await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
-    document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-all"]')?.click()
-    const events = wrapper.emitted('view-bucket')
-    expect(events?.[0]?.[1]).toMatchObject({ key: 'SUBSCRIPTION', preview_total: 6 })
+    expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).not.toBeNull()
+    document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-more"]')?.click()
+    expect(wrapper.emitted('load-more')).toHaveLength(1)
     wrapper.unmount()
   })
 

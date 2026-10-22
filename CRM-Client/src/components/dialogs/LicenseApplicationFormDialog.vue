@@ -39,6 +39,7 @@ import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 const APPROVED_CONTRACT_STATUSES = ['SIGNED']
 
 interface Props {
+  elevated?: boolean
   open: boolean
   customerId: string
   deployments: DeploymentInfoResponse[]
@@ -401,7 +402,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="license-application-form-dialog license-application-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="license-application-form-dialog license-application-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>申请 License</DialogTitle>
         <DialogDescription>选择部署信息、License 类型和有效期，提交后进入审批流程。</DialogDescription>

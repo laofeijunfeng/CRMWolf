@@ -285,7 +285,7 @@ def test_build_opportunity_chart_covers_all_cards_boundaries_ratios_and_previews
 
 
 def test_list_chart_bucket_opportunities_returns_only_product_overflow_rows():
-    listed = list_chart_bucket_opportunities(
+    total, listed = list_chart_bucket_opportunities(
         _Db(),
         7,
         _rows(),
@@ -294,6 +294,7 @@ def test_list_chart_bucket_opportunities_returns_only_product_overflow_rows():
         today=date(2026, 10, 16),
     )
 
+    assert total == 4
     assert [item["id"] for item in listed] == ["opp-09", "opp-10", "opp-11", "opp-12"]
     assert [item["name"] for item in listed] == ["Iota", "Kappa", "Lambda", "Mu"]
     assert all(item["id"] != "opp-outside" and item["id"] != "opp-13" for item in listed)
@@ -306,19 +307,18 @@ def test_list_chart_bucket_opportunities_returns_all_matching_rows_not_preview_l
         _opportunity(id=17, public_id="opp-17", opportunity_name="Nu-3"),
     ]
 
-    listed = list_chart_bucket_opportunities(
+    total, listed = list_chart_bucket_opportunities(
         _Db(),
         7,
         rows,
         "status",
         "0",
         today=date(2026, 10, 16),
+        limit=20,
     )
 
+    assert total == 8
     assert len(listed) == 8
-    assert [item["id"] for item in listed] == [
-        "opp-01", "opp-14", "opp-04", "opp-07", "opp-10", "opp-11", "opp-16", "opp-17",
-    ]
 def test_product_ranking_is_computed_once_per_chart_request(monkeypatch):
     from app.services import opportunity_chart_stats
 
@@ -378,3 +378,18 @@ def test_build_opportunity_chart_batches_missing_preview_names():
     preview = chart["cards"][0]["buckets"][0]["preview"][0]
     assert preview["customer_name"] == "批量客户"
     assert preview["owner_name"] == "批量负责人"
+
+
+def test_bucket_window_orders_created_time_newest_first():
+    rows = [
+        _opportunity(id=1, public_id="opp-a", opportunity_name="早", status=0, created_time=date(2026, 1, 2)),
+        _opportunity(id=2, public_id="opp-b", opportunity_name="晚", status=0, created_time=date(2026, 9, 2)),
+        _opportunity(id=3, public_id="opp-c", opportunity_name="中", status=0, created_time=date(2026, 5, 2)),
+    ]
+
+    total, listed = list_chart_bucket_opportunities(
+        _Db(), 7, rows, "status", "0", today=date(2026, 10, 16), skip=0, limit=2,
+    )
+
+    assert total == 3
+    assert [item["name"] for item in listed] == ["晚", "中"]

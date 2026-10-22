@@ -55,6 +55,7 @@ import {
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 interface Props {
+  elevated?: boolean
   open: boolean
   customer: CustomerResponse | null
 }
@@ -323,7 +324,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="customer-transfer-dialog">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="customer-transfer-dialog">
       <DialogHeader>
         <DialogTitle class="customer-transfer-dialog__title">
           <ArrowRightLeft class="size-4" />

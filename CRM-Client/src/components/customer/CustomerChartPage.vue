@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Area, Donut } from '@unovis/ts'
 import { VisArea, VisAxis, VisDonut, VisLine, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { Button } from '@/components/ui/button'
@@ -42,6 +42,7 @@ const emit = defineEmits<{
   retry: []
   'open-customer': [customerId: string]
   'view-bucket': [card: CustomerChartCard, bucket: CustomerChartBucket]
+  'load-more': []
   'close-bucket': []
 }>()
 
@@ -53,12 +54,28 @@ const pieCards = computed(() => (props.chart?.cards ?? []).filter((card) => card
 const industryCard = computed(() => props.chart?.cards.find((card) => card.key === 'industry') ?? null)
 const cityCard = computed(() => props.chart?.cards.find((card) => card.key === 'city') ?? null)
 const monthCard = computed(() => props.chart?.cards.find((card) => card.key === 'created_month') ?? null)
+const selectedCard = ref<CustomerChartCard | null>(null)
+const selectedBucket = ref<CustomerChartBucket | null>(null)
 const dialogOpen = computed({
-  get: () => props.bucketCustomers !== null || props.bucketLoading || props.bucketError !== '',
+  get: () => selectedBucket.value !== null,
   set: (open: boolean) => {
-    if (!open) emit('close-bucket')
+    if (!open) {
+      selectedCard.value = null
+      selectedBucket.value = null
+      emit('close-bucket')
+    }
   },
 })
+const cardTitle = computed(() => props.chart?.cards.find((card) => card.key === selectedCard.value?.key)?.title ?? '')
+const subtitle = computed(() => {
+  const total = props.bucketCustomers?.total ?? selectedBucket.value?.count ?? 0
+  return `${cardTitle.value} · 共 ${total} 家`
+})
+
+function rememberBucket(card: CustomerChartCard, bucket: CustomerChartBucket): void {
+  selectedCard.value = card
+  selectedBucket.value = bucket
+}
 
 function countText(bucket: CustomerChartBucket): string {
   return `${bucket.count} 家 · ${bucket.ratio}%`
@@ -117,7 +134,14 @@ const monthConfig = {
 
 function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
   const bucket = card?.buckets[datum.index]
-  if (!bucket || bucket.count === 0) return
+  if (!bucket || bucket.count === 0 || card === null) return
+  rememberBucket(card, bucket)
+  emit('view-bucket', card, bucket)
+}
+
+function openNamed(card: CustomerChartCard, bucket: CustomerChartBucket): void {
+  if (bucket.count === 0) return
+  rememberBucket(card, bucket)
   emit('view-bucket', card, bucket)
 }
 </script>
@@ -164,7 +188,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
                     [Donut.selectors.segment]: {
                       click: (datum: PieDatum) => {
                         const bucket = card.buckets.find((item) => item.key === datum.key)
-                        if (bucket) emit('view-bucket', card, bucket)
+                        if (bucket) openNamed(card, bucket)
                       },
                     },
                   }"
@@ -199,7 +223,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
                 type="button"
                 class="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
                 :disabled="bucket.count === 0"
-                @click="emit('view-bucket', industryCard, bucket)"
+                @click="industryCard && openNamed(industryCard, bucket)"
               >
                 <span class="truncate">{{ bucket.label }}</span>
                 <span class="h-2 overflow-hidden rounded-full bg-muted">
@@ -224,7 +248,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
                 type="button"
                 class="grid grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
                 :disabled="bucket.count === 0"
-                @click="emit('view-bucket', cityCard, bucket)"
+                @click="cityCard && openNamed(cityCard, bucket)"
               >
                 <span class="truncate">{{ bucket.label }}</span>
                 <span class="h-2 overflow-hidden rounded-full bg-muted">
@@ -287,12 +311,15 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
       <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
         <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
           <DialogHeader>
-            <DialogTitle>{{ bucketCustomers ? `${bucketCustomers.total} 家` : '客户' }}</DialogTitle>
+            <DialogTitle>{{ selectedBucket?.label ?? '客户' }}</DialogTitle>
             <DialogDescription>
-              {{ bucketLoading ? '正在读取这一组客户…' : bucketError || '这一组里的客户。' }}
+              {{ bucketLoading && !bucketCustomers ? '正在读取这一组客户…' : bucketError && !bucketCustomers ? bucketError : subtitle }}
             </DialogDescription>
           </DialogHeader>
-          <div v-if="bucketCustomers" class="customer-chart-dialog-list">
+          <div v-if="bucketError && !bucketCustomers" class="customer-chart-dialog-state">
+            <Button v-if="selectedCard && selectedBucket" type="button" variant="outline" size="sm" @click="emit('view-bucket', selectedCard, selectedBucket)">重试</Button>
+          </div>
+          <div v-else-if="bucketCustomers" class="customer-chart-dialog-list">
             <button
               v-for="customer in bucketCustomers.customers"
               :key="customer.id"
@@ -301,6 +328,15 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
             >
               <span>{{ customer.name }}</span>
               <small>{{ customer.owner_name || '无负责人' }}</small>
+            </button>
+            <button
+              v-if="bucketCustomers.customers.length < bucketCustomers.total"
+              type="button"
+              class="customer-chart-dialog-more"
+              :disabled="bucketLoading"
+              @click="emit('load-more')"
+            >
+              {{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}
             </button>
           </div>
         </DialogContent>

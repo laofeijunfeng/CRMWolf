@@ -5,7 +5,8 @@ import { VisAxis, VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } 
 import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, componentToString, type ChartConfig } from '@/components/ui/chart'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { AmountText, TableToolbarButton } from '@/components/crmwolf'
 import type {
   BusinessJourneyChartCard,
@@ -67,11 +68,13 @@ const emit = defineEmits<{
   retry: []
   'select-segment': [payload: { card: BusinessJourneyChartCard; segment: BusinessJourneyChartSegment }]
   'open-segment': [payload: { card: BusinessJourneyChartCard; segment: BusinessJourneyChartSegment }]
+  'load-more': []
   'update:segment-open': [value: boolean]
   'open-journey': [payload: { customerId: string; journeyPublicId: string }]
 }>()
 
 const summary = computed(() => props.chart?.summary ?? null)
+const selectedCardTitle = computed(() => selectedSegment.value?.card.title ?? '')
 const cards = computed(() => props.chart?.cards ?? [])
 const pieCard = computed(() => cards.value.find(card => card.graphic === 'pie') ?? null)
 const pieTotal = computed(() => pieCard.value?.segments.reduce((sum, segment) => sum + segment.amount, 0) ?? 0)
@@ -168,7 +171,7 @@ const selectedSegment = computed(() => cards.value.flatMap(card => card.segments
 function selectSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): void {
   if (segment.count === 0) return
   selectedKey.value = `${card.key}:${segment.key}`
-  emit('select-segment', { card, segment })
+  emit('open-segment', { card, segment })
 }
 
 function openSelected(): void {
@@ -342,37 +345,23 @@ function openJourney(item: BusinessJourneyChartPreview): void {
                 <span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ segmentText(segment) }}</span>
               </button>
             </div>
-            <div v-if="selectedSegment?.card.key === card.key" class="journey-chart-preview">
-              <button v-for="item in selectedSegment.segment.preview" :key="item.public_id" type="button" @click="openJourney(item)">
-                <span class="min-w-0">
-                  <span class="block truncate">{{ item.name }}</span>
-                  <small class="block truncate">{{ item.customer_name }}</small>
-                </span>
-                <AmountText :value="item.amount" size="sm" />
-              </button>
-              <button
-                v-if="selectedSegment.segment.count > selectedSegment.segment.preview.length"
-                type="button"
-                class="journey-chart-preview__more"
-                @click="openSelected"
-              >
-                查看详情
-              </button>
-            </div>
           </CardContent>
         </Card>
       </div>
       <p v-if="errorMessage" class="journey-chart-note" role="alert">{{ errorMessage }}</p>
     </template>
 
-    <Sheet :open="segmentOpen ?? false" @update:open="emit('update:segment-open', $event)">
-      <SheetContent side="right" class="journey-chart-sheet">
-        <SheetHeader>
-          <SheetTitle>{{ segmentLabel }}</SheetTitle>
-          <SheetDescription>这一段共 {{ segmentTotal }} 条旅程。</SheetDescription>
-        </SheetHeader>
-        <div v-if="segmentLoading" class="journey-chart-state">正在读取这一段…</div>
-        <div v-else-if="segmentError" class="journey-chart-state" role="alert">{{ segmentError }}</div>
+    <Dialog :open="segmentOpen ?? false" @update:open="emit('update:segment-open', $event)">
+      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{{ segmentLabel }}</DialogTitle>
+          <DialogDescription>{{ selectedCardTitle }} · 共 {{ segmentTotal }} 条</DialogDescription>
+        </DialogHeader>
+        <div v-if="segmentLoading && (segmentItems?.length ?? 0) === 0" class="journey-chart-state">正在读取这一段…</div>
+        <div v-else-if="segmentError && (segmentItems?.length ?? 0) === 0" class="journey-chart-state" role="alert">
+          <span>{{ segmentError }}</span>
+          <Button type="button" variant="outline" size="sm" @click="openSelected">重试</Button>
+        </div>
         <div v-else class="journey-chart-segment-list">
           <button v-for="item in segmentItems" :key="item.public_id" type="button" @click="openJourney(item)">
             <span class="min-w-0">
@@ -381,9 +370,18 @@ function openJourney(item: BusinessJourneyChartPreview): void {
             </span>
             <AmountText :value="item.amount" size="sm" />
           </button>
+          <button
+            v-if="(segmentItems?.length ?? 0) < (segmentTotal ?? 0)"
+            type="button"
+            class="journey-chart-preview__more"
+            :disabled="segmentLoading"
+            @click="emit('load-more')"
+          >
+            {{ segmentLoading ? '正在读取…' : segmentError || '查看更多' }}
+          </button>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   </section>
 </template>
 

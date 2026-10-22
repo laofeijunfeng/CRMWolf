@@ -160,14 +160,15 @@ describe('OpportunityChartPage', () => {
     await wrapper.find('.opportunity-chart-opportunity').trigger('click')
     expect(wrapper.emitted('open-opportunity')).toEqual([['opp_1']])
   })
-  it('closes the bucket dialog before emitting opportunity selection', async () => {
+  it('keeps the bucket dialog open when an opportunity row is selected', async () => {
     const wrapper = mountPage(chart)
 
     await wrapper.find('button.opportunity-chart-legend-row').trigger('click')
     await wrapper.find('.opportunity-chart-opportunity').trigger('click')
 
-    expect(wrapper.emitted('close-bucket')).toHaveLength(1)
-    expect(wrapper.find('.opportunity-chart-opportunity').exists()).toBe(false)
+    expect(wrapper.emitted('close-bucket')).toBeUndefined()
+    expect(wrapper.emitted('open-opportunity')).toHaveLength(1)
+    expect(wrapper.find('.opportunity-chart-opportunity').exists()).toBe(true)
   })
 
   it('opens a bucket when a donut segment is clicked', async () => {

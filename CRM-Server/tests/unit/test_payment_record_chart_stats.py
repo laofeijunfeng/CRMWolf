@@ -198,7 +198,8 @@ def test_zero_purchase_bucket_stays_and_preview_is_capped():
     assert [item["id"] for item in new["preview"]] == [1, 2, 3, 4, 5]
     assert new["preview"][0]["customer_name"] == "甲"
     assert new["preview"][0]["payment_date"] == date(2026, 10, 2)
-    listed = list_chart_bucket_records(rows, "purchase_type", "NEW", today=TODAY)
+    total, listed = list_chart_bucket_records(rows, "purchase_type", "NEW", today=TODAY)
+    assert total == 6
     assert [item["id"] for item in listed] == [1, 2, 3, 4, 5, 6]
 
 
@@ -334,6 +335,24 @@ def test_arr_ratio_breaks_empty_months_and_drops_excluded_rows():
     may = _bucket(arr, "2026-05")
     assert may["plotted_ratio"] == 100
     assert may["annualized_subscription"] == 100000
-    assert [item["id"] for item in list_chart_bucket_records(rows, "arr_ratio", "2026-04", today=TODAY)] == [1]
-    assert list_chart_bucket_records(rows, "arr_ratio", "2026-10", today=TODAY) == []
-    assert list_chart_bucket_records(rows, "arr_ratio", "2026-02", today=TODAY) == []
+    april_total, april_listed = list_chart_bucket_records(rows, "arr_ratio", "2026-04", today=TODAY)
+    assert april_total == 1
+    assert [item["id"] for item in april_listed] == [1]
+    assert list_chart_bucket_records(rows, "arr_ratio", "2026-10", today=TODAY) == (0, [])
+    assert list_chart_bucket_records(rows, "arr_ratio", "2026-02", today=TODAY) == (0, [])
+
+
+def test_bucket_window_orders_payment_date_newest_first_and_keeps_total():
+    rows = [
+        _record(id=1, record_number="HK001", payment_date=date(2026, 10, 1), purchase_type="NEW"),
+        _record(id=2, record_number="HK002", payment_date=date(2026, 10, 9), purchase_type="NEW"),
+        _record(id=3, record_number="HK000", payment_date=None, purchase_type="NEW"),
+        _record(id=4, record_number="HK003", payment_date=None, purchase_type="NEW"),
+    ]
+
+    total, first = list_chart_bucket_records(rows, "purchase_type", "NEW", today=TODAY, skip=0, limit=2)
+    _total, second = list_chart_bucket_records(rows, "purchase_type", "NEW", today=TODAY, skip=2, limit=2)
+
+    assert total == 4
+    assert [item["id"] for item in first] == [2, 1]
+    assert [item["record_number"] for item in second] == ["HK000", "HK003"]

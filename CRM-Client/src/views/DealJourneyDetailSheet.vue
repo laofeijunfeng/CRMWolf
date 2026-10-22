@@ -10,6 +10,7 @@ interface Props {
   journeyId: string | null
   journeyName?: string | undefined
   visible: boolean
+  elevated?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,8 +35,8 @@ function closeSheet(): void {
 
 <template>
   <Sheet v-if="visible" v-model:open="visibleModel">
-    <DetailSheetContent>
-      <DealJourneyDetailHost
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <DealJourneyDetailHost v-bind="elevated ? { elevated: true } : {}"
         v-if="customerId !== null && journeyId !== null"
         :customer-id="customerId"
         :customer-name="customerName"

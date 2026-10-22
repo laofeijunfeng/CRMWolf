@@ -50,6 +50,7 @@ interface FixedCustomer {
 }
 
 interface Props {
+  elevated?: boolean
   open: boolean
   mode: 'create' | 'edit'
   application?: InvoiceApplicationResponse | null
@@ -570,7 +571,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="invoice-application-form-dialog invoice-application-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="invoice-application-form-dialog invoice-application-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>

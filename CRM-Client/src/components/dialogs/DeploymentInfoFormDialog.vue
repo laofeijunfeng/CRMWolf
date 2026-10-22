@@ -29,6 +29,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 
 interface Props {
+  elevated?: boolean
   open: boolean
   customerId: string
 }
@@ -171,7 +172,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="deployment-dialog">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="deployment-dialog">
       <DialogHeader>
         <DialogTitle>新增部署信息</DialogTitle>
         <DialogDescription>填写客户的部署环境，后续 License 申请会关联到部署信息。</DialogDescription>

@@ -1977,6 +1977,8 @@ def get_customer_chart(
 def get_customer_chart_bucket_customers(
     chart: str = Query(..., description="图表键"),
     bucket: str = Query(..., description="段键"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     scope: str | None = Query(None),
     search: str | None = Query(None),
     filters: str | None = Query(None),
@@ -1992,10 +1994,12 @@ def get_customer_chart_bucket_customers(
         db, team_id, current_user, scope=scope, search=search, filters=parsed_filters, sorts=parsed_sorts,
     ))
     try:
-        listed = list_chart_bucket_customers(db, team_id, customers, chart, bucket)
+        total, listed = list_chart_bucket_customers(
+            db, team_id, customers, chart, bucket, skip=skip, limit=limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
-    return CustomerChartBucketCustomersResponse(chart=chart, bucket=bucket, total=len(listed), customers=listed)
+    return CustomerChartBucketCustomersResponse(chart=chart, bucket=bucket, total=total, customers=listed)
 
 @router.get(
     "/identity-resolution",

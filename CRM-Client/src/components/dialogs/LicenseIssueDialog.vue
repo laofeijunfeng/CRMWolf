@@ -45,6 +45,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
+  elevated?: boolean
   open: boolean
   applicationId: number
 }
@@ -141,7 +142,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent class="sm:max-w-[525px] max-w-full">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[525px] max-w-full">
       <DialogHeader>
         <DialogTitle>发放 License</DialogTitle>
         <DialogDescription>请输入 License 信息完成发放</DialogDescription>

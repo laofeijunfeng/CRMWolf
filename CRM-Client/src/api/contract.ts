@@ -327,7 +327,7 @@ export type ContractChartBucket = z.infer<typeof ContractChartBucketSchema>
 export type ContractChartCard = z.infer<typeof ContractChartCardSchema>
 export type ContractChartResponse = z.infer<typeof ContractChartResponseSchema>
 export type ContractChartBucketContracts = z.infer<typeof ContractChartBucketContractsSchema>
-export type ContractChartParams = ContractBoardParams & { chart?: string, bucket?: string }
+export type ContractChartParams = ContractBoardParams & { chart?: string, bucket?: string, skip?: number, limit?: number }
 
 const OwnerFilterOptionSchema = z.object({
   id: z.string(),

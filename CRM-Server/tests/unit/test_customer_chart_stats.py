@@ -158,8 +158,9 @@ def test_other_bucket_lists_every_overflow_customer(monkeypatch):
         for index in range(9)
     ]
 
-    listed = list_chart_bucket_customers(_Db(), 7, customers, "industry", "other", today=date(2026, 10, 16))
+    total, listed = list_chart_bucket_customers(_Db(), 7, customers, "industry", "other", today=date(2026, 10, 16))
 
+    assert total == 1
     assert [item["name"] for item in listed] == ["客户08"]
 
 
@@ -169,3 +170,19 @@ def test_other_bucket_lists_every_overflow_customer(monkeypatch):
 
     assert chart["population"] == 1
     assert _card(chart, "status")["buckets"][1]["preview"][0]["id"] == "cus_2"
+
+
+def test_bucket_window_orders_created_time_newest_first(monkeypatch):
+    _patch_rows(monkeypatch, [CustomerDerivedStatus.FOLLOWING] * 3)
+    customers = [
+        _customer(id=1, public_id="cus_1", account_name="早", created_time=datetime(2026, 1, 2), industry="same"),
+        _customer(id=2, public_id="cus_2", account_name="晚", created_time=datetime(2026, 8, 2), industry="same"),
+        _customer(id=3, public_id="cus_3", account_name="中", created_time=datetime(2026, 4, 2), industry="same"),
+    ]
+
+    total, listed = list_chart_bucket_customers(
+        _Db(), 7, customers, "industry", "same", today=date(2026, 10, 16), skip=0, limit=2,
+    )
+
+    assert total == 3
+    assert [item["name"] for item in listed] == ["晚", "中"]

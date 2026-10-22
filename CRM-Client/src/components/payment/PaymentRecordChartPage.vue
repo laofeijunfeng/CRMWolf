@@ -50,6 +50,7 @@ const emit = defineEmits<{
   retry: []
   'open-record': [recordId: number]
   'view-bucket': [card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket]
+  'load-more': []
   'close-bucket': []
   'retry-bucket': [card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket]
 }>()
@@ -86,7 +87,6 @@ const arrYDomain: [number, number] = [0, 100]
 
 const selectedCard = ref<PaymentRecordChartCard | null>(null)
 const selectedBucket = ref<PaymentRecordChartBucket | null>(null)
-const showingAll = ref(false)
 
 const population = computed(() => props.chart?.population ?? 0)
 const totalAmount = computed(() => props.chart?.total_amount ?? 0)
@@ -105,23 +105,13 @@ const fullRecordsMatch = computed(() => (
   && props.bucketRecords.chart === selectedCard.value.key
   && props.bucketRecords.bucket === selectedBucket.value.key
 ))
-const dialogItems = computed(() => {
-  if (showingAll.value && fullRecordsMatch.value && props.bucketRecords !== null) {
-    return props.bucketRecords.records
-  }
-  return selectedBucket.value?.preview ?? []
-})
-const dialogTotal = computed(() => {
-  if (showingAll.value && fullRecordsMatch.value && props.bucketRecords !== null) {
-    return props.bucketRecords.total
-  }
-  return selectedBucket.value?.preview_total ?? 0
-})
-const canViewAll = computed(() => {
-  const bucket = selectedBucket.value
-  if (bucket === null || showingAll.value) return false
-  return bucket.preview_total > bucket.preview.length
-})
+const dialogItems = computed(() => (
+  fullRecordsMatch.value && props.bucketRecords !== null ? props.bucketRecords.records : []
+))
+const dialogTotal = computed(() => (
+  fullRecordsMatch.value && props.bucketRecords !== null ? props.bucketRecords.total : 0
+))
+const awaitingPage = computed(() => dialogOpen.value && !fullRecordsMatch.value && props.bucketError === '')
 
 function formatSummaryAmount(value: number): string {
   if (!Number.isFinite(value)) return '¥ 0'
@@ -236,8 +226,7 @@ function openArr(datum: ArrDatum): void {
   if (bucket === undefined) return
   selectedCard.value = card
   selectedBucket.value = bucket
-  showingAll.value = false
-  emit('close-bucket')
+  emit('view-bucket', card, bucket)
 }
 
 const arrHover = ref<ArrDatum | null>(null)
@@ -306,8 +295,7 @@ function openBucket(card: PaymentRecordChartCard, bucket: PaymentRecordChartBuck
   if (bucket.count <= 0 && card.key !== 'payment_month') return
   selectedCard.value = card
   selectedBucket.value = bucket
-  showingAll.value = false
-  emit('close-bucket')
+  emit('view-bucket', card, bucket)
 }
 
 function openMonth(card: PaymentRecordChartCard | null, datum: MonthDatum): void {
@@ -327,15 +315,10 @@ function handleDialogChange(open: boolean): void {
   if (open) return
   selectedCard.value = null
   selectedBucket.value = null
-  showingAll.value = false
   emit('close-bucket')
 }
 
-function viewAll(): void {
-  if (selectedCard.value === null || selectedBucket.value === null || !canViewAll.value) return
-  showingAll.value = true
-  emit('view-bucket', selectedCard.value, selectedBucket.value)
-}
+
 
 function retryBucket(): void {
   if (selectedCard.value === null || selectedBucket.value === null) return
@@ -585,11 +568,11 @@ function retryBucket(): void {
           <DialogHeader>
             <DialogTitle>{{ selectedBucket?.label ?? '回款' }}</DialogTitle>
             <DialogDescription>
-              {{ selectedCard?.title ?? '' }} · 共 {{ dialogTotal }} 笔 · {{ formatCurrency(selectedBucket?.amount ?? 0) }}
+              {{ selectedCard?.title ?? '' }} · 共 {{ dialogTotal }} 笔
             </DialogDescription>
           </DialogHeader>
-          <div v-if="bucketLoading" class="payment-record-chart__state" role="status">正在读取这一段回款…</div>
-          <div v-else-if="bucketError" class="payment-record-chart__state" role="alert">
+          <div v-if="(bucketLoading || awaitingPage) && dialogItems.length === 0" class="payment-record-chart__state" role="status">正在读取这一段回款…</div>
+          <div v-else-if="bucketError && dialogItems.length === 0" class="payment-record-chart__state" role="alert">
             <span>{{ bucketError }}</span>
             <Button type="button" variant="outline" size="sm" @click="retryBucket">重试</Button>
           </div>
@@ -607,8 +590,16 @@ function retryBucket(): void {
               <span>{{ formatCurrency(item.amount) }}</span>
             </button>
             <p v-if="dialogItems.length === 0">这一段没有回款。</p>
-            <Button v-if="canViewAll" type="button" variant="outline" size="sm" data-testid="payment-chart-view-all" @click="viewAll">
-              查看详情
+            <Button
+              v-if="fullRecordsMatch && dialogItems.length < dialogTotal"
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="payment-chart-view-more"
+              :disabled="bucketLoading"
+              @click="emit('load-more')"
+            >
+              {{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}
             </Button>
           </div>
         </DialogContent>

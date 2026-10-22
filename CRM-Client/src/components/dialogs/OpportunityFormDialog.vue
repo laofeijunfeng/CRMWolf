@@ -72,6 +72,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
+  elevated?: boolean
   customerId?: string | undefined
   customerName?: string | undefined
   customerLocked?: boolean
@@ -563,7 +564,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="opportunity-form-dialog w-[calc(100vw-2rem)] max-w-[640px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="opportunity-form-dialog w-[calc(100vw-2rem)] max-w-[640px]">
       <DialogHeader>
         <DialogTitle>{{ resolvedDialogTitle }}</DialogTitle>
         <DialogDescription class="sr-only">填写商机金额、授权和预计成交信息</DialogDescription>

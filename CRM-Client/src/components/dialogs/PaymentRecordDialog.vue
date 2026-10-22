@@ -52,6 +52,7 @@ import {
 } from '@/components/crmwolf'
 
 interface Props {
+  elevated?: boolean
   open: boolean
   paymentPlanId?: number | null
   defaultAmount?: number | null
@@ -568,7 +569,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="payment-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="payment-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
       <DialogHeader>
         <DialogTitle>登记回款</DialogTitle>
         <DialogDescription>
@@ -776,7 +777,7 @@ watch(
   </Dialog>
 
   <Dialog :open="addMemberDialogOpen" @update:open="handleAddMemberDialogOpenChange">
-    <DialogContent class="payment-record-add-member-dialog">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="payment-record-add-member-dialog">
       <DialogHeader>
         <DialogTitle>添加团队成员</DialogTitle>
         <DialogDescription>

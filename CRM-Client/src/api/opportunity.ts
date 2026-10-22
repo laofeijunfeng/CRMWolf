@@ -226,6 +226,8 @@ export interface OpportunityChartParams {
 export interface OpportunityChartBucketParams extends OpportunityChartParams {
   chart: string
   bucket: string
+  skip?: number
+  limit?: number
 }
 
 export interface OpportunityListParams {

@@ -27,6 +27,7 @@ import {
 type EditablePaymentRecord = PaymentRecordInfo | PaymentRecordResponse
 
 interface Props {
+  elevated?: boolean
   open: boolean
   record: EditablePaymentRecord | null
   submitting?: boolean
@@ -289,7 +290,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="edit-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="edit-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
       <DialogHeader>
         <DialogTitle>修改回款记录</DialogTitle>
         <DialogDescription>

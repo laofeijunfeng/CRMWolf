@@ -120,9 +120,10 @@ def test_signing_month_keeps_earlier_unsigned_and_future_apart():
 def test_bucket_list_returns_the_whole_segment_and_rejects_unknown_keys():
     rows = [_contract(id=index, contract_name=f"合同{index}", purchase_type=None) for index in range(1, 7)]
 
-    listed = list_chart_bucket_contracts(object(), 7, rows, "purchase_type", "blank", today=TODAY)
+    total, listed = list_chart_bucket_contracts(object(), 7, rows, "purchase_type", "blank", today=TODAY)
     preview = _bucket(_card(build_contract_chart(object(), 7, rows, today=TODAY), "purchase_type"), "blank")
 
+    assert total == 6
     assert len(listed) == 6
     assert preview["preview_total"] == 6
     assert len(preview["preview"]) == 5
@@ -188,3 +189,23 @@ def test_purchase_type_is_read_from_the_same_team_only():
     rendered = " ".join(str(item) for item in opportunity_query.criteria)
     assert "team_id" in rendered
     assert "crm_opportunities.id" in rendered or "opportunity" in rendered.lower() or "IN" in rendered
+
+
+def test_bucket_window_puts_newest_signing_date_first_and_blank_dates_last():
+    rows = [
+        _contract(id=1, contract_name="早", signing_date=date(2026, 1, 2), purchase_type=None),
+        _contract(id=2, contract_name="晚", signing_date=date(2026, 8, 2), purchase_type=None),
+        _contract(id=3, contract_name="无日期乙", signing_date=None, purchase_type=None),
+        _contract(id=4, contract_name="无日期甲", signing_date=None, purchase_type=None),
+    ]
+
+    total, first = list_chart_bucket_contracts(
+        object(), 7, rows, "purchase_type", "blank", today=TODAY, skip=0, limit=2,
+    )
+    _total, second = list_chart_bucket_contracts(
+        object(), 7, rows, "purchase_type", "blank", today=TODAY, skip=2, limit=2,
+    )
+
+    assert total == 4
+    assert [item["id"] for item in first] == [2, 1]
+    assert [item["name"] for item in second] == ["无日期乙", "无日期甲"]

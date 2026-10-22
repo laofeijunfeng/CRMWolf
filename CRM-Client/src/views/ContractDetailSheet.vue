@@ -15,6 +15,7 @@ interface Props {
   contractId: number | null
   visible: boolean
   canApprove?: boolean
+  elevated?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -50,8 +51,8 @@ function closeSheet(): void {
 
 <template>
   <Sheet v-model:open="visibleModel">
-    <DetailSheetContent>
-      <ContractDetailContent
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <ContractDetailContent v-bind="elevated ? { elevated: true } : {}"
         v-if="contractId !== null"
         ref="contractDetailContentRef"
         :contract-id="contractId"

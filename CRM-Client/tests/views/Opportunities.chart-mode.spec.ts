@@ -258,9 +258,9 @@ describe('Opportunities chart mode integration', () => {
       search: 'Acme',
       filters: '[{"field":"purchase_type","op":"eq","value":"NEW"}]',
       sorts: '[{"field":"total_amount","direction":"desc"}]',
+      skip: 0,
+      limit: 10,
     })
-    expect(opportunityApi.getOpportunityChartBucket.mock.calls.at(-1)?.[0]).not.toHaveProperty('skip')
-    expect(opportunityApi.getOpportunityChartBucket.mock.calls.at(-1)?.[0]).not.toHaveProperty('limit')
 
     await wrapper.get('[data-testid="chart-opportunity"]').trigger('click')
     await nextTick()

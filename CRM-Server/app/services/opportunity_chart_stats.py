@@ -332,6 +332,22 @@ def build_opportunity_chart(
     return {"population": len(rows), "total_amount": _number(total_amount), "cards": cards}
 
 
+def _dialog_order(row: object) -> tuple[int, float, str, str]:
+    created = getattr(row, "created_time", None)
+    if isinstance(created, datetime):
+        stamp = created
+    elif isinstance(created, date):
+        stamp = datetime.combine(created, datetime.min.time())
+    else:
+        stamp = None
+    return (
+        0 if stamp is not None else 1,
+        -(stamp.timestamp() if stamp is not None else 0),
+        str(getattr(row, "opportunity_name", None) or ""),
+        str(getattr(row, "public_id", None) or ""),
+    )
+
+
 def list_chart_bucket_opportunities(
     db: object,
     team_id: object,
@@ -339,7 +355,9 @@ def list_chart_bucket_opportunities(
     chart_key: str,
     bucket_key: str,
     today: date | None = None,
-) -> list[dict[str, Any]]:
+    skip: int = 0,
+    limit: int = 10,
+) -> tuple[int, list[dict[str, Any]]]:
     rows = _team_rows(team_id, opportunities)
     customer_names, owner_names = _preview_name_maps(db, rows)
     resolved_today = today or business_now().date()
@@ -348,7 +366,9 @@ def list_chart_bucket_opportunities(
     if bucket_key not in valid_keys:
         raise ValueError(f"Unknown bucket key for {chart_key}: {bucket_key}")
     matching = _group_rows(chart_key, rows, segments)[bucket_key]
-    return _all_previews(customer_names, owner_names, matching)
+    ordered = sorted(matching, key=_dialog_order)
+    window = ordered[skip:skip + limit]
+    return len(ordered), [_preview(row, customer_names, owner_names) for row in window]
 
 
 

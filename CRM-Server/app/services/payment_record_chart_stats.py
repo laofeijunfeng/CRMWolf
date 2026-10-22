@@ -328,12 +328,32 @@ def build_payment_record_chart(rows: list[object], today: date | None = None) ->
     }
 
 
+def _record_id(row: object) -> int:
+    raw_id = _attr(row, "id")
+    if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+        return raw_id
+    return int(str(raw_id))
+
+
+def _dialog_order(row: object) -> tuple[int, int, str, int]:
+    day = _payment_day(row)
+    number = _text(_attr(row, "record_number"))
+    return (
+        0 if day is not None else 1,
+        -(day or date.min).toordinal(),
+        number,
+        _record_id(row),
+    )
+
+
 def list_chart_bucket_records(
     rows: list[object],
     chart_key: str,
     bucket_key: str,
     today: date | None = None,
-) -> list[dict[str, Any]]:
+    skip: int = 0,
+    limit: int = 10,
+) -> tuple[int, list[dict[str, Any]]]:
     if chart_key not in CHART_KEYS:
         raise ValueError("未知图表")
     current_day = today or business_now().date()
@@ -345,7 +365,10 @@ def list_chart_bucket_records(
         grouped_months = _arr_month_rows(rows, months)
         bucket_rows = grouped_months[bucket_key]
         if _arr_bucket(bucket_key, bucket_rows)["plotted_ratio"] is None:
-            return []
-        return [_preview(row) for row in bucket_rows]
+            return 0, []
+        ordered = sorted(bucket_rows, key=_dialog_order)
+        return len(ordered), [_preview(row) for row in ordered[skip:skip + limit]]
     grouped = _grouped(rows, chart_key, months)
-    return [_preview(row) for row in grouped[bucket_key]]
+    ordered = sorted(grouped[bucket_key], key=_dialog_order)
+    return len(ordered), [_preview(row) for row in ordered[skip:skip + limit]]
+

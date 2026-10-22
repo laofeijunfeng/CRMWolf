@@ -77,6 +77,7 @@ interface Props {
   targetJourneyId?: string | null
   targetPanel?: CustomerDetailPanelTarget | null
   visible: boolean
+  elevated?: boolean
 }
 
 const props = defineProps<Props>()
@@ -1357,9 +1358,9 @@ watch(() => props.targetPanel, (panel): void => {
 
 <template>
   <Sheet :open="visible" @update:open="emit('update:visible', $event)">
-    <DetailSheetContent>
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
       <Transition name="drilldown-fade" mode="out-in">
-        <DealJourneyDetailHost
+        <DealJourneyDetailHost v-bind="elevated ? { elevated: true } : {}"
           v-if="selectedJourneyId !== null"
           :journey-id="selectedJourneyId"
           :journey-name="selectedJourney?.name ?? ''"
@@ -1382,7 +1383,7 @@ watch(() => props.targetPanel, (panel): void => {
           @close="handleContextClose"
           @navigate="handleContextNavigate"
         >
-          <ContractDetailContent
+          <ContractDetailContent v-bind="elevated ? { elevated: true } : {}"
             v-if="selectedContractId !== null"
             :contract-id="selectedContractId"
             embedded
@@ -1395,7 +1396,7 @@ watch(() => props.targetPanel, (panel): void => {
             :show-breadcrumb="false"
           />
 
-          <PaymentRecordDetailContent
+          <PaymentRecordDetailContent v-bind="elevated ? { elevated: true } : {}"
             v-else-if="selectedRecord !== null"
             :record-id="selectedRecord.record.id"
             :record="selectedRecord.record"
@@ -1408,7 +1409,7 @@ watch(() => props.targetPanel, (panel): void => {
             @close="handleContextClose"
           />
 
-          <PaymentPlanDetailContent
+          <PaymentPlanDetailContent v-bind="elevated ? { elevated: true } : {}"
             v-else-if="selectedPlanId !== null"
             :plan-id="selectedPlanId"
             embedded
@@ -1758,7 +1759,7 @@ watch(() => props.targetPanel, (panel): void => {
   </Sheet>
 
   <!-- Dialogs -->
-  <FollowUpFormDialog
+  <FollowUpFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :open="followUpDialogOpen"
@@ -1766,7 +1767,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleFollowUpSuccess"
   />
 
-  <CustomerFormDialog
+  <CustomerFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     mode="edit"
     :customer-id="customerId"
@@ -1776,7 +1777,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleCustomerEditSuccess"
   />
 
-  <ContactFormDialog
+  <ContactFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :open="contactDialogOpen"
@@ -1786,7 +1787,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleContactSuccess"
   />
 
-  <OpportunityFormDialog
+  <OpportunityFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :customer-name="customer?.account_name"
@@ -1796,7 +1797,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleOpportunitySuccess"
   />
 
-  <ContractFormDialog
+  <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :customer-name="customer?.account_name"
@@ -1807,7 +1808,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleCustomerContractSuccess"
   />
 
-  <InvoiceTitleFormDialog
+  <InvoiceTitleFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :open="invoiceTitleDialogOpen"
@@ -1816,7 +1817,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleInvoiceTitleSuccess"
   />
 
-  <DeploymentInfoFormDialog
+  <DeploymentInfoFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
     :open="deploymentDialogOpen"
@@ -1824,7 +1825,7 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleDeploymentSuccess"
   />
 
-  <EditRecordDialog
+  <EditRecordDialog v-bind="elevated ? { elevated: true } : {}"
     :open="recordEditDialogOpen"
     :record="selectedRecord?.record ?? null"
     :submitting="recordEditSubmitting"

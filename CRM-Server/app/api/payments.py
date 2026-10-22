@@ -2315,6 +2315,8 @@ def get_payment_record_chart(
 def get_payment_record_chart_records(
     chart: str = Query(..., description="图表键"),
     bucket: str = Query(..., description="段键"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     population: dict = Depends(payment_record_population_filters),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
@@ -2322,10 +2324,10 @@ def get_payment_record_chart_records(
 ) -> PaymentRecordChartBucketRecords:
     rows = _payment_record_chart_rows(db, team_id, current_user, population)
     try:
-        records = list_chart_bucket_records(rows, chart, bucket)
+        total, records = list_chart_bucket_records(rows, chart, bucket, skip=skip, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return PaymentRecordChartBucketRecords(chart=chart, bucket=bucket, total=len(records), records=records)
+    return PaymentRecordChartBucketRecords(chart=chart, bucket=bucket, total=total, records=records)
 
 
 @router.get(

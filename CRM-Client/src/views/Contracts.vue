@@ -384,7 +384,6 @@ const chartError = ref('')
 const chartBucket = ref<ContractChartBucketContracts | null>(null)
 const chartBucketLoading = ref(false)
 const chartBucketError = ref('')
-const chartBucketFull = ref(false)
 const chartBucketRequest = ref<{ card: ContractChartCard, bucket: ContractChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
@@ -428,17 +427,27 @@ watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'board' || displayMode.value === 'chart') void refreshActiveContractView()
 })
 
-const loadChartBucket = async (card: ContractChartCard, bucket: ContractChartBucket, full: boolean): Promise<void> => {
+const CHART_PAGE_SIZE = 10
+
+const loadChartBucket = async (card: ContractChartCard, bucket: ContractChartBucket, append: boolean): Promise<void> => {
   const requestId = ++chartBucketRequestId
   chartBucketRequest.value = { card, bucket }
-  chartBucketFull.value = full
   chartBucketError.value = ''
   chartBucketLoading.value = true
-  if (!full) chartBucket.value = null
+  const skip = append ? (chartBucket.value?.contracts.length ?? 0) : 0
+  if (!append) chartBucket.value = null
   try {
-    const response = await contractApi.getContractChartBucket({ ...chartParams.value, chart: card.key, bucket: bucket.key })
+    const response = await contractApi.getContractChartBucket({
+      ...chartParams.value,
+      chart: card.key,
+      bucket: bucket.key,
+      skip,
+      limit: CHART_PAGE_SIZE,
+    })
     if (requestId !== chartBucketRequestId) return
-    chartBucket.value = full ? response : { ...response, contracts: response.contracts.slice(0, 5) }
+    chartBucket.value = append && chartBucket.value !== null
+      ? { ...response, contracts: [...chartBucket.value.contracts, ...response.contracts] }
+      : response
   } catch (error) {
     if (requestId !== chartBucketRequestId) return
     chartBucketError.value = toFeedbackError(error, '合同图表').description || '这一段加载失败，请重试'
@@ -449,7 +458,12 @@ const loadChartBucket = async (card: ContractChartCard, bucket: ContractChartBuc
 
 const retryChartBucket = (): void => {
   const request = chartBucketRequest.value
-  if (request) void loadChartBucket(request.card, request.bucket, chartBucketFull.value)
+  if (request) void loadChartBucket(request.card, request.bucket, chartBucket.value !== null)
+}
+
+const loadMoreChartBucket = (): void => {
+  const request = chartBucketRequest.value
+  if (request) void loadChartBucket(request.card, request.bucket, true)
 }
 
 const closeChartBucket = (): void => {
@@ -941,7 +955,7 @@ defineExpose({
           @retry-bucket="retryChartBucket"
           @open-contract="viewingContractId = $event"
           @view-bucket="(card, bucket) => loadChartBucket(card, bucket, false)"
-          @view-all="(card, bucket) => loadChartBucket(card, bucket, true)"
+          @load-more="loadMoreChartBucket"
           @close-bucket="closeChartBucket"
         />
       </template>
@@ -1088,6 +1102,7 @@ defineExpose({
       ref="contractDetailSheetRef"
       :contract-id="viewingContractId"
       :visible="viewingContractId !== null"
+      :elevated="chartBucket !== null"
       @update:visible="(v: boolean) => { if (!v) viewingContractId = null }"
       @refresh="handleContractSheetRefresh"
     />

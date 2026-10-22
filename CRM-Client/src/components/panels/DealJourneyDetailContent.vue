@@ -87,6 +87,7 @@ interface CustomerContext {
 }
 
 interface Props {
+  elevated?: boolean
   journeyId: string
   customerId: string
   journey?: DealJourney | null
@@ -1557,7 +1558,7 @@ watch(approvalPhase, phase => {
     </ScrollArea>
 
     <!-- 赢单弹窗 -->
-    <OpportunityWinDialog
+    <OpportunityWinDialog v-bind="elevated ? { elevated: true } : {}"
       :opportunity-id="opportunity?.id ?? null"
       :open="winDialogOpen"
       @update:open="winDialogOpen = $event"
@@ -1565,7 +1566,7 @@ watch(approvalPhase, phase => {
     />
 
     <!-- 输单弹窗 -->
-    <OpportunityLoseDialog
+    <OpportunityLoseDialog v-bind="elevated ? { elevated: true } : {}"
       :opportunity-id="opportunity?.id ?? null"
       :open="loseDialogOpen"
       @update:open="loseDialogOpen = $event"
@@ -1573,7 +1574,7 @@ watch(approvalPhase, phase => {
     />
 
     <!-- 编辑商机弹窗 -->
-    <OpportunityFormDialog
+    <OpportunityFormDialog v-bind="elevated ? { elevated: true } : {}"
       v-if="opportunity"
       :open="editDialogOpen"
       :opportunity="opportunity"
@@ -1586,7 +1587,7 @@ watch(approvalPhase, phase => {
       @success="handleEditSuccess"
     />
 
-    <PaymentPlanFormDialog
+    <PaymentPlanFormDialog v-bind="elevated ? { elevated: true } : {}"
       :open="paymentPlanDialogOpen"
       :mode="paymentPlanDialogMode"
       :plan="editingPaymentPlan"
@@ -1595,7 +1596,7 @@ watch(approvalPhase, phase => {
       @success="handlePaymentPlanSaved"
     />
 
-    <PaymentRecordDialog
+    <PaymentRecordDialog v-bind="elevated ? { elevated: true } : {}"
       :open="paymentRecordDialogOpen"
       :payment-plan-id="selectedPaymentPlan?.id ?? null"
       :default-amount="paymentRecordDefaultAmount"
@@ -1605,7 +1606,7 @@ watch(approvalPhase, phase => {
       @submit="handlePaymentRecordSubmit"
     />
 
-    <InvoiceApplicationFormDialog
+    <InvoiceApplicationFormDialog v-bind="elevated ? { elevated: true } : {}"
       v-if="opportunity !== null"
       mode="create"
       :open="invoiceApplicationDialogOpen"
@@ -1616,7 +1617,7 @@ watch(approvalPhase, phase => {
       @success="handleInvoiceApplicationSuccess"
     />
 
-    <LicenseApplicationFormDialog
+    <LicenseApplicationFormDialog v-bind="elevated ? { elevated: true } : {}"
       v-if="opportunity !== null"
       :customer-id="opportunity.customer_id"
       :open="licenseApplicationDialogOpen"
@@ -1634,7 +1635,7 @@ watch(approvalPhase, phase => {
       :open="paymentPlanToDelete !== null"
       @update:open="handleDeletePaymentPlanDialogOpenChange"
     >
-      <AlertDialogContent>
+      <AlertDialogContent v-bind="elevated ? { elevated: true } : {}">
         <AlertDialogHeader>
           <AlertDialogTitle>删除回款计划？</AlertDialogTitle>
           <AlertDialogDescription>

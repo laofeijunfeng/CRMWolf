@@ -321,6 +321,16 @@ def build_contract_chart(
     }
 
 
+def _dialog_order(row: object) -> tuple[int, int, str, int]:
+    signing = _as_date(getattr(row, "signing_date", None))
+    return (
+        0 if signing is not None else 1,
+        -(signing or date.min).toordinal(),
+        str(getattr(row, "contract_name", "")),
+        int(getattr(row, "id", 0)),
+    )
+
+
 def list_chart_bucket_contracts(
     db: object,
     team_id: object,
@@ -328,7 +338,9 @@ def list_chart_bucket_contracts(
     chart_key: str,
     bucket_key: str,
     today: date | None = None,
-) -> list[dict[str, Any]]:
+    skip: int = 0,
+    limit: int = 10,
+) -> tuple[int, list[dict[str, Any]]]:
     if chart_key not in _CARD_KEYS:
         raise ValueError("未知图表")
     rows = _team_rows(team_id, contracts)
@@ -349,7 +361,9 @@ def list_chart_bucket_contracts(
             today=resolved_today,
         ) == bucket_key
     ]
-    return [_preview(row, customers, owners) for row in _sorted_rows(matching)]
+    ordered = sorted(matching, key=_dialog_order)
+    window = ordered[skip:skip + limit]
+    return len(ordered), [_preview(row, customers, owners) for row in window]
 
 
 __all__ = ["build_contract_chart", "list_chart_bucket_contracts"]

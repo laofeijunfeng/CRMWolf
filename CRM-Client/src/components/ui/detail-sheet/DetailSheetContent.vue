@@ -23,11 +23,16 @@ import { SheetContent } from '@/components/ui/sheet'
 defineOptions({
   name: 'DetailSheetContent'
 })
+
+defineProps<{
+  elevated?: boolean
+}>()
 </script>
 
 <template>
   <SheetContent
     side="right"
+    v-bind="elevated ? { elevated: true } : {}"
     class="detail-sheet-content w-screen max-w-none sm:w-3/4 sm:max-w-[1080px] p-0 flex flex-col"
   >
     <slot />

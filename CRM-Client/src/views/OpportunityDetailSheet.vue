@@ -26,6 +26,7 @@ interface ViewJourneyPayload {
 interface Props {
   opportunityId: string | null
   visible: boolean
+  elevated?: boolean
 }
 
 const props = defineProps<Props>()
@@ -67,8 +68,8 @@ defineExpose({ refresh })
 
 <template>
   <Sheet v-model:open="visibleModel">
-    <DetailSheetContent>
-      <OpportunityDetailContent
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <OpportunityDetailContent v-bind="elevated ? { elevated: true } : {}"
         v-if="opportunityId !== null"
         ref="opportunityDetailContentRef"
         :opportunity-id="opportunityId"

@@ -1313,14 +1313,18 @@ def get_contract_chart(query: _ChartQuery = Depends(_chart_query)) -> ContractCh
 def get_contract_chart_bucket_contracts(
     chart: str = Query(...),
     bucket: str = Query(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     query: _ChartQuery = Depends(_chart_query),
 ) -> ContractChartBucketContracts:
     population = _chart_population(query)
     try:
-        contracts = contract_chart_stats.list_chart_bucket_contracts(query.db, query.team_id, population, chart, bucket)
+        total, contracts = contract_chart_stats.list_chart_bucket_contracts(
+            query.db, query.team_id, population, chart, bucket, skip=skip, limit=limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
-    return ContractChartBucketContracts(chart=chart, bucket=bucket, total=len(contracts), contracts=contracts)
+    return ContractChartBucketContracts(chart=chart, bucket=bucket, total=total, contracts=contracts)
 
 
 @router.get("/{contract_id}", response_model=ContractDetailResponse, summary="获取合同详情", description="""

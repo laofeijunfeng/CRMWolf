@@ -63,6 +63,8 @@ const segmentLabel = ref('')
 const segmentTotal = ref(0)
 const segmentItems = ref<BusinessJourneyChartPreview[]>([])
 const segmentRequestSequence = ref(0)
+const selectedChartCard = ref<BusinessJourneyChartCard | null>(null)
+const selectedChartSegment = ref<BusinessJourneyChartSegment | null>(null)
 const selectedJourneyCustomerId = ref<string | null>(null)
 const selectedJourneyCustomerName = ref<string | undefined>(undefined)
 const selectedJourneyName = ref<string | undefined>(undefined)
@@ -217,40 +219,40 @@ function refreshActiveProjection(): Promise<boolean> {
   return loadTable()
 }
 
-async function openChartSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): Promise<void> {
+
+function rememberChartSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment): void {
+  selectedChartCard.value = card
+  selectedChartSegment.value = segment
+  void openChartSegment(card, segment, false)
+}
+
+async function openChartSegment(card: BusinessJourneyChartCard, segment: BusinessJourneyChartSegment, append = false): Promise<void> {
   const requestId = ++segmentRequestSequence.value
   segmentOpen.value = true
   segmentLoading.value = true
   segmentError.value = ''
-  segmentLabel.value = segment.label
-  segmentTotal.value = segment.count
-  segmentItems.value = []
+  if (!append) {
+    segmentLabel.value = segment.label
+    segmentTotal.value = segment.count
+    segmentItems.value = []
+  }
+  const skip = append ? segmentItems.value.length : 0
   try {
-    const items: BusinessJourneyChartPreview[] = []
-    let skip = 0
-    let total = segment.count
-    do {
-      const response = await dealJourneyApi.getChartSegment({
-        ...projectionQuery(),
-        card: card.key,
-        segment: segment.key,
-        skip,
-        limit: 200
-      })
-      if (requestId !== segmentRequestSequence.value) return
-      items.push(...response.items)
-      total = response.total
-      segmentLabel.value = response.label
-      skip += response.items.length
-      if (response.items.length === 0) break
-    } while (items.length < total)
+    const response = await dealJourneyApi.getChartSegment({
+      ...projectionQuery(),
+      card: card.key,
+      segment: segment.key,
+      skip,
+      limit: 10,
+    })
     if (requestId !== segmentRequestSequence.value) return
-    segmentItems.value = items
-    segmentTotal.value = total
+    segmentLabel.value = response.label
+    segmentTotal.value = response.total
+    segmentItems.value = append ? [...segmentItems.value, ...response.items] : response.items
   } catch (error) {
     if (requestId !== segmentRequestSequence.value) return
+    segmentError.value = '这一段旅程加载失败，请重试'
     logger.error('[BusinessJourneys]', '加载图表分段失败', { error })
-    segmentError.value = '这一段加载失败，请重试'
   } finally {
     if (requestId === segmentRequestSequence.value) segmentLoading.value = false
   }
@@ -300,12 +302,22 @@ async function handleDisplayModeChange(mode: ViewDisplayMode): Promise<void> {
   ])
 }
 
+
+function loadMoreChartSegment(): void {
+  const card = selectedChartCard.value
+  const segment = selectedChartSegment.value
+  if (card === null || segment === null) return
+  void openChartSegment(card, segment, true)
+}
+
+
 async function handleFilterApply(filters: ListFilterCondition[]): Promise<void> {
   activeFilters.value = filters
   pagination.current = 1
   await customFilterViews.updateActiveCustomViewConfig()
   await refreshActiveProjection()
 }
+
 function handleFilterReset(): void {
   activeFilters.value = []
   pagination.current = 1
@@ -532,7 +544,8 @@ onMounted(() => {
           :segment-total="segmentTotal"
           :segment-items="segmentItems"
           @retry="loadChart"
-          @open-segment="openChartSegment($event.card, $event.segment)"
+          @open-segment="rememberChartSegment($event.card, $event.segment)"
+          @load-more="loadMoreChartSegment"
           @update:segment-open="segmentOpen = $event"
           @open-journey="handleRowClick({ customerId: $event.customerId, journeyPublicId: $event.journeyPublicId })"
         />
@@ -542,6 +555,7 @@ onMounted(() => {
 
   <DealJourneyDetailSheet
     :customer-id="selectedJourneyCustomerId"
+    :elevated="segmentOpen"
     :customer-name="selectedJourneyCustomerName"
     :journey-id="selectedJourneyId"
     :journey-name="selectedJourneyName"

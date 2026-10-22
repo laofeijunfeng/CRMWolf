@@ -15,7 +15,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -40,7 +39,7 @@ const emit = defineEmits<{
   'retry-bucket': []
   'open-contract': [contractId: number]
   'view-bucket': [card: ContractChartCard, bucket: ContractChartBucket]
-  'view-all': [card: ContractChartCard, bucket: ContractChartBucket]
+  'load-more': []
   'close-bucket': []
 }>()
 
@@ -304,12 +303,12 @@ function openMonth(card: ContractChartCard, datum: MonthDatum): void {
       <Dialog :open="dialogOpen" @update:open="dialogOpen = $event">
         <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
           <DialogHeader>
-            <DialogTitle>{{ bucketContracts ? `${bucketContracts.total} 份` : '合同' }}</DialogTitle>
+            <DialogTitle>{{ selectedBucket?.label ?? '合同' }}</DialogTitle>
             <DialogDescription>
-              {{ bucketLoading ? '正在读取这一段合同…' : bucketError || '这一段里的合同。' }}
+              {{ bucketLoading && !bucketContracts ? '正在读取这一段合同…' : bucketError && !bucketContracts ? bucketError : `${selectedCard?.title ?? ''} · 共 ${bucketContracts?.total ?? selectedBucket?.count ?? 0} 份` }}
             </DialogDescription>
           </DialogHeader>
-          <div v-if="bucketError" class="contract-chart-page__state">
+          <div v-if="bucketError && !bucketContracts" class="contract-chart-page__state">
             <Button type="button" variant="outline" size="sm" @click="emit('retry-bucket')">重试</Button>
           </div>
           <div v-else-if="bucketContracts" class="contract-chart-dialog-list">
@@ -322,10 +321,16 @@ function openMonth(card: ContractChartCard, datum: MonthDatum): void {
               <span>{{ contract.name }}</span>
               <small>{{ contract.customer_name || '无客户' }} · {{ moneyText(contract.amount) }}</small>
             </button>
+            <button
+              v-if="bucketContracts.contracts.length < bucketContracts.total"
+              type="button"
+              class="contract-chart-dialog-more"
+              :disabled="bucketLoading"
+              @click="emit('load-more')"
+            >
+              {{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}
+            </button>
           </div>
-          <DialogFooter v-if="selectedCard && selectedBucket && bucketContracts && bucketContracts.total > bucketContracts.contracts.length">
-            <Button type="button" variant="outline" @click="emit('view-all', selectedCard, selectedBucket)">查看详情</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </template>

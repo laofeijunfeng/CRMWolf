@@ -59,6 +59,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
+  elevated?: boolean
   customerId: string
   open: boolean
   contact?: ContactResponse | null
@@ -255,7 +256,7 @@ function continueEditing(): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="contact-form-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="contact-form-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑联系人' : '新建联系人' }}</DialogTitle>
         <DialogDescription class="sr-only">填写联系人信息</DialogDescription>

@@ -61,6 +61,7 @@ import { formatLocalDate } from '@/utils/format'
 import { AmountText, DataViewStatePanel } from '@/components/crmwolf'
 
 interface Props {
+  elevated?: boolean
   planId: number | null
   visible?: boolean
   embedded?: boolean
@@ -790,7 +791,7 @@ watch(
   </div>
 
   <!-- Register payment dialog -->
-  <PaymentRecordDialog
+  <PaymentRecordDialog v-bind="elevated ? { elevated: true } : {}"
     :open="registerDialogOpen"
     :payment-plan-id="paymentPlan?.id ?? null"
     :default-amount="registerDefaultAmount"
@@ -801,7 +802,7 @@ watch(
   />
 
   <!-- Edit record dialog (also used for resubmit) -->
-  <EditRecordDialog
+  <EditRecordDialog v-bind="elevated ? { elevated: true } : {}"
     :open="editDialogOpen"
     :record="selectedRecord"
     :submitting="editSubmitting"

@@ -25,6 +25,7 @@ import { confirmDelete } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
+  elevated?: boolean
   customerId: string
   customerName?: string | undefined
   journeyId: string
@@ -508,7 +509,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     @close="handleContextClose"
   >
     <div v-show="currentNode?.type === 'journey'" ref="journeyContentContainerRef" class="contents">
-      <DealJourneyDetailContent
+      <DealJourneyDetailContent v-bind="elevated ? { elevated: true } : {}"
         ref="journeyContentRef"
         :customer-id="customerId"
         :journey-id="journeyId"
@@ -530,7 +531,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
       />
     </div>
 
-    <ContractDetailContent
+    <ContractDetailContent v-bind="elevated ? { elevated: true } : {}"
       v-if="currentContractId !== null"
       :key="`contract-${currentContractId}`"
       :contract-id="currentContractId"
@@ -543,7 +544,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
       @close="handleContextClose"
     />
 
-    <PaymentPlanDetailContent
+    <PaymentPlanDetailContent v-bind="elevated ? { elevated: true } : {}"
       v-if="currentNode?.type === 'payment-plan'"
       :key="`plan-${currentPlanId}`"
       :plan-id="currentPlanId"
@@ -573,7 +574,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     />
   </DetailContextHost>
 
-  <ContractFormDialog
+  <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
     :customer-id="customerId"
     :customer-name="customerName"
     :customer-locked="true"
@@ -584,7 +585,7 @@ async function handleRecordEditSubmit(recordId: number, payload: PaymentRecordUp
     @success="handleContractSuccess"
   />
 
-  <EditRecordDialog
+  <EditRecordDialog v-bind="elevated ? { elevated: true } : {}"
     :open="recordEditDialogOpen"
     :record="selectedPaymentRecord?.record ?? null"
     :submitting="recordEditSubmitting"

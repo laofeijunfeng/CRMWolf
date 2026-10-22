@@ -51,6 +51,7 @@ import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // ==================== Props & Emits ====================
 interface Props {
+  elevated?: boolean
   contractId: number
   embedded?: boolean
   showBreadcrumb?: boolean
@@ -691,7 +692,7 @@ onBeforeUnmount((): void => {
       </SheetFooter>
   </div>
 
-  <ContractFormDialog
+  <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="contractInfo"
     v-model:open="editDialogOpen"
     :customer-id="contractInfo.customer_id"

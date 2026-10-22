@@ -44,6 +44,7 @@ const schema = toTypedSchema(
 )
 
 interface Props {
+  elevated?: boolean
   opportunityId: string | null
   open: boolean
 }
@@ -195,7 +196,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent class="opportunity-win-dialog w-[calc(100vw-2rem)] max-w-[425px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="opportunity-win-dialog w-[calc(100vw-2rem)] max-w-[425px]">
       <DialogHeader>
         <DialogTitle>标记赢单</DialogTitle>
         <DialogDescription>确认商机成交信息后，商机状态将变更为“已赢单”。</DialogDescription>

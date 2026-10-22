@@ -42,6 +42,7 @@ import { normalizePaginatedResponse } from '@/types/pagination'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 
 interface Props {
+  elevated?: boolean
   open: boolean
   mode: 'create' | 'edit'
   plan?: PaymentPlanResponse | null
@@ -673,7 +674,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent class="payment-plan-form-dialog payment-plan-form-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="payment-plan-form-dialog payment-plan-form-dialog w-[calc(100vw-2rem)]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>

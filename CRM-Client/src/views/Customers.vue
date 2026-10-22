@@ -713,8 +713,10 @@ const chartError = ref('')
 const chartBucket = ref<CustomerChartBucketCustomers | null>(null)
 const chartBucketLoading = ref(false)
 const chartBucketError = ref('')
+const chartBucketRequest = ref<{ card: CustomerChartCard, bucket: CustomerChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
+const CHART_PAGE_SIZE = 10
 
 const chartQuery = (): CustomerQueryParams => {
   const params: CustomerQueryParams = {
@@ -763,19 +765,25 @@ const setCustomerDisplayMode = (value: string): void => {
   void refreshVisibleCustomers()
 }
 
-const openChartBucket = async (card: CustomerChartCard, bucket: CustomerChartBucket): Promise<void> => {
+const loadChartBucketPage = async (card: CustomerChartCard, bucket: CustomerChartBucket, append: boolean): Promise<void> => {
   const requestId = ++chartBucketRequestId
-  chartBucket.value = null
+  chartBucketRequest.value = { card, bucket }
   chartBucketError.value = ''
   chartBucketLoading.value = true
+  const skip = append ? (chartBucket.value?.customers.length ?? 0) : 0
+  if (!append) chartBucket.value = null
   try {
     const response = await customerApi.getCustomerChartBucket({
       ...chartQuery(),
       chart: card.key,
       bucket: bucket.key,
+      skip,
+      limit: CHART_PAGE_SIZE,
     })
     if (requestId !== chartBucketRequestId) return
-    chartBucket.value = response
+    chartBucket.value = append && chartBucket.value !== null
+      ? { ...response, customers: [...chartBucket.value.customers, ...response.customers] }
+      : response
   } catch (error) {
     if (requestId !== chartBucketRequestId) return
     chartBucketError.value = toFeedbackError(error, '客户图表').description || '这一段客户加载失败，请重试'
@@ -784,8 +792,19 @@ const openChartBucket = async (card: CustomerChartCard, bucket: CustomerChartBuc
   }
 }
 
+const openChartBucket = (card: CustomerChartCard, bucket: CustomerChartBucket): Promise<void> => (
+  loadChartBucketPage(card, bucket, false)
+)
+
+const loadMoreChartBucket = (): Promise<void> => {
+  const request = chartBucketRequest.value
+  if (request === null) return Promise.resolve()
+  return loadChartBucketPage(request.card, request.bucket, true)
+}
+
 const closeChartBucket = (): void => {
   chartBucketRequestId += 1
+  chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
   chartBucketLoading.value = false
@@ -1579,6 +1598,7 @@ defineExpose({
           @retry="fetchCustomerChart"
           @open-customer="openCustomerDetail"
           @view-bucket="openChartBucket"
+          @load-more="loadMoreChartBucket"
           @close-bucket="closeChartBucket"
         />
       </template>
@@ -1788,6 +1808,7 @@ defineExpose({
       ref="customerDetailSheetRef"
       v-model:visible="sheetVisible"
       :customer-id="selectedCustomerId ?? null"
+      :elevated="chartBucket !== null"
       :target-opportunity-id="targetOpportunityId"
       :target-journey-id="targetJourneyId"
       :target-panel="targetCustomerDetailPanel"

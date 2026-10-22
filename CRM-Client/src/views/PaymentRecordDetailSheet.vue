@@ -26,6 +26,7 @@ interface Props {
   record?: PaymentRecordDetailInfo | null
   stageName?: string
   approval?: ApprovalInfoInput | null
+  elevated?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -53,8 +54,8 @@ const closeSheet = (): void => {
 
 <template>
   <Sheet v-model:open="visibleModel">
-    <DetailSheetContent>
-      <PaymentRecordDetailContent
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <PaymentRecordDetailContent v-bind="elevated ? { elevated: true } : {}"
         :record-id="recordId"
         :visible="visible"
         :record="record ?? null"

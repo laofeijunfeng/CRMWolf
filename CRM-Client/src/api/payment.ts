@@ -289,6 +289,8 @@ export type PaymentRecordBoardParams = Omit<PaymentRecordListParams, 'page' | 'p
 export interface PaymentRecordChartBucketParams extends Omit<PaymentRecordListParams, 'page' | 'page_size'> {
   chart: 'license_type' | 'purchase_type' | 'amount_band' | 'payment_month' | 'arr_ratio'
   bucket: string
+  skip?: number
+  limit?: number
 }
 
 export interface PaymentRecordWithDetails extends PaymentRecordResponse {
@@ -440,7 +442,6 @@ const paymentApi = {
 
   getPaymentPlanBoard: async (params: PaymentPlanBoardParams): Promise<PaymentPlanBoardResponse> => {
     const serialized = serializeListQuery()
-    // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get('/v1/payments/payment-plans/board', {
       params: {
         ...params,
@@ -477,7 +478,6 @@ const paymentApi = {
 
   getPaymentRecordBoard: async (params: PaymentRecordBoardParams): Promise<PaymentRecordBoardResponse> => {
     const serialized = serializeListQuery()
-    // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get('/v1/payments/payment-records/board', {
       params: {
         ...params,

@@ -264,7 +264,7 @@ def get_business_journey_chart_segment(
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(10, ge=1, le=200),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),

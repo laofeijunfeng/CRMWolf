@@ -759,6 +759,8 @@ def get_opportunity_chart(
 def get_opportunity_chart_bucket_opportunities(
     chart: str = Query(...),
     bucket: str = Query(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
     opportunity_status: Optional[str] = Query(None, alias="status"),
     search: Optional[str] = Query(None),
     filters: Optional[str] = Query(None),
@@ -777,15 +779,15 @@ def get_opportunity_chart_bucket_opportunities(
         db=db,
     )
     try:
-        opportunities = opportunity_chart_stats.list_chart_bucket_opportunities(
-            db, team_id, population, chart, bucket
+        total, opportunities = opportunity_chart_stats.list_chart_bucket_opportunities(
+            db, team_id, population, chart, bucket, skip=skip, limit=limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return OpportunityChartBucketOpportunities(
         chart=chart,
         bucket=bucket,
-        total=len(opportunities),
+        total=total,
         opportunities=opportunities,
     )
 

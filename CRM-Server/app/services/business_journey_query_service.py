@@ -220,7 +220,7 @@ class BusinessJourneyQueryService:
             segment=segment,
             today=today,
         )
-        ordered = sorted(selected, key=lambda row: (-_opportunity_amount(row.opportunity), row.journey.public_id))
+        ordered = sorted(selected, key=_dialog_order)
         page = ordered[skip:skip + limit]
         return BusinessJourneyChartSegmentResponse(
             card=card,
@@ -770,6 +770,13 @@ _ACTIVITY_BANDS = (
     ("over_30", "30 天以上"),
     ("none", "没有动态"),
 )
+
+
+
+def _dialog_order(row: BusinessJourneyQueryRow) -> tuple[float, str, str]:
+    created = row.journey.created_time
+    stamp = created.timestamp() if created is not None else 0
+    return (-stamp, row.journey.name, row.journey.public_id)
 
 
 def _opportunity_amount(opportunity: Opportunity | None) -> float:
