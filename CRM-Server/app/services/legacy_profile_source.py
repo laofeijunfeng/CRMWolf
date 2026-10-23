@@ -19,6 +19,7 @@ from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.procurement import OpportunityStageSnapshot
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent, SalesCommitment
+from app.utils.public_id import is_follow_up_task_public_id, is_sales_commitment_public_id
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -33,6 +34,8 @@ def _activity_source_status(db: Session, team_id: int, customer_id: int, activit
     if not str(activity_id or "").isdecimal() or int(str(activity_id)) <= 0:
         return "UNKNOWN"
     identifier = int(str(activity_id))
+    if str(identifier) != str(activity_id):
+        return "UNKNOWN"
     live = (
         db.query(CustomerActivity.submission_source)
         .filter_by(
@@ -90,7 +93,28 @@ def follow_up_source_status(db: Session, row: FollowUpTask | SalesCommitment, te
             .one_or_none()
         )
         return follow_up_source_status(db, commitment, team_id, customer_id) if commitment is not None else "UNKNOWN"
-    origin = task_origin_from_row(db, row, team_id, customer_id)
+    if kind != "customer_activity" or not key.startswith("activity:"):
+        return "UNKNOWN"
+    identifier = key.removeprefix("activity:")
+    if not identifier.isdecimal() or int(identifier) <= 0 or str(int(identifier)) != identifier:
+        return "UNKNOWN"
+    if row.source_activity_id is not None and str(row.source_activity_id) != identifier:
+        return "UNKNOWN"
+    if isinstance(row, FollowUpTask) and row.commitment_id is not None:
+        commitment = (
+            db.query(SalesCommitment)
+            .filter_by(
+                id=row.commitment_id,
+                team_id=team_id,
+                customer_id=customer_id,
+            )
+            .one_or_none()
+        )
+        if commitment is None or commitment.source_type.lower() != kind or commitment.source_key != key:
+            return "UNKNOWN"
+        if follow_up_source_status(db, commitment, team_id, customer_id) != "EXCLUDED":
+            return "UNKNOWN"
+    origin = _activity_source_status(db, team_id, customer_id, identifier)
     return "EXCLUDED" if origin == "EXCLUDED" else "UNKNOWN"
 
 
@@ -288,16 +312,118 @@ def source_status(
         event = (
             db.query(CustomerDealJourneyEvent)
             .filter_by(
-                id=int(source_id),
+                id=int(str(source_id)),
                 team_id=team_id,
                 customer_id=customer_id,
             )
             .one_or_none()
         )
         origin = event_source_status(db, event, team_id, customer_id) if event is not None else "UNKNOWN"
+    elif kind in {"follow_up_task", "task", "sales_commitment", "commitment"}:
+        model = FollowUpTask if kind in {"follow_up_task", "task"} else SalesCommitment
+        if str(source_id or "").isdecimal():
+            number = int(str(source_id))
+            if number <= 0 or str(number) != str(source_id):
+                return "UNKNOWN"
+            identifier = model.id == number
+        elif (
+            is_follow_up_task_public_id(source_id)
+            if model is FollowUpTask
+            else is_sales_commitment_public_id(source_id)
+        ):
+            identifier = model.public_id == source_id
+        else:
+            return "UNKNOWN"
+        row = (
+            db.query(model)
+            .filter(
+                identifier,
+                model.team_id == team_id,
+                model.customer_id == customer_id,
+            )
+            .one_or_none()
+        )
+        origin = (
+            follow_up_source_status(db, row, team_id, customer_id)
+            if isinstance(row, FollowUpTask | SalesCommitment)
+            else "UNKNOWN"
+        )
+    elif kind == "follow_up_task_event" and str(source_id or "").isdecimal():
+        task_event = db.query(FollowUpTaskEvent).filter_by(id=int(str(source_id)), team_id=team_id).one_or_none()
+        task = (
+            db.query(FollowUpTask)
+            .filter_by(id=task_event.task_id, team_id=team_id, customer_id=customer_id)
+            .one_or_none()
+            if task_event is not None
+            else None
+        )
+        origin = (
+            task_event_source_status(db, task_event, task, team_id, customer_id)
+            if task_event is not None and task is not None
+            else "UNKNOWN"
+        )
     else:
         origin = "VERIFIED" if _business_origin(db, team_id, customer_id, kind, source_id) else "UNKNOWN"
+    if origin == "UNKNOWN":
+        return origin
+    if business_type is None and business_id is None:
+        return origin
+    if not _source_hint_matches(db, team_id, customer_id, kind, source_id, business_type, business_id):
+        return "UNKNOWN"
     return origin
+
+
+def _source_hint_matches(
+    db: Session,
+    team_id: int,
+    customer_id: int,
+    kind: str,
+    source_id: object,
+    business_type: object,
+    business_id: object,
+) -> bool:
+    """Both hints must describe the *same* source, not merely two eligible rows."""
+    business_kind = str(business_type or "").lower()
+    if not business_kind or business_id is None:
+        return False
+    aliases = (
+        {"customer_activity", "follow_up", "customer_follow_up"},
+        {"deal_journey_event", "business_flow"},
+        {"follow_up_task", "task"},
+        {"sales_commitment", "commitment"},
+    )
+    if any(kind in group and business_kind in group for group in aliases):
+        return str(source_id) == str(business_id)
+    if kind == business_kind:
+        return str(source_id) == str(business_id)
+    if kind in {"deal_journey_event", "business_flow"} and str(source_id or "").isdecimal():
+        event = (
+            db.query(CustomerDealJourneyEvent)
+            .filter_by(
+                id=int(str(source_id)),
+                team_id=team_id,
+                customer_id=customer_id,
+            )
+            .one_or_none()
+        )
+        return (
+            event is not None
+            and business_kind == str(event.source_type or "").lower()
+            and str(business_id) == str(event.source_id)
+        )
+    if kind == "follow_up_task_event" and business_kind in {"follow_up_task", "task"}:
+        task_event = (
+            db.query(FollowUpTaskEvent.task_id)
+            .filter_by(
+                id=int(str(source_id)),
+                team_id=team_id,
+            )
+            .one_or_none()
+            if str(source_id or "").isdecimal()
+            else None
+        )
+        return task_event is not None and str(business_id) == str(task_event[0])
+    return False
 
 
 def _business_origin(
@@ -361,18 +487,6 @@ def _business_origin(
     return (query.with_for_update() if current else query).first() is not None
 
 
-def task_origin_from_row(db: Session, row: FollowUpTask | SalesCommitment, team_id: int, customer_id: int) -> str:
-    """Classify a follow-up row's origin without progress-table involvement."""
-    if follow_up_origin(db, row, team_id, customer_id):
-        return "VERIFIED"
-    live = (
-        db.query(CustomerActivity.submission_source)
-        .filter_by(id=str(row.source_key or "").removeprefix("activity:") or 0)
-        .one_or_none()
-    )
-    if live is not None and live[0] == "ASSISTANT_2":
-        return "EXCLUDED"
-    return "UNKNOWN"
 
 
 def _trace_customer_source_provenance(db: Session, *, team_id: int, customer_id: int) -> bool:

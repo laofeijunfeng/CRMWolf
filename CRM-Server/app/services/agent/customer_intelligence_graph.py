@@ -116,7 +116,7 @@ class CustomerIntelligenceGraphState(TypedDict, total=False):
     route: CustomerIntelligenceRoute
     visible_trace: Annotated[list[JSONDict], operator.add]
     events: Annotated[list[JSONDict], merge_turn_scoped_events]
-    errors: Annotated[list[JSONDict], operator.add]
+    errors: Annotated[list[JSONDict], merge_turn_scoped_events]
 
 
 class CustomerIntelligenceGraphInput(TypedDict, total=False):
@@ -811,7 +811,7 @@ class CustomerIntelligenceGraphService:
             ],
         }
 
-    def _route_after_persist_facts(self, state: CustomerIntelligenceGraphState) -> str:
+    def _route_after_persist_facts(self, _state: CustomerIntelligenceGraphState) -> str:
         return "write_memory"
 
 
@@ -918,13 +918,14 @@ def _checkpoint_state_from_input(input_state: CustomerIntelligenceGraphInput) ->
             internal_graph_start_event("customer_intelligence_graph_invocation_started"),
             *[coerce_json_dict(event) for event in prior_events if isinstance(event, dict)],
         ],
-        "errors": [],
+        "errors": [internal_graph_start_event("customer_intelligence_graph_invocation_started")],
     }
 
 
 def _with_visible_events(result: CustomerIntelligenceGraphResult) -> CustomerIntelligenceGraphResult:
     projected: CustomerIntelligenceGraphResult = dict(result)
     projected["events"] = visible_graph_events(projected.get("events"))
+    projected["errors"] = visible_graph_events(projected.get("errors"))
     return projected
 
 

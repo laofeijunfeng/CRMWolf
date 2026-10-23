@@ -1,4 +1,4 @@
-"""Contract creation's post-commit file transactions retain legacy source progress."""
+"""Contract file commits preserve source snapshots, rollback and team isolation."""
 
 from decimal import Decimal
 from types import SimpleNamespace
@@ -17,7 +17,6 @@ from app.models.invoice import InvoiceApplication
 from app.models.license_application import LicenseApplication
 from app.services.customer_intelligence_context_service import CustomerIntelligenceContextService
 from app.services.file_storage import FileStorageError
-from app.services.legacy_profile_source import advance_eligible_progress
 from tests.unit.test_customer_intelligence_context_service import _seed_customer_context, _session
 
 
@@ -40,16 +39,15 @@ class _Request(SimpleNamespace):
 
 
 def _watermark(db):
-    customer = db.query(Customer).filter_by(id=101, team_id=2).one()
-    return CustomerIntelligenceContextService()._build_strong_context(
-        db, customer=customer, team_id=2,
-    ).source_watermarks
+    return CustomerIntelligenceContextService().build_context(
+        db, customer_id=101, team_id=2, evidence_limit=0,
+    ).source_watermark
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("from_opportunity", [False, True], ids=["manual", "won-opportunity"])
 @pytest.mark.parametrize("storage_failure", [False, True], ids=["stored", "storage-error"])
-async def test_contract_file_second_transaction_fences_source(
+async def test_contract_file_second_transaction_preserves_source_and_team(
     monkeypatch, from_opportunity, storage_failure,
 ):
     engine, db = _session()
@@ -68,7 +66,7 @@ async def test_contract_file_second_transaction_fences_source(
         before = _watermark(db)
         after_create = []
         captured_create = []
-        # Use an actual committed contract/progress pair rather than the CRUD's
+        # Use an actual committed contract rather than the CRUD's
         # independent contract-number and operation-log dependencies.
         def create_contract(**kwargs):
             captured_create.append(kwargs)
@@ -81,7 +79,6 @@ async def test_contract_file_second_transaction_fences_source(
                 owner_id="9", creator_id="9",
             )
             db.add(row)
-            advance_eligible_progress(db, team_id=2, customer_id=101)
             db.commit()
             db.refresh(row)
             return row
@@ -97,7 +94,9 @@ async def test_contract_file_second_transaction_fences_source(
         monkeypatch.setattr(contracts_api.file_storage_service, "save_contract_file", save_file)
         monkeypatch.setattr(
             contracts_api, "_get_opportunity_by_public_id_or_404",
-            lambda db, opportunity_id, team_id: SimpleNamespace(id=301, customer_id=101, status=1),
+            lambda db, opportunity_id, team_id: SimpleNamespace(
+                id=301, customer_id=101, status=1, approval_phase="approved",
+            ),
         )
         monkeypatch.setattr(
             contracts_api, "check_customer_edit_permission",
@@ -129,7 +128,7 @@ async def test_contract_file_second_transaction_fences_source(
             pass
 
         monkeypatch.setattr(contracts_api, "_trigger_contract_intelligence_refresh", ignore_refresh)
-        route_kwargs = dict(file=_Upload(), team_id=2, current_user=SimpleNamespace(id=9), db=db)
+        route_kwargs = {"file": _Upload(), "team_id": 2, "current_user": SimpleNamespace(id=9), "db": db}
         if from_opportunity:
             route = contracts_api.create_contract_from_opportunity
             route_kwargs.update(opportunity_id="opp_301", contract_name="新合同", signing_contact_id=201)
@@ -147,22 +146,19 @@ async def test_contract_file_second_transaction_fences_source(
             assert result.id == 402
 
         assert len(after_create) == 1
-        assert after_create[0]["eligible_revision"] == before["eligible_revision"] + 1
         assert after_create[0]["source_snapshot_hash"] != before["source_snapshot_hash"]
         db.expire_all()
         row = db.query(Contract).filter_by(id=402, team_id=2).one_or_none()
         after = _watermark(db)
-        assert after["eligible_revision"] == before["eligible_revision"] + 2
         if storage_failure:
             assert row is None
-            assert after["deletion_revision"] == before["deletion_revision"] + 1
             assert after["source_snapshot_hash"] == before["source_snapshot_hash"]
         else:
             assert row.contract_file_path == "contracts/2/402/contract.pdf"
             assert row.contract_file_name == "contract.pdf"
             assert row.contract_file_size == len(b"contract")
-            assert after["deletion_revision"] == before["deletion_revision"]
             assert after["source_snapshot_hash"] != after_create[0]["source_snapshot_hash"]
+        assert row is None or (row.team_id, row.customer_id) == (2, 101)
         if from_opportunity:
             assert captured_create[0]["opportunity_id"] == 301
             assert captured_create[0]["customer_id"] == 101

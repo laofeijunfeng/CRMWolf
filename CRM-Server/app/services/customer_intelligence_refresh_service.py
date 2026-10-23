@@ -15,10 +15,9 @@ from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
 from sqlalchemy import exists, or_
-
-from app.core.config import get_settings
 from sqlalchemy import false as sa_false
 
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.team import team_crud
 from app.models.contract import Contract
@@ -35,12 +34,12 @@ from app.services.agent.async_operation_service import (
 )
 from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
 from app.services.agent.types import JSONDict, coerce_json_dict
-
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolutionService,
     customer_identity_resolution_service,
 )
 from app.services.customer_intelligence_event_service import (
+    CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES,
     CustomerIntelligenceEvent,
     CustomerIntelligenceEventService,
     JsonObject,
@@ -67,6 +66,10 @@ if TYPE_CHECKING:
     from sqlalchemy.sql.elements import ColumnElement
 
     from app.models.agent_async_operation import AgentAsyncOperation
+    from app.services.agent.customer_intelligence_graph import (
+        CustomerIntelligenceGraphInput,
+        CustomerIntelligenceGraphService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +153,9 @@ class CustomerIntelligenceRefreshService:
         identity_resolution_service: CustomerIdentityResolutionService | None = None,
         async_operation_service: AgentAsyncOperationService | None = None,
         operation_projector: CustomerIntelligenceOperationProjector | None = None,
-        profile_workflow: CustomerProfileProjectionWorkflowRunner | None = None,
-        readiness_gate: CustomerProfileReadinessGate | None = None,
+        graph_service: CustomerIntelligenceGraphService | None = None,
     ) -> None:
+        self.graph_service = graph_service
         self.event_service = event_service or customer_intelligence_event_service
         self.run_service = run_service or customer_intelligence_run_service
         self.identity_resolution_service = identity_resolution_service or customer_identity_resolution_service
@@ -241,7 +244,7 @@ class CustomerIntelligenceRefreshService:
 
         This is the in-transaction half of the scheduler seam.  It deliberately
         shares the same registration core as the async and post-commit paths so
-        stale marking, pending status, and durable run creation cannot drift
+        pending status and durable run creation cannot drift
         between business-object modules.  It does not kick the workflow: the
         caller owns the source transaction and must kick only after commit.
         """
@@ -265,7 +268,7 @@ class CustomerIntelligenceRefreshService:
         Task/activity transition services may build the intelligence event while
         their business transaction is still open.  This method is the explicit
         post-commit seam: it owns a short-lived session, commits the durable run,
-        and leaves the low-latency kick to the caller.  A profile scheduling
+        and leaves the low-latency kick to the caller. An intelligence scheduling
         failure therefore cannot roll back the already-committed business write.
         """
 
@@ -434,7 +437,6 @@ class CustomerIntelligenceRefreshService:
             trigger_type="manual_refresh_requested",
         )
         self._ensure_pending_run(db, request)
-        self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request)
         self._start_background_task(self.run_refresh(request))
         return request
@@ -466,7 +468,6 @@ class CustomerIntelligenceRefreshService:
             customer_id=customer_id,
         )
         self._ensure_pending_run(db, request)
-        self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request)
         self._start_background_task(self.run_refresh(request))
         return request
@@ -499,7 +500,6 @@ class CustomerIntelligenceRefreshService:
                 trigger_type="customer_intelligence_batch_rebuild_requested",
             )
             self._ensure_pending_run(db, request)
-            self._mark_profile_stale(db, self._build_event(request))
         self._commit_pending_schedule(db, request_id=request_id)
         for customer_id in target_customer_ids:
             request = CustomerIntelligenceRefreshRequest(
@@ -556,7 +556,6 @@ class CustomerIntelligenceRefreshService:
             )
             requests.append(request)
             self._ensure_pending_run(db, request)
-            self._mark_profile_stale(db, self._build_event(request))
         if schedule_runs:
             for request in requests:
                 self._start_background_task(self.run_refresh(request))
@@ -600,6 +599,8 @@ class CustomerIntelligenceRefreshService:
         operation_public_id: str | None = None,
     ) -> JSONDict:
         _validate_refresh_scope(scope)
+        if event.trigger_type not in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES:
+            raise ValueError("不支持的客户智能业务事件")
         settings = get_settings()
         run_input = CustomerIntelligenceRunInput(
             request_id=request_id,
@@ -608,16 +609,6 @@ class CustomerIntelligenceRefreshService:
             max_attempts=settings.CUSTOMER_INTELLIGENCE_MAX_ATTEMPTS,
         )
         try:
-            deferred = None
-            if deferred is not None:
-                return {
-                    "success": True,
-                    "scheduled": True,
-                    "deferred": True,
-                    "request_id": request_id,
-                    "event_key": event.event_key,
-                    "not_before_at": deferred.isoformat(),
-                }
             claim = self._claim_run(
                 run_input,
                 lease_seconds=settings.CUSTOMER_INTELLIGENCE_LEASE_SECONDS,
@@ -671,17 +662,21 @@ class CustomerIntelligenceRefreshService:
             else:
                 graph_user_id = int(operation.user_id) if operation is not None else _actor_user_id(event.actor_id)
                 graph_session_id = int(operation.session_id or 0) if operation is not None else 0
-            graph_input: dict[str, object] = {
+            graph_input: CustomerIntelligenceGraphInput = {
                 "team_id": event.team_id,
                 "user_id": graph_user_id,
                 "session_id": graph_session_id,
                 "event": event,
-                "run_id": int(claim.run.id),
             }
             if int(claim.run.attempt_count or 0) > 1:
                 graph_input["resume_existing_execution"] = True
+            graph_service = self.graph_service
+            if graph_service is None:
+                from app.services.agent.customer_intelligence_graph import customer_intelligence_graph_service
+
+                graph_service = customer_intelligence_graph_service
             result: JSONDict = {}
-            async for chunk in self.profile_workflow.stream_events(graph_input):
+            async for chunk in graph_service.stream_events(graph_input):
                 if chunk.get("kind") == "event":
                     self._record_operation_progress(
                         run_input=run_input,
@@ -692,11 +687,7 @@ class CustomerIntelligenceRefreshService:
                 elif chunk.get("kind") == "result":
                     result = cast("JSONDict", chunk.get("result") or {})
 
-            # A workflow result is a protocol message, not merely a stream
-            # completion signal.  A graph can return a structured publication
-            # failure without raising (for example after a handled contract
-            # rejection); never record that run as SUCCESS.
-            self._assert_workflow_result_publishable(result)
+            self._assert_event_result_succeeded(result, event)
             mutation = self._mark_run_succeeded(
                 run_input,
                 lease_token=lease_token,
@@ -746,7 +737,6 @@ class CustomerIntelligenceRefreshService:
                     run=mutation.run,
                     operation_public_id=operation_public_id,
                 )
-                self._project_customer_failure(event=event, run=mutation.run)
             return {
                 "success": False,
                 "request_id": request_id,
@@ -756,25 +746,24 @@ class CustomerIntelligenceRefreshService:
             }
 
     @staticmethod
-    def _assert_workflow_result_publishable(result: JSONDict) -> None:
-        """Enforce the workflow-to-runner terminal result contract.
-
-        The dedicated profile workflow normally raises on a hard publication
-        failure, but it may also return a structured failure.  The durable run
-        service must not infer success from reaching the end of a stream.
-        """
-
-        if "profile_projection_result" not in result:
-            raise ValueError("客户档案工作流结果缺少 profile_projection_result")
-        profile_result = coerce_json_dict(result.get("profile_projection_result"))
-        if profile_result.get("success") is True:
-            return
-        error = str(
-            profile_result.get("error")
-            or profile_result.get("error_code")
-            or "客户档案工作流未发布可读版本"
-        )
-        raise RuntimeError(f"客户档案工作流发布失败: {error}")
+    def _assert_event_result_succeeded(result: JSONDict, event: CustomerIntelligenceEvent) -> None:
+        """Require the current memory graph's terminal proof, not stream exhaustion."""
+        result_event = coerce_json_dict(result.get("event"))
+        if any(result_event.get(key) != value for key, value in (
+            ("event_key", event.event_key), ("team_id", event.team_id), ("customer_id", event.customer_id),
+        )):
+            raise ValueError("客户智能事件结果与请求不匹配")
+        errors = result.get("errors")
+        if not isinstance(errors, list) or errors or result.get("__interrupt__"):
+            raise RuntimeError("客户智能事件执行未完成")
+        events = result.get("events")
+        if result.get("route") != "write_memory" or not isinstance(events, list) or not any(
+            isinstance(item, dict)
+            and item.get("event") == "customer_intelligence_memory_written"
+            and item.get("customer_id") == event.customer_id
+            for item in events
+        ):
+            raise ValueError("客户智能事件结果缺少记忆写入凭证")
 
     @staticmethod
     def _claim_response(
@@ -810,8 +799,6 @@ class CustomerIntelligenceRefreshService:
             "run_status": run_status,
         }
 
-    def _defer_profile_run_if_needed(self, run_input: CustomerIntelligenceRunInput, *, now: datetime) -> datetime | None:
-        return None
 
     def _claim_run(
         self,
@@ -826,13 +813,6 @@ class CustomerIntelligenceRefreshService:
                 run_input,
                 lease_seconds=lease_seconds,
             )
-            if claim.status == CustomerIntelligenceRunClaimStatus.CLAIMED:
-                self._mark_profile_updating(
-                    db,
-                    team_id=run_input.event.team_id,
-                    customer_id=run_input.event.customer_id,
-                    run_id=int(claim.run.id),
-                )
             db.commit()
             self._detach(db, claim.run)
             return claim
@@ -842,33 +822,6 @@ class CustomerIntelligenceRefreshService:
         finally:
             db.close()
 
-    def _mark_profile_stale(self, db: Session, event: CustomerIntelligenceEvent) -> None:
-        self.profile_projection_service.mark_stale(
-            db,
-            team_id=event.team_id,
-            customer_id=event.customer_id,
-            source_watermark={
-                "event_key": event.event_key,
-                "trigger_type": event.trigger_type,
-                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-            },
-            reason="存在尚未纳入档案的业务事件",
-        )
-
-    def _mark_profile_updating(
-        self,
-        db: Session,
-        *,
-        team_id: int,
-        customer_id: int,
-        run_id: int,
-    ) -> None:
-        self.profile_projection_service.mark_updating(
-            db,
-            team_id=team_id,
-            customer_id=customer_id,
-            run_id=run_id,
-        )
 
     def _mark_run_succeeded(
         self,
@@ -1011,43 +964,6 @@ class CustomerIntelligenceRefreshService:
         finally:
             db.close()
 
-    def _project_customer_failure(
-        self,
-        *,
-        event: CustomerIntelligenceEvent,
-        run: CustomerIntelligenceRun,
-    ) -> None:
-        db = SessionLocal()
-        try:
-            status = str(run.status)
-            if status == CustomerIntelligenceRunStatus.RETRY_PENDING:
-                self.profile_projection_service.mark_stale(
-                    db,
-                    team_id=event.team_id,
-                    customer_id=event.customer_id,
-                    source_watermark={
-                        "event_key": event.event_key,
-                        "trigger_type": event.trigger_type,
-                        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                    },
-                    reason="本次刷新失败，等待自动重试",  # noqa: RUF001
-                    run_id=int(run.id),
-                )
-            else:
-                self.profile_projection_service.mark_failed(
-                    db,
-                    team_id=event.team_id,
-                    customer_id=event.customer_id,
-                    run_id=int(run.id),
-                    reason=str(run.error_message or "客户智能档案刷新失败"),
-                )
-            db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("写入客户档案投影失败状态失败: request_id=%s", run.request_id)
-            raise
-        finally:
-            db.close()
 
     @staticmethod
     def _detach(db: Session, obj: object) -> None:
@@ -1074,35 +990,34 @@ class CustomerIntelligenceRefreshService:
                     )
                     self.operation_projector.project_run(db, run=mutation.run)
                     continue
-                if isinstance(retry_request, CustomerIntelligenceCommittedEventRequest):
-                    try:
-                        operation = self.async_operation_service.get_by_request_id(
-                            db,
-                            team_id=run.team_id,
-                            request_id=retry_request.request_id,
-                        )
-                    except (AttributeError, NotImplementedError):
-                        operation = None
-                    if operation is not None:
-                        retry_request = replace(
-                            retry_request,
-                            operation_public_id=str(operation.public_id),
-                            agent_binding=AgentAsyncOperationBinding(
-                                team_id=int(operation.team_id),
-                                user_id=int(operation.user_id),
-                                session_id=int(operation.session_id or 0),
-                                source_user_message_id=(
-                                    int(operation.source_user_message_id)
-                                    if operation.source_user_message_id is not None
-                                    else None
-                                ),
-                                source_assistant_message_id=(
-                                    int(operation.source_assistant_message_id)
-                                    if operation.source_assistant_message_id is not None
-                                    else None
-                                ),
+                try:
+                    operation = self.async_operation_service.get_by_request_id(
+                        db,
+                        team_id=run.team_id,
+                        request_id=retry_request.request_id,
+                    )
+                except (AttributeError, NotImplementedError):
+                    operation = None
+                if operation is not None:
+                    retry_request = replace(
+                        retry_request,
+                        operation_public_id=str(operation.public_id),
+                        agent_binding=AgentAsyncOperationBinding(
+                            team_id=int(operation.team_id),
+                            user_id=int(operation.user_id),
+                            session_id=int(operation.session_id or 0),
+                            source_user_message_id=(
+                                int(operation.source_user_message_id)
+                                if operation.source_user_message_id is not None
+                                else None
                             ),
-                        )
+                            source_assistant_message_id=(
+                                int(operation.source_assistant_message_id)
+                                if operation.source_assistant_message_id is not None
+                                else None
+                            ),
+                        ),
+                    )
                 retry_requests.append(retry_request)
             db.commit()
         finally:
@@ -1110,10 +1025,7 @@ class CustomerIntelligenceRefreshService:
 
         results: list[JSONDict] = []
         for request in retry_requests:
-            if isinstance(request, CustomerIntelligenceCommittedEventRequest):
-                results.append(await self.run_committed_event_refresh(request))
-            else:
-                results.append(await self.run_refresh(request))
+            results.append(await self.run_committed_event_refresh(request))
         return {
             "success": True,
             "recovered": recovered,
@@ -1124,252 +1036,35 @@ class CustomerIntelligenceRefreshService:
         }
 
     def recover_stale_runtime_state(self, db: Session, *, team_id: int | None = None) -> JSONDict:
-        """Repair projections without stealing or failing a live execution lease.
-
-        Expired RUNNING rows remain durable execution intents. ``list_due`` and
-        ``claim_for_execution`` perform the only legal reclaim transition. This
-        method merely aligns customer/Agent projections with the persisted run.
-        """
+        """Replay Agent projections; only the run service may reclaim expired leases."""
+        totals: JSONDict = {
+            "obsolete_historical_runs": 0,
+            "reconciled_operations": 0,
+            "stale_runs": 0,
+            "pending_customers": 0,
+            "failed_customers": 0,
+        }
         if not hasattr(db, "query"):
-            return {
-                "obsolete_historical_runs": 0,
-                "reconciled_operations": 0,
-                "stale_runs": 0,
-                "pending_customers": 0,
-                "failed_customers": 0,
-            }
+            return totals
         if team_id is None:
-            totals: JSONDict = {
-                "obsolete_historical_runs": 0,
-                "reconciled_operations": 0,
-                "stale_runs": 0,
-                "pending_customers": 0,
-                "failed_customers": 0,
-            }
             for team in team_crud.get_all_teams(db):
                 team_result = self.recover_stale_runtime_state(db, team_id=int(team.id))
                 for key in totals:
-                    totals[key] = int(totals[key]) + int(team_result.get(key) or 0)
+                    totals[key] = (_positive_int(totals[key]) or 0) + (_positive_int(team_result.get(key)) or 0)
             return totals
-        current_time = business_now()
-        obsolete_historical_runs = self._close_obsolete_historical_backfill_runs(
-            db,
-            team_id=team_id,
-            finished_at=current_time,
-        )
-
         reconciliation = self.operation_projector.reconcile(db, team_id=team_id, limit=200)
-
-        due_runs = self.run_service.list_due(
-            db,
-            now=current_time,
-            team_id=team_id,
-            limit=200,
-        )
-        expired_running_runs = [run for run in due_runs if str(run.status) == CustomerIntelligenceRunStatus.RUNNING]
+        due_runs = self.run_service.list_due(db, now=business_now(), team_id=team_id, limit=200)
         for run in due_runs:
             self.operation_projector.project_run(db, run=run)
-
-        latest_runs = (
-            db.query(CustomerIntelligenceRun)
-            .filter(
-                CustomerIntelligenceRun.team_id == team_id,
-                CustomerIntelligenceRun.status.in_(
-                    [
-                        CustomerIntelligenceRunStatus.PENDING,
-                        CustomerIntelligenceRunStatus.RUNNING,
-                        CustomerIntelligenceRunStatus.RETRY_PENDING,
-                        CustomerIntelligenceRunStatus.SUCCESS,
-                        CustomerIntelligenceRunStatus.FAILED,
-                        CustomerIntelligenceRunStatus.CANCELLED,
-                    ]
-                ),
-            )
-            .order_by(CustomerIntelligenceRun.id.desc())
-            .all()
+        totals["reconciled_operations"] = reconciliation.projected
+        totals["stale_runs"] = sum(
+            str(run.status) == CustomerIntelligenceRunStatus.RUNNING for run in due_runs
         )
-        latest_by_customer: dict[int, CustomerIntelligenceRun] = {}
-        for run in latest_runs:
-            latest_by_customer.setdefault(int(run.customer_id), run)
+        return totals
 
-        pending_updates = 0
-        failed_updates = 0
-        for run in latest_by_customer.values():
-            changed = self._reconcile_profile_projection_for_run(db, run)
-            if not changed:
-                continue
-            if str(run.status) in {
-                CustomerIntelligenceRunStatus.PENDING,
-                CustomerIntelligenceRunStatus.RETRY_PENDING,
-            }:
-                pending_updates += 1
-            elif str(run.status) == CustomerIntelligenceRunStatus.FAILED:
-                failed_updates += 1
-        return {
-            "obsolete_historical_runs": obsolete_historical_runs,
-            "reconciled_operations": reconciliation.projected,
-            "stale_runs": len(expired_running_runs),
-            "pending_customers": pending_updates,
-            "failed_customers": failed_updates,
-        }
 
-    def _close_obsolete_historical_backfill_runs(
-        self,
-        db: Session,
-        *,
-        team_id: int | None,
-        finished_at: datetime,
-    ) -> int:
-        """Close historical backfill runs already satisfied by a published projection.
-
-        Historical backfill is a gap-filling runtime. If a newer run or manual
-        refresh has already published a readable projection, old backfill
-        runs must stop owning retry/runtime decisions for that customer.
-        """
-        active_statuses = [
-            CustomerIntelligenceRunStatus.PENDING,
-            CustomerIntelligenceRunStatus.RUNNING,
-            CustomerIntelligenceRunStatus.RETRY_PENDING,
-        ]
-        query = (
-            db.query(CustomerIntelligenceRun)
-            .join(
-                Customer,
-                (Customer.team_id == CustomerIntelligenceRun.team_id)
-                & (Customer.id == CustomerIntelligenceRun.customer_id),
-            )
-            .filter(
-                CustomerIntelligenceRun.trigger_type == "customer_intelligence_historical_backfill_requested",
-                CustomerIntelligenceRun.status.in_(active_statuses),
-                self._has_published_v2_profile_filter(),
-            )
-        )
-        if team_id is not None:
-            query = query.filter(CustomerIntelligenceRun.team_id == team_id)
-
-        closed = 0
-        for run in (
-            query.order_by(CustomerIntelligenceRun.id.asc()).limit(500).populate_existing().with_for_update().all()
-        ):
-            run.status = CustomerIntelligenceRunStatus.CANCELLED
-            run.finished_time = finished_at
-            run.next_retry_at = None
-            run.lease_token = None
-            run.lease_expires_at = None
-            run.error_message = None
-            run.route = run.route or "historical_backfill_satisfied"
-            run.result_json = {
-                "route": "historical_backfill_satisfied",
-                "reason": "customer_profile_projection_already_available",
-            }
-            operation = self.async_operation_service.get_by_request_id(
-                db,
-                team_id=int(run.team_id),
-                request_id=str(run.request_id),
-            )
-            if operation is not None:
-                self.async_operation_service.cancel(
-                    db,
-                    operation,
-                    summary="客户档案已由更新的数据生成，本次历史补齐任务已取消",  # noqa: RUF001
-                    result={
-                        "route": "historical_backfill_satisfied",
-                        "reason": "customer_profile_projection_already_available",
-                    },
-                )
-            closed += 1
-        if closed > 0:
-            db.flush()
-        return closed
-
-    def _reconcile_profile_projection_for_run(
-        self,
-        db: Session,
-        run: CustomerIntelligenceRun,
-    ) -> bool:
-        current = self.profile_projection_service.ensure_current(
-            db,
-            team_id=int(run.team_id),
-            customer_id=int(run.customer_id),
-        )
-        before = (str(current.profile_status), current.active_run_id)
-        status = str(run.status)
-        if status == CustomerIntelligenceRunStatus.RUNNING:
-            self.profile_projection_service.mark_updating(
-                db,
-                team_id=int(run.team_id),
-                customer_id=int(run.customer_id),
-                run_id=int(run.id),
-            )
-        elif status in {
-            CustomerIntelligenceRunStatus.PENDING,
-            CustomerIntelligenceRunStatus.RETRY_PENDING,
-        }:
-            self.profile_projection_service.mark_stale(
-                db,
-                team_id=int(run.team_id),
-                customer_id=int(run.customer_id),
-                source_watermark={
-                    "event_key": str(run.event_key),
-                    "trigger_type": str(run.trigger_type),
-                },
-                reason=(
-                    "存在尚未纳入档案的业务事件"
-                    if status == CustomerIntelligenceRunStatus.PENDING
-                    else "本次刷新失败，等待自动重试"  # noqa: RUF001
-                ),
-                run_id=int(run.id),
-            )
-        elif status == CustomerIntelligenceRunStatus.FAILED:
-            self.profile_projection_service.mark_failed(
-                db,
-                team_id=int(run.team_id),
-                customer_id=int(run.customer_id),
-                run_id=int(run.id),
-                reason=str(run.error_message or "客户智能档案刷新失败"),
-            )
-        else:
-            return False
-        after = (str(current.profile_status), current.active_run_id)
-        return before != after
-
-    def _build_event(self, request: CustomerIntelligenceRefreshRequest) -> CustomerIntelligenceEvent:
-        occurred_at = business_now()
-        if request.trigger_type == "manual_refresh_requested":
-            return self.event_service.manual_refresh_requested(
-                team_id=request.team_id,
-                customer_id=request.customer_id,
-                actor_id=request.actor_id,
-                request_id=request.request_id,
-                refresh_scope=request.scope,
-                occurred_at=occurred_at,
-            )
-        if request.trigger_type == "customer_intelligence_batch_rebuild_requested":
-            return self.event_service.batch_rebuild_requested(
-                team_id=request.team_id,
-                customer_id=request.customer_id,
-                actor_id=request.actor_id,
-                request_id=request.request_id,
-                refresh_scope=request.scope,
-                occurred_at=occurred_at,
-            )
-        if request.trigger_type == "customer_intelligence_historical_backfill_requested":
-            return self.event_service.historical_backfill_requested(
-                team_id=request.team_id,
-                customer_id=request.customer_id,
-                request_id=request.request_id,
-                refresh_scope=request.scope,
-                occurred_at=occurred_at,
-            )
-        return self.event_service.customer_lifecycle_refresh_requested(
-            team_id=request.team_id,
-            customer_id=request.customer_id,
-            actor_id=request.actor_id,
-            request_id=request.request_id,
-            trigger_type=request.trigger_type,
-            source_lead_id=request.source_lead_id,
-            occurred_at=occurred_at,
-        )
+    def _build_event(self, _request: CustomerIntelligenceRefreshRequest) -> CustomerIntelligenceEvent:
+        raise ValueError("客户档案能力已移除")
 
     def _ensure_pending_run(self, db: Session, request: CustomerIntelligenceRefreshRequest) -> None:
         event = self._build_event(request)
@@ -1432,13 +1127,13 @@ class CustomerIntelligenceRefreshService:
         """Apply the durable event-registration invariants in one transaction.
 
         The scheduler is the sole owner of the transition from a committed
-        business event to a stale customer profile and a pending intelligence
-        run.  Callers choose only *when* this transaction is allowed to commit;
-        they do not reimplement these steps.
+        business event to a pending intelligence run. Callers choose only *when*
+        this transaction is allowed to commit; they do not reimplement these steps.
         """
 
+        if request.event.trigger_type not in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES:
+            raise ValueError("不支持的客户智能业务事件")
         self._ensure_pending_event_run(db, request)
-        self._mark_profile_stale(db, request.event)
         return request
 
     def _schedule_committed_event_run(
@@ -1498,53 +1193,27 @@ class CustomerIntelligenceRefreshService:
             return run.lease_expires_at is None or run.lease_expires_at <= business_now()
         return False
 
-    def _request_from_run(
-        self,
-        run: CustomerIntelligenceRun,
-    ) -> CustomerIntelligenceRefreshRequest | CustomerIntelligenceCommittedEventRequest:
+    def _request_from_run(self, run: CustomerIntelligenceRun) -> CustomerIntelligenceCommittedEventRequest:
         committed_event = self._committed_event_request_from_run(run)
-        if committed_event is not None:
-            return committed_event
-        event_json = run.event_json if isinstance(run.event_json, dict) else {}
-        payload = event_json.get("payload") if isinstance(event_json.get("payload"), dict) else {}
-        raw_trigger_type = str(run.trigger_type)
-        if raw_trigger_type not in {
-            "manual_refresh_requested",
-            "customer_intelligence_batch_rebuild_requested",
-            "customer_intelligence_historical_backfill_requested",
-            "customer_created",
-            "customer_converted_from_lead",
-        }:
-            raise ValueError(f"持久化客户智能运行触发类型无效: {raw_trigger_type}")
-        trigger_type = cast("CustomerIntelligenceRefreshTrigger", raw_trigger_type)
-        scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
-        if scope not in {"full", "partial"}:
-            raise ValueError(f"持久化客户智能运行刷新范围无效: {run.scope}")
-        return CustomerIntelligenceRefreshRequest(
-            team_id=int(run.team_id),
-            customer_id=int(run.customer_id),
-            actor_id=str(run.actor_id) if run.actor_id is not None else None,
-            scope=scope,
-            request_id=str(run.request_id),
-            trigger_type=trigger_type,
-            source_lead_id=_positive_int(payload.get("source_lead_id")),
-        )
+        if committed_event is None:
+            raise ValueError("客户档案能力已移除, 持久化档案运行不可重放")
+        return committed_event
 
     def _committed_event_request_from_run(
         self,
         run: CustomerIntelligenceRun,
     ) -> CustomerIntelligenceCommittedEventRequest | None:
-        if run.trigger_type in {
-            "manual_refresh_requested",
-            "customer_intelligence_batch_rebuild_requested",
-            "customer_intelligence_historical_backfill_requested",
-            "customer_created",
-            "customer_converted_from_lead",
-        }:
+        if run.trigger_type not in CUSTOMER_INTELLIGENCE_COMMITTED_EVENT_TRIGGER_TYPES:
             return None
         event_json = run.event_json if isinstance(run.event_json, dict) else {}
         event = self.event_service.from_dict(cast("JsonObject", event_json))
-        if event is None:
+        if event is None or any((
+            event.team_id != run.team_id,
+            event.tenant_id != run.tenant_id,
+            event.customer_id != run.customer_id,
+            event.event_key != run.event_key,
+            event.trigger_type != run.trigger_type,
+        )):
             raise ValueError("持久化客户智能业务事件快照无效")
         scope = cast("CustomerIntelligenceRefreshScope", str(run.scope))
         if scope not in {"full", "partial"}:

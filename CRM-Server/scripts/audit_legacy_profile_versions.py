@@ -19,10 +19,12 @@ if TYPE_CHECKING:
 from app.core.database import SessionLocal, engine
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_fact import CustomerFact
 from app.models.customer_profile_projection import CustomerProfileCurrent, CustomerProfileProjectionVersion
+from app.models.deal_journey import CustomerDealJourneyEvent
+from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.models.team import Team
-from app.services.customer_profile_evidence_resolver import CustomerProfileEvidenceResolver
-from app.services.customer_profile_version_certification import is_certified_profile_version
+from app.services.legacy_profile_source import activity_origin, event_origin, fact_origin, follow_up_origin
 
 _BATCH = 200
 _SECTIONS = (
@@ -42,6 +44,35 @@ def _pages(db: Session, model: type) -> Iterator[object]:
         db.expunge_all()
 
 
+def _citation_available(db: Session, *, team_id: int, customer_id: int, reference: dict[str, object]) -> bool:
+    """Recheck live, scoped records only; cached availability is not evidence."""
+    key = reference.get("evidence_key") or reference.get("evidence_id") or reference.get("id")
+    if not isinstance(key, str) or not key.strip():
+        return False
+    source_id = str(reference.get("source_id") or "")
+    if not source_id.isdecimal() or int(source_id) <= 0 or str(int(source_id)) != source_id:
+        return False
+    kind = str(reference.get("source_type") or "").lower()
+    models = {
+        "customer_activity": CustomerActivity, "activity": CustomerActivity,
+        "deal_journey_event": CustomerDealJourneyEvent, "journey_event": CustomerDealJourneyEvent,
+        "follow_up_task": FollowUpTask, "task": FollowUpTask,
+        "sales_commitment": SalesCommitment, "commitment": SalesCommitment,
+        "customer_fact": CustomerFact, "fact": CustomerFact,
+    }
+    model = models.get(kind)
+    if model is None:
+        return False
+    row = db.query(model).filter_by(id=int(source_id), team_id=team_id, customer_id=customer_id).one_or_none()
+    if isinstance(row, CustomerActivity):
+        return activity_origin(db, team_id, customer_id, row.id)
+    if isinstance(row, CustomerDealJourneyEvent):
+        return event_origin(db, row, team_id, customer_id)
+    if isinstance(row, FollowUpTask | SalesCommitment):
+        return follow_up_origin(db, row, team_id, customer_id)
+    return isinstance(row, CustomerFact) and fact_origin(db, row, team_id, customer_id)
+
+
 def audit_versions(db: Session) -> dict[str, int]:
     """Count evidence without exporting identifiers, profile text, or source snippets.
 
@@ -54,7 +85,6 @@ def audit_versions(db: Session) -> dict[str, int]:
         "available_citations": 0, "unavailable_citations": 0,
         "current_pointers": 0, "invalid_current_pointers": 0, "blocking_versions": 0,
     }
-    resolver = CustomerProfileEvidenceResolver()
     for version in _pages(db, CustomerProfileProjectionVersion):
         counts["versions"] += 1
         team_id, customer_id = int(version.team_id), int(version.customer_id)
@@ -63,10 +93,10 @@ def audit_versions(db: Session) -> dict[str, int]:
             counts["unowned_versions"] += 1
             counts["blocking_versions"] += 1
             continue
-        blocked = False
-        if not is_certified_profile_version(version):
-            counts["uncertified_versions"] += 1
-            blocked = True
+        # The retired publication verifier is intentionally unavailable. This
+        # inventory cannot authenticate historical attestations or bless bodies.
+        counts["uncertified_versions"] += 1
+        blocked = True
         sections = [getattr(version, name) for name in _SECTIONS]
         body = json.dumps(sections, ensure_ascii=False, sort_keys=True, default=str).casefold()
         # A current source snapshot cannot certify the *historical* body. Even
@@ -91,11 +121,7 @@ def audit_versions(db: Session) -> dict[str, int]:
                     counts["unavailable_citations"] += 1
                     blocked = True
                     continue
-                evidence = resolver.resolve_one(
-                    db, team_id=team_id, customer_id=customer_id,
-                    customer_public_id="", reference=ref,
-                )
-                if evidence.availability == "AVAILABLE":
+                if _citation_available(db, team_id=team_id, customer_id=customer_id, reference=ref):
                     counts["available_citations"] += 1
                 else:
                     counts["unavailable_citations"] += 1
