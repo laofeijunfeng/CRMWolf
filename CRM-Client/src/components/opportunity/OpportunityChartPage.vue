@@ -475,7 +475,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.opportunity-chart-page { display: flex; min-width: 0; flex-direction: column; gap: $wolf-space-md-v2; padding: $wolf-space-md-v2; }
+.opportunity-chart-page { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: $wolf-space-md-v2; overflow: auto; padding: $wolf-space-md-v2; }
 .opportunity-chart-summary h2 { margin: 0; color: $wolf-text-primary-v2; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
 .opportunity-chart-summary p { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; font-size: $wolf-font-size-caption-v2; }
 .opportunity-chart-state, .opportunity-chart-refreshing, .opportunity-chart-dialog-state { display: flex; align-items: center; justify-content: center; gap: $wolf-space-sm-v2; color: $wolf-text-tertiary-v2; }

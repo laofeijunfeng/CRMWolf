@@ -342,9 +342,12 @@ function openMonth(card: ContractChartCard, datum: MonthDatum): void {
 
 .contract-chart-page {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   gap: $wolf-space-md-v2;
+  overflow: auto;
   padding: $wolf-space-md-v2;
 }
 

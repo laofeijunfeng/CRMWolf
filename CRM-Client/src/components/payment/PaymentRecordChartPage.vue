@@ -613,9 +613,12 @@ function retryBucket(): void {
 
 .payment-record-chart {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: $wolf-space-md-v2;
+  min-height: 0;
   min-width: 0;
+  overflow: auto;
   padding: $wolf-space-md-v2;
 }
 
