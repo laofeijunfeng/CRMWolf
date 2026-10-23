@@ -65,11 +65,11 @@ const OpportunityBoardColumnSchema = z.object({
 }).strict().superRefine((value, context) => {
   const shown = value.items.length
   if (
-    shown !== Math.min(value.count, 5)
-    || value.remaining_count !== value.count - shown
-    || value.has_more !== (value.remaining_count > 0)
+    shown !== value.count
+    || value.remaining_count !== 0
+    || value.has_more
   ) {
-    context.addIssue({ code: 'custom', message: 'inconsistent board preview counts' })
+    context.addIssue({ code: 'custom', message: 'inconsistent board column counts' })
   }
 })
 

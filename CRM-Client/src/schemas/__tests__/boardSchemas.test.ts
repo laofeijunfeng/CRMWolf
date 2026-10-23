@@ -40,7 +40,7 @@ import {
   type PaymentRecordBoardResponse,
 } from '@/schemas/paymentRecordBoard'
 
-type BoardSchema = {
+interface BoardSchema {
   safeParse: (value: unknown) => { success: boolean }
 }
 
@@ -513,6 +513,57 @@ describe('strict board response schemas', () => {
     metric['secondary_label'] = '对比'
     metric['secondary_value'] = null
     expect(schema.safeParse(payload).success).toBe(false)
+  })
+
+  function repeatItem(item: Record<string, unknown>, count: number): Record<string, unknown>[] {
+    return Array.from({ length: count }, (_, index) => ({
+      ...item,
+      id: typeof item['id'] === 'number' ? index + 1 : `${String(item['id'])}-${index}`,
+    }))
+  }
+
+  it.each([
+    ['customer', CustomerBoardResponseSchema, customerItem('following')],
+    ['opportunity', OpportunityBoardResponseSchema, opportunityItem('active')],
+    ['contract', ContractBoardResponseSchema, contractItem('DRAFT')],
+    ['payment plan', PaymentPlanBoardResponseSchema, planItem('PENDING')],
+  ] as const)('accepts a full %s column larger than five cards', (_name, schema, item) => {
+    const payload = structuredClone(
+      _name === 'customer'
+        ? customerPayload(true)
+        : _name === 'opportunity'
+          ? opportunityPayload(true)
+          : _name === 'contract'
+            ? contractPayload(true)
+            : planPayload(true),
+    )
+    const column = firstColumn(payload)
+    column['count'] = 6
+    column['items'] = repeatItem(item, 6)
+    column['has_more'] = false
+    column['remaining_count'] = 0
+    expect(schema.safeParse(payload).success).toBe(true)
+
+    column['items'] = repeatItem(item, 5)
+    column['has_more'] = true
+    column['remaining_count'] = 1
+    expect(schema.safeParse(payload).success).toBe(false)
+  })
+
+  it('keeps payment record columns capped at five preview cards', () => {
+    const payload = structuredClone(recordPayload(true))
+    const column = firstColumn(payload)
+    const item = recordItem(recordColumns[0])
+    column['count'] = 6
+    column['items'] = repeatItem(item, 5)
+    column['has_more'] = true
+    column['remaining_count'] = 1
+    expect(PaymentRecordBoardResponseSchema.safeParse(payload).success).toBe(true)
+
+    column['items'] = repeatItem(item, 6)
+    column['has_more'] = false
+    column['remaining_count'] = 0
+    expect(PaymentRecordBoardResponseSchema.safeParse(payload).success).toBe(false)
   })
 })
 
