@@ -6,7 +6,6 @@ import { normalizeListChartDisplayMode, type ViewDisplayMode } from '@/api/viewP
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
-import { toast } from 'vue-sonner'
 
 const mocks = vi.hoisted(() => ({
   getCustomers: vi.fn(),
@@ -520,7 +519,7 @@ describe('Customers board integration', () => {
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    await wrapper.get('[data-column-key="following"] .board-card').trigger('click')
+    await wrapper.get('[data-column-key="following"] [role="button"]').trigger('click')
     await nextTick()
 
     const sheet = wrapper.getComponent({ name: 'CustomerDetailSheet' })
@@ -529,61 +528,21 @@ describe('Customers board integration', () => {
     wrapper.unmount()
   })
 
-  it('calls existing edit, delete, assign, and create-opportunity handlers from card actions', async () => {
+  it('does not render edit, assign, opportunity, or delete actions on a board card', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
     const board = wrapper.get('[data-column-key="following"]')
-    expect(board.find('[data-testid="board-card-action-edit"]').exists()).toBe(true)
-    expect(board.find('[data-testid="board-card-action-assign"]').exists()).toBe(true)
-    expect(board.find('[data-testid="board-card-action-create-opportunity"]').exists()).toBe(true)
-    expect(board.find('[data-testid="board-card-action-delete"]').exists()).toBe(true)
 
-    await board.get('[data-testid="board-card-action-edit"]').trigger('click')
-    await flushPromises()
-    expect(mocks.getCustomerDetail).toHaveBeenCalledWith('cus_public_1')
-    expect(wrapper.get('[data-testid="customer-form-dialog"]').attributes('data-open')).toBe('true')
-    expect(wrapper.get('[data-testid="customer-form-dialog"]').attributes('data-mode')).toBe('edit')
-
-    await board.get('[data-testid="board-card-action-assign"]').trigger('click')
-    await nextTick()
-    expect(wrapper.get('[data-testid="customer-transfer-dialog"]').attributes('data-open')).toBe('true')
-    expect(wrapper.get('[data-testid="customer-transfer-dialog"]').attributes('data-customer-id')).toBe('cus_public_1')
-
-    await board.get('[data-testid="board-card-action-create-opportunity"]').trigger('click')
-    await nextTick()
-    expect(wrapper.get('[data-testid="opportunity-form-dialog"]').attributes('data-open')).toBe('true')
-
-    await board.get('[data-testid="board-card-action-delete"]').trigger('click')
-    await flushPromises()
-    expect(mocks.deleteCustomer).toHaveBeenCalledWith('cus_public_1')
+    expect(board.find('[data-testid="board-card-action-edit"]').exists()).toBe(false)
+    expect(board.find('[data-testid="board-card-action-assign"]').exists()).toBe(false)
+    expect(board.find('[data-testid="board-card-action-create-opportunity"]').exists()).toBe(false)
+    expect(board.find('[data-testid="board-card-action-delete"]').exists()).toBe(false)
+    expect(board.text()).toContain('北方客户')
     wrapper.unmount()
   })
 
-  it('refreshes the ordinary board after a rendered delete without a list request or false failure warning', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-    await switchMode(wrapper, 'board')
 
-    const refreshedBoard: CustomerBoardResponse = {
-      ...boardResponse,
-      columns: boardResponse.columns.map((column) => ({ ...column, count: 0, items: [] })),
-    }
-    mocks.getCustomers.mockClear()
-    mocks.getCustomerBoard.mockClear()
-    mocks.getCustomerBoard.mockResolvedValueOnce(refreshedBoard)
-
-    await wrapper.get('[data-column-key="following"] [data-testid="board-card-action-delete"]').trigger('click')
-    await flushPromises()
-
-    expect(mocks.deleteCustomer).toHaveBeenCalledWith('cus_public_1')
-    expect(mocks.getCustomerBoard).toHaveBeenCalledTimes(1)
-    expect(mocks.getCustomers).not.toHaveBeenCalled()
-    expect(mocks.getPublicCustomers).not.toHaveBeenCalled()
-    expect(toast.warning).not.toHaveBeenCalled()
-    expect(wrapper.text()).not.toContain('北方客户')
-    wrapper.unmount()
-  })
 
   it('refreshes the ordinary board from rendered search, filter, sort, tab, and detail-sheet handlers', async () => {
     const wrapper = mountPage()
@@ -645,62 +604,19 @@ describe('Customers board integration', () => {
   })
 
 
-  it('drills an exact derived status back to page one while preserving search', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-    const table = wrapper.getComponent({ name: 'DataTable' })
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    table.vm.$emit('update:search', '北方')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    table.vm.$emit('search-apply', '北方')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-    table.vm.$emit('update:page', 4)
-    await flushPromises()
-    await switchMode(wrapper, 'board')
-    mocks.getCustomers.mockClear()
-
-    await wrapper.get('[data-column-key="following"] .board-column__footer button').trigger('click')
-    await flushPromises()
-
-    const drilled = wrapper.getComponent({ name: 'DataTable' })
-    expect(drilled.props('viewDisplayMode')).toBe('table')
-    expect(drilled.props('page')).toBe(1)
-    expect(drilled.props('search')).toBe('北方')
-    expect(drilled.props('filters')).toEqual([{ field: 'derived_status', op: 'eq', value: 'following' }])
-    expect(mocks.getCustomers).toHaveBeenCalledWith(expect.objectContaining({
-      skip: 0,
-      search: '北方',
-      filters: JSON.stringify([{ field: 'derived_status', op: 'eq', value: 'following' }]),
-    }))
-    wrapper.unmount()
-  })
-
-  it('rejects rendered public pool and unknown column keys without changing the board', async () => {
-    const following = boardResponse.columns[0]
-    if (following === undefined) throw new Error('missing following column')
-    mocks.getCustomerBoard.mockResolvedValue({
-      ...boardResponse,
-      columns: [
-        following,
-        { ...following, key: 'public_pool', label: '公海', items: [], has_more: false, remaining_count: 0 },
-        { ...following, key: 'unclassified', label: '未分类', items: [], has_more: false, remaining_count: 0 },
-      ],
-    })
+  it('keeps the board in place because the column has no view-all control', async () => {
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const filtersBefore = wrapper.getComponent({ name: 'DataTable' }).props('filters')
 
-    await wrapper.get('[data-column-key="public_pool"] .board-column__footer button').trigger('click')
-    await wrapper.get('[data-column-key="unclassified"] .board-column__footer button').trigger('click')
-
-    const table = wrapper.getComponent({ name: 'DataTable' })
-    expect(table.props('viewDisplayMode')).toBe('board')
-    expect(table.props('filters')).toEqual(filtersBefore)
-    expect(JSON.stringify(table.props('filters'))).not.toContain('public_pool')
+    expect(wrapper.find('.board-column__footer button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('查看全部')
+    expect(wrapper.text()).not.toContain('选择状态')
+    expect(wrapper.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('board')
     wrapper.unmount()
   })
+
+
 
   it('clears search only when the active tab changes, not when display mode changes', async () => {
     const wrapper = mountPage()
@@ -771,7 +687,6 @@ describe('Customers board integration', () => {
     const projection = wrapper.getComponent({ name: 'CustomerBoardProjection' })
     expect(projection.props('response')).toEqual(boardResponse)
     expect(projection.props('stale')).toBe(true)
-    expect(projection.props('canDrillThrough')).toBe(false)
     expect(wrapper.text()).toContain('北方客户')
 
     teamState.currentTeam = { id: 99 }

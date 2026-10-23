@@ -209,6 +209,7 @@ def _column(
     items: list[dict[str, Any]] | None = None,
     extra: dict[str, Any] | None = None,
     amount: str | None = "0.00",
+    preview: bool = False,
 ) -> dict[str, Any]:
     shown = items or []
     payload: dict[str, Any] = {
@@ -218,8 +219,8 @@ def _column(
         "count": count,
         "amount": amount,
         "items": shown,
-        "has_more": count > len(shown),
-        "remaining_count": count - len(shown),
+        "has_more": count > len(shown) if preview else False,
+        "remaining_count": count - len(shown) if preview else 0,
     }
     if extra:
         payload.update(extra)
@@ -276,6 +277,7 @@ def _fixed_columns(
     *,
     focus: str,
     extra_for: Callable[[str], dict[str, Any]] | None = None,
+    preview: bool = False,
 ) -> list[dict[str, Any]]:
     grouped = items_for or {}
     return [
@@ -285,6 +287,7 @@ def _fixed_columns(
             items=grouped.get(key, []),
             extra=None if extra_for is None else extra_for(key),
             amount="180.00" if key == focus and grouped else "0.00",
+            preview=preview,
         )
         for key in keys
     ]
@@ -375,7 +378,7 @@ def _zero_summary(summary: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _customer_payload(*, populated: bool) -> dict[str, Any]:
-    items = [_customer_item() for _ in range(5)] if populated else []
+    items = [_customer_item() for _ in range(6)] if populated else []
     return {
         "summary": _customer_summary() if populated else _zero_summary(_customer_summary()),
         "columns": _customer_columns({"following": items} if populated else None),
@@ -384,7 +387,7 @@ def _customer_payload(*, populated: bool) -> dict[str, Any]:
 
 
 def _opportunity_payload(*, populated: bool) -> dict[str, Any]:
-    items = [_opportunity_item() for _ in range(5)] if populated else []
+    items = [_opportunity_item() for _ in range(6)] if populated else []
     return {
         "summary": _opportunity_summary() if populated else _zero_summary(_opportunity_summary()),
         "columns": _opportunity_columns({"stage:3:8": items} if populated else None),
@@ -393,7 +396,7 @@ def _opportunity_payload(*, populated: bool) -> dict[str, Any]:
 
 
 def _contract_payload(*, populated: bool) -> dict[str, Any]:
-    items = [_contract_item() for _ in range(5)] if populated else []
+    items = [_contract_item() for _ in range(6)] if populated else []
     return {
         "summary": _contract_summary() if populated else _zero_summary(_contract_summary()),
         "columns": _fixed_columns(CONTRACT_STATUSES, {"SIGNED": items} if populated else None, focus="SIGNED"),
@@ -421,7 +424,7 @@ def _record_amounts(key: str, *, populated: bool) -> dict[str, str]:
 
 
 def _payment_plan_payload(*, populated: bool) -> dict[str, Any]:
-    items = [_payment_plan_item() for _ in range(5)] if populated else []
+    items = [_payment_plan_item() for _ in range(6)] if populated else []
     return {
         "summary": _payment_plan_summary() if populated else _zero_summary(_payment_plan_summary()),
         "columns": _fixed_columns(
@@ -453,6 +456,7 @@ def _payment_record_payload(*, populated: bool) -> dict[str, Any]:
             {"approved": items} if populated else None,
             focus="approved",
             extra_for=lambda key: _record_amounts(key, populated=populated),
+            preview=True,
         ),
         "trends": [
             {
@@ -494,9 +498,14 @@ def test_each_domain_accepts_empty_and_populated_responses(
     assert populated.trends
     focus = next(column for column in populated.columns if column.count == 6)
     assert focus.count == 6
-    assert len(focus.items) == 5
-    assert focus.has_more is True
-    assert focus.remaining_count == 1
+    if name == "payment_record":
+        assert len(focus.items) == 5
+        assert focus.has_more is True
+        assert focus.remaining_count == 1
+    else:
+        assert len(focus.items) == 6
+        assert focus.has_more is False
+        assert focus.remaining_count == 0
     if name == "opportunity":
         assert focus.key == "stage:3:8"
         assert focus.column_kind == "active_stage"
@@ -511,6 +520,7 @@ def test_each_domain_accepts_empty_and_populated_responses(
 
 def test_exact_five_preview_rows_are_not_marked_as_having_more() -> None:
     payload = _customer_payload(populated=True)
+    payload["columns"][1]["items"] = payload["columns"][1]["items"][:5]
     payload["columns"][1]["count"] = 5
     payload["columns"][1]["has_more"] = False
     payload["columns"][1]["remaining_count"] = 0
@@ -521,13 +531,13 @@ def test_exact_five_preview_rows_are_not_marked_as_having_more() -> None:
     assert column.remaining_count == 0
 
 
-def test_six_source_rows_require_remaining_preview_count() -> None:
+def test_full_column_returns_every_source_row() -> None:
     payload = _contract_payload(populated=True)
     column = ContractBoardColumn.model_validate(payload["columns"][CONTRACT_STATUSES.index("SIGNED")])
 
-    assert len(column.items) == 5
-    assert column.has_more is True
-    assert column.remaining_count == 1
+    assert len(column.items) == 6
+    assert column.has_more is False
+    assert column.remaining_count == 0
 
 
 @pytest.mark.parametrize(
@@ -752,10 +762,10 @@ def test_preview_invariants_reject_inconsistent_windows() -> None:
 
     plan = _payment_plan_payload(populated=True)["columns"][0]
     plan["remaining_count"] = 2
-    with pytest.raises(ValidationError, match="inconsistent board preview counts"):
+    with pytest.raises(ValidationError, match="inconsistent board column counts"):
         PaymentPlanBoardColumn.model_validate(plan)
 
     opportunity = _opportunity_payload(populated=True)["columns"][0]
     opportunity["items"] = opportunity["items"][:4]
-    with pytest.raises(ValidationError, match="inconsistent board preview counts"):
+    with pytest.raises(ValidationError, match="inconsistent board column counts"):
         OpportunityBoardColumn.model_validate(opportunity)

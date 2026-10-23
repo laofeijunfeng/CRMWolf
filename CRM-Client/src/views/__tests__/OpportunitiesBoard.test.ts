@@ -258,11 +258,6 @@ async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise
   await flushPromises()
 }
 
-function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElement {
-  const button = wrapper.get(`[data-column-key="${columnKey}"] .board-column__footer button`).element
-  if (!(button instanceof HTMLButtonElement)) throw new Error('view-all control is not a button')
-  return button
-}
 
 
 function emitFrom(vm: object, event: string, payload?: unknown): void {
@@ -348,7 +343,7 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'expected_closing_date', direction: '
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    await wrapper.get('[data-column-key="stage:18:42"] .board-card').trigger('click')
+    await wrapper.get('[data-column-key="stage:18:42"] [role="button"]').trigger('click')
     await nextTick()
 
     const sheet = wrapper.getComponent({ name: 'OpportunityDetailSheet' })
@@ -357,37 +352,15 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'expected_closing_date', direction: '
     wrapper.unmount()
   })
 
-  it('enables won and lost drill-through and disables ambiguous stage and unset-stage drill-through', async () => {
+  it('keeps the board in place because the column has no view-all control', async () => {
     const wrapper = mountPage()
-    await flushPromises()
-    const table = wrapper.getComponent({ name: 'DataTable' })
-emitFrom(table.vm, 'update:search', '星河')
-emitFrom(table.vm, 'search-apply', '星河')
-emitFrom(table.vm, 'update:page', 4)
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    expect(viewAllButton(wrapper, 'stage:18:42').disabled).toBe(true)
-    expect(viewAllButton(wrapper, 'unset_stage').disabled).toBe(true)
-    expect(viewAllButton(wrapper, 'won').disabled).toBe(false)
-
-    await wrapper.get('[data-column-key="stage:18:42"] .board-column__footer button').trigger('click')
+    expect(wrapper.find('.board-column__footer button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('查看全部')
+    expect(wrapper.text()).not.toContain('选择状态')
     expect(wrapper.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('board')
-    expect(JSON.stringify(wrapper.getComponent({ name: 'DataTable' }).props('filters'))).not.toContain('stage_name')
-
-    await wrapper.get('[data-column-key="won"] .board-column__footer button').trigger('click')
-    await flushPromises()
-
-    const drilled = wrapper.getComponent({ name: 'DataTable' })
-    expect(drilled.props('viewDisplayMode')).toBe('table')
-    expect(drilled.props('page')).toBe(1)
-    expect(drilled.props('search')).toBe('星河')
-    expect(drilled.props('filters')).toEqual([{ field: 'status', op: 'eq', value: '1' }])
-    expect(mocks.getOpportunities).toHaveBeenCalledWith(expect.objectContaining({
-      skip: 0,
-      search: '星河',
-      filters: JSON.stringify([{ field: 'status', op: 'eq', value: '1' }]),
-    }))
     wrapper.unmount()
   })
 
@@ -425,8 +398,6 @@ emitFrom(table.vm, 'update:page', 3)
     const projection = wrapper.getComponent({ name: 'OpportunityBoardProjection' })
     expect(projection.props('response')).toEqual(boardResponse)
     expect(projection.props('stale')).toBe(true)
-    expect(projection.props('canDrillThrough')).toBe(false)
-    expect(viewAllButton(wrapper, 'won').disabled).toBe(true)
     expect(wrapper.text()).toContain('星河续购')
 
     teamState.currentTeam = { id: 99 }
@@ -440,7 +411,7 @@ emitFrom(table.vm, 'update:page', 3)
     const wrapper = mountPage()
     await flushPromises()
     await switchMode(wrapper, 'board')
-    await wrapper.get('[data-column-key="stage:18:42"] .board-card').trigger('click')
+    await wrapper.get('[data-column-key="stage:18:42"] [role="button"]').trigger('click')
     await nextTick()
 
     mocks.getOpportunities.mockClear()

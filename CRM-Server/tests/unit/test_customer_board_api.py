@@ -380,9 +380,9 @@ def test_board_preview_uses_full_column_totals(api_env) -> None:
     assert response.status_code == 200, response.text
     column = _columns(response.json())["not_started"]
     assert column["count"] == 7
-    assert [item["id"] for item in column["items"]] == ["cus_07", "cus_06", "cus_05", "cus_04", "cus_03"]
-    assert column["has_more"] is True
-    assert column["remaining_count"] == 2
+    assert [item["id"] for item in column["items"]] == ["cus_07", "cus_06", "cus_05", "cus_04", "cus_03", "cus_02", "cus_01"]
+    assert column["has_more"] is False
+    assert column["remaining_count"] == 0
     assert _counts(response.json())["total_count"] == 7
     assert all(other["count"] == 0 and other["items"] == [] for key, other in _columns(response.json()).items() if key != "not_started")
 
@@ -490,9 +490,9 @@ def test_sorting_changes_preview_order_only(api_env) -> None:
     default_body = default_response.json()
     sorted_body = sorted_response.json()
     assert [item["id"] for item in _columns(default_body)["not_started"]["items"]] == [
-        "cus_e", "cus_c", "cus_b", "cus_a", "cus_d",
+        "cus_e", "cus_c", "cus_b", "cus_a", "cus_d", "cus_f", "cus_g",
     ]
-    assert [item["title"] for item in _columns(sorted_body)["not_started"]["items"]] == ["丁", "丙", "乙", "己", "庚"]
+    assert [item["title"] for item in _columns(sorted_body)["not_started"]["items"]] == ["丁", "丙", "乙", "己", "庚", "戊", "甲"]
     assert _counts(default_body) == _counts(sorted_body)
     assert _percentages(default_body) == _percentages(sorted_body)
     assert default_body["trends"] == sorted_body["trends"]
@@ -691,7 +691,7 @@ def test_explicit_source_sort_uses_source_name_then_public_id(api_env) -> None:
     assert response.status_code == 200, response.text
     body = response.json()
     assert [item["id"] for item in _columns(body)["not_started"]["items"]] == [
-        "cus_f", "cus_z", "cus_g", "cus_e", "cus_d",
+        "cus_f", "cus_z", "cus_g", "cus_e", "cus_d", "cus_a", "cus_b",
     ]
     assert _counts(body)["total_count"] == 7
 

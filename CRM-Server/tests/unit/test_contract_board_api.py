@@ -440,9 +440,9 @@ def test_board_preview_keeps_full_column_totals_and_empty_columns(api_env) -> No
     columns = _columns(body)
     column = columns["DRAFT"]
     assert column["count"] == 7
-    assert [item["id"] for item in column["items"]] == [7, 6, 5, 4, 3]
-    assert column["has_more"] is True
-    assert column["remaining_count"] == 2
+    assert [item["id"] for item in column["items"]] == [7, 6, 5, 4, 3, 2, 1]
+    assert column["has_more"] is False
+    assert column["remaining_count"] == 0
     assert column["amount"] == "28.00"
     assert _metric(body, "total_count")["value"] == 7
     assert _metric(body, "total_amount")["value"] == "28.00"
@@ -606,8 +606,8 @@ def test_sorting_changes_preview_order_only(api_env, monkeypatch) -> None:
     assert sorted_response.status_code == 200, sorted_response.text
     default_body = default_response.json()
     sorted_body = sorted_response.json()
-    assert [item["id"] for item in _columns(default_body)["SIGNED"]["items"]] == [4, 7, 6, 1, 5]
-    assert [item["id"] for item in _columns(sorted_body)["SIGNED"]["items"]] == [7, 6, 5, 4, 3]
+    assert [item["id"] for item in _columns(default_body)["SIGNED"]["items"]] == [4, 7, 6, 1, 5, 2, 3]
+    assert [item["id"] for item in _columns(sorted_body)["SIGNED"]["items"]] == [7, 6, 5, 4, 3, 2, 1]
     assert [metric["value"] for metric in default_body["summary"]] == [
         metric["value"] for metric in sorted_body["summary"]
     ]

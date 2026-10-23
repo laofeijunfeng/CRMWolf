@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import OpportunityBoardProjection from '../OpportunityBoardProjection.vue'
 import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
@@ -134,7 +134,7 @@ const response: OpportunityBoardResponse = {
   ],
 }
 
-function mountProjection() {
+function mountProjection(): VueWrapper {
   return mount(OpportunityBoardProjection, {
     props: { response },
     global: {
@@ -150,49 +150,26 @@ function mountProjection() {
 }
 
 describe('OpportunityBoardProjection', () => {
-  it('renders amount, win probability, closing date, customer, purchase, license, and public id in backend order', () => {
+  it('renders customer, opportunity name, and owner for every column', async () => {
     const wrapper = mountProjection()
     const keys = wrapper.findAll('[data-column-key]').map((column) => column.attributes('data-column-key'))
-
-    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
-    expect(keys).toEqual(['stage:18:42', 'stage:19:77', 'unset_stage'])
     const first = wrapper.get('[data-column-key="stage:18:42"]')
-    expect(first.text()).toContain('星河续购')
-    expect(first.text()).toContain('¥8,800.00')
-    expect(first.text()).toContain('65.5%')
-    expect(first.text()).toContain('2026-11-30')
+
+    expect(keys).toEqual(['stage:18:42', 'stage:19:77', 'unset_stage'])
     expect(first.text()).toContain('星河科技')
-    expect(first.text()).toContain('续购')
-    expect(first.text()).toContain('订阅')
-    expect(first.text()).toContain('opp_public_1')
-    expect(first.text()).toContain('还有 4 条')
-    expect(first.findComponent({ name: 'AmountText' }).props('value')).toBe('8800.00')
+    expect(first.text()).toContain('星河续购')
+    expect(first.text()).toContain('李娜')
+    expect(first.text()).not.toContain('65.5%')
+    expect(first.text()).not.toContain('查看全部')
+    expect(first.text()).not.toContain('¥')
 
     const second = wrapper.get('[data-column-key="stage:19:77"]')
     expect(second.text()).toContain('北辰新购')
-    expect(second.text()).not.toContain('%')
-    expect(second.text()).not.toContain('还有')
-  })
+    expect(second.get('[role="button"]').text()).toContain('-')
+    expect(wrapper.get('[data-column-key="unset_stage"]').text()).toContain('暂无记录')
 
-  it('emits the public opportunity id and method/template view-all identity', async () => {
-    const wrapper = mountProjection()
-
-    await wrapper.get('[data-column-key="stage:18:42"] [role="button"]').trigger('click')
+    await first.get('[role="button"]').trigger('click')
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 'opp_public_1', columnKey: 'stage:18:42' }]])
-
-    await wrapper.get('[data-column-key="stage:19:77"] button').trigger('click')
-    expect(wrapper.emitted('view-all')).toEqual([['method:19:template:77']])
-  })
-
-  it('converts fixed-point trend amounts only in the chart values', () => {
-    const wrapper = mountProjection()
-    const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-
-    expect(chart.props('data')).toEqual([
-      { month: '2026-09', count: 1, amount: 8800 },
-      { month: '2026-10', count: 0, amount: -12.5 },
-    ])
-    expect(response.trends[0]?.amount).toBe('8800.00')
-    expect(response.trends[1]?.amount).toBe('-12.50')
+    expect(wrapper.emitted('view-all')).toBeUndefined()
   })
 })

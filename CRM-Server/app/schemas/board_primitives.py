@@ -92,3 +92,8 @@ BoardMetric = Annotated[
 def validate_preview_counts(*, count: int, shown: int, has_more: bool, remaining: int) -> None:
     if count < 0 or shown != min(count, 5) or remaining != count - shown or has_more != (remaining > 0):
         raise ValueError("inconsistent board preview counts")
+
+
+def validate_full_column_counts(*, count: int, shown: int, has_more: bool, remaining: int) -> None:
+    if count < 0 or shown != count or remaining != 0 or has_more:
+        raise ValueError("inconsistent board column counts")

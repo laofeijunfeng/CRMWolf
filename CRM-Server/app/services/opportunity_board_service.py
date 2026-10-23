@@ -31,8 +31,7 @@ from app.services.board_trend_window import (
     month_key,
     resolve_board_trend_window,
 )
-from app.services.board_value_format import BOARD_PREVIEW_LIMIT, money_string
-
+from app.services.board_value_format import money_string
 
 TERMINAL_KEYS = ("won", "lost", "unset_stage")
 TERMINAL_LABELS = {"won": "已赢单", "lost": "已输单", "unset_stage": "未设置阶段"}
@@ -262,8 +261,6 @@ def _active_column(
 ) -> OpportunityBoardColumn:
     fact = facts[rows[0].current_stage_snapshot_id]
     ordered = _preview_order(rows, facts, customers, explicit_sort, sorts, order_by, order_dir)
-    shown = ordered[:BOARD_PREVIEW_LIMIT]
-    remaining = len(ordered) - len(shown)
     amount = sum((Decimal(str(row.total_amount or 0)) for row in ordered), Decimal("0"))
     return OpportunityBoardColumn(
         key=f"stage:{identity[0]}:{identity[1]}",
@@ -278,11 +275,19 @@ def _active_column(
         count=len(ordered),
         amount=money_string(amount),
         items=[
-            _item(row, "active", facts.get(row.current_stage_snapshot_id), customers, owners, current_user_id, permission_codes)
-            for row in shown
+            _item(
+                row,
+                "active",
+                facts.get(row.current_stage_snapshot_id),
+                customers,
+                owners,
+                current_user_id,
+                permission_codes,
+            )
+            for row in ordered
         ],
-        has_more=remaining > 0,
-        remaining_count=remaining,
+        has_more=False,
+        remaining_count=0,
     )
 
 
@@ -300,8 +305,6 @@ def _terminal_column(
     order_dir: str | None,
 ) -> OpportunityBoardColumn:
     ordered = _preview_order(rows, facts, customers, explicit_sort, sorts, order_by, order_dir)
-    shown = ordered[:BOARD_PREVIEW_LIMIT]
-    remaining = len(ordered) - len(shown)
     amount = sum((Decimal(str(row.total_amount or 0)) for row in ordered), Decimal("0"))
     return OpportunityBoardColumn(
         key=key,
@@ -320,10 +323,10 @@ def _terminal_column(
                 current_user_id,
                 permission_codes,
             )
-            for row in shown
+            for row in ordered
         ],
-        has_more=remaining > 0,
-        remaining_count=remaining,
+        has_more=False,
+        remaining_count=0,
     )
 
 

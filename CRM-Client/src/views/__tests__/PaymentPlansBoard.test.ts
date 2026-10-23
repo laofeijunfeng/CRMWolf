@@ -229,11 +229,6 @@ async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise
   await flushPromises()
 }
 
-function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElement {
-  const button = wrapper.get(`[data-column-key="${columnKey}"] .board-column__footer button`).element
-  if (!(button instanceof HTMLButtonElement)) throw new Error('view-all control is not a button')
-  return button
-}
 
 
 function emitFrom(vm: object, event: string, payload?: unknown): void {
@@ -312,7 +307,7 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'due_date', direction: 'asc' }])
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    await wrapper.get('[data-column-key="OVERDUE"] .board-card').trigger('click')
+    await wrapper.get('[data-column-key="OVERDUE"] [role="button"]').trigger('click')
     await nextTick()
 
     const page = pageState(wrapper)
@@ -323,34 +318,15 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'due_date', direction: 'asc' }])
     wrapper.unmount()
   })
 
-  it('drills a known status to page one and disables unclassified drill-through', async () => {
+  it('keeps the board in place because the column has no view-all control', async () => {
     const wrapper = mountPage()
-    await flushPromises()
-    const table = wrapper.getComponent({ name: 'DataTable' })
-emitFrom(table.vm, 'update:search', '星河')
-emitFrom(table.vm, 'search-apply', '星河')
-emitFrom(table.vm, 'update:page', 4)
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    expect(viewAllButton(wrapper, 'UNCLASSIFIED').disabled).toBe(true)
-    expect(viewAllButton(wrapper, 'OVERDUE').disabled).toBe(false)
-    await wrapper.get('[data-column-key="UNCLASSIFIED"] .board-column__footer button').trigger('click')
+    expect(wrapper.find('.board-column__footer button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('查看全部')
+    expect(wrapper.text()).not.toContain('选择状态')
     expect(wrapper.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('board')
-
-    await wrapper.get('[data-column-key="OVERDUE"] .board-column__footer button').trigger('click')
-    await flushPromises()
-
-    const drilled = wrapper.getComponent({ name: 'DataTable' })
-    expect(drilled.props('viewDisplayMode')).toBe('table')
-    expect(drilled.props('page')).toBe(1)
-    expect(drilled.props('search')).toBe('星河')
-    expect(drilled.props('filters')).toEqual([{ field: 'status', op: 'eq', value: 'OVERDUE' }])
-    expect(mocks.listPaymentPlans).toHaveBeenCalledWith(expect.objectContaining({
-      page: 1,
-      search: '星河',
-      filters: JSON.stringify([{ field: 'status', op: 'eq', value: 'OVERDUE' }]),
-    }))
     wrapper.unmount()
   })
 
@@ -365,7 +341,6 @@ emitFrom(table.vm, 'update:page', 4)
 
     expect(wrapper.getComponent({ name: 'PaymentPlanBoardProjection' }).props('response')).toEqual(boardResponse)
     expect(wrapper.getComponent({ name: 'PaymentPlanBoardProjection' }).props('stale')).toBe(true)
-    expect(viewAllButton(wrapper, 'OVERDUE').disabled).toBe(true)
 
     userState.userInfo = { id: '99' }
     await nextTick()

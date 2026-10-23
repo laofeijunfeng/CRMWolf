@@ -244,7 +244,6 @@ const fetchPaymentPlans = async (): Promise<boolean> => {
   }
 }
 
-const paymentPlanKnownStatuses = ['PENDING', 'OVERDUE', 'PARTIAL', 'COMPLETED'] as const
 
 const paymentPlanTabStatus = computed<string | null>(() => (
   activeTab.value === 'pending'
@@ -314,18 +313,6 @@ const handleDisplayModeChange = (mode: string | number | undefined): void => {
 watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'board') void refreshActivePaymentPlanView()
 })
-
-const isKnownPaymentPlanStatus = (value: string): value is typeof paymentPlanKnownStatuses[number] => (
-  paymentPlanKnownStatuses.some((status) => status === value)
-)
-
-const handleBoardViewAll = (columnKey: string): void => {
-  if (!paymentPlanBoard.canDrillThrough || !isKnownPaymentPlanStatus(columnKey)) return
-  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey }]
-  pagination.current = 1
-  displayMode.value = 'table'
-  void fetchPaymentPlans()
-}
 
 const handleBoardCardActivate = (payload: BoardCardActivation): void => {
   if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
@@ -843,10 +830,7 @@ defineExpose({
           :refreshing="paymentPlanBoard.refreshing"
           :stale="paymentPlanBoard.stale"
           :error="paymentPlanBoard.error"
-          :can-drill-through="paymentPlanBoard.canDrillThrough"
-          :drill-through-column-keys="paymentPlanKnownStatuses"
           @activate-card="handleBoardCardActivate"
-          @view-all="handleBoardViewAll"
           @retry="paymentPlanBoard.retry"
         />
       </template>

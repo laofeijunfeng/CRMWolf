@@ -29,7 +29,7 @@ from app.services.board_trend_window import (
     month_key,
     resolve_board_trend_window,
 )
-from app.services.board_value_format import BOARD_PREVIEW_LIMIT, finite_percentage
+from app.services.board_value_format import finite_percentage
 from app.services.customer_derived_status import (
     CustomerDerivedStatus,
     DerivedCustomerStatus,
@@ -216,8 +216,6 @@ def _column(
     order_dir: str | None,
 ) -> CustomerBoardColumn:
     ordered = _preview_order(rows, derived, explicit_sort, sorts, order_by, order_dir)
-    shown = ordered[:BOARD_PREVIEW_LIMIT]
-    remaining = len(ordered) - len(shown)
     return CustomerBoardColumn(
         key=key,
         label=COLUMN_LABELS[key],
@@ -226,10 +224,10 @@ def _column(
         amount=None,
         items=[
             _item(row, key, derived[int(row.id)], owners, editable_member_ids, current_user_id, permission_codes)
-            for row in shown
+            for row in ordered
         ],
-        has_more=remaining > 0,
-        remaining_count=remaining,
+        has_more=False,
+        remaining_count=0,
     )
 
 

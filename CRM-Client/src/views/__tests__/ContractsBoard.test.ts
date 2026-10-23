@@ -234,11 +234,6 @@ async function switchMode(wrapper: VueWrapper, mode: 'table' | 'board'): Promise
   await flushPromises()
 }
 
-function viewAllButton(wrapper: VueWrapper, columnKey: string): HTMLButtonElement {
-  const button = wrapper.get(`[data-column-key="${columnKey}"] .board-column__footer button`).element
-  if (!(button instanceof HTMLButtonElement)) throw new Error('view-all control is not a button')
-  return button
-}
 
 
 function emitFrom(vm: object, event: string, payload?: unknown): void {
@@ -323,7 +318,7 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'signing_date', direction: 'desc' }])
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    await wrapper.get('[data-column-key="SIGNED"] .board-card').trigger('click')
+    await wrapper.get('[data-column-key="SIGNED"] [role="button"]').trigger('click')
     await nextTick()
 
     const sheet = wrapper.getComponent({ name: 'ContractDetailSheet' })
@@ -332,34 +327,15 @@ emitFrom(table.vm, 'sort-apply', [{ field: 'signing_date', direction: 'desc' }])
     wrapper.unmount()
   })
 
-  it('drills a known lifecycle status and disables unclassified drill-through', async () => {
+  it('keeps the board in place because the column has no view-all control', async () => {
     const wrapper = mountPage()
-    await flushPromises()
-    const table = wrapper.getComponent({ name: 'DataTable' })
-emitFrom(table.vm, 'update:search', '星河')
-emitFrom(table.vm, 'search-apply', '星河')
-emitFrom(table.vm, 'update:page', 3)
     await flushPromises()
     await switchMode(wrapper, 'board')
 
-    expect(viewAllButton(wrapper, 'UNCLASSIFIED').disabled).toBe(true)
-    expect(viewAllButton(wrapper, 'SIGNED').disabled).toBe(false)
-    await wrapper.get('[data-column-key="UNCLASSIFIED"] .board-column__footer button').trigger('click')
+    expect(wrapper.find('.board-column__footer button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('查看全部')
+    expect(wrapper.text()).not.toContain('选择状态')
     expect(wrapper.getComponent({ name: 'DataTable' }).props('viewDisplayMode')).toBe('board')
-
-    await wrapper.get('[data-column-key="SIGNED"] .board-column__footer button').trigger('click')
-    await flushPromises()
-
-    const drilled = wrapper.getComponent({ name: 'DataTable' })
-    expect(drilled.props('viewDisplayMode')).toBe('table')
-    expect(drilled.props('page')).toBe(1)
-    expect(drilled.props('search')).toBe('星河')
-    expect(drilled.props('filters')).toEqual([{ field: 'status', op: 'eq', value: 'SIGNED' }])
-    expect(mocks.getContracts).toHaveBeenCalledWith(expect.objectContaining({
-      skip: 0,
-      search: '星河',
-      filters: JSON.stringify([{ field: 'status', op: 'eq', value: 'SIGNED' }]),
-    }))
     wrapper.unmount()
   })
 
@@ -396,7 +372,6 @@ emitFrom(table.vm, 'update:page', 3)
 
     expect(wrapper.getComponent({ name: 'ContractBoardProjection' }).props('response')).toEqual(boardResponse)
     expect(wrapper.getComponent({ name: 'ContractBoardProjection' }).props('stale')).toBe(true)
-    expect(viewAllButton(wrapper, 'SIGNED').disabled).toBe(true)
 
     permissionState.permissions = [{ code: 'contract:view:own' }]
     await nextTick()

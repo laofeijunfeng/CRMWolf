@@ -639,11 +639,13 @@ def test_preview_limit_keeps_full_totals_and_sort_changes_order_only(api_env, mo
     default_column = _columns(default_body)["PENDING"]
     sorted_column = _columns(sorted_body)["PENDING"]
     assert default_column["count"] == 7
-    assert [item["id"] for item in default_column["items"]] == [1, 2, 3, 4, 5]
-    assert default_column["has_more"] is True
-    assert default_column["remaining_count"] == 2
+    assert [item["id"] for item in default_column["items"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert default_column["has_more"] is False
+    assert default_column["remaining_count"] == 0
     assert default_column["planned_amount"] == "28.00"
-    assert [item["id"] for item in sorted_column["items"]] == [7, 6, 5, 4, 3]
+    assert [item["id"] for item in sorted_column["items"]] == [7, 6, 5, 4, 3, 2, 1]
+    assert sorted_column["has_more"] is False
+    assert sorted_column["remaining_count"] == 0
     assert sorted_column["count"] == default_column["count"]
     assert sorted_column["planned_amount"] == default_column["planned_amount"]
     assert sorted_column["paid_amount"] == default_column["paid_amount"]

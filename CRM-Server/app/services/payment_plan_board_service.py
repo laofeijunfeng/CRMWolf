@@ -29,9 +29,8 @@ from app.services.board_trend_window import (
     month_key,
     resolve_board_trend_window,
 )
-from app.services.board_value_format import BOARD_PREVIEW_LIMIT, money_string
+from app.services.board_value_format import money_string
 from app.services.payment_approval_status import payment_approval_status_expression
-
 
 COLUMN_KEYS = ("PENDING", "OVERDUE", "PARTIAL", "COMPLETED", "UNCLASSIFIED")
 COLUMN_LABELS = {
@@ -255,8 +254,6 @@ def _column(
         order_by,
         order_dir,
     )
-    shown = ordered[:BOARD_PREVIEW_LIMIT]
-    remaining_count = len(ordered) - len(shown)
     planned_total = Decimal("0")
     paid_total = Decimal("0")
     remaining_total = Decimal("0")
@@ -278,10 +275,10 @@ def _column(
         overdue_remaining_amount=money_string(overdue_remaining),
         items=[
             _item(plan, key, paid_by_plan, plans_with_records, owners, current_user_id, permission_codes)
-            for plan in shown
+            for plan in ordered
         ],
-        has_more=remaining_count > 0,
-        remaining_count=remaining_count,
+        has_more=False,
+        remaining_count=0,
     )
 
 

@@ -561,21 +561,6 @@ watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'board') void refreshActiveOpportunityView()
 })
 
-const opportunityExactDrillColumns = ['won', 'lost'] as const
-
-const opportunityDrillThroughColumnKeys = computed(() => (
-  opportunityExactDrillColumns.filter(() => true)
-))
-
-const handleBoardViewAll = (columnKey: string): void => {
-  if (!opportunityBoard.canDrillThrough) return
-  if (columnKey !== 'won' && columnKey !== 'lost') return
-  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey === 'won' ? '1' : '2' }]
-  pagination.current = 1
-  displayMode.value = 'table'
-  void fetchOpportunities()
-}
-
 const handleBoardCardActivate = (payload: BoardCardActivation): void => {
   if (typeof payload.id !== 'string' || !isOpportunityPublicId(payload.id)) return
   openOpportunitySheet(payload.id)
@@ -1165,10 +1150,7 @@ defineExpose({
           :refreshing="opportunityBoard.refreshing"
           :stale="opportunityBoard.stale"
           :error="opportunityBoard.error"
-          :can-drill-through="opportunityBoard.canDrillThrough"
-          :drill-through-column-keys="opportunityDrillThroughColumnKeys"
           @activate-card="handleBoardCardActivate"
-          @view-all="handleBoardViewAll"
           @retry="opportunityBoard.retry"
         />
       </template>

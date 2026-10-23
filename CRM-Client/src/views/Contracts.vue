@@ -329,7 +329,6 @@ const fetchContractList = async (): Promise<boolean> => {
 }
 
 const contractTabStatuses = ['DRAFT', 'PENDING_REVIEW', 'SIGNED'] as const
-const contractLifecycleStatuses = ['DRAFT', 'PENDING_REVIEW', 'SIGNED', 'EFFECTIVE', 'EXPIRED', 'TERMINATED'] as const
 
 const contractTabStatus = computed<string | null>(() => (
   contractTabStatuses.some((status) => status === activeTab.value) ? activeTab.value : null
@@ -472,18 +471,6 @@ const closeChartBucket = (): void => {
   chartBucket.value = null
   chartBucketError.value = ''
   chartBucketLoading.value = false
-}
-
-const isContractLifecycleStatus = (value: string): value is typeof contractLifecycleStatuses[number] => (
-  contractLifecycleStatuses.some((status) => status === value)
-)
-
-const handleBoardViewAll = (columnKey: string): void => {
-  if (!contractBoard.canDrillThrough || !isContractLifecycleStatus(columnKey)) return
-  activeFilters.value = [{ field: 'status', op: 'eq', value: columnKey }]
-  pagination.current = 1
-  displayMode.value = 'table'
-  void fetchContractList()
 }
 
 const handleBoardCardActivate = (payload: BoardCardActivation): void => {
@@ -935,10 +922,7 @@ defineExpose({
           :refreshing="contractBoard.refreshing"
           :stale="contractBoard.stale"
           :error="contractBoard.error"
-          :can-drill-through="contractBoard.canDrillThrough"
-          :drill-through-column-keys="contractLifecycleStatuses"
           @activate-card="handleBoardCardActivate"
-          @view-all="handleBoardViewAll"
           @retry="contractBoard.retry"
         />
       </template>

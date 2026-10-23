@@ -894,71 +894,11 @@ watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'chart') void refreshVisibleCustomers()
 })
 
-const customerDerivedStatuses = ['not_started', 'following', 'repurchasing', 'won', 'lost'] as const
-type CustomerDerivedStatus = typeof customerDerivedStatuses[number]
-
-const isCustomerDerivedStatus = (value: string): value is CustomerDerivedStatus => (
-  customerDerivedStatuses.some((status) => status === value)
-)
-
-const handleBoardViewAll = (columnKey: string): void => {
-  if (!customerBoard.canDrillThrough || !isCustomerDerivedStatus(columnKey)) return
-  activeFilters.value = [{ field: 'derived_status', op: 'eq', value: columnKey }]
-  pagination.current = 1
-  displayMode.value = 'table'
-  void fetchCustomerList()
-}
-
-const boardCustomerRecord = (id: string | number): CustomerResponse | null => {
-  const publicId = String(id)
-  const columns = customerBoard.data?.columns ?? []
-  for (const column of columns) {
-    const item = column.items.find((candidate) => candidate.id === publicId)
-    if (item === undefined) continue
-    return {
-      id: item.id,
-      public_id: item.id,
-      account_name: item.title,
-      industry: item.metadata.industry,
-      city: item.metadata.city ?? '',
-      address: null,
-      company_scale: item.metadata.company_scale,
-      source: null,
-      status: 0,
-      owner_id: item.owner?.id ?? null,
-      source_lead_id: null,
-      default_procurement_method_id: null,
-      loss_reason: null,
-      return_reason: null,
-      returned_time: null,
-      creator_id: '',
-      created_time: item.date ?? '',
-      last_modified_time: item.date ?? '',
-      version: 0,
-      license_expiry_date: item.metadata.license_expiry_date,
-      license_authorized_users: null,
-      license_type: item.metadata.license_type,
-    }
-  }
-  return null
-}
-
 const handleBoardCardActivate = (payload: BoardCardActivation): void => {
   if (typeof payload.id !== 'string' || !isCustomerPublicId(payload.id)) return
   openCustomerDetail(payload.id)
 }
 
-const handleBoardCardAction = (payload: { id: string | number, action: 'edit' | 'delete' | 'assign' | 'create-opportunity' }): void => {
-  const record = boardCustomerRecord(payload.id)
-  if (record === null) return
-  const column = customerBoard.data?.columns.find((candidate) => candidate.items.some((item) => item.id === record.id))
-  const item = column?.items.find((candidate) => candidate.id === record.id)
-  if (item === undefined) return
-  if (payload.action === 'edit' && item.action_state.can_edit) void handleEdit(record)
-  else if (payload.action === 'delete' && item.action_state.can_delete) void handleDelete(record)
-  else if (payload.action === 'assign' && item.action_state.can_assign) handleTransfer(record)
-  else if (payload.action === 'create-opportunity' && item.action_state.can_create_opportunity) handleCreateOpportunity(record, true)
-}
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
   const refreshed = await refreshVisibleCustomers()
   if (!refreshed) {
@@ -1579,10 +1519,7 @@ defineExpose({
           :refreshing="customerBoard.refreshing"
           :stale="customerBoard.stale"
           :error="customerBoard.error"
-          :can-drill-through="customerBoard.canDrillThrough"
           @activate-card="handleBoardCardActivate"
-          @view-all="handleBoardViewAll"
-          @card-action="handleBoardCardAction"
           @retry="customerBoard.retry"
         />
       </template>

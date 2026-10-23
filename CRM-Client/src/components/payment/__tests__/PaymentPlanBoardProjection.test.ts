@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import PaymentPlanBoardProjection from '../PaymentPlanBoardProjection.vue'
 import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
@@ -121,7 +121,7 @@ const response: PaymentPlanBoardResponse = {
   ],
 }
 
-function mountProjection(board: PaymentPlanBoardResponse = response) {
+function mountProjection(board: PaymentPlanBoardResponse = response): VueWrapper {
   return mount(PaymentPlanBoardProjection, {
     props: { response: board },
     global: {
@@ -137,100 +137,26 @@ function mountProjection(board: PaymentPlanBoardResponse = response) {
 }
 
 describe('PaymentPlanBoardProjection', () => {
-  it('renders planned, paid, remaining, overdue, due date, relations, stage, owner, status, and numeric id', () => {
+  it('renders customer, stage name, and owner without the plan number or amounts', async () => {
     const wrapper = mountProjection()
-    const column = wrapper.get('[data-column-key="OVERDUE"]')
+    const overdue = wrapper.get('[data-column-key="OVERDUE"]')
+    const card = overdue.get('[role="button"]')
 
-    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
-    expect(column.text()).toContain('¥10,000.00')
-    expect(column.text()).toContain('¥2,500.00')
-    expect(column.text()).toContain('¥7,500.00')
-    expect(column.text()).not.toContain('10000.00')
-    expect(column.text()).not.toContain('2500.00')
-    expect(column.text()).not.toContain('7500.00')
-    expect(column.text()).toContain('2026-07-31')
-    expect(column.text()).toContain('星河科技')
-    expect(column.text()).toContain('星河年度合同')
-    expect(column.text()).toContain('星河续购')
-    expect(column.text()).toContain('已逾期')
-    expect(column.text()).toContain('陈晨')
-    expect(column.text()).toContain('7')
-    const card = column.get('.board-card')
-    expect(card.text()).toContain('计划金额')
-    expect(card.text()).toContain('已回款')
-    expect(card.text()).toContain('待回款')
-    expect(card.text()).toContain('逾期待回款')
-    expect(card.text()).toContain('¥10,000.00')
-    expect(card.text()).toContain('¥2,500.00')
-    expect(card.text()).toContain('¥7,500.00')
-    expect(column.findAllComponents({ name: 'AmountText' }).map((amount: { props: (name: string) => unknown }) => amount.props('value'))).toEqual([
-      '7500.00',
-      '10000.00',
-    ])
-  })
+    expect(card.text()).toContain('星河科技')
+    expect(card.text()).toContain('一期')
+    expect(card.text()).toContain('陈晨')
+    expect(card.text()).not.toContain('PP-2026-007')
+    expect(card.text()).not.toContain('计划金额')
+    expect(card.text()).not.toContain('¥')
+    expect(overdue.text()).not.toContain('查看全部')
 
-  it('keeps the column overdue total off a non-overdue card', () => {
-    const wrapper = mountProjection()
-    const column = wrapper.get('[data-column-key="PENDING"]')
-    const card = column.get('.board-card')
+    const pending = wrapper.get('[data-column-key="PENDING"]')
+    expect(pending.text()).toContain('北辰制造')
+    expect(pending.text()).toContain('二期')
+    expect(pending.text()).toContain('林岚')
 
-    expect(column.findComponent({ name: 'AmountText' }).props('value')).toBe('7500.00')
-    expect(column.text()).toContain('¥7,500.00')
-    expect(card.text()).not.toContain('逾期待回款')
-    expect(card.text()).not.toContain('¥7,500.00')
-    expect(card.text()).toContain('计划金额')
-    expect(card.text()).toContain('¥4,000.00')
-    expect(card.text()).toContain('已回款')
-    expect(card.text()).toContain('¥0.00')
-    expect(card.text()).toContain('待回款')
-    expect(card.text()).toContain('¥4,000.00')
-  })
-
-  it('shows a formatted zero when an overdue plan remaining balance is zero', () => {
-    const board: PaymentPlanBoardResponse = {
-      ...response,
-      columns: response.columns.map((column) => {
-        if (column.key !== 'OVERDUE') return column
-        return {
-          ...column,
-          items: column.items.map((item) => ({
-            ...item,
-            remaining_amount: '0.00',
-            metadata: { ...item.metadata, remaining_amount: '0.00' },
-          })),
-        }
-      }),
-    }
-    const wrapper = mountProjection(board)
-    const column = wrapper.get('[data-column-key="OVERDUE"]')
-    const card = column.get('.board-card')
-    const overdueLabel = card.findAll('dt').find((label) => label.text() === '逾期待回款')
-
-    expect(overdueLabel?.element.nextElementSibling?.textContent?.trim()).toBe('¥0.00')
-    expect(column.findComponent({ name: 'AmountText' }).props('value')).toBe('7500.00')
-    expect(card.text()).not.toContain('¥7,500.00')
-  })
-
-  it('emits the numeric payment plan id', async () => {
-    const wrapper = mountProjection()
-
-    await wrapper.get('[role="button"]').trigger('click')
+    await card.trigger('click')
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 7, columnKey: 'OVERDUE' }]])
-    await wrapper.get('button').trigger('click')
-    expect(wrapper.emitted('view-all')).toEqual([['OVERDUE']])
-  })
-
-  it('converts payment-plan chart amounts without changing the response', () => {
-    const wrapper = mountProjection()
-    const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-
-    expect(chart.props('data')).toEqual([{
-      month: '2026-07',
-      count: 1,
-      planned_amount: 10000,
-      paid_amount: 2500,
-      remaining_amount: 7500,
-    }])
-    expect(response.trends[0]?.planned_amount).toBe('10000.00')
+    expect(wrapper.emitted('view-all')).toBeUndefined()
   })
 })

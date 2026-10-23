@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ContractBoardProjection from '../ContractBoardProjection.vue'
 import type { ContractBoardResponse } from '@/schemas/contractBoard'
@@ -69,7 +69,7 @@ const response: ContractBoardResponse = {
   trends: [{ date: '2026-08', count: 1, amount: '32000.00' }],
 }
 
-function mountProjection() {
+function mountProjection(): VueWrapper {
   return mount(ContractBoardProjection, {
     props: { response },
     global: {
@@ -85,41 +85,22 @@ function mountProjection() {
 }
 
 describe('ContractBoardProjection', () => {
-  it('renders amount, dates, customer, opportunity, license, purchase, owner, numeric id, and all seven columns', () => {
+  it('renders customer, contract name, and owner across the lifecycle columns', async () => {
     const wrapper = mountProjection()
     const keys = wrapper.findAll('[data-column-key]').map((column) => column.attributes('data-column-key'))
     const signed = wrapper.get('[data-column-key="SIGNED"]')
 
-    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
     expect(keys).toEqual([...statuses])
+    expect(signed.text()).toContain('星河科技')
     expect(signed.text()).toContain('星河年度合同')
     expect(signed.text()).toContain('赵磊')
-    expect(signed.text()).toContain('星河科技')
-    expect(signed.text()).toContain('星河续购')
-    expect(signed.text()).toContain('订阅')
-    expect(signed.text()).toContain('续购')
-    expect(signed.text()).toContain('2026-08-01')
-    expect(signed.text()).toContain('2026-08-15')
-    expect(signed.text()).toContain('2027-08-14')
-    expect(signed.text()).toContain('42')
-    expect(signed.findComponent({ name: 'AmountText' }).props('value')).toBe('32000.00')
-    expect(wrapper.get('[data-column-key="UNCLASSIFIED"]').text()).toContain('未分类')
-  })
+    expect(signed.text()).not.toContain('HT-2026-042')
+    expect(signed.text()).not.toContain('查看全部')
+    expect(signed.text()).not.toContain('¥')
+    expect(wrapper.get('[data-column-key="UNCLASSIFIED"]').text()).toContain('暂无记录')
 
-  it('emits the numeric contract id and the unclassified column key', async () => {
-    const wrapper = mountProjection()
-
-    await wrapper.get('[data-column-key="SIGNED"] [role="button"]').trigger('keydown', { key: ' ' })
+    await signed.get('[role="button"]').trigger('keydown', { key: ' ' })
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 42, columnKey: 'SIGNED' }]])
-    await wrapper.get('[data-column-key="UNCLASSIFIED"] button').trigger('click')
-    expect(wrapper.emitted('view-all')).toEqual([['UNCLASSIFIED']])
-  })
-
-  it('passes a numeric contract chart amount without changing the response', () => {
-    const wrapper = mountProjection()
-    const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-
-    expect(chart.props('data')).toEqual([{ month: '2026-08', count: 1, amount: 32000 }])
-    expect(response.trends[0]?.amount).toBe('32000.00')
+    expect(wrapper.emitted('view-all')).toBeUndefined()
   })
 })

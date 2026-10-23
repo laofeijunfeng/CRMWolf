@@ -12,7 +12,7 @@ from app.schemas.board_primitives import (
     MonthString,
     Percentage,
     StrictBoardModel,
-    validate_preview_counts,
+    validate_full_column_counts,
 )
 
 
@@ -56,7 +56,7 @@ class CustomerBoardColumn(StrictBoardModel):
 
     @model_validator(mode="after")
     def validate_preview(self) -> Self:
-        validate_preview_counts(
+        validate_full_column_counts(
             count=self.count,
             shown=len(self.items),
             has_more=self.has_more,

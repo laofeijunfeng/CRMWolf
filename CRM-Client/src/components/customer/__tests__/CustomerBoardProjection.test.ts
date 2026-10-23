@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import CustomerBoardProjection from '../CustomerBoardProjection.vue'
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
@@ -108,7 +108,7 @@ const response: CustomerBoardResponse = {
   ],
 }
 
-function mountProjection(value: CustomerBoardResponse = response) {
+function mountProjection(value: CustomerBoardResponse = response): VueWrapper {
   return mount(CustomerBoardProjection, {
     props: { response: value },
     global: {
@@ -124,70 +124,26 @@ function mountProjection(value: CustomerBoardResponse = response) {
 }
 
 describe('CustomerBoardProjection', () => {
-  it('renders owner, stage, industry, city, scale, license expiry, and public id through BoardView', async () => {
+  it('renders stage hint, customer name, and owner without the old card rows', async () => {
     const wrapper = mountProjection()
     const following = wrapper.get('[data-column-key="following"]')
+    const card = following.get('[role="button"]')
 
-    expect(wrapper.findComponent({ name: 'BoardView' }).exists()).toBe(true)
+    expect(following.text()).toContain('方案沟通')
     expect(following.text()).toContain('星河科技')
     expect(following.text()).toContain('王敏')
-    expect(following.text()).toContain('方案沟通')
-    expect(following.text()).toContain('软件')
-    expect(following.text()).toContain('上海')
-    expect(following.text()).toContain('100-499人')
-    expect(following.text()).toContain('正式授权')
-    expect(following.text()).toContain('2027-03-15')
-    expect(following.text()).toContain('cus_public_1')
-    expect(following.findComponent({ name: 'AmountText' }).props('value')).toBe('1200.50')
+    expect(following.text()).not.toContain('行业')
+    expect(following.text()).not.toContain('软件')
+    expect(following.text()).not.toContain('查看全部')
+    expect(following.find('[data-testid="board-card-action-edit"]').exists()).toBe(false)
+    expect(card.text()).not.toContain('¥')
 
     const lost = wrapper.get('[data-column-key="lost"]')
     expect(lost.text()).toContain('北辰制造')
-    expect(lost.findComponent({ name: 'AmountText' }).exists()).toBe(false)
+    expect(lost.get('[role="button"]').text()).toContain('-')
 
-    await following.get('.board-card').trigger('keydown', { key: 'Enter' })
+    await card.trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 'cus_public_1', columnKey: 'following' }]])
-
-    await lost.get('.board-column__footer button').trigger('click')
-    expect(wrapper.emitted('view-all')).toEqual([['lost']])
-  })
-
-  it('emits only the rendered card action and does not activate the card', async () => {
-    const wrapper = mountProjection()
-    const following = wrapper.get('[data-column-key="following"]')
-    const lost = wrapper.get('[data-column-key="lost"]')
-
-    expect(following.find('[data-testid="board-card-action-edit"]').exists()).toBe(true)
-    expect(following.find('[data-testid="board-card-action-assign"]').exists()).toBe(true)
-    expect(following.find('[data-testid="board-card-action-create-opportunity"]').exists()).toBe(true)
-    expect(following.find('[data-testid="board-card-action-delete"]').exists()).toBe(false)
-    expect(lost.find('[data-testid^="board-card-action-"]').exists()).toBe(false)
-
-    await following.get('[data-testid="board-card-action-edit"]').trigger('click')
-
-    expect(wrapper.emitted('card-action')).toEqual([[{ id: 'cus_public_1', action: 'edit' }]])
-    expect(wrapper.emitted('activate-card')).toBeUndefined()
-  })
-
-  it('passes numeric customer trend counts through BoardView without changing the response', () => {
-    const wrapper = mountProjection()
-    const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-
-    expect(chart.props('xKey')).toBe('month')
-    expect(chart.props('data')).toEqual([
-      { month: '2026-09', count: 1 },
-      { month: '2026-10', count: 2 },
-    ])
-    expect(response.trends).toEqual([
-      { date: '2026-09', count: 1 },
-      { date: '2026-10', count: 2 },
-    ])
-  })
-
-  it('formats percentage summaries and omits an empty trend chart', () => {
-    const wrapper = mountProjection({ ...response, trends: [] })
-
-    expect(wrapper.text()).toContain('50%')
-    expect(wrapper.text()).toContain('-')
-    expect(wrapper.findComponent({ name: 'AreaTrendChart' }).exists()).toBe(false)
+    expect(wrapper.emitted('view-all')).toBeUndefined()
   })
 })

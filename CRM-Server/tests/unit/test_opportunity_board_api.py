@@ -504,9 +504,9 @@ def test_board_preview_keeps_full_column_totals_and_empty_terminal_columns(api_e
     columns = _columns(body)
     column = columns["stage:3:8"]
     assert column["count"] == 7
-    assert [item["id"] for item in column["items"]] == ["opp_01", "opp_02", "opp_03", "opp_04", "opp_05"]
-    assert column["has_more"] is True
-    assert column["remaining_count"] == 2
+    assert [item["id"] for item in column["items"]] == ["opp_01", "opp_02", "opp_03", "opp_04", "opp_05", "opp_06", "opp_07"]
+    assert column["has_more"] is False
+    assert column["remaining_count"] == 0
     assert column["amount"] == "28.00"
     assert _metric(body, "total_count")["value"] == 7
     assert _metric(body, "pipeline_amount")["value"] == "28.00"
@@ -629,10 +629,10 @@ def test_sorting_changes_preview_order_only(api_env) -> None:
     default_body = default_response.json()
     sorted_body = sorted_response.json()
     assert [item["id"] for item in _columns(default_body)["stage:3:8"]["items"]] == [
-        "opp_03", "opp_02", "opp_05", "opp_01", "opp_06",
+        "opp_03", "opp_02", "opp_05", "opp_01", "opp_06", "opp_07", "opp_04",
     ]
     assert [item["id"] for item in _columns(sorted_body)["stage:3:8"]["items"]] == [
-        "opp_07", "opp_06", "opp_05", "opp_04", "opp_03",
+        "opp_07", "opp_06", "opp_05", "opp_04", "opp_03", "opp_02", "opp_01",
     ]
     assert [metric["value"] for metric in default_body["summary"]] == [
         metric["value"] for metric in sorted_body["summary"]

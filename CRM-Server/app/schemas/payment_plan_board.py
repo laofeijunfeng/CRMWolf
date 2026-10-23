@@ -12,7 +12,7 @@ from app.schemas.board_primitives import (
     EntityId,
     MonthString,
     StrictBoardModel,
-    validate_preview_counts,
+    validate_full_column_counts,
 )
 
 
@@ -61,7 +61,7 @@ class PaymentPlanBoardColumn(StrictBoardModel):
 
     @model_validator(mode="after")
     def validate_preview(self) -> Self:
-        validate_preview_counts(
+        validate_full_column_counts(
             count=self.count,
             shown=len(self.items),
             has_more=self.has_more,

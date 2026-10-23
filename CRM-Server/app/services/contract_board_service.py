@@ -34,8 +34,7 @@ from app.services.board_trend_window import (
     month_key,
     resolve_board_trend_window,
 )
-from app.services.board_value_format import BOARD_PREVIEW_LIMIT, money_string
-
+from app.services.board_value_format import money_string
 
 COLUMN_KEYS = (
     "DRAFT",
@@ -219,8 +218,6 @@ def _column(
         order_by,
         order_dir,
     )
-    shown = ordered[:BOARD_PREVIEW_LIMIT]
-    remaining = len(ordered) - len(shown)
     amount = sum((Decimal(str(row.total_amount or 0)) for row in ordered), Decimal("0"))
     return ContractBoardColumn(
         key=key,
@@ -241,10 +238,10 @@ def _column(
                 permission_codes,
                 role_codes,
             )
-            for row in shown
+            for row in ordered
         ],
-        has_more=remaining > 0,
-        remaining_count=remaining,
+        has_more=False,
+        remaining_count=0,
     )
 
 
