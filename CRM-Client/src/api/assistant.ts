@@ -2,9 +2,11 @@ import { z } from 'zod'
 
 import {
   AssistantTaskViewSchema,
+  ConversationViewSchema, ConversationReplySchema,
   AssistantTurnStatusSchema,
   parseAssistantTaskList,
   SubmitInputResponseSchema,
+  type ConversationView, type ConversationReply,
   type AssistantInputKind,
   type AssistantTaskView,
   type SubmitInputResponse
@@ -201,6 +203,42 @@ export interface SubmitAssistantInput {
 }
 
 export const assistantApi = {
+  async openConversation(): Promise<ConversationView> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/open')
+    return ConversationViewSchema.parse(payload)
+  },
+  async getConversation(before?: number): Promise<ConversationView> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.get('/v1/assistant/conversation', { params: { before } })
+    return ConversationViewSchema.parse(payload)
+  },
+  async conversationText(input: { text: string; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/messages', input, { timeout: 150_000 })
+    return ConversationReplySchema.parse(payload)
+  },
+  async conversationChoice(input: { entry_id: string; choice: 'CONTINUE' | 'NEW' | 'CANCEL'; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/choices', input)
+    return ConversationReplySchema.parse(payload)
+  },
+  async conversationCommand(input: { task_public_id: string; input: SubmitAssistantInput; expected_version: number }): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/commands', input)
+    return ConversationReplySchema.parse(payload)
+  },
+  async resumeConversation(): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/resume', undefined, { timeout: 150_000 })
+    return ConversationReplySchema.parse(payload)
+  },
+  async conversationKind(input: { task_public_id: string; kind: 'FOLLOW_UP' | 'ONLINE_MEETING' | 'OFFLINE_MEETING';
+    task_version: number; expected_version: number; client_request_id: string }): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/change-kind', input)
+    return ConversationReplySchema.parse(payload)
+  },
   async createTask(goal: string, clientRequestId: string = crypto.randomUUID()): Promise<AssistantTaskView> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
     const payload: unknown = await request.post('/v1/assistant/tasks', { goal, client_request_id: clientRequestId })

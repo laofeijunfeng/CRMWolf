@@ -162,7 +162,7 @@ class AssistantCoordinator:
             reply=CoordinatorReply(
                 task_public_id=result.task.public_id,
                 status=result.task.status,
-                message="已取消本次任务，未写入的内容不会保存。",
+                message="当前这件已停下，之前的对话和已写入的记录仍保留。",
             ),
             task=result.task,
         )

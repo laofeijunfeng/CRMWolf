@@ -21,12 +21,13 @@ test('reload restores the in-flight task with its waiting card', async ({ page }
   await page.reload()
   await expect(page.locator('textarea').first()).toBeVisible({ timeout: 30_000 })
 
-  // Sidebar shows the restored in-progress task.
-  await expect(page.getByText('进行中').first()).toBeVisible({ timeout: 30_000 })
+  // The continuous transcript restores without requiring a task sidebar.
+  await expect(page.getByText('明天下午和广州睿狐科技有限公司复盘部署计划', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新任务', exact: true })).toHaveCount(0)
 
   // Cancel it from the restored UI to leave a clean state.
-  const giveUp = page.getByRole('button', { name: /算了|取消任务/ })
+  const giveUp = page.getByRole('button', { name: /算了/ })
   await expect(giveUp.first()).toBeVisible({ timeout: 30_000 })
   await giveUp.first().click()
-  await expect(page.getByText('已取消').first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('当前这件已停下，之前的对话和已写入的记录仍保留。').first()).toBeVisible({ timeout: 30_000 })
 })

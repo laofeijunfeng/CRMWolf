@@ -352,10 +352,10 @@ test('s1 layout & idle state', async ({ page }) => {
 
   await expect(page.locator('textarea').first()).toBeVisible()
   await expect(page.locator('textarea').first()).toHaveAttribute('placeholder', '描述一次客户沟通，我来整理成跟进或会议纪要…')
-  await expect(page.getByText('发送一句话开始').first()).toBeVisible()
-  await expect(page.getByText('任务').first()).toBeVisible()
-  await expect(page.getByText('当前没有进行中的任务').first()).toBeVisible()
-  await expect(page.getByText('新任务')).toBeVisible()
+  // Cancelling a draft no longer clears the continuous transcript.
+  await expect(page.locator('textarea').first()).toBeEnabled()
+  await expect(page.getByRole('button', { name: '新任务', exact: true })).toHaveCount(0)
+  await expect(page.getByText('最近任务', { exact: true })).toHaveCount(0)
   await expect(page.getByText('销售助手').first()).toBeVisible()
   // Enter hint present in composer footer.
   await expect(page.getByText(/Enter 发送/).first()).toBeVisible()
@@ -521,19 +521,19 @@ test('s6 write receipt then serial proposals', async ({ page }) => {
 })
 
 /**
- * 场景 7 · 任务栏进行中状态
- * Sidebar steps light up during an in-flight task.
+ * 场景 7 · 等待确认时仍是连续对话
+ * Confirmation stays actionable without a task-management sidebar.
  */
-test('s7 sidebar shows in-progress task and steps', async ({ page }) => {
+test('s7 confirmation stays in the transcript without a task sidebar', async ({ page }) => {
   test.setTimeout(300_000)
   await cancelActiveTasks(page)
   await page.goto('/assistant')
   await awaitResumeSettled(page)
 
   await apiDrive(page, `明天和${CUSTOMER}对齐部署计划，${CONTENT}`, { kind: 'ONLINE_MEETING' })
-  await expect(page.getByText('进行中').first()).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('类型确认').first()).toBeVisible()
-  await expect(page.getByText('内容整理').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '新任务', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '取消任务', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /算了/ }).first()).toBeVisible()
   await expect(page.getByText('确认写入').first()).toBeVisible()
 
   await settleTail(page, 'reject')

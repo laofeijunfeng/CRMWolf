@@ -155,16 +155,10 @@ async function cancelActive(page: Page): Promise<void> {
   }
 }
 
-async function openAssistant(page: Page, fresh = false): Promise<void> {
+async function openAssistant(page: Page): Promise<void> {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/assistant', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('textarea').first()).toBeVisible({ timeout: 30_000 })
-  if (fresh) {
-    const button = page.getByRole('button', { name: '新任务' })
-    if ((await button.getAttribute('disabled').catch(() => '1')) === null) {
-      await button.click({ timeout: 3_000, force: true }).catch(() => undefined)
-    }
-  }
   await page.waitForTimeout(400)
 }
 
@@ -287,7 +281,7 @@ test('design boards', async ({ page }) => {
     ['expected-s4.png', '场景 4 · 会议纪要 · 请求确认'],
     ['expected-s5.png', '场景 5 · 补缺口 · 输入框进入受控模式'],
     ['expected-s6.png', '场景 6 · 活动写入成功 · 后续提案逐笔出现'],
-    ['expected-s7.png', '场景 7 · 任务栏 · 进行中任务的可见状态'],
+    ['expected-s7.png', '场景 7 · 连续对话 · 当前确认的可见状态'],
     ['expected-s8.png', '场景 8 · 失败与澄清 · 永不静默'],
     ['expected-s9.png', '场景 9 · 执行过程可见 · 用户始终知道 Agent 在做什么']
   ]
@@ -296,12 +290,12 @@ test('design boards', async ({ page }) => {
 
 test('s1 idle', async ({ page }) => {
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   const actual = await appShot(page, 'actual-s1-idle.png')
   const checks = {
-    guide: await page.getByText('发送一句话开始').first().isVisible().catch(() => false),
-    empty: await page.getByText('当前没有进行中的任务').first().isVisible().catch(() => false),
-    fresh: await page.getByRole('button', { name: '新任务' }).isVisible().catch(() => false),
+    guide: await page.locator('textarea').first().isEnabled().catch(() => false),
+    empty: (await page.getByText('最近任务', { exact: true }).count()) === 0,
+    fresh: (await page.getByRole('button', { name: '新任务', exact: true }).count()) === 0,
     enter: await page.getByText('Enter 发送').first().isVisible().catch(() => false),
     title: await page.getByText('销售助手').first().isVisible().catch(() => false),
     recentCustomerKind: await page.getByText(/· (跟进|线上会议|线下会议)/).first().isVisible().catch(() => false)
@@ -309,8 +303,8 @@ test('s1 idle', async ({ page }) => {
   record({
     id: 's1',
     scene: '主布局与空闲态',
-    expected: '左对话右任务栏、空态引导、自由输入、Enter 提示、空任务、「新任务」、最近任务显示「客户 · 类型」。',
-    actual: `引导=${checks.guide} 空任务=${checks.empty} 新任务=${checks.fresh} Enter=${checks.enter} 标题=${checks.title} 最近「客户·类型」=${checks.recentCustomerKind}`,
+    expected: '单列连续对话、原记录保留、自由输入和 Enter 提示；无任务栏、最近任务或新任务按钮。',
+    actual: `引导=${checks.guide} 无最近任务=${checks.empty} 无新任务=${checks.fresh} Enter=${checks.enter} 标题=${checks.title} 最近「客户·类型」=${checks.recentCustomerKind}`,
     verdict: checks.guide && checks.empty && checks.fresh && checks.enter && checks.title ? 'pass' : 'gap',
     expectedShot: 'screenshots/expected-s1.png',
     actualShot: actual
@@ -320,7 +314,7 @@ test('s1 idle', async ({ page }) => {
 test('s9 processing and s2 kind card', async ({ page }) => {
   test.setTimeout(360_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   await send(page, '今天下午去拜访了客户，也开了个线上会，聊得还行')
   await page.waitForTimeout(800)
   const earlyShot = await appShot(page, 'actual-s9-processing.png')
@@ -378,7 +372,7 @@ test('s9 processing and s2 kind card', async ({ page }) => {
 test('s3 follow-up confirmation card', async ({ page }) => {
   test.setTimeout(420_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   const snap = await driveUntil(
     page,
     `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`,
@@ -415,7 +409,7 @@ test('s3 follow-up confirmation card', async ({ page }) => {
 test('s5 gap composer and none button', async ({ page }) => {
   test.setTimeout(360_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   const snap = await driveUntil(page, `今天和${CUSTOMER}打了个电话，聊得还行`, {
     stopOn: ['FIELD'],
     pickKind: 'FOLLOW_UP',
@@ -449,7 +443,7 @@ test('s5 gap composer and none button', async ({ page }) => {
 test('s4 meeting confirmation card', async ({ page }) => {
   test.setTimeout(420_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   const snap = await driveUntil(
     page,
     `开线上会议评审POC部署。今天下午和${CUSTOMER}开了线上会议，主题是 POC 部署方案评审。${CONTENT}。参会：我方张工（方案）、刘敏（商务）；客户王总（决策）、李经理（安全）。下一步：下周三王总反馈立项批复结果。`,
@@ -493,27 +487,27 @@ test('s7 sidebar and s6 write receipt then proposals', async ({ page }) => {
   const existing = await activeTask(page)
   if (existing?.waiting?.type !== 'CONFIRMATION' || existing.waiting.field !== 'activity_write') {
     await cancelActive(page)
-    await openAssistant(page, true)
+    await openAssistant(page)
     await driveUntil(
       page,
       `今天和${CUSTOMER}的王总开了线上会议。${CONTENT}。下一步：${NEXT_ACTION}。`,
       { stopOn: ['CONFIRMATION'], pickKind: 'ONLINE_MEETING', timeoutMs: 280_000 }
     )
   }
-  // Sidebar checks while the confirmation is pending.
+  // Current confirmation and composer remain visible without task management.
   const side = await appShot(page, 'actual-s7-sidebar.png')
   const steps = {
-    progress: await page.getByText('进行中', { exact: true }).first().isVisible().catch(() => false),
-    kind: await page.getByText('类型确认').first().isVisible().catch(() => false),
-    structure: await page.getByText('内容整理').first().isVisible().catch(() => false),
+    progress: (await page.getByRole('button', { name: '取消任务', exact: true }).count()) === 0,
+    kind: (await page.getByText('最近任务', { exact: true }).count()) === 0,
+    structure: (await page.getByRole('button', { name: '新任务', exact: true }).count()) === 0,
     confirm: await page.getByText('确认写入', { exact: true }).first().isVisible().catch(() => false),
-    cancel: await page.getByRole('button', { name: '取消任务' }).first().isVisible().catch(() => false)
+    cancel: await page.getByRole('button', { name: /算了/ }).first().isVisible().catch(() => false)
   }
   record({
     id: 's7',
-    scene: '任务栏进行中状态',
-    expected: '当前任务「进行中」、步骤类型/整理/确认高亮、侧栏「取消任务」按钮。',
-    actual: `进行中=${steps.progress} 类型确认=${steps.kind} 内容整理=${steps.structure} 确认写入=${steps.confirm} 取消任务=${steps.cancel}`,
+    scene: '连续对话等待确认',
+    expected: '无右侧任务管理；原确认卡仍可操作，输入框保留算了。',
+    actual: `无侧栏取消=${steps.progress} 无最近任务=${steps.kind} 无新任务=${steps.structure} 确认写入=${steps.confirm} 算了=${steps.cancel}`,
     verdict: steps.progress && steps.kind && steps.structure && steps.confirm && steps.cancel ? 'pass' : 'gap',
     expectedShot: 'screenshots/expected-s7.png',
     actualShot: side
@@ -577,7 +571,7 @@ test('s8 unknown customer failure card', async ({ page }) => {
 test('o1 kind hint after change-kind', async ({ page }) => {
   test.setTimeout(420_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   // Reach any confirmation card with meeting kind first.
   const snap = await driveUntil(
     page,
@@ -627,7 +621,7 @@ test('o1 kind hint after change-kind', async ({ page }) => {
 test('o2 idempotent double confirm', async ({ page }) => {
   test.setTimeout(420_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   const snap = await driveUntil(
     page,
     `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`,
@@ -717,7 +711,7 @@ test('o4 replay read-only cards and badge', async ({ page }) => {
 test('o5 reload recovery mid-turn', async ({ page }) => {
   test.setTimeout(420_000)
   await cancelActive(page)
-  await openAssistant(page, true)
+  await openAssistant(page)
   await send(page, `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`)
   // Wait until the turn is in flight (processing visible), then reload.
   await page.getByText(/Agent 正在处理/).first().isVisible({ timeout: 15_000 }).catch(() => false)

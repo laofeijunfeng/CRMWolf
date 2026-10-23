@@ -150,9 +150,12 @@ from app.models.workflow import VALID_TRANSITIONS, Workflow, WorkflowStatus
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
 from app.models.product import Product, ProductModule, ProductModuleRole
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
+from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 
 __all__ = [
+    "AssistantConversation",
+    "AssistantConversationEntry",
     "AIConfig",
     "AssistantRequest",
     "AssistantTurn",

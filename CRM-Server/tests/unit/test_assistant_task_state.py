@@ -153,7 +153,7 @@ def test_change_kind_rejects_turn_claim_between_read_and_update(tmp_path, monkey
 
     from app.api.assistant import ChangeKindRequest, change_kind
     from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
-    from app.services.assistant import task_state, turns
+    from app.services.assistant import task_operations, task_state, turns
 
     engine = create_engine(f"sqlite:///{tmp_path / 'change-kind-race.db'}")
     Base.metadata.create_all(engine, tables=[
@@ -183,7 +183,7 @@ def test_change_kind_rejects_turn_claim_between_read_and_update(tmp_path, monkey
             claimed_turn_id = turn.id
         return original_apply(db, task, update)
 
-    monkeypatch.setattr(task_state, "apply_task_update", claim_before_update)
+    monkeypatch.setattr(task_operations, "apply_task_update", claim_before_update)
     with Session() as stale:
         with pytest.raises(HTTPException) as conflict:
             asyncio.run(change_kind(

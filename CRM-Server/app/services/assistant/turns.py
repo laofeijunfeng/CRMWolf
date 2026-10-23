@@ -402,7 +402,8 @@ def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEv
 
 
 async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:
-    from app.api.assistant import _coordinator, _view
+    from app.api.assistant import _coordinator
+    from app.services.assistant.presentation import task_view
 
     followup_turn_id: int | None = None
 
@@ -507,7 +508,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                     raise AssistantStateConflict("活动后续轮次无法领取任务")
             db.refresh(turn)
             db.refresh(outcome.task)
-            data = {"task": _view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
+            data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
             if followup is not None:
                 data["next_turn_id"] = followup.public_id
             add_event(db, turn, "waiting", data)

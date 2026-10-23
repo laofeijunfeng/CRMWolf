@@ -1,21 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
-import { SendHorizontal, X } from 'lucide-vue-next'
+import { computed, nextTick, onUnmounted, ref, shallowRef } from 'vue'
+import { isAxiosError } from 'axios'
+import { ArrowUp, CircleHelp, X } from 'lucide-vue-next'
 import { assistantApi, submitInputStream, type StageName } from '@/api/assistant'
 import type { SubmitAssistantInput } from '@/api/assistant'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import AssistantTaskSidebar from './AssistantTaskSidebar.vue'
 import ConfirmationCard from './ConfirmationCard.vue'
 import MeetingConfirmationCard from './MeetingConfirmationCard.vue'
 import ProposalCard from './ProposalCard.vue'
 import GapCard from './GapCard.vue'
 import FailureCard from './FailureCard.vue'
-import { ConfirmationPayloadSchema, type AssistantTaskView, type ProposalConfirmation, type TaskWaiting } from '@/schemas/assistant-contracts'
+import { type AssistantTaskView, type ProposalConfirmation, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
 
 interface ChatEntry {
   id: number
+  serverId?: string | undefined
+  ownTask?: AssistantTaskView | null | undefined
+  boundary?: ConversationBoundary | null | undefined
   role: 'user' | 'assistant'
   text: string
   waiting: TaskWaiting | null
@@ -26,72 +29,29 @@ interface ChatEntry {
 }
 
 const task = ref<AssistantTaskView | null>(null)
-const recentTasks = ref<AssistantTaskView[]>([])
-const recentTasksWarning = ref('')
 let disposed = false
 let navigationVersion = 0
+let viewRequestSequence = 0
+let appliedViewRequest = 0
+let historyExtended = false
 onUnmounted(() => { disposed = true; if (elapsedTimer !== null) clearInterval(elapsedTimer) })
-
-const loadRecentTasks = async (): Promise<void> => {
-  try {
-    const result = await assistantApi.listTasks()
-    if (disposed) return
-    recentTasks.value = result.tasks
-    recentTasksWarning.value = result.skipped.length > 0 ? `${result.skipped.length} 条历史任务无法识别，已跳过。` : ''
-  } catch {
-    if (!disposed) {
-      recentTasks.value = []
-      recentTasksWarning.value = '最近任务加载失败。'
-    }
-  }
-}
-
-const resumeActiveTask = async (): Promise<void> => {
-  const navigation = navigationVersion
-  try {
-    const active = await assistantApi.latestActiveTask()
-    if (!disposed && navigation === navigationVersion && active !== null && active !== undefined) {
-      task.value = active
-      pushEntry('assistant', active.waiting?.prompt ?? active.goal, active.waiting ?? null)
-      adoptProcessingTurn(active)
-      if (processingRecovery.value !== null) await recoverProcessingTurn()
-    }
-  } catch {
-    /* No task is displayed until the authoritative lookup succeeds. */
-  }
-}
-
-void resumeActiveTask().then(() => { void loadRecentTasks() })
-
 defineProps<{ optionalMarker?: boolean }>()
-
 const emit = defineEmits<{
   (e: 'task-updated', task: AssistantTaskView, replyMessage: string): void
   (e: 'task-created', task: AssistantTaskView): void
 }>()
-
 const entries = ref<ChatEntry[]>([])
 const inputText = ref('')
 const submitting = ref(false)
 const seq = ref(0)
 const currentWaitEntryId = ref<number | null>(null)
-
-const resetTask = (): void => {
-  task.value = null
-  navigationVersion += 1
-  pendingRequest.value = null
-  pendingCreation.value = null
-  resultPending.value = false
-  processingRecovery.value = null
-  currentWaitEntryId.value = null
-  entries.value = []
-  seq.value = 0
-  inputText.value = ''
-  editingDraft.value = false
-  explicitNone.value = false
-  endProcessing()
-  void loadRecentTasks()
-}
+const conversation = shallowRef<ConversationView | null>(null)
+const loadingConversation = ref(true)
+const historyError = ref('')
+const routing = ref(false)
+const olderCursor = ref<number | null>(null)
+const pendingConversation = shallowRef<(() => Promise<ConversationReply>) | null>(null)
+const unacceptedText = ref('')
 
 const FIELD_LABELS: Record<string, string> = {
   customer: '客户名称',
@@ -108,137 +68,6 @@ const KIND_LABELS: Record<string, string> = {
 
 const isTaskLive = computed(() => task.value?.status === 'ACTIVE')
 
-const pushReplayEntry = (role: 'user' | 'assistant', text: string, atIso: string): ChatEntry => {
-  seq.value += 1
-  const entry: ChatEntry = {
-    id: seq.value,
-    role,
-    text,
-    waiting: null,
-    replayed: true,
-    at: new Date(atIso)
-  }
-  entries.value.push(entry)
-  return entry
-}
-
-const openTask = async (publicId: string): Promise<void> => {
-  const navigation = ++navigationVersion
-  try {
-    const [loaded, actions] = await Promise.all([
-      assistantApi.getTask(publicId),
-      assistantApi.listTaskActions(publicId)
-    ])
-    if (disposed || navigation !== navigationVersion) return
-    pendingRequest.value = null
-    processingRecovery.value = null
-    submitting.value = false
-    endProcessing()
-    pendingCreation.value = null
-    resultPending.value = false
-    task.value = loaded
-    entries.value = []
-    seq.value = 0
-    currentWaitEntryId.value = null
-    pushEntry('user', loaded.goal)
-    for (const action of actions) {
-      if (action.actor === 'USER' && action.action === 'submit_field') {
-        const field = typeof action.input['field'] === 'string' ? action.input['field'] : ''
-        const text = typeof action.input['text'] === 'string' ? action.input['text'] : ''
-        const choice = typeof action.input['choice'] === 'string' ? action.input['choice'] : ''
-        const fallback = choice !== ''
-          ? KIND_LABELS[choice] ?? choice
-          : `（补充${FIELD_LABELS[field] ?? field}）`
-        if (text !== '' || choice !== '' || field !== '') {
-          pushEntry('user', text !== '' ? text : fallback, null, true)
-        }
-      } else if (action.action === 'select_activity_kind') {
-        const kind = typeof action.input['kind'] === 'string' ? action.input['kind'] : ''
-        if (kind !== '') pushEntry('user', KIND_LABELS[kind] ?? kind, null, true)
-      } else if (action.action === 'ask_activity_kind') {
-        const prompt = typeof action.result['prompt'] === 'string' && action.result['prompt'] !== ''
-          ? action.result['prompt']
-          : '这条记录属于哪种活动？'
-        pushEntry('assistant', prompt, {
-          type: 'ACTIVITY_KIND',
-          field: 'activity_kind',
-          question_id: `replay_${action.created_time}`,
-          prompt
-        }, true)
-      } else if (action.action === 'ask_field' || action.action === 'ask_quality_gap' || action.action === 'ask_customer_name') {
-        const field = typeof action.input['field'] === 'string' ? action.input['field'] : ''
-        const prompt = typeof action.result['prompt'] === 'string' && action.result['prompt'] !== ''
-          ? action.result['prompt']
-          : `请补充${FIELD_LABELS[field] ?? '关键信息'}。`
-        pushEntry('assistant', prompt, {
-          type: 'FIELD',
-          field,
-          question_id: `replay_${action.created_time}`,
-          prompt
-        }, true)
-      } else if (action.action === 'ask_confirmation' || action.action === 'offer_proposal') {
-        const prompt = typeof action.result['prompt'] === 'string' && action.result['prompt'] !== ''
-          ? action.result['prompt']
-          : '请确认。'
-        const field = typeof action.result['field'] === 'string' && action.result['field'] !== ''
-          ? action.result['field']
-          : action.action === 'ask_confirmation' ? 'activity_write' : ''
-        pushEntry('assistant', prompt, field === 'activity_write'
-          ? { type: 'CONFIRMATION', field, question_id: `replay_${action.created_time}`, prompt }
-          : null, true)
-      } else if (action.action === 'reject_confirmation') {
-        pushEntry('user', '取消', null, true)
-      } else if (action.action === 'refuse_proposal') {
-        pushEntry('user', '暂不处理', null, true)
-      } else if (action.action === 'accept_proposal') {
-        pushEntry('user', '确认', null, true)
-      } else if (action.action === 'cancel_task') {
-        pushEntry('assistant', '已取消本次任务。', null, true)
-      } else if (action.event_type === 'meeting_card' || action.event_type === 'follow_up_card') {
-        const confirmation = action.result['confirmation']
-        const snapshot = typeof confirmation === 'object' && confirmation !== null ? confirmation as { prompt?: unknown; confirmation_payload?: unknown } : null
-        const payloadParse = ConfirmationPayloadSchema.safeParse(snapshot?.confirmation_payload)
-        const prompt = typeof snapshot?.prompt === 'string' && snapshot.prompt !== '' ? snapshot.prompt : '确认后写入这条客户活动？'
-        pushEntry('assistant', prompt, {
-          type: 'CONFIRMATION', field: 'activity_write', question_id: `replay_${action.created_time}`, prompt,
-          ...(payloadParse.success && payloadParse.data.kind === 'activity_write' ? { confirmation_payload: payloadParse.data } : {}),
-        }, true)
-      } else if (action.event_type === 'user_choice') {
-        pushEntry('user', String(action.result['label'] ?? '确认'), null, true)
-      } else if (action.event_type === 'receipt') {
-        const receipt = pushReplayEntry('assistant', String(action.result['label'] ?? '已记录这条客户活动。'), action.created_time)
-        receipt.outcome = 'activity_written'
-        void receipt
-      } else if (action.action === 'confirm_write' && action.event_type == null) {
-        const confirmation = action.result['confirmation']
-        const snapshot = typeof confirmation === 'object' && confirmation !== null
-          ? confirmation as { prompt?: unknown; confirmation_payload?: unknown }
-          : null
-        const payloadParse = ConfirmationPayloadSchema.safeParse(snapshot?.confirmation_payload)
-        const prompt = typeof snapshot?.prompt === 'string' && snapshot.prompt !== '' ? snapshot.prompt : '确认后写入这条客户活动？'
-        pushEntry('assistant', prompt, {
-          type: 'CONFIRMATION', field: 'activity_write', question_id: `replay_${action.created_time}`, prompt,
-          ...(payloadParse.success && payloadParse.data.kind === 'activity_write' ? { confirmation_payload: payloadParse.data } : {}),
-        }, true)
-        const receipt = pushReplayEntry('assistant', '已记录这条客户活动。', action.created_time)
-        receipt.outcome = 'activity_written'
-        void receipt
-      }
-    }
-    // The projection, not the action log, determines the only current wait.
-    if (loaded.status === 'ACTIVE' && loaded.waiting !== null && loaded.waiting !== undefined) {
-      pushEntry('assistant', loaded.waiting.prompt, loaded.waiting)
-    }
-    adoptProcessingTurn(loaded)
-    if (processingRecovery.value !== null) await recoverProcessingTurn()
-  } catch {
-    if (disposed || navigation !== navigationVersion) return
-    submitting.value = false
-    endProcessing()
-    pushEntry('assistant', '未打开目标任务，当前任务已保留，请重试。')
-  }
-}
-
 const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
 const isWaiting = computed(() => waiting.value !== null)
 const isTerminal = computed(() => task.value != null && task.value.status !== 'ACTIVE')
@@ -247,8 +76,6 @@ const isTerminal = computed(() => task.value != null && task.value.status !== 'A
 
 const inputPlaceholder = computed(() => {
   if (isWaiting.value && waiting.value?.type === 'FIELD') return waiting.value.prompt ?? ''
-  if (isWaiting.value && waiting.value?.type === 'ACTIVITY_KIND') return '请在上方选择活动类型'
-  if (isWaiting.value && waiting.value?.type === 'CONFIRMATION') return '请在上方确认或取消'
   return '描述一次客户沟通，我来整理成跟进或会议纪要…'
 })
 
@@ -265,8 +92,9 @@ const pushEntry = (
   replayed = false
 ): void => {
   seq.value += 1
-  entries.value.push({ id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date() })
+  entries.value.push({ id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value })
   if (entryWaiting !== null && !replayed) currentWaitEntryId.value = seq.value
+  scrollToBottom()
 }
 
 const scrollId = ref<HTMLElement | null>(null)
@@ -275,7 +103,7 @@ const scrollToBottom = (): void => {
     scrollId.value?.scrollTo?.({ top: scrollId.value.scrollHeight })
   })
 }
-watch(entries, scrollToBottom, { deep: true })
+
 
 interface LiveStage {
   name: StageName
@@ -355,7 +183,7 @@ const fieldLabel = computed(() => {
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
   const base = 'Agent 正在处理，通常需要 30–60 秒…'
-  if (elapsedSeconds.value >= 60) return `${base}（已 ${elapsedSeconds.value} 秒 · 任务已持久化，刷新不丢，可稍后在最近任务中继续）`
+  if (elapsedSeconds.value >= 60) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容已保存，刷新后可继续）`
   if (elapsedSeconds.value >= 15) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容不会丢失，请稍候）`
   return base
 })
@@ -398,17 +226,18 @@ const recoverProcessingTurn = async (): Promise<void> => {
       resultPending.value = false
     }
     if (!resultPending.value && pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
+    await refreshConversation()
     if (processingRecovery.value !== null && processingRecovery.value !== pending) await recoverProcessingTurn()
   } catch {
     // The active turn is already persisted; recovery is GET-only even after failure.
     if (!disposed && navigation === navigationVersion && processingRecovery.value === pending) resultPending.value = true
   }
 }
-const pendingCreation = ref<{ createRequestId: string; input: SubmitAssistantInput; displayText: string } | null>(null)
 const resultPending = ref(false)
 
 const publishTask = (updated: AssistantTaskView, message?: string): void => {
   if (disposed || updated === undefined || (task.value !== null && task.value.public_id !== updated.public_id)) return
+  if (task.value !== null && updated.version < task.value.version) return
   const hadActivity = task.value?.committed.some((receipt) => receipt.kind === 'customer_activity') ?? false
   task.value = updated
   adoptProcessingTurn(updated)
@@ -421,40 +250,17 @@ const publishTask = (updated: AssistantTaskView, message?: string): void => {
   }
   emit('task-updated', updated, reply)
 }
-const submit = async (input: SubmitAssistantInput, displayText: string, sourceWaiting: TaskWaiting | null = null, recovery: typeof pendingCreation.value = null): Promise<void> => {
+const runPrepared = async (prepared: NonNullable<ConversationReply['submission']>, displayText: string): Promise<void> => {
   const navigation = navigationVersion
-  if (submitting.value || (resultPending.value && recovery === null)) return
-  const current = task.value
-  if (sourceWaiting !== null && (current?.waiting?.question_id !== sourceWaiting.question_id
-    || current.waiting.action_id !== sourceWaiting.action_id
-    || current.waiting.expected_version !== sourceWaiting.expected_version)) return
-  submitting.value = true
-  if (recovery === null) pushEntry('user', displayText)
-  const request: SubmitAssistantInput = recovery?.input ?? {
-    ...input,
-    client_request_id: crypto.randomUUID(),
-    ...(sourceWaiting?.action_id !== null && sourceWaiting?.action_id !== undefined ? { action_id: sourceWaiting.action_id } : {}),
-    ...(sourceWaiting?.expected_version != null ? { expected_version: sourceWaiting.expected_version } : {})
+  const targetId = prepared.task_public_id
+  const request: SubmitAssistantInput = {
+    kind: prepared.input.kind, text: prepared.input.text ?? undefined, choice: prepared.input.choice ?? undefined,
+    client_request_id: prepared.input.client_request_id, action_id: prepared.input.action_id ?? undefined,
+    expected_version: prepared.input.expected_version ?? undefined
   }
+  submitting.value = true
+  processingRecovery.value = null
   try {
-    let targetId = current?.public_id ?? null
-    if (targetId === null) {
-      const createRequestId = recovery?.createRequestId ?? crypto.randomUUID()
-      pendingCreation.value = { createRequestId, input: request, displayText }
-      const created = await assistantApi.createTask(displayText, createRequestId)
-      if (disposed || navigation !== navigationVersion) return
-      const authoritative = recovery === null ? created : await assistantApi.getTask(created.public_id)
-      if (disposed || navigation !== navigationVersion) return
-      task.value = authoritative
-      emit('task-created', authoritative)
-      targetId = authoritative.public_id
-      pendingCreation.value = null
-      if (recovery !== null && (authoritative.version !== 0 || authoritative.waiting !== null || authoritative.status !== 'ACTIVE')) {
-        publishTask(authoritative)
-        resultPending.value = processingRecovery.value !== null
-        return
-      }
-    }
     resultPending.value = false
     const pending = { input: request, targetId, displayText, turnId: '', cursor: 0 }
     pendingRequest.value = pending
@@ -537,7 +343,7 @@ const submit = async (input: SubmitAssistantInput, displayText: string, sourceWa
     }
     if (!active()) return
     if (!resultPending.value) pendingRequest.value = null
-    void loadRecentTasks()
+    await refreshConversation()
   } catch (error) {
     if (disposed || navigation !== navigationVersion) return
     resultPending.value = true
@@ -551,34 +357,99 @@ const submit = async (input: SubmitAssistantInput, displayText: string, sourceWa
   }
 }
 
-const submitText = (): Promise<void> => {
-  editingDraft.value = false
+const submitText = async (): Promise<void> => {
   const text = inputText.value.trim()
-  if (!text || resultPending.value) return Promise.resolve()
-  if (explicitNone.value && isWaiting.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
+  if (!text || loadingConversation.value || resultPending.value || submitting.value || conversation.value === null || conversation.value.pending_choice !== null) return
+  if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
     explicitNone.value = false
-    inputText.value = ''
-    return submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
+    await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
+    return
   }
   explicitNone.value = false
-  if (isWaiting.value && waiting.value?.type === 'FIELD') {
-    return submit({ kind: 'submit_field', text }, text, waiting.value)
+  unacceptedText.value = text
+  const request = { text, client_request_id: crypto.randomUUID(), expected_version: conversation.value.version }
+  pushEntry('user', text)
+  inputText.value = ''
+  await dispatchConversation(() => assistantApi.conversationText(request), text)
+}
+
+const submit = async (input: SubmitAssistantInput, displayText: string, source: TaskWaiting | null = null): Promise<void> => {
+  if (submitting.value || resultPending.value || task.value === null || conversation.value === null) return
+  if (source !== null && (task.value.waiting?.action_id !== source.action_id || task.value.waiting?.expected_version !== source.expected_version)) return
+  const payload: SubmitAssistantInput = { ...input, client_request_id: crypto.randomUUID(),
+    action_id: source?.action_id ?? undefined, expected_version: source?.expected_version ?? undefined }
+  const request = { task_public_id: task.value.public_id, input: payload, expected_version: conversation.value.version }
+  pushEntry('user', displayText)
+  inputText.value = ''
+  await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+}
+
+const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<void> => {
+  if (disposed) return
+  const requestOrder = ++viewRequestSequence
+  submitting.value = true
+  routing.value = true
+  pendingConversation.value = send
+  try {
+    const response = await send()
+    if (disposed) return
+    pendingConversation.value = null
+    unacceptedText.value = ''
+    applyConversation(response.conversation, false, requestOrder)
+    routing.value = false
+    if (response.submission !== null) await runPrepared(response.submission, displayText)
+    else resultPending.value = false
+  } catch (error) {
+    if (disposed) return
+    if (isAxiosError(error) && error.response?.status === 409) {
+      // A rejected stale command must not stay in an endless same-version retry loop.
+      resultPending.value = false
+      await refreshConversation()
+      if (conversation.value?.has_pending_request !== true) {
+        pendingConversation.value = null
+        if (unacceptedText.value !== '') inputText.value = unacceptedText.value
+        unacceptedText.value = ''
+      }
+      historyError.value = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
+    } else {
+      resultPending.value = true
+      historyError.value = `发送状态待确认：${error instanceof Error ? error.message : '网络请求失败'}`
+    }
+  } finally {
+    if (!disposed) { routing.value = false; submitting.value = false }
   }
-  if (isTerminal.value || isWaiting.value) return Promise.resolve()
-  return submit({ kind: 'text', text }, text)
+}
+
+const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Promise<void> => {
+  const boundary = entry.boundary
+  if (!boundary || conversation.value?.pending_choice?.entry_id !== boundary.entry_id || submitting.value || resultPending.value) return
+  const request = { entry_id: boundary.entry_id, choice, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
+  await dispatchConversation(() => assistantApi.conversationChoice(request), choice === 'CONTINUE' ? '接着刚才' : '另记一件')
 }
 
 const pickKind = (choice: string, source: TaskWaiting | null): Promise<void> =>
-  submit({ kind: 'submit_field', choice }, choice, source)
+  submit({ kind: 'submit_field', choice }, KIND_LABELS[choice] ?? source?.candidates?.find((candidate) => candidate.id === choice)?.account_name ?? '选择客户', source)
 
 const confirmWrite = (source: TaskWaiting | null): Promise<void> =>
   submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
 const rejectWrite = (source: TaskWaiting | null): Promise<void> =>
   submit({ kind: 'confirm', choice: 'reject' }, '取消', source)
-const cancelTask = (source: TaskWaiting | null = waiting.value): Promise<void> =>
-  submit({ kind: 'cancel' }, '算了，不记了', source)
+const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<void> => {
+  const pending = conversation.value?.pending_choice
+  if (pending && conversation.value) {
+    const request = { entry_id: pending.entry_id, choice: 'CANCEL' as const, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
+    await dispatchConversation(() => assistantApi.conversationChoice(request), '算了，不记了')
+    return
+  }
+  await submit({ kind: 'cancel' }, '算了，不记了', source)
+}
 
 const retryPending = async (): Promise<void> => {
+  if (submitting.value) return
+  if (conversation.value?.has_pending_request === true && pendingConversation.value === null) {
+    await dispatchConversation(() => assistantApi.resumeConversation(), '')
+    return
+  }
   if (processingRecovery.value !== null) {
     if (submitting.value) return
     submitting.value = true
@@ -586,9 +457,8 @@ const retryPending = async (): Promise<void> => {
     try { await recoverProcessingTurn() } finally { if (navigation === navigationVersion) submitting.value = false }
     return
   }
-  if (pendingCreation.value !== null) {
-    const creation = pendingCreation.value
-    await submit(creation.input, creation.displayText, null, creation)
+  if (pendingConversation.value !== null) {
+    await dispatchConversation(pendingConversation.value, '')
     return
   }
   const navigation = navigationVersion
@@ -650,10 +520,7 @@ const retryPending = async (): Promise<void> => {
   }
 }
 
-const editingDraft = ref(false)
-
 const focusComposer = (): void => {
-  editingDraft.value = true
   inputText.value = ''
   void nextTick(() => {
     scrollId.value?.scrollIntoView?.({ block: 'center' })
@@ -662,26 +529,10 @@ const focusComposer = (): void => {
 }
 
 const changeKind = async (kind: 'FOLLOW_UP' | 'ONLINE_MEETING' | 'OFFLINE_MEETING'): Promise<void> => {
-  if (submitting.value || task.value === null) return
-  submitting.value = true
-  pushEntry('user', `改为${KIND_LABELS[kind]}`)
-  try {
-    const publicId = task.value.public_id
-    await assistantApi.changeKind(publicId, kind)
-    const updated = await assistantApi.getTask(publicId)
-    if (disposed || task.value?.public_id !== publicId) return
-    task.value = updated
-    entries.value = []
-    seq.value = 0
-    currentWaitEntryId.value = null
-    pushEntry('assistant', updated.waiting?.prompt ?? `已切换为${KIND_LABELS[kind]}，请重新描述这次沟通。`, updated.waiting ?? null)
-    void loadRecentTasks()
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '切换类型失败，请稍后重试。'
-    pushEntry('assistant', message)
-  } finally {
-    submitting.value = false
-  }
+  if (busy.value || task.value === null || conversation.value === null) return
+  const request = { task_public_id: task.value.public_id, kind, task_version: task.value.version,
+    expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
+  await dispatchConversation(() => assistantApi.conversationKind(request), `改为${KIND_LABELS[kind]}`)
 }
 
 const nextKindOf = (current: string | null | undefined): 'FOLLOW_UP' | 'ONLINE_MEETING' => {
@@ -704,12 +555,10 @@ const formatHHmm = (value: Date | string | undefined): string => {
   if (Number.isNaN(parsed.getTime())) return ''
   return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
 }
-const entryTask = (_entry: ChatEntry): AssistantTaskView | null => task.value
-const isMeeting = (current: AssistantTaskView | null): boolean =>
-  current?.activity_kind === 'ONLINE_MEETING' || current?.activity_kind === 'OFFLINE_MEETING'
+const entryTask = (entry: ChatEntry): AssistantTaskView | null => entry.ownTask ?? null
 
 const isCurrentWait = (entry: ChatEntry): boolean =>
-  !entry.replayed && entry.id === currentWaitEntryId.value && entry.waiting !== null && task.value?.status === 'ACTIVE'
+  entry.id === currentWaitEntryId.value && entryTask(entry)?.public_id === task.value?.public_id && entry.waiting !== null && task.value?.status === 'ACTIVE'
   && task.value.waiting?.question_id === entry.waiting.question_id
   && task.value.waiting?.action_id === entry.waiting.action_id
   && task.value.waiting?.expected_version === entry.waiting.expected_version
@@ -725,7 +574,6 @@ const cardKind = (entry: ChatEntry): 'confirm' | 'meeting' | 'proposal' | 'gap' 
     return kind === 'ONLINE_MEETING' || kind === 'OFFLINE_MEETING' ? 'meeting' : 'confirm'
   }
   if (w.type === 'CONFIRMATION' && w.confirmation_payload?.kind === 'proposal') return 'proposal'
-  if (entry.replayed && w.type === 'CONFIRMATION' && w.field === 'activity_write') return isMeeting(task.value) ? 'meeting' : 'confirm'
   if (w.type === 'ACTIVITY_KIND') return 'kind'
   if (w.type === 'OBJECT_SELECTION') return 'customer'
   if (w.type === 'FIELD') return 'gap'
@@ -738,18 +586,110 @@ const proposalOf = (entry: ChatEntry): ProposalConfirmation | null =>
 const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined => {
   const proposal = proposalOf(entry)
   if (proposal === null) return undefined
-  const receipt = task.value?.committed.find((item) => 'proposal_key' in item && item.proposal_key === proposal.candidate.key)
+  const receipt = entryTask(entry)?.committed.find((item) => 'proposal_key' in item && item.proposal_key === proposal.candidate.key)
   if (receipt === undefined) return undefined
   return receipt.kind === `refused:${proposal.proposal_kind}` ? 'refused' : 'accepted'
 }
 
+
+const applyConversation = (view: ConversationView, older = false, requestOrder = ++viewRequestSequence): void => {
+  if (disposed) return
+  if (!older && conversation.value !== null && (view.version < conversation.value.version
+    || (view.version === conversation.value.version && requestOrder < appliedViewRequest)
+    || (view.version === conversation.value.version && task.value?.public_id === view.focused_task?.public_id
+      && (view.focused_task?.version ?? 0) < (task.value?.version ?? 0)))) return
+  historyError.value = ''
+  if (!older) {
+    appliedViewRequest = requestOrder
+    if (task.value?.public_id !== view.focused_task?.public_id) {
+      navigationVersion += 1
+      pendingRequest.value = null
+      processingRecovery.value = null
+      resultPending.value = false
+      submitting.value = false
+      endProcessing()
+    }
+    conversation.value = view
+    task.value = view.focused_task
+  }
+  if (older || !historyExtended) olderCursor.value = view.older_cursor
+  const preserved = entries.value.filter((entry) => entry.serverId !== undefined && !entry.serverId.startsWith('current:'))
+  const mapped = view.messages.map((message): ChatEntry => ({
+    id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
+    waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
+    at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined
+  }))
+  const incomingIds = new Set(mapped.map((entry) => entry.serverId))
+  entries.value = older ? [...mapped, ...preserved.filter((entry) => !incomingIds.has(entry.serverId))]
+    : [...preserved.filter((entry) => !incomingIds.has(entry.serverId)), ...mapped]
+  currentWaitEntryId.value = null
+  const current = task.value
+  if (current?.status === 'ACTIVE' && current.waiting != null) {
+    const candidate = [...entries.value].reverse().find((entry) => entry.ownTask?.public_id === current.public_id
+      && entry.waiting?.action_id === current.waiting?.action_id && entry.waiting?.expected_version === current.waiting?.expected_version)
+    if (candidate !== undefined) {
+      candidate.ownTask = current
+      candidate.replayed = false
+      currentWaitEntryId.value = candidate.id
+    } else {
+      pushEntry('assistant', current.waiting.prompt, current.waiting)
+      const added = entries.value[entries.value.length - 1]
+      if (added !== undefined) added.serverId = `current:${current.public_id}:${current.version}`
+    }
+  }
+  if (!older && current !== null) adoptProcessingTurn(current)
+  if (!older && view.has_pending_request) resultPending.value = true
+  if (!older) scrollToBottom()
+}
+
+const refreshConversation = async (): Promise<void> => {
+  const order = ++viewRequestSequence
+  try { applyConversation(await assistantApi.getConversation(), false, order) }
+  catch { if (!disposed) historyError.value = '对话同步失败，已留下的内容仍保留，请重试同步。' }
+}
+
+const loadOlder = async (): Promise<void> => {
+  if (olderCursor.value === null || submitting.value) return
+  submitting.value = true
+  const cursor = olderCursor.value
+  const scroller = scrollId.value
+  const height = scroller?.scrollHeight ?? 0
+  const top = scroller?.scrollTop ?? 0
+  try {
+    const page = await assistantApi.getConversation(cursor)
+    historyExtended = true
+    applyConversation(page, true)
+    await nextTick()
+    if (scroller) scroller.scrollTop = top + scroller.scrollHeight - height
+  }
+  catch { if (!disposed) historyError.value = '更早的对话暂时无法加载，请重试。' }
+  finally { submitting.value = false }
+}
+
+const loadConversation = async (): Promise<void> => {
+  loadingConversation.value = true
+  const order = ++viewRequestSequence
+  try {
+    applyConversation(await assistantApi.openConversation(), false, order)
+    if (processingRecovery.value !== null) await recoverProcessingTurn()
+  } catch {
+    if (!disposed) historyError.value = '对话加载失败，请重试；不会自动开始新的记录。'
+  } finally { if (!disposed) loadingConversation.value = false }
+}
+void loadConversation()
 </script>
 
 <template>
-  <div class="grid h-full min-h-0 grid-cols-[1fr_240px] gap-4">
+  <div class="flex h-full min-h-0 flex-col">
     <div class="flex h-full min-h-0 flex-col">
+    <div v-if="historyError" role="alert" class="mb-2 text-sm text-destructive">
+      {{ historyError }}
+      <Button variant="outline" size="sm" :disabled="submitting" @click="pendingConversation ? retryPending() : loadConversation()">重试同步</Button>
+    </div>
+    <div v-if="loadingConversation" role="status" class="mb-2 text-sm text-muted-foreground">正在恢复对话…</div>
     <div ref="scrollId" class="flex-1 space-y-3 overflow-y-auto pr-1">
-      <div v-if="entries.length === 0" class="rounded-wolf-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+      <Button v-if="olderCursor !== null" variant="ghost" size="sm" :disabled="submitting" @click="loadOlder">查看更早对话</Button>
+      <div v-if="entries.length === 0 && !loadingConversation && !historyError" class="rounded-wolf-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
         发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。
       </div>
 
@@ -762,8 +702,15 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
         <div v-else class="flex gap-2.5">
           <div class="mt-1 size-7 shrink-0 place-items-center rounded-wolf-md bg-muted text-[11px] font-medium text-muted-foreground grid">AI</div>
           <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
+            <div v-if="entry.boundary" class="overflow-hidden rounded-wolf-lg border bg-card shadow-sm">
+              <div class="flex items-center gap-2 border-b bg-muted/30 px-4 py-3 text-sm font-medium"><CircleHelp class="size-5 shrink-0 rounded-full bg-warning/10 p-0.5 text-warning" />{{ entry.boundary.prompt }}</div>
+              <div class="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
+                <Button variant="outline" :disabled="submitting || resultPending || conversation?.pending_choice?.entry_id !== entry.boundary.entry_id" @click="chooseBoundary(entry, 'CONTINUE')">接着刚才</Button>
+                <Button variant="outline" :disabled="submitting || resultPending || conversation?.pending_choice?.entry_id !== entry.boundary.entry_id" @click="chooseBoundary(entry, 'NEW')">另记一件</Button>
+              </div>
+            </div>
             <div
-              v-if="cardKind(entry) === 'none' || cardKind(entry) === 'gap'"
+              v-else-if="cardKind(entry) === 'none' || cardKind(entry) === 'gap'"
               class="rounded-wolf-lg border bg-card px-3.5 py-2 text-sm shadow-sm"
             >
               {{ entry.text }}
@@ -773,7 +720,7 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
 
             <GapCard
               v-if="cardKind(entry) === 'gap' && entry.waiting !== null"
-              :task="task"
+              :task="entryTask(entry)"
               :prompt="entry.waiting.prompt"
               :field="entry.waiting.field ?? entry.waiting.type"
               :replayed="!isCurrentWait(entry)"
@@ -833,8 +780,8 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
 
             <p v-if="isCurrentWait(entry) && entry.waiting?.type === 'CONFIRMATION'" class="text-xs text-muted-foreground">{{ entry.waiting.prompt }}</p>
             <MeetingConfirmationCard
-              v-if="cardKind(entry) === 'meeting' && entry.waiting !== null && entryTask(entry) !== null"
-              :task="entryTask(entry)!"
+              v-if="cardKind(entry) === 'meeting' && entry.waiting !== null && entry.ownTask != null"
+              :task="entry.ownTask"
               :waiting="entry.waiting"
               :replayed="!isCurrentWait(entry)"
               :busy="busy"
@@ -845,8 +792,8 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
             />
 
             <ConfirmationCard
-              v-if="cardKind(entry) === 'confirm' && entry.waiting !== null && entryTask(entry) !== null"
-              :task="entryTask(entry)!"
+              v-if="cardKind(entry) === 'confirm' && entry.waiting !== null && entry.ownTask != null"
+              :task="entry.ownTask"
               :waiting="entry.waiting"
               :replayed="!isCurrentWait(entry)"
               :busy="busy"
@@ -875,7 +822,7 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
               :replayed="entry.replayed || !isTaskLive"
               :busy="busy"
               @retry="focusComposer"
-              @abort="cancelTask"
+              @abort="cancelTask()"
             />
           </div>
         </div>
@@ -898,14 +845,15 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
       <div v-if="isWaiting" class="mb-1.5 flex items-center justify-between text-xs font-medium text-primary">
         <span>正在回答：{{ fieldLabel || waiting?.type }}</span>
       </div>
-      <div v-else-if="processing.active" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+      <div v-else-if="processing.active || routing" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
         <svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
-        <span>{{ processingHint }}</span>
+        <span>{{ routing ? '正在理解这次沟通…' : processingHint }}</span>
       </div>
       <Textarea
+        aria-label="客户沟通内容"
         v-model="inputText"
         :rows="2"
-        :disabled="resultPending || (isWaiting && waiting?.type !== 'FIELD')"
+        :disabled="loadingConversation || submitting || resultPending || conversation?.pending_choice != null"
         :placeholder="inputPlaceholder"
         class="resize-none border-0 p-0 focus-visible:ring-0"
         @keydown.enter.exact.prevent="submitText"
@@ -916,17 +864,16 @@ const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined =
           <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button v-if="resultPending && (pendingRequest || pendingCreation || processingRecovery)" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
-          <Button v-if="!isTerminal && task !== null" size="sm" variant="ghost" :disabled="busy || resultPending" @click="cancelTask">
+          <Button v-if="resultPending && (pendingRequest || pendingConversation || processingRecovery || conversation?.has_pending_request)" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
+          <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" size="sm" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X class="size-3.5" />算了
           </Button>
-          <Button size="icon-sm" :disabled="busy || resultPending || (isWaiting && waiting?.type !== 'FIELD')" @click="submitText">
-            <SendHorizontal class="size-4" />
+          <Button aria-label="发送" size="icon-sm" :disabled="loadingConversation || busy || resultPending || conversation?.pending_choice != null" @click="submitText">
+            <ArrowUp class="size-4" />
           </Button>
         </div>
       </div>
     </div>
     </div>
-    <AssistantTaskSidebar :task="task" :recent-tasks="recentTasks" :recent-tasks-warning="recentTasksWarning" @new-task="resetTask" @select-task="openTask" @cancel-task="cancelTask" />
   </div>
 </template>

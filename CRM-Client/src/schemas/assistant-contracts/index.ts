@@ -178,3 +178,29 @@ export const SubmitInputResponseSchema = z.object({
   message: z.string().min(1)
 }).strict()
 export type SubmitInputResponse = z.infer<typeof SubmitInputResponseSchema>
+
+export const ConversationBoundarySchema = z.object({ entry_id: z.string().min(1), prompt: z.string().min(1) }).strict()
+export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
+export const ConversationMessageSchema = z.object({
+  id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
+  task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
+  outcome: z.enum(['activity_written', 'failure']).nullable()
+}).strict()
+export const ConversationViewSchema = z.object({
+  public_id: z.string().min(1), version: z.number().int().nonnegative(),
+  focused_task: AssistantTaskViewSchema.nullable(), pending_choice: ConversationBoundarySchema.nullable(),
+  has_pending_request: z.boolean().default(false),
+  messages: z.array(ConversationMessageSchema), older_cursor: z.number().int().positive().nullable()
+}).strict()
+export type ConversationView = z.infer<typeof ConversationViewSchema>
+export const ConversationReplySchema = z.object({
+  conversation: ConversationViewSchema,
+  submission: z.object({
+    task_public_id: z.string().min(1), turn_id: z.string().min(1),
+    input: z.object({
+      kind: AssistantInputKindSchema, text: z.string().nullable(), choice: z.string().nullable(),
+      client_request_id: z.string().min(8), action_id: z.string().nullable(), expected_version: z.number().int().nonnegative().nullable()
+    }).strict()
+  }).strict().nullable()
+}).strict()
+export type ConversationReply = z.infer<typeof ConversationReplySchema>

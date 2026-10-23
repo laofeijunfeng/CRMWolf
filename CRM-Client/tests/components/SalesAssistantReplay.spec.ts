@@ -1,219 +1,112 @@
-import { mount, flushPromises } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const getTaskMock = vi.fn()
-const listActionsMock = vi.fn()
-const listTasksMock = vi.fn()
-const latestActiveMock = vi.fn()
-const createTaskMock = vi.fn()
-const submitInputMock = vi.fn()
-
-vi.mock('@/api/assistant', () => ({
-  assistantApi: {
-    getTask: (...args: unknown[]) => getTaskMock(...args),
-    listTaskActions: (...args: unknown[]) => listActionsMock(...args),
-    listTasks: (...args: unknown[]) => listTasksMock(...args),
-    latestActiveTask: (...args: unknown[]) => latestActiveMock(...args),
-    createTask: (...args: unknown[]) => createTaskMock(...args),
-    submitInput: (...args: unknown[]) => submitInputMock(...args)
-  }
-}))
-
+// @vitest-environment happy-dom
+import { flushPromises, mount } from '@vue/test-utils'
+import { describe, expect, it } from 'vitest'
+import { confirmation, field, makeTask, message, mocks, show, view } from './assistantChatHarness'
 import SalesAssistantChat from '@/components/sales-assistant/SalesAssistantChat.vue'
-import type { AssistantTaskAction, AssistantTaskView } from '@/api/assistant'
-import type { TaskWaiting } from '@/schemas/assistant-contracts'
 
-const draft = {
-  customer: { status: 'ACCEPTED', value: '广州睿狐科技有限公司' },
-  content: { status: 'ACCEPTED', value: '客户确认 POC 可行' },
-  next_action: { status: 'ACCEPTED', value: '下周三确认批复' },
-  next_follow_time: { status: 'MISSING' }
-}
-
-const makeTask = (overrides: Partial<AssistantTaskView> = {}): AssistantTaskView => ({
-  public_id: 'ast_hist',
-  status: 'COMPLETED',
-  goal: '记录会议纪要',
-  activity_kind: 'ONLINE_MEETING',
-  draft,
-  waiting: null,
-  committed: [],
-  budget_steps: 8,
-  budget_max_steps: 50,
-  version: 8,
-  ...overrides
-})
-
-const act = (actor: string, action: string, input: Record<string, unknown> = {}, result: Record<string, unknown> = {}, eventType: string | null = null): AssistantTaskAction => ({
-  actor,
-  action,
-  input,
-  result,
-  event_type: eventType,
-  created_time: '2026-09-24T21:00:00'
-})
-
-beforeEach(() => {
-  getTaskMock.mockReset()
-  listActionsMock.mockReset()
-  listTasksMock.mockReset()
-  latestActiveMock.mockReset()
-  createTaskMock.mockReset()
-  submitInputMock.mockReset()
-  latestActiveMock.mockResolvedValue(null)
-  listTasksMock.mockResolvedValue({ tasks: [], skipped: [] })
-})
-
-describe('history replay readability', () => {
-  it('shows submitted text and human prompts instead of raw action names', async () => {
-    getTaskMock.mockResolvedValue(makeTask())
-    listActionsMock.mockResolvedValue([
-      act('SYSTEM', 'set_activity_kind', {}, { kind: 'ONLINE_MEETING' }),
-      act('SYSTEM', 'ask_confirmation', {}, { prompt: '确认后写入这条客户活动？' }),
-      act('USER', 'confirm_write', {}, { activity_public_id: 'act_1' }),
-      act('SYSTEM', 'offer_proposal', {}, { prompt: '为这个客户创建商机吗？' }),
-      act('USER', 'refuse_proposal', { kind: 'opportunity' }, {}),
-      act('SYSTEM', 'complete_after_proposals', {}, { reason: 'no_more_proposals' })
-    ])
+describe('owned historical conversation projection', () => {
+  it('shows original text and human prompts, not internal action names', async () => {
+    show(view({ messages: [message('u', '今天和客户复盘部署', null, 'user'), message('a', '请补充客户名称'), message('r', '已记录这条客户活动。')] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
-    const text = wrapper.text()
-    // Historical actions remain readable, but only the current projection renders an interactive card.
-    expect(text).toContain('会议纪要确认')
-    expect(text).toContain('已记录这条客户活动。')
-    expect(text).toContain('为这个客户创建商机吗？')
-    expect(text).not.toContain('ask_')
-    expect(text).not.toContain('confirm_write')
+    expect(wrapper.text()).toContain('今天和客户复盘部署')
+    expect(wrapper.text()).toContain('请补充客户名称')
+    expect(wrapper.text()).not.toMatch(/ask_confirmation|submit_field|confirm_write/)
   })
 
-  it('keeps the confirmed meeting card with full content from the saved snapshot', async () => {
-    getTaskMock.mockResolvedValue(makeTask({ status: 'COMPLETED', activity_kind: 'ONLINE_MEETING' }))
-    listActionsMock.mockResolvedValue([
-      act('SYSTEM', 'ask_confirmation', {}, { prompt: '确认后写入这条客户活动？', field: 'activity_write' }),
-      act('USER', 'confirm_choice', {}, { label: '确认' }, 'user_choice'),
-      act('USER', 'confirm_write', {}, {
-        activity_public_id: 'act_9',
-        confirmation: {
-          prompt: '确认后写入这条客户活动？',
-          confirmation_payload: { kind: 'activity_write', preview: { customer_name: '广州睿狐科技有限公司', activity_kind: 'ONLINE_MEETING', title: 'POC 部署方案评审', summary: '客户确认 POC 可行', content_json: {}, source_content: '原文记录', score: 69, score_reason: '依据充分', next_action: '周五前提交数据出境说明' } }
-        },
-      }),
-      act('SYSTEM', 'show_write_receipt', {}, { label: '已记录这条客户活动。' }, 'receipt'),
-    ])
+  it('binds an archived meeting card to its own frozen snapshot rather than the current task', async () => {
+    const old = makeTask({ public_id: 'ast_old', status: 'COMPLETED', activity_kind: 'ONLINE_MEETING', waiting: confirmation({ confirmation_payload: { kind: 'activity_write', preview: {
+      customer_name: '原客户', activity_kind: 'ONLINE_MEETING', title: '原会议主题', summary: '原会议讨论',
+      content_json: {}, source_content: '原始记录', score: 88, score_reason: '原评分'
+    } } }) })
+    const current = makeTask({ public_id: 'ast_new', waiting: field(), draft: { ...old.draft, customer: { status: 'ACCEPTED', value: '新客户' } } })
+    show(view({ focused_task: current, messages: [message('old', '会议确认', old), message('new', '当前提示', current)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    await wrapper.findComponent({ name: 'AssistantTaskSidebar' }).vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
-    const text = wrapper.text()
-    expect(text).toContain('POC 部署方案评审')
-    expect(text).toContain('确认')
-    expect(text).toContain('广州睿狐科技有限公司')
-    expect(text).toContain('已记录这条客户活动。')
+    const meeting = wrapper.findComponent({ name: 'MeetingConfirmationCard' })
+    expect(meeting.text()).toContain('原会议主题')
+    expect(meeting.text()).toContain('原会议讨论')
+    expect(meeting.text()).toContain('原客户')
+    expect(meeting.text()).not.toContain('新客户')
+    expect(meeting.props('replayed')).toBe(true)
   })
 
-  it('uses field labels when legacy actions carry no text', async () => {
-    getTaskMock.mockResolvedValue(makeTask({ status: 'CANCELLED' }))
-    listActionsMock.mockResolvedValue([
-      act('SYSTEM', 'ask_quality_gap', { field: 'content' }, {}),
-      act('USER', 'submit_field', { field: 'content' }, { accepted: true })
-    ])
+  it('keeps legacy field/kind labels readable from the server projection', async () => {
+    show(view({ messages: [message('one', '客户名称：睿狐科技', null, 'user'), message('two', '线上会议', null, 'user')] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
-    const text = wrapper.text()
-    expect(text).toContain('请补充沟通内容。')
-    expect(text).toContain('（补充沟通内容）')
-    expect(text).not.toContain('content')
-  })
-
-  it('renders no confirmation buttons for finished tasks', async () => {
-    const waiting: TaskWaiting = {
-      type: 'CONFIRMATION',
-      field: 'proposal:opportunity_create',
-      question_id: 'q9',
-      prompt: '为这个客户创建商机吗？',
-      confirmation_payload: { kind: 'proposal', proposal_kind: 'opportunity_create', candidate: {
-        kind: 'opportunity_create', key: 'fictional-opportunity', payload: { opportunity_name: '虚构商机' },
-        evidence_quote: '计划采购虚构系统', activity_id: 1, customer_id: 42, source_revision: 1
-      } }
-    }
-    getTaskMock.mockResolvedValue(makeTask({ status: 'COMPLETED', waiting }))
-    listActionsMock.mockResolvedValue([
-      act('SYSTEM', 'offer_proposal', {}, { prompt: '为这个客户创建商机吗？' })
-    ])
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
-    const buttons = wrapper.findAll('button').filter((b) => b.text() === '确认' || b.text() === '取消')
-    expect(buttons.length).toBe(0)
-  })
-
-  it('keeps the live waiting card for an active task', async () => {
-    const waiting: TaskWaiting = {
-      type: 'CONFIRMATION',
-      field: 'activity_write',
-      question_id: 'q8',
-      prompt: '确认后写入这条客户活动？',
-      confirmation_payload: { kind: 'activity_write', preview: {
-        customer_name: '虚构星河科技', activity_kind: 'ONLINE_MEETING', content_json: {}, source_content: '会议原文', score: 82, score_reason: '内容完整'
-      } }
-    }
-    getTaskMock.mockResolvedValue(makeTask({ status: 'ACTIVE', waiting }))
-    listActionsMock.mockResolvedValue([
-      act('SYSTEM', 'ask_confirmation', {}, { prompt: '确认后写入这条客户活动？' })
-    ])
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
-    // Live task: the restored waiting surfaces in the composer's controlled label.
-    expect(wrapper.text()).toContain('正在回答：确认操作')
-  })
-
-  it('replays kind selection with its Chinese label', async () => {
-    getTaskMock.mockResolvedValue(makeTask())
-    listActionsMock.mockResolvedValue([act('USER', 'select_activity_kind', { kind: 'ONLINE_MEETING' }, {})])
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_hist')
-    await flushPromises()
-
+    expect(wrapper.text()).toContain('客户名称：睿狐科技')
     expect(wrapper.text()).toContain('线上会议')
   })
-  it('keeps the most recently selected task if an older task request finishes later', async () => {
-    let releaseOld: ((task: AssistantTaskView) => void) | undefined
-    getTaskMock.mockImplementation((publicId: string) => publicId === 'ast_old'
-      ? new Promise<AssistantTaskView>((resolve) => { releaseOld = resolve })
-      : Promise.resolve(makeTask({ public_id: 'ast_new', goal: '新任务' })))
-    listActionsMock.mockResolvedValue([])
+
+  it('does not let an archived card confirm or change the focused activity kind', async () => {
+    const old = makeTask({ status: 'COMPLETED', waiting: confirmation() })
+    show(view({ focused_task: makeTask({ public_id: 'ast_new' }), messages: [message('old', '已归档', old)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    const sidebar = wrapper.findComponent({ name: 'AssistantTaskSidebar' })
-    await sidebar.vm.$emit('select-task', 'ast_old')
-    await sidebar.vm.$emit('select-task', 'ast_new')
+    expect(wrapper.findAll('button').filter((b) => /确认写入|改为线下/.test(b.text()))).toHaveLength(0)
+    expect(mocks.kind).not.toHaveBeenCalled()
+  })
+
+  it('restores one live authoritative wait while older matching cards stay archived', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    show(view({ focused_task: current, messages: [message('old', '旧提示', current), message('new', '当前提示', current)] }))
+    const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    releaseOld?.(makeTask({ public_id: 'ast_old', goal: '旧任务' }))
+    expect(wrapper.findAll('button').filter((b) => b.text() === '确认写入')).toHaveLength(1)
+  })
+
+  it('preserves the old draft field chips instead of taking values from a new focus', async () => {
+    const old = makeTask({ public_id: 'ast_old', waiting: field(), draft: { ...makeTask().draft, customer: { status: 'ACCEPTED', value: '旧客户' } } })
+    const next = makeTask({ public_id: 'ast_next', waiting: field(), draft: { ...makeTask().draft, customer: { status: 'ACCEPTED', value: '新客户' } } })
+    show(view({ focused_task: next, messages: [message('old', '旧稿问题', old), message('new', '新稿问题', next)] }))
+    const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    expect(sidebar.props('task').public_id).toBe('ast_new')
-    expect(wrapper.text()).not.toContain('旧任务')
+    const gaps = wrapper.findAllComponents({ name: 'GapCard' })
+    expect(gaps[0]?.text()).toContain('旧客户')
+    expect(gaps[0]?.text()).not.toContain('新客户')
+  })
+
+  it('loads earlier conversation by cursor without dropping the latest results', async () => {
+    show(view({ messages: [message('new', '最近结果')], older_cursor: 31 }))
+    mocks.get.mockResolvedValue(view({ messages: [message('old', '更早结果')], older_cursor: null }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === '查看更早对话')?.trigger('click')
+    await flushPromises()
+    expect(mocks.get).toHaveBeenCalledWith(31)
+    expect(wrapper.text()).toContain('更早结果')
+    expect(wrapper.text()).toContain('最近结果')
+  })
+})
+
+describe('conversation snapshot fences', () => {
+  it('does not restore a next history cursor after all earlier pages were loaded', async () => {
+    show(view({ version: 1, messages: [message('new', '最近结果')], older_cursor: 31 }))
+    mocks.get.mockResolvedValueOnce(view({ version: 1, messages: [message('old', '最早结果')], older_cursor: null }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === '查看更早对话')?.trigger('click')
+    await flushPromises()
+    mocks.text.mockResolvedValue({ conversation: view({ version: 2, messages: [message('new', '最近结果'), message('next', '新的回复')], older_cursor: 31 }), submission: null })
+    await wrapper.find('textarea').setValue('下一件')
+    await wrapper.find('textarea').trigger('keydown.enter', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('最早结果')
+    expect(wrapper.text()).toContain('新的回复')
+    expect(wrapper.findAll('button').find((b) => b.text() === '查看更早对话')).toBeUndefined()
+  })
+
+  it('persists activity-kind changes through the owned conversation, without clearing history', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    show(view({ version: 3, focused_task: current, messages: [message('old', '此前的沟通'), message('card', '确认？', current)] }))
+    mocks.kind.mockResolvedValue({ conversation: view({ version: 4, focused_task: { ...current, version: 2, activity_kind: 'ONLINE_MEETING', waiting: null }, messages: [message('old', '此前的沟通'), message('kind', '已切换为线上会议，请重新描述这次沟通。')] }), submission: null })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === '改为线下 / 跟进')?.trigger('click')
+    await flushPromises()
+    expect(mocks.kind).toHaveBeenCalledWith(expect.objectContaining({ task_public_id: 'ast_one', kind: 'ONLINE_MEETING', task_version: 1, expected_version: 3 }))
+    expect(wrapper.text()).toContain('此前的沟通')
+    expect(wrapper.text()).toContain('已切换为线上会议')
   })
 })

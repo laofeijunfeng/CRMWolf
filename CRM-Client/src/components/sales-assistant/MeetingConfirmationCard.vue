@@ -117,7 +117,7 @@ const nextAction = computed(() => frozen.value ? frozen.value.next_action ?? '' 
       <Button size="sm" variant="outline" :disabled="busy" @click="emit('reject')">取消</Button>
     </div>
     <div class="px-4 py-1 text-center">
-      <button type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" :disabled="busy" @click="emit('change-kind')">改为线下 / 跟进</button>
+      <button v-if="!replayed" type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" :disabled="busy" @click="emit('change-kind')">改为线下 / 跟进</button>
     </div>
   </div>
 </template>

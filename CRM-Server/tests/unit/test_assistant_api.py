@@ -16,6 +16,7 @@ from app.models.assistant import (
     AssistantTask,
     AssistantTaskStatus,
 )
+from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.contracts import TaskDraft
 
@@ -74,6 +75,8 @@ def db_session():
             AssistantRequest.__table__,
             AssistantTurn.__table__,
             AssistantTurnEvent.__table__,
+            AssistantConversation.__table__,
+            AssistantConversationEntry.__table__,
         ],
     )
     session = sessionmaker(bind=engine)()
@@ -203,7 +206,7 @@ def test_submit_cancel_closes_task_via_sse(client):
     assert names[-1] == "waiting"
     final = events[-1][1]
     assert final["task"]["status"] == "CANCELLED"
-    assert "已取消" in final["message"]
+    assert "当前这件已停下" in final["message"]
 
 
 def test_submit_replay_returns_original_turn_after_task_changes(client, db_session):
@@ -1218,7 +1221,7 @@ def test_task_list_isolates_unreadable_row_without_exposing_stored_authority(cli
 def test_task_view_keeps_historical_receipt_omissions_and_rejects_partial_processing_pointer():
     from pydantic import ValidationError
 
-    from app.api.assistant import AssistantTaskView
+    from app.schemas.assistant import AssistantTaskView
 
     values = {
         "public_id": "ast_fictional",
@@ -1261,3 +1264,33 @@ def test_activity_preview_accepts_only_canonical_crm_kinds():
     for unsupported in ("FOLLOW_UP", "PHONE_CALL", "VIDEO_CALL", "arbitrary_kind"):
         with pytest.raises(ValidationError):
             ActivityPreview.model_validate({**preview, "activity_kind": unsupported})
+
+
+def test_conversation_http_contract_persists_and_isolates_owner(client, db_session, monkeypatch):
+    from app.api import assistant as api
+    from app.core import deps
+    from app.schemas.assistant_conversation import ConversationDecision
+    from app.services.assistant import conversation as conversation_module
+    from app.services.assistant.conversation import ConversationService
+
+    class Root:
+        async def classify(self, db, **kwargs):
+            return ConversationDecision(semantic_plan={'speech_act':'ASSERT_EVENT','business_object':'CUSTOMER_ACTIVITY',
+                'operation':'CREATE','confidence':0.95},task_relation='NEW_TASK',route='WORKFLOW',boundary='NEW',confidence=0.95)
+
+    monkeypatch.setattr(api,'_conversation_service',ConversationService(classifier=Root()))
+    monkeypatch.setattr(conversation_module,'schedule_turn',lambda turn_id: None)
+    opened = client.post('/api/v1/assistant/conversation/open')
+    assert opened.status_code == 200
+    request = {'text':'HTTP入口记录客户沟通','client_request_id':'http-conversation-01','expected_version':opened.json()['version']}
+    first = client.post('/api/v1/assistant/conversation/messages',json=request)
+    retry = client.post('/api/v1/assistant/conversation/messages',json=request)
+    assert first.status_code == retry.status_code == 200
+    assert first.json()['submission']['turn_id'] == retry.json()['submission']['turn_id']
+    assert db_session.query(AssistantTurn).count() == 1
+    assert client.get('/api/v1/assistant/conversation').json()['messages'][0]['text'] == request['text']
+    app.dependency_overrides[deps.get_current_active_user] = lambda: _make_user(team_id=1,user_id=3)
+    other = client.post('/api/v1/assistant/conversation/open')
+    assert other.status_code == 200
+    assert other.json()['public_id'] != opened.json()['public_id']
+    assert other.json()['messages'] == []

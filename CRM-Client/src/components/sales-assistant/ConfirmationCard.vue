@@ -121,7 +121,7 @@ const qualityText = computed(() => frozen.value?.score !== undefined ? String(fr
         <span class="text-[11px] text-muted-foreground">{{ kindLabel }} · 已归档</span>
       </div>
       <div class="px-4 pt-1 text-center">
-        <button type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" :disabled="busy" @click="emit('change-kind')">改为线下 / 跟进</button>
+        <button v-if="!replayed" type="button" class="text-xs text-muted-foreground underline-offset-2 hover:underline" :disabled="busy" @click="emit('change-kind')">改为线下 / 跟进</button>
       </div>
     </div>
   </div>
