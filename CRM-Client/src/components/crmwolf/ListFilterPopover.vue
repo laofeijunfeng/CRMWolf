@@ -320,9 +320,11 @@ function commitNumber(field: ListFilterField): void {
 function handleOperatorChange(field: ListFilterField, op: ListFilterOperator): void {
   if (field.type === 'enum') {
     if (!operatorNeedsValue(op)) {
+      draftOperator.value = ''
       replaceField(field.key, { field: field.key, op, value: null })
       return
     }
+    draftOperator.value = op
     const values = selectedEnumValues(field)
     replaceField(field.key, values.length > 0 ? { field: field.key, op, value: values } : null)
     return
