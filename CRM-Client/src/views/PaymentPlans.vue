@@ -953,16 +953,10 @@ defineExpose({
   padding: 0;
   border: 0;
   background: transparent;
-  color: $wolf-text-link-v2;
+  color: $wolf-text-primary-v2;
   cursor: pointer;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   text-align: left;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
 
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;

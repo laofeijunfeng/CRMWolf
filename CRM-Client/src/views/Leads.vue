@@ -956,15 +956,11 @@ watchEffect(() => {
   }
 }
 
-// 链接样式
+// 行主标识，对齐客户名称，不用链接色
 .link-text {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   cursor: pointer;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
 }
 
 .lead-mobile-card-header {

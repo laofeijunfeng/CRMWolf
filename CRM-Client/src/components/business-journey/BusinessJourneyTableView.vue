@@ -290,13 +290,9 @@ function setDisplayMode(value: string): void {
 @use '@/styles/variables-v2.scss' as *;
 
 .business-journey-name-link {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   cursor: pointer;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
 }
 .business-journey-mobile-card-header {
   display: flex;

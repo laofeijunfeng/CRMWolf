@@ -915,15 +915,11 @@ watchEffect(() => {
   }
 }
 
-// 链接样式
+// 申请单号是行主标识，对齐客户名称
 .link-text {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   cursor: pointer;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
 }
 
 // 申请单号单元格（含下载入口）

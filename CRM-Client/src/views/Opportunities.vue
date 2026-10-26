@@ -1212,7 +1212,7 @@ defineExpose({
 
       <!-- 商机名称 -->
       <template #cell-opportunity_name="{ row }">
-        <span class="link-text" @click.stop="openOpportunitySheet(row.id)">
+        <span class="opportunity-name" @click.stop="openOpportunitySheet(row.id)">
           {{ row.opportunity_name }}
         </span>
       </template>
@@ -1365,6 +1365,12 @@ defineExpose({
 }
 
 // 链接样式
+.opportunity-name {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
+  cursor: pointer;
+}
+
 .link-text {
   color: $wolf-text-link-v2;
   font-weight: $wolf-font-weight-medium-v2;

@@ -983,14 +983,14 @@ defineExpose({
 
       <!-- 合同编号 -->
       <template #cell-contract_number="{ row }">
-        <span class="link-text" @click.stop="handleViewDetail(row)">
+        <span class="contract-number" @click.stop="handleViewDetail(row)">
           {{ row.contract_number || '-' }}
         </span>
       </template>
 
       <!-- 合同名称 -->
       <template #cell-contract_name="{ row }">
-        <span class="link-text" @click.stop="handleViewDetail(row)">
+        <span @click.stop="handleViewDetail(row)">
           {{ row.contract_name }}
         </span>
       </template>
@@ -1111,15 +1111,10 @@ defineExpose({
   }
 }
 
-// 链接样式
-.link-text {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+.contract-number {
+  color: $wolf-text-primary-v2;
+  font-weight: $wolf-font-weight-semibold-v2;
   cursor: pointer;
-
-  &:hover {
-    color: $wolf-text-link-hover-v2;
-  }
 }
 
 .contract-mobile-card-header {
