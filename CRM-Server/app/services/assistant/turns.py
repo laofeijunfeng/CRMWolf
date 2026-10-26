@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 300
 _active: set[asyncio.Task[None]] = set()
+_workers: dict[int, tuple[int, asyncio.Task[None]]] = {}
 _execution_lease: ContextVar[tuple[int, str, int] | None] = ContextVar("assistant_execution_lease", default=None)
 
 
@@ -275,6 +276,76 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     return turn.lease_version if turn is not None else None
 
 
+def retry_owned_turn(
+    db: Session,
+    *,
+    team_id: int,
+    user_id: int,
+    task_public_id: str,
+    turn_public_id: str,
+    expected_lease_version: int,
+) -> tuple[AssistantTask, AssistantTurn, bool] | None:
+    """Restart only the observed, still-active turn; stale retries only read it."""
+
+    owned = (
+        db.query(AssistantTask, AssistantTurn)
+        .join(AssistantTurn, AssistantTurn.task_id == AssistantTask.id)
+        .filter(
+            AssistantTask.public_id == task_public_id,
+            AssistantTask.team_id == team_id,
+            AssistantTask.user_id == user_id,
+            AssistantTurn.public_id == turn_public_id,
+            AssistantTurn.team_id == team_id,
+            AssistantTurn.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    if owned is None:
+        return None
+    task, turn = owned
+    if (
+        task.status != AssistantTaskStatus.ACTIVE
+        or task.active_turn_id != turn.id
+        or turn.status not in {"PENDING", "RUNNING"}
+    ):
+        return task, turn, False
+    active_task = select(AssistantTask.id).where(
+        AssistantTask.id == task.id,
+        AssistantTask.team_id == team_id,
+        AssistantTask.user_id == user_id,
+        AssistantTask.status == AssistantTaskStatus.ACTIVE,
+        AssistantTask.active_turn_id == turn.id,
+    )
+    changed = db.execute(
+        update(AssistantTurn)
+        .where(
+            AssistantTurn.id == turn.id,
+            AssistantTurn.team_id == team_id,
+            AssistantTurn.user_id == user_id,
+            AssistantTurn.status.in_(["PENDING", "RUNNING"]),
+            AssistantTurn.lease_version == expected_lease_version,
+            active_task.exists(),
+        )
+        .values(
+            status="PENDING",
+            lease_owner=None,
+            lease_expires_at=None,
+            lease_version=AssistantTurn.lease_version + 1,
+            last_modified_time=business_now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    restarted = changed.rowcount == 1
+    db.commit()
+    if restarted:
+        worker = _workers.get(turn.id)
+        if worker is not None and worker[0] == expected_lease_version:
+            worker[1].cancel()
+    db.refresh(turn)
+    db.refresh(task)
+    return task, turn, restarted
+
+
 def renew_lease(factory: sessionmaker, *, turn_id: int, owner: str, version: int) -> bool:
     """Extend only a live lease still owned by this worker."""
 
@@ -419,6 +490,9 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
         turn = db.get(AssistantTurn, turn_id)
         if turn is None:
             return
+        worker = asyncio.current_task()
+        if worker is not None:
+            _workers[turn_id] = (version, worker)
         lease_token = _execution_lease.set((turn_id, owner, version))
         try:
             task = db.get(AssistantTask, turn.task_id)
@@ -573,6 +647,9 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
     finally:
         if lease_token is not None:
             _execution_lease.reset(lease_token)
+        registered = _workers.get(turn_id)
+        if registered is not None and registered[1] is asyncio.current_task():
+            del _workers[turn_id]
         if heartbeat is not None:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError):

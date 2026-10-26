@@ -203,34 +203,53 @@ const adoptProcessingTurn = (updated: AssistantTaskView): void => {
   }
 }
 
-const recoverProcessingTurn = async (): Promise<void> => {
+const recoverProcessingTurn = async (restart = false, watch = restart): Promise<void> => {
   const pending = processingRecovery.value
   const navigation = navigationVersion
   if (pending === null) return
+  const active = (): boolean => !disposed && navigation === navigationVersion && processingRecovery.value === pending && task.value?.public_id === pending.targetId
   try {
-    const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
-    if (disposed || navigation !== navigationVersion || processingRecovery.value !== pending || task.value?.public_id !== pending.targetId) return
-    pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
-    let reply: string | undefined
-    for (const event of turn.events) {
-      if (event.event === 'waiting' && typeof event.data['message'] === 'string') reply = event.data['message']
-      if (event.event === 'error') {
-        pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
-        const entry = entries.value[entries.value.length - 1]
-        if (entry !== undefined) entry.outcome = 'failure'
+    let turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
+    if (!active()) return
+    if (restart && (turn.status === 'PENDING' || turn.status === 'RUNNING')) {
+      beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
+      turn = await assistantApi.retryTurn(pending.targetId, pending.turnId, turn.lease_version, pending.cursor)
+    }
+    while (active()) {
+      pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
+      let reply: string | undefined
+      for (const event of turn.events) {
+        if (event.event === 'waiting' && typeof event.data['message'] === 'string') reply = event.data['message']
+        if (event.event === 'error') {
+          pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
+          const entry = entries.value[entries.value.length - 1]
+          if (entry !== undefined) entry.outcome = 'failure'
+        }
       }
+      publishTask(turn.task, reply)
+      if (processingRecovery.value === pending && (turn.status === 'SUCCEEDED' || turn.status === 'FAILED')) {
+        processingRecovery.value = null
+        resultPending.value = false
+      }
+      if (!resultPending.value && pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
+      await refreshConversation()
+      if (disposed || navigation !== navigationVersion) return
+      if (processingRecovery.value !== null && processingRecovery.value !== pending) {
+        await recoverProcessingTurn(false, watch)
+        return
+      }
+      if (!watch || !active()) return
+      await new Promise<void>((resolve) => { setTimeout(resolve, 1000) })
+      if (!active()) return
+      turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
     }
-    publishTask(turn.task, reply)
-    if (processingRecovery.value === pending && (turn.status === 'SUCCEEDED' || turn.status === 'FAILED')) {
-      processingRecovery.value = null
-      resultPending.value = false
-    }
-    if (!resultPending.value && pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
-    await refreshConversation()
-    if (processingRecovery.value !== null && processingRecovery.value !== pending) await recoverProcessingTurn()
   } catch {
-    // The active turn is already persisted; recovery is GET-only even after failure.
-    if (!disposed && navigation === navigationVersion && processingRecovery.value === pending) resultPending.value = true
+    if (active()) {
+      resultPending.value = true
+      if (restart) pushEntry('assistant', '连接中断，处理结果待确认，正在同步任务状态。')
+    }
+  } finally {
+    if (restart && navigation === navigationVersion) endProcessing()
   }
 }
 const resultPending = ref(false)
@@ -454,7 +473,7 @@ const retryPending = async (): Promise<void> => {
     if (submitting.value) return
     submitting.value = true
     const navigation = navigationVersion
-    try { await recoverProcessingTurn() } finally { if (navigation === navigationVersion) submitting.value = false }
+    try { await recoverProcessingTurn(true) } finally { if (navigation === navigationVersion) submitting.value = false }
     return
   }
   if (pendingConversation.value !== null) {
@@ -472,7 +491,7 @@ const retryPending = async (): Promise<void> => {
       pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
       publishTask(turn.task)
       if (processingRecovery.value !== null) {
-        await recoverProcessingTurn()
+        await recoverProcessingTurn(true)
         return
       }
       if ((turn.status === 'SUCCEEDED' || turn.status === 'FAILED') && processingRecovery.value === null) {
@@ -480,14 +499,15 @@ const retryPending = async (): Promise<void> => {
         pendingRequest.value = null
         return
       }
-      // This turn is already accepted and still executing; only refresh its projection.
+      processingRecovery.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
+      await recoverProcessingTurn(true)
       return
     } else {
       const latest = await assistantApi.getTask(pending.targetId)
       if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
       publishTask(latest)
       if (processingRecovery.value !== null) {
-        await recoverProcessingTurn()
+        await recoverProcessingTurn(true)
         return
       }
     }

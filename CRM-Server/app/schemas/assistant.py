@@ -57,8 +57,16 @@ class AssistantTurnView(BaseModel):
 
     turn_id: str
     status: TurnStatus
+    lease_version: int = Field(ge=0)
     events: list[AssistantTurnEventView]
     task: AssistantTaskView
+
+
+class RetryTurnRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_lease_version: int = Field(ge=0)
+    after_seq: int = Field(default=0, ge=0)
 
 
 class CreateTaskRequest(BaseModel):

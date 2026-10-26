@@ -61,6 +61,7 @@ const TurnEventSchema = z.object({
 const AssistantTurnSchema = z.object({
   turn_id: z.string(),
   status: AssistantTurnStatusSchema,
+  lease_version: z.number().int().nonnegative(),
   events: z.array(TurnEventSchema),
   task: AssistantTaskViewSchema
 }).strict()
@@ -255,6 +256,14 @@ export const assistantApi = {
     const payload: unknown = await request.get(
       `/v1/assistant/tasks/${encodeURIComponent(publicId)}/turns/${encodeURIComponent(turnId)}`,
       { params: { after_seq: afterSeq } }
+    )
+    return AssistantTurnSchema.parse(payload)
+  },
+  async retryTurn(publicId: string, turnId: string, expectedLeaseVersion: number, afterSeq = 0): Promise<AssistantTurn> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
+    const payload: unknown = await request.post(
+      `/v1/assistant/tasks/${encodeURIComponent(publicId)}/turns/${encodeURIComponent(turnId)}/retry`,
+      { expected_lease_version: expectedLeaseVersion, after_seq: afterSeq }
     )
     return AssistantTurnSchema.parse(payload)
   },

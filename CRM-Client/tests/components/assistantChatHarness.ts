@@ -4,7 +4,7 @@ import type { SubmitStreamHandlers } from '@/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), get: vi.fn(), text: vi.fn(), choice: vi.fn(), command: vi.fn(),
-  turn: vi.fn(), task: vi.fn(), kind: vi.fn(), resume: vi.fn(), stream: vi.fn()
+  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), kind: vi.fn(), resume: vi.fn(), stream: vi.fn()
 }))
 export { mocks }
 vi.mock('@/api/assistant', () => ({
@@ -12,7 +12,7 @@ vi.mock('@/api/assistant', () => ({
     openConversation: mocks.open, getConversation: mocks.get,
     conversationText: mocks.text, conversationChoice: mocks.choice, conversationCommand: mocks.command,
     resumeConversation: mocks.resume, conversationKind: mocks.kind,
-    getTurn: mocks.turn, getTask: mocks.task, changeKind: mocks.kind
+    getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task, changeKind: mocks.kind
   },
   submitInputStream: mocks.stream
 }))

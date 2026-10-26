@@ -22,6 +22,7 @@ from app.schemas.assistant import (
     AssistantTurnEventView,
     AssistantTurnView,
     CreateTaskRequest,
+    RetryTurnRequest,
     SubmitInputRequest,
 )
 from app.schemas.assistant_conversation import (
@@ -43,6 +44,7 @@ from app.services.assistant.turns import (
     accept_create,
     accept_submit,
     events_after,
+    retry_owned_turn,
     schedule_turn,
 )
 
@@ -307,7 +309,9 @@ async def adjudicate_unknown_command(
 
     result = dict(action.result_json or {})
     if result.get("status") not in {"UNKNOWN", "CLAIMED"}:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"该命令已终态 {result.get('status')}，不可裁决")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=f"该命令已终态 {result.get('status')}，不可裁决"
+        )
 
     decision = str(payload.get("decision") or "")
     reason = str(payload.get("reason") or "").strip()
@@ -317,7 +321,10 @@ async def adjudicate_unknown_command(
     if decision == "SUCCEEDED":
         command_id = str(result.get("command_id") or "")
         if not command_id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="老格式 claim 无 command_id，不能判成功；保持 UNKNOWN")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="老格式 claim 无 command_id，不能判成功；保持 UNKNOWN",
+            )
         from app.models.assistant_crm_effect import AssistantCRMEffect
 
         effect = (
@@ -342,7 +349,9 @@ async def adjudicate_unknown_command(
             )
         new_status = "REJECTED"
     else:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision 只支持 SUCCEEDED/REJECTED")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision 只支持 SUCCEEDED/REJECTED"
+        )
 
     result.update(
         {
@@ -382,11 +391,50 @@ async def read_turn(
     return AssistantTurnView(
         turn_id=turn.public_id,
         status=turn.status,
+        lease_version=turn.lease_version,
         events=[
             AssistantTurnEventView(seq=event.seq, event=event.event, data=event.data_json)
             for event in events_after(db, turn_id=turn.id, seq=max(after_seq, 0))
         ],
         task=task_view(task, db),
+    )
+
+
+@router.post("/tasks/{public_id}/turns/{turn_id}/retry", response_model=AssistantTurnView)
+async def retry_turn(
+    public_id: str,
+    turn_id: str,
+    request: RetryTurnRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> AssistantTurnView:
+    result = retry_owned_turn(
+        db,
+        team_id=team_id,
+        user_id=int(current_user.id),
+        task_public_id=public_id,
+        turn_public_id=turn_id,
+        expected_lease_version=request.expected_lease_version,
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="轮次不存在")
+    task, turn, restarted = result
+    if restarted:
+        from sqlalchemy.orm import sessionmaker
+
+        schedule_turn(turn.id, factory=sessionmaker(bind=db.get_bind(), autoflush=False))
+    return AssistantTurnView.model_validate(
+        {
+            "turn_id": turn.public_id,
+            "status": turn.status,
+            "lease_version": turn.lease_version,
+            "events": [
+                AssistantTurnEventView(seq=event.seq, event=event.event, data=event.data_json)
+                for event in events_after(db, turn_id=turn.id, seq=request.after_seq)
+            ],
+            "task": task_view(task, db),
+        }
     )
 
 
