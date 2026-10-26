@@ -271,8 +271,20 @@ const openStageTemplates = (record: ProcurementMethodRow): void => {
   void router.push('/settings/procurement-methods/' + record.id + '/stages')
 }
 
+const isProcurementMethodRow = (row: unknown): row is ProcurementMethodRow => {
+  if (typeof row !== 'object' || row === null) return false
+  const record = row as Record<string, unknown>
+  return typeof record['id'] === 'number' &&
+    typeof record['code'] === 'string' &&
+    typeof record['name'] === 'string' &&
+    typeof record['is_active'] === 'number'
+}
+
 const asMethodHandler = (handler: (row: ProcurementMethodRow) => void): ActionConfig['handler'] => {
-  return (row) => { handler(row as ProcurementMethodRow) }
+  return (row) => {
+    if (!isProcurementMethodRow(row)) return
+    handler(row)
+  }
 }
 
 const getRowActions = (row: ProcurementMethodRow): TableRowActionSet => {
@@ -411,7 +423,7 @@ watch([hasAccess, teamId], (): void => {
         </Badge>
       </template>
       <template #mobile-actions="{ row }">
-        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+        <TableRowActions :row="{ ...row }" v-bind="getRowActions(row)" size="lg" />
       </template>
     </DataTable>
   </SettingsContent>

@@ -245,7 +245,7 @@ const opportunitySelectOptions = computed(() => {
       value: opportunity.id,
       label: opportunity.opportunity_name,
       disabled: reason !== '',
-      disabledReason: reason === '' ? undefined : reason,
+      ...(reason === '' ? {} : { disabledReason: reason }),
     }
   })
 })

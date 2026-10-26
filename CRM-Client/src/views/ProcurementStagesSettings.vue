@@ -139,8 +139,21 @@ const removeStage = async (stage: ProcurementStageTemplate): Promise<void> => {
   }
 }
 
+const isProcurementStage = (row: unknown): row is ProcurementStageTemplate => {
+  if (typeof row !== 'object' || row === null) return false
+  const record = row as Record<string, unknown>
+  return typeof record['id'] === 'number' &&
+    typeof record['procurement_method_id'] === 'number' &&
+    typeof record['template_code'] === 'string' &&
+    typeof record['stage_name'] === 'string' &&
+    typeof record['win_probability'] === 'number'
+}
+
 const asStageHandler = (handler: (row: ProcurementStageTemplate) => void): ActionConfig['handler'] => {
-  return (row) => { handler(row as ProcurementStageTemplate) }
+  return (row) => {
+    if (!isProcurementStage(row)) return
+    handler(row)
+  }
 }
 
 const getRowActions = (_row: ProcurementStageTemplate): TableRowActionSet => {
@@ -226,7 +239,7 @@ useTopBarRegistration({
         <span v-else class="text-muted-foreground">否</span>
       </template>
       <template #mobile-actions="{ row }">
-        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+        <TableRowActions :row="{ ...row }" v-bind="getRowActions(row)" size="lg" />
       </template>
     </DataTable>
   </SettingsContent>

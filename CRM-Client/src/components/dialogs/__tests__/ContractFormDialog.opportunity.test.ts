@@ -86,7 +86,7 @@ async function openDialog(): Promise<ReturnType<typeof mount>> {
         FormField: defineComponent({
           props: { name: { type: String, required: true } },
           setup(_props, { slots }): () => VNode {
-            return () => h('div', slots.default?.({ value: '', handleChange: () => undefined }))
+            return () => h('div', slots['default']?.({ value: '', handleChange: () => undefined }))
           },
         }),
         FormItem: defineComponent({ template: '<div><slot /></div>' }),

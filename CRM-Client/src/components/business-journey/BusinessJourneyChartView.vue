@@ -208,7 +208,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
           class="journey-chart-card"
           :data-graphic="card.graphic"
         >
-          <CardHeader :class="card.graphic === 'pie' ? 'items-start pb-0' : undefined">
+          <CardHeader v-bind="card.graphic === 'pie' ? { class: 'items-start pb-0' } : {}">
             <CardTitle>{{ card.title }}</CardTitle>
             <CardDescription>{{ card.description }}</CardDescription>
           </CardHeader>

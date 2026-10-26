@@ -53,8 +53,9 @@ describe('JourneyStyleBoardView', () => {
     expect(wrapper.get('[data-column-key="lost"]').text()).toContain('暂无记录')
 
     const blank = following.findAll('[role="button"]')[1]
-    expect(blank.text()).toContain('-')
-    expect(blank.text()).not.toContain('行业')
+    expect(blank).toBeDefined()
+    expect(blank?.text()).toContain('-')
+    expect(blank?.text()).not.toContain('行业')
 
     await card.trigger('keydown', { key: 'Enter' })
     await card.trigger('keydown', { key: ' ' })

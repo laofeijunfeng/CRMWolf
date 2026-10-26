@@ -90,8 +90,11 @@ export function getDateBounds(
     }
     if (condition.op === 'between' && Array.isArray(condition.value) && condition.value.length === 2) {
       const dates = condition.value.map((item) => String(item))
-      if (dates.some((item) => !/^\d{4}-\d{2}-\d{2}$/.test(item))) continue
-      const [start, end] = dates[0] <= dates[1] ? dates : [dates[1], dates[0]]
+      const first = dates[0]
+      const second = dates[1]
+      if (first === undefined || second === undefined) continue
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(first) || !/^\d{4}-\d{2}-\d{2}$/.test(second)) continue
+      const [start, end] = first <= second ? [first, second] : [second, first]
       bounds.start = start
       bounds.end = end
       continue

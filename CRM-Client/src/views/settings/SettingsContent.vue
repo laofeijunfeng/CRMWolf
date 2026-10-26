@@ -4,14 +4,14 @@ interface Props {
   description?: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   description: '',
 })
 </script>
 
 <template>
   <main class="settings-content" :aria-label="ariaLabel">
-    <p v-if="description.length > 0" class="settings-content__description">{{ description }}</p>
+    <p v-if="props.description.length > 0" class="settings-content__description">{{ props.description }}</p>
     <slot />
   </main>
 </template>

@@ -155,7 +155,7 @@ const stubs = {
   FormMessage: { template: '<span><slot /></span>' },
 }
 
-const formSubmitStubs = Object.fromEntries(
+const formSubmitStubs: Record<string, object> = Object.fromEntries(
   Object.entries(stubs).filter(([key]) => ![
     'FormField',
     'FormControl',
@@ -201,7 +201,7 @@ function seedPinia(codes: string[]): void {
   setPermissions(codes)
 }
 
-function mountPage(extraStubs: Record<string, unknown> = stubs): VueWrapper {
+function mountPage(extraStubs: Record<string, object> = stubs): VueWrapper {
   return mount(SettingsProductsPage, { global: { stubs: extraStubs } })
 }
 
@@ -215,8 +215,8 @@ function hasButton(wrapper: VueWrapper, label: string): boolean {
 
 describe('SettingsProductsPage', () => {
   beforeEach(() => {
-    mocks.routeQuery.action = undefined
-    mocks.routeQuery.id = undefined
+    mocks.routeQuery['action'] = undefined
+    mocks.routeQuery['id'] = undefined
     vi.mocked(productApi.list).mockReset()
     vi.mocked(productApi.list).mockResolvedValue([mocks.product])
     vi.mocked(productApi.create).mockReset()
@@ -296,8 +296,8 @@ describe('SettingsProductsPage', () => {
 
   it('does not open an edit dialog for a read-only edit deep link', async () => {
     seedPinia(['product:view'])
-    mocks.routeQuery.action = 'edit'
-    mocks.routeQuery.id = 'prd_1'
+    mocks.routeQuery['action'] = 'edit'
+    mocks.routeQuery['id'] = 'prd_1'
     const wrapper = mountPage()
     await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
     await flushPromises()
@@ -313,7 +313,7 @@ describe('SettingsProductsPage', () => {
     await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
     await flushPromises()
     expect(wrapper.find('h2').exists()).toBe(false)
-    mocks.routeQuery.action = 'create'
+    mocks.routeQuery['action'] = 'create'
     await flushPromises()
     expect(wrapper.find('h2').text()).toBe('新建产品')
     expect(hasButton(wrapper, '保存')).toBe(true)
@@ -333,7 +333,7 @@ describe('SettingsProductsPage', () => {
     const store = usePermissionStore()
     store.loadState = 'loading'
     store.permissions = []
-    mocks.routeQuery.action = 'create'
+    mocks.routeQuery['action'] = 'create'
     const wrapper = mountPage()
     await flushPromises()
     expect(productApi.list).not.toHaveBeenCalled()
@@ -348,7 +348,7 @@ describe('SettingsProductsPage', () => {
 
   it('does not reopen create Dialog when the list length changes', async () => {
     seedPinia(['product:view', 'product:create'])
-    mocks.routeQuery.action = 'create'
+    mocks.routeQuery['action'] = 'create'
 
     let resolveProducts: ((value: typeof mocks.product[]) => void) | undefined
     vi.mocked(productApi.list).mockImplementation(() => new Promise((resolve) => {
@@ -403,7 +403,7 @@ describe('SettingsProductsPage', () => {
 
   it('creates a product from the product form instead of the module form', async () => {
     seedPinia(['product:view', 'product:create'])
-    mocks.routeQuery.action = 'create'
+    mocks.routeQuery['action'] = 'create'
     vi.mocked(productApi.create).mockResolvedValueOnce(mocks.product)
     const wrapper = mount(SettingsProductsPage, {
       global: { stubs: formSubmitStubs },

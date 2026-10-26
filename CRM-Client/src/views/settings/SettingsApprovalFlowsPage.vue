@@ -197,8 +197,21 @@ const handleAICreated = (): void => {
   void loadApprovalFlows()
 }
 
+const isApprovalFlowListItem = (row: unknown): row is ApprovalFlowListItem => {
+  if (typeof row !== 'object' || row === null) return false
+  const record = row as Record<string, unknown>
+  return typeof record['id'] === 'number' &&
+    typeof record['flow_name'] === 'string' &&
+    typeof record['flow_code'] === 'string' &&
+    typeof record['business_type'] === 'string' &&
+    typeof record['is_active'] === 'number'
+}
+
 const asFlowHandler = (handler: (row: ApprovalFlowListItem) => void): ActionConfig['handler'] => {
-  return (row) => { handler(row as ApprovalFlowListItem) }
+  return (row) => {
+    if (!isApprovalFlowListItem(row)) return
+    handler(row)
+  }
 }
 
 const getRowActions = (row: ApprovalFlowListItem): TableRowActionSet => {
@@ -353,7 +366,7 @@ watch([hasAccess, teamId], (): void => {
         </Badge>
       </template>
       <template #mobile-actions="{ row }">
-        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+        <TableRowActions :row="{ ...row }" v-bind="getRowActions(row)" size="lg" />
       </template>
     </DataTable>
   </SettingsContent>

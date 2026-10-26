@@ -2,21 +2,24 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import ListFilterPopover from '../ListFilterPopover.vue'
-import type { ListFilterCondition } from '../listFilterTypes'
+import type { ListFilterCondition, ListFilterField } from '../listFilterTypes'
 
 const attached: VueWrapper[] = []
 
-const stageField = {
+const stageField: ListFilterField = {
   key: 'stage',
   label: '当前阶段',
-  type: 'enum' as const,
+  type: 'enum',
   options: [
     { value: 'early_communication', label: '早期沟通' },
     { value: 'active_progress', label: '积极推进' }
   ]
 }
 
-const mountAttached = (props: Record<string, unknown>): VueWrapper => {
+const mountAttached = (props: {
+  fields: ListFilterField[]
+  modelValue?: ListFilterCondition[]
+}): VueWrapper => {
   const wrapper = mount(ListFilterPopover, {
     props,
     attachTo: document.body

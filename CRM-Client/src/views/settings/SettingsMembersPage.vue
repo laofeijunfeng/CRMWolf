@@ -339,8 +339,21 @@ const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => 
   }
 }
 
+const isTeamMember = (row: unknown): row is TeamMemberResponse => {
+  if (typeof row !== 'object' || row === null) return false
+  const record = row as Record<string, unknown>
+  return typeof record['id'] === 'string' &&
+    typeof record['name'] === 'string' &&
+    typeof record['email'] === 'string' &&
+    typeof record['joined_at'] === 'string' &&
+    Array.isArray(record['roles'])
+}
+
 const asMemberHandler = (handler: (row: TeamMemberResponse) => void): ActionConfig['handler'] => {
-  return (row) => { handler(row as TeamMemberResponse) }
+  return (row) => {
+    if (!isTeamMember(row)) return
+    handler(row)
+  }
 }
 
 const getRowActions = (row: TeamMemberResponse): TableRowActionSet => {
@@ -488,7 +501,7 @@ watch([hasAccess, teamId], (): void => {
         {{ formatDate(row.joined_at) }}
       </template>
       <template #mobile-actions="{ row }">
-        <TableRowActions :row="row" v-bind="getRowActions(row)" size="lg" />
+        <TableRowActions :row="{ ...row }" v-bind="getRowActions(row)" size="lg" />
       </template>
     </DataTable>
   </SettingsContent>

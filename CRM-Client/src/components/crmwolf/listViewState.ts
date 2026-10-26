@@ -53,8 +53,11 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 function formatDateRange(value: ListFilterCondition['value']): string | undefined {
   if (!Array.isArray(value) || value.length !== 2) return undefined
   const dates = value.map((item) => String(item).trim())
-  if (dates.some((item) => !ISO_DATE.test(item))) return undefined
-  const [start, end] = dates[0] <= dates[1] ? dates : [dates[1], dates[0]]
+  const first = dates[0]
+  const second = dates[1]
+  if (first === undefined || second === undefined) return undefined
+  if (!ISO_DATE.test(first) || !ISO_DATE.test(second)) return undefined
+  const [start, end] = first <= second ? [first, second] : [second, first]
   return `${start} 至 ${end}`
 }
 

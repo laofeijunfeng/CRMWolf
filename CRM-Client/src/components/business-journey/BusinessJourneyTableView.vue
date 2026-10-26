@@ -181,7 +181,7 @@ function setDisplayMode(value: string): void {
         </TabsList>
       </Tabs>
     </template>
-    <template v-if="slots.replacement" #replacement>
+    <template v-if="slots['replacement']" #replacement>
       <slot name="replacement" />
     </template>
     <template #mobile-card="{ row }">

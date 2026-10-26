@@ -41,9 +41,9 @@ const InputStub = defineComponent({
         ),
       }),
       props.error !== ''
-        ? h('p', { 'data-testid': `${String(attrs.id)}-error` }, props.error)
+        ? h('p', { 'data-testid': `${String(attrs['id'])}-error` }, props.error)
         : props.helperText !== ''
-          ? h('p', { 'data-testid': `${String(attrs.id)}-helper` }, props.helperText)
+          ? h('p', { 'data-testid': `${String(attrs['id'])}-helper` }, props.helperText)
           : null,
     ])
   },

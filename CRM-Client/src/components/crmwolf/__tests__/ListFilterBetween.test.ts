@@ -4,11 +4,14 @@ import Calendar from '@/components/ui/calendar/Calendar.vue'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import ListFilterPopover from '../ListFilterPopover.vue'
-import type { ListFilterCondition } from '../listFilterTypes'
+import type { ListFilterCondition, ListFilterField } from '../listFilterTypes'
 
 const attached: VueWrapper[] = []
 
-const mountAttached = (props: Record<string, unknown>): VueWrapper => {
+const mountAttached = (props: {
+  fields: ListFilterField[]
+  modelValue?: ListFilterCondition[]
+}): VueWrapper => {
   const wrapper = mount(ListFilterPopover, {
     props,
     attachTo: document.body
@@ -136,7 +139,11 @@ describe('date between filter', () => {
     await flushPromises()
 
     expect(wrapper.emitted('apply')).toBeUndefined()
-    expect(wrapper.props('modelValue')).toEqual(existing)
+    const mountedProps: unknown = wrapper.props()
+    const modelValue = typeof mountedProps === 'object' && mountedProps !== null && 'modelValue' in mountedProps
+      ? mountedProps.modelValue
+      : undefined
+    expect(modelValue).toEqual(existing)
   })
 
   it('treats two clicks on the same day as a one-day range', async () => {
