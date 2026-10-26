@@ -13,6 +13,7 @@ import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import SelectionSummary, { type SummaryItem } from '@/components/crmwolf/SelectionSummary.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
+import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { confirmDialog } from '@/utils/confirmDialog'
@@ -141,6 +142,24 @@ const addMemberForm = reactive<AddCustomerMemberForm>({
 })
 const roleOptions = customerMemberRoleOptions
 const accessOptions = customerMemberAccessOptions
+
+function isCustomerMemberRole(value: string): value is CustomerMemberRole {
+  return roleOptions.some(option => option.value === value)
+}
+
+function isCustomerMemberAccess(value: string): value is CustomerMemberAccessLevel {
+  return accessOptions.some(option => option.value === value)
+}
+
+function handleMemberRoleChange(value: string): void {
+  if (addingCustomerMember.value || !isCustomerMemberRole(value)) return
+  addMemberForm.memberRole = value
+}
+
+function handleMemberAccessChange(value: string): void {
+  if (addingCustomerMember.value || !isCustomerMemberAccess(value)) return
+  addMemberForm.accessLevel = value
+}
 const initialFormSnapshot = ref('')
 const supplementOpen = ref(false)
 
@@ -795,31 +814,31 @@ watch(
         />
 
         <div class="payment-record-dialog__field">
-          <Label for="payment-record-add-member-role">角色</Label>
-          <Select v-model="addMemberForm.memberRole" :disabled="addingCustomerMember">
-            <SelectTrigger id="payment-record-add-member-role">
-              <SelectValue placeholder="请选择角色" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="option in roleOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <Label id="payment-record-add-member-role-label">角色</Label>
+          <SegmentedChoiceControl
+            id="payment-record-add-member-role"
+            :model-value="addMemberForm.memberRole"
+            :options="roleOptions"
+            :disabled="addingCustomerMember"
+            labelled-by="payment-record-add-member-role-label"
+            id-prefix="payment-record-add-member-role"
+            style="--segmented-choice-columns: 5"
+            @update:model-value="handleMemberRoleChange"
+          />
         </div>
 
         <div class="payment-record-dialog__field">
-          <Label for="payment-record-add-member-access">权限</Label>
-          <Select v-model="addMemberForm.accessLevel" :disabled="addingCustomerMember">
-            <SelectTrigger id="payment-record-add-member-access">
-              <SelectValue placeholder="请选择权限" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="option in accessOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <Label id="payment-record-add-member-access-label">权限</Label>
+          <SegmentedChoiceControl
+            id="payment-record-add-member-access"
+            :model-value="addMemberForm.accessLevel"
+            :options="accessOptions"
+            :disabled="addingCustomerMember"
+            labelled-by="payment-record-add-member-access-label"
+            id-prefix="payment-record-add-member-access"
+            style="--segmented-choice-columns: 3"
+            @update:model-value="handleMemberAccessChange"
+          />
         </div>
       </div>
 

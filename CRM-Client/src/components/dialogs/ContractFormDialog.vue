@@ -33,6 +33,7 @@ import {
   FileAttachment,
   InputField,
   SearchableSelectField,
+  SegmentedChoiceControl,
   SelectField,
 } from '@/components/crmwolf'
 import { handleApiError } from '@/utils/errorHandler'
@@ -191,8 +192,8 @@ const showConfirmDialog = closeGuard.showConfirmDialog
 
 // License type options
 const licenseTypeOptions = [
-  { value: 'SUBSCRIPTION', label: '订阅制' },
-  { value: 'PERPETUAL', label: '买断制' }
+  { value: 'SUBSCRIPTION', label: '订阅制', tone: 'warning' as const },
+  { value: 'PERPETUAL', label: '买断制', tone: 'success' as const },
 ]
 
 const selectedOpportunity = computed<ContractOpportunityOption | null>(() => {
@@ -754,18 +755,22 @@ function continueEditing(): void {
           </FormItem>
         </FormField>
 
-        <!-- License Type (Select) -->
         <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <SelectField
-              id="contract-license-type"
-              :model-value="String(value ?? '')"
-              label="授权类型"
-              required
-              :options="licenseTypeOptions"
-              placeholder="请选择授权类型"
-              @update:model-value="handleChange"
-            />
+            <div class="grid gap-wolf-xs">
+              <p id="contract-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+                授权类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+              </p>
+              <SegmentedChoiceControl
+                id="contract-license-type"
+                :model-value="String(value ?? '')"
+                :options="licenseTypeOptions"
+                labelled-by="contract-license-type-label"
+                id-prefix="contract-license-type"
+                style="--segmented-choice-columns: 2"
+                @update:model-value="handleChange"
+              />
+            </div>
             <FormMessage />
           </FormItem>
         </FormField>

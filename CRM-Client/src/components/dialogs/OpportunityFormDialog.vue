@@ -162,15 +162,14 @@ const resolvedSuccessMessage = computed(() => {
 
 // License type options
 const licenseTypeOptions = [
-  { value: LicenseType.SUBSCRIPTION, label: '订阅制' },
-  { value: LicenseType.PERPETUAL, label: '买断制' }
+  { value: LicenseType.SUBSCRIPTION, label: '订阅制', tone: 'warning' as const },
+  { value: LicenseType.PERPETUAL, label: '买断制', tone: 'success' as const },
 ]
 
-// Purchase type options
 const purchaseTypeOptions = [
-  { value: PurchaseType.NEW, label: '新购' },
-  { value: PurchaseType.RENEWAL, label: '续购' },
-  { value: PurchaseType.EXPANSION, label: '增购' }
+  { value: PurchaseType.NEW, label: '新购', tone: 'warning' as const },
+  { value: PurchaseType.RENEWAL, label: '续购', tone: 'success' as const },
+  { value: PurchaseType.EXPANSION, label: '增购', tone: 'primary' as const },
 ]
 const customerSelectOptions = computed(() =>
   customers.value.map(customer => ({
@@ -681,18 +680,22 @@ function continueEditing(): void {
           </FormItem>
         </FormField>
 
-        <!-- License Type (Select) -->
         <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <SelectField
-              id="opportunity-license-type"
-              :model-value="String(value ?? '')"
-              label="授权类型"
-              required
-              :options="licenseTypeOptions"
-              placeholder="请选择授权类型"
-              @update:model-value="handleChange"
-            />
+            <div class="grid gap-wolf-xs">
+              <p id="opportunity-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+                授权类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+              </p>
+              <SegmentedChoiceControl
+                id="opportunity-license-type"
+                :model-value="String(value ?? '')"
+                :options="licenseTypeOptions"
+                labelled-by="opportunity-license-type-label"
+                id-prefix="opportunity-license-type"
+                style="--segmented-choice-columns: 2"
+                @update:model-value="handleChange"
+              />
+            </div>
             <FormMessage />
           </FormItem>
         </FormField>
@@ -715,18 +718,22 @@ function continueEditing(): void {
           </FormItem>
         </FormField>
 
-        <!-- Purchase Type (Select) -->
         <FormField v-slot="{ value, handleChange }" name="purchase_type">
           <FormItem>
-            <SelectField
-              id="opportunity-purchase-type"
-              :model-value="String(value ?? '')"
-              label="采购类型"
-              required
-              :options="purchaseTypeOptions"
-              placeholder="请选择采购类型"
-              @update:model-value="handleChange"
-            />
+            <div class="grid gap-wolf-xs">
+              <p id="opportunity-purchase-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+                采购类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+              </p>
+              <SegmentedChoiceControl
+                id="opportunity-purchase-type"
+                :model-value="String(value ?? '')"
+                :options="purchaseTypeOptions"
+                labelled-by="opportunity-purchase-type-label"
+                id-prefix="opportunity-purchase-type"
+                style="--segmented-choice-columns: 3"
+                @update:model-value="handleChange"
+              />
+            </div>
             <FormMessage />
           </FormItem>
         </FormField>

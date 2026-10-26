@@ -84,6 +84,10 @@ const { handleSubmit, resetForm, setValues, setFieldValue, setFieldError, setErr
 })
 const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 const genderOptions = [{ value: '男', label: '男', tone: 'primary' as const }, { value: '女', label: '女', tone: 'success' as const }]
+const customerLicenseTypeOptions = [
+  { value: 'TRIAL', label: '试用', tone: 'success' as const },
+  { value: 'OFFICIAL', label: '正式', tone: 'primary' as const },
+]
 const submitting = ref(false)
 const loading = ref(false)
 const loadError = ref<FeedbackError | null>(null)
@@ -809,16 +813,21 @@ function continueEditing(): void { closeGuard.continueEditing() }
 
             <!-- Company Scale -->
             <FormField v-slot="{ value, handleChange }" name="company_scale">
-              <FormItem>
-                <SelectField
-                  id="customer-company-scale"
-                  :model-value="String(value ?? '')"
-                  label="公司规模"
-                  required
-                  :options="companyScaleSelectOptions"
-                  placeholder="请选择规模"
-                  @update:model-value="handleChange"
-                />
+              <FormItem class="sm:col-span-2">
+                <div class="grid gap-wolf-xs">
+                  <p id="customer-company-scale-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+                    公司规模 <span class="text-wolf-danger" aria-hidden="true">*</span>
+                  </p>
+                  <SegmentedChoiceControl
+                    id="customer-company-scale"
+                    :model-value="String(value ?? '')"
+                    :options="companyScaleSelectOptions"
+                    labelled-by="customer-company-scale-label"
+                    id-prefix="customer-company-scale"
+                    :style="{ '--segmented-choice-columns': String(companyScaleSelectOptions.length) }"
+                    @update:model-value="handleChange"
+                  />
+                </div>
                 <FormMessage />
               </FormItem>
             </FormField>
@@ -957,14 +966,19 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 :retained-industry-info="retainedIndustryInfo"
                 label="行业"
               />
-              <SelectField
-                id="customer-license-type"
-                :model-value="licenseTypeValue ?? ''"
-                label="授权类型"
-                :options="[{ value: 'TRIAL', label: '试用' }, { value: 'OFFICIAL', label: '正式' }]"
-                :disabled="writeSubmitting"
-                @update:model-value="handleLicenseTypeChange"
-              />
+              <div class="grid gap-wolf-xs">
+                <p id="customer-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">授权类型</p>
+                <SegmentedChoiceControl
+                  id="customer-license-type"
+                  :model-value="licenseTypeValue ?? ''"
+                  :options="customerLicenseTypeOptions"
+                  :disabled="writeSubmitting"
+                  labelled-by="customer-license-type-label"
+                  id-prefix="customer-license-type"
+                  style="--segmented-choice-columns: 2"
+                  @update:model-value="handleLicenseTypeChange"
+                />
+              </div>
               <DateField
                 id="customer-license-expiry-date"
                 label="授权到期日"

@@ -115,6 +115,7 @@ vi.mock('@/components/crmwolf', () => {
       props: {
         modelValue: { type: String, default: '' },
         options: { type: Array, default: () => [] },
+        idPrefix: { type: String, default: '' },
       },
       emits: ['update:modelValue'],
       setup(props, { emit }): () => VNode {
@@ -310,6 +311,20 @@ describe('OpportunityFormDialog product defaults', () => {
 
     expect(wrapper.findComponent({ name: 'SegmentedChoiceControl' }).props('modelValue')).toBe('prd_oa')
     expect(wrapper.get('[data-testid="selected-modules"]').text()).toBe('prm_oa_base')
+    const choices = wrapper.findAllComponents({ name: 'SegmentedChoiceControl' })
+    const license = choices.find(item => item.props('idPrefix') === 'opportunity-license-type')
+    const purchase = choices.find(item => item.props('idPrefix') === 'opportunity-purchase-type')
+    expect(license?.props('modelValue')).toBe('SUBSCRIPTION')
+    expect(license?.props('options')).toEqual([
+      { value: 'SUBSCRIPTION', label: '订阅制', tone: 'warning' },
+      { value: 'PERPETUAL', label: '买断制', tone: 'success' },
+    ])
+    expect(purchase?.props('modelValue')).toBe('NEW')
+    expect(purchase?.props('options')).toEqual([
+      { value: 'NEW', label: '新购', tone: 'warning' },
+      { value: 'RENEWAL', label: '续购', tone: 'success' },
+      { value: 'EXPANSION', label: '增购', tone: 'primary' },
+    ])
     wrapper.unmount()
   })
 
