@@ -66,6 +66,19 @@ const KIND_LABELS: Record<string, string> = {
   OFFLINE_MEETING: '线下会议'
 }
 
+const conversationLoadErrorMessage = (error: unknown): string => {
+  const noNewRecord = '；不会自动开始新的记录。'
+  if (!isAxiosError(error)) return `对话加载失败，请重试${noNewRecord}`
+  const responseData = error.response?.data as { error_code?: unknown } | undefined
+  if (responseData?.error_code === 'DATABASE_SCHEMA_MISMATCH') {
+    return `数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试${noNewRecord}`
+  }
+  if (error.response?.status === 401) return `登录状态已失效，请重新登录后重试${noNewRecord}`
+  if (error.response === undefined) return `服务或网络暂时不可用，请检查网络后重试${noNewRecord}`
+  if (error.response.status >= 500) return `服务暂时不可用，请稍后重试${noNewRecord}`
+  return `对话加载失败，请重试${noNewRecord}`
+}
+
 const isTaskLive = computed(() => task.value?.status === 'ACTIVE')
 
 const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
@@ -692,8 +705,8 @@ const loadConversation = async (): Promise<void> => {
   try {
     applyConversation(await assistantApi.openConversation(), false, order)
     if (processingRecovery.value !== null) await recoverProcessingTurn()
-  } catch {
-    if (!disposed) historyError.value = '对话加载失败，请重试；不会自动开始新的记录。'
+  } catch (error) {
+    if (!disposed) historyError.value = conversationLoadErrorMessage(error)
   } finally { if (!disposed) loadingConversation.value = false }
 }
 void loadConversation()

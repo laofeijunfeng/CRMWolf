@@ -102,3 +102,39 @@ test('narrow viewport keeps the same receipt and two-choice card without overflo
   await page.screenshot({ path: testInfo.outputPath('crm28-mobile-boundary.png'), fullPage: true })
   expect(calls.unexpected).toEqual([])
 })
+
+
+test('schema mismatch explains the migration failure and does not start a record', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'ui.fixture.not-a-credential')
+  })
+  const writes: string[] = []
+  await page.route('**/api/v1/**', async (route) => {
+    const path = new URL(route.request().url()).pathname
+    const json = (status: number, body: unknown) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(body)
+    })
+    const at = '2026-10-23T15:40:00'
+    if (path.endsWith('/teams/user-teams')) {
+      return json(200, { teams: [{ id: 1, name: '界面验证团队', code: 'UI', owner_id: 'fixture', created_at: at }], current_team_id: 1 })
+    }
+    if (path.endsWith('/auth/me')) {
+      return json(200, { id: 2, name: '界面验证', email: 'fixture@example.invalid', status: 'ACTIVE', created_at: at, updated_at: at })
+    }
+    if (path.endsWith('/follow-up-tasks/confirmation-cases/pending-count')) return json(200, { count: 0 })
+    if (path.endsWith('/auth/me/roles')) return json(200, [])
+    if (path.endsWith('/auth/me/permissions')) return json(200, { permissions: [], total: 0, cached: false })
+    if (path.endsWith('/assistant/conversation/open')) {
+      return json(500, { error_code: 'DATABASE_SCHEMA_MISMATCH', detail: '数据库结构与当前代码版本不一致，请执行数据库迁移后重试。' })
+    }
+    if (route.request().method() !== 'GET') writes.push(path)
+    return json(404, { detail: 'Unexpected isolated fixture request' })
+  })
+  await page.goto('/assistant')
+  await expect(page.getByRole('alert')).toContainText('数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试；不会自动开始新的记录。')
+  await expect(page.getByRole('button', { name: '重试同步' })).toBeVisible()
+  const shot = testInfo.outputPath('crm43-schema-mismatch.png')
+  await page.screenshot({ path: shot, fullPage: true })
+  expect(writes).toEqual([])
+})

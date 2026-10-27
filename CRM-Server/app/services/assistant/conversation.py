@@ -6,7 +6,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.exceptions import is_database_schema_mismatch
+from app.core.logging import get_logger
 from app.crud import assistant_conversation as crud
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest
 from app.schemas.assistant_conversation import (
@@ -33,6 +36,8 @@ from app.services.assistant.turns import (
     accept_submit,
     schedule_turn,
 )
+
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -72,7 +77,19 @@ class ConversationService:
         rows, older = crud.page(db, conversation, before=before)
         messages = []
         for row in rows:
-            messages.extend(self._messages(db, conversation, row))
+            try:
+                messages.extend(self._messages(db, conversation, row))
+            except SQLAlchemyError:
+                raise
+            except Exception as exc:
+                if is_database_schema_mismatch(exc):
+                    raise
+                logger.warning(
+                    "assistant history entry projection failed: entry=%s error_type=%s",
+                    row.public_id,
+                    type(exc).__name__,
+                )
+                messages.extend(self._unavailable_messages(row))
         focused = crud.owned_task(db, conversation, conversation.focused_task_public_id)
         pending = (
             crud.owned_entry(db, conversation, conversation.pending_choice_id)
@@ -167,6 +184,20 @@ class ConversationService:
                         )
                     )
         return result
+
+    @staticmethod
+    def _unavailable_messages(row: AssistantConversationEntry) -> list[ConversationMessage]:
+        at = row.created_time.isoformat()
+        return [
+            ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at),
+            ConversationMessage(
+                id=f"{row.public_id}:unavailable",
+                role="assistant",
+                text="这条历史结果暂时无法显示，原记录仍保留。",
+                at=at,
+                outcome="failure",
+            ),
+        ]
 
     def _legacy_messages(
         self, db: Session, conversation: AssistantConversation, row: AssistantConversationEntry, task: AssistantTask

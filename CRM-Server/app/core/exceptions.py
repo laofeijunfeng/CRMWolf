@@ -10,6 +10,31 @@ from app.core.logging import get_logger, log_with_fields
 
 logger = get_logger(__name__)
 
+_DATABASE_SCHEMA_ERROR_CODES = frozenset({1054, 1146})
+DATABASE_SCHEMA_MISMATCH_DETAIL = "数据库结构与当前代码版本不一致，请执行数据库迁移后重试。"  # noqa: RUF001
+
+
+def _mysql_error_code(exc: BaseException) -> int | None:
+    errno = getattr(exc, "errno", None)
+    if isinstance(errno, int):
+        return errno
+    args = getattr(exc, "args", ())
+    if args and isinstance(args[0], int):
+        return args[0]
+    return None
+
+
+def is_database_schema_mismatch(exc: BaseException | None) -> bool:
+    """Return whether an exception is a missing-table or missing-column error."""
+    current = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if _mysql_error_code(current) in _DATABASE_SCHEMA_ERROR_CODES:
+            return True
+        current = getattr(current, "orig", None) or current.__cause__ or current.__context__
+    return False
+
 
 class AppException(Exception):
     def __init__(
@@ -225,13 +250,15 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
 
 
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    schema_mismatch = is_database_schema_mismatch(exc)
     logger.error(
-        "数据库错误",
+        "数据库结构版本不一致" if schema_mismatch else "数据库错误",
         exc_info=True,
         extra={"extra_fields": {
             "path": str(request.url.path),
             "method": request.method,
-            "error_type": type(exc).__name__
+            "error_type": type(exc).__name__,
+            "schema_mismatch": schema_mismatch,
         }}
     )
     if _is_customer_profile_path(request):
@@ -244,8 +271,8 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
-            "error_code": "DATABASE_ERROR",
-            "detail": "数据库操作失败",
+            "error_code": "DATABASE_SCHEMA_MISMATCH" if schema_mismatch else "DATABASE_ERROR",
+            "detail": DATABASE_SCHEMA_MISMATCH_DETAIL if schema_mismatch else "数据库操作失败",
             "path": str(request.url)
         }
     )

@@ -938,3 +938,80 @@ def test_root_understanding_waits_150_seconds(monkeypatch):
     )
     assert seen["timeout_seconds"] == ROOT_UNDERSTANDING_TIMEOUT_SECONDS == 150
     assert result.boundary == "AMBIGUOUS"
+
+
+def test_single_broken_history_projection_keeps_other_entries_readable(db, monkeypatch):
+    from app.crud import assistant_conversation as crud
+
+    service = ConversationService(classifier=Classifier(decision()))
+    service.open(db, team_id=1, user_id=2)
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    db.add_all(
+        [
+            AssistantConversationEntry(
+                conversation_id=conv.id,
+                team_id=1,
+                user_id=2,
+                client_request_id="history-good",
+                input_fingerprint="x",
+                user_text="正常历史",
+                state="READY",
+            ),
+            AssistantConversationEntry(
+                conversation_id=conv.id,
+                team_id=1,
+                user_id=2,
+                client_request_id="history-broken",
+                input_fingerprint="x",
+                user_text="无法投影的原句",
+                state="READY",
+            ),
+        ]
+    )
+    db.commit()
+    original = ConversationService._messages
+
+    def project(self, session, conversation, row):
+        if row.user_text == "无法投影的原句":
+            raise ValueError("malformed historical projection")
+        return original(self, session, conversation, row)
+
+    monkeypatch.setattr(ConversationService, "_messages", project)
+    page = service.read(db, team_id=1, user_id=2)
+    assert [message.text for message in page.messages] == [
+        "正常历史",
+        "无法投影的原句",
+        "这条历史结果暂时无法显示，原记录仍保留。",
+    ]
+    assert page.messages[1].role == "user"
+    assert page.messages[2].outcome == "failure"
+
+
+def test_schema_mismatch_is_not_downgraded_to_a_broken_history_entry(db, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app.crud import assistant_conversation as crud
+
+    service = ConversationService(classifier=Classifier(decision()))
+    service.open(db, team_id=1, user_id=2)
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    db.add(
+        AssistantConversationEntry(
+            conversation_id=conv.id,
+            team_id=1,
+            user_id=2,
+            client_request_id="history-schema-error",
+            input_fingerprint="x",
+            user_text="结构错误不能伪装成坏历史",
+            state="READY",
+        )
+    )
+    db.commit()
+    schema_error = OperationalError(
+        "SELECT crm_assistant_conversations.version",
+        {},
+        RuntimeError(1054, "Unknown column 'crm_assistant_conversations.version'"),
+    )
+    monkeypatch.setattr(ConversationService, "_messages", lambda *args: (_ for _ in ()).throw(schema_error))
+    with pytest.raises(OperationalError):
+        service.read(db, team_id=1, user_id=2)
