@@ -131,3 +131,38 @@ describe('pending boundary cancellation', () => {
     expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
   })
 })
+
+
+describe('conversation load failures', () => {
+  async function loadError(error: unknown): Promise<string> {
+    mocks.open.mockRejectedValue(error)
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(mocks.text).not.toHaveBeenCalled()
+    expect(mocks.command).not.toHaveBeenCalled()
+    return wrapper.get('[role="alert"]').text()
+  }
+
+  it('classifies a schema mismatch without starting a new record', async () => {
+    const text = await loadError({
+      isAxiosError: true,
+      response: { status: 500, data: { error_code: 'DATABASE_SCHEMA_MISMATCH' } }
+    })
+    expect(text).toContain('数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试；不会自动开始新的记录。')
+  })
+
+  it('asks the user to sign in again when the session is gone', async () => {
+    const text = await loadError({ isAxiosError: true, response: { status: 401, data: {} } })
+    expect(text).toContain('登录状态已失效，请重新登录后重试；不会自动开始新的记录。')
+  })
+
+  it('keeps a retryable network message when the server cannot be reached', async () => {
+    const text = await loadError({ isAxiosError: true, response: undefined })
+    expect(text).toContain('服务或网络暂时不可用，请检查网络后重试；不会自动开始新的记录。')
+  })
+
+  it('keeps the original failure sentence for an unclassified error', async () => {
+    const text = await loadError(new Error('boom'))
+    expect(text).toContain('对话加载失败，请重试；不会自动开始新的记录。')
+  })
+})
