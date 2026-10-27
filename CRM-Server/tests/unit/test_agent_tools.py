@@ -21,7 +21,7 @@ from app.models.agent import (
     AgentToolCallStatus,
 )
 from app.models.contract import Contract
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_fact import CustomerFact, CustomerFactRevision, CustomerFactSource
 from app.models.customer_identity_term import CustomerIdentityTerm
@@ -49,6 +49,7 @@ from app.models.user import User
 from app.models.user_role import UserRole
 from app.services.acquisition_source_service import seed_default_sources
 from app.services.agent.tool_registry import AgentToolRegistry
+from app.services.agent.tools.api_client import CRMAPIClientError
 from app.services.agent.tools.base import AgentToolContext
 from app.services.agent.tools.service import CRMAgentToolService
 from app.services.agent.work_summary_graph import WorkSummaryGraphService
@@ -68,7 +69,7 @@ FOLLOW_UP_CONFIRMATION_CASE_PUBLIC_ID = "fuc_00000000000000000000000000002001"
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -235,7 +236,7 @@ class FakeCustomerEmbeddingService:
     def __init__(self) -> None:
         self.queries: list[str] = []
 
-    def embed_query(self, db, team_id, text):  # noqa: ANN001
+    def embed_query(self, db, team_id, text):
         self.queries.append(text)
         return [0.1, 0.2, 0.3]
 
@@ -284,7 +285,7 @@ class DisabledCustomerKnowledgeCandidateService:
 
 
 class FailingFollowUpTaskSemanticEvidenceService:
-    def recall(self, *args, **kwargs):  # noqa: ANN002, ANN003
+    def recall(self, *args, **kwargs):
         raise AssertionError("structured task query should not use semantic evidence")
 
 
@@ -301,6 +302,7 @@ def _db_session(extra_tables=None):
         connect_args={"check_same_thread": False},
     )
     tables = [
+        CustomerProduct.__table__,
         AgentSession.__table__,
         AgentMessage.__table__,
         AgentToolCall.__table__,
@@ -562,7 +564,7 @@ async def test_agent_tool_search_customers_uses_customer_knowledge_when_keyword_
                 business_object_type=None,
                 business_object_id=None,
                 title="客户概况",
-                text="中国科学院信息工程研究所，简称中科院信工所。",
+                text="中国科学院信息工程研究所\N{FULLWIDTH COMMA}简称中科院信工所。",
             )
         ]
     )
@@ -731,7 +733,7 @@ async def test_agent_tool_search_customers_does_not_promote_low_score_semantic_h
                 business_object_type=None,
                 business_object_id=None,
                 title="跟进记录",
-                text="续订采购流程相关，但没有客户身份文本。",
+                text="续订采购流程相关\N{FULLWIDTH COMMA}但没有客户身份文本。",
             )
         ]
     )
@@ -794,7 +796,7 @@ async def test_agent_tool_search_customers_does_not_promote_medium_semantic_hits
                 business_object_type=None,
                 business_object_id=None,
                 title="跟进记录",
-                text="内容语义相关，但没有客户名称身份证据。",
+                text="内容语义相关\N{FULLWIDTH COMMA}但没有客户名称身份证据。",
             )
         ]
     )
@@ -1054,7 +1056,12 @@ async def test_agent_tool_search_customers_uses_generated_customer_name_alias_wh
 
 
 def test_generated_identity_terms_include_parenthetical_company_short_name():
-    terms = {term for term, _term_type in generated_identity_terms_for_customer_name("华米（北京）信息科技有限公司")}
+    terms = {
+        term
+        for term, _term_type in generated_identity_terms_for_customer_name(
+            "华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司"
+        )
+    }
 
     assert "华米科技" in terms
     assert "华米信息科技" in terms
@@ -1083,7 +1090,7 @@ def test_customer_identity_rebuild_persists_generated_terms():
             Customer(
                 id=607,
                 team_id=1,
-                account_name="华米（北京）信息科技有限公司",
+                account_name="华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司",
                 city="北京",
                 status=0,
                 creator_id="2",
@@ -1131,7 +1138,7 @@ async def test_agent_tool_search_customers_resolves_parenthetical_company_short_
             Customer(
                 id=604,
                 team_id=1,
-                account_name="华米（北京）信息科技有限公司",
+                account_name="华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司",
                 city="北京",
                 status=0,
                 creator_id="2",
@@ -1142,7 +1149,10 @@ async def test_agent_tool_search_customers_resolves_parenthetical_company_short_
         result = await service.search_customers(_context(db), "华米科技", limit=5)
 
         assert result.success is True
-        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["account_name"] == (
+            "华米\N{FULLWIDTH LEFT PARENTHESIS}北京"
+            "\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司"
+        )
         assert result.data["items"][0]["match"]["source"] == "generated_match_term"
         assert result.data["items"][0]["match"]["score"] >= 0.86
         assert result.data["retrieval"]["identity_decision"] == "auto_select"
@@ -1178,7 +1188,7 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
             Customer(
                 id=608,
                 team_id=1,
-                account_name="华米（北京）信息科技有限公司",
+                account_name="华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司",
                 city="北京",
                 status=0,
                 creator_id="2",
@@ -1191,7 +1201,10 @@ async def test_agent_tool_search_customers_uses_persisted_identity_term():
         result = await service.search_customers(_context(db), "华米科技", limit=5)
 
         assert result.success is True
-        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["account_name"] == (
+            "华米\N{FULLWIDTH LEFT PARENTHESIS}北京"
+            "\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司"
+        )
         assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
         assert "customer_identity_term" in result.data["retrieval"]["identity_source_counts"]
     finally:
@@ -1275,7 +1288,7 @@ async def test_agent_tool_search_customers_resolves_short_core_customer_name():
             Customer(
                 id=609,
                 team_id=1,
-                account_name="华米（北京）信息科技有限公司",
+                account_name="华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司",
                 city="北京",
                 status=0,
                 creator_id="2",
@@ -1288,7 +1301,10 @@ async def test_agent_tool_search_customers_resolves_short_core_customer_name():
         result = await service.search_customers(_context(db), "华米", limit=5)
 
         assert result.success is True
-        assert result.data["items"][0]["account_name"] == "华米（北京）信息科技有限公司"
+        assert result.data["items"][0]["account_name"] == (
+            "华米\N{FULLWIDTH LEFT PARENTHESIS}北京"
+            "\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司"
+        )
         assert result.data["items"][0]["match"]["source"] in {"customer_identity_term", "hybrid_identity"}
         assert result.data["items"][0]["match"]["score"] >= 0.9
         assert result.data["retrieval"]["identity_decision"] == "auto_select"
@@ -1322,7 +1338,10 @@ async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguou
                 Customer(
                     id=605,
                     team_id=1,
-                    account_name="华米（北京）信息科技有限公司",
+                    account_name=(
+                        "华米\N{FULLWIDTH LEFT PARENTHESIS}北京"
+                        "\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司"
+                    ),
                     city="北京",
                     status=0,
                     creator_id="2",
@@ -1344,7 +1363,7 @@ async def test_agent_tool_search_customers_marks_close_identity_matches_ambiguou
         assert result.success is True
         assert [item["account_name"] for item in result.data["items"]] == [
             "华米科技股份有限公司",
-            "华米（北京）信息科技有限公司",
+            "华米\N{FULLWIDTH LEFT PARENTHESIS}北京\N{FULLWIDTH RIGHT PARENTHESIS}信息科技有限公司",
         ]
         assert result.data["retrieval"]["identity_decision"] == "requires_confirmation"
         assert result.data["retrieval"]["identity_conflict_count"] == 2
@@ -1778,7 +1797,7 @@ async def test_agent_tool_list_follow_up_tasks_uses_semantic_evidence_as_filtere
                 business_object_type="follow_up_task",
                 business_object_id=budget_task_id,
                 title="跟进任务: 回访预算",
-                text="客户说本周确认预算，需要周五回访预算进展。",
+                text="客户说本周确认预算\N{FULLWIDTH COMMA}需要周五回访预算进展。",
                 metadata_json={"task_public_id": budget_task_id, "status": FollowUpTaskStatus.OPEN},
             ),
             CustomerEvidenceSearchResult(
@@ -2046,7 +2065,7 @@ async def test_agent_tool_get_follow_up_task_detail_uses_public_id_and_hides_int
                 customer_id=101,
                 activity_kind="PHONE_FOLLOW_UP",
                 title="电话沟通预算",
-                source_content="客户说本周看预算，周五再联系",
+                source_content="客户说本周看预算\N{FULLWIDTH COMMA}周五再联系",
                 summary="客户还在确认预算",
                 next_action="周五回访预算进展",
                 next_follow_time=datetime(2026, 8, 7, 9, 30, 0),
@@ -2143,10 +2162,10 @@ async def test_agent_tool_summarize_completed_work_returns_graph_outcome(monkeyp
     engine, db = _db_session(_sales_commitment_tables())
 
     class MissingConfigCrud:
-        def get_config(self, db, team_id):  # noqa: ARG002
+        def get_config(self, db, team_id):
             return None
 
-        def get_decrypted_api_key(self, db, team_id):  # noqa: ARG002
+        def get_decrypted_api_key(self, db, team_id):
             return None
 
     summary_graph = WorkSummaryGraphService(
@@ -2195,10 +2214,10 @@ async def test_agent_tool_summarize_completed_work_fetches_all_71_facts(monkeypa
     engine, db = _db_session(_sales_commitment_tables())
 
     class MissingConfigCrud:
-        def get_config(self, db, team_id):  # noqa: ARG002
+        def get_config(self, db, team_id):
             return None
 
-        def get_decrypted_api_key(self, db, team_id):  # noqa: ARG002
+        def get_decrypted_api_key(self, db, team_id):
             return None
 
     summary_graph = WorkSummaryGraphService(
@@ -2557,7 +2576,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
             source_content="今天和王总沟通了项目进展",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
@@ -2570,7 +2589,7 @@ async def test_agent_tool_create_customer_activity_is_idempotent():
             source_content="今天和王总沟通了项目进展",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             next_action="下周三确认进展",
             next_follow_time="2026-07-29T09:00:00",
             idempotency_suffix="msg-001",
@@ -2629,7 +2648,7 @@ async def test_agent_write_tool_propagates_stable_action_key_to_internal_api():
             source_content="稳定动作键透传",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             idempotency_suffix="act_123",
         )
 
@@ -2655,7 +2674,7 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
             source_content="第一次内容",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             idempotency_suffix="msg-contract",
         )
         conflict = await service.create_customer_activity(
@@ -2666,7 +2685,7 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
             source_content="第二次不同内容",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             idempotency_suffix="msg-contract",
         )
 
@@ -2684,7 +2703,13 @@ async def test_agent_tool_rejects_same_idempotency_key_with_changed_payload():
 async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
     class ReconcileCRMAPIClient(FakeCRMAPIClient):
         async def request(self, method, path, authorization, *, params=None, json=None, idempotency_key=None):
-            if method == "GET" and path == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/create_customer_activity:3:msg-reconcile":
+            if (
+                method == "GET"
+                and path == (
+                    f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/"
+                    "create_customer_activity:3:msg-reconcile"
+                )
+            ):
                 self.calls.append({"method": method, "path": path, "params": params, "json": json})
                 return {
                     "id": 9010,
@@ -2719,7 +2744,7 @@ async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
         "next_follow_time_source": None,
         "effectiveness_score": 82,
         "effectiveness_is_valid": True,
-        "effectiveness_reason": "信息完整，已完成最终评估。",
+        "effectiveness_reason": "信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
         "effectiveness_detail_json": {},
     }
     db.add(
@@ -2742,7 +2767,7 @@ async def test_agent_tool_reconciles_dispatched_write_from_existing_activity():
             source_content="可能已写入的内容",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             idempotency_suffix="msg-reconcile",
         )
 
@@ -2777,7 +2802,7 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
         "next_follow_time_source": None,
         "effectiveness_score": 82,
         "effectiveness_is_valid": True,
-        "effectiveness_reason": "信息完整，已完成最终评估。",
+        "effectiveness_reason": "信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
         "effectiveness_detail_json": {},
     }
     db.add(
@@ -2800,7 +2825,7 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
             source_content="可能已写入的内容",
             effectiveness_score=82,
             effectiveness_is_valid=True,
-            effectiveness_reason="信息完整，已完成最终评估。",
+            effectiveness_reason="信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             idempotency_suffix="msg-dispatched",
         )
 
@@ -2808,7 +2833,10 @@ async def test_agent_tool_fails_closed_for_previously_dispatched_write():
         assert result.status_code == 409
         assert result.error_message == "idempotency_execution_ambiguous"
         assert [call["method"] for call in fake_client.calls] == ["GET"]
-        assert fake_client.calls[0]["path"] == f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/create_customer_activity:3:msg-dispatched"
+        assert fake_client.calls[0]["path"] == (
+            f"/v1/customer-activities/{CUSTOMER_PUBLIC_ID}/agent-submissions/"
+            "create_customer_activity:3:msg-dispatched"
+        )
         assert db.query(AgentToolCall).count() == 0
     finally:
         db.close()
@@ -2823,14 +2851,22 @@ async def test_activity_post_response_cannot_claim_success_without_persisted_int
             if method == "GET" and "/agent-submissions/" in path:
                 self.calls.append({"method": method, "path": path})
                 raise CRMAPIClientError("原始持久回执尚不完整", status_code=409)
-            return await super().request(method, path, authorization, params=params, json=json, idempotency_key=idempotency_key)
+            return await super().request(
+                method, path, authorization, params=params, json=json, idempotency_key=idempotency_key
+            )
 
     engine, db = _db_session()
     client = UnscheduledClient()
     service = CRMAgentToolService(api_client=client)
-    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
-                  source_content="scheduled ID is not durable", effectiveness_score=82,
-                  effectiveness_is_valid=True, effectiveness_reason="valid", idempotency_suffix="unscheduled")
+    kwargs = {
+        'customer_id': CUSTOMER_PUBLIC_ID,
+        'activity_kind': "PHONE_FOLLOW_UP",
+        'source_content': "scheduled ID is not durable",
+        'effectiveness_score': 82,
+        'effectiveness_is_valid': True,
+        'effectiveness_reason': "valid",
+        'idempotency_suffix': "unscheduled",
+    }
     try:
         first = await service.create_customer_activity(_context(db), **kwargs)
         second = await service.create_customer_activity(_context(db), **kwargs)
@@ -2848,14 +2884,22 @@ async def test_activity_lost_post_response_never_dispatches_second_post():
             if method == "POST" and "/customer-activities/" in path:
                 self.calls.append({"method": method, "path": path})
                 raise TimeoutError("response lost after commit")
-            return await super().request(method, path, authorization, params=params, json=json, idempotency_key=idempotency_key)
+            return await super().request(
+                method, path, authorization, params=params, json=json, idempotency_key=idempotency_key
+            )
 
     engine, db = _db_session()
     client = LostResponseClient()
     service = CRMAgentToolService(api_client=client)
-    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
-                  source_content="one POST only", effectiveness_score=82, effectiveness_is_valid=True,
-                  effectiveness_reason="valid", idempotency_suffix="lost-response")
+    kwargs = {
+        'customer_id': CUSTOMER_PUBLIC_ID,
+        'activity_kind': "PHONE_FOLLOW_UP",
+        'source_content': "one POST only",
+        'effectiveness_score': 82,
+        'effectiveness_is_valid': True,
+        'effectiveness_reason': "valid",
+        'idempotency_suffix': "lost-response",
+    }
     try:
         first = await service.create_customer_activity(_context(db), **kwargs)
         second = await service.create_customer_activity(_context(db), **kwargs)
@@ -2878,15 +2922,33 @@ async def test_activity_reconciliation_rejects_fabricated_receipt_and_changed_se
     engine, db = _db_session()
     client = SpoofClient()
     service = CRMAgentToolService(api_client=client)
-    kwargs = dict(customer_id=CUSTOMER_PUBLIC_ID, activity_kind="PHONE_FOLLOW_UP",
-                  source_content="original", effectiveness_score=82, effectiveness_is_valid=True,
-                  effectiveness_reason="valid", idempotency_suffix="spoof")
+    kwargs = {
+        'customer_id': CUSTOMER_PUBLIC_ID,
+        'activity_kind': "PHONE_FOLLOW_UP",
+        'source_content': "original",
+        'effectiveness_score': 82,
+        'effectiveness_is_valid': True,
+        'effectiveness_reason': "valid",
+        'idempotency_suffix': "spoof",
+    }
     context = _context(db)
-    payload = dict(customer_id=CUSTOMER_PUBLIC_ID, customer_name=None, activity_kind="PHONE_FOLLOW_UP",
-                   source_content="original", title=None, content_json=None, summary=None,
-                   next_action=None, next_action_source=None, next_follow_time=None,
-                   next_follow_time_source=None, effectiveness_score=82, effectiveness_is_valid=True,
-                   effectiveness_reason="valid", effectiveness_detail_json={})
+    payload = {
+        'customer_id': CUSTOMER_PUBLIC_ID,
+        'customer_name': None,
+        'activity_kind': "PHONE_FOLLOW_UP",
+        'source_content': "original",
+        'title': None,
+        'content_json': None,
+        'summary': None,
+        'next_action': None,
+        'next_action_source': None,
+        'next_follow_time': None,
+        'next_follow_time_source': None,
+        'effectiveness_score': 82,
+        'effectiveness_is_valid': True,
+        'effectiveness_reason': "valid",
+        'effectiveness_detail_json': {},
+    }
     db.add(AgentIdempotencyKey(team_id=1, user_id=2, session_id=99,
                                action_key="create_customer_activity:3:spoof", status=AgentIdempotencyStatus.DISPATCHED,
                                request_hash=service._hash_json(payload)))
@@ -3436,7 +3498,7 @@ async def test_agent_tool_registry_blocks_write_without_hitl_confirmation():
                     "source_content": "客户项目还在评估",
                     "effectiveness_score": 82,
                     "effectiveness_is_valid": True,
-                    "effectiveness_reason": "信息完整，已完成最终评估。",
+                    "effectiveness_reason": "信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
                 },
             )
 
@@ -3463,7 +3525,7 @@ async def test_agent_tool_registry_allows_confirmed_write():
                 "source_content": "客户项目还在评估",
                 "effectiveness_score": 82,
                 "effectiveness_is_valid": True,
-                "effectiveness_reason": "信息完整，已完成最终评估。",
+                "effectiveness_reason": "信息完整\N{FULLWIDTH COMMA}已完成最终评估。",
             },
         )
 

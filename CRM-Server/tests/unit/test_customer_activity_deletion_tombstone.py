@@ -11,6 +11,7 @@ from app.crud.customer_activity import CustomerActivityCRUD
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
+from app.models.customer_vector_document import CustomerVectorDocument
 
 
 @compiles(BigInteger, "sqlite")
@@ -29,7 +30,10 @@ def test_hard_delete_writes_tombstone_in_same_transaction():
 
     Base.metadata.create_all(
         engine,
-        tables=[Customer.__table__, CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__],
+        tables=[
+            Customer.__table__, CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__, CustomerVectorDocument.__table__,
+        ],
     )
     db = sessionmaker(bind=engine)()
     try:
@@ -81,11 +85,11 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
     from app.crud.customer_activity_ai_job import CustomerActivityAIJobCRUD
     from app.crud.customer_activity_post_commit_job import CustomerActivityPostCommitJobCRUD
     from app.models.customer_activity_ai_job import CustomerActivityAIJob
-    from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
     from app.models.customer_activity_post_commit_job import (
         CustomerActivityPostCommitJob,
         CustomerActivityPostCommitJobStatus,
     )
+    from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
     from app.services.customer_activity_write_service import CustomerActivityWriteService
     from app.services.customer_intelligence_refresh_service import CustomerIntelligenceCommittedEventRequest
 
@@ -101,6 +105,7 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
             Customer.__table__,
             CustomerActivity.__table__,
             CustomerActivityDeletionTombstone.__table__,
+            CustomerVectorDocument.__table__,
             CustomerActivityAIJob.__table__,
             CustomerActivityPostCommitJob.__table__,
             CustomerOpportunitySuggestionJob.__table__,
@@ -197,7 +202,9 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
             graph_thread_id="opp-thread-completed",
             result_json={"decision": "NO_ACTION"},
         )
-        db.add_all([ai_job, ai_completed, post_commit_job, opportunity_suggestion_job, opportunity_suggestion_completed])
+        db.add_all([
+            ai_job, ai_completed, post_commit_job, opportunity_suggestion_job, opportunity_suggestion_completed
+        ])
         db.commit()
 
         class _Projection:

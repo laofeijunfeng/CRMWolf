@@ -2,11 +2,9 @@
 import json
 import logging
 from uuid import UUID
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.exceptions import HTTPException
-from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -17,12 +15,12 @@ from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
 from app.crud.team import team_crud
 from app.crud.user import user_crud
+from app.models.agent import AgentSession
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
     AgentCreateSessionRequest,
     AgentSessionResponse,
-    AgentSSEEventEnvelope,
     AgentWorkflowActionResponse,
     AgentWorkflowActionSummaryResponse,
     AgentWorkflowDetailResponse,
@@ -61,7 +59,6 @@ from app.services.customer_opportunity_suggestion_agent_ui_projection import (
 from app.services.customer_opportunity_suggestion_operation_projector import (
     customer_opportunity_suggestion_operation_projector,
 )
-from app.utils.sse_encoder import SSEJsonEncoder
 
 router = APIRouter(prefix="/v1/agent", tags=["CRM AI Agent"])
 logger = logging.getLogger(__name__)
@@ -70,6 +67,13 @@ agent_ui_action_repository = AgentUIActionRepository()
 
 
 _WORKFLOW_TERMINAL_STATUSES = {"EXECUTED", "SKIPPED", "FAILED", "CANCELLED", "BLOCKED"}
+
+# Keep dependency defaults as import-time metadata, preserving Python call signatures.
+_team_dependency = Depends(get_current_user_team)
+_user_dependency = Depends(get_current_active_user)
+_database_dependency = Depends(get_db)
+_credentials_dependency = Depends(security)
+_message_ids_query = Query(default=[])
 
 
 def _read_repair_customer_intelligence_operations(
@@ -184,13 +188,6 @@ def _read_repair_customer_activity_post_commit_operations(
     return repaired
 
 
-def _encode_sse(event: AgentSSEEventEnvelope) -> str:
-    payload = event.model_dump(mode="json", exclude_none=True)
-    return f"data: {json.dumps(payload, ensure_ascii=False, cls=SSEJsonEncoder)}\n\n"
-
-
-def _authorization_header(credentials: HTTPAuthorizationCredentials) -> str:
-    return f"{credentials.scheme} {credentials.credentials}"
 def _project_agent_message_actions(
     db: Session,
     items: list[AgentUIEnvelope],
@@ -244,7 +241,7 @@ def _project_agent_message_actions(
         except Exception:
             db.rollback()
             logger.exception(
-                "读取 Agent 跟进确认 Case 状态失败，显式绑定卡片降级为只读: session_id=%s",
+                "读取 Agent 跟进确认 Case 状态失败\N{FULLWIDTH COMMA}显式绑定卡片降级为只读: session_id=%s",
                 session_id,
             )
             follow_up_case_statuses_by_action.update(
@@ -269,10 +266,10 @@ def _project_agent_message_actions(
 @router.post("/sessions", response_model=AgentSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent_session(
     request: AgentCreateSessionRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> AgentSession:
     session = agent_session_crud.create(
         db,
         build_session_create(request, team_id=team_id, user_id=current_user.id),
@@ -284,11 +281,11 @@ async def create_agent_session(
 async def list_agent_sessions(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    session_status: Optional[str] = Query(None, description="会话状态"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    session_status: str | None = Query(None, description="会话状态"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> PaginatedResponse[AgentSessionResponse]:
     skip = (page - 1) * page_size
     items, total = agent_session_crud.list_by_user(
         db,
@@ -393,7 +390,11 @@ def _reconstruct_failure_observability(user_text: str, assistant_message: object
         FailureDispatchResult(
             error=AgentExecutionError(
                 code=error_code,
-                message=message if isinstance(message, str) and message.strip() else "这次没处理成，请稍后再试。",
+                message=(
+                    message
+                    if isinstance(message, str) and message.strip()
+                    else "这次没处理成\N{FULLWIDTH COMMA}请稍后再试。"
+                ),
             )
         ),
         user_text=user_text,
@@ -410,7 +411,11 @@ def _run_log_observability(user_text: str, assistant_message: object) -> dict[st
 
 def _run_log_list_item(db: Session, user_message: object, assistant_message: object) -> AgentRunLogTurnListItem:
     raw_text = getattr(user_message, "content", None)
-    user_text = raw_text.strip() if isinstance(raw_text, str) and raw_text.strip() else "（无文本）"
+    user_text = (
+        raw_text.strip()
+        if isinstance(raw_text, str) and raw_text.strip()
+        else "\N{FULLWIDTH LEFT PARENTHESIS}无文本\N{FULLWIDTH RIGHT PARENTHESIS}"
+    )
     observability = _run_log_observability(user_text, assistant_message)
     return AgentRunLogTurnListItem(
         turn_id=str(user_message.turn_id),
@@ -418,7 +423,11 @@ def _run_log_list_item(db: Session, user_message: object, assistant_message: obj
         user_name=_run_log_user_name(db, int(user_message.user_id)),
         user_text=user_text,
         outcome=str(observability.get("outcome")),
-        summary=str(observability.get("summary") or assistant_message.content or "（无摘要）"),
+        summary=str(
+            observability.get("summary")
+            or assistant_message.content
+            or "\N{FULLWIDTH LEFT PARENTHESIS}无摘要\N{FULLWIDTH RIGHT PARENTHESIS}"
+        ),
         quality_score=observability.get("quality_score"),
         customer_name=observability.get("customer_name"),
         model=observability.get("model"),
@@ -430,12 +439,12 @@ def _run_log_list_item(db: Session, user_message: object, assistant_message: obj
 async def list_agent_run_log_turns(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    user_id: Optional[int] = Query(None, gt=0, description="按销售筛选"),
-    outcome: Optional[str] = Query(None, description="按回合结论筛选"),
-    q: Optional[str] = Query(None, description="搜索用户原文、客户或摘要"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    user_id: int | None = Query(None, gt=0, description="按销售筛选"),
+    outcome: str | None = Query(None, description="按回合结论筛选"),
+    q: str | None = Query(None, description="搜索用户原文、客户或摘要"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
 ) -> PaginatedResponse[AgentRunLogTurnListItem]:
     _require_run_log_access(db, team_id=team_id, user_id=current_user.id)
     skip = (page - 1) * page_size
@@ -460,9 +469,9 @@ async def list_agent_run_log_turns(
 @router.get("/run-log/turns/{turn_id}", response_model=AgentRunLogTurnDetail)
 async def get_agent_run_log_turn(
     turn_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
 ) -> AgentRunLogTurnDetail:
     _require_run_log_access(db, team_id=team_id, user_id=current_user.id)
     pair = agent_message_crud.get_run_log_turn(db, team_id=team_id, turn_id=turn_id)
@@ -499,16 +508,16 @@ async def get_agent_run_log_turn(
 async def list_agent_actions(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(50, ge=1, le=200, description="每页数量"),
-    session_id: Optional[int] = Query(None, description="Agent会话ID"),
-    workflow_id: Optional[str] = Query(None, description="Agent工作流ID"),
-    action_status: Optional[str] = Query(None, description="动作状态"),
-    source_type: Optional[str] = Query(None, description="动作来源"),
-    target_type: Optional[str] = Query(None, description="目标业务对象类型"),
-    target_id: Optional[int] = Query(None, description="目标业务对象ID"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    session_id: int | None = Query(None, description="Agent会话ID"),
+    workflow_id: str | None = Query(None, description="Agent工作流ID"),
+    action_status: str | None = Query(None, description="动作状态"),
+    source_type: str | None = Query(None, description="动作来源"),
+    target_type: str | None = Query(None, description="目标业务对象类型"),
+    target_id: int | None = Query(None, description="目标业务对象ID"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> PaginatedResponse[AgentWorkflowActionResponse]:
     if session_id is not None:
         require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     skip = (page - 1) * page_size
@@ -548,10 +557,10 @@ async def list_agent_actions(
 @router.get("/workflows/{workflow_id}", response_model=AgentWorkflowDetailResponse)
 async def get_agent_workflow_detail(
     workflow_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> AgentWorkflowDetailResponse:
     actions = agent_workflow_action_crud.list_by_workflow(
         db,
         workflow_id=workflow_id,
@@ -570,11 +579,11 @@ async def get_agent_workflow_detail(
 )
 async def list_agent_message_anchors(
     session_id: int,
-    message_id: list[int] = Query(default=[]),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    message_id: list[int] = _message_ids_query,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> list[AgentUIEnvelope]:
     require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     ids = {value for value in message_id if value > 0}
     records = agent_turn_repository.list_owned_by_ids(
@@ -597,10 +606,10 @@ async def list_agent_message_anchors(
 async def list_agent_async_operations(
     session_id: int,
     limit: int = Query(50, ge=1, le=100, description="异步操作数量"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> list[AgentAsyncOperationProjection]:
     require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     try:
         recovered = agent_durable_work_recovery_service.recover_session(
@@ -649,10 +658,10 @@ async def list_agent_operation_history(
     session_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=100),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> PaginatedResponse[AgentAsyncOperationResponse]:
     require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     try:
         recovered = agent_durable_work_recovery_service.recover_session(
@@ -697,10 +706,10 @@ async def list_agent_operation_history(
 @router.get("/operations/{operation_public_id}", response_model=AgentAsyncOperationResponse)
 async def get_agent_async_operation(
     operation_public_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> AgentAsyncOperationProjection:
     operation = agent_async_operation_service.get_projection(
         db,
         team_id=team_id,
@@ -734,11 +743,11 @@ async def list_agent_messages(
     session_id: int,
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(100, ge=1, le=200, description="每页数量"),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    credentials: HTTPAuthorizationCredentials = _credentials_dependency,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> PaginatedResponse[AgentUIEnvelope]:
     require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     permission_codes = frozenset(
         permission.code
@@ -812,7 +821,11 @@ async def list_agent_messages(
                 )
             except Exception:
                 db.rollback()
-                logger.warning("读取重复跟进确认 Case 失败，跳过重复消息隐藏: session_id=%s", session_id, exc_info=True)
+                logger.warning(
+                    "读取重复跟进确认 Case 失败\N{FULLWIDTH COMMA}跳过重复消息隐藏: session_id=%s",
+                    session_id,
+                    exc_info=True,
+                )
         hidden_case_ids = superseded_case_ids | duplicate_case_ids
         hidden_message_ids = {
             action.message_id
@@ -821,7 +834,10 @@ async def list_agent_messages(
         }
     except Exception:
         db.rollback()
-        logger.exception("读取 Agent 历史时识别已被新修订替代的跟进确认消息失败，保留原消息: session_id=%s", session_id)
+        logger.exception(
+            "读取 Agent 历史时识别已被新修订替代的跟进确认消息失败\N{FULLWIDTH COMMA}保留原消息: session_id=%s",
+            session_id,
+        )
 
     skip = (page - 1) * page_size
     records, total = agent_turn_repository.list_visible_by_session(
@@ -854,11 +870,11 @@ async def list_agent_workflow_actions(
     session_id: int,
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(50, ge=1, le=200, description="每页数量"),
-    action_status: Optional[str] = Query(None, description="动作状态"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    action_status: str | None = Query(None, description="动作状态"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _database_dependency,
+) -> PaginatedResponse[AgentWorkflowActionResponse]:
     require_owned_session(db, team_id=team_id, user_id=current_user.id, session_id=session_id)
     skip = (page - 1) * page_size
     total = agent_workflow_action_crud.count_by_session(
@@ -889,44 +905,27 @@ async def list_agent_workflow_actions(
 @router.post("/chat/stream")
 async def stream_agent_chat(
     request: AgentChatRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    credentials: HTTPAuthorizationCredentials = _credentials_dependency,
+) -> None:
     payload = getattr(current_user, "_token_payload", {}) or {}
     if payload.get("purpose") == "agent_worker":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的执行凭证")
-    user_id = current_user.id
-    async def generate_sse():
-        async for event in agent_application_service.stream_chat_events(
-            request_input=request.input,
-            client_request_id=request.client_request_id,
-            team_id=team_id,
-            user_id=user_id,
-            authorization=_authorization_header(credentials),
-            session_id=request.session_id,
-            session_key=request.session_key,
-        ):
-            yield _encode_sse(event)
-
-    return StreamingResponse(
-        generate_sse(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+    del request, team_id, credentials
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="AI Agent 已下线。请使用销售助手。",
     )
 
 
-@router.get("/sessions/{session_id}/requests/{client_request_id}")
+@router.get("/sessions/{session_id}/requests/{client_request_id}", response_model=None)
 async def get_agent_request_status(
     session_id: int,
     client_request_id: UUID,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+) -> dict[str, object]:
     status_result = agent_application_service.request_status(
         team_id=team_id,
         user_id=current_user.id,

@@ -11,8 +11,8 @@ from app.api.products import _domain_error
 from app.core.database import Base
 from app.crud.product import product_crud
 from app.crud.product_intent import (
-    ProductNotFoundError,
     PRODUCT_IN_USE_MESSAGE,
+    ProductNotFoundError,
     base_module_public_id,
     first_active_product,
     format_active_product_catalog,
@@ -25,6 +25,8 @@ from app.models.customer import Customer, CustomerProduct
 from app.models.lead import Lead, LeadProduct
 from app.models.opportunity import Opportunity
 from app.models.product import Product, ProductModule, ProductModuleRole
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.product import ProductCreate, ProductIntentRef
 
 
@@ -39,6 +41,7 @@ def db(tmp_path: Path):
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE IF NOT EXISTS crm_customer_deal_journeys (id INTEGER PRIMARY KEY)"))
     tables = [
+        User.__table__, Team.__table__,
         Product.__table__,
         ProductModule.__table__,
         Lead.__table__,
@@ -59,6 +62,13 @@ def db(tmp_path: Path):
         for index, original_name in renamed_indexes:
             index.name = original_name
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     try:
         yield session
     finally:

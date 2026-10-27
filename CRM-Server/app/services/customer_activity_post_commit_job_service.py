@@ -18,18 +18,20 @@ from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
 )
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.customer_activity_post_commit_operation_projector import (
     customer_activity_post_commit_operation_projector,
 )
-from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
 
     from sqlalchemy.orm import Session
 
     from app.models.customer_activity import CustomerActivity
+    from app.services.customer_activity_post_commit_workflow import CustomerActivityPostCommitWorkflow
 
 
 logger = logging.getLogger(__name__)
@@ -119,7 +121,10 @@ class CustomerActivityPostCommitJobService:
                 self._project_bound_operation(db, existing)
                 return dict(existing.result_json or {})
             activity = customer_activity_crud.get_by_id(db, existing.activity_id, existing.team_id)
-            if activity is not None and activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value:
+            if (
+                activity is not None
+                and activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+            ):
                 result = self._skipped_result(existing.activity_id, "ASSISTANT_2_SOURCE")
                 skipped = customer_activity_post_commit_job_crud.skip_forbidden_source(
                     db, team_id=request.team_id, public_id=request.job_public_id,
@@ -190,36 +195,36 @@ class CustomerActivityPostCommitJobService:
                 )
                 self._project_bound_operation(db, updated or job)
                 return result
-            job_data = {
-                "activity_id": int(job.activity_id),
-                "team_id": int(job.team_id),
-                "trigger_type": str(job.trigger_type),
-                "actor_id": str(job.actor_id) if job.actor_id is not None else None,
-                "run_id": str(job.run_id),
-                "graph_thread_id": str(job.graph_thread_id),
-                "activity_revision": int(job.activity_revision),
-                "attempt_count": int(job.attempt_count or 1),
-            }
+            activity_id = int(job.activity_id)
+            team_id = int(job.team_id)
+            trigger_type = str(job.trigger_type)
+            actor_id = str(job.actor_id) if job.actor_id is not None else None
+            run_id = str(job.run_id)
+            graph_thread_id = str(job.graph_thread_id)
+            activity_revision = int(job.activity_revision)
+            attempt_count = int(job.attempt_count or 1)
             self._project_bound_operation(db, job)
         finally:
             db.close()
         try:
+            from app.services.customer_activity_post_commit_workflow import customer_activity_post_commit_workflow
+
             state = await customer_activity_post_commit_workflow.run(
-                activity_id=job_data["activity_id"],
-                team_id=job_data["team_id"],
-                expected_activity_revision=job_data["activity_revision"],
-                trigger_type=job_data["trigger_type"],
-                actor_id=job_data["actor_id"],
-                run_id=job_data["run_id"],
-                thread_id=job_data["graph_thread_id"],
+                activity_id=activity_id,
+                team_id=team_id,
+                expected_activity_revision=activity_revision,
+                trigger_type=trigger_type,
+                actor_id=actor_id,
+                run_id=run_id,
+                thread_id=graph_thread_id,
             )
-            result = self._result_from_state(job_data["activity_id"], state)
+            result = self._result_from_state(activity_id, state)
         except Exception as exc:
             failure_result = await self._record_failure(
                 request,
                 lease_token=lease_token,
-                activity_id=job_data["activity_id"],
-                attempt_count=job_data["attempt_count"],
+                activity_id=activity_id,
+                attempt_count=attempt_count,
                 exc=exc,
             )
             if failure_result is not None:
@@ -229,10 +234,10 @@ class CustomerActivityPostCommitJobService:
         db = SessionLocal()
         try:
             workflow_error = str(result.get("error") or "").strip()
-            if workflow_error and job_data["attempt_count"] >= max_attempts:
+            if workflow_error and attempt_count >= max_attempts:
                 post_commit = result.get("post_commit")
                 result = self._retries_exhausted_result(
-                    job_data["activity_id"],
+                    activity_id,
                     error_message=workflow_error,
                     post_commit=post_commit if isinstance(post_commit, dict) else None,
                 )
@@ -251,7 +256,7 @@ class CustomerActivityPostCommitJobService:
                     public_id=request.job_public_id,
                     lease_token=lease_token,
                     error_message=workflow_error,
-                    next_attempt_at=self._next_attempt_at(job_data["attempt_count"]),
+                    next_attempt_at=self._next_attempt_at(attempt_count),
                 )
             else:
                 updated = customer_activity_post_commit_job_crud.mark_completed_if_lease_owner(
@@ -267,7 +272,7 @@ class CustomerActivityPostCommitJobService:
                     "客户活动后提交任务执行结果因租约已变更被忽略: job=%s",
                     request.job_public_id,
                 )
-                return self._lease_lost_result(job_data["activity_id"])
+                return self._lease_lost_result(activity_id)
             self._project_bound_operation(db, updated)
             return result
         finally:
@@ -374,7 +379,7 @@ class CustomerActivityPostCommitJobService:
         return business_now() + timedelta(seconds=base * (2**exponent))
 
     @staticmethod
-    def _result_from_state(activity_id: int, state: dict[str, object]) -> dict[str, object]:
+    def _result_from_state(activity_id: int, state: Mapping[str, object]) -> dict[str, object]:
         return {
             "success": not bool(state.get("error_message")),
             "activity_id": activity_id,
@@ -459,7 +464,7 @@ def _empty_post_commit_outcome() -> dict[str, object]:
 customer_activity_post_commit_job_service = CustomerActivityPostCommitJobService()
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> CustomerActivityPostCommitWorkflow:
     """Lazily expose the legacy post-commit workflow without importing it eagerly.
 
     The assistant 2.0 write chain imports this module; the LangGraph workflow

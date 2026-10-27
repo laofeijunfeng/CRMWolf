@@ -6,9 +6,16 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.models.customer import Customer
+from app.models.customer import Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
-from app.models.sales_commitment import DueAtGranularity, FollowUpTask, FollowUpTaskSourceType, SalesCommitment
+from app.models.sales_commitment import (
+    DueAtGranularity,
+    FollowUpTask,
+    FollowUpTaskConfirmationCase,
+    FollowUpTaskSourceType,
+    SalesCommitment,
+)
+from app.models.user import User
 from app.services.follow_up_task_query_service import FollowUpTaskQueryService
 from app.services.follow_up_task_semantic_evidence_service import FollowUpTaskSemanticEvidenceResult
 from app.services.follow_up_task_semantic_query_golden_suite import (
@@ -58,10 +65,12 @@ def _session():
     Base.metadata.create_all(
         engine,
         tables=[
-            Customer.__table__,
+            User.__table__,
+            Customer.__table__, CustomerProduct.__table__,
             CustomerActivity.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
+            FollowUpTaskConfirmationCase.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)
@@ -121,6 +130,12 @@ def test_follow_up_task_semantic_query_golden_case_runs_against_query_service(ca
 
 
 def _seed_case(db, case: FollowUpTaskSemanticQueryGoldenCase) -> None:
+    user_ids = {int(task.owner_id) for task in case.tasks if task.owner_id.isdigit()} | {case.user_id}
+    db.add_all([
+        User(id=user_id, email=f"owner-{user_id}@example.com", name=f"Owner {user_id}")
+        for user_id in sorted(user_ids)
+    ])
+    db.flush()
     customers_by_public_id: dict[str, Customer] = {}
     for task_case in case.tasks:
         customer = customers_by_public_id.get(task_case.customer_public_id)

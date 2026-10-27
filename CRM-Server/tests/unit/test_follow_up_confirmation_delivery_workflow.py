@@ -12,8 +12,9 @@ from app.core.database import Base
 from app.crud.sales_commitment import FollowUpTaskConfirmationPromptDeliveryCRUD, follow_up_task_crud
 from app.models.agent import AgentMessage, AgentSession
 from app.models.agent_persistence import AgentUIAction
-from app.models.customer import Customer
+from app.models.customer import Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
     DueAtGranularity,
@@ -64,7 +65,9 @@ def db_session(monkeypatch):
             AgentMessage.__table__,
             AgentUIAction.__table__,
             Customer.__table__,
+            CustomerProduct.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,

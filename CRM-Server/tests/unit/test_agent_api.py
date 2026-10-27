@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
@@ -26,13 +25,13 @@ from app.models.agent import (
 )
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
 from app.models.agent_persistence import AgentUIAction
-from app.schemas.agent import AgentSSEEventEnvelope
 from app.schemas.agent_persistence import AgentUIActionRegistration
 from app.services.agent.ui.actions import AgentUIActionRepository
-from app.services.agent.ui.schemas import TextAgentInput
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from app.schemas.agent import AgentSSEEventEnvelope
 
 
 @compiles(BigInteger, "sqlite")
@@ -283,10 +282,6 @@ def _persist_action(session_factory: sessionmaker[Session], *, session_id: int) 
             )
         )
         db.commit()
-
-
-def _stream_events(response) -> list[dict[str, object]]:
-    return [json.loads(line.removeprefix("data: ")) for line in response.text.splitlines() if line.startswith("data: ")]
 
 
 def test_session_create_and_list_are_scoped_to_current_owner(api_harness) -> None:
@@ -658,74 +653,21 @@ def test_operation_history_repairs_both_background_task_types_without_short_circ
         "customer_activity_post_commit",
     ]
 
-def test_chat_stream_delegates_only_to_application_service(api_harness, monkeypatch) -> None:
+def test_chat_stream_rejects_stale_web_tabs_without_calling_application(api_harness, monkeypatch) -> None:
     client, _ = api_harness
-    request_id = UUID("6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be")
-    message = {
-        "schema_version": "crm.agent.ui.v1",
-        "message_id": 11,
-        "turn_id": "turn_api_stream",
-        "role": "assistant",
-        "state": "final",
-        "blocks": [
-            {
-                "id": "answer",
-                "type": "text",
-                "format": "plain",
-                "text": "你在上海有 1 个客户。",
-            }
-        ],
-        "suggested_actions": [],
-        "metadata": {
-            "display": "MESSAGE",
-            "route": "QUERY",
-            "result_set_id": None,
-            "accessibility_label": "你在上海有 1 个客户。",
-        },
-    }
-    fake = _FakeApplicationService(
-        [
-            AgentSSEEventEnvelope.model_validate(
-                {"event": "session", "session_id": 7, "session_key": "agent_api_stream"}
-            ),
-            AgentSSEEventEnvelope.model_validate(
-                {
-                    "event": "agent_ui",
-                    "phase": "final",
-                    "message_id": 11,
-                    "turn_id": "turn_api_stream",
-                    "sequence": 1,
-                    "message": message,
-                }
-            ),
-            AgentSSEEventEnvelope.model_validate({"event": "done", "session_id": 7}),
-        ]
-    )
+    fake = _FakeApplicationService([])
     monkeypatch.setattr(agent_api, "agent_application_service", fake)
-
     response = client.post(
         "/v1/agent/chat/stream",
         headers={"Authorization": "Bearer test-token"},
         json={
-            "client_request_id": str(request_id),
+            "client_request_id": "6fa2e0e8-86d4-4d6c-a1b0-6490b2bf12be",
             "input": {"type": "text", "text": "上海有哪些客户"},
         },
     )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    events = _stream_events(response)
-    assert [event["event"] for event in events] == ["session", "agent_ui", "done"]
-    assert events[1]["message"] == message
-    assert len(fake.calls) == 1
-    call = fake.calls[0]
-    assert call["client_request_id"] == request_id
-    assert call["team_id"] == 1
-    assert call["user_id"] == 2
-    assert call["authorization"] == "Bearer test-token"
-    assert call["session_id"] is None
-    assert call["session_key"] is None
-    assert call["request_input"] == TextAgentInput(type="text", text="上海有哪些客户")
+    assert response.status_code == 410
+    assert response.json() == {"detail": "AI Agent 已下线。请使用销售助手。"}
+    assert fake.calls == []
 
 
 def test_removed_runtime_management_endpoints_are_not_registered(api_harness) -> None:
@@ -769,7 +711,7 @@ def _persist_run_log_turn(
     turn_id: str,
     user_id: int = 2,
     user_text: str = "记一条跟进",
-    assistant_text: str = "质量 52 分，拦住写入。",
+    assistant_text: str = "质量 52 分\N{FULLWIDTH COMMA}拦住写入。",
     outcome: str = "blocked_unwritten",
     quality_score: int | None = 52,
     customer_name: str | None = "双汇",
@@ -801,11 +743,36 @@ def _persist_run_log_turn(
                     "model": "test-model",
                     "steps": [
                         {"kind": "model", "title": "判成「记跟进」", "detail": "route = WORKFLOW", "tone": "done"},
-                        {"kind": "code", "title": "匹配到客户「双汇」", "detail": "checkpoint 已有客户绑定", "tone": "done"},
-                        {"kind": "code", "title": "质量 52 分，拦住", "detail": "阈值 60。", "tone": "blocked"},
-                        {"kind": "interaction", "title": "只问了一个补充问题", "detail": assistant_text, "tone": "blocked"},
-                        {"kind": "api", "title": "没有调创建", "detail": "create_customer_activity 未调用", "tone": "skipped"},
-                        {"kind": "background", "title": "没有整理 / 评分任务", "detail": "Agent 路径不创建 AIJob", "tone": "skipped"},
+                        {
+                            "kind": "code",
+                            "title": "匹配到客户「双汇」",
+                            "detail": "checkpoint 已有客户绑定",
+                            "tone": "done",
+                        },
+                        {
+                            "kind": "code",
+                            "title": "质量 52 分\N{FULLWIDTH COMMA}拦住",
+                            "detail": "阈值 60。",
+                            "tone": "blocked",
+                        },
+                        {
+                            "kind": "interaction",
+                            "title": "只问了一个补充问题",
+                            "detail": assistant_text,
+                            "tone": "blocked",
+                        },
+                        {
+                            "kind": "api",
+                            "title": "没有调创建",
+                            "detail": "create_customer_activity 未调用",
+                            "tone": "skipped",
+                        },
+                        {
+                            "kind": "background",
+                            "title": "没有整理 / 评分任务",
+                            "detail": "Agent 路径不创建 AIJob",
+                            "tone": "skipped",
+                        },
                     ],
                 },
             },
@@ -841,7 +808,7 @@ def test_run_log_turns_list_and_filter_with_ai_read(api_harness, monkeypatch) ->
         turn_id="turn_answered",
         user_id=3,
         user_text="上海还有哪些客户?",
-        assistant_text="已回答查询，没有写入。",
+        assistant_text="已回答查询\N{FULLWIDTH COMMA}没有写入。",
         outcome="answered",
         quality_score=None,
         customer_name=None,
@@ -972,7 +939,7 @@ def test_run_log_lists_catch_all_failure_without_observability(api_harness, monk
                     user_id=2,
                     session_id=int(session["id"]),
                     role=AgentMessageRole.ASSISTANT,
-                    content="这次没处理成，请稍后再试。",
+                    content="这次没处理成\N{FULLWIDTH COMMA}请稍后再试。",
                     turn_id="turn_internal_error",
                     diagnostics_json={"dispatch_type": "failure"},
                 ),

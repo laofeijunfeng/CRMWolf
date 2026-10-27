@@ -10,6 +10,15 @@
 - `CRM-Docs/design-agent/roadmap/customer-activity-workflow-implementation-status.md`
 - `docs/adr/0001-customer-activity-workflow-parity.md`
 
+## 当前入口边界（CRM-37）
+
+- 默认入口是销售助手 `/assistant`；旧 Web `/agent` 仅重定向，不恢复旧对话。旧运行日志设置入口退役，原 URL 显示缺页。
+- 旧 Web `POST /v1/agent/chat/stream` 拒绝新输入（HTTP 410）。飞书合法业务事件仅协议确认，不创建入站业务记录/频道会话，不调用旧 Agent、不回执或回复，也不写跟进。
+- 飞书解密、配置归属、App ID/Token 校验和 URL verification 保留；飞书登录和独立审批通知不受影响。隐藏机器人设置不清除历史凭据。
+- 已受理旧回合按原执行/恢复规则收尾，可能晚到写入；不重放或撤销已成功原子，不补发飞书旧回复。这不授权接收新的确认、补充或表情。
+- 销售助手与页面表单仍遵守下列稳定不变量。旧 Agent 规则只约束其已受理工作和保留的领域能力，不表示入口仍开放。
+- 决策依据：`docs/adr/0003-legacy-agent-entry-retirement.md`。本次不删除历史数据、密钥或表结构，不恢复已下线的档案补全入口。会话结构只通过桥接迁移补齐，失败时保留已有行。
+
 ## 领域词汇
 
 - **客户活动（Customer Activity）**：客户下的跟进记录或会议纪要。本期只有“新增”和“删除”，没有修改操作。

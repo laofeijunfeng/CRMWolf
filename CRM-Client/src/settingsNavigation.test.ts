@@ -49,18 +49,10 @@ describe('settings navigation registry', () => {
       allowOwnerBypass: false,
     })
   })
-  it('registers Agent run log after AI config in the integration group', () => {
-    const item = getSettingsNavigationItem('agent-run-log')
-    const ids = SETTINGS_NAVIGATION.map(entry => entry.id)
-    expect(item).toMatchObject({
-      path: '/settings/agent-run-log',
-      group: 'integration',
-      scope: 'team',
-      requiresTeam: true,
-      requiredAnyPermissions: ['ai:read', 'ai:manage', 'system:config'],
-    })
-    expect(item?.legacyComponentKey).toBeUndefined()
-    expect(ids.indexOf('agent-run-log')).toBe(ids.indexOf('ai') + 1)
+  it('removes the retired run log without changing the active integration navigation order', () => {
+    expect(getSettingsNavigationItem('agent-run-log')).toBeUndefined()
+    const ids = SETTINGS_NAVIGATION.filter(item => item.group === 'integration').map(item => item.id)
+    expect(ids).toEqual(['ai', 'notifications', 'integrations'])
   })
 
   it('does not host settings modules through SettingsModulePage', () => {

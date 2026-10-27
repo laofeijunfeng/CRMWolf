@@ -8,12 +8,13 @@ from app.core.database import Base
 from app.core.list_query import FilterCondition
 from app.crud.customer import customer_crud
 from app.crud.lead import lead_crud
-from app.models.customer import Customer, CustomerStatus
-from app.models.lead import Lead, LeadSource, LeadStatus
+from app.models.customer import Customer, CustomerProduct, CustomerStatus
+from app.models.deal_journey import CustomerDealJourney
+from app.models.lead import Lead, LeadProduct, LeadSource, LeadStatus
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -23,7 +24,12 @@ def _session(*tables):
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine, tables=list(tables))
+    dependencies = []
+    if Customer.__table__ in tables:
+        dependencies.extend([CustomerProduct.__table__, CustomerDealJourney.__table__])
+    if Lead.__table__ in tables:
+        dependencies.append(LeadProduct.__table__)
+    Base.metadata.create_all(engine, tables=[*tables, *dependencies])
     return engine, sessionmaker(bind=engine)()
 
 

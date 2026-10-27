@@ -102,6 +102,6 @@ const handleMenuClick = (path: string): void => {
 }
 
 const returnToSystem = (): void => {
-  void router.push('/agent')
+  void router.push('/assistant')
 }
 </script>

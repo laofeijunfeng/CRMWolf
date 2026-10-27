@@ -149,7 +149,7 @@ const onSubmit = handleSubmit(async (values): Promise<void> => {
   try {
     await teamStore.createTeam(values.name)
     toast.success('团队创建成功')
-    router.replace(getSafeAuthReturnPath(route.query['redirect']) ?? '/leads')
+    router.replace(getSafeAuthReturnPath(route.query['redirect']) ?? '/assistant')
   } catch (error: unknown) {
     handleApiError(error, '创建团队')
   } finally {

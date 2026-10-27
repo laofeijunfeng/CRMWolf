@@ -23,11 +23,13 @@ from app.models.lead import Lead, LeadFollowUp, LeadProduct
 from app.models.operation_log import OperationLog
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.product import ProductCreate
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -47,6 +49,7 @@ def convert_client(monkeypatch):
         connection.execute(text("CREATE TABLE IF NOT EXISTS crm_customer_deal_journeys (id INTEGER PRIMARY KEY)"))
 
     tables = [
+        User.__table__, Team.__table__,
         AcquisitionSource.__table__,
         Product.__table__,
         ProductModule.__table__,
@@ -75,6 +78,13 @@ def convert_client(monkeypatch):
             index.name = original_name
 
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     session.add(
         AcquisitionSource(
             team_id=1,

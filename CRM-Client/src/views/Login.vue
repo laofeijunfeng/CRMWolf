@@ -139,7 +139,7 @@ async function handleLogin(): Promise<void> {
     try {
       await teamStore.fetchUserTeams()
       if (teamStore.hasTeam()) {
-        void router.replace(returnPath ?? '/leads')
+        void router.replace(returnPath ?? '/assistant')
       } else {
         void router.replace({ name: 'Onboarding', query: createAuthReturnQuery(returnPath) })
       }

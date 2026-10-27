@@ -15,14 +15,17 @@ from app.crud.product_intent import (
     product_intent_payload,
 )
 from app.models.acquisition_source import AcquisitionSource
+from app.models.customer import Customer
 from app.models.lead import Lead, LeadProduct
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.lead import LeadCreate, LeadUpdate
 from app.schemas.product import ProductCreate
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -35,6 +38,7 @@ def db(tmp_path: Path):
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
     tables = [
+        User.__table__, Team.__table__, Customer.__table__,
         AcquisitionSource.__table__,
         Product.__table__,
         ProductModule.__table__,
@@ -53,6 +57,13 @@ def db(tmp_path: Path):
         for index, original_name in renamed_indexes:
             index.name = original_name
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     try:
         session.add(
             AcquisitionSource(

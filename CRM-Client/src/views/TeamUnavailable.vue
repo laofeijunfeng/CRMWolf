@@ -55,7 +55,7 @@ const retryTeamLoad = async (): Promise<void> => {
   try {
     await teamStore.fetchUserTeams()
     if (teamStore.hasTeam()) {
-      await router.replace(returnPath() ?? '/leads')
+      await router.replace(returnPath() ?? '/assistant')
     } else {
       await router.replace({ name: 'Onboarding', query: createAuthReturnQuery(returnPath()) })
     }

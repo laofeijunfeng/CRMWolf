@@ -12,6 +12,7 @@ from app.models.agent import AgentMessage, AgentSession, AgentWorkflowAction
 from app.models.agent_persistence import AgentUIAction
 from app.models.customer import Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
+from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.models.sales_commitment import (
     DueAtGranularity,
@@ -85,6 +86,7 @@ def db_session(monkeypatch):
             Customer.__table__,
             CustomerProduct.__table__,
             CustomerActivity.__table__,
+            CustomerActivityDeletionTombstone.__table__,
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
@@ -1106,7 +1108,7 @@ class UnavailableMatcher:
 @pytest.mark.asyncio
 async def test_post_commit_workflow_projects_new_task_before_reconciling_only_historical_tasks(db_session):
     activity = db_session.query(CustomerActivity).filter_by(id=190, team_id=1).one()
-    activity.source_content = "今天已微信联系客户，客户反馈项目正在走立项流程。"
+    activity.source_content = "今天已微信联系客户\N{FULLWIDTH COMMA}客户反馈项目正在走立项流程。"
     activity.summary = "已联系客户并取得立项流程进展。"
     activity.next_action = "下周三继续跟进立项流程"
     activity.next_follow_time = datetime(2026, 9, 2, 9, 0, 0)

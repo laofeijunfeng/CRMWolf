@@ -1,5 +1,4 @@
 """AI 创建解析器把来源/产品名称解析成表单 public_id 的回归测试。"""
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -10,14 +9,17 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import Base
 from app.crud.product import product_crud
 from app.models.acquisition_source import AcquisitionSource
+from app.models.customer import Customer
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.product import ProductCreate
 from app.services.ai_parser.customer_parser import CustomerAIParser
 from app.services.ai_parser.lead_parser import LeadAIParser
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -29,7 +31,10 @@ def db(tmp_path: Path):
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
-    tables = [AcquisitionSource.__table__, Product.__table__, ProductModule.__table__]
+    tables = [
+        User.__table__, Team.__table__, Customer.__table__,
+        AcquisitionSource.__table__, Product.__table__, ProductModule.__table__,
+    ]
     renamed_indexes = []
     for table in tables:
         for index in table.indexes:
@@ -42,6 +47,13 @@ def db(tmp_path: Path):
         for index, original_name in renamed_indexes:
             index.name = original_name
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     try:
         session.add(
             AcquisitionSource(

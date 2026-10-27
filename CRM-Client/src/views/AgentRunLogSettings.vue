@@ -20,7 +20,7 @@ import type { AgentRunLogTurnDetail, AgentRunLogTurnListItem, TurnOutcome } from
 
 usePageTitle()
 
-const pageItem = getSettingsNavigationItem('agent-run-log')
+const pageItem = getSettingsNavigationItem('ai')
 const { canAccess, permissionsUnavailable, permissionsPending } = useSettingsAccess()
 const hasAccess = computed(() => pageItem !== undefined && canAccess(pageItem))
 

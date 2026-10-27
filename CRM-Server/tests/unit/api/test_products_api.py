@@ -15,6 +15,9 @@ from app.api import products as products_api
 from app.core import database, deps
 from app.core.database import Base
 from app.crud.product import product_crud
+from app.models.customer import Customer, CustomerProduct
+from app.models.lead import Lead, LeadProduct
+from app.models.opportunity import Opportunity
 from app.models.product import Product, ProductModule
 from app.models.team import Team
 from app.models.user import User
@@ -40,11 +43,27 @@ def api_env(monkeypatch):
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    Base.metadata.create_all(engine, tables=[User.__table__, Team.__table__, Product.__table__, ProductModule.__table__])
+    tables = [
+        User.__table__, Team.__table__, Customer.__table__, Lead.__table__,
+        Product.__table__, ProductModule.__table__, LeadProduct.__table__,
+        CustomerProduct.__table__, Opportunity.__table__,
+    ]
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
     session_factory = sessionmaker(bind=engine)
     db = session_factory()
+    db.add(User(id=7, email="seller@example.com", name="销售成员"))
+    db.flush()
     db.add_all([
-        User(id=7, email="seller@example.com", name="销售成员"),
         Team(id=1, name="One", code="TEAM_ONE", owner_id=7),
         Team(id=2, name="Two", code="TEAM_TWO", owner_id=7),
     ])

@@ -382,10 +382,11 @@ def test_v2_saved_conditions_control_daily_delivery(api_env):
     import asyncio
     from datetime import datetime, timedelta
 
-    from app.models.customer import Customer
+    from app.models.customer import Customer, CustomerProduct
     from app.services.reminder_rule_execution import execute_due_reminder_rules
 
     Customer.__table__.create(api_env.db.bind)
+    CustomerProduct.__table__.create(api_env.db.bind)
     now = datetime(2026, 9, 23, 9, 30)
     api_env.db.add(UserTeam(user_id=1, team_id=101))
     api_env.db.add(
@@ -424,6 +425,8 @@ def test_v2_saved_conditions_control_daily_delivery(api_env):
     }
     response = api_env.client.post("/v1/reminder-rules", json=payload)
     assert response.status_code == 201, response.text
+    api_env.db.query(ReminderRule).filter_by(id=response.json()["id"]).one().created_time = now - timedelta(days=1)
+    api_env.db.commit()
     sent = []
 
     def deliver(team_id, user_ids, title, content):

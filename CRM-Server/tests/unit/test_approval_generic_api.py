@@ -1,79 +1,83 @@
-"""Task A6 / M-3：通用审批 API 端点单元测试。
+"""Task A6 / M-3\uFF1A通用审批 API 端点单元测试。
 
-覆盖：
+覆盖\uFF1A
 - POST /v1/approvals/INVOICE/{id}/submit —— 发票提交审批 → 200 + status=PENDING
 - POST /v1/approvals/UNKNOWN/1/submit —— 非法 entity_type → 400
 - POST /v1/approvals/INVOICE/{id}/approve —— 发票审批通过 → 200 + D3 端点回写
-  reviewer_id / review_comment（不扩适配器签名，端点直接补两字段）
+  reviewer_id / review_comment\uFF08不扩适配器签名\uFF0C端点直接补两字段\uFF09
 - POST /v1/approvals/INVOICE/{id}/approve 非当前节点角色 → 403
-- POST /v1/approvals/bulk-approve —— 逐条独立事务，部分成功汇总
+- POST /v1/approvals/bulk-approve —— 逐条独立事务\uFF0C部分成功汇总
 - GET  /v1/approvals/INVOICE/{id}/detail —— 返回审批实例
 - POST /v1/approvals/INVOICE/{id}/cancel —— 仅提交人可撤回
 
-M-3：payment/invoice 的 :approve:own 自审校验真正生效。
-- PAYMENT 自审：submitter==approver 无 payment:approve:own → 403；有 → 通过
-- INVOICE 自审：applicant==approver 无 invoice:approve:own → 403；有 → 通过
-- 非自审（submitter!=approver）→ 不需 :approve:own，角色校验通过即可
+M-3\uFF1Apayment/invoice 的 :approve:own 自审校验真正生效。
+- PAYMENT 自审\uFF1Asubmitter==approver 无 payment:approve:own → 403\uFF1B有 → 通过
+- INVOICE 自审\uFF1Aapplicant==approver 无 invoice:approve:own → 403\uFF1B有 → 通过
+- 非自审\uFF08submitter!=approver\uFF09→ 不需 :approve:own\uFF0C角色校验通过即可
 - bulk-approve 自审 403 → failed 条目 reason=detail 文案
 """
-import pytest
-from datetime import datetime, timedelta, date
+from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import create_engine
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.types import BigInteger
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-# SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增。
-# 仅作用于 sqlite 方言，不影响 MySQL 真实引擎。
-@compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
-    return "INTEGER"
-
-
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.types import BigInteger
 
-from app.core.database import Base
+from app.api import approvals as approvals_api
+from app.api.approvals import router as approvals_router
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
 from app.core import deps
-from app.api import approvals as approvals_api
-from app.api.approvals import router as approvals_router
+from app.core.database import Base
 from app.crud.approval import approval_crud
-
 from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
-    ApprovalStatus, ApprovalAction,
+    Approval,
+    ApprovalFlow,
+    ApprovalNode,
+    ApprovalRecord,
+    ApprovalStatus,
 )
-from app.models.contract import Contract, ContractStatus
-from app.models.invoice import (
-    InvoiceApplication, InvoiceApplicationStatus, InvoiceType,
-)
-from app.models.payment import PaymentRecord, PaymentConfirmationStatus
-from app.models.customer import Customer, CustomerMember
+from app.models.contract import Contract
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
-from app.models.user import User, UserStatus
-from app.models.role import Role
-from app.models.user_role import UserRole
-from app.models.permission import Permission
-from app.models.role_permission import RolePermission
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceType,
+)
+from app.models.opportunity import Opportunity
 from app.models.outbound_notification_job import (
     OutboundNotificationEventType,
     OutboundNotificationJob,
 )
+from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentRecord
+from app.models.permission import Permission
+from app.models.role import Role
+from app.models.role_permission import RolePermission
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
+
+
+# SQLite 把 BigInteger 编译为 INTEGER,确保 BigInteger 主键在 SQLite 上能自增。
+# 仅作用于 sqlite 方言,不影响 MySQL 真实引擎。
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
 
 
 # ---------- DB fixtures ---------------------------------------------------
 
 @pytest.fixture(scope="function")
 def db_session():
-    """内存 SQLite，仅创建本测试需要的表（避免触发全模型级联建表）。
+    """内存 SQLite\uFF0C仅创建本测试需要的表\uFF08避免触发全模型级联建表\uFF09。
 
-    用 StaticPool 共享同一 in-memory 连接，跨线程（FastAPI 请求与 fixture
-    setup 在不同线程）也能见同样表。否则 :memory: 默认按连接隔离，TestClient
+    用 StaticPool 共享同一 in-memory 连接\uFF0C跨线程\uFF08FastAPI 请求与 fixture
+    setup 在不同线程\uFF09也能见同样表。否则 :memory: 默认按连接隔离\uFF0CTestClient
     请求里的 db session 会进入空库导致 "no such table"。
     """
     engine = create_engine(
@@ -87,11 +91,13 @@ def db_session():
         UserRole.__table__,
         Permission.__table__,
         RolePermission.__table__,
-        Customer.__table__,
+        Customer.__table__, CustomerProduct.__table__,
         CustomerLegacySourceProgress.__table__,
         CustomerMember.__table__,
+        Opportunity.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
+        PaymentPlan.__table__,
         PaymentRecord.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
@@ -110,16 +116,21 @@ def db_session():
     finally:
         for index, original_name in renamed_indexes:
             index.name = original_name
-    Session = sessionmaker(bind=engine)
+    # Keep schema inspection on the session's connection. With StaticPool,
+    # inspecting the engine checks out the same DBAPI connection and rolls
+    # back an in-flight approval when that inspection connection is closed.
+    connection = engine.connect()
+    Session = sessionmaker(bind=connection)
     session = Session()
     yield session
     session.close()
+    connection.close()
     engine.dispose()
 
 
 @pytest.fixture(autouse=True)
 def _noop_outbound_notification_kick(monkeypatch):
-    """TestClient 有事件循环，不能让 worker 真的去打飞书。"""
+    """TestClient 有事件循环\uFF0C不能让 worker 真的去打飞书。"""
     monkeypatch.setattr(
         "app.services.outbound_notification_job_service.OutboundNotificationJobService.kick",
         lambda self, request: None,
@@ -128,7 +139,7 @@ def _noop_outbound_notification_kick(monkeypatch):
 
 @pytest.fixture(scope="function")
 def app(db_session):
-    """构造只挂 approvals router 的最小 FastAPI app，依赖全部覆盖到 db_session。"""
+    """构造只挂 approvals router 的最小 FastAPI app\uFF0C依赖全部覆盖到 db_session。"""
     app_ = FastAPI()
     app_.include_router(approvals_router)
 
@@ -147,7 +158,7 @@ def client(app):
 
 @pytest.fixture
 def current_user_rec(db_session):
-    """真实写入一条 ACTIVE 用户，供 approve 端点的 current_user.id（int）使用。"""
+    """真实写入一条 ACTIVE 用户\uFF0C供 approve 端点的 current_user.id\uFF08int\uFF09使用。"""
     u = User(
         email="finance@example.com",
         name="财务张",
@@ -207,10 +218,10 @@ def seed_finance_role_and_link(db_session, current_user_rec):
 
 
 def _grant_perm_code(db, role, code, *, resource="x", action="approve", scope="own"):
-    """给角色授予一个权限码（建 Permission + RolePermission 行）。
+    """给角色授予一个权限码\uFF08建 Permission + RolePermission 行\uFF09。
 
     permission_crud.get_user_permissions 通过 UserRole -> RolePermission -> Permission
-    联表取用户权限码，所以必须同时建 Permission 行与 RolePermission 关联。
+    联表取用户权限码\uFF0C所以必须同时建 Permission 行与 RolePermission 关联。
     """
     perm = Permission(name=code, code=code, resource=resource, action=action, scope=scope)
     db.add(perm)
@@ -225,7 +236,7 @@ def grant_invoice_approve_own(seed_finance_role_and_link, db_session):
     """给 FINANCE 角色授予 invoice:approve:own —— 让自审批能通过。
 
     既有 D3 reviewer 回写 / bulk 自审 / 乐观锁冲突等用例的发票 applicant
-    都是 current_user，M-3 后自审需 :approve:own，故这些用例需此 fixture。
+    都是 current_user\uFF0CM-3 后自审需 :approve:own\uFF0C故这些用例需此 fixture。
     """
     return _grant_perm_code(
         db_session, seed_finance_role_and_link, "invoice:approve:own",
@@ -235,7 +246,7 @@ def grant_invoice_approve_own(seed_finance_role_and_link, db_session):
 
 @pytest.fixture
 def seed_customer(db_session):
-    """发票所属客户：负责人是提交人，无关用户默认不可见。"""
+    """发票所属客户\uFF1A负责人是提交人\uFF0C无关用户默认不可见。"""
     customer = Customer(
         team_id=1,
         account_name="测试公司",
@@ -250,7 +261,7 @@ def seed_customer(db_session):
 
 @pytest.fixture
 def seed_invoice_draft(db_session, current_user_rec, seed_customer):
-    """一条 DRAFT 发票申请，applicant=当前用户。"""
+    """一条 DRAFT 发票申请\uFF0Capplicant=当前用户。"""
     inv = InvoiceApplication(
         team_id=1,
         application_number="INV-2026-001",
@@ -273,10 +284,10 @@ def seed_invoice_draft(db_session, current_user_rec, seed_customer):
 
 @pytest.fixture
 def seed_invoice_draft_other_submitter(db_session, seed_customer):
-    """一条 DRAFT 发票申请，applicant=他人（非 current_user）—— 用于非自审用例。
+    """一条 DRAFT 发票申请\uFF0Capplicant=他人\uFF08非 current_user\uFF09—— 用于非自审用例。
 
-    applicant_id 用数字字符串（"9999"）以兼容通知层 int(submitter_id) 转换；
-    与 current_user.id（=1）不同即可触发"非自审"路径。
+    applicant_id 用数字字符串\uFF08"9999"\uFF09以兼容通知层 int(submitter_id) 转换\uFF1B
+    与 current_user.id\uFF08=1\uFF09不同即可触发"非自审"路径。
     """
     inv = InvoiceApplication(
         team_id=1,
@@ -298,7 +309,7 @@ def seed_invoice_draft_other_submitter(db_session, seed_customer):
     return inv
 
 
-# ---------- PAYMENT fixtures（M-3） ---------------------------------------
+# ---------- PAYMENT fixtures(M-3) ---------------------------------------
 
 @pytest.fixture
 def seed_payment_flow_with_director_node(db_session):
@@ -328,7 +339,7 @@ def seed_payment_flow_with_director_node(db_session):
 
 @pytest.fixture
 def seed_sales_director_role_and_link(db_session, current_user_rec):
-    """创建 SALES_DIRECTOR 角色并把 current_user 关联到 team_id=1（不授任何权限码）。"""
+    """创建 SALES_DIRECTOR 角色并把 current_user 关联到 team_id=1\uFF08不授任何权限码\uFF09。"""
     role = Role(name="销售总监", code="SALES_DIRECTOR")
     db_session.add(role)
     db_session.flush()
@@ -338,12 +349,60 @@ def seed_sales_director_role_and_link(db_session, current_user_rec):
 
 
 @pytest.fixture
-def seed_payment_record_self(db_session, current_user_rec):
-    """一条 PENDING 回款登记，creator=当前用户（自审场景）。"""
+def seed_payment_plan(db_session, seed_customer):
+    """Payment approval uses a real customer -> opportunity -> contract -> plan chain."""
+    opportunity = Opportunity(
+        team_id=1,
+        opportunity_number="OPP-PAYMENT",
+        opportunity_name="Payment approval opportunity",
+        customer_id=seed_customer.id,
+        total_amount=Decimal("5000"),
+        user_count=1,
+        unit_price=Decimal("5000"),
+        license_type="PERPETUAL",
+        purchase_type="NEW",
+        expected_closing_date=date(2026, 7, 1),
+        owner_id="1",
+        creator_id="1",
+    )
+    db_session.add(opportunity)
+    db_session.flush()
+    contract = Contract(
+        team_id=1,
+        contract_number="CON-PAYMENT",
+        contract_name="Payment approval contract",
+        customer_id=seed_customer.id,
+        opportunity_id=opportunity.id,
+        user_count=1,
+        total_amount=Decimal("5000"),
+        license_type="PERPETUAL",
+        standard_unit_price=Decimal("5000"),
+        owner_id="1",
+        creator_id="1",
+    )
+    db_session.add(contract)
+    db_session.flush()
+    plan = PaymentPlan(
+        id=1,
+        team_id=1,
+        contract_id=contract.id,
+        plan_number="PLAN-PAYMENT",
+        stage_name="Full payment",
+        planned_amount=Decimal("5000"),
+        due_date=date(2026, 7, 1),
+    )
+    db_session.add(plan)
+    db_session.commit()
+    return plan
+
+
+@pytest.fixture
+def seed_payment_record_self(db_session, current_user_rec, seed_payment_plan):
+    """一条 PENDING 回款登记\uFF0Ccreator=当前用户\uFF08自审场景\uFF09。"""
     pr = PaymentRecord(
         team_id=1,
         record_number="PAY-2026-SELF",
-        payment_plan_id=1,
+        payment_plan_id=seed_payment_plan.id,
         actual_amount=Decimal("5000"),
         payment_date=date(2026, 7, 1),
         creator_id=str(current_user_rec.id),
@@ -356,12 +415,12 @@ def seed_payment_record_self(db_session, current_user_rec):
 
 
 @pytest.fixture
-def seed_payment_record_other(db_session):
-    """一条 PENDING 回款登记，creator=他人（非自审场景）。"""
+def seed_payment_record_other(db_session, seed_payment_plan):
+    """一条 PENDING 回款登记\uFF0Ccreator=他人\uFF08非自审场景\uFF09。"""
     pr = PaymentRecord(
         team_id=1,
         record_number="PAY-2026-OTHER",
-        payment_plan_id=1,
+        payment_plan_id=seed_payment_plan.id,
         actual_amount=Decimal("5000"),
         payment_date=date(2026, 7, 1),
         creator_id="other_user",
@@ -423,7 +482,7 @@ def test_approve_invoice_writes_reviewer_via_endpoint(
     body = r.json()
     assert body["status"] == "APPROVED"
 
-    # 验证 D3 端点回写：发票 reviewer_id / review_comment 已写
+    # 验证 D3 端点回写:发票 reviewer_id / review_comment 已写
     db_session.expire_all()
     inv = db_session.query(InvoiceApplication).filter(
         InvoiceApplication.id == seed_invoice_draft.id
@@ -456,7 +515,7 @@ def test_approve_rejects_non_matching_role(
 def test_cancel_by_submitter(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
 ):
-    # submitter = current_user（applicant_id = current_user.id）
+    # submitter = current_user(applicant_id = current_user.id)
     r = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
         json={"comment": "请审批"},
@@ -615,8 +674,8 @@ def test_bulk_approve_partial_success(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
     seed_finance_role_and_link, grant_invoice_approve_own, current_user_rec,
 ):
-    """逐条独立事务：一条成功 + 一条不存在汇总失败。"""
-    # 第 1 条：提交一份发票
+    """逐条独立事务\uFF1A一条成功 + 一条不存在汇总失败。"""
+    # 第 1 条:提交一份发票
     r = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
         json={"comment": "请审批"},
@@ -660,15 +719,15 @@ def test_bulk_approve_optimistic_lock_conflict(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
     seed_finance_role_and_link, grant_invoice_approve_own, current_user_rec,
 ):
-    """E6 乐观锁冲突：审批已被他人处理 → failed reason='已被他人处理'。
+    """E6 乐观锁冲突\uFF1A审批已被他人处理 → failed reason='已被他人处理'。
 
-    构造一条 INVOICE 审批，先由"他人"直接 approve（updated_time 变化、status=APPROVED），
-    再用旧的 updated_time 调 bulk-approve → approval_crud.approve 检测 updated_time 不匹配，
+    构造一条 INVOICE 审批\uFF0C先由"他人"直接 approve\uFF08updated_time 变化、status=APPROVED\uFF09\uFF0C
+    再用旧的 updated_time 调 bulk-approve → approval_crud.approve 检测 updated_time 不匹配\uFF0C
     raise ValueError("审批已被其他用户处理") → bulk 端点映射 reason="已被他人处理"。
     """
     from app.crud.approval import approval_crud
-    from app.schemas.approval import ApprovalActionRequest as _AAR
     from app.models.approval import ApprovalAction as _AA
+    from app.schemas.approval import ApprovalActionRequest as _AAR
 
     # 1. 提交发票审批
     r = client.post(
@@ -682,7 +741,7 @@ def test_bulk_approve_optimistic_lock_conflict(
     ).one()
     original_updated_time = ap.updated_time
 
-    # 2. 模拟"他人先审了"：直接 approve（status=APPROVED）
+    # 2. 模拟"他人先审了":直接 approve(status=APPROVED)
     req_other = _AAR(
         action=_AA.APPROVE, comment="他人先审了",
         updated_time=original_updated_time,
@@ -695,8 +754,8 @@ def test_bulk_approve_optimistic_lock_conflict(
     assert ap.status == ApprovalStatus.APPROVED
 
     # SQLite 秒级精度下 onupdate 可能不产生新时间戳——手动 +1s 模拟真实 DB
-    # 的 updated_time 变化，保证 bulk-approve 传入的旧时间戳与当前值不匹配，
-    # 从而触发乐观锁冲突（approval_crud.approve 内的 updated_time 比对）。
+    # 的 updated_time 变化,保证 bulk-approve 传入的旧时间戳与当前值不匹配,
+    # 从而触发乐观锁冲突(approval_crud.approve 内的 updated_time 比对)。
     if ap.updated_time == original_updated_time:
         ap.updated_time = original_updated_time + timedelta(seconds=1)
         db_session.commit()
@@ -733,9 +792,9 @@ def test_approve_invoice_self_without_own_perm_403(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
     seed_finance_role_and_link,
 ):
-    """INVOICE 自审：applicant==approver 且无 invoice:approve:own → 403。
+    """INVOICE 自审\uFF1Aapplicant==approver 且无 invoice:approve:own → 403。
 
-    FINANCE 角色校验通过，但发票 applicant_id == current_user.id 触发自审，
+    FINANCE 角色校验通过\uFF0C但发票 applicant_id == current_user.id 触发自审\uFF0C
     缺 invoice:approve:own 权限码 → 403「您没有权限审批自己创建的发票」。
     """
     r = client.post(
@@ -756,7 +815,7 @@ def test_approve_invoice_self_with_own_perm_passes(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
     seed_finance_role_and_link, grant_invoice_approve_own,
 ):
-    """INVOICE 自审：applicant==approver 且有 invoice:approve:own → 200。"""
+    """INVOICE 自审\uFF1Aapplicant==approver 且有 invoice:approve:own → 200。"""
     r = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
         json={"comment": "请审批"},
@@ -783,9 +842,9 @@ def test_approve_payment_self_without_own_perm_403(
     db_session, client, seed_payment_record_self,
     seed_payment_flow_with_director_node, seed_sales_director_role_and_link,
 ):
-    """PAYMENT 自审：creator==approver 且无 payment:approve:own → 403。
+    """PAYMENT 自审\uFF1Acreator==approver 且无 payment:approve:own → 403。
 
-    SALES_DIRECTOR 角色校验通过，但回款 creator_id == current_user.id 触发自审，
+    SALES_DIRECTOR 角色校验通过\uFF0C但回款 creator_id == current_user.id 触发自审\uFF0C
     缺 payment:approve:own 权限码 → 403「您没有权限审批自己创建的回款」。
     """
     r = client.post(
@@ -806,7 +865,7 @@ def test_approve_payment_self_with_own_perm_passes(
     db_session, client, seed_payment_record_self,
     seed_payment_flow_with_director_node, seed_sales_director_role_and_link,
 ):
-    """PAYMENT 自审：creator==approver 且有 payment:approve:own → 200。"""
+    """PAYMENT 自审\uFF1Acreator==approver 且有 payment:approve:own → 200。"""
     # 授予 payment:approve:own
     _grant_perm_code(
         db_session, seed_sales_director_role_and_link, "payment:approve:own",
@@ -839,10 +898,10 @@ def test_approve_non_self_no_own_perm_passes(
     db_session, client, seed_invoice_draft_other_submitter,
     seed_invoice_flow_with_finance_node, seed_finance_role_and_link,
 ):
-    """非自审：submitter!=approver → 不需 :approve:own，角色校验通过即可 → 200。
+    """非自审\uFF1Asubmitter!=approver → 不需 :approve:own\uFF0C角色校验通过即可 → 200。
 
-    发票 applicant_id="other_user" != current_user.id，不触发自审校验，
-    即便没有 invoice:approve:own 也能审批（沿用既有角色校验）。
+    发票 applicant_id="other_user" != current_user.id\uFF0C不触发自审校验\uFF0C
+    即便没有 invoice:approve:own 也能审批\uFF08沿用既有角色校验\uFF09。
     """
     r = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft_other_submitter.id}/submit",
@@ -872,8 +931,8 @@ def test_bulk_approve_payment_self_without_own_perm_fails(
 ):
     """bulk-approve PAYMENT 自审无 payment:approve:own → failed 条目 reason=detail 文案。
 
-    验证 bulk_approve 泛化自审校验：helper 抛 HTTPException → 转 ValueError →
-    计入 failed，reason 为「您没有权限审批自己创建的回款」。
+    验证 bulk_approve 泛化自审校验\uFF1Ahelper 抛 HTTPException → 转 ValueError →
+    计入 failed\uFF0Creason 为「您没有权限审批自己创建的回款」。
     """
     r = client.post(
         f"/v1/approvals/PAYMENT/{seed_payment_record_self.id}/submit",

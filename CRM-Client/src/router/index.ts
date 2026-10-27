@@ -7,7 +7,7 @@ import { createAuthReturnQuery, getSafeAuthReturnPath } from '@/utils/authRecove
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/agent'
+    redirect: '/assistant'
   },
   {
     path: '/login',
@@ -76,9 +76,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'agent',
-        name: 'AgentChat',
-        component: () => import('@/views/AgentChat.vue'),
-        meta: { requiresAuth: true, title: 'AI Agent', keepAlive: true }
+        redirect: () => ({ path: '/assistant', query: {}, hash: '' })
       },
       {
         path: 'assistant',
@@ -245,9 +243,9 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'settings/agent-run-log',
-        name: 'SettingsAgentRunLog',
-        component: () => import('@/views/AgentRunLogSettings.vue'),
-        meta: { requiresAuth: true, title: 'Agent 运行日志', settingsKey: 'agent-run-log' }
+        name: 'NotFound',
+        component: () => import('@/views/NotFound.vue'),
+        meta: { requiresAuth: true, title: '找不到页面', settingsContext: false }
       },
       {
         path: 'settings/acquisition-sources',
@@ -404,7 +402,7 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (to.path === '/login' && userStore.isLoggedIn()) {
-    const returnPath = getSafeAuthReturnPath(to.query['redirect']) ?? '/leads'
+    const returnPath = getSafeAuthReturnPath(to.query['redirect']) ?? '/assistant'
     next(returnPath)
     return
   }

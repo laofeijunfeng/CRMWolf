@@ -4,7 +4,7 @@
  * @description 封装页面标题设置逻辑，自动从 route.meta.title 设置静态标题
  */
 
-import { onMounted, onUnmounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePageTitleStore } from '@/stores/pageTitle'
 
@@ -14,7 +14,7 @@ import { usePageTitleStore } from '@/stores/pageTitle'
  * 功能：
  * 1. 自动从 route.meta.title 设置静态标题
  * 2. 提供 setTitle() 设置动态标题（详情页使用）
- * 3. 页面卸载时自动 reset 标题
+ * 3. 页面卸载前自动 reset 标题，避免清掉下一页激活后的标题
  *
  * @example
  * // 静态标题（route.meta.title）
@@ -40,8 +40,8 @@ export function usePageTitle(): {
     }
   })
 
-  // 页面卸载时重置标题
-  onUnmounted(() => {
+  // 先释放旧页面标题，再由下一页的 mounted / activated 接管。
+  onBeforeUnmount(() => {
     store.reset()
   })
 

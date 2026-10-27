@@ -58,7 +58,7 @@ const onSubmit = handleSubmit(async (values): Promise<void> => {
   try {
     await teamStore.joinTeam(values.code)
     toast.success('加入团队成功')
-    router.replace(getSafeAuthReturnPath(route.query['redirect']) ?? '/leads')
+    router.replace(getSafeAuthReturnPath(route.query['redirect']) ?? '/assistant')
   } catch (error: unknown) {
     handleApiError(error, '加入团队')
   } finally {

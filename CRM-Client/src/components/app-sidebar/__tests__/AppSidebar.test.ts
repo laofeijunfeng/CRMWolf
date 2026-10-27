@@ -7,7 +7,7 @@ import AppSidebar from '@/components/app-sidebar/AppSidebar.vue'
 import type { PermissionResponse } from '@/schemas/auth'
 import { usePermissionStore, type PermissionLoadState } from '@/stores/permissions'
 
-const route = vi.hoisted(() => ({ path: '/customers' }))
+const route = vi.hoisted(() => ({ path: '/customers', meta: {} as { settingsContext?: boolean } }))
 const router = vi.hoisted(() => ({ push: vi.fn() }))
 const confirmationApiMocks = vi.hoisted(() => ({
   getPendingCount: vi.fn().mockResolvedValue(0),
@@ -115,6 +115,7 @@ describe('AppSidebar business navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     route.path = '/customers'
+    route.meta = {}
   })
 
   afterEach(() => {
@@ -127,7 +128,7 @@ describe('AppSidebar business navigation', () => {
     wrappers.push(wrapper)
 
     expect(groupLabels(wrapper)).toEqual(['销售工作', '交易管理', '财务管理', '数据看板'])
-    expect(items(wrapper, '销售工作')).toEqual(['AI Agent', '线索管理', '客户管理', '客户追踪', '业务旅程'])
+    expect(items(wrapper, '销售工作')).toEqual(['销售助手', '线索管理', '客户管理', '客户追踪', '业务旅程'])
     expect(items(wrapper, '交易管理')).toEqual(['商机管理', '合同管理', '回款计划'])
     expect(items(wrapper, '财务管理')).toEqual(['回款管理', '发票管理'])
     expect(items(wrapper, '数据看板')).toEqual(['销售看板'])
@@ -163,4 +164,22 @@ describe('AppSidebar business navigation', () => {
 
     expect(items(wrapper, '销售工作')).not.toContain('业务旅程')
   })
+
+  it('keeps the normal CRM sidebar on a retired settings URL', () => {
+    route.path = '/settings/agent-run-log'
+    route.meta = { settingsContext: false }
+    const wrapper = mountSidebar('ready', [firstJourneyPermissionCode])
+    wrappers.push(wrapper)
+    expect(wrapper.find('settings-sidebar-stub').exists()).toBe(false)
+    expect(pathFor(wrapper, '销售助手')).toBe('/assistant')
+    expect(wrapper.text()).not.toContain('AI Agent')
+  })
+
+  it('retains the settings shell on active settings pages', () => {
+    route.path = '/settings/integrations'
+    const wrapper = mountSidebar('ready')
+    wrappers.push(wrapper)
+    expect(wrapper.find('settings-sidebar-stub').exists()).toBe(true)
+  })
+
 })

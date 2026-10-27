@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.customer import Customer, CustomerMember
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity
 from app.models.reminder_rule import ReminderRule
@@ -31,7 +31,7 @@ def _session():
         UserTeam.__table__,
         Role.__table__,
         UserRole.__table__,
-        Customer.__table__,
+        Customer.__table__, CustomerProduct.__table__,
         CustomerMember.__table__,
         Opportunity.__table__,
         CustomerActivity.__table__,
@@ -249,7 +249,8 @@ def _v2_rule(db, object_type, conditions, recipients=None):
     assert validate_reminder_rule(payload) == []
     db.add(
         ReminderRule(
-            id=99, team_id=101, name="条件提醒", object_type=object_type, trigger="schedule", enabled=True, rule=payload
+            id=99, team_id=101, name="条件提醒", object_type=object_type, trigger="schedule", enabled=True,
+            created_time=datetime(2026, 9, 22, 9, 30), rule=payload
         )
     )
     db.commit()
@@ -266,12 +267,17 @@ def test_v2_partial_delivery_retries_only_unreached_recipients():
     db.add(UserTeam(user_id=7, team_id=101))
     db.add(UserTeam(user_id=8, team_id=101))
     db.add(Customer(id=1, team_id=101, account_name="客户", city="上海", owner_id="7", creator_id="7"))
-    _v2_rule(db, "customer", [{"field": "status", "operator": "in", "value": ["FOLLOWING"]}], recipients=["user:7", "user:8"])
+    _v2_rule(
+        db, "customer", [{"field": "status", "operator": "in", "value": ["FOLLOWING"]}], recipients=["user:7", "user:8"]
+    )
     calls = []
 
     def deliver(_team_id, user_ids, _title, _content):
         calls.append(user_ids)
-        return {"sent": int(user_ids != [8] or calls.count([8]) > 1), "skipped": int(user_ids == [8] and calls.count([8]) == 1)}
+        return {
+            "sent": int(user_ids != [8] or calls.count([8]) > 1),
+            "skipped": int(user_ids == [8] and calls.count([8]) == 1),
+        }
 
     def run():
         return asyncio.run(execute_due_reminder_rules(db, now=now, deliver=deliver)).sent_count
@@ -322,9 +328,13 @@ def test_v2_deadline_at_earliest_date_handles_maximum_day_offset():
     now = datetime(2026, 9, 23, 9, 30)
     db.add(User(id=7, email="owner@example.com", name="负责人", status=UserStatus.ACTIVE))
     db.add(UserTeam(user_id=7, team_id=101))
-    db.add(Customer(id=1, team_id=101, account_name="客户", city="上海", owner_id="7", creator_id="7", license_expiry_date=date.min))
+    db.add(Customer(
+        id=1, team_id=101, account_name="客户", city="上海", owner_id="7", creator_id="7", license_expiry_date=date.min
+    ))
     _v2_rule(db, "customer", [{"field": "license_expiry_date", "operator": "due_in_days", "value": 36500}])
-    assert asyncio.run(execute_due_reminder_rules(db, now=now, deliver=lambda *_args: {"sent": 1, "skipped": 0})).sent_count == 1
+    assert asyncio.run(
+        execute_due_reminder_rules(db, now=now, deliver=lambda *_args: {"sent": 1, "skipped": 0})
+    ).sent_count == 1
 
 
 
@@ -340,9 +350,16 @@ def test_v2_rejects_overflowing_day_conditions_and_keeps_scanning():
     db.add(UserTeam(user_id=7, team_id=101))
     db.add(Customer(id=1, team_id=101, account_name="客户", city="上海", owner_id="7", creator_id="7"))
     valid = _v2_rule(db, "customer", [{"field": "status", "operator": "in", "value": ["FOLLOWING"]}])
-    malformed = {**valid, "name": "错误天数", "conditions": [{"field": "license_expiry_date", "operator": "due_in_days", "value": 10**9}]}
+    malformed = {
+        **valid,
+        "name": "错误天数",
+        "conditions": [{"field": "license_expiry_date", "operator": "due_in_days", "value": 10**9}],
+    }
     assert validate_reminder_rule(malformed)
-    db.add(ReminderRule(id=100, team_id=101, name="错误天数", object_type="customer", trigger="schedule", enabled=True, rule=malformed))
+    db.add(ReminderRule(
+        id=100, created_time=now - timedelta(days=1), team_id=101, name="错误天数", object_type="customer",
+        trigger="schedule", enabled=True, rule=malformed
+    ))
     db.commit()
     calls = []
 
@@ -376,7 +393,9 @@ def test_v2_created_after_daily_slot_waits_until_next_day():
 
     assert asyncio.run(execute_due_reminder_rules(db, now=now, deliver=deliver)).sent_count == 0
     assert db.query(ReminderRuleRun).count() == 0
-    assert asyncio.run(execute_due_reminder_rules(db, now=datetime(2026, 9, 24, 9, 15), deliver=deliver)).sent_count == 1
+    assert asyncio.run(
+        execute_due_reminder_rules(db, now=datetime(2026, 9, 24, 9, 15), deliver=deliver)
+    ).sent_count == 1
     assert len(deliveries) == 1
 
 
@@ -486,6 +505,7 @@ def test_v2_due_in_days_sends_before_deadline_and_status_only_once():
     db.add(
         ReminderRule(
             id=100,
+            created_time=now - timedelta(days=1),
             team_id=101,
             name="状态提醒",
             object_type="follow_up_task",
@@ -904,6 +924,7 @@ def test_v2_invalid_stored_conditions_do_not_send_or_interrupt_other_rules():
         [
             ReminderRule(
                 id=90,
+                created_time=now - timedelta(days=1),
                 team_id=101,
                 name="坏条件",
                 object_type="customer",
@@ -922,6 +943,7 @@ def test_v2_invalid_stored_conditions_do_not_send_or_interrupt_other_rules():
             ),
             ReminderRule(
                 id=91,
+                created_time=now - timedelta(days=1),
                 team_id=101,
                 name="坏时间",
                 object_type="customer",
@@ -940,6 +962,7 @@ def test_v2_invalid_stored_conditions_do_not_send_or_interrupt_other_rules():
             ),
             ReminderRule(
                 id=92,
+                created_time=now - timedelta(days=1),
                 team_id=101,
                 name="状态提醒",
                 object_type="customer",

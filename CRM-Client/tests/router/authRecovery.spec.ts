@@ -61,4 +61,44 @@ describe('auth and team route recovery', () => {
     expect(router.currentRoute.value.name).toBe('Onboarding')
     expect(router.currentRoute.value.query).toEqual({ redirect: '/customers?page=2' })
   })
+
+  it.each(['/', '/login', '/login?redirect=https%3A%2F%2Fexample.com'])('defaults %s to the sales assistant', async (path) => {
+    authState.loggedIn = true
+    teamState.hasTeam = true
+    await router.push('/signup')
+    await router.push(path)
+    expect(router.currentRoute.value.path).toBe('/assistant')
+  })
+
+  it('uses the assistant as the return destination for a signed-out root visit', async () => {
+    await router.push('/')
+    expect(router.currentRoute.value.name).toBe('Login')
+    expect(router.currentRoute.value.query).toEqual({ redirect: '/assistant' })
+  })
+
+  it('retires old Agent links without carrying their conversation parameters', async () => {
+    authState.loggedIn = true
+    teamState.hasTeam = true
+    await router.push('/agent?session_id=17&session_key=old#turn-3')
+    expect(router.currentRoute.value.fullPath).toBe('/assistant')
+    expect(router.getRoutes().find(route => route.path === '/agent')?.components).toBeUndefined()
+  })
+
+  it('keeps query and hash when returning to a business deep link', async () => {
+    authState.loggedIn = true
+    teamState.hasTeam = true
+    await router.push({ path: '/login', query: { redirect: '/opportunities?stage=won#deal-42' } })
+    expect(router.currentRoute.value.fullPath).toBe('/opportunities?stage=won#deal-42')
+  })
+
+  it('renders the retired run-log URL as a missing page in the normal CRM shell', async () => {
+    authState.loggedIn = true
+    teamState.hasTeam = true
+    await router.push('/settings/agent-run-log')
+    expect(router.currentRoute.value.name).toBe('NotFound')
+    expect(router.currentRoute.value.meta['title']).toBe('找不到页面')
+    expect(router.currentRoute.value.meta['settingsContext']).toBe(false)
+    expect(router.currentRoute.value.meta['settingsKey']).toBeUndefined()
+  })
+
 })

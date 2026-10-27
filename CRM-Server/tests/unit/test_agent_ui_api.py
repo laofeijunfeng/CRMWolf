@@ -51,7 +51,12 @@ def test_chat_stream_rejects_legacy_content_request(monkeypatch) -> None:
     assert response.status_code == 422
 
 
-def test_chat_stream_accepts_typed_input_and_forwards_request_identity(monkeypatch) -> None:
+@pytest.mark.parametrize("request_input", [
+    {"type": "text", "text": "我在上海有哪些客户"},
+    {"type": "interaction_submission", "action_id": "old-confirmation", "values": {"confirm": True}},
+    {"type": "entity_action", "action_id": "old-action"},
+])
+def test_chat_stream_retires_new_typed_input_without_dispatch(monkeypatch, request_input) -> None:
     captured = {}
     app = FastAPI()
     app.include_router(agent_api.router)
@@ -81,17 +86,13 @@ def test_chat_stream_accepts_typed_input_and_forwards_request_identity(monkeypat
         json={
             "session_id": 9,
             "client_request_id": _CLIENT_REQUEST_ID,
-            "input": {"type": "text", "text": "我在上海有哪些客户"},
+            "input": request_input,
         },
     )
 
-    assert response.status_code == 200
-    assert captured["session_id"] == 9
-    assert str(captured["client_request_id"]) == _CLIENT_REQUEST_ID
-    assert captured["request_input"].type == "text"
-    assert captured["request_input"].text == "我在上海有哪些客户"
-    assert "content" not in captured
-    assert "turn_input" not in captured
+    assert response.status_code == 410
+    assert response.json() == {"detail": "AI Agent 已下线。请使用销售助手。"}
+    assert captured == {}
 
 
 def test_agent_sse_event_union_rejects_unknown_events() -> None:
@@ -195,9 +196,9 @@ def test_message_history_returns_only_validated_agent_ui_envelopes(monkeypatch) 
         )
         assistant_body = AgentUIMessageBody(
             state="final",
-            blocks=[TextBlock(id="b_text_1", type="text", format="plain", text="你好！")],
+            blocks=[TextBlock(id="b_text_1", type="text", format="plain", text="你好\N{FULLWIDTH EXCLAMATION MARK}")],
             suggested_actions=[],
-            metadata=AgentUIMetadata(route="CHITCHAT", accessibility_label="你好！"),
+            metadata=AgentUIMetadata(route="CHITCHAT", accessibility_label="你好\N{FULLWIDTH EXCLAMATION MARK}"),
         )
         repository.complete(
             db,
@@ -206,7 +207,7 @@ def test_message_history_returns_only_validated_agent_ui_envelopes(monkeypatch) 
                 user_id=2,
                 session_id=session.id,
                 turn_id=started.user_message.turn_id,
-                content="你好！",
+                content="你好\N{FULLWIDTH EXCLAMATION MARK}",
                 ui=assistant_body,
                 diagnostics={"runtime_events": []},
             ),

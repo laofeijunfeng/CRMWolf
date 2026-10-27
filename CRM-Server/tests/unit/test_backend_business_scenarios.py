@@ -61,31 +61,20 @@ from app.models.invoice import (
 )
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus
 from app.models.opportunity import Opportunity, OpportunityProductModule
-from app.models.product import Product, ProductModule
 from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
+from app.models.product import Product, ProductModule
 from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
 from app.schemas.approval import ApprovalActionRequest
-from app.services.agent.orchestrator import (
-    ContextPolicy,
-    RootDecision,
-    RootRuntimeContext,
-    RootTurnInput,
-    WorkflowCompletedResult,
-    WorkflowDispatchResult,
-    WorkflowRef,
-)
-from app.services.agent.semantic_plan import AgentSemanticPlan
-from app.services.agent.workflow.progress import execution_progress
 from app.services.deal_journey_service import deal_journey_service
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -471,7 +460,7 @@ def seed_role_for_user(env, user_id, role_code):
 
 
 def seed_sales_owned_invoice_created_by_team_owner(env):
-    """团队所有者给销售负责的客户开票：销售是客户所有者，团队所有者只是客户成员。"""
+    """团队所有者给销售负责的客户开票:销售是客户所有者,团队所有者只是客户成员。"""
     salesperson = env.db.get(User, 2)
     if salesperson is None:
         env.db.add(User(id=2, email="sales@example.com", name="销售李", status=UserStatus.ACTIVE))
@@ -531,12 +520,6 @@ def post_agent(env, session_id, content):
     )
 
 
-def assert_sse_contains(response, *snippets):
-    assert response.status_code == 200, response.text
-    for snippet in snippets:
-        assert snippet in response.text
-
-
 def run_agent_session_created(env):
     session = agent_session(env, "客户跟进")
     response = env.client.get("/v1/agent/sessions")
@@ -545,64 +528,17 @@ def run_agent_session_created(env):
     assert response.json()["items"][0]["title"] == session["title"]
 
 
-def run_agent_stream_persists_messages(env):
-    class FakeRootOrchestrator:
-        async def dispatch(
-            self,
-            turn: RootTurnInput,
-            *,
-            runtime: RootRuntimeContext,
-            on_progress=None,
-        ) -> WorkflowDispatchResult:
-            del runtime, on_progress
-            assert turn.input.type == "text"
-            return WorkflowDispatchResult(
-                decision=RootDecision(
-                    task_relation="NEW_TASK",
-                    route="WORKFLOW",
-                    risk="WRITE",
-                    context_policy=ContextPolicy(
-                        selected_entity="IGNORE",
-                        previous_query="IGNORE",
-                        result_set="IGNORE",
-                        active_workflow="NONE",
-                    ),
-                    confidence=1.0,
-                    reason_code="EXPLICIT_MUTATION",
-                    evidence=[],
-                    semantic_plan=AgentSemanticPlan(
-                        speech_act="REQUEST_ACTION",
-                        business_object="CUSTOMER_ACTIVITY",
-                        operation="CREATE",
-                        confidence=1.0,
-                    ),
-                ),
-                workflow_result=WorkflowCompletedResult(
-                    workflow_ref=WorkflowRef(workflow_id="wf_business_scenario"),
-                    assistant_text=f"已收到: {turn.input.text}",
-                    progress=execution_progress(
-                        confirmation_required=False,
-                        has_supplements=False,
-                        outcome="COMPLETED",
-                    ),
-                ),
-            )
-
-    env.monkeypatch.setattr(
-        agent_api.agent_application_service,
-        "root_orchestrator",
-        FakeRootOrchestrator(),
-    )
+def run_agent_stream_retired_without_messages(env):
     session = agent_session(env)
     response = post_agent(env, session["id"], "帮我创建商机")
-    assert_sse_contains(response, '"event": "agent_ui"', '"phase": "final"', "已收到", "帮我创建商机")
+    assert response.status_code == 410, response.text
+    assert response.json() == {"detail": "AI Agent 已下线。请使用销售助手。"}
     messages_response = env.client.get(
         f"/v1/agent/sessions/{session['id']}/messages",
         headers={"Authorization": "Bearer scenario-token"},
     )
     assert messages_response.status_code == 200, messages_response.text
-    messages = messages_response.json()
-    assert [item["role"] for item in messages["items"]] == ["user", "assistant"]
+    assert messages_response.json()["items"] == []
 
 
 def run_approval_invoice_submit_pending(env):
@@ -1099,7 +1035,7 @@ def run_license_submit_without_flow_configuration_error(env):
 
 AGENT_SCENARIOS = [
     ("agent_session_created", run_agent_session_created),
-    ("agent_stream_persists_messages", run_agent_stream_persists_messages),
+    ("agent_stream_retired_without_messages", run_agent_stream_retired_without_messages),
 ]
 
 APPROVAL_SCENARIOS = [

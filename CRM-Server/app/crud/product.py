@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.customer import Customer, CustomerProduct
-from app.models.opportunity import Opportunity
+from app.models.customer import Customer
 from app.models.product import Product, ProductModule, ProductModuleRole
 from app.models.team import Team
 from app.utils.public_id import generate_public_id
@@ -134,7 +133,7 @@ class ProductCRUD:
     def create(self, db: Session, team_id: int, obj_in: ProductCreate, creator_id: str) -> Product:
         data = self._dump(obj_in)
         self.lock_catalog_team(db, team_id)
-        customer_ids = self._lock_team_customers(db, team_id)
+        self._lock_team_customers(db, team_id)
         product = Product(
             team_id=team_id,
             created_by=creator_id,
@@ -156,7 +155,6 @@ class ProductCRUD:
                 created_by=creator_id,
             )
             db.add(base_module)
-            self._advance_customers(db, team_id, customer_ids)
             db.commit()
         except IntegrityError as exc:
             db.rollback()
@@ -165,39 +163,20 @@ class ProductCRUD:
         return product
 
     def update(self, db: Session, product: Product, obj_in: ProductUpdate, updater_id: str) -> Product:
-        product, customer_ids = self._locked_product(db, product)
+        product, _ = self._locked_product(db, product)
         data = self._dump(obj_in)
         changed = {key: value for key, value in data.items() if getattr(product, key) != value}
-        old_active = bool(product.is_active)
-        affected: list[int] = []
-        if "name" in changed or "is_active" in changed:
-            if old_active or bool(changed.get("is_active")):
-                affected = customer_ids
-            elif "name" in changed:
-                # Inactive products can still name a linked customer intent or
-                # an opportunity in the full-row context snapshot.
-                with db.no_autoflush:
-                    linked_ids = db.query(CustomerProduct.customer_id).filter(
-                        CustomerProduct.team_id == product.team_id,
-                        CustomerProduct.product_id == product.id,
-                    ).with_for_update().all()
-                    opportunity_ids = db.query(Opportunity.customer_id).filter(
-                        Opportunity.team_id == product.team_id,
-                        Opportunity.product_id == product.id,
-                    ).with_for_update().all()
-                affected = sorted({int(row[0]) for row in (*linked_ids, *opportunity_ids)})
         if changed:
             for key, value in changed.items():
                 setattr(product, key, value)
             product.updated_by = updater_id
             product.updated_time = business_now()
-            self._advance_customers(db, int(product.team_id), affected)
         db.commit()
         db.refresh(product)
         return product
 
     def delete(self, db: Session, product: Product) -> None:
-        product, customer_ids = self._locked_product(db, product)
+        product, _ = self._locked_product(db, product)
         # The API may have populated modules before waiting for the Team lock.
         # Read the current rows for the deletion guard, not the cached collection.
         with db.no_autoflush:
@@ -217,8 +196,6 @@ class ProductCRUD:
 
         assert_product_deletable(db, product)
         try:
-            if product.is_active:
-                self._advance_customers(db, int(product.team_id), customer_ids, deleted=True)
             db.delete(product)
             db.commit()
         except IntegrityError as exc:

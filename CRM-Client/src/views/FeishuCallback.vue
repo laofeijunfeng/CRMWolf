@@ -37,7 +37,7 @@ const finishInviteLogin = async (token: string, returnPath: string | null): Prom
   }
 
   if (teamStore.hasTeam()) {
-    await router.replace(returnPath ?? '/leads')
+    await router.replace(returnPath ?? '/assistant')
   } else {
     await router.replace({ name: 'Onboarding', query: createAuthReturnQuery(returnPath) })
   }

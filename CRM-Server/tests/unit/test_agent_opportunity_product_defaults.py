@@ -13,6 +13,8 @@ from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
 from app.models.customer import Customer, CustomerProduct
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.schemas.product import ProductCreate
 from app.services.agent.business_rules import (
     apply_customer_opportunity_product_defaults,
@@ -31,7 +33,7 @@ from app.services.agent.workflow.resources import ProcurementMethodResolution
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -45,6 +47,7 @@ def db(tmp_path: Path):
         dbapi_connection.execute("PRAGMA foreign_keys=OFF")
 
     tables = [
+        User.__table__, Team.__table__,
         Product.__table__,
         ProductModule.__table__,
         Customer.__table__,
@@ -64,6 +67,13 @@ def db(tmp_path: Path):
         for index, original_name in renamed_indexes:
             index.name = original_name
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     try:
         yield session
     finally:

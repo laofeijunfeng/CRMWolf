@@ -1,9 +1,8 @@
 """Agent lead/customer create payloads and missing-field copy require 产品."""
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-
-from contextlib import nullcontext
 
 import pytest
 from pydantic import ValidationError
@@ -12,8 +11,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
+from app.models.customer import Customer
 from app.models.lead import FollowUpMethod
 from app.models.product import Product, ProductModule
+from app.models.team import Team
+from app.models.user import User
 from app.services.agent.business_rules import (
     format_customer_missing_fields,
     format_lead_missing_fields,
@@ -34,8 +36,18 @@ def db(tmp_path: Path):
     def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
         dbapi_connection.execute("PRAGMA foreign_keys=OFF")
 
-    Base.metadata.create_all(engine, tables=[Product.__table__, ProductModule.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[User.__table__, Team.__table__, Customer.__table__, Product.__table__, ProductModule.__table__],
+    )
     session = sessionmaker(bind=engine, expire_on_commit=False)()
+    session.add(User(id=1, email="catalog-owner@example.com", name="Catalog owner"))
+    session.flush()
+    session.add_all([
+        Team(id=1, name="One", code="TEAM_ONE", owner_id=1),
+        Team(id=2, name="Two", code="TEAM_TWO", owner_id=1),
+    ])
+    session.commit()
     try:
         yield session
     finally:
@@ -202,7 +214,7 @@ def test_plan_lead_matches_product_name_from_user_message(db):
     plan = _plan_lead(
         SimpleNamespace(**_lead_kwargs()),
         db=db,
-        user_message="录入 Hifox 线索\n企业名称：协鑫数智科技\n联系人：黄思盛",
+        user_message="录入 Hifox 线索\n企业名称\N{FULLWIDTH COLON}协鑫数智科技\n联系人\N{FULLWIDTH COLON}黄思盛",
     )
     assert plan.commands[0].payload["lead"]["product_public_id"] == product.public_id
 

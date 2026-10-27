@@ -35,7 +35,6 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BarChart3,
-  Bot,
   Building2,
   FileText,
   Flag,
@@ -67,7 +66,7 @@ import SettingsSidebar from './SettingsSidebar.vue'
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
-const isSettingsContext = computed(() => route.path.startsWith('/settings'))
+const isSettingsContext = computed(() => route.meta['settingsContext'] !== false && route.path.startsWith('/settings'))
 const confirmationStore = useFollowUpConfirmationStore()
 const { pendingCount: pendingConfirmationCount } = storeToRefs(confirmationStore)
 const { fetchPendingCount } = confirmationStore
@@ -134,12 +133,6 @@ const navGroups = computed<NavMainGroup[]>(() => [
   {
     label: '销售工作',
     items: [
-      {
-        label: 'AI Agent',
-        path: '/agent',
-        icon: Bot,
-        active: currentPath.value.startsWith('/agent') && !currentPath.value.startsWith('/assistant'),
-      },
       {
         label: '销售助手',
         path: '/assistant',

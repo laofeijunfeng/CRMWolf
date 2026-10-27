@@ -133,7 +133,7 @@ describe('FeishuCallback recovery contract', () => {
     expect(mocks.router.replace).toHaveBeenCalledWith('/customers?status=active')
   })
 
-  it('uses leads as the default destination for invite login without a saved path', async () => {
+  it('uses the assistant as the default destination for invite login without a saved path', async () => {
     mocks.authCallback.mockResolvedValue({
       mode: 'invite',
       login: { access_token: 'invite-token' },
@@ -143,7 +143,7 @@ describe('FeishuCallback recovery contract', () => {
     mountCallback()
     await flushPromises()
 
-    expect(mocks.router.replace).toHaveBeenCalledWith('/leads')
+    expect(mocks.router.replace).toHaveBeenCalledWith('/assistant')
   })
 
   it('routes to team-unavailable when team loading fails', async () => {
