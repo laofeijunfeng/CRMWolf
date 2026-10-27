@@ -13,11 +13,12 @@ if TYPE_CHECKING:
 
     from app.services.assistant.confirmation import ActivityWriter
     from app.services.assistant.intake import KindStructurer
+    from app.services.assistant.quality_gate import QualityGate
 
 from app.models.assistant import AssistantTask, AssistantTaskStatus, AssistantWaitingType
 from app.services.assistant.action_evidence import append_source, parse_deadline, reconcile_action_evidence
 from app.services.assistant.confirmation import execute_confirmation, freeze_confirmation
-from app.services.assistant.contracts import DraftField, TaskAuthority, TaskWaiting
+from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter
 from app.services.assistant.intake_flow import intake_step
@@ -185,6 +186,8 @@ class AssistantCoordinator:
             return await self._answer_activity_kind(db, task, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.OBJECT_SELECTION:
             return await self._answer_object_selection(db, task, waiting, user_input)
+        if waiting.field == "temporal_choice":
+            return await self._answer_temporal_choice(db, task, waiting, user_input, reporter=reporter)
         return await self._answer_field(db, task, waiting, user_input, reporter=reporter)
 
     async def _prepare_confirmation(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
@@ -193,49 +196,60 @@ class AssistantCoordinator:
             return await self._advance(db, task)
         if task.authority_json.get("frozen_activity_command"):
             raise InvalidTaskTransitionError("frozen activity requires its matching waiting action")
-        time_text = (draft.next_follow_time.value or "").strip()
-        source = next((record for record in reversed(draft.source_records) if time_text in record.text), None)
-        next_follow_time_granularity = "UNKNOWN"
-        if source is not None and time_text:
-            resolved, granularity = parse_deadline(time_text, anchor=source.recorded_at)
-            next_follow_time_granularity = granularity
-            next_follow_time = resolved.replace(hour=9) if resolved is not None and granularity == "DATE" else resolved
+        temporal = draft.content_json.get("temporal_evidence")
+        if isinstance(temporal, dict) and temporal.get("version") == "temporal-evidence-v1":
+            gated = await self._gate_temporal_evidence(db, task, draft)
+            if isinstance(gated, CoordinatorOutcome):
+                return gated
+            task, next_follow_time, next_follow_time_granularity = gated
+            draft = load_draft(task)
         else:
-            next_follow_time = resolve_follow_up_time(time_text, base=task.created_time) if time_text else None
-            if time_text:
-                _, next_follow_time_granularity = parse_deadline(time_text, anchor=task.created_time)
-        if time_text and (
-            next_follow_time is None
-            or (
-                draft.next_follow_time.status != "ACCEPTED"
-                and not any(time_text in segment for segment in draft.source_segments)
-            )
-        ):
-            waiting = TaskWaiting(
-                type=AssistantWaitingType.FIELD,
-                field="next_follow_time",
-                question_id=f"q_time_{task.public_id}_{task.version}",
-                prompt="下次跟进时间无法确定，请提供具体日期和时间。",
-            )
-            result = apply_task_update(
-                db,
-                task,
-                TaskUpdate(
-                    waiting=waiting,
-                    action_actor="SYSTEM",
-                    action_name="ask_follow_up_time",
-                    action_result={"reason": "UNRESOLVED_TIME"},
-                ),
-            )
-            return CoordinatorOutcome(
-                CoordinatorReply(
-                    task_public_id=result.task.public_id,
-                    status=result.task.status,
-                    message=waiting.prompt,
-                    waiting=load_waiting(result.task),
-                ),
-                result.task,
-            )
+            time_text = (draft.next_follow_time.value or "").strip()
+            source = next((record for record in reversed(draft.source_records) if time_text in record.text), None)
+            next_follow_time_granularity = "UNKNOWN"
+            if source is not None and time_text:
+                resolved, granularity = parse_deadline(time_text, anchor=source.recorded_at)
+                next_follow_time_granularity = granularity
+                if resolved is not None and granularity == "DATE":
+                    next_follow_time = resolved.replace(hour=9)
+                else:
+                    next_follow_time = resolved
+            else:
+                next_follow_time = resolve_follow_up_time(time_text, base=task.created_time) if time_text else None
+                if time_text:
+                    _, next_follow_time_granularity = parse_deadline(time_text, anchor=task.created_time)
+            if time_text and (
+                next_follow_time is None
+                or (
+                    draft.next_follow_time.status != "ACCEPTED"
+                    and not any(time_text in segment for segment in draft.source_segments)
+                )
+            ):
+                waiting = TaskWaiting(
+                    type=AssistantWaitingType.FIELD,
+                    field="next_follow_time",
+                    question_id=f"q_time_{task.public_id}_{task.version}",
+                    prompt="下次跟进时间无法确定，请提供具体日期和时间。",
+                )
+                result = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        waiting=waiting,
+                        action_actor="SYSTEM",
+                        action_name="ask_follow_up_time",
+                        action_result={"reason": "UNRESOLVED_TIME"},
+                    ),
+                )
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=result.task.public_id,
+                        status=result.task.status,
+                        message=waiting.prompt,
+                        waiting=load_waiting(result.task),
+                    ),
+                    result.task,
+                )
         customer_id = task.authority_json.get("customer_public_id")
         if customer_id:
             from app.crud.permission import permission_crud
@@ -395,6 +409,178 @@ class AssistantCoordinator:
             ),
         )
         return await self._prepare_confirmation(db, result.task)
+
+
+    async def _gate_temporal_evidence(
+        self, db: Session, task: AssistantTask, draft: TaskDraft
+    ) -> CoordinatorOutcome | tuple[AssistantTask, object, str]:
+        from app.services.assistant.temporal_evidence import project_draft, resolved_sales_follow_up, temporal_waiting
+
+        project_draft(draft)
+        spec = temporal_waiting(draft)
+        if spec is not None:
+            raw_candidates = spec.get("candidates")
+            if isinstance(raw_candidates, list):
+                candidates = [item for item in raw_candidates if isinstance(item, dict)]
+            else:
+                candidates = []
+            waiting = TaskWaiting(
+                type=AssistantWaitingType.FIELD,
+                field="temporal_choice" if candidates else "next_follow_time",
+                question_id=f"q_time_{task.public_id}_{task.version}",
+                prompt=str(spec["prompt"]),
+                candidates=candidates,
+            )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    draft=draft,
+                    waiting=waiting,
+                    action_actor="SYSTEM",
+                    action_name="ask_temporal_evidence",
+                    action_result={"reason": spec["reason"], "candidate_count": len(candidates)},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=waiting.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        resolved, granularity = resolved_sales_follow_up(draft)
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(draft=draft, action_actor="SYSTEM", action_name="project_temporal_evidence"),
+        )
+        return result.task, resolved, granularity
+
+    async def _answer_temporal_choice(
+        self,
+        db: Session,
+        task: AssistantTask,
+        waiting: TaskWaiting,
+        user_input: AssistantInput,
+        reporter: ProgressReporter | None = None,
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.temporal_evidence import TemporalContractError, apply_temporal_choice
+
+        if reporter is None:
+            reporter = NullProgressReporter()
+        choice = (user_input.choice or "").strip()
+        offered = {str(item.get("id")) for item in waiting.candidates if isinstance(item, dict)}
+        if not choice or choice not in offered:
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=task.public_id, status=task.status, message=waiting.prompt, waiting=waiting
+                ),
+                task,
+            )
+        draft = load_draft(task)
+        try:
+            apply_temporal_choice(draft, choice)
+        except TemporalContractError:
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=task.public_id, status=task.status, message=waiting.prompt, waiting=waiting
+                ),
+                task,
+            )
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_waiting=True,
+                draft=draft,
+                action_actor="USER",
+                action_name="choose_temporal_evidence",
+                action_input={"choice": choice},
+                action_result={"accepted": True},
+            ),
+        )
+        updated = result.task
+        if self._quality_gate is not None:
+            scored = await self._rescore_temporal_choice(db, updated, reporter)
+            if isinstance(scored, CoordinatorOutcome):
+                return scored
+            updated = scored
+        return await self._prepare_confirmation(db, updated)
+
+    async def _rescore_temporal_choice(
+        self, db: Session, task: AssistantTask, _reporter: ProgressReporter
+    ) -> CoordinatorOutcome | AssistantTask:
+        from typing import cast
+
+        gate = cast("QualityGate", self._quality_gate)
+        draft = load_draft(task)
+        try:
+            gate_outcome = await gate.evaluate(
+                db,
+                team_id=task.team_id,
+                user_text="\n".join(draft.source_segments),
+                content=draft.content.value or "",
+                next_action=draft.next_action.value or "",
+                kind=task.activity_kind or "FOLLOW_UP",
+                content_json=draft.content_json,
+            )
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError):
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    error_code="QUALITY_GATE_UNAVAILABLE",
+                    action_actor="SYSTEM",
+                    action_name="quality_gate",
+                    action_result={"passed": False, "retryable": True},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message="评分暂时没有完成，请稍后重试。",
+                ),
+                result.task,
+            )
+        if not gate_outcome.passed:
+            gap = TaskWaiting(
+                type=AssistantWaitingType.FIELD,
+                field=gate_outcome.gap_field or "content",
+                question_id=f"q_gap_{task.public_id}_{task.version}",
+                prompt=gate_outcome.question or "请补充这次沟通的关键信息。",
+            )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(waiting=gap, action_actor="SYSTEM", action_name="ask_quality_gap"),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=gap.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        draft.quality_score = DraftField(status="CANDIDATE", value=str(gate_outcome.score))
+        draft.score_reason = gate_outcome.reason
+        draft.score_detail = gate_outcome.detail or {}
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                draft=draft,
+                action_actor="SYSTEM",
+                action_name="quality_gate",
+                action_result={"passed": True, "score": gate_outcome.score},
+            ),
+        )
+        return result.task
 
     async def _answer_field(
         self,

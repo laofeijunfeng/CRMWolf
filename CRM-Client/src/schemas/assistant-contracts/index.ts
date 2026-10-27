@@ -91,7 +91,10 @@ export const TaskWaitingSchema = z.object({
   action_id: z.string().min(1).nullable().optional(),
   expected_version: z.number().int().nonnegative().nullable().optional(),
   fingerprint: z.string().nullable().optional(),
-  candidates: z.array(z.object({ id: z.string().min(1), account_name: z.string().min(1) }).strict()).optional(),
+  candidates: z.array(z.union([
+    z.object({ id: z.string().min(1), account_name: z.string().min(1) }).strict(),
+    z.object({ id: z.string().min(1), label: z.string().min(1) }).strict()
+  ])).optional(),
   confirmation_payload: ConfirmationPayloadSchema.nullable().optional()
 }).strict().superRefine((waiting, ctx) => {
   const payload = waiting.confirmation_payload

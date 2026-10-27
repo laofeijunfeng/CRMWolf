@@ -62,7 +62,7 @@ class ActionEvidence(BaseModel):
     due_at_text: str | None = None
     anchor_at: datetime | None = None
     timezone: Literal["Asia/Shanghai"] = "Asia/Shanghai"
-    parser_version: Literal["assistant-date-v1"] = PARSER_VERSION
+    parser_version: Literal["assistant-date-v1", "assistant-date-v2"] = PARSER_VERSION
     granularity: Literal["DATE", "DATETIME", "UNKNOWN"] = "UNKNOWN"
     resolution_status: Literal["RESOLVED", "AMBIGUOUS", "UNRESOLVED", "EXPLICITLY_NONE"] = "UNRESOLVED"
     due_at: datetime | None = None
@@ -334,6 +334,27 @@ def reconcile_action_evidence(draft: TaskDraft, kind: str) -> None:
             history.append(evidence)
     draft.content_json["action_evidence"] = [item.model_dump(mode="json") for item in history]
     draft.content_json["source_records"] = [record.model_dump(mode="json") for record in draft.source_records]
+    _overlay_temporal_sales_evidence(draft)
+
+
+
+def _overlay_temporal_sales_evidence(draft: TaskDraft) -> None:
+    """Keep proposal evidence aligned with the resolved sales mention only."""
+
+    from app.services.assistant.temporal_evidence import sales_evidence_overlay
+
+    overlay = sales_evidence_overlay(draft)
+    if overlay is None:
+        return
+    evidence = ActionEvidence.model_validate(overlay)
+    history = [ActionEvidence.model_validate(item) for item in draft.content_json.get("action_evidence", [])]
+    for item in history:
+        same_sales_action = item.action == evidence.action or item.due_date == evidence.due_date
+        if item.state == "ACTIVE" and item.parser_version != "assistant-date-v2" and same_sales_action:
+            item.state = "SUPERSEDED"
+            item.superseded_by = f"{evidence.action_id}:{evidence.revision}"
+    history.append(evidence)
+    draft.content_json["action_evidence"] = [item.model_dump(mode="json") for item in history]
 
 
 def validate_action_evidence(
@@ -357,6 +378,8 @@ def validate_action_evidence(
             for item in content.get("action_evidence", [])
             if isinstance(item, dict) and item.get("action_id") == action_id and item.get("state") == "ACTIVE"
         ]
+        if len(active) == 1 and active[0].parser_version == "assistant-date-v2":
+            return _validate_temporal_evidence(content, active[0], source_content=source_content, records=records)
         if len(matching) != 1 or len(active) != 1 or active[0].resolution_status != "RESOLVED":
             return None
         evidence, action = active[0], matching[0]
@@ -375,3 +398,47 @@ def validate_action_evidence(
         return evidence if recomputed == evidence else None
     except (ValidationError, ValueError, TypeError, KeyError):
         return None
+
+def _validate_temporal_evidence(
+    content: dict[str, object], evidence: ActionEvidence, *, source_content: str, records: list[SourceSegment]
+) -> ActionEvidence | None:
+    bundle = content.get("temporal_evidence")
+    if not isinstance(bundle, dict) or evidence.due_at is None or evidence.resolution_status != "RESOLVED":
+        return None
+    mentions = bundle.get("mentions")
+    actions = bundle.get("actions")
+    if not isinstance(mentions, list) or not isinstance(actions, list):
+        return None
+    mention = next(
+        (
+            item
+            for item in mentions
+            if isinstance(item, dict)
+            and item.get("state") == "ACTIVE"
+            and item.get("raw_text") == evidence.due_at_text
+            and item.get("resolution_status") == "RESOLVED"
+            and item.get("resolved_at") == evidence.due_at.isoformat()
+            and item.get("role") == "SALES_FOLLOW_UP"
+        ),
+        None,
+    )
+    action = next(
+        (
+            item
+            for item in actions
+            if isinstance(item, dict)
+            and item.get("state") == "ACTIVE"
+            and item.get("action_id") == evidence.action_id
+            and item.get("action_text") == evidence.action
+            and item.get("owner_role") == "SALES"
+        ),
+        None,
+    )
+    sources = [record for record in records if record.segment_id == evidence.segment_id]
+    if mention is None or action is None or len(sources) != 1 or evidence.evidence_quote not in sources[0].text:
+        return None
+    if evidence.evidence_quote not in source_content or _withdrawn_after(evidence, records):
+        return None
+    return evidence
+
+

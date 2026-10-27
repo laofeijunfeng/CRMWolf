@@ -38,6 +38,23 @@ const followTime = computed(() => {
   return candidate?.next_follow_time_granularity === 'DATE' ? value?.slice(0, 10) : value
 })
 
+const jsonList = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null) : []
+
+const commitments = computed(() => jsonList(frozen.value?.content_json.customer_commitments)
+  .map((item) => item.text)
+  .filter((item): item is string => typeof item === 'string' && item !== ''))
+
+const salesLine = computed(() => {
+  const value = frozen.value?.content_json.sales_follow_up_text
+  return typeof value === 'string' ? value : ''
+})
+
+const notices = computed(() => {
+  const value = frozen.value?.content_json.temporal_notices
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item !== '') : []
+})
+
 interface Slot { status: string; value?: string | null | undefined }
 
 interface FieldRow { key: string; label: string; value: string; locked: boolean; hint?: string | undefined }
@@ -79,10 +96,16 @@ const qualityText = computed(() => frozen.value?.score !== undefined ? String(fr
         <div class="rounded-wolf-md border bg-muted/30 px-3 py-2.5 text-sm leading-relaxed">
           {{ contentText }}
         </div>
+        <div v-if="commitments.length" class="mt-2">
+          <div class="mb-1 text-xs font-medium text-muted-foreground">客户事实</div>
+          <p v-for="line in commitments" :key="line" class="text-sm leading-relaxed">{{ line }}</p>
+        </div>
         <div v-if="frozen" class="mt-2 space-y-1 text-xs text-muted-foreground">
           <p v-if="frozen.score_reason">评分依据：{{ frozen.score_reason }}</p>
-          <p v-if="frozen.next_action">下一步：{{ frozen.next_action }}</p>
+          <p v-if="salesLine">下一步：{{ salesLine }}</p>
+          <p v-else-if="frozen.next_action">下一步：{{ frozen.next_action }}</p>
           <p v-if="followTime">跟进时间：{{ followTime }}</p>
+          <p v-for="notice in notices" :key="notice">{{ notice }}</p>
         </div>
       </div>
 

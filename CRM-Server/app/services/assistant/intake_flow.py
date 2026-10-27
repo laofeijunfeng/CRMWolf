@@ -76,7 +76,14 @@ def _merge_canonical(
     old = schema.model_validate(previous).model_dump(mode="json")
     new = schema.model_validate(incoming).model_dump(mode="json")
     merged = dict(old)
-    for name in ("action_evidence", "source_records"):
+    for name in (
+        "action_evidence",
+        "source_records",
+        "temporal_evidence",
+        "customer_commitments",
+        "sales_follow_up_text",
+        "temporal_notices",
+    ):
         if name in previous:
             merged[name] = previous[name]
     for name, value in new.items():
@@ -211,6 +218,22 @@ def apply_structured_draft(task: AssistantTask, structured: object, *, correctio
     _patch("meeting_subject", str(canonical.get("meeting_subject") or getattr(structured, "meeting_subject", "")))
     _patch("participants", str(getattr(structured, "participants", "")))
     _patch("customer", str(getattr(structured, "customer_name", "")))
+    mentions = list(getattr(structured, "temporal_mentions", []) or [])
+    actions = list(getattr(structured, "actions", []) or [])
+    if mentions or actions:
+        from app.services.assistant.temporal_evidence import TemporalContractError, attach_model_evidence
+
+        record = next((item for item in reversed(draft.source_records) if item.text == correction_text), None)
+        if record is None:
+            raise TemporalContractError("temporal evidence has no source segment")
+        attach_model_evidence(
+            draft,
+            segment_id=record.segment_id,
+            segment_text=record.text,
+            anchor=record.recorded_at,
+            mentions=mentions,
+            actions=actions,
+        )
     return draft
 
 
@@ -411,7 +434,13 @@ async def intake_step(
         "structuring_model_name": getattr(structured, "structuring_model", "") or None,
     }
     # Scoring and next-action presence are independent prerequisites.
-    action_present = draft.next_action.status == "EXPLICITLY_NONE" or bool((draft.next_action.value or "").strip())
+    from app.services.assistant.temporal_evidence import commitment_only
+
+    action_present = (
+        draft.next_action.status == "EXPLICITLY_NONE"
+        or bool((draft.next_action.value or "").strip())
+        or commitment_only(draft)
+    )
     passed = gate_outcome.passed and action_present
     if passed:
         apply_quality_score(draft, gate_outcome.score)

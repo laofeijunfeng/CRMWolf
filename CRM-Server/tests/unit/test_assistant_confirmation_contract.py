@@ -843,3 +843,86 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
         assert task_row.evidence_json["evidence_quote"] == original
         assert task_row.evidence_json["parser_version"] == "assistant-date-v1"
         assert activity.source_content == f"{original}\n{supplement}"
+
+
+@pytest.mark.asyncio
+async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
+    from datetime import datetime
+
+    from app.services.assistant.temporal_evidence import attach_model_evidence, find_time_spans
+
+    session, factory, _ = db
+    task, _, _ = prepared(db)
+    text = "叶老师反馈本月底会完成；等 30 号再联系叶老师"
+    spans = find_time_spans(text)
+    mentions = []
+    actions = []
+    for index, span in enumerate(spans):
+        mentions.append(
+            {
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": span.kind,
+                "role": "OTHER",
+                "owner": "",
+                "action_ref": f"a{index}",
+                "confidence": 0.9,
+            }
+        )
+        actions.append(
+            {
+                "action_ref": f"a{index}",
+                "owner_role": "SALES",
+                "owner_text": "我",
+                "action_text": "完成准备" if span.kind == "MONTH_END" else "联系叶老师",
+                "action_status": "PLANNED",
+                "evidence_quote": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+            }
+        )
+    draft = TaskDraft.model_validate(task.draft_json)
+    draft.content = DraftField(status="CANDIDATE", value=text)
+    draft.content_json = {"content": text, "next_action": "", "next_follow_time_text": ""}
+    draft.source_segments = [text]
+    attach_model_evidence(
+        draft,
+        segment_id="seg_example",
+        segment_text=text,
+        anchor=datetime(2026, 10, 27, 15, 0),
+        mentions=mentions,
+        actions=actions,
+    )
+    task.draft_json = draft.model_dump(mode="json")
+    session.commit()
+
+    outcome = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, task, AssistantInput(kind="text")
+    )
+    assert outcome.reply.waiting is not None
+    assert outcome.reply.waiting.field == "temporal_choice"
+    assert outcome.reply.message == "“30号”是指本月30号还是下月30号？"
+    assert "具体日期和时间" not in outcome.reply.message
+    assert outcome.task.authority_json.get("frozen_activity_command") is None
+    with factory() as independent:
+        assert independent.query(CustomerActivity).count() == 0
+
+    choice = outcome.reply.waiting.candidates[0]["id"]
+    chosen = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, outcome.task, AssistantInput(kind="submit_field", choice=choice)
+    )
+    frozen = chosen.task.authority_json["frozen_activity_command"]
+    assert frozen["next_follow_time"] == "2026-10-30T00:00:00"
+    assert frozen["next_follow_time_granularity"] == "DATE"
+    assert "2026-10-31" not in (frozen["next_follow_time"] or "")
+    assert frozen["content_json"]["customer_commitments"][0]["text"] == "叶老师预计本月底完成准备。"
+    session.commit()
+    await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, chosen.task, AssistantInput(kind="confirm", choice="confirm")
+    )
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).one()
+        assert activity.next_follow_time == datetime(2026, 10, 30, 0, 0)
+        assert json.loads(activity.content_json)["customer_commitments"][0]["resolved_on"] == "2026-10-31"

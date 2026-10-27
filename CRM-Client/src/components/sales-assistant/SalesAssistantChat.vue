@@ -57,7 +57,8 @@ const FIELD_LABELS: Record<string, string> = {
   customer: '客户名称',
   content: '沟通内容',
   next_action: '下一步行动',
-  next_follow_time: '下次跟进时间'
+  next_follow_time: '下次跟进时间',
+  temporal_choice: '下次跟进时间'
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -459,8 +460,14 @@ const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Pro
   await dispatchConversation(() => assistantApi.conversationChoice(request), choice === 'CONTINUE' ? '接着刚才' : '另记一件')
 }
 
+const choiceLabel = (choice: string, source: TaskWaiting | null): string => {
+  const candidate = source?.candidates?.find((item) => item.id === choice)
+  if (candidate === undefined) return KIND_LABELS[choice] ?? '选择'
+  return 'account_name' in candidate ? candidate.account_name : candidate.label
+}
+
 const pickKind = (choice: string, source: TaskWaiting | null): Promise<void> =>
-  submit({ kind: 'submit_field', choice }, KIND_LABELS[choice] ?? source?.candidates?.find((candidate) => candidate.id === choice)?.account_name ?? '选择客户', source)
+  submit({ kind: 'submit_field', choice }, choiceLabel(choice, source), source)
 
 const confirmWrite = (source: TaskWaiting | null): Promise<void> =>
   submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
@@ -597,7 +604,7 @@ const isCurrentWait = (entry: ChatEntry): boolean =>
   && task.value.waiting?.expected_version === entry.waiting.expected_version
 
 
-const cardKind = (entry: ChatEntry): 'confirm' | 'meeting' | 'proposal' | 'gap' | 'kind' | 'customer' | 'failure' | 'none' => {
+const cardKind = (entry: ChatEntry): 'confirm' | 'meeting' | 'proposal' | 'gap' | 'kind' | 'customer' | 'temporal' | 'failure' | 'none' => {
   if (entry.outcome === 'failure') return 'failure'
   const settledConfirmation = entry.waiting?.type === 'CONFIRMATION' && !isCurrentWait(entry)
   const w = (isCurrentWait(entry) || entry.replayed || settledConfirmation) ? entry.waiting : null
@@ -609,6 +616,7 @@ const cardKind = (entry: ChatEntry): 'confirm' | 'meeting' | 'proposal' | 'gap' 
   if (w.type === 'CONFIRMATION' && w.confirmation_payload?.kind === 'proposal') return 'proposal'
   if (w.type === 'ACTIVITY_KIND') return 'kind'
   if (w.type === 'OBJECT_SELECTION') return 'customer'
+  if (w.type === 'FIELD' && w.field === 'temporal_choice') return 'temporal'
   if (w.type === 'FIELD') return 'gap'
   return 'none'
 }
@@ -794,6 +802,20 @@ void loadConversation()
                     <span class="text-[11px] text-muted-foreground">{{ option.hint }}</span>
                   </Button>
                 </div>
+              </div>
+            </div>
+
+            <div v-if="cardKind(entry) === 'temporal' && entry.waiting" class="w-full rounded-wolf-lg border bg-card shadow-sm">
+              <div class="border-b bg-muted/40 px-4 py-3 text-sm font-medium">{{ entry.waiting.prompt }}</div>
+              <div class="grid gap-2 px-4 py-3">
+                <Button
+                  v-for="candidate in entry.waiting.candidates ?? []"
+                  :key="candidate.id"
+                  variant="outline"
+                  class="h-auto justify-start py-2 text-left"
+                  :disabled="busy || resultPending || !isCurrentWait(entry)"
+                  @click="() => { void pickKind(candidate.id, entry.waiting) }"
+                >{{ 'label' in candidate ? candidate.label : candidate.account_name }}</Button>
               </div>
             </div>
 
