@@ -174,6 +174,19 @@ def accept_submit(
                 or text is not None
             ):
                 raise AssistantStateConflict("请选择当前签发的客户")
+        elif waiting.type == "FIELD" and waiting.field == "temporal_choice":
+            offered: set[str] = set()
+            for candidate in waiting.candidates:
+                candidate_id = candidate.get("id")
+                if isinstance(candidate_id, str) and candidate_id:
+                    offered.add(candidate_id)
+            has_text = isinstance(text, str) and bool(text.strip())
+            choice_is_current = isinstance(choice, str) and choice in offered
+            if choice is not None:
+                if text is not None or not choice_is_current:
+                    raise AssistantStateConflict("请选择当前签发的时间")
+            elif not has_text:
+                raise AssistantStateConflict("请选择当前签发的时间")
         elif waiting.type == "FIELD":
             if choice == "EXPLICITLY_NONE":
                 if waiting.field != "next_action" or not isinstance(text, str) or not text.strip():

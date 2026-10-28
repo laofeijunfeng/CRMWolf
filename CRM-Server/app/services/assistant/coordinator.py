@@ -493,11 +493,17 @@ class AssistantCoordinator:
         user_input: AssistantInput,
         reporter: ProgressReporter | None = None,
     ) -> CoordinatorOutcome:
-        from app.services.assistant.temporal_evidence import TemporalContractError, apply_temporal_choice
+        from app.services.assistant.temporal_evidence import (
+            TemporalContractError,
+            apply_temporal_choice,
+            match_temporal_choice_id,
+        )
 
         if reporter is None:
             reporter = NullProgressReporter()
         choice = (user_input.choice or "").strip()
+        if not choice:
+            choice = match_temporal_choice_id(waiting.candidates, user_input.text or "") or ""
         offered = {str(item.get("id")) for item in waiting.candidates if isinstance(item, dict)}
         if not choice or choice not in offered:
             return CoordinatorOutcome(

@@ -1015,3 +1015,337 @@ def test_schema_mismatch_is_not_downgraded_to_a_broken_history_entry(db, monkeyp
     monkeypatch.setattr(ConversationService, "_messages", lambda *args: (_ for _ in ()).throw(schema_error))
     with pytest.raises(OperationalError):
         service.read(db, team_id=1, user_id=2)
+
+
+
+MONTH_TEXT = "叶老师反馈本月底会完成；等 30 号再联系叶老师"
+
+
+def month_ambiguity(db):
+    from datetime import datetime
+
+    from app.services.assistant.contracts import DraftField
+    from app.services.assistant.temporal_evidence import attach_model_evidence, find_time_spans, temporal_waiting
+
+    spans = find_time_spans(MONTH_TEXT)
+    mentions = []
+    actions = []
+    for index, span in enumerate(spans):
+        mentions.append(
+            {
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": span.kind,
+                "role": "OTHER",
+                "owner": "",
+                "action_ref": f"a{index}",
+                "confidence": 0.9,
+            }
+        )
+        actions.append(
+            {
+                "action_ref": f"a{index}",
+                "owner_role": "SALES",
+                "owner_text": "我",
+                "action_text": "完成准备" if span.kind == "MONTH_END" else "联系叶老师",
+                "action_status": "PLANNED",
+                "evidence_quote": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+            }
+        )
+    draft = TaskDraft(
+        content=DraftField(status="CANDIDATE", value=MONTH_TEXT),
+        content_json={"content": MONTH_TEXT},
+        source_segments=[MONTH_TEXT],
+        quality_score=DraftField(status="CANDIDATE", value="80"),
+    )
+    attach_model_evidence(
+        draft,
+        segment_id="seg_month",
+        segment_text=MONTH_TEXT,
+        anchor=datetime(2026, 10, 27, 15, 0),
+        mentions=mentions,
+        actions=actions,
+    )
+    spec = temporal_waiting(draft)
+    assert spec is not None
+    row = task(
+        db,
+        goal=MONTH_TEXT,
+        version=3,
+        activity_kind="FOLLOW_UP",
+        draft_json=draft.model_dump(mode="json"),
+        waiting_type="FIELD",
+        waiting_field="temporal_choice",
+        waiting_json={
+            "action_id": "awa_month",
+            "payload": {
+                "question_id": "q_month",
+                "prompt": spec["prompt"],
+                "candidates": spec["candidates"],
+            },
+        },
+    )
+    return row, spec
+
+
+def temporal_command(version, public_id, key, *, choice=None, text_value=None, action_id="awa_month", task_version=3):
+    from app.schemas.assistant import SubmitInputRequest
+    from app.schemas.assistant_conversation import ConversationCommandRequest
+
+    return ConversationCommandRequest(
+        task_public_id=public_id,
+        expected_version=version,
+        input=SubmitInputRequest(
+            kind="submit_field",
+            choice=choice,
+            text=text_value,
+            action_id=action_id,
+            expected_version=task_version,
+            client_request_id=key,
+        ),
+    )
+
+
+async def execute_accepted_turn(db, monkeypatch, turn_public_id):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.services.assistant.coordinator import AssistantCoordinator
+    from app.services.assistant.turns import execute_turn
+
+    class NoChooser:
+        async def choose(self, current):
+            raise AssertionError(f"time choice must not replan task {current.public_id}")
+
+    monkeypatch.setattr("app.api.assistant._coordinator", AssistantCoordinator(NoChooser()))
+    turn = db.query(AssistantTurn).filter_by(public_id=turn_public_id).one()
+    await execute_turn(turn.id, factory=sessionmaker(bind=db.get_bind()))
+    db.expire_all()
+
+
+def assert_october_follow_up(row):
+    from datetime import datetime
+
+    from app.services.assistant.task_state import load_draft, load_waiting
+    from app.services.assistant.temporal_evidence import resolved_sales_follow_up, temporal_waiting
+
+    draft = load_draft(row)
+    assert temporal_waiting(draft) is None
+    resolved, granularity = resolved_sales_follow_up(draft)
+    assert (resolved, granularity) == (datetime(2026, 10, 30), "DATE")
+    waiting = load_waiting(row)
+    assert waiting is not None and waiting.field == "customer"
+    assert waiting.prompt == "请提供客户准确名称。"
+
+
+@pytest.mark.parametrize("answer", ["本月 30 号", "本月30号"])
+async def test_temporal_month_text_maps_through_the_message_entry(db, monkeypatch, answer):
+    row, _spec = month_ambiguity(db)
+    service = ConversationService(
+        classifier=Classifier(
+            decision("CONTINUE", row.public_id, "PROVIDE_SUPPLEMENT").model_copy(update={"field_answer": True})
+        )
+    )
+    state = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(
+        db, team_id=1, user_id=2, request=text(state.version, answer, f"month-text-{answer}")
+    )
+    assert response.submission is not None
+    assert response.submission.input.kind == "submit_field"
+    assert response.submission.input.choice is None
+    assert response.submission.input.text == answer
+    assert any(message.text == answer for message in response.conversation.messages)
+    await execute_accepted_turn(db, monkeypatch, response.submission.turn_id)
+    db.refresh(row)
+    assert_october_follow_up(row)
+    assert db.query(AssistantTurn).filter_by(public_id=response.submission.turn_id).one().status == "SUCCEEDED"
+
+
+async def test_temporal_month_button_enters_a_durable_turn_and_keeps_the_label(db, monkeypatch):
+    row, spec = month_ambiguity(db)
+    choice_id = spec["candidates"][0]["id"]
+    service = ConversationService(classifier=Classifier(decision()))
+    state = service.open(db, team_id=1, user_id=2)
+    request = temporal_command(state.version, row.public_id, "month-button", choice=choice_id)
+    response = await service.command(db, team_id=1, user_id=2, request=request)
+    replay = await service.command(db, team_id=1, user_id=2, request=request)
+    assert response.submission is not None and replay.submission is not None
+    assert response.submission.turn_id == replay.submission.turn_id
+    assert response.submission.input.choice == choice_id
+    assert db.query(AssistantTurn).count() == 1
+    assert any(message.text == "本月30号" for message in response.conversation.messages)
+    assert not any(message.text == choice_id for message in response.conversation.messages)
+    await execute_accepted_turn(db, monkeypatch, response.submission.turn_id)
+    db.refresh(row)
+    assert_october_follow_up(row)
+    assert row.waiting_field != "temporal_choice"
+
+
+async def test_temporal_choice_failures_do_not_write_a_date(db, monkeypatch):
+    from app.services.assistant.task_state import load_draft
+    from app.services.assistant.temporal_evidence import resolved_sales_follow_up
+
+    row, spec = month_ambiguity(db)
+    choice_id = spec["candidates"][0]["id"]
+    service = ConversationService(classifier=Classifier(decision()))
+    state = service.open(db, team_id=1, user_id=2)
+    rejected = [
+        ("month-unknown", {"choice": "tm_missing:0"}),
+        ("month-stale-action", {"choice": choice_id, "action_id": "awa_old"}),
+        ("month-stale-version", {"choice": choice_id, "task_version": 2}),
+        ("month-both", {"choice": choice_id, "text_value": "本月30号"}),
+    ]
+    for key, options in rejected:
+        response = await service.command(
+            db,
+            team_id=1,
+            user_id=2,
+            request=temporal_command(state.version, row.public_id, key, **options),
+        )
+        assert response.submission is None
+        assert any("这张卡片状态已变化" in message.text for message in response.conversation.messages)
+        state = response.conversation
+    assert db.query(AssistantTurn).count() == 0
+    db.refresh(row)
+    assert row.waiting_field == "temporal_choice" and row.version == 3
+    resolved, granularity = resolved_sales_follow_up(load_draft(row))
+    assert (resolved, granularity) == (None, "UNKNOWN")
+
+    classifier = Classifier(
+        decision("CONTINUE", row.public_id, "PROVIDE_SUPPLEMENT").model_copy(update={"field_answer": True})
+    )
+    service = ConversationService(classifier=classifier)
+    opened = service.open(db, team_id=1, user_id=2)
+    unmapped = await service.submit_text(
+        db, team_id=1, user_id=2, request=text(opened.version, "2026-10-30", "month-unmapped")
+    )
+    assert unmapped.submission is not None
+    await execute_accepted_turn(db, monkeypatch, unmapped.submission.turn_id)
+    db.refresh(row)
+    assert row.waiting_field == "temporal_choice" and row.version == 3
+    draft = load_draft(row)
+    resolved, granularity = resolved_sales_follow_up(draft)
+    assert (resolved, granularity) == (None, "UNKNOWN")
+    mentions = draft.content_json["temporal_evidence"]["mentions"]
+    sales = next(item for item in mentions if item["raw_text"] == "30 号")
+    assert sales["resolution_status"] == "AMBIGUOUS"
+    assert sales["resolved_at"] is None
+
+
+async def test_duplicate_temporal_labels_do_not_guess(db, monkeypatch):
+    row = task(
+        db,
+        version=2,
+        waiting_type="FIELD",
+        waiting_field="temporal_choice",
+        waiting_json={
+            "action_id": "awa_dup",
+            "payload": {
+                "question_id": "q_dup",
+                "prompt": "请选择时间",
+                "candidates": [
+                    {"id": "tm_one:0", "label": "本月30号"},
+                    {"id": "tm_two:0", "label": "本月 30 号"},
+                ],
+            },
+        },
+    )
+    service = ConversationService(
+        classifier=Classifier(
+            decision("CONTINUE", row.public_id, "PROVIDE_SUPPLEMENT").model_copy(update={"field_answer": True})
+        )
+    )
+    state = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version, "本月30号", "month-dup"))
+    assert response.submission is not None
+    await execute_accepted_turn(db, monkeypatch, response.submission.turn_id)
+    db.refresh(row)
+    assert row.waiting_field == "temporal_choice" and row.version == 2
+    assert row.draft_json["next_follow_time"]["status"] == "MISSING"
+
+
+async def test_other_waiting_inputs_keep_their_existing_constraints(db):
+    content = task(
+        db,
+        version=2,
+        waiting_type="FIELD",
+        waiting_field="content",
+        waiting_json={"action_id": "awa_content", "payload": {"question_id": "q_content", "prompt": "补充内容"}},
+    )
+    service = ConversationService(classifier=Classifier(decision()))
+    state = service.open(db, team_id=1, user_id=2)
+    rejected = await service.command(
+        db,
+        team_id=1,
+        user_id=2,
+        request=temporal_command(
+            state.version,
+            content.public_id,
+            "content-choice",
+            choice="本月30号",
+            action_id="awa_content",
+            task_version=2,
+        ),
+    )
+    assert rejected.submission is None
+    assert db.query(AssistantTurn).count() == 0
+
+    kind = task(
+        db,
+        version=2,
+        waiting_type="ACTIVITY_KIND",
+        waiting_field="activity_kind",
+        waiting_json={"action_id": "awa_kind", "payload": {"question_id": "q_kind", "prompt": "选择类型"}},
+    )
+    # The first open already focused the content task. Point the session at this card.
+    from app.crud import assistant_conversation as crud
+
+    conversation = crud.owned_conversation(db, team_id=1, user_id=2)
+    conversation.focused_task_public_id = kind.public_id
+    db.commit()
+    state = service.open(db, team_id=1, user_id=2)
+    rejected_kind = await service.command(
+        db,
+        team_id=1,
+        user_id=2,
+        request=temporal_command(
+            state.version,
+            kind.public_id,
+            "kind-with-text",
+            choice="FOLLOW_UP",
+            text_value="普通跟进",
+            action_id="awa_kind",
+            task_version=2,
+        ),
+    )
+    assert rejected_kind.submission is None
+
+    action = task(
+        db,
+        version=2,
+        waiting_type="FIELD",
+        waiting_field="next_action",
+        waiting_json={"action_id": "awa_action", "payload": {"question_id": "q_action", "prompt": "下一步"}},
+    )
+    conversation.focused_task_public_id = action.public_id
+    db.commit()
+    state = service.read(db, team_id=1, user_id=2)
+    accepted = await service.command(
+        db,
+        team_id=1,
+        user_id=2,
+        request=temporal_command(
+            state.version,
+            action.public_id,
+            "explicit-none",
+            choice="EXPLICITLY_NONE",
+            text_value="客户决定这次先不安排",
+            action_id="awa_action",
+            task_version=2,
+        ),
+    )
+    assert accepted.submission is not None
+    assert accepted.submission.input.choice == "EXPLICITLY_NONE"
+    assert db.query(AssistantTurn).count() == 1

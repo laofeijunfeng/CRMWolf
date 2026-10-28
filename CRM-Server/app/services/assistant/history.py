@@ -38,6 +38,14 @@ def command_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> s
         return "选择客户"
     if waiting and waiting.type == "ACTIVITY_KIND":
         return KIND_LABELS.get(payload.choice or "", "选择活动类型")
+    if waiting and waiting.field == "temporal_choice":
+        for candidate in waiting.candidates:
+            label = candidate.get("label")
+            if candidate.get("id") == payload.choice and isinstance(label, str) and label.strip():
+                return label
+        if isinstance(payload.text, str) and payload.text.strip():
+            return payload.text.strip()
+        return "选择"
     if payload.choice == "EXPLICITLY_NONE":
         return payload.text or "暂无下一步行动"
     return payload.text or "选择"

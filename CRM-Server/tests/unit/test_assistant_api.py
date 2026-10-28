@@ -748,6 +748,35 @@ def test_waiting_kind_field_and_confirmation_are_closed_choices(client, db_sessi
     assert db_session.query(AssistantTurn).count() == 0
 
 
+def test_unknown_temporal_choice_is_rejected_before_a_turn(client, db_session):
+    task_id = client.post(
+        "/api/v1/assistant/tasks",
+        json={"goal": "时间消歧", "client_request_id": "create-temporal-choice"},
+    ).json()["public_id"]
+    task = db_session.query(AssistantTask).filter_by(public_id=task_id).one()
+    waiting = _issue_waiting(
+        db_session,
+        task,
+        type="FIELD",
+        field="temporal_choice",
+        candidates=[{"id": "tm_known:0", "label": "本月30号"}, {"id": "tm_known:1", "label": "下月30号"}],
+    )
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task_id}/submit",
+        json={
+            "kind": "submit_field",
+            "choice": "tm_missing:0",
+            "client_request_id": "temporal-unknown-choice",
+            "action_id": waiting.action_id,
+            "expected_version": waiting.expected_version,
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["message"] == "请选择当前签发的时间"
+    assert response.json()["detail"]["task"]["waiting"]["field"] == "temporal_choice"
+    assert db_session.query(AssistantTurn).count() == 0
+
+
 def test_old_confirmation_card_cannot_authorize_next_card_but_same_key_replays(client, db_session, monkeypatch):
     from types import SimpleNamespace
 

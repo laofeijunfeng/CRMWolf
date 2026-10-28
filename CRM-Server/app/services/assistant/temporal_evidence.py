@@ -28,6 +28,7 @@ EvidenceState = Literal["ACTIVE", "SUPERSEDED", "EXPLICITLY_NONE"]
 ActionStatus = Literal["PLANNED", "COMPLETED", "COMMITTED", "UNKNOWN"]
 _UNCERTAIN = re.compile(r"大概|大约|左右|前后|差不多|可能|也许")
 _REPLACEMENT = re.compile(r"改为|改到|应为|而是")
+_LABEL_WHITESPACE = re.compile(r"\s+")
 _CLOCK = re.compile(
     r"(?:[的\s]*)(?:(上午|下午|晚上|中午|早上)?(?:(\d{1,2})[:：](\d{2})(?::(\d{2}))?"
     r"|([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?))"
@@ -352,6 +353,25 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
             ],
         }
     return None
+
+
+def match_temporal_choice_id(candidates: list[dict[str, object]], text: str) -> str | None:
+    """Return the one current candidate id whose label equals text, ignoring whitespace."""
+
+    needle = _LABEL_WHITESPACE.sub("", text)
+    if not needle:
+        return None
+    matched: list[str] = []
+    for candidate in candidates:
+        label = candidate.get("label")
+        choice_id = candidate.get("id")
+        if not isinstance(label, str) or not isinstance(choice_id, str) or not choice_id:
+            continue
+        if _LABEL_WHITESPACE.sub("", label) == needle:
+            matched.append(choice_id)
+    if len(matched) != 1:
+        return None
+    return matched[0]
 
 
 def apply_temporal_choice(draft: TaskDraft, choice_id: str) -> None:
