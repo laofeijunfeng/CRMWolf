@@ -45,11 +45,11 @@ interface CardMeta {
 
 const cardOrder: CardKey[] = [
   'status',
+  'win_probability',
   'purchase_type',
   'license_type',
   'amount_band',
   'product',
-  'win_probability',
   'expected_closing_month',
 ]
 
@@ -90,8 +90,6 @@ const cards = computed(() => cardOrder.map((key) => {
   const existing = props.chart?.cards.find((card) => card.key === key)
   return existing ?? { key, buckets: [] }
 }))
-const forecastCard = computed<OpportunityChartCard>(() => cards.value[6] ?? { key: 'expected_closing_month', buckets: [] })
-
 function isUnscheduledBucket(bucket: OpportunityChartBucket): boolean {
   return bucket.key === 'unscheduled' || bucket.label === '未排期'
 }
@@ -167,18 +165,18 @@ function bucketRatio(bucket: OpportunityChartBucket, mode: MetricMode): number {
   return normalizeRatio(mode === 'count' ? bucket.ratio : bucket.amount_ratio)
 }
 
-function dominantBucket(card: OpportunityChartCard): OpportunityChartBucket | null {
-  const mode = metricModeFor(card)
-  return card.buckets
-    .filter((bucket) => bucket.count > 0)
-    .reduce<OpportunityChartBucket | null>((dominant, bucket) => (
-      dominant === null || bucketRatio(bucket, mode) > bucketRatio(dominant, mode) ? bucket : dominant
-    ), null)
+function isWideCard(card: OpportunityChartCard): boolean {
+  return card.key === 'amount_band' || card.key === 'product' || card.key === 'expected_closing_month'
 }
 
-function dominantRatio(card: OpportunityChartCard): number {
-  const bucket = dominantBucket(card)
-  return bucket === null ? 0 : bucketRatio(bucket, metricModeFor(card))
+function cardClass(card: OpportunityChartCard): string {
+  const presentation = metaFor(card).presentation
+  return [
+    'opportunity-chart-card',
+    presentation === 'bar' ? 'opportunity-chart-card--bar' : '',
+    presentation === 'forecast' ? 'opportunity-chart-card--forecast' : '',
+    isWideCard(card) ? 'opportunity-chart-card--wide' : '',
+  ].filter((name) => name !== '').join(' ')
 }
 
 interface DonutDatum {
@@ -283,17 +281,26 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
       </p>
       <div class="opportunity-chart-grid">
         <Card
-          v-for="card in cards.slice(0, 3)"
+          v-for="card in cards"
           :key="card.key"
-          class="opportunity-chart-card"
+          :class="cardClass(card)"
         >
           <CardHeader>
             <CardTitle>{{ metaFor(card).title }}</CardTitle>
             <CardDescription>{{ metaFor(card).description }}</CardDescription>
           </CardHeader>
-          <CardContent>
-            <ChartContainer :config="chartConfig" class="opportunity-chart-donut-chart">
-              <div class="opportunity-chart-donut-wrap">
+          <CardContent :class="metaFor(card).presentation === 'donut' ? 'grid grid-cols-[220px_minmax(0,1fr)] items-center gap-6 pb-6' : ''">
+            <template v-if="metaFor(card).presentation === 'donut'">
+              <ChartContainer
+                :config="chartConfig"
+                class="opportunity-chart-donut-chart aspect-square h-[220px] w-[220px]"
+                :style="{
+                  '--vis-donut-central-label-font-size': '22px',
+                  '--vis-donut-central-label-font-weight': '600',
+                  '--vis-donut-central-label-text-color': 'hsl(var(--foreground))',
+                  '--vis-donut-central-sub-label-text-color': 'hsl(var(--muted-foreground))',
+                }"
+              >
                 <div v-if="hasData(card)" class="opportunity-chart-donut">
                   <VisSingleContainer :data="donutData(card)" :margin="{ top: 8, bottom: 8 }">
                     <VisDonut
@@ -301,6 +308,9 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                       :value="(datum: DonutDatum) => datum.value"
                       :color="(datum: DonutDatum) => datum.fill"
                       :arc-width="30"
+                      :central-label="String(chart?.population ?? 0)"
+                      central-sub-label="条"
+                      :central-label-offset-y="10"
                       :events="{
                         [Donut.selectors.segment]: {
                           click: (datum: DonutDatum) => openDonutBucket(card, datum),
@@ -308,81 +318,57 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                       }"
                     />
                   </VisSingleContainer>
-                  <div class="opportunity-chart-donut-hole">
-                    <strong>{{ dominantBucket(card)?.label ?? '暂无' }}</strong>
-                    <span>{{ Math.round(dominantRatio(card) * 100) }}%</span>
-                  </div>
                 </div>
+                <div v-else class="opportunity-chart-card-empty">暂无分布数据</div>
+              </ChartContainer>
+              <div v-if="hasData(card)" class="opportunity-chart-legend">
+                <button
+                  v-for="(bucket, index) in card.buckets"
+                  :key="bucket.key"
+                  type="button"
+                  :disabled="bucket.count <= 0"
+                  class="opportunity-chart-legend-row"
+                  @click="openBucket(card, bucket)"
+                >
+                  <i :style="{ backgroundColor: bucketColor(index, bucket) }" aria-hidden="true"></i>
+                  <span class="opportunity-chart-legend-label">{{ bucket.label }}</span>
+                  <span class="opportunity-chart-legend-value">{{ formatCount(bucket.count) }} · {{ formatCurrency(bucket.amount) }}</span>
+                </button>
               </div>
-            </ChartContainer>
-            <div v-if="!hasData(card)" class="opportunity-chart-card-empty">暂无分布数据</div>
-            <div v-else class="opportunity-chart-legend">
-              <button
-                v-for="(bucket, index) in card.buckets"
-                :key="bucket.key"
-                type="button"
-                :disabled="bucket.count <= 0"
-                class="opportunity-chart-legend-row"
-                @click="openBucket(card, bucket)"
-              >
-                <i :style="{ backgroundColor: bucketColor(index, bucket) }" aria-hidden="true"></i>
-                <span class="opportunity-chart-legend-label">{{ bucket.label }}</span>
-                <span class="opportunity-chart-legend-value">{{ formatCount(bucket.count) }} · {{ formatCurrency(bucket.amount) }}</span>
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card
-          v-for="card in cards.slice(3, 6)"
-          :key="card.key"
-          class="opportunity-chart-card opportunity-chart-card--bar"
-        >
-          <CardHeader>
-            <CardTitle>{{ metaFor(card).title }}</CardTitle>
-            <CardDescription>{{ metaFor(card).description }}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div v-if="hasData(card)" class="grid gap-2">
-              <button
-                v-for="bucket in card.buckets"
-                :key="bucket.key"
-                type="button"
-                :disabled="bucket.count <= 0"
-                class="grid grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
-                @click="openBucket(card, bucket)"
-              >
-                <span class="truncate">{{ bucket.label }}</span>
-                <span class="h-2 overflow-hidden rounded-full bg-muted">
-                  <span
-                    class="opportunity-chart-bar-fill block h-full rounded-full"
-                    :class="bucket.key === 'blank' || bucket.key === 'other' || bucket.key === 'unscheduled' ? 'bg-muted-foreground' : 'bg-primary'"
-                    :style="barStyle(card, bucket)"
-                  />
-                </span>
-                <span class="text-muted-foreground tabular-nums">{{ formatCount(bucket.count) }} · {{ formatCurrency(bucket.amount) }}</span>
-              </button>
-            </div>
-            <div v-else class="opportunity-chart-card-empty">暂无分布数据</div>
-          </CardContent>
-        </Card>
-
-        <Card :key="forecastCard.key" class="opportunity-chart-card opportunity-chart-card--forecast">
-          <CardHeader>
-            <CardTitle>{{ metaFor(forecastCard).title }}</CardTitle>
-            <CardDescription>{{ metaFor(forecastCard).description }}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer :config="chartConfig" class="opportunity-chart-forecast-chart">
+            </template>
+            <template v-else-if="metaFor(card).presentation === 'bar'">
+              <div v-if="hasData(card)" class="grid gap-2">
+                <button
+                  v-for="bucket in card.buckets"
+                  :key="bucket.key"
+                  type="button"
+                  :disabled="bucket.count <= 0"
+                  class="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm disabled:cursor-default"
+                  @click="openBucket(card, bucket)"
+                >
+                  <span class="truncate">{{ bucket.label }}</span>
+                  <span class="h-2 overflow-hidden rounded-full bg-muted">
+                    <span
+                      class="opportunity-chart-bar-fill block h-full rounded-full"
+                      :class="bucket.key === 'blank' || bucket.key === 'other' || bucket.key === 'unscheduled' ? 'bg-muted-foreground' : 'bg-primary'"
+                      :style="barStyle(card, bucket)"
+                    />
+                  </span>
+                  <span class="text-muted-foreground tabular-nums">{{ formatCount(bucket.count) }} · {{ formatCurrency(bucket.amount) }}</span>
+                </button>
+              </div>
+              <div v-else class="opportunity-chart-card-empty">暂无分布数据</div>
+            </template>
+            <ChartContainer v-else :config="chartConfig" class="opportunity-chart-forecast-chart aspect-auto h-[240px]">
               <div
-                v-if="hasData(forecastCard)"
+                v-if="hasData(card)"
                 class="opportunity-chart-forecast"
-                :aria-label="`${metaFor(forecastCard).title}，按预计金额比较`"
+                :aria-label="`${metaFor(card).title}，按预计金额比较`"
               >
                 <div class="opportunity-chart-forecast-plot">
                   <div class="opportunity-chart-forecast-y-axis" aria-hidden="true">
-                    <span>{{ formatAxisAmount(maxForecastAmount(forecastCard)) }}</span>
-                    <span>{{ formatAxisAmount(maxForecastAmount(forecastCard) / 2) }}</span>
+                    <span>{{ formatAxisAmount(maxForecastAmount(card)) }}</span>
+                    <span>{{ formatAxisAmount(maxForecastAmount(card) / 2) }}</span>
                     <span>¥0</span>
                   </div>
                   <div class="opportunity-chart-forecast-plot-area">
@@ -393,7 +379,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                     </div>
                     <div class="opportunity-chart-forecast-columns">
                       <button
-                        v-for="(bucket, index) in forecastCard.buckets"
+                        v-for="(bucket, index) in card.buckets"
                         :key="bucket.key"
                         type="button"
                         :disabled="bucket.count <= 0"
@@ -403,17 +389,15 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                           'opportunity-chart-forecast-column',
                           { 'opportunity-chart-forecast-column--unscheduled': isUnscheduledBucket(bucket) },
                         ]"
-                        @click="openBucket(forecastCard, bucket)"
+                        @click="openBucket(card, bucket)"
                       >
                         <span class="opportunity-chart-forecast-track">
-                          <span class="opportunity-chart-forecast-value">{{ formatCurrency(bucket.amount) }}</span>
                           <span
                             class="opportunity-chart-bar-fill opportunity-chart-forecast-fill"
-                            :style="{ backgroundColor: bucketColor(index, bucket), ...forecastBarStyle(forecastCard, bucket) }"
+                            :style="{ backgroundColor: bucketColor(index, bucket), ...forecastBarStyle(card, bucket) }"
                           />
                         </span>
                         <span class="opportunity-chart-forecast-label">{{ bucket.label }}</span>
-                        <span class="opportunity-chart-forecast-count">{{ formatCount(bucket.count) }}</span>
                       </button>
                     </div>
                     <span class="opportunity-chart-forecast-baseline" aria-hidden="true"></span>
@@ -477,23 +461,19 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 
 .opportunity-chart-page { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: $wolf-space-md-v2; overflow: auto; padding: $wolf-space-md-v2; }
 .opportunity-chart-summary h2 { margin: 0; color: $wolf-text-primary-v2; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
-.opportunity-chart-summary p { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; font-size: $wolf-font-size-caption-v2; }
+.opportunity-chart-summary p { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; }
 .opportunity-chart-state, .opportunity-chart-refreshing, .opportunity-chart-dialog-state { display: flex; align-items: center; justify-content: center; gap: $wolf-space-sm-v2; color: $wolf-text-tertiary-v2; }
 .opportunity-chart-state { min-height: 320px; flex-direction: column; text-align: center; }
 .opportunity-chart-refreshing { justify-content: flex-start; min-height: 28px; font-size: 13px; }
 .opportunity-chart-inline-error { display: flex; align-items: center; gap: $wolf-space-sm-v2; margin: 0; color: $wolf-danger-text-v2; font-size: 13px; }
-.opportunity-chart-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
+.opportunity-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
 .opportunity-chart-card { min-width: 0; }
-.opportunity-chart-card--forecast { grid-column: 1 / -1; }
-.opportunity-chart-donut-chart { min-height: 170px; aspect-ratio: auto; }
-.opportunity-chart-donut { position: relative; width: 132px; height: 132px; }
+.opportunity-chart-card--wide { grid-column: 1 / -1; }
+.opportunity-chart-donut-chart { width: 220px; height: 220px; min-height: 0; aspect-ratio: 1; }
+.opportunity-chart-donut { width: 220px; height: 220px; }
 .opportunity-chart-donut [data-vis-single-container] { width: 100%; height: 100%; }
-.opportunity-chart-donut-hole { position: absolute; z-index: 1; top: 28px; left: 28px; pointer-events: none; display: flex; width: 76px; height: 76px; flex-direction: column; align-items: center; justify-content: center; border-radius: 50%; background: $wolf-bg-card-v2; padding: 8px; text-align: center; }
-.opportunity-chart-donut-hole strong { max-width: 100%; overflow: hidden; color: $wolf-text-primary-v2; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.opportunity-chart-donut-hole span { margin-top: 2px; color: $wolf-text-secondary-v2; font-size: 16px; font-weight: 600; }
-.opportunity-chart-legend { display: grid; gap: $wolf-space-sm-v2; margin-top: $wolf-space-sm-v2; }
+.opportunity-chart-legend { display: grid; gap: $wolf-space-sm-v2; }
 .opportunity-chart-legend-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: $wolf-space-sm-v2; width: 100%; border: 0; border-radius: $wolf-radius-control-v2; background: transparent; padding: 2px 0; font-size: 14px; text-align: left; }
-.opportunity-chart-donut-wrap { display: flex; min-height: 170px; align-items: center; justify-content: center; }
 .opportunity-chart-legend-row:not(:disabled):hover { background: $wolf-bg-muted-v2; }
 .opportunity-chart-legend-row:disabled { cursor: default; opacity: .65; }
 .opportunity-chart-legend-row i { width: 8px; height: 8px; border-radius: 50%; }
@@ -509,39 +489,32 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-opportunity strong { color: $wolf-text-primary-v2; }
 .opportunity-chart-opportunity small { margin-top: 3px; color: $wolf-text-tertiary-v2; font-size: 12px; }
 
-.opportunity-chart-forecast-chart { width: 100%; height: auto; min-height: 0; aspect-ratio: auto; }
+.opportunity-chart-forecast-chart { width: 100%; height: 240px; min-height: 240px; }
 .opportunity-chart-forecast { min-height: 0; padding: 0; }
 .opportunity-chart-forecast-plot { display: grid; grid-template-columns: 58px minmax(0, 1fr); min-height: 0; }
-.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 34px 0; color: $wolf-text-tertiary-v2; font-size: 11px; line-height: 1; text-align: right; }
+.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 18px 0; color: $wolf-text-tertiary-v2; font-size: 11px; line-height: 1; text-align: right; }
 .opportunity-chart-forecast-plot-area { position: relative; min-width: 0; padding: 4px 0 0; }
-.opportunity-chart-forecast-grid { position: absolute; inset: 4px 0 34px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+.opportunity-chart-forecast-grid { position: absolute; inset: 4px 0 18px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .opportunity-chart-forecast-grid span { border-top: 1px solid $wolf-border-light-v2; }
-.opportunity-chart-forecast-columns { position: relative; z-index: 1; display: flex; height: 196px; align-items: flex-end; gap: $wolf-space-sm-v2; }
-.opportunity-chart-forecast-column { display: grid; height: 100%; min-width: 0; flex: 1 1 0; grid-template-rows: minmax(0, 1fr) 16px 14px; align-items: stretch; gap: 2px; padding: 0 4px; text-align: center; }
+.opportunity-chart-forecast-columns { position: relative; z-index: 1; display: flex; height: 220px; align-items: flex-end; gap: $wolf-space-sm-v2; }
+.opportunity-chart-forecast-column { display: grid; height: 100%; min-width: 0; flex: 1 1 0; grid-template-rows: minmax(0, 1fr) 16px; align-items: stretch; gap: 2px; padding: 0 4px; text-align: center; }
 .opportunity-chart-forecast-column--unscheduled { margin-left: $wolf-space-sm-v2; border-left: 1px dashed $wolf-border-default-v2; border-radius: 0; padding-left: $wolf-space-md-v2; }
-.opportunity-chart-forecast-value, .opportunity-chart-forecast-count { overflow: hidden; color: $wolf-text-tertiary-v2; font-size: 11px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.opportunity-chart-forecast-value { color: $wolf-text-secondary-v2; }
-.opportunity-chart-forecast-count { color: $wolf-text-tertiary-v2; }
 .opportunity-chart-forecast-track { display: flex; min-height: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
 .opportunity-chart-forecast-fill { display: block; width: min(42px, 72%); min-width: 0; min-height: 0; border-radius: $wolf-radius-sm-v2 $wolf-radius-sm-v2 0 0; transition: height .2s ease; }
 .opportunity-chart-forecast-column:disabled .opportunity-chart-forecast-fill { background: $wolf-bg-muted-v2 !important; }
 .opportunity-chart-forecast-label { overflow: hidden; color: $wolf-text-primary-v2; font-size: 12px; font-weight: 500; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 34px; left: 0; z-index: 2; border-top: 1px solid $wolf-border-default-v2; pointer-events: none; }
+.opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 18px; left: 0; z-index: 2; border-top: 1px solid $wolf-border-default-v2; pointer-events: none; }
 .opportunity-chart-bar-row--forecast:not(:disabled):hover { background: $wolf-bg-muted-v2; }
 .opportunity-chart-bar-row--forecast:focus-visible { outline: 2px solid $wolf-focus-ring-color-v2; outline-offset: 2px; }
 
 @media (max-width: 900px) {
-  .opportunity-chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .opportunity-chart-card--forecast { grid-column: 1 / -1; }
+  .opportunity-chart-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 600px) {
-  .opportunity-chart-grid { grid-template-columns: minmax(0, 1fr); }
-  .opportunity-chart-card--forecast { grid-column: auto; }
   .opportunity-chart-forecast-plot { grid-template-columns: 44px minmax(0, 1fr); }
   .opportunity-chart-forecast-y-axis { padding-right: 6px; font-size: 10px; }
   .opportunity-chart-forecast-column { padding-right: 2px; padding-left: 2px; }
   .opportunity-chart-forecast-column--unscheduled { margin-left: 0; padding-left: $wolf-space-sm-v2; }
-  .opportunity-chart-forecast-value { font-size: 10px; }
 }
 </style>

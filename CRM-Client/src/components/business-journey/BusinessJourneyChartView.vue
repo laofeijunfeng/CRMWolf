@@ -76,12 +76,20 @@ const emit = defineEmits<{
 const summary = computed(() => props.chart?.summary ?? null)
 const selectedCardTitle = computed(() => selectedSegment.value?.card.title ?? '')
 const cards = computed(() => props.chart?.cards ?? [])
-const pieCard = computed(() => cards.value.find(card => card.graphic === 'pie') ?? null)
-const pieTotal = computed(() => pieCard.value?.segments.reduce((sum, segment) => sum + segment.amount, 0) ?? 0)
-const largestPie = computed(() => pieCard.value?.segments.reduce<BusinessJourneyChartSegment | null>(
-  (current, segment) => current === null || segment.amount > current.amount ? segment : current,
-  null
-) ?? null)
+const displayCardOrder: BusinessJourneyChartCard['key'][] = ['purchase_type', 'recent_activity', 'stage', 'amount_band', 'product', 'expected_closing']
+const pairedCardKeys = new Set<BusinessJourneyChartCard['key']>(['purchase_type', 'recent_activity'])
+const displayCards = computed(() => {
+  const byKey = new Map(cards.value.map(card => [card.key, card]))
+  const ordered = displayCardOrder.flatMap((key) => {
+    const card = byKey.get(key)
+    return card === undefined ? [] : [card]
+  })
+  return [...ordered, ...cards.value.filter(card => !displayCardOrder.includes(card.key))]
+})
+
+function isWideCard(card: BusinessJourneyChartCard): boolean {
+  return !pairedCardKeys.has(card.key)
+}
 
 const closingConfig = {
   amount: { label: '金额', color: CHART_COLOR }
@@ -97,11 +105,6 @@ function formatWan(value: number): string {
 
 function formatAxisAmount(value: number): string {
   return formatWan(value)
-}
-
-function share(segment: BusinessJourneyChartSegment): string {
-  if (pieTotal.value <= 0) return '0%'
-  return `${Math.round(segment.amount / pieTotal.value * 100)}%`
 }
 
 function isMutedKey(key: string): boolean {
@@ -203,9 +206,9 @@ function openJourney(item: BusinessJourneyChartPreview): void {
       </header>
       <div class="journey-chart-grid">
         <Card
-          v-for="card in cards"
+          v-for="card in displayCards"
           :key="card.key"
-          class="journey-chart-card"
+          :class="isWideCard(card) ? 'journey-chart-card journey-chart-card--wide' : 'journey-chart-card'"
           :data-graphic="card.graphic"
         >
           <CardHeader v-bind="card.graphic === 'pie' ? { class: 'items-start pb-0' } : {}">
@@ -213,10 +216,10 @@ function openJourney(item: BusinessJourneyChartPreview): void {
             <CardDescription>{{ card.description }}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div v-if="card.graphic === 'pie'" class="journey-chart-pie">
+            <div v-if="card.graphic === 'pie'" class="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-6">
               <ChartContainer
                 :config="pieConfig(card)"
-                class="journey-chart-donut"
+                class="aspect-square h-[220px] w-[220px]"
                 role="img"
                 aria-label="采购类型金额占比"
                 :style="{
@@ -231,8 +234,8 @@ function openJourney(item: BusinessJourneyChartPreview): void {
                     :value="(datum: PieDatum) => datum.amount"
                     :color="(datum: PieDatum) => datum.fill"
                     :arc-width="30"
-                    :central-label="largestPie ? share(largestPie) : '0%'"
-                    :central-sub-label="largestPie?.label ?? '金额占比'"
+                    :central-label="String(summary.total_count)"
+                    central-sub-label="条"
                     :central-label-offset-y="10"
                     :events="{
                       [Donut.selectors.segment]: {
@@ -307,21 +310,6 @@ function openJourney(item: BusinessJourneyChartPreview): void {
                   />
                 </VisXYContainer>
               </ChartContainer>
-              <div class="journey-chart-closing-summary" aria-label="预计成交明细">
-                <button
-                  v-for="segment in card.segments"
-                  :key="segment.key"
-                  type="button"
-                  class="text-sm disabled:cursor-default"
-                  :class="{ 'is-selected': isSelected(card, segment) }"
-                  :data-segment="segment.key"
-                  :disabled="segment.count === 0"
-                  @click="selectSegment(card, segment)"
-                >
-                  <span>{{ segment.label }}</span>
-                  <small>{{ segmentText(segment) }}</small>
-                </button>
-              </div>
             </div>
             <div v-else class="journey-chart-bars">
               <button
@@ -402,7 +390,6 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   margin: 0;
   color: $wolf-text-primary-v2;
   font-size: $wolf-font-size-title-v2;
-  font-weight: 400;
   line-height: 1.25;
 }
 
@@ -415,21 +402,15 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 
 .journey-chart-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $wolf-space-md-v2;
 }
 
 .journey-chart-card {
-  grid-column: span 2;
   min-width: 0;
 }
 
-.journey-chart-card:nth-child(4),
-.journey-chart-card:nth-child(5) {
-  grid-column: span 3;
-}
-
-.journey-chart-card[data-graphic='vertical_bar'] {
+.journey-chart-card--wide {
   grid-column: 1 / -1;
 }
 
@@ -441,7 +422,6 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 
 .journey-chart-bars button,
 .journey-chart-legend button,
-.journey-chart-closing-summary button,
 .journey-chart-preview button,
 .journey-chart-segment-list button {
   border: 0;
@@ -449,22 +429,9 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-bars button.is-selected,
-.journey-chart-legend button.is-selected,
-.journey-chart-closing-summary button.is-selected {
+.journey-chart-legend button.is-selected {
   border-radius: $wolf-radius-v2;
   background: hsl(var(--primary) / 0.08);
-}
-
-.journey-chart-pie {
-  display: grid;
-  grid-template-columns: 156px minmax(0, 1fr);
-  align-items: center;
-  gap: $wolf-space-md-v2;
-}
-
-.journey-chart-donut {
-  width: 156px;
-  height: 156px;
 }
 
 .journey-chart-closing-plot {
@@ -472,22 +439,6 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   height: 240px;
 }
 
-.journey-chart-closing-summary {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: $wolf-space-sm-v2;
-  margin-right: 12px;
-  margin-left: 56px;
-}
-
-.journey-chart-closing-summary button {
-  display: grid;
-  gap: 2px;
-  padding: $wolf-space-xs-v2;
-  text-align: center;
-}
-
-.journey-chart-closing-summary small,
 .journey-chart-preview small,
 .journey-chart-segment-list small {
   color: $wolf-text-tertiary-v2;
@@ -543,43 +494,9 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   overflow: auto;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .journey-chart-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .journey-chart-card,
-  .journey-chart-card:nth-child(4),
-  .journey-chart-card:nth-child(5),
-  .journey-chart-card[data-graphic='vertical_bar'] {
-    grid-column: span 1;
-  }
-
-  .journey-chart-pie,
-  .journey-chart-donut {
-    width: 100%;
-  }
-
-  .journey-chart-pie {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .journey-chart-donut {
-    width: 220px;
-    height: 220px;
-  }
-}
-
-@media (max-width: 720px) {
-  .journey-chart-grid,
-  .journey-chart-pie,
-  .journey-chart-closing-summary {
     grid-template-columns: 1fr;
-  }
-
-  .journey-chart-closing-summary {
-    margin-right: 0;
-    margin-left: 0;
   }
 }
 </style>

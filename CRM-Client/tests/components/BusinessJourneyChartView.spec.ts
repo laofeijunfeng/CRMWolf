@@ -91,11 +91,14 @@ describe('BusinessJourneyChartView', () => {
   })
   it('selects a segment from the wrapped Unovis donut datum', () => {
     const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
-    const events = wrapper.findComponent(VisDonut).props('events') as Record<string, { click?: (datum: unknown) => void }>
+    const donut = wrapper.findComponent(VisDonut)
+    expect(donut.props('centralLabel')).toBe('86')
+    expect(donut.props('centralSubLabel')).toBe('条')
+    const events = donut.props('events') as Record<string, { click?: (datum: unknown) => void }>
 
     events[Donut.selectors.segment]?.click?.({ data: { key: 'NEW' } })
 
-    expect(wrapper.emitted('select-segment')?.[0]?.[0]).toMatchObject({
+    expect(wrapper.emitted('open-segment')?.[0]?.[0]).toMatchObject({
       segment: { key: 'NEW' }
     })
   })
@@ -104,8 +107,24 @@ describe('BusinessJourneyChartView', () => {
     const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
 
     expect(wrapper.find('.journey-chart-closing-plot').attributes('role')).toBe('img')
+    expect(wrapper.find('.journey-chart-closing-summary').exists()).toBe(false)
   })
-  it('shows the selected segment preview and emits detail opening', async () => {
+
+  it('places the pie beside recent activity and gives the long cards their own row', () => {
+    const wrapper = mount(BusinessJourneyChartView, { props: { chart } })
+    const cards = wrapper.findAll('.journey-chart-card')
+    expect(cards[0]?.text()).toContain('采购类型')
+    expect(cards[1]?.text()).toContain('最近动态')
+    expect(cards[0]?.classes()).not.toContain('journey-chart-card--wide')
+    expect(cards[1]?.classes()).not.toContain('journey-chart-card--wide')
+    expect(cards[1]?.attributes('data-graphic')).toBe('horizontal_bar')
+    for (const card of cards.slice(2)) {
+      expect(card.classes()).toContain('journey-chart-card--wide')
+    }
+    expect(wrapper.find('.h-\\[220px\\]').exists()).toBe(true)
+  })
+
+  it('opens the segment dialog and emits the journey detail', async () => {
     const preview = {
       public_id: 'journey-1',
       customer_id: 'customer-1',
@@ -113,18 +132,25 @@ describe('BusinessJourneyChartView', () => {
       name: '示例旅程',
       amount: 120000
     }
-    const chartWithPreview = structuredClone(chart)
-    const stage = chartWithPreview.cards[0]
-    if (!stage) throw new Error('missing stage card')
-    stage.segments[0] = { ...stage.segments[0], preview: [preview] }
-    const wrapper = mount(BusinessJourneyChartView, { props: { chart: chartWithPreview } })
+    const wrapper = mount(BusinessJourneyChartView, {
+      props: {
+        chart,
+        segmentOpen: true,
+        segmentLabel: '初期交流',
+        segmentTotal: 1,
+        segmentItems: [preview]
+      }
+    })
 
     await wrapper.find('.journey-chart-bars button').trigger('click')
-
-    expect(wrapper.find('.journey-chart-preview').exists()).toBe(true)
-    expect(wrapper.emitted('select-segment')).toHaveLength(1)
-    const detailButton = wrapper.find('.journey-chart-preview button:last-child')
-    await detailButton.trigger('click')
     expect(wrapper.emitted('open-segment')).toHaveLength(1)
+    const detailButton = document.body.querySelector('.journey-chart-segment-list button')
+    if (!(detailButton instanceof HTMLElement)) throw new Error('记录没有出现在对话框里')
+    expect(detailButton.textContent).toContain('示例旅程')
+    detailButton.click()
+    expect(wrapper.emitted('open-journey')?.[0]?.[0]).toEqual({
+      customerId: 'customer-1',
+      journeyPublicId: 'journey-1'
+    })
   })
 })

@@ -18,6 +18,8 @@ vi.mock('@unovis/vue', () => ({
     name: 'VisDonut',
     props: {
       data: { type: Array as PropType<DonutTestDatum[]>, default: () => [] },
+      centralLabel: { type: String, default: '' },
+      centralSubLabel: { type: String, default: '' },
       events: {
         type: Object as PropType<Record<string, { click?: (datum: DonutTestDatum) => void }>>,
         default: () => ({}),
@@ -25,13 +27,16 @@ vi.mock('@unovis/vue', () => ({
     },
     setup(props) {
       const click = Object.values(props.events)[0]?.click
-      return () => h('div', props.data.map((datum) => h('button', {
-        type: 'button',
-        class: 'opportunity-chart-donut-segment',
-        'data-donut-value': String(datum.value),
-        'data-donut-fill': datum.fill,
-        onClick: () => click?.(datum),
-      }, datum.label)))
+      return () => h('div', [
+        h('div', { class: 'opportunity-chart-donut-center' }, `${props.centralLabel}${props.centralSubLabel}`),
+        ...props.data.map((datum) => h('button', {
+          type: 'button',
+          class: 'opportunity-chart-donut-segment',
+          'data-donut-value': String(datum.value),
+          'data-donut-fill': datum.fill,
+          onClick: () => click?.(datum),
+        }, datum.label)),
+      ])
     },
   }),
 }))
@@ -295,7 +300,7 @@ describe('OpportunityChartPage', () => {
     expect(values.slice(0, 2)).toEqual(['0.43', '0.57'])
   })
 
-  it('selects count or amount metrics for donut cards and centers the dominant bucket', () => {
+  it('selects count or amount metrics for donut cards and centers the page total', () => {
     const value: OpportunityChartResponse = {
       ...chart,
       cards: [
@@ -315,13 +320,13 @@ describe('OpportunityChartPage', () => {
     }
 
     const wrapper = mountPage(value)
-    const centers = wrapper.findAll('.opportunity-chart-donut-hole')
-    expect(centers[0]?.text()).toContain('跟进中')
-    expect(centers[0]?.text()).toContain('80%')
-    expect(centers[1]?.text()).toContain('续购')
-    expect(centers[1]?.text()).toContain('80%')
-    expect(centers[2]?.text()).toContain('买断')
-    expect(centers[2]?.text()).toContain('80%')
+    const centers = wrapper.findAll('.opportunity-chart-donut-center')
+    expect(centers).toHaveLength(3)
+    for (const center of centers) {
+      expect(center.text()).toBe(`${value.population}条`)
+    }
+    const values = wrapper.findAll('.opportunity-chart-donut-segment').map((segment) => segment.attributes('data-donut-value'))
+    expect(values).toEqual(['0.8', '0.2', '0.2', '0.8', '0.2', '0.8'])
   })
 
   it('uses count metrics for regular bars and actual amounts for forecast bar heights', () => {
@@ -349,7 +354,9 @@ describe('OpportunityChartPage', () => {
 
     const wrapper = mountPage(value)
     const regularCards = wrapper.findAll('.opportunity-chart-card--bar')
+    expect(regularCards.length).toBeGreaterThan(0)
     for (const cardWrapper of regularCards) {
+      expect(cardWrapper.find('button').classes()).toContain('grid-cols-[88px_minmax(0,1fr)_auto]')
       const fills = cardWrapper.findAll('.opportunity-chart-bar-fill')
       expect(fills[0]?.attributes('style')).toContain('width: 100%')
       expect(fills[1]?.attributes('style')).toContain('width: 25%')
@@ -425,4 +432,24 @@ describe('OpportunityChartPage', () => {
     expect(forecast.find('.opportunity-chart-forecast-fill[style*="height: 0%"]').exists()).toBe(true)
   })
 
+
+  it('pairs short cards and gives long cards their own row', () => {
+    const wrapper = mountPage(chart)
+    const cards = wrapper.findAll('.opportunity-chart-card')
+    expect(cards.map((card) => card.find('h3').text())).toEqual([
+      '状态', '赢率', '采购类型', '授权模式', '金额档', '产品', '预计成交',
+    ])
+    expect(cards[0]?.classes()).not.toContain('opportunity-chart-card--wide')
+    expect(cards[1]?.classes()).toContain('opportunity-chart-card--bar')
+    expect(cards[1]?.classes()).not.toContain('opportunity-chart-card--wide')
+    expect(cards[2]?.classes()).not.toContain('opportunity-chart-card--wide')
+    expect(cards[3]?.classes()).not.toContain('opportunity-chart-card--wide')
+    expect(cards[4]?.classes()).toContain('opportunity-chart-card--wide')
+    expect(cards[5]?.classes()).toContain('opportunity-chart-card--wide')
+    expect(cards[6]?.classes()).toContain('opportunity-chart-card--forecast')
+    expect(cards[6]?.classes()).toContain('opportunity-chart-card--wide')
+    expect(wrapper.find('.h-\\[220px\\]').exists()).toBe(true)
+    expect(wrapper.find('.opportunity-chart-forecast-value').exists()).toBe(false)
+    expect(wrapper.find('.opportunity-chart-forecast-count').exists()).toBe(false)
+  })
 })
