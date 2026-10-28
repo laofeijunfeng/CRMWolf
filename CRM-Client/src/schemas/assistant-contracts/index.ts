@@ -154,6 +154,7 @@ export const AssistantTaskViewSchema = z.object({
   last_modified_time: z.string().nullable().optional(),
   processing_turn_id: z.string().min(1).nullable().optional(),
   processing_turn_status: AssistantTurnStatusSchema.nullable().optional(),
+  reprocess_turn_id: z.string().min(1).nullable().optional(),
 }).strict().superRefine((task, ctx) => {
   if ((task.processing_turn_id == null) !== (task.processing_turn_status == null)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['processing_turn_id'], message: '处理轮次 ID 和状态必须同时提供' })

@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, shallowRef } from 'vue'
 import { isAxiosError } from 'axios'
 import { ArrowUp, CircleHelp, X } from 'lucide-vue-next'
-import { assistantApi, submitInputStream, type StageName } from '@/api/assistant'
+import { assistantApi, submitInputStream, type AssistantTurn, type StageName } from '@/api/assistant'
 import type { SubmitAssistantInput } from '@/api/assistant'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import MeetingConfirmationCard from './MeetingConfirmationCard.vue'
 import ProposalCard from './ProposalCard.vue'
 import GapCard from './GapCard.vue'
 import FailureCard from './FailureCard.vue'
+import { ZodError } from 'zod'
 import { type AssistantTaskView, type ProposalConfirmation, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
 
 interface ChatEntry {
@@ -203,70 +204,212 @@ const processingHint = computed(() => {
 })
 const pendingRequest = shallowRef<{ input: SubmitAssistantInput; targetId: string; displayText: string; turnId: string; cursor: number } | null>(null)
 const processingRecovery = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
+const reprocessTarget = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
+const recoveryNotice = ref('')
+const autoRecovering = ref(false)
+const reprocessAllowed = ref(false)
+const seenEventKeys = new Set<string>()
+const RECOVERY_POLLS = 90
+let recoveryTimer: ReturnType<typeof setTimeout> | null = null
+let recoveryToken = 0
+let recoveryStarted = false
+
+const stopAutoRecovery = (): void => {
+  autoRecovering.value = false
+  if (recoveryTimer !== null) {
+    clearTimeout(recoveryTimer)
+    recoveryTimer = null
+  }
+}
+
+const logRecovery = (action: string, data: Record<string, unknown>): void => {
+  void import('@/utils/logger').then(({ logger }) => {
+    logger.info('[SalesAssistant]', action, data)
+  }).catch(() => undefined)
+}
+
+onUnmounted(() => { recoveryToken += 1; stopAutoRecovery() })
 
 const adoptProcessingTurn = (updated: AssistantTaskView): void => {
   if (updated.processing_turn_id != null && (updated.processing_turn_status === 'PENDING' || updated.processing_turn_status === 'RUNNING')) {
     const recovery = processingRecovery.value
     if (recovery === null || recovery.turnId !== updated.processing_turn_id || recovery.targetId !== updated.public_id) {
-      processingRecovery.value = { targetId: updated.public_id, turnId: updated.processing_turn_id, cursor: 0 }
+      processingRecovery.value = {
+        targetId: updated.public_id,
+        turnId: updated.processing_turn_id,
+        cursor: recovery?.cursor ?? 0
+      }
     }
     resultPending.value = true
   } else if (processingRecovery.value?.targetId === updated.public_id) {
     processingRecovery.value = null
     resultPending.value = false
   }
-}
-
-const recoverProcessingTurn = async (restart = false, watch = restart): Promise<void> => {
-  const pending = processingRecovery.value
-  const navigation = navigationVersion
-  if (pending === null) return
-  const active = (): boolean => !disposed && navigation === navigationVersion && processingRecovery.value === pending && task.value?.public_id === pending.targetId
-  try {
-    let turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
-    if (!active()) return
-    if (restart && (turn.status === 'PENDING' || turn.status === 'RUNNING')) {
-      beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
-      turn = await assistantApi.retryTurn(pending.targetId, pending.turnId, turn.lease_version, pending.cursor)
+  if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '') {
+    reprocessAllowed.value = true
+    const current = reprocessTarget.value
+    reprocessTarget.value = {
+      targetId: updated.public_id,
+      turnId: updated.reprocess_turn_id,
+      cursor: current?.turnId === updated.reprocess_turn_id ? current.cursor : 0
     }
-    while (active()) {
-      pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
-      let reply: string | undefined
-      for (const event of turn.events) {
-        if (event.event === 'waiting' && typeof event.data['message'] === 'string') reply = event.data['message']
-        if (event.event === 'error') {
-          pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
-          const entry = entries.value[entries.value.length - 1]
-          if (entry !== undefined) entry.outcome = 'failure'
-        }
-      }
-      publishTask(turn.task, reply)
-      if (processingRecovery.value === pending && (turn.status === 'SUCCEEDED' || turn.status === 'FAILED')) {
-        processingRecovery.value = null
-        resultPending.value = false
-      }
-      if (!resultPending.value && pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
-      await refreshConversation()
-      if (disposed || navigation !== navigationVersion) return
-      if (processingRecovery.value !== null && processingRecovery.value !== pending) {
-        await recoverProcessingTurn(false, watch)
-        return
-      }
-      if (!watch || !active()) return
-      await new Promise<void>((resolve) => { setTimeout(resolve, 1000) })
-      if (!active()) return
-      turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
-    }
-  } catch {
-    if (active()) {
-      resultPending.value = true
-      if (restart) pushEntry('assistant', '连接中断，处理结果待确认，正在同步任务状态。')
-    }
-  } finally {
-    if (restart && navigation === navigationVersion) endProcessing()
+  } else {
+    reprocessAllowed.value = false
+    reprocessTarget.value = null
   }
 }
+
 const resultPending = ref(false)
+
+const rememberEvent = (turnId: string, seq: number | undefined): boolean => {
+  if (turnId === '' || seq === undefined) return true
+  const key = `${turnId}:${seq}`
+  if (seenEventKeys.has(key)) return false
+  seenEventKeys.add(key)
+  return true
+}
+
+const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): string | undefined => {
+  let reply: string | undefined
+  for (const event of events) {
+    if (!rememberEvent(turnId, event.seq)) continue
+    if (event.event === 'stage') {
+      const stage = event.data['stage']
+      const phase = event.data['phase']
+      if ((stage === 'classify' || stage === 'structure' || stage === 'quality_gate' || stage === 'write')
+        && (phase === 'start' || phase === 'done')) {
+        applyStageEvent({
+          stage,
+          phase,
+          ms: typeof event.data['ms'] === 'number' ? event.data['ms'] : undefined,
+          score: typeof event.data['score'] === 'number' ? event.data['score'] : undefined
+        })
+      }
+    } else if (event.event === 'waiting' && typeof event.data['message'] === 'string') {
+      reply = event.data['message']
+    } else if (event.event === 'error') {
+      pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
+      const entry = entries.value[entries.value.length - 1]
+      if (entry !== undefined) entry.outcome = 'failure'
+    }
+  }
+  return reply
+}
+
+const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor: number }): Promise<boolean> => {
+  const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
+  const seqs = turn.events.map((event) => event.seq)
+  if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
+  const reply = applyTurnEvents(pending.turnId, turn.events)
+  publishTask(turn.task, reply)
+  if (turn.reprocess_allowed) {
+    reprocessAllowed.value = true
+    reprocessTarget.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
+  }
+  if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
+    const successor = processingRecovery.value !== null && processingRecovery.value.turnId !== pending.turnId
+      ? processingRecovery.value
+      : null
+    if (successor === null) {
+      processingRecovery.value = null
+      resultPending.value = false
+      recoveryNotice.value = ''
+      stopAutoRecovery()
+      if (pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
+    }
+    logRecovery(turn.status === 'SUCCEEDED' ? 'recovery_success' : 'recovery_terminal', {
+      task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: turn.status
+    })
+    return true
+  }
+  resultPending.value = true
+  return false
+}
+
+const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: number }, pollsLeft: number): void => {
+  const token = recoveryToken
+  autoRecovering.value = true
+  recoveryTimer = setTimeout(() => {
+    void (async (): Promise<void> => {
+      if (disposed || token !== recoveryToken || processingRecovery.value?.turnId !== pending.turnId) return
+      try {
+        const done = await readKnownTurn(pending)
+        if (token === recoveryToken) await refreshConversation()
+        if (done || disposed || token !== recoveryToken) {
+          const successor = processingRecovery.value
+          if (done && successor !== null && successor.turnId !== pending.turnId && token === recoveryToken) {
+            await startAutoRecovery(successor, '已受理，正在确认处理结果')
+          }
+          return
+        }
+        if (pollsLeft <= 1) {
+          stopAutoRecovery()
+          recoveryNotice.value = ''
+          resultPending.value = true
+          logRecovery('recovery_timeout', { task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'timeout' })
+          return
+        }
+        scheduleRecovery(pending, pollsLeft - 1)
+      } catch (error) {
+        if (disposed || token !== recoveryToken) return
+        if (!(error instanceof ZodError) && pollsLeft > 1) {
+          scheduleRecovery(pending, pollsLeft - 1)
+          return
+        }
+        stopAutoRecovery()
+        recoveryNotice.value = ''
+        resultPending.value = true
+        pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+        logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
+          task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
+        })
+      }
+    })()
+  }, 1000)
+}
+
+const startAutoRecovery = async (
+  pending: { targetId: string; turnId: string; cursor: number },
+  notice: string
+): Promise<void> => {
+  recoveryStarted = true
+  recoveryToken += 1
+  stopAutoRecovery()
+  processingRecovery.value = pending
+  recoveryNotice.value = notice
+  resultPending.value = true
+  autoRecovering.value = true
+  const token = recoveryToken
+  try {
+    const done = await readKnownTurn(pending)
+    if (token !== recoveryToken || disposed) return
+    await refreshConversation()
+    if (token !== recoveryToken || disposed) return
+    const successor = processingRecovery.value
+    if (done && successor !== null && successor.turnId !== pending.turnId) {
+      await startAutoRecovery(successor, notice)
+      return
+    }
+    if (!done && successor?.turnId === pending.turnId) scheduleRecovery(pending, RECOVERY_POLLS)
+    else stopAutoRecovery()
+  } catch (error) {
+    if (token !== recoveryToken || disposed) return
+    stopAutoRecovery()
+    recoveryNotice.value = ''
+    resultPending.value = true
+    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+    logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
+      task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
+    })
+  }
+}
+
+const recoverProcessingTurn = async (): Promise<void> => {
+  const pending = processingRecovery.value
+  if (pending === null) return
+  await startAutoRecovery(pending, '已受理，正在确认处理结果')
+}
+
 
 const publishTask = (updated: AssistantTaskView, message?: string): void => {
   if (disposed || updated === undefined || (task.value !== null && task.value.public_id !== updated.public_id)) return
@@ -293,26 +436,30 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
   }
   submitting.value = true
   processingRecovery.value = null
+  recoveryStarted = false
   try {
     resultPending.value = false
-    const pending = { input: request, targetId, displayText, turnId: '', cursor: 0 }
+    const pending = { input: request, targetId, displayText, turnId: prepared.turn_id, cursor: 0 }
     pendingRequest.value = pending
     beginProcessing(request, task.value?.waiting != null)
     const active = (): boolean => !disposed && navigation === navigationVersion && pendingRequest.value === pending
-    let turnId = ''
+    let turnId = prepared.turn_id
     let cursor = 0
     let delivered = false
     let disconnected = false
+    let terminalInvalid = false
     await submitInputStream(targetId, request, {
       onAccepted: (id, seq) => {
         if (!active()) return
         turnId = id
         cursor = Math.max(cursor, seq ?? 0)
+        rememberEvent(id, seq)
         if (pendingRequest.value !== null) { pendingRequest.value.turnId = id; pendingRequest.value.cursor = cursor }
       },
       onStage: (event) => {
         if (!active()) return
         cursor = Math.max(cursor, event.seq ?? 0)
+        rememberEvent(turnId, event.seq)
         if (pendingRequest.value !== null) pendingRequest.value.cursor = cursor
         applyStageEvent(event)
       },
@@ -330,7 +477,8 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         const entry = entries.value[entries.value.length - 1]
         if (entry !== undefined) entry.outcome = 'failure'
       },
-      onNetworkLost: () => { if (active()) disconnected = true }
+      onNetworkLost: () => { if (active()) disconnected = true },
+      onTerminalInvalid: () => { if (active()) terminalInvalid = true }
     })
     if (!active()) return
     if (!delivered && !disconnected && turnId !== '') {
@@ -346,32 +494,19 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         // Fall through to the existing durable recovery path.
       }
     }
-    if (disconnected || !delivered) {
+    if ((disconnected || !delivered) && turnId !== '') {
+      pending.cursor = cursor
+      const notice = terminalInvalid ? '处理结果暂时无法显示，正在重新读取。' : '已受理，正在确认处理结果'
+      await startAutoRecovery({ targetId, turnId, cursor }, notice)
+    } else if (disconnected || !delivered) {
       resultPending.value = true
-      pushEntry('assistant', '连接中断，处理结果待确认，正在同步任务状态。')
       try {
-        if (turnId !== '') {
-          const turn = await assistantApi.getTurn(targetId, turnId, cursor)
-          if (!active()) return
-          for (const event of turn.events) {
-            cursor = Math.max(cursor, event.seq)
-            if (event.event === 'stage') {
-              const stage = event.data['stage']
-              const phase = event.data['phase']
-              if ((stage === 'classify' || stage === 'structure' || stage === 'quality_gate' || stage === 'write')
-                && (phase === 'start' || phase === 'done')) applyStageEvent({ stage, phase })
-            }
-          }
-          publishTask(turn.task)
-          resultPending.value = processingRecovery.value !== null || turn.status === 'PENDING' || turn.status === 'RUNNING'
-        } else {
-          const latest = await assistantApi.getTask(targetId)
-          if (!active()) return
-          publishTask(latest)
-          resultPending.value = true
-        }
+        const latest = await assistantApi.getTask(targetId)
+        if (!active()) return
+        publishTask(latest)
+        if (processingRecovery.value !== null) await startAutoRecovery(processingRecovery.value, '已受理，正在确认处理结果')
       } catch {
-        // Keep the request ID for an idempotent retry; never claim it was not submitted.
+        resultPending.value = true
       }
     }
     if (!active()) return
@@ -385,7 +520,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     if (navigation === navigationVersion) {
       endProcessing()
       submitting.value = false
-      if (processingRecovery.value !== null) await recoverProcessingTurn()
+      if (!recoveryStarted && processingRecovery.value !== null && !autoRecovering.value) await recoverProcessingTurn()
     }
   }
 }
@@ -483,6 +618,64 @@ const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<v
   await submit({ kind: 'cancel' }, '算了，不记了', source)
 }
 
+const showConversationRetry = computed(() => resultPending.value && !autoRecovering.value && processingRecovery.value === null
+  && (pendingConversation.value !== null || conversation.value?.has_pending_request === true))
+const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showConversationRetry.value
+  && (processingRecovery.value !== null || (pendingRequest.value?.turnId ?? '') !== ''))
+const showReprocess = computed(() => reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
+
+const syncResult = async (): Promise<void> => {
+  const activeRecovery = processingRecovery.value
+  const request = pendingRequest.value
+  const pending = activeRecovery ?? (request !== null && request.turnId !== ''
+    ? { targetId: request.targetId, turnId: request.turnId, cursor: request.cursor }
+    : null)
+  if (pending === null || submitting.value) return
+  submitting.value = true
+  recoveryToken += 1
+  stopAutoRecovery()
+  try {
+    await readKnownTurn(pending)
+    await refreshConversation()
+  } catch {
+    resultPending.value = true
+    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+  } finally {
+    submitting.value = false
+  }
+}
+
+const reprocessTurn = async (): Promise<void> => {
+  const pending = reprocessTarget.value
+  if (pending === null || !reprocessAllowed.value || submitting.value) return
+  submitting.value = true
+  recoveryToken += 1
+  stopAutoRecovery()
+  try {
+    const current = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
+    if (current.reprocess_allowed !== true) {
+      reprocessAllowed.value = false
+      publishTask(current.task)
+      return
+    }
+    const restarted = await assistantApi.retryTurn(pending.targetId, pending.turnId, current.lease_version, pending.cursor)
+    reprocessAllowed.value = restarted.reprocess_allowed === true
+    const seqs = restarted.events.map((event) => event.seq)
+    if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
+    applyTurnEvents(pending.turnId, restarted.events)
+    publishTask(restarted.task)
+    if (restarted.status === 'PENDING' || restarted.status === 'RUNNING') {
+      beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
+      await startAutoRecovery(pending, '已受理，正在确认处理结果')
+    }
+  } catch {
+    resultPending.value = true
+    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+  } finally {
+    submitting.value = false
+  }
+}
+
 const retryPending = async (): Promise<void> => {
   if (submitting.value) return
   if (conversation.value?.has_pending_request === true && pendingConversation.value === null) {
@@ -490,10 +683,7 @@ const retryPending = async (): Promise<void> => {
     return
   }
   if (processingRecovery.value !== null) {
-    if (submitting.value) return
-    submitting.value = true
-    const navigation = navigationVersion
-    try { await recoverProcessingTurn(true) } finally { if (navigation === navigationVersion) submitting.value = false }
+    await syncResult()
     return
   }
   if (pendingConversation.value !== null) {
@@ -510,24 +700,21 @@ const retryPending = async (): Promise<void> => {
       if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
       pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
       publishTask(turn.task)
-      if (processingRecovery.value !== null) {
-        await recoverProcessingTurn(true)
+      if (processingRecovery.value !== null || turn.status === 'PENDING' || turn.status === 'RUNNING') {
+        await startAutoRecovery({ targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }, '已受理，正在确认处理结果')
         return
       }
-      if ((turn.status === 'SUCCEEDED' || turn.status === 'FAILED') && processingRecovery.value === null) {
+      if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
         resultPending.value = false
         pendingRequest.value = null
         return
       }
-      processingRecovery.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
-      await recoverProcessingTurn(true)
-      return
     } else {
       const latest = await assistantApi.getTask(pending.targetId)
       if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
       publishTask(latest)
       if (processingRecovery.value !== null) {
-        await recoverProcessingTurn(true)
+        await startAutoRecovery(processingRecovery.value, '已受理，正在确认处理结果')
         return
       }
     }
@@ -884,7 +1071,7 @@ void loadConversation()
       </template>
     </div>
 
-    <div v-if="processing.active && processing.stages.length > 0" class="mt-2 rounded-wolf-lg border bg-card px-3.5 py-3 shadow-sm">
+    <div v-if="processing.stages.length > 0" class="mt-2 rounded-wolf-lg border bg-card px-3.5 py-3 shadow-sm">
       <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-muted-foreground' : stageItem.status === 'running' ? 'font-medium' : 'text-muted-foreground'">
         <svg v-if="stageItem.status === 'done'" class="size-4 shrink-0 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
         <svg v-else-if="stageItem.status === 'running'" class="size-4 shrink-0 animate-spin text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
@@ -900,9 +1087,9 @@ void loadConversation()
       <div v-if="isWaiting" class="mb-1.5 flex items-center justify-between text-xs font-medium text-primary">
         <span>正在回答：{{ fieldLabel || waiting?.type }}</span>
       </div>
-      <div v-else-if="processing.active || routing" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
-        <svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
-        <span>{{ routing ? '正在理解这次沟通…' : processingHint }}</span>
+      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+        <svg v-if="routing || processing.active || autoRecovering" class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
+        <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>
       <Textarea
         aria-label="客户沟通内容"
@@ -919,7 +1106,9 @@ void loadConversation()
           <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button v-if="resultPending && (pendingRequest || pendingConversation || processingRecovery || conversation?.has_pending_request)" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
+          <Button v-if="showSyncResult" size="sm" variant="outline" :disabled="submitting" @click="syncResult">同步结果</Button>
+          <Button v-if="showReprocess" size="sm" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
+          <Button v-if="showConversationRetry" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" size="sm" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X class="size-3.5" />算了
           </Button>

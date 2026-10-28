@@ -32,6 +32,7 @@ class AssistantTaskView(BaseModel):
     last_modified_time: str | None = None
     processing_turn_id: str | None = None
     processing_turn_status: TurnStatus | None = None
+    reprocess_turn_id: str | None = None
 
     @model_validator(mode="after")
     def match_processing_pointer(self) -> AssistantTaskView:
@@ -58,6 +59,7 @@ class AssistantTurnView(BaseModel):
     turn_id: str
     status: TurnStatus
     lease_version: int = Field(ge=0)
+    reprocess_allowed: bool = False
     events: list[AssistantTurnEventView]
     task: AssistantTaskView
 

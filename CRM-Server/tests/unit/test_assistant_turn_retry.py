@@ -43,12 +43,10 @@ def retryable_turn(client: TestClient, db_session: Session) -> tuple[AssistantTa
 
 
 @pytest.mark.parametrize("initial_status", ["PENDING", "RUNNING", "EXPIRED"])
-def test_retry_schedules_same_accepted_turn_and_fences_old_execution(
+def test_retry_restarts_only_an_expired_turn(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn], initial_status: str,
 ) -> None:
-
-
     task, turn = retryable_turn
     if initial_status != "PENDING":
         turn.status = "RUNNING"
@@ -57,36 +55,47 @@ def test_retry_schedules_same_accepted_turn_and_fences_old_execution(
         turn.lease_expires_at = business_now() + timedelta(seconds=-1 if initial_status == "EXPIRED" else 300)
         db_session.commit()
     observed_version = turn.lease_version
+    observed_attempts = turn.attempts
     scheduled = []
     monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
     url = f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}"
     before = client.get(url)
     assert before.status_code == 200
+    assert before.json()["reprocess_allowed"] is (initial_status == "EXPIRED")
     assert scheduled == []  # GET remains read-only.
     response = client.post(url + "/retry", json={"expected_lease_version": observed_version, "after_seq": 0})
     assert response.status_code == 200
     body = response.json()
+    db_session.expire_all()
+    latest = db_session.get(AssistantTurn, turn.id)
+    assert db_session.query(AssistantTurn).count() == 1
+    assert db_session.query(AssistantRequest).filter(AssistantRequest.turn_id.is_not(None)).count() == 1
+    if initial_status != "EXPIRED":
+        assert body["status"] == initial_status
+        assert body["lease_version"] == observed_version
+        assert latest.attempts == observed_attempts
+        assert scheduled == []
+        return
     assert body["turn_id"] == turn.public_id
     assert body["status"] == "PENDING"
     assert body["task"]["processing_turn_id"] == turn.public_id
-    assert body["lease_version"] >= observed_version
-    assert scheduled == [turn.id]
-    db_session.expire_all()
-    latest = db_session.get(AssistantTurn, turn.id)
+    assert body["reprocess_allowed"] is False
+    assert latest.lease_version > observed_version
     assert latest.lease_owner is None
     assert latest.lease_expires_at is None
-    if initial_status != "PENDING":
-        assert latest.lease_version > observed_version
-    assert db_session.query(AssistantTurn).count() == 1
-    assert db_session.query(AssistantRequest).filter(AssistantRequest.turn_id.is_not(None)).count() == 1
+    assert latest.attempts == observed_attempts
+    assert scheduled == [turn.id]
 
 
 def test_retry_with_stale_observed_version_cannot_reclaim_the_new_worker(
     client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
-
     task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "expired-worker"
+    turn.lease_expires_at = business_now() + timedelta(seconds=-1)
+    db_session.commit()
     scheduled = []
     monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
     url = f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry"
@@ -144,11 +153,9 @@ def test_retry_turn_is_owner_and_team_scoped(
     assert db_session.get(AssistantTurn, turn.id).lease_version == 0
 
 
-def test_explicit_retry_cancels_local_old_worker_and_only_new_execution_finishes(
+def test_live_retry_does_not_cancel_the_running_worker(
     db_session: Session, retryable_turn: tuple[AssistantTask, AssistantTurn], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
-
     task, turn = retryable_turn
     started = asyncio.Event()
     old_released = asyncio.Event()
@@ -159,11 +166,10 @@ def test_explicit_retry_cancels_local_old_worker_and_only_new_execution_finishes
     ) -> SimpleNamespace:
         del reporter
         calls.append("started")
-        if len(calls) == 1:
-            started.set()
-            await old_released.wait()
-            calls.append("old-side-effect")
-        return SimpleNamespace(task=task, reply=SimpleNamespace(message="恢复后给出下一步"))
+        started.set()
+        await old_released.wait()
+        calls.append("old-side-effect")
+        return SimpleNamespace(task=task, reply=SimpleNamespace(message="原来的下一步"))
 
     monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=handle_task))
     factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
@@ -173,18 +179,76 @@ def test_explicit_retry_cancels_local_old_worker_and_only_new_execution_finishes
         await asyncio.wait_for(started.wait(), timeout=5)
         with factory() as db:
             observed = db.get(AssistantTurn, turn.id)
+            version = observed.lease_version
+            attempts = observed.attempts
             result = turns.retry_owned_turn(
                 db, team_id=1, user_id=2, task_public_id=task.public_id,
-                turn_public_id=turn.public_id, expected_lease_version=observed.lease_version,
+                turn_public_id=turn.public_id, expected_lease_version=version,
             )
-            assert result is not None and result[2] is True
+            assert result is not None and result[2] is False
+            assert result[1].lease_version == version
+            assert result[1].attempts == attempts
+        old_released.set()
         await asyncio.wait_for(old, timeout=5)
-        await turns.execute_turn(turn.id, factory=factory)
 
     asyncio.run(scenario())
     db_session.expire_all()
     latest = db_session.get(AssistantTurn, turn.id)
     assert latest.status == "SUCCEEDED"
-    assert latest.attempts == 2
-    assert calls == ["started", "started"]
+    assert latest.attempts == 1
+    assert calls == ["started", "old-side-effect"]
     assert db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="waiting").count() == 1
+
+
+def test_failed_retryable_turn_restarts_without_a_second_request(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, turn = retryable_turn
+    turn.status = "FAILED"
+    task.active_turn_id = None
+    turns.add_event(
+        db_session,
+        turn,
+        "error",
+        {"code": "RETRYABLE_DEPENDENCY_FAILURE", "retryable": True, "message": "处理未完成请重试"},
+    )
+    db_session.commit()
+    scheduled = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry",
+        json={"expected_lease_version": turn.lease_version, "after_seq": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "PENDING"
+    assert response.json()["task"]["processing_turn_id"] == turn.public_id
+    assert scheduled == [turn.id]
+    assert db_session.query(AssistantTurn).count() == 1
+
+
+def test_activity_receipt_blocks_reprocess(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, turn = retryable_turn
+    turn.status = "FAILED"
+    task.active_turn_id = None
+    task.committed_json = [{"kind": "customer_activity", "public_id": "act_existing"}]
+    turns.add_event(
+        db_session,
+        turn,
+        "error",
+        {"code": "RETRYABLE_DEPENDENCY_FAILURE", "retryable": True, "message": "处理未完成请重试"},
+    )
+    db_session.commit()
+    scheduled = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry",
+        json={"expected_lease_version": turn.lease_version},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "FAILED"
+    assert response.json()["reprocess_allowed"] is False
+    assert scheduled == []

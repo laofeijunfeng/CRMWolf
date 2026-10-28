@@ -276,6 +276,77 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     return turn.lease_version if turn is not None else None
 
 
+def task_has_customer_activity(task: AssistantTask) -> bool:
+    """A committed activity receipt means this task already wrote CRM state."""
+
+    return any(
+        isinstance(item, dict) and item.get("kind") == "customer_activity" for item in (task.committed_json or [])
+    )
+
+
+def live_worker(turn_id: int, lease_version: int) -> bool:
+    worker = _workers.get(turn_id)
+    return worker is not None and worker[0] == lease_version and not worker[1].done()
+
+
+def latest_error_retryable(db: Session, turn: AssistantTurn) -> bool:
+    event = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="error")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .first()
+    )
+    data = event.data_json if event is not None else None
+    return isinstance(data, dict) and data.get("retryable") is True
+
+
+def reprocess_allowed(db: Session, task: AssistantTask, turn: AssistantTurn) -> bool:
+    """Server decision for the separate reprocess action. Sync never uses it."""
+
+    if task.status != AssistantTaskStatus.ACTIVE or task_has_customer_activity(task):
+        return False
+    if task.active_turn_id not in (None, turn.id):
+        return False
+    if turn.status == "FAILED":
+        return latest_error_retryable(db, turn)
+    expired = (
+        turn.status == "RUNNING"
+        and turn.lease_expires_at is not None
+        and turn.lease_expires_at < business_now()
+    )
+    return expired and not live_worker(turn.id, turn.lease_version)
+
+
+def _log_retry(db: Session, task: AssistantTask, turn: AssistantTurn, result: str) -> None:
+    request = db.get(AssistantRequest, turn.request_id)
+    client_request_id = request.client_request_id if request is not None else ""
+    from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
+
+    conversation_id = (
+        db.query(AssistantConversation.public_id)
+        .join(AssistantConversationEntry, AssistantConversationEntry.conversation_id == AssistantConversation.id)
+        .filter(
+            AssistantConversationEntry.turn_public_id == turn.public_id,
+            AssistantConversationEntry.team_id == turn.team_id,
+            AssistantConversationEntry.user_id == turn.user_id,
+        )
+        .limit(1)
+        .scalar()
+    )
+    logger.info(
+        "assistant_turn_retry result=%s client_request_id=%s conversation=%s task=%s turn=%s "
+        "lease_version=%s attempts=%s last_seq=%s event_name=retry",
+        result,
+        client_request_id,
+        conversation_id or "",
+        task.public_id,
+        turn.public_id,
+        turn.lease_version,
+        turn.attempts,
+        max(turn.next_seq - 1, 0),
+    )
+
+
 def retry_owned_turn(
     db: Session,
     *,
@@ -285,7 +356,7 @@ def retry_owned_turn(
     turn_public_id: str,
     expected_lease_version: int,
 ) -> tuple[AssistantTask, AssistantTurn, bool] | None:
-    """Restart only the observed, still-active turn; stale retries only read it."""
+    """Restart only an eligible failed or expired turn. A live lease is read-only."""
 
     owned = (
         db.query(AssistantTask, AssistantTurn)
@@ -303,18 +374,14 @@ def retry_owned_turn(
     if owned is None:
         return None
     task, turn = owned
-    if (
-        task.status != AssistantTaskStatus.ACTIVE
-        or task.active_turn_id != turn.id
-        or turn.status not in {"PENDING", "RUNNING"}
-    ):
+    if turn.lease_version != expected_lease_version or not reprocess_allowed(db, task, turn):
+        _log_retry(db, task, turn, "denied")
         return task, turn, False
-    active_task = select(AssistantTask.id).where(
-        AssistantTask.id == task.id,
-        AssistantTask.team_id == team_id,
-        AssistantTask.user_id == user_id,
-        AssistantTask.status == AssistantTaskStatus.ACTIVE,
-        AssistantTask.active_turn_id == turn.id,
+    now = business_now()
+    status_filter = (
+        AssistantTurn.status == "FAILED"
+        if turn.status == "FAILED"
+        else (AssistantTurn.status == "RUNNING") & (AssistantTurn.lease_expires_at < now)
     )
     changed = db.execute(
         update(AssistantTurn)
@@ -322,28 +389,47 @@ def retry_owned_turn(
             AssistantTurn.id == turn.id,
             AssistantTurn.team_id == team_id,
             AssistantTurn.user_id == user_id,
-            AssistantTurn.status.in_(["PENDING", "RUNNING"]),
+            status_filter,
             AssistantTurn.lease_version == expected_lease_version,
-            active_task.exists(),
         )
         .values(
             status="PENDING",
             lease_owner=None,
             lease_expires_at=None,
             lease_version=AssistantTurn.lease_version + 1,
-            last_modified_time=business_now(),
+            last_modified_time=now,
         )
         .execution_options(synchronize_session=False)
     )
-    restarted = changed.rowcount == 1
+    if changed.rowcount != 1:
+        db.rollback()
+        db.refresh(turn)
+        db.refresh(task)
+        _log_retry(db, task, turn, "denied_conflict")
+        return task, turn, False
+    claimed = db.execute(
+        update(AssistantTask)
+        .where(
+            AssistantTask.id == task.id,
+            AssistantTask.team_id == team_id,
+            AssistantTask.user_id == user_id,
+            AssistantTask.status == AssistantTaskStatus.ACTIVE,
+            or_(AssistantTask.active_turn_id.is_(None), AssistantTask.active_turn_id == turn.id),
+        )
+        .values(active_turn_id=turn.id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        db.refresh(turn)
+        db.refresh(task)
+        _log_retry(db, task, turn, "denied_task_owner")
+        return task, turn, False
     db.commit()
-    if restarted:
-        worker = _workers.get(turn.id)
-        if worker is not None and worker[0] == expected_lease_version:
-            worker[1].cancel()
     db.refresh(turn)
     db.refresh(task)
-    return task, turn, restarted
+    _log_retry(db, task, turn, "restarted")
+    return task, turn, True
 
 
 def renew_lease(factory: sessionmaker, *, turn_id: int, owner: str, version: int) -> bool:
@@ -587,6 +673,15 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 data["next_turn_id"] = followup.public_id
             add_event(db, turn, "waiting", data)
             db.commit()
+            logger.info(
+                "assistant_turn_terminal result=succeeded task=%s turn=%s lease_version=%s attempts=%s "
+                "last_seq=%s event_name=waiting",
+                outcome.task.public_id,
+                turn.public_id,
+                version,
+                turn.attempts,
+                max(turn.next_seq - 1, 0),
+            )
             if followup is not None:
                 followup_turn_id = followup.id
             return
@@ -642,6 +737,17 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                     },
                 )
                 db.commit()
+                failed_task = db.get(AssistantTask, turn.task_id)
+                logger.info(
+                    "assistant_turn_terminal result=failed task=%s turn=%s lease_version=%s attempts=%s "
+                    "last_seq=%s event_name=error code=%s",
+                    failed_task.public_id if failed_task is not None else "",
+                    turn.public_id,
+                    version,
+                    turn.attempts,
+                    max(turn.next_seq - 1, 0),
+                    code,
+                )
             else:
                 db.rollback()
     finally:

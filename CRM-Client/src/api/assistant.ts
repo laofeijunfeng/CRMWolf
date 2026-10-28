@@ -50,6 +50,7 @@ export interface SubmitStreamHandlers {
   onWaiting(data: { task: AssistantTaskView; message: string; seq?: number | undefined }): void
   onError(event: SubmitStreamError): void
   onNetworkLost(): void
+  onTerminalInvalid?(detail: { event: string; turnId: string; seq?: number | undefined; issues: string[] }): void
 }
 
 const TurnEventSchema = z.object({
@@ -62,17 +63,37 @@ const AssistantTurnSchema = z.object({
   turn_id: z.string(),
   status: AssistantTurnStatusSchema,
   lease_version: z.number().int().nonnegative(),
+  reprocess_allowed: z.boolean().optional().default(false),
   events: z.array(TurnEventSchema),
   task: AssistantTaskViewSchema
 }).strict()
 
 export type AssistantTurn = z.infer<typeof AssistantTurnSchema>
 
+export type SseSplitter = ((chunk: string) => string[]) & { flush(): string[] }
+
+/** Empty build args must follow the axios rule and stay on the `/api` proxy. */
+export function resolveAssistantApiBase(raw: string | null | undefined): string {
+  if (raw === undefined || raw === null || raw.trim() === '') return '/api'
+  return raw
+}
+
+function schemaIssuePaths(error: z.ZodError): string[] {
+  return error.issues.map((issue) => issue.path.map((part) => String(part)).join('.') || '$')
+}
+
+function logAssistantClient(level: 'info' | 'warn' | 'error', action: string, data: Record<string, unknown>): void {
+  void import('@/utils/logger').then(({ logger }) => {
+    logger[level]('[SalesAssistant]', action, data)
+  }).catch(() => undefined)
+}
+
 /** Parse one SSE frame block into [event, data-json]; returns null on noise. */
 export function parseSseBlock(block: string): { event: string; data: string } | null {
   let event = ''
   let data = ''
-  for (const line of block.split('\n')) {
+  const normalized = block.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  for (const line of normalized.split('\n')) {
     if (line.startsWith('event: ')) {
       event = line.slice('event: '.length).trim()
     } else if (line.startsWith('data: ')) {
@@ -83,11 +104,13 @@ export function parseSseBlock(block: string): { event: string; data: string } | 
   return { event, data }
 }
 
-/** Incremental splitter: feed chunks, yields complete blocks. */
-export function createSseSplitter(): (chunk: string) => string[] {
+/** Incremental splitter: LF and CRLF frames, plus a legal tail frame on flush. */
+export function createSseSplitter(): SseSplitter {
   let buffer = ''
-  return (chunk: string): string[] => {
-    buffer += chunk
+  const take = (final: boolean): string[] => {
+    const holdCarriage = !final && buffer.endsWith('\r')
+    const body = holdCarriage ? buffer.slice(0, -1) : buffer
+    buffer = body.replace(/\r\n/g, '\n')
     const blocks: string[] = []
     let idx = buffer.indexOf('\n\n')
     while (idx !== -1) {
@@ -95,8 +118,19 @@ export function createSseSplitter(): (chunk: string) => string[] {
       buffer = buffer.slice(idx + 2)
       idx = buffer.indexOf('\n\n')
     }
+    if (holdCarriage) buffer += '\r'
+    if (final && buffer.trim() !== '') {
+      blocks.push(buffer.replace(/\s+$/g, ''))
+      buffer = ''
+    }
     return blocks
   }
+  const push = ((chunk: string): string[] => {
+    buffer += chunk
+    return take(false)
+  }) as SseSplitter
+  push.flush = (): string[] => take(true)
+  return push
 }
 
 export async function submitInputStream(
@@ -105,11 +139,80 @@ export async function submitInputStream(
   handlers: SubmitStreamHandlers
 ): Promise<void> {
   const userStore = useUserStore()
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '/api'
+  const base = resolveAssistantApiBase(import.meta.env.VITE_API_BASE_URL as string | undefined)
   let settled = false
+  let streamTurnId = ''
 
   const finish = (): void => {
     settled = true
+  }
+  const deliver = (block: string): boolean => {
+    const parsed = parseSseBlock(block)
+    if (parsed === null) return false
+    let payload: Record<string, unknown>
+    try {
+      payload = JSON.parse(parsed.data) as Record<string, unknown>
+    } catch {
+      logAssistantClient('warn', 'sse_frame_invalid', {
+        event_name: parsed.event, turn_id: streamTurnId, task: publicId, client_request_id: input.client_request_id ?? ''
+      })
+      return false
+    }
+    const sequence = typeof payload['seq'] === 'number' ? payload['seq'] : undefined
+    if (parsed.event === 'accepted') {
+      streamTurnId = typeof payload['turn_id'] === 'string' ? payload['turn_id'] : streamTurnId
+      handlers.onAccepted(streamTurnId, sequence)
+      return false
+    }
+    if (parsed.event === 'stage') {
+      const stage = StageNameSchema.safeParse(payload['stage'])
+      const phase = payload['phase'] === 'done' ? 'done' : 'start'
+      if (stage.success) {
+        handlers.onStage({
+          stage: stage.data,
+          phase,
+          ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
+          score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
+          seq: sequence
+        })
+      }
+      return false
+    }
+    if (parsed.event === 'waiting') {
+      const task = AssistantTaskViewSchema.safeParse(payload['task'])
+      const message = typeof payload['message'] === 'string' ? payload['message'] : ''
+      if (task.success && message !== '') {
+        handlers.onWaiting({ task: task.data, message, seq: sequence })
+        finish()
+        return true
+      }
+      const issues = task.success ? ['message'] : schemaIssuePaths(task.error)
+      logAssistantClient('error', 'terminal_schema_invalid', {
+        event_name: 'waiting', turn_id: streamTurnId, task: publicId, seq: sequence ?? null,
+        client_request_id: input.client_request_id ?? '', issues
+      })
+      handlers.onTerminalInvalid?.({ event: 'waiting', turnId: streamTurnId, seq: sequence, issues })
+      return false
+    }
+    if (parsed.event === 'error') {
+      const code = typeof payload['code'] === 'string' ? payload['code'] : ''
+      const message = typeof payload['message'] === 'string' ? payload['message'] : ''
+      if (code === '' || message === '') {
+        logAssistantClient('error', 'terminal_schema_invalid', {
+          event_name: 'error', turn_id: streamTurnId, task: publicId, seq: sequence ?? null,
+          client_request_id: input.client_request_id ?? '', issues: [code === '' ? 'code' : 'message']
+        })
+        handlers.onTerminalInvalid?.({ event: 'error', turnId: streamTurnId, seq: sequence, issues: [code === '' ? 'code' : 'message'] })
+        return false
+      }
+      handlers.onError({ code, retryable: payload['retryable'] === true, message, seq: sequence })
+      finish()
+      return true
+    }
+    logAssistantClient('info', 'sse_event_ignored', {
+      event_name: parsed.event, turn_id: streamTurnId, task: publicId, seq: sequence ?? null
+    })
+    return false
   }
 
   try {
@@ -128,6 +231,10 @@ export async function submitInputStream(
       })
     })
     if (!response.ok || response.body === null) {
+      logAssistantClient('warn', 'sse_disconnect', {
+        task: publicId, turn_id: streamTurnId, client_request_id: input.client_request_id ?? '',
+        http_status: response.status, event_name: 'submit'
+      })
       handlers.onNetworkLost()
       finish()
       return
@@ -136,59 +243,23 @@ export async function submitInputStream(
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     const split = createSseSplitter()
-
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       for (const block of split(decoder.decode(value, { stream: true }))) {
-        const parsed = parseSseBlock(block)
-        if (parsed === null) continue
-        let payload: Record<string, unknown>
-        try {
-          payload = JSON.parse(parsed.data) as Record<string, unknown>
-        } catch {
-          continue
-        }
-        const sequence = typeof payload['seq'] === 'number' ? payload['seq'] : undefined
-        if (parsed.event === 'accepted') {
-          handlers.onAccepted(typeof payload['turn_id'] === 'string' ? payload['turn_id'] : '', sequence)
-        } else if (parsed.event === 'stage') {
-          const stage = StageNameSchema.safeParse(payload['stage'])
-          const phase = payload['phase'] === 'done' ? 'done' : 'start'
-          if (stage.success) {
-            handlers.onStage({
-              stage: stage.data,
-              phase,
-              ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
-              score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
-              seq: sequence
-            })
-          }
-        } else if (parsed.event === 'waiting') {
-          const task = AssistantTaskViewSchema.safeParse(payload['task'])
-          const message = typeof payload['message'] === 'string' ? payload['message'] : ''
-          if (task.success) {
-            handlers.onWaiting({ task: task.data, message, seq: sequence })
-            finish()
-            return
-          }
-        } else if (parsed.event === 'error') {
-          handlers.onError({
-            code: typeof payload['code'] === 'string' ? payload['code'] : 'UNKNOWN',
-            retryable: payload['retryable'] === true,
-            message: typeof payload['message'] === 'string' ? payload['message'] : '处理失败',
-            seq: sequence
-          })
-          finish()
-          return
-        }
+        if (deliver(block)) return
       }
     }
-    if (!settled) {
-      handlers.onNetworkLost()
+    for (const block of split.flush()) {
+      if (deliver(block)) return
     }
+    if (!settled) handlers.onNetworkLost()
   } catch {
     if (!settled) {
+      logAssistantClient('warn', 'sse_disconnect', {
+        task: publicId, turn_id: streamTurnId, client_request_id: input.client_request_id ?? '',
+        http_status: null, event_name: 'submit'
+      })
       handlers.onNetworkLost()
     }
   }

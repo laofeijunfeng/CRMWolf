@@ -30,6 +30,19 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
         )
         if turn is None:
             raise ValueError("active assistant turn does not belong to the task")
+    from app.services.assistant.turns import reprocess_allowed
+
+    candidate = turn
+    if candidate is None:
+        candidate = (
+            db.query(AssistantTurn)
+            .filter_by(task_id=task.id, team_id=task.team_id, user_id=task.user_id)
+            .order_by(AssistantTurn.id.desc())
+            .first()
+        )
+    reprocess_turn_id = (
+        candidate.public_id if candidate is not None and reprocess_allowed(db, task, candidate) else None
+    )
 
     # Validate persistence values (including closed statuses and receipt unions) at this boundary.
     return AssistantTaskView.model_validate(
@@ -47,5 +60,6 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
             "version": task.version,
             "processing_turn_id": turn.public_id if turn is not None else None,
             "processing_turn_status": turn.status if turn is not None else None,
+            "reprocess_turn_id": reprocess_turn_id,
         }
     )

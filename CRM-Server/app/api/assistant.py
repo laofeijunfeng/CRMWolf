@@ -44,6 +44,7 @@ from app.services.assistant.turns import (
     accept_create,
     accept_submit,
     events_after,
+    reprocess_allowed,
     retry_owned_turn,
     schedule_turn,
 )
@@ -392,6 +393,7 @@ async def read_turn(
         turn_id=turn.public_id,
         status=turn.status,
         lease_version=turn.lease_version,
+        reprocess_allowed=reprocess_allowed(db, task, turn),
         events=[
             AssistantTurnEventView(seq=event.seq, event=event.event, data=event.data_json)
             for event in events_after(db, turn_id=turn.id, seq=max(after_seq, 0))
@@ -429,6 +431,7 @@ async def retry_turn(
             "turn_id": turn.public_id,
             "status": turn.status,
             "lease_version": turn.lease_version,
+            "reprocess_allowed": reprocess_allowed(db, task, turn),
             "events": [
                 AssistantTurnEventView(seq=event.seq, event=event.event, data=event.data_json)
                 for event in events_after(db, turn_id=turn.id, seq=request.after_seq)

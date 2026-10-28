@@ -96,53 +96,46 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(wrapper.text()).not.toContain('已写入')
   })
 
-  it('restarts an interrupted accepted turn once and unlocks without repeating the user message', async () => {
+  it('reads the business result after the stream is lost without retrying the turn', async () => {
     const current = makeTask({ processing_turn_id: 'atn_one', processing_turn_status: 'RUNNING' })
     const finished = makeTask({ waiting: field() })
     mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))
-    mocks.get.mockResolvedValue(view({ focused_task: current }))
+    mocks.get.mockResolvedValue(view({ focused_task: finished, messages: [message('user', '只收下一次的跟进', null, 'user'), message('result', '整理暂时没有完成，请稍后重试。', finished)] }))
     drive((handlers) => { handlers.onAccepted('atn_one', 1); handlers.onNetworkLost() })
-    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'RUNNING', lease_version: 3, events: [], task: current })
+    mocks.turn.mockResolvedValue({
+      turn_id: 'atn_one', status: 'SUCCEEDED', lease_version: 1, reprocess_allowed: false,
+      events: [{ seq: 2, event: 'waiting', data: { message: '整理暂时没有完成，请稍后重试。' } }],
+      task: finished
+    })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper, '只收下一次的跟进')
     expect(mocks.retry).not.toHaveBeenCalled()
-    mocks.retry.mockResolvedValue({ turn_id: 'atn_one', status: 'SUCCEEDED', lease_version: 5, events: [{ seq: 2, event: 'waiting', data: { message: '请补充客户名称' } }], task: finished })
-    mocks.get.mockResolvedValue(view({ focused_task: finished, messages: [message('user', '只收下一次的跟进', null, 'user'), message('result', '请补充客户名称', finished)] }))
-    const calls = mocks.stream.mock.calls.length
-    await wrapper.findAll('button').find((b) => b.text() === '重试同步')?.trigger('click')
-    await flushPromises()
-    expect(mocks.retry).toHaveBeenCalledWith('ast_one', 'atn_one', 3, expect.any(Number))
-    expect(mocks.retry).toHaveBeenCalledTimes(1)
-    expect(mocks.stream).toHaveBeenCalledTimes(calls)
-    expect(mocks.text).toHaveBeenCalledTimes(1)
-    expect(wrapper.text().match(/只收下一次的跟进/g)).toHaveLength(1)
+    expect(mocks.turn).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('整理暂时没有完成，请稍后重试。')
+    expect(wrapper.text()).not.toContain('连接中断')
+    expect(wrapper.text()).not.toContain('重试同步')
     expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
-  it('polls a restarted turn until an explicit failure releases input without another retry', async () => {
+  it('keeps polling a live turn with GET and does not restart it', async () => {
     vi.useFakeTimers()
     const current = makeTask({ processing_turn_id: 'atn_one', processing_turn_status: 'PENDING' })
-    const finished = makeTask()
     show(view({ focused_task: current, messages: [message('user', '已收下的原句', null, 'user')] }))
-    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'PENDING', lease_version: 0, events: [], task: current })
-    mocks.retry.mockResolvedValue({ turn_id: 'atn_one', status: 'PENDING', lease_version: 1, events: [], task: current })
+    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'PENDING', lease_version: 0, reprocess_allowed: false, events: [], task: current })
     const wrapper = mount(SalesAssistantChat)
     try {
       await flushPromises()
-      await wrapper.findAll('button').find((b) => b.text() === '重试同步')?.trigger('click')
-      await flushPromises()
-      expect(wrapper.text()).toContain('Agent 正在处理')
-      mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', lease_version: 2, events: [{ seq: 2, event: 'error', data: { message: '处理未完成，请查看最新任务状态后重试' } }], task: finished })
-      mocks.get.mockResolvedValue(view({ focused_task: finished, messages: [message('user', '已收下的原句', null, 'user'), { ...message('error', '处理未完成，请查看最新任务状态后重试'), outcome: 'failure' }] }))
+      expect(wrapper.text()).toContain('已受理，正在确认处理结果')
+      expect(wrapper.text()).not.toContain('重试同步')
+      const reads = mocks.turn.mock.calls.length
       await vi.advanceTimersByTimeAsync(1000)
       await flushPromises()
-      expect(mocks.retry).toHaveBeenCalledTimes(1)
-      expect(wrapper.text()).toContain('处理未完成')
-      expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
-      expect(mocks.text).not.toHaveBeenCalled()
+      expect(mocks.turn.mock.calls.length).toBeGreaterThan(reads)
+      expect(mocks.retry).not.toHaveBeenCalled()
       expect(mocks.stream).not.toHaveBeenCalled()
+      expect(mocks.text).not.toHaveBeenCalled()
     } finally {
       wrapper.unmount()
       vi.useRealTimers()
@@ -171,6 +164,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(mocks.text).not.toHaveBeenCalled()
     expect(mocks.command).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('已记录这条客户活动')
+    wrapper.unmount()
   })
 
   it('follows a successor turn discovered from a completed original turn using GET only', async () => {
@@ -250,11 +244,18 @@ describe('focus changes during recovery', () => {
     mocks.get.mockResolvedValueOnce(view({ version: 1, focused_task: old }))
       .mockResolvedValue(view({ version: 2, focused_task: next, messages: [message('new', '新沟通等待客户', next)] }))
     const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await wrapper.findAll('button').find((b) => b.text() === '重试同步')?.trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('新沟通等待客户')
-    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
-    expect(mocks.stream).not.toHaveBeenCalled()
+    try {
+      vi.useFakeTimers()
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(1000)
+      await flushPromises()
+      expect(wrapper.text()).toContain('新沟通等待客户')
+      expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+      expect(mocks.retry).not.toHaveBeenCalled()
+      expect(mocks.stream).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 })

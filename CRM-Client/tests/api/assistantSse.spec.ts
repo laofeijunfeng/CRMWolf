@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+vi.mock('@/stores/user', () => ({ useUserStore: () => ({ token: 'token' }) }))
+vi.mock('@/utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 
-import { createSseSplitter, parseSseBlock } from '@/api/assistant'
+import { createSseSplitter, parseSseBlock, resolveAssistantApiBase, submitInputStream } from '@/api/assistant'
 
 describe('SSE parser', () => {
   it('parses a named event with json data', () => {
@@ -34,5 +36,38 @@ describe('SSE parser', () => {
     split('event: stage\ndata: {"stage":"classify"')
     const blocks = split(',"phase":"start"}\n\n')
     expect(blocks).toEqual(['event: stage\ndata: {"stage":"classify","phase":"start"}'])
+  })
+
+  it('splits CRLF frames and flushes a legal tail frame', () => {
+    const split = createSseSplitter()
+    const blocks = split('event: accepted\r\ndata: {"turn_id":"t_1"}\r\n\r\n')
+    expect(blocks).toEqual(['event: accepted\ndata: {"turn_id":"t_1"}'])
+    split('event: waiting\ndata: {"ok":true}')
+    expect(split.flush().map(parseSseBlock)).toEqual([{ event: 'waiting', data: '{"ok":true}' }])
+  })
+})
+
+describe('assistant API base', () => {
+  it('treats an empty build-time base as the nginx /api prefix', () => {
+    expect(resolveAssistantApiBase('')).toBe('/api')
+    expect(resolveAssistantApiBase('   ')).toBe('/api')
+    expect(resolveAssistantApiBase(undefined)).toBe('/api')
+    expect(resolveAssistantApiBase('/api')).toBe('/api')
+  })
+
+  it('posts the durable submit stream under /api when the base is empty', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '')
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 405, body: null })
+    vi.stubGlobal('fetch', fetchMock)
+    const lost = vi.fn()
+    await submitInputStream('ast_one', { kind: 'text', text: '跟进', client_request_id: 'client-req' }, {
+      onAccepted() { return undefined },
+      onStage() { return undefined },
+      onWaiting() { return undefined },
+      onError() { return undefined },
+      onNetworkLost: lost
+    })
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/assistant/tasks/ast_one/submit')
+    expect(lost).toHaveBeenCalledTimes(1)
   })
 })
