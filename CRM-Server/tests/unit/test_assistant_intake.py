@@ -19,8 +19,9 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.intake_flow import apply_structured_draft, intake_step
 from app.services.assistant.llm import AssistantLLMError
-from app.services.assistant.llm_contracts import KindDecision, StructureDraftResult
+from app.services.assistant.llm_contracts import KindDecision, ModelDraftAction, StructureDraftResult
 from app.services.assistant.quality_gate import QualityGateOutcome
+from app.services.assistant.temporal_evidence import TemporalContractError
 
 
 class RecordingGate:
@@ -112,6 +113,18 @@ def _make_task(session, **overrides):
     return task
 
 
+
+def _structure_failure(session, task_id: int) -> dict:
+    action = (
+        session.query(AssistantAction)
+        .filter_by(task_id=task_id, action="structure_draft")
+        .order_by(AssistantAction.id.desc())
+        .first()
+    )
+    assert action is not None
+    return action.result_json
+
+
 async def test_unclear_kind_pauses_with_kind_question(db_session):
     task = _make_task(db_session)
     structurer = FakeStructurer(KindDecision(kind="UNCLEAR", reason="线上线下不明"))
@@ -192,6 +205,10 @@ async def test_structuring_failure_fails_closed(db_session):
     assert updated.status == AssistantTaskStatus.ACTIVE
     assert updated.last_error_code == "STRUCTURING_UNAVAILABLE"
     assert "稍后重试" in message
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "provider_schema"
+    assert logged["error_type"] == "AssistantLLMError"
+    assert "模型不可用" in logged["cause"]
 
 
 async def test_structured_draft_never_overwrites_accepted_slot(db_session):
@@ -530,6 +547,9 @@ async def test_invalid_canonical_structuring_is_technical_failure(db_session):
     updated, _, waiting, failed = await intake_step(db_session, task, "讨论会议", structurer, RecordingGate(_score()))
     assert failed and waiting is None and updated.last_error_code == "STRUCTURING_UNAVAILABLE"
     assert TaskDraft.model_validate(updated.draft_json).source_segments == ["讨论会议"]
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "draft_merge"
+    assert logged["error_type"] == "ValidationError"
 
 
 async def test_follow_up_complete_revision_does_not_duplicate_prior_body(db_session):
@@ -784,3 +804,53 @@ async def test_reorganization_cannot_accept_goal_as_new_source(db_session, mode)
     draft = TaskDraft.model_validate(updated.draft_json)
     assert draft.source_segments == [original]
     assert draft.source_records == []
+
+
+async def test_temporal_contract_failure_keeps_its_cause(db_session):
+    task = _make_task(db_session, activity_kind="FOLLOW_UP")
+
+    class MissingTime(FakeStructurer):
+        async def structure(self, db, *, team_id, kind, user_text):
+            raise TemporalContractError("temporal mentions do not cover the source")
+
+    updated, message, waiting, failed = await intake_step(
+        db_session, task, "我下周三联系叶老师", MissingTime(KindDecision(kind="FOLLOW_UP"))
+    )
+    assert failed and waiting is None
+    assert updated.last_error_code == "STRUCTURING_UNAVAILABLE"
+    assert message == "整理暂时没有完成，请稍后重试。"
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "temporal_evidence"
+    assert logged["error_type"] == "TemporalContractError"
+    assert "temporal mentions do not cover the source" in logged["cause"]
+
+
+async def test_action_contract_failure_is_not_a_draft_merge(db_session):
+    task = _make_task(db_session, activity_kind="FOLLOW_UP")
+    text = "叶老师会完成准备"
+    structured = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content=text,
+        actions=[
+            ModelDraftAction(
+                action_ref="a1",
+                owner_role="CUSTOMER",
+                owner_text="叶老师",
+                action_text="完成准备",
+                action_status="COMMITTED",
+                evidence_quote="不在原文",
+                quote_start=0,
+                quote_end=4,
+            )
+        ],
+    )
+    updated, message, waiting, failed = await intake_step(
+        db_session, task, text, FakeStructurer(KindDecision(kind="FOLLOW_UP"), structured)
+    )
+    assert failed and waiting is None
+    assert message == "整理暂时没有完成，请稍后重试。"
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "action_evidence"
+    assert logged["error_type"] == "ActionContractError"
+    assert "action quote is not in the source" in logged["cause"]
+    assert "model_type" not in logged["cause"]

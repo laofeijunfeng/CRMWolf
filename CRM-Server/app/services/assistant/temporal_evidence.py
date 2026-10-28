@@ -18,22 +18,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.assistant.contracts import DraftField, TaskDraft
+from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeKind, TimeRole
 
 PROTOCOL_VERSION = "temporal-evidence-v1"
 PARSER_VERSION: Literal["assistant-date-v2"] = "assistant-date-v2"
 POLICY_VERSION: Literal["bare-day-v1"] = "bare-day-v1"
-TimeKind = Literal[
-    "EXPLICIT_DATE",
-    "MONTH_DAY",
-    "DAY_OF_MONTH",
-    "MONTH_END",
-    "RELATIVE_DAY",
-    "RELATIVE_WEEK",
-    "RELATIVE_MONTH",
-    "RELATIVE_WEEKDAY",
-    "UNKNOWN",
-]
-TimeRole = Literal["CUSTOMER_COMMITMENT", "CUSTOMER_ACTION", "SALES_FOLLOW_UP", "INTERNAL_ACTION", "OTHER"]
 Resolution = Literal["RESOLVED", "AMBIGUOUS", "UNRESOLVED", "EXPLICITLY_NONE"]
 EvidenceState = Literal["ACTIVE", "SUPERSEDED", "EXPLICITLY_NONE"]
 ActionStatus = Literal["PLANNED", "COMPLETED", "COMMITTED", "UNKNOWN"]
@@ -58,6 +47,10 @@ _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
 
 class TemporalContractError(ValueError):
     """Model evidence contradicted the source text or the closed vocabulary."""
+
+
+class ActionContractError(TemporalContractError):
+    """Action model or action quote contradicted the source."""
 
 
 class FoundSpan(BaseModel):
@@ -769,44 +762,18 @@ def _stored_action(item: object) -> StoredAction:
     return item if isinstance(item, StoredAction) else StoredAction.model_validate(item)
 
 
-class _ModelMention(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    raw_text: str
-    quote_start: int
-    quote_end: int
-    kind: TimeKind
-    role: TimeRole
-    owner: str = ""
-    action_ref: str = ""
-    confidence: float = 0
-
-
-class _ModelAction(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    action_ref: str
-    owner_role: Literal["CUSTOMER", "SALES", "INTERNAL", "OTHER"]
-    owner_text: str = ""
-    action_text: str
-    action_status: ActionStatus
-    evidence_quote: str
-    quote_start: int
-    quote_end: int
-
-
-def _read_mention(item: object) -> _ModelMention:
+def _read_mention(item: object) -> ModelTemporalMention:
     try:
-        return item if isinstance(item, _ModelMention) else _ModelMention.model_validate(item)
+        return item if isinstance(item, ModelTemporalMention) else ModelTemporalMention.model_validate(item)
     except ValueError as exc:
         raise TemporalContractError("illegal temporal mention") from exc
 
 
-def _read_action(item: object) -> _ModelAction:
+def _read_action(item: object) -> ModelDraftAction:
     try:
-        return item if isinstance(item, _ModelAction) else _ModelAction.model_validate(item)
+        return item if isinstance(item, ModelDraftAction) else ModelDraftAction.model_validate(item)
     except ValueError as exc:
-        raise TemporalContractError("illegal temporal action") from exc
+        raise ActionContractError("illegal temporal action") from exc
 
 
 def _mention_span(text: str, item: object) -> tuple[int, int]:
@@ -815,7 +782,7 @@ def _mention_span(text: str, item: object) -> tuple[int, int]:
     return start, end
 
 
-def _snap_span(text: str, mention: _ModelMention) -> tuple[int, int]:
+def _snap_span(text: str, mention: ModelTemporalMention) -> tuple[int, int]:
     within = 0 <= mention.quote_start < mention.quote_end <= len(text)
     quoted = text[mention.quote_start : mention.quote_end] if within else ""
     if quoted == mention.raw_text:
@@ -831,7 +798,7 @@ def _exact_slice(text: str, start: int, end: int, raw: str) -> str:
         return raw
     found = text.find(raw)
     if found < 0 or text.find(raw, found + 1) >= 0:
-        raise TemporalContractError("action quote is not in the source")
+        raise ActionContractError("action quote is not in the source")
     return raw
 
 

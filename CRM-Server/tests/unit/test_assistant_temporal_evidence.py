@@ -9,7 +9,9 @@ from datetime import datetime
 import pytest
 
 from app.services.assistant.contracts import DraftField, TaskDraft
+from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention
 from app.services.assistant.temporal_evidence import (
+    ActionContractError,
     TemporalContractError,
     apply_temporal_choice,
     attach_model_evidence,
@@ -180,3 +182,81 @@ def test_choice_id_from_outside_the_waiting_set_is_rejected() -> None:
     draft = _attach(EXAMPLE)
     with pytest.raises(TemporalContractError):
         apply_temporal_choice(draft, "tm_missing:0")
+
+
+def test_public_model_instances_are_accepted() -> None:
+    text = "叶老师反馈本月底会完成"
+    span = find_time_spans(text)[0]
+    mention = ModelTemporalMention(
+        raw_text=span.raw_text,
+        quote_start=span.start,
+        quote_end=span.end,
+        kind=span.kind,
+        role="CUSTOMER_COMMITMENT",
+        owner="叶老师",
+        action_ref="c1",
+        confidence=0.9,
+    )
+    action = ModelDraftAction(
+        action_ref="c1",
+        owner_role="CUSTOMER",
+        owner_text="叶老师",
+        action_text="完成",
+        action_status="COMMITTED",
+        evidence_quote="会完成",
+        quote_start=text.find("会完成"),
+        quote_end=text.find("会完成") + len("会完成"),
+    )
+    ensure_mentions_cover_source(text, [mention])
+    draft = _draft(text)
+    attach_model_evidence(
+        draft,
+        segment_id="seg_test",
+        segment_text=text,
+        anchor=ANCHOR,
+        mentions=[mention],
+        actions=[action],
+    )
+    stored = draft.content_json["temporal_evidence"]["mentions"]
+    assert stored[0]["raw_text"] == "本月底"
+    assert stored[0]["role"] == "CUSTOMER_COMMITMENT"
+
+
+def test_extra_mention_field_is_rejected() -> None:
+    text = "叶老师反馈本月底会完成"
+    span = find_time_spans(text)[0]
+    mention = {
+        "raw_text": span.raw_text,
+        "quote_start": span.start,
+        "quote_end": span.end,
+        "kind": span.kind,
+        "role": "CUSTOMER_COMMITMENT",
+        "iso_date": "2026-10-31",
+    }
+    with pytest.raises(TemporalContractError, match="illegal temporal mention"):
+        ensure_mentions_cover_source(text, [mention])
+
+
+def test_action_quote_miss_is_an_action_contract_error() -> None:
+    text = "叶老师会完成准备"
+    draft = _draft(text)
+    with pytest.raises(ActionContractError, match="action quote is not in the source"):
+        attach_model_evidence(
+            draft,
+            segment_id="seg_test",
+            segment_text=text,
+            anchor=ANCHOR,
+            mentions=[],
+            actions=[
+                ModelDraftAction(
+                    action_ref="a1",
+                    owner_role="CUSTOMER",
+                    owner_text="叶老师",
+                    action_text="完成准备",
+                    action_status="COMMITTED",
+                    evidence_quote="不在原文",
+                    quote_start=0,
+                    quote_end=4,
+                )
+            ],
+        )

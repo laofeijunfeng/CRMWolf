@@ -244,6 +244,75 @@ def apply_quality_score(draft: TaskDraft, score: int) -> TaskDraft:
     return draft
 
 
+
+_FAILURE_CAUSE_LIMIT = 500
+
+
+def _structuring_failure(exc: BaseException, *, stage: str) -> dict[str, object]:
+    """Classify a structuring failure and keep the underlying exception visible."""
+
+    from app.services.assistant.temporal_evidence import ActionContractError, TemporalContractError
+
+    decisive: BaseException = exc
+    cursor: BaseException | None = exc
+    while cursor is not None:
+        if isinstance(cursor, ActionContractError):
+            decisive = cursor
+            break
+        if isinstance(cursor, TemporalContractError):
+            decisive = cursor
+            break
+        cursor = cursor.__cause__
+    if isinstance(decisive, ActionContractError):
+        failure = "action_evidence"
+    elif isinstance(decisive, TemporalContractError):
+        failure = "temporal_evidence"
+    elif stage == "apply" and isinstance(exc, ValidationError):
+        failure = "draft_merge"
+    elif stage == "reconcile":
+        failure = "action_evidence"
+    else:
+        failure = "provider_schema"
+    root = exc
+    while root.__cause__ is not None:
+        root = root.__cause__
+    cause = f"{type(root).__name__}: {root}"
+    if root is not exc:
+        cause = f"{type(exc).__name__}: {exc} ({cause})"
+    return {
+        "accepted": False,
+        "retryable": True,
+        "failure": failure,
+        "error_type": type(decisive).__name__,
+        "cause": cause[:_FAILURE_CAUSE_LIMIT],
+    }
+
+
+def _record_structuring_failure(
+    db: Session,
+    task: AssistantTask,
+    draft: TaskDraft,
+    exc: BaseException,
+    *,
+    stage: str,
+) -> tuple[AssistantTask, str, None, bool]:
+    draft.quality_score = DraftField(status="MISSING")
+    draft.score_reason = None
+    draft.score_detail = {}
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            draft=draft,
+            error_code="STRUCTURING_UNAVAILABLE",
+            action_actor="SYSTEM",
+            action_name="structure_draft",
+            action_result=_structuring_failure(exc, stage=stage),
+        ),
+    )
+    return result.task, "整理暂时没有完成，请稍后重试。", None, True
+
+
 async def intake_step(
     db: Session,
     task: AssistantTask,
@@ -333,45 +402,20 @@ async def intake_step(
             db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=user_text
         )
         reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
-    except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError):
-        draft.quality_score = DraftField(status="MISSING")
-        draft.score_reason = None
-        draft.score_detail = {}
-        result = apply_task_update(
-            db,
-            task,
-            TaskUpdate(
-                # Transient LLM failure must not kill the task: it stays
-                # ACTIVE so the user can retry when the provider recovers.
-                draft=draft,
-                error_code="STRUCTURING_UNAVAILABLE",
-                action_actor="SYSTEM",
-                action_name="structure_draft",
-                action_result={"accepted": False, "retryable": True},
-            ),
-        )
-        return result.task, "整理暂时没有完成，请稍后重试。", None, True
+    except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
+        # Transient LLM failure must not kill the task: it stays ACTIVE.
+        return _record_structuring_failure(db, task, draft, exc, stage="structure")
 
     try:
         draft = apply_structured_draft(task, structured, correction_text=user_text)
-        reconcile_action_evidence(draft, task.activity_kind or "FOLLOW_UP")
-    except (ValueError, TypeError, ValidationError):
+    except (ValueError, TypeError, ValidationError) as exc:
         draft = TaskDraft.model_validate(task.draft_json or {})
-        draft.quality_score = DraftField(status="MISSING")
-        draft.score_reason = None
-        draft.score_detail = {}
-        result = apply_task_update(
-            db,
-            task,
-            TaskUpdate(
-                draft=draft,
-                error_code="STRUCTURING_UNAVAILABLE",
-                action_actor="SYSTEM",
-                action_name="structure_draft",
-                action_result={"accepted": False, "retryable": True},
-            ),
-        )
-        return result.task, "整理暂时没有完成，请稍后重试。", None, True
+        return _record_structuring_failure(db, task, draft, exc, stage="apply")
+    try:
+        reconcile_action_evidence(draft, task.activity_kind or "FOLLOW_UP")
+    except (ValueError, TypeError, ValidationError) as exc:
+        draft = TaskDraft.model_validate(task.draft_json or {})
+        return _record_structuring_failure(db, task, draft, exc, stage="reconcile")
     draft.quality_score = DraftField(status="MISSING")
     draft.score_reason = None
     draft.score_detail = {}

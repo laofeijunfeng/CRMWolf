@@ -142,13 +142,10 @@ class AssistantLLM:
             "会议纪要整理" if meeting else "跟进整理",
         )
         _require_complete_content(response.content_json)
-        if meeting:
-            from app.services.assistant.temporal_evidence import TemporalContractError, ensure_mentions_cover_source
+        from app.services.assistant.temporal_evidence import ensure_mentions_cover_source
 
-            try:
-                ensure_mentions_cover_source(user_text, response.temporal_mentions)
-            except TemporalContractError as exc:
-                raise AssistantLLMError("会议纪要整理：时间证据与原文不一致") from exc
+        ensure_mentions_cover_source(user_text, response.temporal_mentions)
+        if meeting:
             return StructureDraftResult(
                 kind_confirmed=kind,
                 content=response.content or "\n".join(response.content_json.key_minutes),
@@ -162,12 +159,6 @@ class AssistantLLM:
                 actions=response.actions,
                 structuring_model=model_name,
             )
-        from app.services.assistant.temporal_evidence import TemporalContractError, ensure_mentions_cover_source
-
-        try:
-            ensure_mentions_cover_source(user_text, response.temporal_mentions)
-        except TemporalContractError as exc:
-            raise AssistantLLMError("跟进整理：时间证据与原文不一致") from exc
         return StructureDraftResult(
             kind_confirmed="FOLLOW_UP",
             content=response.content_json.content,
