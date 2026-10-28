@@ -39,7 +39,20 @@ export const ActivityPreviewSchema = z.object({
   next_action: z.string().nullable().optional(),
   next_follow_time: z.string().nullable().optional(),
   next_follow_time_text: z.string().nullable().optional(),
-  next_follow_time_granularity: z.enum(['DATE', 'DATETIME', 'UNKNOWN']).optional()
+  next_follow_time_granularity: z.enum(['DATE', 'DATETIME', 'UNKNOWN']).optional(),
+  change_signal: z.enum(['推进', '持平', '放缓', '待确认']).nullable().optional(),
+  change_summary: z.string().nullable().optional(),
+  opportunity_name: z.string().nullable().optional(),
+  opportunity_stage: z.string().nullable().optional(),
+  context_as_of: z.string().nullable().optional(),
+  context_notices: z.array(z.string()).optional(),
+  context_evidence: z.array(z.object({
+    source_type: z.string(),
+    occurred_at: z.string().nullable().optional(),
+    summary: z.string(),
+    relation: z.string(),
+    key: z.boolean().optional()
+  }).strict()).optional()
 }).strict()
 
 export const ProposalKindSchema = z.enum([

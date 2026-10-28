@@ -19,6 +19,18 @@ ProposalKind = Literal[
 ]
 
 
+class ContextEvidence(BaseModel):
+    """One authorized source line on the follow-up confirmation card."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_type: str = Field(min_length=1, max_length=40)
+    occurred_at: str | None = None
+    summary: str = Field(min_length=1, max_length=120)
+    relation: str = Field(min_length=1, max_length=20)
+    key: bool = False
+
+
 class ActivityPreview(BaseModel):
     """The public subset of the frozen command; never a mutable draft."""
 
@@ -44,6 +56,13 @@ class ActivityPreview(BaseModel):
     next_follow_time: str | None = None
     next_follow_time_text: str | None = None
     next_follow_time_granularity: Literal["DATE", "DATETIME", "UNKNOWN"] = "UNKNOWN"
+    change_signal: Literal["推进", "持平", "放缓", "待确认"] | None = None
+    change_summary: str | None = Field(default=None, max_length=80)
+    opportunity_name: str | None = None
+    opportunity_stage: str | None = None
+    context_as_of: str | None = None
+    context_notices: list[str] = Field(default_factory=list)
+    context_evidence: list[ContextEvidence] = Field(default_factory=list)
 
 
 class ActivityWriteConfirmation(BaseModel):
@@ -206,6 +225,8 @@ class TaskAuthority(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     customer_public_id: str | None = Field(default=None, max_length=64)
+    opportunity_public_id: str | None = Field(default=None, max_length=64)
+    opportunity_stage_name: str | None = Field(default=None, max_length=100)
     activity_public_id: str | None = Field(default=None, max_length=64)
     confirmation_receipt: str | None = Field(default=None, max_length=128)
     frozen_activity_command: dict[str, object] | None = None

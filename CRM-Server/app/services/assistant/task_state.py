@@ -56,6 +56,7 @@ class TaskUpdate:
     clear_waiting: bool = False
     authority: TaskAuthority | None = None
     clear_frozen_activity_command: bool = False
+    clear_follow_up_opportunity: bool = False
     append_committed: list[dict[str, object]] | None = None
     error_code: str | None = None
     # Required audit trail entry for this transition.
@@ -154,12 +155,15 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
                 "action_id": update.waiting.action_id or generate_public_id("awa"),
             },
         )
-    if update.authority is not None or update.clear_frozen_activity_command:
+    if update.authority is not None or update.clear_frozen_activity_command or update.clear_follow_up_opportunity:
         merged = dict(task.authority_json or {})
         if update.authority is not None:
             merged.update(update.authority.model_dump(mode="json", exclude_none=True))
         if update.clear_frozen_activity_command:
             merged.pop("frozen_activity_command", None)
+        if update.clear_follow_up_opportunity:
+            merged.pop("opportunity_public_id", None)
+            merged.pop("opportunity_stage_name", None)
         values["authority_json"] = merged
     if update.append_committed:
         values["committed_json"] = [*(task.committed_json or []), *update.append_committed]

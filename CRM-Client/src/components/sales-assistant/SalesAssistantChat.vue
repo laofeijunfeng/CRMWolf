@@ -187,7 +187,7 @@ const endProcessing = (): void => {
 }
 
 const fieldLabel = computed(() => {
-  if (waiting.value?.type === 'OBJECT_SELECTION') return '选择客户'
+  if (waiting.value?.type === 'OBJECT_SELECTION') return waiting.value.field === 'opportunity' ? '选择商机' : '选择客户'
   if (waiting.value?.type === 'ACTIVITY_KIND') return '活动类型'
   if (waiting.value?.type === 'CONFIRMATION') return '确认操作'
   const field = waiting.value?.field ?? ''
@@ -1016,7 +1016,7 @@ void loadConversation()
                   class="h-auto justify-start py-2 text-left"
                   :disabled="busy || resultPending || !isCurrentWait(entry)"
                   @click="() => { void pickKind(candidate.id, entry.waiting) }"
-                >{{ candidate.account_name }}</Button>
+                >{{ 'account_name' in candidate ? candidate.account_name : candidate.label }}</Button>
               </div>
             </div>
 

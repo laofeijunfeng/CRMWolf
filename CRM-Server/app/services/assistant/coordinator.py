@@ -21,12 +21,13 @@ from app.services.assistant.confirmation import execute_confirmation, freeze_con
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter
-from app.services.assistant.intake_flow import intake_step
+from app.services.assistant.intake_flow import intake_step, kind_waiting
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
     TaskUpdate,
     apply_task_update,
+    load_authority,
     load_draft,
     load_waiting,
 )
@@ -85,12 +86,14 @@ class AssistantCoordinator:
         writer: ActivityWriter | None = None,
         proposal_executor: object | None = None,
         quality_gate: object | None = None,
+        follow_up: object | None = None,
     ) -> None:
         self._next_action_chooser = next_action_chooser
         self._structurer = structurer
         self._writer = writer
         self._proposal_executor = proposal_executor
         self._quality_gate = quality_gate
+        self._follow_up = follow_up
 
     async def handle_task(
         self,
@@ -132,19 +135,25 @@ class AssistantCoordinator:
             return await self._answer_waiting(db, task, waiting, user_input, reporter=reporter)
 
         if self._structurer is not None and user_input.text:
-            task, message, paused_waiting, failed = await intake_step(
-                db, task, user_input.text, self._structurer, gate=self._quality_gate, reporter=reporter
-            )
-            if failed or paused_waiting is not None:
-                return CoordinatorOutcome(
-                    reply=CoordinatorReply(
-                        task_public_id=task.public_id,
-                        status=task.status,
-                        message=message,
-                        waiting=paused_waiting,
-                    ),
-                    task=task,
+            if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
+                begun = await self._begin_follow_up(db, task, user_input.text, reporter, accept_source=True)
+                if isinstance(begun, CoordinatorOutcome):
+                    return begun
+                task = begun
+            else:
+                task, message, paused_waiting, failed = await intake_step(
+                    db, task, user_input.text, self._structurer, gate=self._quality_gate, reporter=reporter
                 )
+                if failed or paused_waiting is not None:
+                    return CoordinatorOutcome(
+                        reply=CoordinatorReply(
+                            task_public_id=task.public_id,
+                            status=task.status,
+                            message=message,
+                            waiting=paused_waiting,
+                        ),
+                        task=task,
+                    )
 
         return await self._prepare_confirmation(db, task)
 
@@ -185,7 +194,7 @@ class AssistantCoordinator:
         if waiting.type == AssistantWaitingType.ACTIVITY_KIND:
             return await self._answer_activity_kind(db, task, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.OBJECT_SELECTION:
-            return await self._answer_object_selection(db, task, waiting, user_input)
+            return await self._answer_object_selection(db, task, waiting, user_input, reporter=reporter)
         if waiting.field == "temporal_choice":
             return await self._answer_temporal_choice(db, task, waiting, user_input, reporter=reporter)
         return await self._answer_field(db, task, waiting, user_input, reporter=reporter)
@@ -318,12 +327,19 @@ class AssistantCoordinator:
                 return self._ask_customer(db, task, code="NOT_FOUND")
         else:
             return self._ask_customer(db, task)
+        context_card = None
+        if self._follow_up is not None and (task.activity_kind or "") == "FOLLOW_UP":
+            attached = await self._attach_follow_up_context(db, task, customer)
+            if isinstance(attached, CoordinatorOutcome):
+                return attached
+            task, context_card = attached
         updated, waiting = freeze_confirmation(
             db,
             task,
             customer=customer,
             next_follow_time=next_follow_time,
             next_follow_time_granularity=next_follow_time_granularity,
+            context_card=context_card,
         )
         return CoordinatorOutcome(
             CoordinatorReply(
@@ -381,11 +397,20 @@ class AssistantCoordinator:
         )
 
     async def _answer_object_selection(
-        self, db: Session, task: AssistantTask, waiting: TaskWaiting, user_input: AssistantInput
+        self,
+        db: Session,
+        task: AssistantTask,
+        waiting: TaskWaiting,
+        user_input: AssistantInput,
+        reporter: ProgressReporter | None = None,
     ) -> CoordinatorOutcome:
+        if reporter is None:
+            reporter = NullProgressReporter()
         from app.crud.permission import permission_crud
         from app.services.customer_activity_access_policy import customer_activity_access_policy
 
+        if waiting.field == "opportunity":
+            return await self._answer_opportunity_selection(db, task, waiting, user_input)
         customer_id = user_input.choice
         if customer_id not in {item.get("id") for item in waiting.candidates}:
             raise InvalidTaskTransitionError("customer choice is not in the signed waiting card")
@@ -402,13 +427,14 @@ class AssistantCoordinator:
             task,
             TaskUpdate(
                 clear_waiting=True,
+                clear_follow_up_opportunity=True,
                 authority=TaskAuthority(customer_public_id=customer.public_id),
                 action_actor="USER",
                 action_name="select_customer",
                 action_result={"customer_public_id": customer.public_id},
             ),
         )
-        return await self._prepare_confirmation(db, result.task)
+        return await self._continue_after_customer(db, result.task, reporter=reporter)
 
 
     async def _gate_temporal_evidence(
@@ -606,6 +632,8 @@ class AssistantCoordinator:
                 ),
                 task,
             )
+        if self._follow_up is not None and field_name == "customer" and (task.activity_kind or "") == "FOLLOW_UP":
+            return await self._answer_follow_up_customer(db, task, text, reporter)
 
         draft = load_draft(task)
         slot: DraftField | None = getattr(draft, field_name, None)
@@ -784,6 +812,11 @@ class AssistantCoordinator:
 
         # Kind is now known: continue structuring from the original goal text
         # instead of letting the chooser end an unstructured task.
+        if self._follow_up is not None and kind == "FOLLOW_UP":
+            begun = await self._begin_follow_up(db, updated, updated.goal, reporter, accept_source=False)
+            if isinstance(begun, CoordinatorOutcome):
+                return begun
+            return await self._prepare_confirmation(db, begun)
         if self._structurer is not None:
             original_text = updated.goal
             updated, message, paused_waiting, failed = await intake_step(
@@ -950,6 +983,416 @@ class AssistantCoordinator:
             ),
             task=result.task,
         )
+
+
+    async def _begin_follow_up(
+        self,
+        db: Session,
+        task: AssistantTask,
+        user_text: str,
+        reporter: ProgressReporter,
+        *,
+        accept_source: bool,
+    ) -> CoordinatorOutcome | AssistantTask:
+        """Classify, bind the customer, then structure. Meetings stay on the old intake path."""
+
+        import time
+
+        from app.services.assistant.events import stage as mk_stage
+
+        if self._structurer is None or self._follow_up is None:
+            raise RuntimeError("follow-up context requires a structurer")
+        kind = task.activity_kind
+        if kind is None:
+            reporter.stage_start(mk_stage("classify"))
+            started = time.monotonic()
+            decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
+            reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))
+            if decision.kind == "UNCLEAR":
+                draft = load_draft(task)
+                if accept_source:
+                    append_source(db, task, draft, user_text)
+                waiting = kind_waiting(task)
+                result = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        draft=draft,
+                        waiting=waiting,
+                        action_actor="SYSTEM",
+                        action_name="ask_activity_kind",
+                        action_result={"reason": decision.reason},
+                    ),
+                )
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=result.task.public_id,
+                        status=result.task.status,
+                        message=waiting.prompt,
+                        waiting=load_waiting(result.task),
+                    ),
+                    result.task,
+                )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    activity_kind=decision.kind,
+                    action_actor="SYSTEM",
+                    action_name="set_activity_kind",
+                    action_result={"kind": decision.kind, "source": "classifier"},
+                ),
+            )
+            task = result.task
+            kind = decision.kind
+        if kind != "FOLLOW_UP":
+            updated, message, paused, failed = await intake_step(
+                db, task, user_text, self._structurer, gate=self._quality_gate, reporter=reporter,
+                accept_source=accept_source,
+            )
+            if failed or paused is not None:
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
+                    ),
+                    updated,
+                )
+            return updated
+        if not load_authority(task).customer_public_id:
+            try:
+                customer_name = await self._follow_up.locate_customer(db, team_id=task.team_id, user_text=user_text)
+            except AssistantLLMError:
+                result = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        error_code="CUSTOMER_LOCATOR_UNAVAILABLE",
+                        action_actor="SYSTEM",
+                        action_name="locate_customer",
+                        action_result={"accepted": False, "retryable": True},
+                    ),
+                )
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=result.task.public_id,
+                        status=result.task.status,
+                        message="客户暂时没有识别出来，请稍后重试。",
+                    ),
+                    result.task,
+                )
+            if not str(customer_name or "").strip():
+                draft = load_draft(task)
+                if accept_source:
+                    append_source(db, task, draft, user_text)
+                    apply_task_update(
+                        db,
+                        task,
+                        TaskUpdate(draft=draft, action_actor="USER", action_name="accept_source"),
+                    )
+                return self._ask_customer(db, task)
+            resolution = resolve_customer_candidates_for_assistant(
+                db, team_id=task.team_id, user_id=task.user_id, customer_name=str(customer_name)
+            )
+            if resolution.status == "AMBIGUOUS":
+                draft = load_draft(task)
+                if accept_source:
+                    append_source(db, task, draft, user_text)
+                waiting = TaskWaiting(
+                    type=AssistantWaitingType.OBJECT_SELECTION,
+                    field="customer",
+                    question_id=f"q_cust_{task.public_id}_{task.version}",
+                    prompt="请选择这次沟通对应的客户。",
+                    candidates=resolution.candidates,
+                )
+                result = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        draft=draft,
+                        waiting=waiting,
+                        action_actor="SYSTEM",
+                        action_name="choose_customer",
+                        action_result={"candidate_count": len(resolution.candidates)},
+                    ),
+                )
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=result.task.public_id,
+                        status=result.task.status,
+                        message=waiting.prompt,
+                        waiting=load_waiting(result.task),
+                    ),
+                    result.task,
+                )
+            if resolution.status == "RESOLVED" and resolution.customer is not None:
+                draft = load_draft(task)
+                draft.customer = DraftField(status="ACCEPTED", value=resolution.customer.account_name)
+                if accept_source:
+                    append_source(db, task, draft, user_text)
+                result = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        draft=draft,
+                        authority=TaskAuthority(customer_public_id=resolution.customer.public_id),
+                        action_actor="SYSTEM",
+                        action_name="bind_customer",
+                        action_result={"customer_public_id": resolution.customer.public_id},
+                    ),
+                )
+                task = result.task
+            elif resolution.status == "DEPENDENCY_FAILURE":
+                raise RuntimeError("customer resolution unavailable")
+            elif resolution.status == "PERMISSION_DENIED":
+                return self._customer_permission_denied(db, task)
+            else:
+                draft = load_draft(task)
+                if accept_source:
+                    append_source(db, task, draft, user_text)
+                    apply_task_update(
+                        db, task, TaskUpdate(draft=draft, action_actor="USER", action_name="accept_source")
+                    )
+                return self._ask_customer(db, task, code="NOT_FOUND")
+        segments = load_draft(task).source_segments
+        fresh = accept_source and bool(user_text.strip()) and user_text.strip() not in segments
+        intake_text = user_text if fresh else ("\n".join(segments) or user_text)
+        updated, message, paused, failed = await intake_step(
+            db,
+            task,
+            intake_text,
+            self._structurer,
+            gate=self._quality_gate,
+            reporter=reporter,
+            accept_source=fresh,
+        )
+        if failed or paused is not None:
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
+                ),
+                updated,
+            )
+        return updated
+
+    async def _continue_after_customer(
+        self, db: Session, task: AssistantTask, *, reporter: ProgressReporter
+    ) -> CoordinatorOutcome:
+        draft = load_draft(task)
+        needs_structure = (
+            self._follow_up is not None
+            and (task.activity_kind or "") == "FOLLOW_UP"
+            and self._structurer is not None
+            and draft.quality_score.status != "CANDIDATE"
+        )
+        if needs_structure:
+                text = "\n".join(draft.source_segments) or task.goal
+                updated, message, paused, failed = await intake_step(
+                    db,
+                    task,
+                    text,
+                    self._structurer,
+                    gate=self._quality_gate,
+                    reporter=reporter,
+                    accept_source=False,
+                )
+                if failed or paused is not None:
+                    return CoordinatorOutcome(
+                        CoordinatorReply(
+                            task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
+                        ),
+                        updated,
+                    )
+                task = updated
+        return await self._prepare_confirmation(db, task)
+
+    async def _answer_follow_up_customer(
+        self, db: Session, task: AssistantTask, customer_name: str, reporter: ProgressReporter
+    ) -> CoordinatorOutcome:
+        resolution = resolve_customer_candidates_for_assistant(
+            db, team_id=task.team_id, user_id=task.user_id, customer_name=customer_name
+        )
+        if resolution.status == "AMBIGUOUS":
+            waiting = TaskWaiting(
+                type=AssistantWaitingType.OBJECT_SELECTION,
+                field="customer",
+                question_id=f"q_cust_{task.public_id}_{task.version}",
+                prompt="请选择这次沟通对应的客户。",
+                candidates=resolution.candidates,
+            )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    clear_waiting=True,
+                    clear_follow_up_opportunity=True,
+                    waiting=waiting,
+                    action_actor="SYSTEM",
+                    action_name="choose_customer",
+                    action_result={"candidate_count": len(resolution.candidates)},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=waiting.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        if resolution.status != "RESOLVED" or resolution.customer is None:
+            if resolution.status == "DEPENDENCY_FAILURE":
+                raise RuntimeError("customer resolution unavailable")
+            if resolution.status == "PERMISSION_DENIED":
+                return self._customer_permission_denied(db, task)
+            return self._ask_customer(db, task, code="NOT_FOUND")
+        draft = load_draft(task)
+        draft.customer = DraftField(status="ACCEPTED", value=resolution.customer.account_name)
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_waiting=True,
+                clear_follow_up_opportunity=True,
+                draft=draft,
+                authority=TaskAuthority(customer_public_id=resolution.customer.public_id),
+                action_actor="USER",
+                action_name="submit_customer",
+                action_result={"customer_public_id": resolution.customer.public_id},
+            ),
+        )
+        return await self._continue_after_customer(db, result.task, reporter=reporter)
+
+    async def _answer_opportunity_selection(
+        self, db: Session, task: AssistantTask, waiting: TaskWaiting, user_input: AssistantInput
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.follow_up_context import load_visible_opportunity
+
+        choice = user_input.choice or ""
+        if choice not in {item.get("id") for item in waiting.candidates}:
+            raise InvalidTaskTransitionError("opportunity choice is not in the signed waiting card")
+        customer_id = load_authority(task).customer_public_id
+        if not customer_id:
+            raise InvalidTaskTransitionError("opportunity choice requires a bound customer")
+        from app.crud.permission import permission_crud
+        from app.services.customer_activity_access_policy import customer_activity_access_policy
+
+        codes = {item.code for item in permission_crud.get_user_permissions(db, task.user_id, task.team_id)}
+        customer = customer_activity_access_policy.resolve_customer(
+            db,
+            customer_identifier=customer_id,
+            team_id=task.team_id,
+            user_id=task.user_id,
+            permission_codes=codes,
+        )
+        row = load_visible_opportunity(
+            db,
+            team_id=task.team_id,
+            user_id=task.user_id,
+            customer_id=int(customer.id),
+            public_id=choice,
+            permission_codes=codes,
+        )
+        if row is None:
+            raise InvalidTaskTransitionError("opportunity choice is no longer visible")
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_waiting=True,
+                authority=TaskAuthority(
+                    customer_public_id=customer.public_id,
+                    opportunity_public_id=row.public_id,
+                    opportunity_stage_name=row.current_stage_name or "",
+                ),
+                action_actor="USER",
+                action_name="select_opportunity",
+                action_result={"opportunity_public_id": row.public_id},
+            ),
+        )
+        return await self._prepare_confirmation(db, result.task)
+
+    async def _attach_follow_up_context(
+        self, db: Session, task: AssistantTask, customer: object
+    ) -> CoordinatorOutcome | tuple[AssistantTask, dict[str, object]]:
+        from app.services.assistant.follow_up_context import OPPORTUNITY_PROMPT
+
+        if self._follow_up is None:
+            raise RuntimeError("follow-up context is not configured")
+        authority = load_authority(task)
+        draft = load_draft(task)
+        user_text = "\n".join(draft.source_segments)
+        pack = self._follow_up.read_evidence(db, team_id=task.team_id, user_id=task.user_id, customer=customer)
+        choice = await self._follow_up.choose_opportunity(
+            db,
+            team_id=task.team_id,
+            user_id=task.user_id,
+            customer=customer,
+            user_text=user_text,
+            pack=pack,
+            bound_public_id=authority.opportunity_public_id,
+            bound_stage=authority.opportunity_stage_name,
+        )
+        if choice.kind == "ask":
+            waiting = TaskWaiting(
+                type=AssistantWaitingType.OBJECT_SELECTION,
+                field="opportunity",
+                question_id=f"q_opp_{task.public_id}_{task.version}",
+                prompt=OPPORTUNITY_PROMPT,
+                candidates=[dict(item) for item in choice.candidates],
+            )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    clear_follow_up_opportunity=True,
+                    waiting=waiting,
+                    action_actor="SYSTEM",
+                    action_name="choose_opportunity",
+                    action_result={"candidate_count": len(choice.candidates)},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=waiting.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        if choice.kind == "bound" and choice.public_id:
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    authority=TaskAuthority(
+                        customer_public_id=customer.public_id,
+                        opportunity_public_id=choice.public_id,
+                        opportunity_stage_name=choice.stage or "",
+                    ),
+                    action_actor="SYSTEM",
+                    action_name="bind_opportunity",
+                    action_result={"opportunity_public_id": choice.public_id},
+                ),
+            )
+            task = result.task
+        else:
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    clear_follow_up_opportunity=True,
+                    action_actor="SYSTEM",
+                    action_name="clear_opportunity",
+                    action_result={"reason": choice.kind},
+                ),
+            )
+            task = result.task
+        card = await self._follow_up.judge(
+            db, team_id=task.team_id, user_text=user_text, pack=pack, choice=choice
+        )
+        return task, card.as_command()
 
     def _ask_field(self, db: Session, task: AssistantTask, parameters: dict[str, object]) -> CoordinatorOutcome:
         field_name = str(parameters.get("field", ""))

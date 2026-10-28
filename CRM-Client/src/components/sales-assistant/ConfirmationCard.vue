@@ -55,6 +55,15 @@ const notices = computed(() => {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item !== '') : []
 })
 
+interface ContextEvidence { source_type: string; occurred_at?: string | null | undefined; summary: string; relation: string; key?: boolean | undefined }
+
+const contextEvidence = computed(() => {
+  const value = frozen.value?.context_evidence
+  return Array.isArray(value) ? value.filter((item): item is ContextEvidence => typeof item === 'object' && item !== null && 'summary' in item) : []
+})
+const keyEvidence = computed(() => contextEvidence.value.filter((item) => item.key === true).slice(0, 2))
+const contextNotices = computed(() => frozen.value?.context_notices?.filter((item) => item !== '') ?? [])
+
 interface Slot { status: string; value?: string | null | undefined }
 
 interface FieldRow { key: string; label: string; value: string; locked: boolean; hint?: string | undefined }
@@ -100,6 +109,14 @@ const qualityText = computed(() => frozen.value?.score !== undefined ? String(fr
           <div class="mb-1 text-xs font-medium text-muted-foreground">客户事实</div>
           <p v-for="line in commitments" :key="line" class="text-sm leading-relaxed">{{ line }}</p>
         </div>
+        <div v-if="frozen?.change_summary" class="mt-2 space-y-1">
+          <div class="text-xs font-medium text-muted-foreground">变化判断</div>
+          <p class="text-sm leading-relaxed">{{ frozen.change_summary }}</p>
+          <p v-if="frozen.opportunity_name" class="text-xs text-muted-foreground">商机：{{ frozen.opportunity_name }}<template v-if="frozen.opportunity_stage"> · 当前阶段 {{ frozen.opportunity_stage }}</template></p>
+          <p v-for="item in keyEvidence" :key="`${item.source_type}-${item.summary}`" class="text-xs text-muted-foreground">{{ item.occurred_at }} {{ item.summary }}</p>
+          <p v-for="notice in contextNotices" :key="notice" class="text-xs text-muted-foreground">{{ notice }}</p>
+          <p v-if="frozen.context_as_of" class="text-xs text-muted-foreground">依据截至 {{ frozen.context_as_of }}</p>
+        </div>
         <div v-if="frozen" class="mt-2 space-y-1 text-xs text-muted-foreground">
           <p v-if="frozen.score_reason">评分依据：{{ frozen.score_reason }}</p>
           <p v-if="salesLine">下一步：{{ salesLine }}</p>
@@ -126,6 +143,20 @@ const qualityText = computed(() => frozen.value?.score !== undefined ? String(fr
           </div>
         </div>
       </div>
+
+      <details v-if="contextEvidence.length" class="group rounded-wolf-md border">
+        <summary class="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs text-muted-foreground hover:bg-accent">
+          <span>查看依据</span>
+          <svg class="size-3.5 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <div class="space-y-2 border-t px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          <div v-for="item in contextEvidence" :key="`${item.source_type}-${item.occurred_at}-${item.summary}`">
+            <div>{{ item.source_type }}<template v-if="item.occurred_at"> · {{ item.occurred_at }}</template></div>
+            <div>{{ item.summary }}</div>
+            <div>关系：{{ item.relation }}</div>
+          </div>
+        </div>
+      </details>
 
       <details class="group rounded-wolf-md border">
         <summary class="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-xs text-muted-foreground hover:bg-accent">

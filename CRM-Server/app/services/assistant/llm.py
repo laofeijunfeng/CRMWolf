@@ -6,18 +6,20 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from app.services.assistant.llm_contracts import (
+    ChangeJudgment,
+    CustomerMention,
+    KindDecision,
+    OpportunityRank,
+    StructuredFollowUp,
+    StructuredMeeting,
+    StructureDraftResult,
+)
 from app.services.assistant.model_transport import (
     AssistantLLMError,
     AssistantModelTransport,
     team_model_credentials,
 )
-from app.services.assistant.llm_contracts import (
-    KindDecision,
-    StructuredFollowUp,
-    StructuredMeeting,
-    StructureDraftResult,
-)
-
 from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingActionItem, MeetingContent
 
 if TYPE_CHECKING:
@@ -169,4 +171,71 @@ class AssistantLLM:
             temporal_mentions=response.temporal_mentions,
             actions=response.actions,
             structuring_model=model_name,
+        )
+
+
+    async def locate_customer(self, db: Session, *, team_id: int, user_text: str) -> CustomerMention:
+        found = await self._invoke(
+            db,
+            team_id,
+            "你只从用户原文摘录客户公司名称。没有明确写出公司或客户名称时返回空字符串。"
+            "不要把“他”“客户”或某人的姓氏当成公司名称，不要根据常识补全。只输出结构化结果。",
+            user_text,
+            CustomerMention,
+            "客户名称定位",
+            timeout_seconds=30,
+        )
+        return found
+
+    async def rank_opportunities(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_text: str,
+        candidates: list[dict[str, object]],
+    ) -> OpportunityRank:
+        import json
+
+        return await self._invoke(
+            db,
+            team_id,
+            "你只在给定序号里为这次跟进排序进行中商机。返回序号和 0 到 1 的置信度。"
+            "不得输出商机编号或数据库标识。不确定时让置信度接近。只输出结构化结果。",
+            json.dumps({"follow_up": user_text, "candidates": candidates}, ensure_ascii=False),
+            OpportunityRank,
+            "商机排序",
+            timeout_seconds=30,
+        )
+
+    async def judge_change(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_text: str,
+        evidence: list[dict[str, object]],
+        opportunity_name: str | None,
+        opportunity_stage: str | None,
+    ) -> ChangeJudgment:
+        import json
+
+        return await self._invoke(
+            db,
+            team_id,
+            "你只判断这次跟进相对给定证据的变化信号：推进、持平、放缓或待确认。"
+            "只能引用给定 ref。relation 只能是推进、持平、放缓、冲突或背景。"
+            "“再考虑”本身不是放缓，不得判断输单、退步或商机回退。只输出结构化结果。",
+            json.dumps(
+                {
+                    "follow_up": user_text,
+                    "evidence": evidence,
+                    "opportunity_name": opportunity_name,
+                    "opportunity_stage": opportunity_stage,
+                },
+                ensure_ascii=False,
+            ),
+            ChangeJudgment,
+            "变化判断",
+            timeout_seconds=30,
         )

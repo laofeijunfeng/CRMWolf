@@ -105,3 +105,39 @@ class StructureDraftResult(BaseModel):
     temporal_mentions: list[ModelTemporalMention] = Field(default_factory=list)
     actions: list[ModelDraftAction] = Field(default_factory=list)
     structuring_model: str = ""
+
+
+
+class CustomerMention(BaseModel):
+    """Customer name copied from the utterance. Empty means the user did not name one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    customer_name: str = Field(default="", max_length=500)
+
+
+class OpportunityRankItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0)
+    confidence: float = Field(ge=0, le=1)
+
+
+class OpportunityRank(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ranked: list[OpportunityRankItem] = Field(default_factory=list, max_length=5)
+
+
+class EvidenceUse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str = Field(min_length=1, max_length=16)
+    relation: Literal["推进", "持平", "放缓", "冲突", "背景"]
+
+
+class ChangeJudgment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: Literal["推进", "持平", "放缓", "待确认"]
+    uses: list[EvidenceUse] = Field(default_factory=list, max_length=8)

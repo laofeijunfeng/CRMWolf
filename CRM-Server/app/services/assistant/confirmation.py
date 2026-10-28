@@ -51,6 +51,7 @@ def freeze_confirmation(
     customer: object,
     next_follow_time: datetime | None = None,
     next_follow_time_granularity: str = "UNKNOWN",
+    context_card: dict[str, object] | None = None,
 ) -> tuple[AssistantTask, TaskWaiting]:
     from app.crud.customer_activity import customer_activity_crud
     from app.services.customer_activity_kinds import get_activity_kind_meta
@@ -92,6 +93,27 @@ def freeze_confirmation(
         "draft_version": task.version,
         "submission_id": generate_public_id("asub"),
     }
+    preview_keys = [
+        "customer_name",
+        "activity_kind",
+        "title",
+        "summary",
+        "content_json",
+        "source_content",
+        "score",
+        "score_reason",
+        "next_action",
+        "next_follow_time",
+        "next_follow_time_text",
+        "next_follow_time_granularity",
+    ]
+    if context_card:
+        from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
+
+        for key in CONTEXT_COMMAND_KEYS:
+            if key in context_card:
+                command[key] = context_card[key]
+                preview_keys.append(key)
     command["fingerprint"] = command_fingerprint(command)
     command["execution_status"] = "PENDING"
     waiting = TaskWaiting(
@@ -102,23 +124,7 @@ def freeze_confirmation(
         fingerprint=command["fingerprint"],
         confirmation_payload={
             "kind": "activity_write",
-            "preview": {
-                key: command[key]
-                for key in (
-                    "customer_name",
-                    "activity_kind",
-                    "title",
-                    "summary",
-                    "content_json",
-                    "source_content",
-                    "score",
-                    "score_reason",
-                    "next_action",
-                    "next_follow_time",
-                    "next_follow_time_text",
-                    "next_follow_time_granularity",
-                )
-            },
+            "preview": {key: command[key] for key in preview_keys},
         },
     )
     persisted_waiting = waiting.model_dump(mode="json")
@@ -127,7 +133,12 @@ def freeze_confirmation(
         task,
         TaskUpdate(
             draft=draft,
-            authority=TaskAuthority(customer_public_id=customer.public_id, frozen_activity_command=command),
+            authority=TaskAuthority(
+                customer_public_id=customer.public_id,
+                opportunity_public_id=load_authority(task).opportunity_public_id,
+                opportunity_stage_name=load_authority(task).opportunity_stage_name,
+                frozen_activity_command=command,
+            ),
             waiting=waiting,
             action_actor="SYSTEM",
             action_name="freeze_activity",

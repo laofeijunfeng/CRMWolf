@@ -68,6 +68,7 @@ def _build_coordinator() -> AssistantCoordinator:
 
     from app.services.assistant.chooser import AgentLLMChooser
     from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor
+    from app.services.assistant.follow_up_context import RealFollowUpContext
     from app.services.assistant.intake import RealKindStructurer
     from app.services.assistant.quality_gate import QualityGate
     from app.services.assistant.real_writer import RealActivityWriter
@@ -78,6 +79,7 @@ def _build_coordinator() -> AssistantCoordinator:
         writer=RealActivityWriter(),
         proposal_executor=RealCRMProposalExecutor(),
         quality_gate=QualityGate(),
+        follow_up=RealFollowUpContext(),
     )
 
 
