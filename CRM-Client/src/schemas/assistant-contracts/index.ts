@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { AgentUIEnvelopeSchema } from '@/schemas/agent-contracts/ui-envelope'
+
 export const DraftFieldStatusSchema = z.enum(['MISSING', 'CANDIDATE', 'ACCEPTED', 'EXPLICITLY_NONE'])
 export type DraftFieldStatus = z.infer<typeof DraftFieldStatusSchema>
 
@@ -201,7 +203,8 @@ export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
-  outcome: z.enum(['activity_written', 'failure']).nullable()
+  outcome: z.enum(['activity_written', 'failure']).nullable(),
+  ui: AgentUIEnvelopeSchema.nullable()
 }).strict()
 export const ConversationViewSchema = z.object({
   public_id: z.string().min(1), version: z.number().int().nonnegative(),

@@ -23,12 +23,11 @@ describe('owned historical conversation projection', () => {
     show(view({ focused_task: current, messages: [message('old', '会议确认', old), message('new', '当前提示', current)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    const meeting = wrapper.findComponent({ name: 'MeetingConfirmationCard' })
-    expect(meeting.text()).toContain('原会议主题')
-    expect(meeting.text()).toContain('原会议讨论')
-    expect(meeting.text()).toContain('原客户')
-    expect(meeting.text()).not.toContain('新客户')
-    expect(meeting.props('replayed')).toBe(true)
+    const meeting = wrapper.findAllComponents({ name: 'AgentUIMessage' })[0]
+    expect(meeting?.text()).toContain('原会议主题')
+    expect(meeting?.text()).toContain('原会议讨论')
+    expect(meeting?.text()).toContain('原客户')
+    expect(meeting?.text()).not.toContain('新客户')
   })
 
   it('keeps legacy field/kind labels readable from the server projection', async () => {
@@ -44,7 +43,7 @@ describe('owned historical conversation projection', () => {
     show(view({ focused_task: makeTask({ public_id: 'ast_new' }), messages: [message('old', '已归档', old)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    expect(wrapper.findAll('button').filter((b) => /确认写入|改为线下/.test(b.text()))).toHaveLength(0)
+    expect(wrapper.findAll('button').filter((b) => /确认写入|改为线下/.test(b.text()) && b.attributes('disabled') === undefined)).toHaveLength(0)
     expect(mocks.kind).not.toHaveBeenCalled()
   })
 
@@ -53,7 +52,7 @@ describe('owned historical conversation projection', () => {
     show(view({ focused_task: current, messages: [message('old', '旧提示', current), message('new', '当前提示', current)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    expect(wrapper.findAll('button').filter((b) => b.text() === '确认写入')).toHaveLength(1)
+    expect(wrapper.findAll('button').filter((b) => b.text() === '确认写入' && b.attributes('disabled') === undefined)).toHaveLength(1)
   })
 
   it('preserves the old draft field chips instead of taking values from a new focus', async () => {
@@ -62,7 +61,7 @@ describe('owned historical conversation projection', () => {
     show(view({ focused_task: next, messages: [message('old', '旧稿问题', old), message('new', '新稿问题', next)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    const gaps = wrapper.findAllComponents({ name: 'GapCard' })
+    const gaps = wrapper.findAllComponents({ name: 'AgentUIMessage' })
     expect(gaps[0]?.text()).toContain('旧客户')
     expect(gaps[0]?.text()).not.toContain('新客户')
   })

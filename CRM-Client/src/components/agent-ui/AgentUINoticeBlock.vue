@@ -22,14 +22,16 @@ const classesByTone = {
 
 <template>
   <aside
-    class="grid grid-cols-[18px_minmax(0,1fr)] gap-2 rounded-xl border p-3"
-    :class="classesByTone[block.tone]"
+    class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-wolf-surface border p-3"
+    :class="block.tone === 'warning' ? 'border-[#fde68a] bg-[#fffdf5]' : classesByTone[block.tone]"
     :aria-label="block.title ?? '提示'"
   >
-    <component :is="iconByTone[block.tone]" class="h-[18px] w-[18px]" aria-hidden="true" />
+    <span class="grid size-[22px] place-items-center rounded-wolf" :class="block.tone === 'warning' ? 'bg-[#fef3c7] text-[#b45309]' : 'bg-muted'" aria-hidden="true">
+      <component :is="iconByTone[block.tone]" class="h-3.5 w-3.5" />
+    </span>
     <div>
-      <strong v-if="block.title" class="text-foreground">{{ block.title }}</strong>
-      <p class="m-0 text-muted-foreground" :class="{ 'mt-1': block.title }">{{ block.text }}</p>
+      <strong v-if="block.title" class="text-[13px] text-foreground">{{ block.title }}</strong>
+      <p class="m-0 text-[12px] text-muted-foreground" :class="{ 'mt-1': block.title }">{{ block.text }}</p>
     </div>
   </aside>
 </template>

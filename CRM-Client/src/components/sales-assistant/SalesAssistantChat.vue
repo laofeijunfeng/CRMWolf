@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, shallowRef } from 'vue'
 import { isAxiosError } from 'axios'
-import { ArrowUp, CircleHelp, X } from 'lucide-vue-next'
+import { ArrowUp, X } from 'lucide-vue-next'
 import { assistantApi, submitInputStream, type AssistantTurn, type StageName } from '@/api/assistant'
 import type { SubmitAssistantInput } from '@/api/assistant'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import ConfirmationCard from './ConfirmationCard.vue'
-import MeetingConfirmationCard from './MeetingConfirmationCard.vue'
-import ProposalCard from './ProposalCard.vue'
-import GapCard from './GapCard.vue'
-import FailureCard from './FailureCard.vue'
 import { ZodError } from 'zod'
-import { type AssistantTaskView, type ProposalConfirmation, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
+import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import type { JsonObject } from '@/schemas/agent-contracts/common'
+import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
+import { type AssistantTaskView, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
 
 interface ChatEntry {
   id: number
@@ -27,6 +25,7 @@ interface ChatEntry {
   /** Historical messages never hold authoritative task state or interactive cards. */
   replayed: boolean
   outcome?: 'activity_written' | 'failure' | undefined
+  ui?: AgentUIEnvelope | null | undefined
 }
 
 const task = ref<AssistantTaskView | null>(null)
@@ -45,7 +44,6 @@ const entries = ref<ChatEntry[]>([])
 const inputText = ref('')
 const submitting = ref(false)
 const seq = ref(0)
-const currentWaitEntryId = ref<number | null>(null)
 const conversation = shallowRef<ConversationView | null>(null)
 const loadingConversation = ref(true)
 const historyError = ref('')
@@ -53,14 +51,6 @@ const routing = ref(false)
 const olderCursor = ref<number | null>(null)
 const pendingConversation = shallowRef<(() => Promise<ConversationReply>) | null>(null)
 const unacceptedText = ref('')
-
-const FIELD_LABELS: Record<string, string> = {
-  customer: '客户名称',
-  content: '沟通内容',
-  next_action: '下一步行动',
-  next_follow_time: '下次跟进时间',
-  temporal_choice: '下次跟进时间'
-}
 
 const KIND_LABELS: Record<string, string> = {
   FOLLOW_UP: '普通跟进',
@@ -81,8 +71,6 @@ const conversationLoadErrorMessage = (error: unknown): string => {
   return `对话加载失败，请重试${noNewRecord}`
 }
 
-const isTaskLive = computed(() => task.value?.status === 'ACTIVE')
-
 const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
 const isWaiting = computed(() => waiting.value !== null)
 const isTerminal = computed(() => task.value != null && task.value.status !== 'ACTIVE')
@@ -90,15 +78,9 @@ const isTerminal = computed(() => task.value != null && task.value.status !== 'A
 
 
 const inputPlaceholder = computed(() => {
-  if (isWaiting.value && waiting.value?.type === 'FIELD') return waiting.value.prompt ?? ''
+  if (waiting.value?.type === 'FIELD' && waiting.value.field === 'temporal_choice') return '或输入完整日期，例如 2026-10-30'
   return '描述一次客户沟通，我来整理成跟进或会议纪要…'
 })
-
-const kindOptions = [
-  { value: 'ONLINE_MEETING', label: '线上会议', hint: '远程沟通' },
-  { value: 'OFFLINE_MEETING', label: '线下会议', hint: '面谈拜访' },
-  { value: 'FOLLOW_UP', label: '普通跟进', hint: '电话/微信' }
-]
 
 const pushEntry = (
   role: 'user' | 'assistant',
@@ -108,7 +90,6 @@ const pushEntry = (
 ): void => {
   seq.value += 1
   entries.value.push({ id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value })
-  if (entryWaiting !== null && !replayed) currentWaitEntryId.value = seq.value
   scrollToBottom()
 }
 
@@ -185,15 +166,6 @@ const endProcessing = (): void => {
   }
   processing.value.active = false
 }
-
-const fieldLabel = computed(() => {
-  if (waiting.value?.type === 'OBJECT_SELECTION') return waiting.value.field === 'opportunity' ? '选择商机' : '选择客户'
-  if (waiting.value?.type === 'ACTIVITY_KIND') return '活动类型'
-  if (waiting.value?.type === 'CONFIRMATION') return '确认操作'
-  const field = waiting.value?.field ?? ''
-  if (field !== '' && field.startsWith('proposal:')) return field.slice('proposal:'.length)
-  return FIELD_LABELS[field] ?? field
-})
 
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
@@ -768,7 +740,7 @@ const nextKindOf = (current: string | null | undefined): 'FOLLOW_UP' | 'ONLINE_M
 
 const explicitNone = ref(false)
 const gapNone = (entry: ChatEntry): Promise<void> => {
-  if (submitting.value || resultPending.value || !isCurrentWait(entry)) return Promise.resolve()
+  if (submitting.value || resultPending.value || !showExplicitNone(entry)) return Promise.resolve()
   explicitNone.value = true
   return Promise.resolve()
 }
@@ -776,49 +748,52 @@ const gapNone = (entry: ChatEntry): Promise<void> => {
 
 const busy = computed(() => submitting.value || resultPending.value)
 
-const formatHHmm = (value: Date | string | undefined): string => {
-  if (value === undefined) return ''
-  const parsed = typeof value === 'string' ? new Date(value) : value
-  if (Number.isNaN(parsed.getTime())) return ''
-  return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
-}
 const entryTask = (entry: ChatEntry): AssistantTaskView | null => entry.ownTask ?? null
 
-const isCurrentWait = (entry: ChatEntry): boolean =>
-  entry.id === currentWaitEntryId.value && entryTask(entry)?.public_id === task.value?.public_id && entry.waiting !== null && task.value?.status === 'ACTIVE'
-  && task.value.waiting?.question_id === entry.waiting.question_id
-  && task.value.waiting?.action_id === entry.waiting.action_id
-  && task.value.waiting?.expected_version === entry.waiting.expected_version
+const interactionBlock = (entry: ChatEntry): Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> | undefined =>
+  entry.ui?.blocks.find((block): block is Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> => block.type === 'interaction')
 
-
-const cardKind = (entry: ChatEntry): 'confirm' | 'meeting' | 'proposal' | 'gap' | 'kind' | 'customer' | 'temporal' | 'failure' | 'none' => {
-  if (entry.outcome === 'failure') return 'failure'
-  const settledConfirmation = entry.waiting?.type === 'CONFIRMATION' && !isCurrentWait(entry)
-  const w = (isCurrentWait(entry) || entry.replayed || settledConfirmation) ? entry.waiting : null
-  if (w === null) return 'none'
-  if (w.type === 'CONFIRMATION' && w.confirmation_payload?.kind === 'activity_write') {
-    const kind = w.confirmation_payload.preview.activity_kind
-    return kind === 'ONLINE_MEETING' || kind === 'OFFLINE_MEETING' ? 'meeting' : 'confirm'
+const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
+  const block = interactionBlock(entry)
+  if (block === undefined || block.type !== 'interaction') return
+  const choice = typeof values['choice'] === 'string' ? values['choice'] : ''
+  if (block.business_action === 'assistant_boundary') {
+    if (choice === 'CONTINUE' || choice === 'NEW') void chooseBoundary(entry, choice)
+    return
   }
-  if (w.type === 'CONFIRMATION' && w.confirmation_payload?.kind === 'proposal') return 'proposal'
-  if (w.type === 'ACTIVITY_KIND') return 'kind'
-  if (w.type === 'OBJECT_SELECTION') return 'customer'
-  if (w.type === 'FIELD' && w.field === 'temporal_choice') return 'temporal'
-  if (w.type === 'FIELD') return 'gap'
-  return 'none'
+  if (block.interaction_type === 'confirmation') {
+    if (choice === 'confirm') void confirmWrite(entry.waiting)
+    else void rejectWrite(entry.waiting)
+    return
+  }
+  if (block.interaction_type === 'choice') {
+    if (choice !== '') {
+      void pickKind(choice, entry.waiting)
+      return
+    }
+    const typed = typeof values['text'] === 'string' ? values['text'].trim() : ''
+    if (typed !== '') void submit({ kind: 'submit_field', text: typed }, typed, entry.waiting)
+    return
+  }
+  const fieldKey = block.fields[0]?.key
+  const raw = fieldKey === undefined ? values['text'] : values[fieldKey]
+  const answer = typeof raw === 'string' ? raw.trim() : ''
+  if (answer === '') return
+  void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting)
 }
 
-const proposalOf = (entry: ChatEntry): ProposalConfirmation | null =>
-  entry.waiting?.confirmation_payload?.kind === 'proposal' ? entry.waiting.confirmation_payload : null
-
-const proposalOutcome = (entry: ChatEntry): 'accepted' | 'refused' | undefined => {
-  const proposal = proposalOf(entry)
-  if (proposal === null) return undefined
-  const receipt = entryTask(entry)?.committed.find((item) => 'proposal_key' in item && item.proposal_key === proposal.candidate.key)
-  if (receipt === undefined) return undefined
-  return receipt.kind === `refused:${proposal.proposal_kind}` ? 'refused' : 'accepted'
+const showActivityExtras = (entry: ChatEntry): boolean => {
+  const block = interactionBlock(entry)
+  return block?.type === 'interaction' && block.business_action === 'confirm_activity_write' && block.state === 'ACTIVE'
 }
 
+const showExplicitNone = (entry: ChatEntry): boolean => {
+  const block = interactionBlock(entry)
+  return block?.type === 'interaction'
+    && block.state === 'ACTIVE'
+    && block.business_action === 'collect_field'
+    && block.fields[0]?.key === 'next_action'
+}
 
 const applyConversation = (view: ConversationView, older = false, requestOrder = ++viewRequestSequence): void => {
   if (disposed) return
@@ -845,12 +820,12 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   const mapped = view.messages.map((message): ChatEntry => ({
     id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
     waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
-    at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined
+    at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
+    ui: message.role === 'assistant' ? message.ui : null
   }))
   const incomingIds = new Set(mapped.map((entry) => entry.serverId))
   entries.value = older ? [...mapped, ...preserved.filter((entry) => !incomingIds.has(entry.serverId))]
     : [...preserved.filter((entry) => !incomingIds.has(entry.serverId)), ...mapped]
-  currentWaitEntryId.value = null
   const current = task.value
   if (current?.status === 'ACTIVE' && current.waiting != null) {
     const candidate = [...entries.value].reverse().find((entry) => entry.ownTask?.public_id === current.public_id
@@ -858,7 +833,6 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     if (candidate !== undefined) {
       candidate.ownTask = current
       candidate.replayed = false
-      currentWaitEntryId.value = candidate.id
     } else {
       pushEntry('assistant', current.waiting.prompt, current.waiting)
       const added = entries.value[entries.value.length - 1]
@@ -928,154 +902,38 @@ void loadConversation()
           </div>
         </div>
         <div v-else class="flex gap-2.5">
-          <div class="mt-1 size-7 shrink-0 place-items-center rounded-wolf-md bg-muted text-[11px] font-medium text-muted-foreground grid">AI</div>
+          <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]">AI</div>
           <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
-            <div v-if="entry.boundary" class="overflow-hidden rounded-wolf-lg border bg-card shadow-sm">
-              <div class="flex items-center gap-2 border-b bg-muted/30 px-4 py-3 text-sm font-medium"><CircleHelp class="size-5 shrink-0 rounded-full bg-warning/10 p-0.5 text-warning" />{{ entry.boundary.prompt }}</div>
-              <div class="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
-                <Button variant="outline" :disabled="submitting || resultPending || conversation?.pending_choice?.entry_id !== entry.boundary.entry_id" @click="chooseBoundary(entry, 'CONTINUE')">接着刚才</Button>
-                <Button variant="outline" :disabled="submitting || resultPending || conversation?.pending_choice?.entry_id !== entry.boundary.entry_id" @click="chooseBoundary(entry, 'NEW')">另记一件</Button>
-              </div>
-            </div>
-            <div
-              v-else-if="cardKind(entry) === 'none' || cardKind(entry) === 'gap'"
-              class="rounded-wolf-lg border bg-card px-3.5 py-2 text-sm shadow-sm"
-            >
-              {{ entry.text }}
-              <span v-if="entry.outcome === 'activity_written'" class="ml-2 inline-flex items-center rounded-wolf-md bg-success/10 px-1.5 py-0.5 align-middle text-[11px] text-success">已写入</span>
-              <span v-if="entry.outcome === 'activity_written' && formatHHmm(entry.at) !== ''" class="ml-1 text-[11px] text-muted-foreground">{{ formatHHmm(entry.at) }}</span>
-            </div>
-
-            <GapCard
-              v-if="cardKind(entry) === 'gap' && entry.waiting !== null"
-              :task="entryTask(entry)"
-              :prompt="entry.waiting.prompt"
-              :field="entry.waiting.field ?? entry.waiting.type"
-              :replayed="!isCurrentWait(entry)"
-              @none="() => { void gapNone(entry) }"
+            <AgentUIMessage
+              v-if="entry.ui"
+              :message="entry.ui"
+              :disabled="busy"
+              @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
             />
-
-            <div
-              v-if="cardKind(entry) === 'kind'"
-              class="w-full overflow-hidden rounded-wolf-lg border bg-card shadow-sm"
-            >
-              <div class="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
-                <div class="flex min-w-0 items-center gap-2">
-                  <span class="grid size-6 shrink-0 place-items-center rounded-wolf-md bg-warning/15 text-warning">
-                    <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                  </span>
-                  <span class="text-sm font-medium">这条记录属于哪种活动？</span>
-                </div>
-                <button
-                  v-if="isCurrentWait(entry)"
-                  type="button"
-                  class="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
-                  :disabled="busy"
-                  @click="() => { void cancelTask(entry.waiting) }"
-                >算了，不记了</button>
-              </div>
-              <div class="px-4 py-3">
-                <p class="text-xs text-muted-foreground">选错也没关系，确认写入前可以改。</p>
-                <div class="mt-3 grid grid-cols-3 gap-2">
-                  <Button
-                    v-for="option in kindOptions"
-                    :key="option.value"
-                    variant="outline"
-                    :disabled="busy || !isCurrentWait(entry) || waiting?.type !== 'ACTIVITY_KIND'"
-                    class="h-auto flex-col py-2"
-                    @click="() => { void pickKind(option.value, entry.waiting) }"
-                  >
-                    <span>{{ option.label }}</span>
-                    <span class="text-[11px] text-muted-foreground">{{ option.hint }}</span>
-                  </Button>
-                </div>
-              </div>
+            <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示，原记录仍保留。</div>
+            <div v-if="showActivityExtras(entry)" class="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" :disabled="busy" @click="focusComposer">修改内容</Button>
+              <Button size="sm" variant="ghost" :disabled="busy" @click="() => { void changeKind(nextKindOf(entryTask(entry)?.activity_kind)) }">改为线下 / 跟进</Button>
             </div>
-
-            <div v-if="cardKind(entry) === 'temporal' && entry.waiting" class="w-full rounded-wolf-lg border bg-card shadow-sm">
-              <div class="border-b bg-muted/40 px-4 py-3 text-sm font-medium">{{ entry.waiting.prompt }}</div>
-              <div class="grid gap-2 px-4 py-3">
-                <Button
-                  v-for="candidate in entry.waiting.candidates ?? []"
-                  :key="candidate.id"
-                  variant="outline"
-                  class="h-auto justify-start py-2 text-left"
-                  :disabled="busy || resultPending || !isCurrentWait(entry)"
-                  @click="() => { void pickKind(candidate.id, entry.waiting) }"
-                >{{ 'label' in candidate ? candidate.label : candidate.account_name }}</Button>
-              </div>
-            </div>
-
-            <div v-if="cardKind(entry) === 'customer' && entry.waiting" class="w-full rounded-wolf-lg border bg-card shadow-sm">
-              <div class="border-b bg-muted/40 px-4 py-3 text-sm font-medium">{{ entry.waiting.prompt }}</div>
-              <div class="grid gap-2 px-4 py-3">
-                <Button
-                  v-for="candidate in entry.waiting.candidates ?? []"
-                  :key="candidate.id"
-                  variant="outline"
-                  class="h-auto justify-start py-2 text-left"
-                  :disabled="busy || resultPending || !isCurrentWait(entry)"
-                  @click="() => { void pickKind(candidate.id, entry.waiting) }"
-                >{{ 'account_name' in candidate ? candidate.account_name : candidate.label }}</Button>
-              </div>
-            </div>
-
-            <p v-if="isCurrentWait(entry) && entry.waiting?.type === 'CONFIRMATION'" class="text-xs text-muted-foreground">{{ entry.waiting.prompt }}</p>
-            <MeetingConfirmationCard
-              v-if="cardKind(entry) === 'meeting' && entry.waiting !== null && entry.ownTask != null"
-              :task="entry.ownTask"
-              :waiting="entry.waiting"
-              :replayed="!isCurrentWait(entry)"
-              :busy="busy"
-              @confirm="() => { void confirmWrite(entry.waiting) }"
-              @reject="() => { void rejectWrite(entry.waiting) }"
-              @request-edit="focusComposer"
-              @change-kind="() => { void changeKind(nextKindOf(entryTask(entry)?.activity_kind)) }"
-            />
-
-            <ConfirmationCard
-              v-if="cardKind(entry) === 'confirm' && entry.waiting !== null && entry.ownTask != null"
-              :task="entry.ownTask"
-              :waiting="entry.waiting"
-              :replayed="!isCurrentWait(entry)"
-              :busy="busy"
-              @confirm="() => { void confirmWrite(entry.waiting) }"
-              @reject="() => { void rejectWrite(entry.waiting) }"
-              @request-edit="focusComposer"
-              @change-kind="() => { void changeKind(nextKindOf(entryTask(entry)?.activity_kind)) }"
-            />
-
-            <ProposalCard
-              v-if="cardKind(entry) === 'proposal' && entry.waiting?.confirmation_payload?.kind === 'proposal'"
-              :proposal="entry.waiting.confirmation_payload"
-              :prompt="entry.waiting?.prompt ?? ''"
-              :customer-name="(entryTask(entry) ?? task)?.draft.customer.value ?? ''"
-              :outcome="proposalOutcome(entry)"
-              :replayed="!isCurrentWait(entry)"
-              :busy="busy"
-              @accept="() => { void confirmWrite(entry.waiting) }"
-              @refuse="() => { void rejectWrite(entry.waiting) }"
-            />
-
-            <FailureCard
-              v-if="cardKind(entry) === 'failure'"
-              :message="entry.text"
-              :waiting="entry.waiting"
-              :replayed="entry.replayed || !isTaskLive"
-              :busy="busy"
-              @retry="focusComposer"
-              @abort="cancelTask()"
-            />
+            <button
+              v-if="showExplicitNone(entry)"
+              type="button"
+              class="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              :disabled="busy"
+              @click="() => { void gapNone(entry) }"
+            >这条没有下一步</button>
           </div>
         </div>
       </template>
     </div>
 
-    <div v-if="processing.stages.length > 0" class="mt-2 rounded-wolf-lg border bg-card px-3.5 py-3 shadow-sm">
-      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-muted-foreground' : stageItem.status === 'running' ? 'font-medium' : 'text-muted-foreground'">
-        <svg v-if="stageItem.status === 'done'" class="size-4 shrink-0 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
-        <svg v-else-if="stageItem.status === 'running'" class="size-4 shrink-0 animate-spin text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
-        <span v-else class="size-4 shrink-0 rounded-full border"></span>
+    <div v-if="processing.stages.length > 0" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
+      <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
+        <span>执行过程</span>
+        <span class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processing.active ? '处理中' : '已更新' }}</span>
+      </div>
+      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-emerald-700' : stageItem.status === 'running' ? 'font-medium text-[#1d4ed8]' : 'text-muted-foreground'">
+        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-emerald-600 bg-emerald-600' : stageItem.status === 'running' ? 'border-[#2563eb] bg-white' : 'border-border'"></span>
         <span>{{ STAGE_LABELS[stageItem.name] }}</span>
         <span v-if="stageItem.status === 'done' && stageItem.ms !== undefined" class="text-xs text-muted-foreground">{{ (stageItem.ms / 1000).toFixed(1) }}s</span>
         <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-wolf-md border bg-muted/50 px-1.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
@@ -1084,10 +942,7 @@ void loadConversation()
     </div>
 
     <div class="mt-3 rounded-wolf-lg border bg-background p-2.5 shadow-sm" :class="{ 'border-2 border-primary/60': isWaiting }">
-      <div v-if="isWaiting" class="mb-1.5 flex items-center justify-between text-xs font-medium text-primary">
-        <span>正在回答：{{ fieldLabel || waiting?.type }}</span>
-      </div>
-      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+      <div v-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
         <svg v-if="routing || processing.active || autoRecovering" class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>

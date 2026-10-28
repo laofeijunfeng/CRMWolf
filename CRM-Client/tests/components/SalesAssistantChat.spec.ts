@@ -99,7 +99,8 @@ describe('continuous conversation public interactions', () => {
     expect(mocks.choice).toHaveBeenCalledWith(expect.objectContaining({ entry_id: 'acm_one', choice: 'NEW', expected_version: 3 }))
     expect(mocks.text).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('下面开始记这一件')
-    expect(wrapper.findAll('button').find((b) => b.text() === '另记一件')?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('历史交互不再提供可再次提交的确认按钮。')
+    expect(wrapper.findAll('button').filter((b) => b.text() === '另记一件' && b.attributes('disabled') === undefined)).toHaveLength(0)
   })
 
   it('never makes two old/new versions of the same wait interactive', async () => {
@@ -108,8 +109,9 @@ describe('continuous conversation public interactions', () => {
     show(view({ focused_task: current, messages: [message('old', '旧确认', old), message('new', '新确认', current)] }))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    expect(wrapper.findAll('button').filter((b) => b.text() === '确认写入')).toHaveLength(1)
-    await wrapper.findAll('button').find((b) => b.text() === '确认写入')?.trigger('click')
+    const enabled = wrapper.findAll('button').filter((b) => b.text() === '确认写入' && b.attributes('disabled') === undefined)
+    expect(enabled).toHaveLength(1)
+    await enabled[0]?.trigger('click')
     expect(mocks.command).toHaveBeenCalledWith(expect.objectContaining({ input: expect.objectContaining({ action_id: 'action2', expected_version: 2 }) }))
   })
 })

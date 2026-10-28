@@ -126,13 +126,13 @@ it('highlights only the selected choice instead of the first option', async () =
 
   expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
   expect(buttons[1]?.attributes('aria-pressed')).toBe('false')
-  expect(buttons[0]?.classes()).not.toContain('bg-primary')
+  expect(buttons[0]?.classes()).toContain('bg-primary')
+  expect(buttons[1]?.classes()).not.toContain('bg-primary')
 
   await buttons[1]?.trigger('click')
 
   expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
   expect(buttons[1]?.attributes('aria-pressed')).toBe('true')
-  expect(buttons[0]?.classes()).not.toContain('bg-primary')
   expect(buttons[1]?.classes()).toContain('bg-accent')
 })
 

@@ -26,11 +26,13 @@ const classesByStatus = {
 </script>
 
 <template>
-  <section class="grid grid-cols-[18px_minmax(0,1fr)] gap-2 rounded-xl border p-3" :class="classesByStatus[block.status]">
-    <component :is="iconByStatus[block.status]" class="h-[18px] w-[18px]" aria-hidden="true" />
+  <section class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-wolf-surface border p-3" :class="block.status === 'SUCCESS' ? 'border-[#a7f3d0] bg-[#f7fffb]' : classesByStatus[block.status]">
+    <span class="grid size-[22px] place-items-center rounded-wolf text-[11px] font-semibold" :class="block.status === 'SUCCESS' ? 'bg-[#d1fae5] text-[#047857]' : 'bg-muted text-muted-foreground'" aria-hidden="true">
+      <component :is="iconByStatus[block.status]" class="h-3.5 w-3.5" />
+    </span>
     <div>
-      <strong class="text-foreground">{{ block.title }}</strong>
-      <p class="mb-0 mt-1 text-muted-foreground">{{ block.message }}</p>
+      <strong class="text-[13px] text-foreground">{{ block.title }}</strong>
+      <p class="mb-0 mt-1 text-[12px] text-muted-foreground">{{ block.message }}</p>
       <button
         v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
         type="button"

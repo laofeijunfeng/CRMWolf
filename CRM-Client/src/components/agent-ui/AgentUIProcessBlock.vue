@@ -50,11 +50,11 @@ const statusClass = (status: ProcessItem['status']): string => {
 </script>
 
 <template>
-  <Collapsible v-slot="{ open }" class="rounded-xl border border-border/70 bg-muted/25">
+  <Collapsible v-slot="{ open }" class="rounded-wolf-surface border border-border bg-card">
     <CollapsibleTrigger as-child>
       <button
         type="button"
-        class="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="flex min-h-11 w-full items-center gap-2 rounded-wolf-surface px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <component
           :is="open ? ChevronDown : ChevronRight"

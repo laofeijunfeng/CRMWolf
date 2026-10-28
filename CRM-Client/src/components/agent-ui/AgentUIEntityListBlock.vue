@@ -15,12 +15,12 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <section class="grid gap-2" :aria-label="block.entity_type === 'customer' ? '公司列表' : '实体列表'">
+  <section class="overflow-hidden rounded-wolf-surface border border-border bg-white" :aria-label="block.entity_type === 'customer' ? '公司列表' : '实体列表'">
     <template v-for="item in block.items" :key="item.entity_ref.ref_id">
       <button
         v-if="isAgentEntityOpenable(item.entity_ref)"
         type="button"
-        class="flex min-h-11 w-full items-center rounded-xl border border-border bg-card px-4 py-3 text-left text-sm font-semibold text-foreground transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="flex min-h-11 w-full items-center border-t border-border bg-white px-3 py-2.5 text-left text-sm font-semibold text-foreground first:border-t-0 hover:bg-[#eff6ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :aria-label="`打开${item.entity_ref.display_name}详情`"
         @click="emit('open-entity', item.entity_ref)"
       >
@@ -28,7 +28,7 @@ const emit = defineEmits<{
       </button>
       <div
         v-else
-        class="flex min-h-11 w-full items-center rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground"
+        class="flex min-h-11 w-full items-center border-t border-border bg-white px-3 py-2.5 text-sm font-semibold text-foreground first:border-t-0"
       >
         <span class="min-w-0 truncate">{{ item.entity_ref.display_name }}</span>
       </div>

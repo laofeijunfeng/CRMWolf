@@ -32,6 +32,7 @@ const emit = defineEmits<{
 
 const interactionRef = ref<HTMLElement | null>(null)
 const selectedValues = ref<string[]>([])
+const manualDate = ref('')
 const fieldValues = ref<Record<string, JsonValue>>({})
 const validationAttempted = ref(false)
 const submitting = ref(false)
@@ -62,6 +63,7 @@ const resetValues = (): void => {
   )
   validationAttempted.value = false
   submitting.value = false
+  manualDate.value = ''
 }
 
 watch(
@@ -168,6 +170,14 @@ const submitsOnOptionClick = computed(() => (
   props.block.interaction_type === 'confirmation'
   || props.block.submit_on_select === true
 ))
+
+const submitManualDate = (): void => {
+  const actionId = props.block.submit_action_id
+  const value = manualDate.value.trim()
+  if (controlsDisabled.value || actionId === null || value === '') return
+  submitting.value = true
+  emit('submit', actionId, { text: value })
+}
 
 const handleOptionClick = (value: string): void => {
   if (controlsDisabled.value) return
@@ -331,7 +341,7 @@ const submit = async (): Promise<void> => {
     ref="interactionRef"
     class="agent-ui-interaction flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors"
     :class="[
-      grouped ? '' : 'rounded-xl border',
+      grouped ? '' : 'rounded-wolf-surface border border-border',
       compactCompletionSucceeded
         ? (grouped ? 'bg-emerald-50/70 dark:bg-emerald-950/25' : 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/25')
         : (grouped ? 'bg-transparent' : 'border-border/70 bg-muted/25')
@@ -380,37 +390,45 @@ const submit = async (): Promise<void> => {
   <section
     v-else
     ref="interactionRef"
-    class="agent-ui-interaction grid gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3"
+    class="agent-ui-interaction grid gap-3 rounded-wolf-surface p-3"
+    :class="block.state === 'READ_ONLY'
+      ? 'border border-dashed border-border bg-muted/40'
+      : 'border border-[#bfdbfe] bg-[#f8fbff]'"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
+    <p v-if="block.state === 'READ_ONLY'" class="m-0 inline-flex w-fit items-center rounded-full border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground">历史消息 · 已回放</p>
     <header class="flex items-start justify-between gap-3">
-      <p :id="`${block.id}-prompt`" class="m-0 text-foreground">{{ block.prompt }}</p>
-      <span class="shrink-0 text-xs text-muted-foreground">{{ stateLabel }}</span>
+      <div class="flex min-w-0 items-start gap-2">
+        <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]" aria-hidden="true">?</span>
+        <p :id="`${block.id}-prompt`" class="m-0 text-[13px] font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
+      </div>
+      <span class="shrink-0 rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ stateLabel }}</span>
     </header>
 
     <dl
       v-if="block.facts.length > 0"
-      class="grid gap-2 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm"
+      class="grid grid-cols-1 gap-2 sm:grid-cols-3"
       data-agent-ui-confirmation-facts
     >
-      <div v-for="fact in block.facts" :key="fact.key" class="grid gap-0.5">
-        <dt class="text-xs text-muted-foreground">{{ fact.label }}</dt>
-        <dd class="m-0 whitespace-pre-wrap text-foreground">{{ fact.value }}</dd>
+      <div v-for="fact in block.facts" :key="fact.key" class="min-w-0 rounded-wolf border border-border bg-white px-2.5 py-2">
+        <dt class="text-[11px] text-muted-foreground">{{ fact.label }}</dt>
+        <dd class="m-0 mt-0.5 truncate text-xs font-semibold text-foreground" :title="fact.value">{{ fact.value }}</dd>
       </div>
     </dl>
 
     <div
       v-if="submittedChoiceValue !== null"
-      class="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm text-foreground"
+      class="rounded-wolf border border-border bg-background px-3 py-2 text-sm text-foreground"
       data-agent-ui-submitted-choice
     >
       <span class="font-medium">已选择：</span>{{ submittedChoiceOption?.label ?? submittedChoiceValue }}
     </div>
 
-    <template v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'">
+    <template v-else-if="isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')">
       <div
-        class="grid gap-2"
+        class="gap-2"
+        :class="block.interaction_type === 'confirmation' ? 'flex flex-wrap' : 'grid grid-cols-1 sm:grid-cols-2'"
         role="group"
         :aria-invalid="selectionError !== null"
         :aria-describedby="selectionError === null ? undefined : `${block.id}-selection-error`"
@@ -419,9 +437,12 @@ const submit = async (): Promise<void> => {
         v-for="(option, index) in block.options"
         :key="option.value"
         type="button"
-        :variant="optionSelected(option.value) ? 'default' : 'outline'"
-        class="grid min-h-11 h-auto w-full justify-start gap-1 px-3 py-2 text-left"
-        :class="{ 'border-primary bg-accent text-accent-foreground': optionSelected(option.value) }"
+        :variant="block.interaction_type === 'confirmation' && option.value === 'confirm' ? 'default' : 'outline'"
+        class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
+        :class="[
+          block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
+          optionSelected(option.value) ? 'border-primary bg-accent text-accent-foreground' : ''
+        ]"
         :aria-pressed="optionSelected(option.value)"
         :disabled="controlsDisabled || option.disabled"
         :data-agent-ui-error-focus="selectionError !== null && index === 0 ? 'true' : undefined"
@@ -441,16 +462,32 @@ const submit = async (): Promise<void> => {
           {{ selectionError }}
         </p>
       </div>
+      <div v-if="block.business_action === 'resolve_temporal_choice'" class="grid gap-1.5">
+        <label class="text-[13px] font-semibold text-foreground" :for="`${block.id}-manual-date`">手动输入其他日期</label>
+        <input
+          :id="`${block.id}-manual-date`"
+          v-model="manualDate"
+          type="text"
+          class="min-h-11 rounded-wolf border border-border bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          placeholder="例如：2026-10-30"
+          :disabled="controlsDisabled"
+          @keydown.enter.prevent="submitManualDate"
+        />
+        <p class="m-0 text-[11px] text-muted-foreground">选择候选或输入完整日期后继续。</p>
+      </div>
     </template>
+    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" class="m-0 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的确认按钮。</p>
+    <div v-else-if="!isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" class="hidden"></div>
 
     <div
       v-else-if="submittedTextField !== null"
-      class="rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-sm text-foreground"
+      class="rounded-wolf border border-border bg-background px-3 py-2 text-sm text-foreground"
       data-agent-ui-submitted-text
     >
       <span class="font-medium">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
     </div>
 
+    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'text_input' || block.interaction_type === 'form')" class="m-0 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的确认按钮。</p>
     <form v-else class="grid gap-3" novalidate @submit.prevent="submit">
       <div v-for="field in block.fields" :key="field.key" class="grid gap-1.5">
         <Label :for="`${block.id}-${field.key}`" class="text-sm font-medium text-foreground">

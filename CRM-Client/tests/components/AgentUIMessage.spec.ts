@@ -365,10 +365,13 @@ describe('AgentUIMessage', () => {
       })
       const buttons = wrapper.findAll('button')
 
-      expect(buttons).toHaveLength(2)
-      expect(buttons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
-      await buttons[0]?.trigger('click')
-      await buttons[1]?.trigger('click')
+      expect(buttons).toHaveLength(0)
+      if (state === 'READ_ONLY') {
+        expect(wrapper.text()).toContain('历史消息 · 已回放')
+        expect(wrapper.text()).toContain('历史交互不再提供可再次提交的确认按钮。')
+      } else {
+        expect(wrapper.text()).toContain('已提交')
+      }
       expect(wrapper.emitted('interaction')).toBeUndefined()
     },
   )

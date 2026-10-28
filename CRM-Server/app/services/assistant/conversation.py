@@ -96,15 +96,22 @@ class ConversationService:
             if conversation.pending_choice_id
             else None
         )
-        return ConversationView(
-            public_id=conversation.public_id,
-            version=conversation.version,
-            focused_task=task_view(focused, db) if focused else None,
-            pending_choice=ConversationBoundary(
+        focused_view = task_view(focused, db) if focused else None
+        pending_choice = (
+            ConversationBoundary(
                 entry_id=pending.public_id, prompt=pending.reply_text or "是接着刚才，还是另记一件？"
             )
             if pending
-            else None,
+            else None
+        )
+        from app.services.assistant.ui_projection import finalize_assistant_ui
+
+        finalize_assistant_ui(messages, focused_task=focused_view, pending_choice=pending_choice)
+        return ConversationView(
+            public_id=conversation.public_id,
+            version=conversation.version,
+            focused_task=focused_view,
+            pending_choice=pending_choice,
             messages=messages,
             older_cursor=older,
             has_pending_request=conversation.busy_entry_id is not None,
@@ -154,6 +161,8 @@ class ConversationService:
                     message = data.get("message")
                     if not isinstance(message, str) or not message:
                         raise ValueError("missing result message")
+                    error_code = data.get("code") if event.event == "error" else None
+                    retryable = data.get("retryable") if event.event == "error" else None
                     result.append(
                         ConversationMessage(
                             id=f"{row.public_id}:{turn.public_id}:{event.seq}",
@@ -169,6 +178,8 @@ class ConversationService:
                             and any(r.kind == "customer_activity" for r in snapshot.committed)
                             and turn.input_json.get("kind") == "confirm"
                             else None,
+                            error_code=error_code if isinstance(error_code, str) else None,
+                            retryable=retryable if isinstance(retryable, bool) else None,
                         )
                     )
                     followup = data.get("next_turn_id")
@@ -181,6 +192,8 @@ class ConversationService:
                             text="这条历史结果暂时无法显示，原记录仍保留。",
                             at=event.created_time.isoformat(),
                             outcome="failure",
+                            error_code="INTERNAL_ERROR",
+                            retryable=False,
                         )
                     )
         return result
@@ -196,6 +209,8 @@ class ConversationService:
                 text="这条历史结果暂时无法显示，原记录仍保留。",
                 at=at,
                 outcome="failure",
+                error_code="INTERNAL_ERROR",
+                retryable=False,
             ),
         ]
 

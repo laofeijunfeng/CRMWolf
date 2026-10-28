@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest  # noqa: TC001 -- Pydantic runtime models.
 from app.services.agent.semantic_plan import AgentSemanticPlan  # noqa: TC001 -- Pydantic runtime model.
+from app.services.agent.ui.schemas import AgentUIEnvelope  # noqa: TC001 -- Pydantic runtime model.
 
 
 class ConversationModel(BaseModel):
@@ -65,6 +66,10 @@ class ConversationMessage(ConversationModel):
     task: AssistantTaskView | None = None
     boundary: ConversationBoundary | None = None
     outcome: Literal["activity_written", "failure"] | None = None
+    ui: AgentUIEnvelope | None = None
+    # Read-model inputs. The Web UI uses ui.blocks, not these fields.
+    error_code: str | None = Field(default=None, exclude=True)
+    retryable: bool | None = Field(default=None, exclude=True)
 
 
 class ConversationView(ConversationModel):

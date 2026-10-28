@@ -39,9 +39,137 @@ export const confirmation = (overrides: Partial<TaskWaiting> = {}): TaskWaiting 
   } }, ...overrides
 })
 export const message = (id: string, text: string, task: AssistantTaskView | null = null, role: 'user' | 'assistant' = 'assistant'): ConversationView['messages'][number] => ({
-  id, role, text, at: '2026-10-23T14:00:00', task, boundary: null, outcome: null
+  id, role, text, at: '2026-10-23T14:00:00', task, boundary: null, outcome: null, ui: null
 })
-export const view = (overrides: Partial<ConversationView> = {}): ConversationView => ({
+
+const fixtureEnvelope = (
+  item: ConversationView['messages'][number],
+  active: boolean,
+  pendingEntryId: string | null
+): ConversationView['messages'][number]['ui'] => {
+  if (item.role !== 'assistant') return null
+  if (item.boundary !== null) {
+    const boundaryActive = pendingEntryId === item.boundary.entry_id
+    return {
+      schema_version: 'crm.agent.ui.v1' as const,
+      message_id: 1,
+      turn_id: item.id,
+      role: 'assistant' as const,
+      state: 'final' as const,
+      suggested_actions: [],
+      metadata: { display: 'MESSAGE' as const, route: 'CLARIFY' as const, accessibility_label: item.boundary.prompt },
+      blocks: [{
+        id: 'b_interaction_1', type: 'interaction' as const, interaction_id: `ix-${item.id}`, interaction_type: 'choice' as const,
+        business_action: 'assistant_boundary', state: boundaryActive ? 'ACTIVE' as const : 'READ_ONLY' as const, prompt: item.boundary.prompt,
+        fields: [], facts: [], options: [
+          { value: 'CONTINUE', label: '接着刚才', description: null, disabled: false },
+          { value: 'NEW', label: '另记一件', description: null, disabled: false }
+        ],
+        selection_mode: 'single' as const, min_selections: 1, max_selections: 1, submit_on_select: true, submit_label: '提交',
+        allow_cancel: false, submit_action_id: boundaryActive ? `boundary:${item.boundary.entry_id}` : null
+      }]
+    }
+  }
+  const base = {
+    schema_version: 'crm.agent.ui.v1' as const,
+    message_id: 1,
+    turn_id: item.id,
+    role: 'assistant' as const,
+    state: 'final' as const,
+    suggested_actions: [],
+    metadata: { display: 'MESSAGE' as const, route: 'WORKFLOW' as const, accessibility_label: item.text }
+  }
+  if (item.outcome === 'activity_written') {
+    return { ...base, blocks: [{ id: 'b_result_1', type: 'action_result', action_id: item.id, status: 'SUCCESS', title: '已写入', message: item.text }] }
+  }
+  if (item.outcome === 'failure') {
+    return { ...base, state: 'failed', blocks: [{ id: 'b_error_1', type: 'error', code: 'INTERNAL_ERROR', title: '遇到问题', message: item.text, retryable: false }] }
+  }
+  const waiting = item.task?.waiting ?? null
+  if (waiting?.type === 'CONFIRMATION' && waiting.confirmation_payload?.kind === 'activity_write') {
+    const preview = waiting.confirmation_payload.preview
+    const facts = [
+      { key: 'customer', label: '客户', value: preview.customer_name },
+      { key: 'title', label: '标题', value: preview.title ?? '' },
+      { key: 'summary', label: '摘要', value: preview.summary ?? '' },
+      { key: 'next_action', label: '行动项', value: preview.next_action ?? '未提供行动项' }
+    ].filter((fact) => fact.value !== '')
+    const confirmationBlocks = item.text !== waiting.prompt
+      ? [{ id: 'b_text_1', type: 'text' as const, format: 'plain' as const, text: item.text }]
+      : []
+    return {
+      ...base,
+      blocks: [...confirmationBlocks, {
+        id: 'b_interaction_1', type: 'interaction', interaction_id: `ix-${item.id}`, interaction_type: 'confirmation',
+        business_action: 'confirm_activity_write', state: active ? 'ACTIVE' : 'READ_ONLY', prompt: waiting.prompt,
+        fields: [], facts, options: [
+          { value: 'confirm', label: '确认写入', description: null, disabled: false },
+          { value: 'cancel', label: '取消', description: null, disabled: false }
+        ],
+        selection_mode: 'single', submit_on_select: true, submit_label: '提交', allow_cancel: false,
+        submit_action_id: active ? (waiting.action_id ?? 'act') : null
+      }]
+    }
+  }
+  if (waiting?.type === 'OBJECT_SELECTION' || waiting?.type === 'ACTIVITY_KIND' || waiting?.field === 'temporal_choice') {
+    const options = waiting.type === 'ACTIVITY_KIND'
+      ? [{ value: 'ONLINE_MEETING', label: '线上会议' }, { value: 'OFFLINE_MEETING', label: '线下会议' }, { value: 'FOLLOW_UP', label: '普通跟进' }]
+      : (waiting.candidates ?? []).map((candidate) => ({
+          value: candidate.id,
+          label: 'account_name' in candidate ? candidate.account_name : candidate.label
+        }))
+    const choiceBlocks = item.text !== waiting.prompt
+      ? [{ id: 'b_text_1', type: 'text' as const, format: 'plain' as const, text: item.text }]
+      : []
+    return {
+      ...base,
+      blocks: [...choiceBlocks, {
+        id: 'b_interaction_1', type: 'interaction', interaction_id: `ix-${item.id}`, interaction_type: 'choice',
+        business_action: waiting.field === 'temporal_choice' ? 'resolve_temporal_choice' : 'select_customer',
+        state: active ? 'ACTIVE' : 'READ_ONLY', prompt: waiting.prompt, fields: [], facts: [],
+        options: options.map((option) => ({ ...option, description: null, disabled: false })),
+        selection_mode: 'single', min_selections: 1, max_selections: 1, submit_on_select: true, submit_label: '提交',
+        allow_cancel: false, submit_action_id: active ? (waiting.action_id ?? 'act') : null
+      }]
+    }
+  }
+  if (waiting?.type === 'FIELD') {
+    const chips: string[] = []
+    const draft = item.task?.draft
+    if (draft?.customer.status === 'ACCEPTED' && (draft.customer.value ?? '') !== '') chips.push(`客户：${draft.customer.value}`)
+    const blocks = []
+    if (item.text !== waiting.prompt) blocks.push({ id: 'b_text_1', type: 'text' as const, format: 'plain' as const, text: item.text })
+    if (chips.length > 0) blocks.push({ id: 'b_notice_1', type: 'notice' as const, tone: 'info' as const, title: '已确认', text: chips.join('、') })
+    blocks.push({
+      id: 'b_interaction_1', type: 'interaction' as const, interaction_id: `ix-${item.id}`, interaction_type: 'text_input' as const,
+      business_action: 'collect_field', state: active ? 'ACTIVE' as const : 'READ_ONLY' as const, prompt: waiting.prompt,
+      fields: [{ key: waiting.field ?? 'answer', label: waiting.field === 'customer' ? '客户名称' : '补充内容', field_type: 'text' as const, required: true, min_length: 1, max_length: 2000, default_value: null, options: [] }],
+      facts: [], options: [], allow_blank: false, allow_cancel: false, submit_label: '提交',
+      submit_action_id: active ? (waiting.action_id ?? 'act') : null
+    })
+    return { ...base, blocks }
+  }
+  return { ...base, blocks: [{ id: 'b_text_1', type: 'text', format: 'plain', text: item.text }] }
+}
+
+const withFixtureUi = (state: ConversationView): ConversationView => {
+  const focused = state.focused_task
+  let liveId: string | null = null
+  if (focused?.status === 'ACTIVE' && focused.waiting != null) {
+    for (const item of state.messages) {
+      const waiting = item.task?.waiting
+      if (item.task?.public_id === focused.public_id && waiting?.action_id === focused.waiting.action_id && waiting?.expected_version === focused.waiting.expected_version && waiting?.question_id === focused.waiting.question_id) {
+        liveId = item.id
+      }
+    }
+  }
+  return {
+    ...state,
+    messages: state.messages.map((item) => ({ ...item, ui: fixtureEnvelope(item, item.id === liveId, state.pending_choice?.entry_id ?? null) }))
+  }
+}
+
+export const view = (overrides: Partial<ConversationView> = {}): ConversationView => withFixtureUi({
   public_id: 'asc_one', version: 0, focused_task: null, pending_choice: null, has_pending_request: false, messages: [], older_cursor: null, ...overrides
 })
 export const show = (state: ConversationView): void => {

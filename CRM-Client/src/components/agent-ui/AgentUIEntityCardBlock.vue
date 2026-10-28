@@ -16,7 +16,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <article class="grid gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground">
+  <article class="grid gap-3 rounded-wolf-surface border border-border bg-card p-4 text-card-foreground">
     <h3 class="m-0 text-base font-semibold text-foreground">{{ block.title }}</h3>
     <section v-for="section in block.sections" :key="section.key" class="grid gap-2">
       <h4 v-if="section.title" class="m-0 text-xs font-medium text-muted-foreground">{{ section.title }}</h4>
