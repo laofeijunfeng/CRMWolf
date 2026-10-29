@@ -268,10 +268,12 @@ def _confirmation(
 ) -> InteractionBlock:
     payload = waiting.confirmation_payload
     assert payload is not None
+    confirm_disabled = False
     if payload.kind == "activity_write":
         business_action = "confirm_activity_write"
-        facts = _activity_facts(payload.preview)
+        facts = _activity_facts(payload.preview, editable=active)
         confirm_label = "确认写入"
+        confirm_disabled = payload.preview.channel_status == "required"
     else:
         business_action = "confirm_proposal"
         facts = _proposal_facts(payload.proposal_kind, payload.candidate.evidence_quote)
@@ -286,7 +288,12 @@ def _confirmation(
         prompt=prompt,
         facts=facts,
         options=[
-            InteractionOption(value="confirm", label=confirm_label),
+            InteractionOption(
+                value="confirm",
+                label=confirm_label,
+                disabled=confirm_disabled,
+                description="先选择活动类型" if confirm_disabled else None,
+            ),
             InteractionOption(value="cancel", label="取消"),
         ],
         selection_mode="single",
@@ -295,22 +302,47 @@ def _confirmation(
     )
 
 
-def _activity_facts(preview: ActivityPreview) -> list[InteractionConfirmationFact]:
+def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[InteractionConfirmationFact]:
     facts: list[InteractionConfirmationFact] = []
-    _add_fact(facts, "customer", "客户", preview.customer_name)
-    _add_fact(facts, "activity_kind", "活动类型", _KIND_LABELS.get(preview.activity_kind, preview.activity_kind))
-    _add_fact(facts, "title", "标题", preview.title)
-    _add_fact(facts, "summary", "摘要", preview.summary)
+    kind_label = _KIND_LABELS.get(preview.activity_kind or "", "") or "请选择本次活动的主渠道"
+    _add_fact(facts, "customer", "客户", preview.customer_name, group="write")
+    if preview.title and preview.title != kind_label:
+        _add_fact(facts, "title", "标题", preview.title, group="write")
+    _add_fact(facts, "summary", "摘要", preview.summary, group="write")
     participants = _participants(preview.content_json)
-    _add_fact(facts, "participants", "参会角色", participants)
+    _add_fact(facts, "participants", "参会角色", participants, group="write")
     if preview.next_action:
-        _add_fact(facts, "next_action", "行动项", preview.next_action)
+        _add_fact(facts, "next_action", "下一步", preview.next_action, group="write")
     elif preview.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
-        _add_fact(facts, "next_action", "行动项", "未提供行动项")
+        _add_fact(facts, "next_action", "下一步", "未提供行动项", group="write")
     follow_time = preview.next_follow_time_text or preview.next_follow_time
-    _add_fact(facts, "next_follow_time", "跟进时间", follow_time)
-    _add_fact(facts, "score", "评分", f"{preview.score} / 100")
-    _add_fact(facts, "score_reason", "评分依据", preview.score_reason)
+    _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
+    status_label = "历史冻结" if not editable and preview.activity_kind else preview.channel_status_label
+    options = [
+        InteractionOption(value=kind, label=_KIND_LABELS[kind])
+        for kind in preview.channel_options
+        if editable and kind in _KIND_LABELS
+    ]
+    _add_fact(
+        facts, "activity_kind", "活动类型", kind_label, group="activity_kind",
+        status_label=status_label, source=preview.channel_source_text, options=options,
+    )
+    if preview.change_signal:
+        _add_fact(
+            facts, "change_signal", "客户上下文判断", preview.change_signal, group="context",
+            source=preview.change_summary,
+        )
+        if preview.opportunity_name:
+            stage = f" · {preview.opportunity_stage}" if preview.opportunity_stage else ""
+            _add_fact(facts, "opportunity", "关联商机", f"{preview.opportunity_name}{stage}", group="context")
+        evidence = [
+            " ".join(part for part in (item.occurred_at, item.summary) if part)
+            for item in preview.context_evidence[:3]
+        ]
+        if evidence:
+            _add_fact(facts, "context_evidence", "依据", "；".join(evidence), group="context")
+    _add_fact(facts, "score", "内容质量", f"{preview.score} / 100", group="score")
+    _add_fact(facts, "score_reason", "评分依据", preview.score_reason, group="score")
     return facts[:20]
 
 
@@ -505,13 +537,33 @@ def _candidate_options(candidates: list[dict[str, object]]) -> list[InteractionO
     return options
 
 
-def _add_fact(facts: list[InteractionConfirmationFact], key: str, label: str, value: str | None) -> None:
+def _add_fact(
+    facts: list[InteractionConfirmationFact],
+    key: str,
+    label: str,
+    value: str | None,
+    *,
+    group: Literal["write", "activity_kind", "context", "score"] = "write",
+    status_label: str | None = None,
+    source: str | None = None,
+    options: list[InteractionOption] | None = None,
+) -> None:
     if value is None:
         return
     text = _plain(value)
     if not text:
         return
-    facts.append(InteractionConfirmationFact(key=key, label=label, value=_clip(text, 10000)))
+    facts.append(
+        InteractionConfirmationFact(
+            key=key,
+            label=label,
+            value=_clip(text, 10000),
+            group=group,
+            status_label=status_label,
+            source=_clip(source, 1000) if source else None,
+            options=options or [],
+        )
+    )
 
 
 def _action_id(waiting: TaskWaiting) -> str:

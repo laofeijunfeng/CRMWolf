@@ -10,15 +10,27 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingContent
 
 ActivityKind = Literal["FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"]
+CanonicalActivityKind = Literal[
+    "PHONE_FOLLOW_UP",
+    "WECHAT_FOLLOW_UP",
+    "EMAIL_FOLLOW_UP",
+    "VISIT_FOLLOW_UP",
+    "OTHER_FOLLOW_UP",
+    "ONLINE_MEETING",
+    "OFFLINE_MEETING",
+]
 
 
 class KindDecision(BaseModel):
-    """Closed-world result of the kind classifier."""
+    """Model nomination of one activity channel. The server decides whether it can be frozen."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: ActivityKind | Literal["UNCLEAR"] = "UNCLEAR"
+    kind: CanonicalActivityKind | ActivityKind | Literal["UNCLEAR"] = "UNCLEAR"
     reason: str = Field(default="", max_length=200)
+    confidence: float = Field(default=0, ge=0, le=1)
+    evidence_quote: str = Field(default="", max_length=200)
+    channels: list[CanonicalActivityKind] = Field(default_factory=list, max_length=7)
 
 
 

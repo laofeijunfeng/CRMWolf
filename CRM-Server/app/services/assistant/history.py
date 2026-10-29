@@ -15,7 +15,16 @@ if TYPE_CHECKING:
     from app.models.assistant import AssistantAction, AssistantTask
     from app.schemas.assistant import SubmitInputRequest
 
-KIND_LABELS = {"FOLLOW_UP": "普通跟进", "ONLINE_MEETING": "线上会议", "OFFLINE_MEETING": "线下会议"}
+KIND_LABELS = {
+    "FOLLOW_UP": "普通跟进",
+    "PHONE_FOLLOW_UP": "电话跟进",
+    "WECHAT_FOLLOW_UP": "微信跟进",
+    "EMAIL_FOLLOW_UP": "邮件跟进",
+    "VISIT_FOLLOW_UP": "拜访跟进",
+    "OTHER_FOLLOW_UP": "其他跟进",
+    "ONLINE_MEETING": "线上会议",
+    "OFFLINE_MEETING": "线下会议",
+}
 FIELD_LABELS = {
     "customer": "客户名称",
     "content": "沟通内容",
@@ -29,6 +38,8 @@ FIELD_LABELS = {
 def command_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> str:
     if payload.kind == "cancel":
         return "算了，不记了"
+    if payload.kind == "revise_activity_kind":
+        return KIND_LABELS.get(payload.choice or "", "修改活动类型")
     if payload.kind == "confirm":
         return "确认" if payload.choice == "confirm" else "取消"
     if waiting and waiting.type == "OBJECT_SELECTION":
@@ -84,7 +95,7 @@ def legacy_messages(task: AssistantTask, actions: list[AssistantAction], prefix:
         elif action.actor == "USER":
             role = "user"
             text = action.input_json.get("text") or data.get("label")
-            if action.action in {"change_kind", "select_activity_kind"}:
+            if action.action in {"change_kind", "select_activity_kind", "revise_activity_kind"}:
                 text = KIND_LABELS.get(str(action.input_json.get("kind")), "选择活动类型")
             elif action.action == "submit_field" and isinstance(text, str):
                 label = FIELD_LABELS.get(str(action.input_json.get("field")), "补充内容")

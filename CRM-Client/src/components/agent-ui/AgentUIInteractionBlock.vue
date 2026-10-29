@@ -179,6 +179,51 @@ const submitManualDate = (): void => {
   emit('submit', actionId, { text: value })
 }
 
+const kindEditorOpen = ref(false)
+const isActivityConfirmation = computed(() => props.block.business_action === 'confirm_activity_write')
+const activityFact = (key: string): InteractionBlock['facts'][number] | undefined => props.block.facts.find(fact => fact.key === key)
+const activityKindFact = computed(() => activityFact('activity_kind'))
+const activityScoreFact = computed(() => activityFact('score'))
+const activityScoreReason = computed(() => activityFact('score_reason'))
+const activityContext = computed(() => activityFact('change_signal'))
+const activityOpportunity = computed(() => activityFact('opportunity'))
+const activityEvidence = computed(() => activityFact('context_evidence'))
+const activityEvidenceLines = computed(() => (activityEvidence.value?.value ?? '').split('；').map(line => line.trim()).filter(line => line !== ''))
+const activityScoreNumber = computed(() => (activityScoreFact.value?.value ?? '').split('/')[0]?.trim() ?? '')
+const activityPassed = computed(() => {
+  const score = Number(activityScoreNumber.value)
+  return Number.isFinite(score) && score >= 60
+})
+const activityHistory = computed(() => props.block.state === 'READ_ONLY')
+const activityWaitingLabel = computed(() => {
+  if (activityHistory.value) return '历史只读'
+  return activityKindFact.value?.status_label === '未识别 · 需要确认' ? '等待选择类型' : '等待你确认'
+})
+const activityActionOptions = computed(() => {
+  const cancel = props.block.options.find(option => option.value === 'cancel')
+  const confirm = props.block.options.find(option => option.value === 'confirm')
+  return [cancel, confirm].filter((option): option is InteractionBlock['options'][number] => option !== undefined)
+})
+const activityKindPillClass = computed(() => {
+  const label = activityKindFact.value?.status_label ?? ''
+  if (label.includes('未识别')) return 'is-warning'
+  if (label.includes('高置信度') || label.includes('词表兜底')) return 'is-success'
+  return 'is-info'
+})
+
+const kindOptionsVisible = (fact: InteractionBlock['facts'][number]): boolean => {
+  if ((fact.options?.length ?? 0) === 0 || !isActive.value) return false
+  if (fact.status_label === '未识别 · 需要确认') return true
+  return kindEditorOpen.value
+}
+
+const reviseActivityKind = (value: string): void => {
+  const actionId = props.block.submit_action_id
+  if (controlsDisabled.value || actionId === null) return
+  submitting.value = true
+  emit('submit', actionId, { revise_activity_kind: value })
+}
+
 const handleOptionClick = (value: string): void => {
   if (controlsDisabled.value) return
   if (!submitsOnOptionClick.value) {
@@ -390,15 +435,94 @@ const submit = async (): Promise<void> => {
   <section
     v-else
     ref="interactionRef"
-    class="agent-ui-interaction grid gap-3 rounded-wolf-surface p-3"
-    :class="block.state === 'READ_ONLY'
-      ? 'border border-dashed border-border bg-muted/40'
-      : 'border border-[#bfdbfe] bg-[#f8fbff]'"
+    class="agent-ui-interaction grid rounded-wolf-surface p-3"
+    :class="isActivityConfirmation
+      ? (block.state === 'READ_ONLY' ? 'activity-card gap-0 overflow-hidden border border-dashed border-[#cbd5e1] bg-white p-0' : 'activity-card gap-0 overflow-hidden border border-[#e2e8f0] bg-white p-0')
+      : (block.state === 'READ_ONLY' ? 'gap-3 border border-dashed border-border bg-muted/40' : 'gap-3 border border-[#bfdbfe] bg-[#f8fbff]')"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
-    <p v-if="block.state === 'READ_ONLY'" class="m-0 inline-flex w-fit items-center rounded-full border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground">历史消息 · 已回放</p>
-    <header class="flex items-start justify-between gap-3">
+    <template v-if="isActivityConfirmation">
+      <header class="activity-header">
+        <h2 :id="`${block.id}-prompt`" class="activity-title">{{ activityHistory ? '历史确认内容' : '确认写入客户活动' }}</h2>
+        <span class="activity-pill" :class="activityHistory ? 'is-muted' : 'is-info'">{{ activityWaitingLabel }}</span>
+      </header>
+      <div class="activity-main">
+        <p v-if="activityHistory" class="activity-note">仅回看当时冻结的内容、类型与判断，不代表当前客户状态。</p>
+        <section class="activity-section">
+          <div class="activity-section-head">
+            <h3 class="activity-kicker">{{ activityHistory ? '当时的写入预览' : '本次将写入 CRM' }}</h3>
+            <span v-if="activityScoreFact" class="activity-pill is-success">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : activityScoreFact.value }}</span>
+          </div>
+          <p v-if="activityFact('customer')" class="activity-customer">
+            <b>{{ activityFact('customer')?.value }}</b>
+            <span aria-hidden="true">/</span>
+            <span>客户活动</span>
+          </p>
+          <p v-if="activityFact('summary')" class="activity-body">{{ activityFact('summary')?.value }}</p>
+          <dl v-if="activityFact('next_action') || activityFact('next_follow_time') || activityKindFact" class="activity-meta">
+            <div v-if="activityFact('next_action')" class="activity-meta-row">
+              <dt>下一步</dt>
+              <dd>{{ activityFact('next_action')?.value }}</dd>
+            </div>
+            <div v-if="activityFact('next_follow_time')" class="activity-meta-row">
+              <dt>跟进时间</dt>
+              <dd>{{ activityFact('next_follow_time')?.value }}</dd>
+            </div>
+            <div v-if="activityKindFact" class="activity-meta-row">
+              <dt>活动类型</dt>
+              <dd>
+                <div class="activity-kind">
+                  <span class="activity-kind-name">{{ activityKindFact.value }}</span>
+                  <span v-if="activityKindFact.status_label" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
+                  <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改类型' }}</button>
+                </div>
+                <p v-if="activityKindFact.source" class="activity-caption"><span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '为什么需要选择：' : '识别来源：' }}</span>{{ activityKindFact.source }}</p>
+              </dd>
+            </div>
+          </dl>
+          <div v-if="activityKindFact && kindOptionsVisible(activityKindFact)" class="activity-kind-editor">
+            <div class="activity-kind-editor-head">
+              <span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '选择活动类型' : '修改活动类型' }}</span>
+              <span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '选择后才可确认' : '不会重新生成正文' }}</span>
+            </div>
+            <div class="activity-kind-options">
+              <button v-for="option in activityKindFact.options ?? []" :key="option.value" type="button" class="activity-kind-option" :class="option.label === activityKindFact.value ? 'is-selected' : ''" :disabled="controlsDisabled || option.disabled" @click="reviseActivityKind(option.value)">{{ option.label }}</button>
+            </div>
+            <p>只修改“活动类型”字段，不改写活动标题、摘要或下一步。</p>
+          </div>
+        </section>
+        <section v-if="activityContext" class="activity-context">
+          <div class="activity-section-head">
+            <div class="activity-context-title">
+              <h3>客户上下文判断</h3>
+              <span>AI 辅助</span>
+            </div>
+            <span class="activity-pill is-warning">{{ activityContext.value }}</span>
+          </div>
+          <p v-if="activityContext.source" class="activity-body">{{ activityContext.source }}</p>
+          <p v-if="activityOpportunity" class="activity-inline"><span>关联商机</span><b>{{ activityOpportunity.value }}</b></p>
+          <p v-if="activityEvidenceLines[0]" class="activity-evidence"><b>关键依据</b><span>{{ activityEvidenceLines[0] }}</span></p>
+          <p class="activity-caption">不写入活动正文，不自动修改商机阶段。</p>
+          <details v-if="activityEvidenceLines.length > 0" class="activity-details">
+            <summary>查看完整上下文依据 · {{ activityEvidenceLines.length }} 条</summary>
+            <div>
+              <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
+            </div>
+          </details>
+        </section>
+        <details v-if="activityScoreReason" class="activity-details activity-score">
+          <summary>查看评分依据 · 内容质量</summary>
+          <div class="activity-score-body">
+            <strong>{{ activityScoreFact?.value }} · {{ activityPassed ? '通过写入质量门禁' : '未通过写入质量门禁' }}</strong>
+            <p>{{ activityScoreReason.value }}</p>
+            <p class="activity-caption">质量通过不表示客户进展良好，也不替代上下文判断。</p>
+          </div>
+        </details>
+      </div>
+    </template>
+    <p v-if="!isActivityConfirmation && block.state === 'READ_ONLY'" class="m-0 inline-flex w-fit items-center rounded-full border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground">历史消息 · 已回放</p>
+    <header v-if="!isActivityConfirmation" class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-2">
         <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]" aria-hidden="true">?</span>
         <p :id="`${block.id}-prompt`" class="m-0 text-[13px] font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
@@ -406,16 +530,49 @@ const submit = async (): Promise<void> => {
       <span class="shrink-0 rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ stateLabel }}</span>
     </header>
 
-    <dl
-      v-if="block.facts.length > 0"
-      class="grid grid-cols-1 gap-2 sm:grid-cols-3"
-      data-agent-ui-confirmation-facts
-    >
-      <div v-for="fact in block.facts" :key="fact.key" class="min-w-0 rounded-wolf border border-border bg-white px-2.5 py-2">
-        <dt class="text-[11px] text-muted-foreground">{{ fact.label }}</dt>
-        <dd class="m-0 mt-0.5 truncate text-xs font-semibold text-foreground" :title="fact.value">{{ fact.value }}</dd>
-      </div>
-    </dl>
+    <div v-if="!isActivityConfirmation && block.facts.length > 0" class="grid gap-3" data-agent-ui-confirmation-facts>
+      <section v-for="group in ['write', 'activity_kind', 'context', 'score']" :key="group" class="grid gap-2">
+        <template v-if="block.facts.some(fact => (fact.group ?? 'write') === group)">
+          <div :class="group === 'write' ? 'grid grid-cols-1 gap-2 sm:grid-cols-2' : 'grid gap-2'">
+            <div
+              v-for="fact in block.facts.filter(item => (item.group ?? 'write') === group)"
+              :key="fact.key"
+              class="min-w-0 rounded-wolf border border-border bg-white px-2.5 py-2"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <dt class="text-[11px] text-muted-foreground">{{ fact.label }}</dt>
+                <span v-if="fact.status_label" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] text-[#1d4ed8]">{{ fact.status_label }}</span>
+              </div>
+              <dd class="m-0 mt-0.5 text-xs font-semibold text-foreground" :class="group === 'activity_kind' ? '' : 'truncate'" :title="fact.value">{{ fact.value }}</dd>
+              <p v-if="fact.source" class="m-0 mt-1 text-[11px] leading-5 text-muted-foreground">{{ fact.source }}</p>
+              <div v-if="(fact.options?.length ?? 0) > 0" class="mt-2 grid gap-2">
+                <button
+                  v-if="fact.status_label !== '未识别 · 需要确认'"
+                  type="button"
+                  class="w-fit text-xs text-primary underline-offset-2 hover:underline"
+                  @click="kindEditorOpen = !kindEditorOpen"
+                >
+                  {{ kindEditorOpen ? '收起类型选项' : '修改类型' }}
+                </button>
+                <div v-if="kindOptionsVisible(fact)" class="flex flex-wrap gap-2">
+                  <button
+                    v-for="option in fact.options ?? []"
+                    :key="option.value"
+                    type="button"
+                    class="min-h-11 rounded-wolf border px-3 text-xs"
+                    :class="option.value === fact.value || option.label === fact.value ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-white'"
+                    :disabled="controlsDisabled || option.disabled"
+                    @click="reviseActivityKind(option.value)"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </section>
+    </div>
 
     <div
       v-if="submittedChoiceValue !== null"
@@ -428,20 +585,27 @@ const submit = async (): Promise<void> => {
     <template v-else-if="isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')">
       <div
         class="gap-2"
-        :class="block.interaction_type === 'confirmation' ? 'flex flex-wrap' : 'grid grid-cols-1 sm:grid-cols-2'"
+        :class="block.interaction_type === 'confirmation' ? (isActivityConfirmation ? 'activity-actions' : 'flex flex-wrap') : 'grid grid-cols-1 sm:grid-cols-2'"
         role="group"
         :aria-invalid="selectionError !== null"
         :aria-describedby="selectionError === null ? undefined : `${block.id}-selection-error`"
       >
+      <p
+        v-if="isActivityConfirmation && block.options.some(option => option.disabled && option.description)"
+        class="activity-actions-hint"
+      >
+        {{ block.options.find(option => option.disabled && option.description)?.description }}
+      </p>
       <Button
-        v-for="(option, index) in block.options"
+        v-for="(option, index) in (isActivityConfirmation ? activityActionOptions : block.options)"
         :key="option.value"
         type="button"
         :variant="block.interaction_type === 'confirmation' && option.value === 'confirm' ? 'default' : 'outline'"
         class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
         :class="[
           block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
-          optionSelected(option.value) ? 'border-primary bg-accent text-accent-foreground' : ''
+          optionSelected(option.value) ? 'border-primary bg-accent text-accent-foreground' : '',
+          isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && option.disabled ? 'border-[#cbd5e1] bg-[#e2e8f0] text-[#94a3b8] opacity-100' : ''
         ]"
         :aria-pressed="optionSelected(option.value)"
         :disabled="controlsDisabled || option.disabled"
@@ -449,10 +613,16 @@ const submit = async (): Promise<void> => {
         @click="handleOptionClick(option.value)"
       >
         <span>{{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}</span>
-        <small v-if="option.description" class="text-xs text-muted-foreground">
+        <small v-if="option.description && block.interaction_type !== 'confirmation'" class="text-xs text-muted-foreground">
           {{ option.description }}
         </small>
       </Button>
+        <p
+          v-if="!isActivityConfirmation && block.interaction_type === 'confirmation' && block.options.some(option => option.disabled && option.description)"
+          class="m-0 basis-full text-xs text-muted-foreground"
+        >
+          {{ block.options.find(option => option.disabled && option.description)?.description }}
+        </p>
         <p
           v-if="selectionError !== null"
           :id="`${block.id}-selection-error`"
@@ -476,7 +646,7 @@ const submit = async (): Promise<void> => {
         <p class="m-0 text-[11px] text-muted-foreground">选择候选或输入完整日期后继续。</p>
       </div>
     </template>
-    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" class="m-0 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的确认按钮。</p>
+    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" :class="isActivityConfirmation ? 'activity-history-note' : 'm-0 text-[11px] text-muted-foreground'">{{ isActivityConfirmation ? '历史交互只读，不可再次提交。' : '历史交互不再提供可再次提交的确认按钮。' }}</p>
     <div v-else-if="!isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" class="hidden"></div>
 
     <div
@@ -651,3 +821,399 @@ const submit = async (): Promise<void> => {
     </Button>
   </section>
 </template>
+
+<style scoped>
+.activity-card {
+  gap: 0;
+  color: #020817;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 400;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  padding: 12px 16px;
+}
+
+.activity-title {
+  margin: 0;
+  color: #020817;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.activity-main {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.activity-note,
+.activity-history-note {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.activity-note {
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px 12px;
+}
+
+.activity-history-note {
+  border-top: 1px solid #edf2f7;
+  padding: 12px 16px;
+}
+
+.activity-section,
+.activity-context,
+.activity-score-body {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-section-head,
+.activity-kind,
+.activity-kind-editor-head,
+.activity-customer,
+.activity-inline,
+.activity-context-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.activity-section-head,
+.activity-kind-editor-head {
+  justify-content: space-between;
+}
+
+.activity-kicker,
+.activity-context-title h3,
+.activity-kind-editor-head span:first-child {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.activity-kicker {
+  color: #1d4ed8;
+}
+
+.activity-customer,
+.activity-inline,
+.activity-context-title span,
+.activity-kind-editor-head {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.activity-customer b,
+.activity-kind-name {
+  color: #020817;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.activity-inline b {
+  color: #334155;
+  font-weight: 500;
+}
+
+.activity-body {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.activity-meta {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  border-top: 1px solid #edf2f7;
+  padding-top: 12px;
+}
+
+.activity-meta-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+}
+
+.activity-meta-row dt {
+  margin: 0;
+  padding-top: 1px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.activity-meta-row dd {
+  margin: 0;
+  min-width: 0;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.activity-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.activity-caption,
+.activity-evidence,
+.activity-kind-editor > p,
+.activity-actions-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.activity-kind .activity-caption {
+  margin-top: 4px;
+}
+
+.activity-caption span,
+.activity-evidence b {
+  color: #475569;
+  font-weight: 600;
+}
+
+.activity-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.activity-pill.is-info,
+.activity-card :deep(.is-info) {
+  border-color: #dbeafe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.activity-pill.is-success {
+  border-color: #d1fae5;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.activity-pill.is-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.activity-pill.is-muted {
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.activity-section > .activity-kind-editor {
+  margin-top: 4px;
+}
+
+.activity-kind-editor {
+  margin-top: 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 12px;
+}
+
+.activity-kind-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.activity-kind-option {
+  min-height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px 10px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.activity-kind-option.is-selected {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.activity-kind-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.activity-kind-editor > p {
+  margin-top: 8px;
+}
+
+.activity-context {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.activity-evidence {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid #cbd5e1;
+  padding-left: 10px;
+}
+
+.activity-details {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 4px;
+}
+
+.activity-score {
+  border-top-color: #edf2f7;
+}
+
+.activity-details summary {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.activity-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-details > div > p,
+.activity-score-body > p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.activity-details > div > p {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 0;
+}
+
+.activity-details > div > p:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.activity-score-body {
+  margin-top: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.activity-score-body strong {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #edf2f7;
+  padding: 12px 16px;
+}
+
+.activity-actions-hint {
+  margin-right: auto;
+  color: #b45309;
+}
+
+.activity-card :deep(.activity-action) {
+  height: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  padding-right: 16px;
+  padding-left: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+@media (max-width: 640px) {
+  .activity-meta-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .activity-meta-row dt {
+    padding-top: 0;
+  }
+
+  .activity-header,
+  .activity-section-head {
+    align-items: flex-start;
+  }
+}
+
+.activity-card :deep(.activity-action:disabled) {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #94a3b8;
+  opacity: 1;
+}
+</style>

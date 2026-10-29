@@ -401,3 +401,48 @@ async def test_ambiguous_opportunity_is_the_only_action(db_session):
     assert waiting.confirmation_payload is None
     assert context.judged is False
     assert [item["label"] for item in waiting.candidates] == ["星河续费 · 报价", "星河扩容 · 需求"]
+
+
+async def test_high_confidence_phone_is_frozen_without_rewriting_follow_up_content(db_session):
+    class PhoneStructurer(Structurer):
+        async def classify(self, db, *, team_id, user_text):
+            return KindDecision(
+                kind="PHONE_FOLLOW_UP",
+                confidence=0.91,
+                evidence_quote="电话联系",
+            )
+
+    context = Context("广州睿狐科技有限公司")
+    outcome = await AssistantCoordinator(
+        Chooser(), structurer=PhoneStructurer(), quality_gate=Gate(), follow_up=context
+    ).handle_task(
+        db_session,
+        _task(db_session),
+        AssistantInput(kind="text", text="今天电话联系了广州睿狐科技有限公司，他说再考虑"),
+    )
+    waiting = outcome.reply.waiting
+    assert waiting is not None and waiting.type == "CONFIRMATION"
+    preview = waiting.confirmation_payload.preview
+    assert preview.activity_kind == "PHONE_FOLLOW_UP"
+    assert preview.channel_status == "recognized"
+    assert preview.channel_status_label == "AI 已识别 · 高置信度"
+    assert preview.title == "电话跟进"
+    assert preview.summary == "客户说再考虑。"
+    assert "change_signal" not in preview.content_json
+    command = outcome.task.authority_json["frozen_activity_command"]
+    assert command["activity_kind"] == "PHONE_FOLLOW_UP"
+    assert outcome.task.activity_kind == "FOLLOW_UP"
+    from app.services.assistant.confirmation import revise_frozen_activity_kind
+
+    revised, revised_waiting = revise_frozen_activity_kind(db_session, outcome.task, "WECHAT_FOLLOW_UP")
+    revised_preview = revised_waiting.confirmation_payload.preview
+    assert revised_preview.activity_kind == "WECHAT_FOLLOW_UP"
+    assert revised_preview.title == "微信跟进"
+    assert revised_preview.summary == "客户说再考虑。"
+    assert revised_preview.channel_status == "revised"
+    assert revised_preview.channel_status_label == "已手动修正"
+    assert revised_preview.score == preview.score
+    assert revised_preview.change_signal == preview.change_signal
+    assert revised.authority_json["frozen_activity_command"]["submission_id"] == command["submission_id"]
+    assert revised.authority_json["frozen_activity_command"]["fingerprint"] != command["fingerprint"]
+    assert revised.activity_kind == "FOLLOW_UP"

@@ -747,7 +747,20 @@ class AssistantCoordinator:
             from app.services.assistant.turns import AssistantConfigurationError
 
             raise AssistantConfigurationError("confirmation submitted but no activity writer is configured")
+        if user_input.kind == "revise_activity_kind":
+            return self._revise_activity_kind(db, task, user_input.choice or "")
         if choice == "confirm":
+            command = load_authority(task).frozen_activity_command
+            if isinstance(command, dict) and command.get("channel_status") == "required":
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=task.public_id,
+                        status=task.status,
+                        message="请先选择活动类型。",
+                        waiting=load_waiting(task),
+                    ),
+                    task,
+                )
             import time as _time
 
             from app.services.assistant.events import stage as mk_stage
@@ -823,6 +836,20 @@ class AssistantCoordinator:
             if isinstance(begun, CoordinatorOutcome):
                 return begun
             return await self._prepare_confirmation(db, begun)
+        if kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
+            from app.services.assistant.activity_channel import apply_channel_resolution, selected_kind
+
+            drafted = apply_channel_resolution(load_draft(updated), selected_kind(kind))
+            updated = apply_task_update(
+                db,
+                updated,
+                TaskUpdate(
+                    draft=drafted,
+                    action_actor="SYSTEM",
+                    action_name="remember_activity_kind",
+                    action_result={"kind": kind, "source": "user"},
+                ),
+            ).task
         if self._structurer is not None:
             original_text = updated.goal
             updated, message, paused_waiting, failed = await intake_step(
@@ -991,6 +1018,101 @@ class AssistantCoordinator:
         )
 
 
+    async def _classify_channel(
+        self,
+        db: Session,
+        task: AssistantTask,
+        user_text: str,
+        reporter: ProgressReporter,
+        *,
+        accept_source: bool,
+    ) -> CoordinatorOutcome | AssistantTask:
+        import time
+
+        from app.services.assistant.activity_channel import apply_channel_resolution, resolve_channel
+        from app.services.assistant.events import stage as mk_stage
+
+        reporter.stage_start(mk_stage("classify"))
+        started = time.monotonic()
+        decision = None
+        model_failed = False
+        try:
+            decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
+        except AssistantLLMError:
+            model_failed = True
+        reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))
+        resolution = resolve_channel(user_text, decision, model_failed=model_failed)
+        draft = load_draft(task)
+        if resolution.status == "family_unclear":
+            if accept_source:
+                append_source(db, task, draft, user_text)
+            waiting = kind_waiting(task)
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    draft=draft,
+                    waiting=waiting,
+                    action_actor="SYSTEM",
+                    action_name="ask_activity_kind",
+                    action_result={"reason": resolution.reason},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=waiting.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        allowed_families = {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}
+        family = resolution.family if resolution.family in allowed_families else "FOLLOW_UP"
+        draft = apply_channel_resolution(draft, resolution)
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                draft=draft,
+                activity_kind=family,
+                action_actor="SYSTEM",
+                action_name="set_activity_kind",
+                action_result={
+                    "kind": resolution.kind,
+                    "family": family,
+                    "source": resolution.source or "unresolved",
+                    "status": resolution.status,
+                },
+            ),
+        )
+        return result.task
+
+    def _revise_activity_kind(self, db: Session, task: AssistantTask, kind: str) -> CoordinatorOutcome:
+        from app.services.assistant.confirmation import revise_frozen_activity_kind
+
+        try:
+            updated, waiting = revise_frozen_activity_kind(db, task, kind)
+        except ValueError:
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=task.public_id,
+                    status=task.status,
+                    message="这个活动类型不在可修改范围内。",
+                    waiting=load_waiting(task),
+                ),
+                task,
+            )
+        return CoordinatorOutcome(
+            CoordinatorReply(
+                task_public_id=updated.public_id,
+                status=updated.status,
+                message=waiting.prompt,
+                waiting=waiting,
+            ),
+            updated,
+        )
+
     async def _begin_follow_up(
         self,
         db: Session,
@@ -1002,55 +1124,18 @@ class AssistantCoordinator:
     ) -> CoordinatorOutcome | AssistantTask:
         """Classify, bind the customer, then structure. Meetings stay on the old intake path."""
 
-        import time
-
-        from app.services.assistant.events import stage as mk_stage
-
         if self._structurer is None or self._follow_up is None:
             raise RuntimeError("follow-up context requires a structurer")
         kind = task.activity_kind
-        if kind is None:
-            reporter.stage_start(mk_stage("classify"))
-            started = time.monotonic()
-            decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
-            reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))
-            if decision.kind == "UNCLEAR":
-                draft = load_draft(task)
-                if accept_source:
-                    append_source(db, task, draft, user_text)
-                waiting = kind_waiting(task)
-                result = apply_task_update(
-                    db,
-                    task,
-                    TaskUpdate(
-                        draft=draft,
-                        waiting=waiting,
-                        action_actor="SYSTEM",
-                        action_name="ask_activity_kind",
-                        action_result={"reason": decision.reason},
-                    ),
-                )
-                return CoordinatorOutcome(
-                    CoordinatorReply(
-                        task_public_id=result.task.public_id,
-                        status=result.task.status,
-                        message=waiting.prompt,
-                        waiting=load_waiting(result.task),
-                    ),
-                    result.task,
-                )
-            result = apply_task_update(
-                db,
-                task,
-                TaskUpdate(
-                    activity_kind=decision.kind,
-                    action_actor="SYSTEM",
-                    action_name="set_activity_kind",
-                    action_result={"kind": decision.kind, "source": "classifier"},
-                ),
+        needs_channel = kind is None or (kind == "FOLLOW_UP" and load_draft(task).channel_status is None)
+        if needs_channel:
+            classified = await self._classify_channel(
+                db, task, user_text, reporter, accept_source=accept_source and kind is None
             )
-            task = result.task
-            kind = decision.kind
+            if isinstance(classified, CoordinatorOutcome):
+                return classified
+            task = classified
+            kind = task.activity_kind
         if kind != "FOLLOW_UP":
             updated, message, paused, failed = await intake_step(
                 db, task, user_text, self._structurer, gate=self._quality_gate, reporter=reporter,

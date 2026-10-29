@@ -157,7 +157,8 @@ def accept_submit(
             "FIELD": "submit_field",
             "CONFIRMATION": "confirm",
         }
-        if kind != allowed[waiting.type]:
+        revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
+        if kind != allowed[waiting.type] and not revising:
             raise AssistantStateConflict("当前输入不符合等待动作")
         if waiting.type == "ACTIVITY_KIND":
             options = {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}
@@ -193,10 +194,18 @@ def accept_submit(
                     raise AssistantStateConflict("请说明这条没有下一步行动的原因")
             elif choice is not None or not isinstance(text, str) or not text.strip():
                 raise AssistantStateConflict("请回复当前字段内容")
+        elif revising:
+            payload = waiting.confirmation_payload
+            preview = payload.preview if payload is not None and payload.kind == "activity_write" else None
+            offered = set(preview.channel_options) if preview is not None else set()
+            if not isinstance(choice, str) or choice not in offered or text is not None:
+                raise AssistantStateConflict("请选择当前签发的活动类型")
         elif choice not in {"confirm", "reject"} or text is not None:
             raise AssistantStateConflict("请选择确认或拒绝当前动作")
     elif waiting is None and (
-        action_id is not None or expected_version is not None or kind in {"confirm", "submit_field"}
+        action_id is not None
+        or expected_version is not None
+        or kind in {"confirm", "submit_field", "revise_activity_kind"}
     ):
         raise AssistantStateConflict("没有待回复的动作")
     if kind == "cancel" and (choice is not None or text is not None):

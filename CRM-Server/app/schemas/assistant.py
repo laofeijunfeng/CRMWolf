@@ -81,7 +81,7 @@ class CreateTaskRequest(BaseModel):
 class SubmitInputRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["text", "submit_field", "confirm", "cancel"]
+    kind: Literal["text", "submit_field", "confirm", "cancel", "revise_activity_kind"]
     text: str | None = Field(default=None, max_length=20000)
     choice: str | None = Field(default=None, max_length=64)
     client_request_id: str = Field(min_length=8, max_length=128)

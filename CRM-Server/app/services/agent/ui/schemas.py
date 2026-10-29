@@ -325,6 +325,10 @@ class InteractionConfirmationFact(AgentUIContractModel):
     key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1, max_length=200)
     value: str = Field(min_length=1, max_length=10_000)
+    group: Literal["write", "activity_kind", "context", "score"] = "write"
+    status_label: str | None = Field(default=None, max_length=40)
+    source: str | None = Field(default=None, max_length=1000)
+    options: list[InteractionOption] = Field(default_factory=list, max_length=10)
 
 
 class InteractionBlock(AgentUIBlockBase):

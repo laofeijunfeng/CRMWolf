@@ -719,25 +719,6 @@ const retryPending = async (): Promise<void> => {
   }
 }
 
-const focusComposer = (): void => {
-  inputText.value = ''
-  void nextTick(() => {
-    scrollId.value?.scrollIntoView?.({ block: 'center' })
-    document.querySelector<HTMLTextAreaElement>('.sales-assistant-page textarea')?.focus()
-  })
-}
-
-const changeKind = async (kind: 'FOLLOW_UP' | 'ONLINE_MEETING' | 'OFFLINE_MEETING'): Promise<void> => {
-  if (busy.value || task.value === null || conversation.value === null) return
-  const request = { task_public_id: task.value.public_id, kind, task_version: task.value.version,
-    expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
-  await dispatchConversation(() => assistantApi.conversationKind(request), `改为${KIND_LABELS[kind]}`)
-}
-
-const nextKindOf = (current: string | null | undefined): 'FOLLOW_UP' | 'ONLINE_MEETING' => {
-  return current === 'ONLINE_MEETING' || current === 'OFFLINE_MEETING' ? 'FOLLOW_UP' : 'ONLINE_MEETING'
-}
-
 const explicitNone = ref(false)
 const gapNone = (entry: ChatEntry): Promise<void> => {
   if (submitting.value || resultPending.value || !showExplicitNone(entry)) return Promise.resolve()
@@ -745,10 +726,28 @@ const gapNone = (entry: ChatEntry): Promise<void> => {
   return Promise.resolve()
 }
 
-
 const busy = computed(() => submitting.value || resultPending.value)
 
-const entryTask = (entry: ChatEntry): AssistantTaskView | null => entry.ownTask ?? null
+const ACTIVITY_BADGES: Record<string, string> = {
+  PHONE_FOLLOW_UP: '电话跟进',
+  WECHAT_FOLLOW_UP: '微信跟进',
+  EMAIL_FOLLOW_UP: '邮件跟进',
+  VISIT_FOLLOW_UP: '拜访跟进',
+  OTHER_FOLLOW_UP: '其他跟进',
+  ONLINE_MEETING: '线上会议',
+  OFFLINE_MEETING: '线下会议',
+  FOLLOW_UP: '跟进',
+}
+
+const activityBadge = computed((): string => {
+  const waiting = task.value?.waiting
+  const preview = waiting?.confirmation_payload?.kind === 'activity_write'
+    ? waiting.confirmation_payload.preview
+    : null
+  if (preview?.channel_status === 'required') return '待确认类型'
+  const kind = preview?.activity_kind || task.value?.activity_kind || ''
+  return ACTIVITY_BADGES[kind] ?? ''
+})
 
 const interactionBlock = (entry: ChatEntry): Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> | undefined =>
   entry.ui?.blocks.find((block): block is Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> => block.type === 'interaction')
@@ -759,6 +758,10 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
   const choice = typeof values['choice'] === 'string' ? values['choice'] : ''
   if (block.business_action === 'assistant_boundary') {
     if (choice === 'CONTINUE' || choice === 'NEW') void chooseBoundary(entry, choice)
+    return
+  }
+  if (typeof values['revise_activity_kind'] === 'string') {
+    void submit({ kind: 'revise_activity_kind', choice: values['revise_activity_kind'] }, '修改活动类型', entry.waiting)
     return
   }
   if (block.interaction_type === 'confirmation') {
@@ -780,11 +783,6 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
   const answer = typeof raw === 'string' ? raw.trim() : ''
   if (answer === '') return
   void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting)
-}
-
-const showActivityExtras = (entry: ChatEntry): boolean => {
-  const block = interactionBlock(entry)
-  return block?.type === 'interaction' && block.business_action === 'confirm_activity_write' && block.state === 'ACTIVE'
 }
 
 const showExplicitNone = (entry: ChatEntry): boolean => {
@@ -911,10 +909,6 @@ void loadConversation()
               @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
             />
             <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示，原记录仍保留。</div>
-            <div v-if="showActivityExtras(entry)" class="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" :disabled="busy" @click="focusComposer">修改内容</Button>
-              <Button size="sm" variant="ghost" :disabled="busy" @click="() => { void changeKind(nextKindOf(entryTask(entry)?.activity_kind)) }">改为线下 / 跟进</Button>
-            </div>
             <button
               v-if="showExplicitNone(entry)"
               type="button"
@@ -957,7 +951,7 @@ void loadConversation()
       />
       <div class="mt-2 flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <Badge v-if="task?.activity_kind" variant="secondary">{{ task.activity_kind === 'ONLINE_MEETING' ? '线上会议' : task.activity_kind === 'OFFLINE_MEETING' ? '线下会议' : '跟进' }}</Badge>
+          <Badge v-if="activityBadge" variant="secondary">{{ activityBadge }}</Badge>
           <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex items-center gap-2">

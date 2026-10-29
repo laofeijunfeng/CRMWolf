@@ -49,7 +49,11 @@ export const InteractionFieldSchema = z.object({
 export const InteractionConfirmationFactSchema = z.object({
   key: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_]*$/),
   label: z.string().min(1).max(200),
-  value: z.string().min(1).max(10000)
+  value: z.string().min(1).max(10000),
+  group: z.enum(['write', 'activity_kind', 'context', 'score']).optional(),
+  status_label: z.string().max(40).nullable().optional(),
+  source: z.string().max(1000).nullable().optional(),
+  options: z.array(InteractionOptionSchema).max(10).default([])
 }).strict()
 
 export const InteractionBlockObjectSchema = z.object({

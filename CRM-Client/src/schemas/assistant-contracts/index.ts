@@ -26,12 +26,26 @@ export const TaskDraftSchema = z.object({
   }).strict()).optional(),
   score_reason: z.string().nullable().optional(),
   score_detail: z.record(z.unknown()).optional(),
-  quality_score: DraftFieldSchema.optional()
+  quality_score: DraftFieldSchema.optional(),
+  channel_status: z.enum(['recognized', 'required', 'selected', 'revised']).nullable().optional(),
+  channel_kind: z.string().nullable().optional(),
+  channel_source: z.enum(['model', 'keyword', 'user']).nullable().optional(),
+  channel_quote: z.string().nullable().optional(),
+  channel_reason: z.string().nullable().optional(),
+  channel_confidence: z.number().nullable().optional(),
+  channel_status_label: z.string().nullable().optional(),
+  channel_source_text: z.string().nullable().optional(),
+  channel_options: z.array(z.string()).optional(),
+  channel_origin_label: z.string().nullable().optional()
 }).strict()
 export type TaskDraft = z.infer<typeof TaskDraftSchema>
 export const ActivityPreviewSchema = z.object({
   customer_name: z.string(),
-  activity_kind: z.enum(['PHONE_FOLLOW_UP', 'WECHAT_FOLLOW_UP', 'EMAIL_FOLLOW_UP', 'VISIT_FOLLOW_UP', 'OTHER_FOLLOW_UP', 'ONLINE_MEETING', 'OFFLINE_MEETING']),
+  activity_kind: z.enum(['PHONE_FOLLOW_UP', 'WECHAT_FOLLOW_UP', 'EMAIL_FOLLOW_UP', 'VISIT_FOLLOW_UP', 'OTHER_FOLLOW_UP', 'ONLINE_MEETING', 'OFFLINE_MEETING']).nullable().optional(),
+  channel_status: z.enum(['recognized', 'required', 'selected', 'revised']).optional(),
+  channel_status_label: z.string().nullable().optional(),
+  channel_source_text: z.string().nullable().optional(),
+  channel_options: z.array(z.string()).optional(),
   title: z.string().nullable().optional(),
   summary: z.string().nullable().optional(),
   content_json: z.record(z.unknown()),
@@ -189,7 +203,7 @@ export function parseAssistantTaskList(payload: unknown): { tasks: AssistantTask
   return { tasks, skipped }
 }
 
-export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel'])
+export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel', 'revise_activity_kind'])
 export type AssistantInputKind = z.infer<typeof AssistantInputKindSchema>
 
 export const SubmitInputResponseSchema = z.object({

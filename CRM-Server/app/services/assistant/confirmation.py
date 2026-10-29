@@ -54,15 +54,20 @@ def freeze_confirmation(
     context_card: dict[str, object] | None = None,
 ) -> tuple[AssistantTask, TaskWaiting]:
     from app.crud.customer_activity import customer_activity_crud
-    from app.services.customer_activity_kinds import get_activity_kind_meta
-
+    from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
     draft = TaskDraft.model_validate(task.draft_json or {})
     if draft.quality_score.status != "CANDIDATE" or not draft.score_reason:
         raise ValueError("activity cannot be confirmed without a final quality score")
     score = int(draft.quality_score.value or 0)
     if score < 60 or not draft.source_segments or not draft.content_json:
         raise ValueError("activity cannot be confirmed without a passing, complete draft")
-    kind = get_activity_kind_meta(task.activity_kind or "FOLLOW_UP")["value"]
+    kind = draft.channel_kind if draft.channel_kind in CANONICAL_KINDS else None
+    channel_status = draft.channel_status or ("recognized" if kind is not None else "required")
+    if task.activity_kind in MEETING_KINDS and kind is None and draft.channel_status is None:
+        kind = task.activity_kind
+        channel_status = "recognized"
+    if channel_status == "required":
+        kind = None
     source_content = "\n".join(draft.source_segments)
     next_action = None if draft.next_action.status == "EXPLICITLY_NONE" else draft.next_action.value
     next_follow_time_text = (draft.next_follow_time.value or "").strip()
@@ -75,8 +80,14 @@ def freeze_confirmation(
         "content_json": draft.content_json,
         "source_segments": draft.source_segments,
         "source_content": source_content,
-        "title": customer_activity_crud.build_title(kind, draft.content_json),
-        "summary": customer_activity_crud.build_summary(kind, draft.content_json, source_content),
+        "title": customer_activity_crud.build_title(kind, draft.content_json) if kind is not None else None,
+        "summary": customer_activity_crud.build_summary(kind or "OTHER_FOLLOW_UP", draft.content_json, source_content),
+        "channel_status": channel_status,
+        "channel_status_label": draft.channel_status_label
+        or ("未识别 · 需要确认" if channel_status == "required" else None),
+        "channel_source_text": draft.channel_source_text,
+        "channel_options": list(draft.channel_options),
+        "channel_origin_label": draft.channel_origin_label,
         "next_action": next_action,
         "next_follow_time_text": next_follow_time_text,
         "next_follow_time": next_follow_time.isoformat() if next_follow_time is not None else None,
@@ -106,6 +117,10 @@ def freeze_confirmation(
         "next_follow_time",
         "next_follow_time_text",
         "next_follow_time_granularity",
+        "channel_status",
+        "channel_status_label",
+        "channel_source_text",
+        "channel_options",
     ]
     if context_card:
         from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
@@ -169,6 +184,8 @@ async def execute_confirmation(
     """Stage the canonical activity and receipt in the caller's one transaction."""
     command = load_authority(task).frozen_activity_command
     waiting = task.waiting_json.get("payload") if task.waiting_json else None
+    if isinstance(command, dict) and command.get("channel_status") == "required":
+        raise ValueError("activity kind must be selected before confirmation")
     if (
         not isinstance(command, dict)
         or command.get("execution_status") != "PENDING"
@@ -241,3 +258,101 @@ async def execute_confirmation(
         ),
     )
     return result.task, "已记录这条客户活动。"
+
+
+
+def revise_frozen_activity_kind(
+    db: Session, task: AssistantTask, kind: str
+) -> tuple[AssistantTask, TaskWaiting]:
+    """Replace only the frozen activity kind. Content, score and context stay put."""
+
+    from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
+    from app.services.customer_activity_kinds import get_activity_kind_meta
+
+    command = load_authority(task).frozen_activity_command
+    if not isinstance(command, dict) or command.get("execution_status") != "PENDING":
+        raise ValueError("activity kind can only be revised before writing")
+    options = command.get("channel_options")
+    if not isinstance(options, list) or kind not in options or kind not in CANONICAL_KINDS:
+        raise ValueError("activity kind is not one of the issued options")
+    meta = get_activity_kind_meta(kind)
+    label = str(meta["label"])
+    updated = dict(command)
+    previous = updated.get("channel_status")
+    origin = updated.get("channel_origin_label")
+    if previous == "required":
+        status = "selected"
+        status_label = "已选择"
+        source_text = f"你选择：{label}"
+    else:
+        status = "revised"
+        status_label = "已手动修正"
+        origin_label = origin if isinstance(origin, str) and origin.strip() else "原类型"
+        source_text = f"原始识别：{origin_label} · 你修改为{label}"
+        if not isinstance(origin, str) or not origin.strip():
+            updated["channel_origin_label"] = label
+    updated["activity_kind"] = kind
+    updated["channel_status"] = status
+    updated["channel_status_label"] = status_label
+    updated["channel_source_text"] = source_text
+    if meta["category"] == "FOLLOW_UP":
+        updated["title"] = label
+    updated.pop("fingerprint", None)
+    updated["fingerprint"] = command_fingerprint(updated)
+    preview_keys = [
+        "customer_name", "activity_kind", "title", "summary", "content_json", "source_content",
+        "score", "score_reason", "next_action", "next_follow_time", "next_follow_time_text",
+        "next_follow_time_granularity", "channel_status", "channel_status_label",
+        "channel_source_text", "channel_options",
+    ]
+    from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
+
+    for key in CONTEXT_COMMAND_KEYS:
+        if key in updated and key not in preview_keys:
+            preview_keys.append(key)
+    draft = TaskDraft.model_validate(task.draft_json or {}).model_copy(
+        update={
+            "channel_status": status,
+            "channel_kind": kind,
+            "channel_source": "user",
+            "channel_status_label": status_label,
+            "channel_source_text": source_text,
+            "channel_origin_label": updated.get("channel_origin_label"),
+        }
+    )
+    waiting = TaskWaiting(
+        type=AssistantWaitingType.CONFIRMATION,
+        field="activity_write",
+        question_id=f"q_confirm_{task.public_id}_{task.version}",
+        prompt=CONFIRM_PROMPT,
+        fingerprint=updated["fingerprint"],
+        confirmation_payload={
+            "kind": "activity_write",
+            "preview": {key: updated[key] for key in preview_keys if key in updated},
+        },
+    )
+    authority = load_authority(task).model_copy(update={"frozen_activity_command": updated})
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            draft=draft,
+            activity_kind=kind if kind in MEETING_KINDS else None,
+            authority=authority,
+            waiting=waiting,
+            action_actor="USER",
+            action_name="revise_activity_kind",
+            action_input={"kind": kind},
+            action_result={"accepted": True, "kind": kind, "fingerprint": updated["fingerprint"]},
+            event_type="user_choice",
+            event_key=f"kind:{updated['fingerprint'][:24]}",
+            correlation_id=waiting.action_id,
+        ),
+    )
+    return result.task, TaskWaiting.model_validate(
+        {
+            **waiting.model_dump(),
+            "action_id": result.task.waiting_json["action_id"],
+            "expected_version": result.task.version,
+        }
+    )

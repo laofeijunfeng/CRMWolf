@@ -45,7 +45,11 @@ class ActivityPreview(BaseModel):
         "OTHER_FOLLOW_UP",
         "ONLINE_MEETING",
         "OFFLINE_MEETING",
-    ]
+    ] | None = None
+    channel_status: Literal["recognized", "required", "selected", "revised"] = "recognized"
+    channel_status_label: str | None = Field(default=None, max_length=40)
+    channel_source_text: str | None = Field(default=None, max_length=400)
+    channel_options: list[str] = Field(default_factory=list, max_length=7)
     title: str | None = None
     summary: str | None = None
     content_json: dict[str, object]
@@ -180,6 +184,16 @@ class TaskDraft(BaseModel):
     score_reason: str | None = None
     score_detail: dict[str, object] = Field(default_factory=dict)
     quality_score: DraftField = Field(default_factory=lambda: DraftField(status="MISSING"))
+    channel_status: Literal["recognized", "required", "selected", "revised"] | None = None
+    channel_kind: str | None = Field(default=None, max_length=32)
+    channel_source: Literal["model", "keyword", "user"] | None = None
+    channel_quote: str | None = Field(default=None, max_length=200)
+    channel_reason: str | None = Field(default=None, max_length=200)
+    channel_confidence: float | None = None
+    channel_status_label: str | None = Field(default=None, max_length=40)
+    channel_source_text: str | None = Field(default=None, max_length=400)
+    channel_options: list[str] = Field(default_factory=list, max_length=7)
+    channel_origin_label: str | None = Field(default=None, max_length=40)
 
 
 class TaskWaiting(BaseModel):

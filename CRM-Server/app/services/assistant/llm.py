@@ -30,13 +30,19 @@ if TYPE_CHECKING:
 
 
 
-KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断用户这段话描述的是哪种客户活动。
+KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断用户这段话要写入哪一种客户活动。
 
 规则：
-- FOLLOW_UP：普通跟进，电话、微信、邮件等日常沟通。
-- ONLINE_MEETING：线上会议，出现会议主题、参会人、会议结论或行动项且是远程形式。
-- OFFLINE_MEETING：线下会议或面谈拜访，且具备会议结构。
-- UNCLEAR：线上还是线下无法区分，或同时出现会议和拜访信号。
+- 只输出一种 kind：PHONE_FOLLOW_UP、WECHAT_FOLLOW_UP、EMAIL_FOLLOW_UP、
+  VISIT_FOLLOW_UP、OTHER_FOLLOW_UP、ONLINE_MEETING、OFFLINE_MEETING、UNCLEAR。
+- 电话、微信、邮件、拜访各自对应前面的跟进类型。
+  不要输出 FOLLOW_UP，也不要把明确渠道写成 OTHER_FOLLOW_UP。
+- ONLINE_MEETING 是线上会议。OFFLINE_MEETING 是线下会议。
+  普通拜访没有会议结构时用 VISIT_FOLLOW_UP。
+- confidence 取 0 到 1。只有一种渠道且原文明确时才高于或等于 0.8。
+- evidence_quote 必须是用户原文里的连续片段，不能改写。
+- channels 列出原文里出现的全部渠道；同时有电话和微信时都要列出，不能只留一个。
+- 没有渠道、多个渠道，或会议和跟进分不清时，kind 用 UNCLEAR，confidence 低于 0.8。
 
 只输出结构化结果，不要解释。"""
 
@@ -131,6 +137,9 @@ class AssistantLLM:
         kind: str,
         user_text: str,
     ) -> StructureDraftResult:
+        from app.services.assistant.activity_channel import structuring_kind
+
+        kind = structuring_kind(kind)
         if kind not in {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}:
             raise AssistantLLMError("未知活动类型")
         meeting = kind != "FOLLOW_UP"
