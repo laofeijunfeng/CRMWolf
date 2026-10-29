@@ -19,6 +19,7 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
+    QUALITY_GATE_FAILURE_MESSAGE,
     AssistantFailureCode,
     AssistantStageFailure,
 )
@@ -358,7 +359,7 @@ async def test_quality_gate_timeout_fails_closed_without_field_gap(db_session):
     assert failure.code is AssistantFailureCode.UPSTREAM_TIMEOUT
     assert failure.retryable is True
     assert failure.stage == "quality_gate"
-    assert failure.user_message == ORGANIZE_FAILURE_MESSAGE
+    assert failure.user_message == QUALITY_GATE_FAILURE_MESSAGE
     assert updated.waiting_type is None
     assert updated.last_error_code == "UPSTREAM_TIMEOUT"
     assert updated.status == AssistantTaskStatus.ACTIVE
@@ -889,3 +890,118 @@ async def test_action_contract_failure_is_not_a_draft_merge(db_session):
     assert logged["error_type"] == "ActionContractError"
     assert "action quote is not in the source" in logged["cause"]
     assert "model_type" not in logged["cause"]
+
+
+async def test_structure_timeout_keeps_organize_message_and_labels_upstream_timeout(db_session):
+    task = _make_task(db_session, activity_kind="FOLLOW_UP")
+
+    class TimeoutStructurer(FakeStructurer):
+        async def structure(self, db, *, team_id, kind, user_text):
+            try:
+                raise TimeoutError("read timed out")
+            except TimeoutError as exc:
+                raise AssistantLLMError(
+                    "跟进整理：AI 请求超时",
+                    code=AssistantFailureCode.UPSTREAM_TIMEOUT,
+                    cause=exc,
+                ) from exc
+
+    updated, failure = await _stage_failure(
+        db_session, task, "今天联系了客户", TimeoutStructurer(KindDecision(kind="FOLLOW_UP"))
+    )
+    assert failure.code is AssistantFailureCode.UPSTREAM_TIMEOUT
+    assert failure.stage == "structure"
+    assert failure.user_message == ORGANIZE_FAILURE_MESSAGE
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "upstream_timeout"
+    assert logged["code"] == "UPSTREAM_TIMEOUT"
+    assert logged["error_type"] == "AssistantLLMError"
+    assert "TimeoutError" in logged["cause"]
+    assert "read timed out" in logged["cause"]
+
+
+FUTURES_TEXT = (
+    "今天微信联系了上海期货信息技术有限公司的代理商商务左总对齐合同和发票方面的情况，"
+    "目前合同已经走完盖章流程，左总反馈发票今天可以开具，预计11月份可以完成付款；"
+    "11月15号跟进付款方面的情况"
+)
+
+
+async def test_month_only_commitment_survives_structuring(db_session):
+    from app.services.assistant.llm_contracts import ModelTemporalMention
+
+    task = _make_task(db_session, activity_kind="FOLLOW_UP")
+
+    def mention(raw, start, end, kind, role, ref, owner=""):
+        return ModelTemporalMention(
+            raw_text=raw,
+            quote_start=start,
+            quote_end=end,
+            kind=kind,
+            role=role,
+            owner=owner,
+            action_ref=ref,
+            confidence=0.9,
+        )
+
+    def action(ref, role, text, status, start, end, owner=""):
+        return ModelDraftAction(
+            action_ref=ref,
+            owner_role=role,
+            owner_text=owner,
+            action_text=text,
+            action_status=status,
+            evidence_quote=FUTURES_TEXT[start:end],
+            quote_start=start,
+            quote_end=end,
+        )
+
+    assert FUTURES_TEXT[68:72] == "11月份"
+    structured = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content="合同已经走完盖章流程。左总反馈发票今天可以开具，预计11月份可以完成付款。11月15号跟进付款。",
+        customer_name="上海期货信息技术有限公司",
+        next_action="11月15号跟进付款方面的情况",
+        next_follow_time_text="11月15号",
+        temporal_mentions=[
+            mention("今天", 0, 2, "RELATIVE_DAY", "SALES_FOLLOW_UP", "a1"),
+            mention("今天", 59, 61, "RELATIVE_DAY", "CUSTOMER_COMMITMENT", "a3", "左总"),
+            mention("11月份", 68, 72, "UNKNOWN", "CUSTOMER_COMMITMENT", "a4", "左总"),
+            mention("11月15号", 79, 85, "MONTH_DAY", "SALES_FOLLOW_UP", "a5"),
+        ],
+        actions=[
+            action("a1", "SALES", "微信联系对齐合同和发票", "COMPLETED", 0, 39),
+            action("a3", "CUSTOMER", "发票今天可以开具", "COMMITTED", 53, 65, "左总"),
+            action("a4", "CUSTOMER", "预计11月份可以完成付款", "PLANNED", 66, 78, "左总"),
+            action("a5", "SALES", "11月15号跟进付款方面的情况", "PLANNED", 79, 94),
+        ],
+        content_json={
+            "content": "合同已经走完盖章流程。左总反馈发票今天可以开具，预计11月份可以完成付款。",
+            "customer_feedback": "左总反馈发票今天可以开具，预计11月份可以完成付款。",
+            "current_progress": "目前合同已经走完盖章流程。",
+            "next_action": "11月15号跟进付款方面的情况",
+            "next_follow_time_text": "11月15号",
+        },
+    )
+    updated, message, waiting, failed = await intake_step(
+        db_session,
+        task,
+        FUTURES_TEXT,
+        FakeStructurer(KindDecision(kind="FOLLOW_UP"), structured),
+    )
+    assert failed is False
+    assert waiting is None
+    assert message == "已整理完成。"
+    draft = TaskDraft.model_validate(updated.draft_json)
+    assert draft.customer.value == "上海期货信息技术有限公司"
+    commitments = {item["text"] for item in draft.content_json["customer_commitments"]}
+    assert "左总发票今天可以开具。" in commitments
+    assert "左总预计11月份可以完成付款。" in commitments
+    month = next(item for item in draft.content_json["temporal_evidence"]["mentions"] if item["raw_text"] == "11月份")
+    assert month["role"] == "CUSTOMER_COMMITMENT"
+    assert month["resolution_status"] == "RESOLVED"
+    assert month["resolved_at"] is None
+    assert draft.content_json["next_follow_time_text"] == "11月15号"
+    assert "11月15号" in (draft.next_action.value or "")
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["accepted"] is True

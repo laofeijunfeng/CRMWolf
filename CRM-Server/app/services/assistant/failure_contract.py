@@ -74,6 +74,8 @@ def root_failure_retryable(code: AssistantFailureCode) -> bool:
 
 
 ORGANIZE_FAILURE_MESSAGE = "内容已保存，但整理未完成，尚未写入客户活动"
+QUALITY_GATE_FAILURE_MESSAGE = "内容已经整理，但质量评估没有完成，尚未写入客户活动"
+QUALITY_GATE_FAILURE_TITLE = "评估未完成"
 _EXPLICIT_ORGANIZE_CODES = frozenset(
     {
         AssistantFailureCode.CONFIGURATION_ERROR,

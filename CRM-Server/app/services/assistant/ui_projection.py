@@ -32,6 +32,8 @@ from app.services.agent.ui.schemas import (
 )
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
+    QUALITY_GATE_FAILURE_MESSAGE,
+    QUALITY_GATE_FAILURE_TITLE,
     ROOT_RETRYABLE_FAILURE_CODES,
     is_root_failure_code,
     root_failure_code,
@@ -210,8 +212,11 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
         # Turn-event organize/quality failures reuse the root codes but must not
         # offer the root entry retry or replace the saved-content sentence.
         failure = root_failure_code(code)
-        title = "整理未完成"
-        text = text or ORGANIZE_FAILURE_MESSAGE
+        if text == QUALITY_GATE_FAILURE_MESSAGE:
+            title = QUALITY_GATE_FAILURE_TITLE
+        else:
+            title = "整理未完成"
+            text = text or ORGANIZE_FAILURE_MESSAGE
         retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES
         trace_id = None
     error = ErrorBlock(

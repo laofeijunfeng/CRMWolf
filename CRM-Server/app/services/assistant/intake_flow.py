@@ -25,6 +25,8 @@ from app.services.assistant.events import (
 )
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
+    QUALITY_GATE_FAILURE_MESSAGE,
+    AssistantFailureCode,
     AssistantStageFailure,
     classify_organize_failure,
     failure_cause,
@@ -307,6 +309,8 @@ def _record_structuring_failure(
     draft.score_detail = {}
     code, retryable = classify_organize_failure(exc)
     detail = _structuring_failure(exc, stage=stage)
+    if detail["failure"] == "provider_schema" and code is AssistantFailureCode.UPSTREAM_TIMEOUT:
+        detail["failure"] = "upstream_timeout"
     detail.update(code=code.value, stage="structure", retryable=retryable)
     result = apply_task_update(
         db,
@@ -354,7 +358,7 @@ def raise_quality_gate_failure(db: Session, task: AssistantTask, exc: BaseExcept
         code=code,
         stage="quality_gate",
         retryable=retryable,
-        user_message=ORGANIZE_FAILURE_MESSAGE,
+        user_message=QUALITY_GATE_FAILURE_MESSAGE,
         task_public_id=result.task.public_id,
     )
 

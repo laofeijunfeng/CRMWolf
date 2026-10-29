@@ -37,6 +37,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("RELATIVE_MONTH", re.compile(r"下个?月\s*([0-9]{1,2})\s*[号日]")),
     ("MONTH_END", re.compile(r"下个?月底|下月末|本月底|这个月底|这个月末|本月末|月底")),
     ("MONTH_DAY", re.compile(r"(?:(20\d{2})\s*年\s*)?([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*[号日]")),
+    ("UNKNOWN", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
     ("RELATIVE_WEEKDAY", re.compile(r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
     ("RELATIVE_DAY", re.compile(r"大后天|后天|明天|今天|今日")),
@@ -243,7 +244,10 @@ def project_draft(draft: TaskDraft) -> None:
         action = _action_for(mention, actions)
         owner = mention.owner or (action.owner_text if action else "")
         verb = action.action_text if action else ""
-        text = _sentence(f"{owner}预计{mention.raw_text}{verb}")
+        if mention.raw_text and mention.raw_text in verb:
+            text = _sentence(f"{owner}{verb}")
+        else:
+            text = _sentence(f"{owner}预计{mention.raw_text}{verb}")
         commitments.append(
             {
                 "text": text,
@@ -557,6 +561,24 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
         if month < 1 or month > 12 or day < 1 or day > calendar.monthrange(year, month)[1]:
             return {"month": month, "day": day, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
         return _dated(year, month, day, hour_minute, anchor)
+    if kind == "UNKNOWN":
+        month_text = found.groups[0] if found.groups else None
+        month = int(month_text) if month_text and month_text.isdigit() else 0
+        if not 1 <= month <= 12:
+            return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
+        year = anchor.year if month >= anchor.month else anchor.year + 1
+        return {
+            "year": year,
+            "month": month,
+            "day": None,
+            "hour": None,
+            "minute": None,
+            "resolved_at": None,
+            "granularity": "UNKNOWN",
+            "resolution_status": "RESOLVED",
+            "ambiguity_reason": None,
+            "candidates": [],
+        }
     if kind == "RELATIVE_DAY":
         offsets = {"今天": 0, "今日": 0, "明天": 1, "后天": 2, "大后天": 3}
         key = next(name for name in offsets if found.raw_text.startswith(name))

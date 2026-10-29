@@ -339,6 +339,21 @@ def test_organize_failure_keeps_saved_content_sentence_and_skips_root_retry() ->
     assert denied.blocks[0].retryable is False
     assert denied.suggested_actions == []
 
+    from app.services.assistant.failure_contract import QUALITY_GATE_FAILURE_MESSAGE, QUALITY_GATE_FAILURE_TITLE
+
+    quality = _message(
+        "acm_123:atn_1:6",
+        QUALITY_GATE_FAILURE_MESSAGE,
+        outcome="failure",
+        error_code="UPSTREAM_TIMEOUT",
+        retryable=True,
+    )
+    quality_envelope = project_assistant_message(quality, active_waiting=False, active_boundary=False)
+    quality_error = quality_envelope.blocks[0]
+    assert quality_error.title == QUALITY_GATE_FAILURE_TITLE
+    assert quality_error.message == QUALITY_GATE_FAILURE_MESSAGE
+    assert quality_envelope.suggested_actions == []
+
 
 def test_downstream_failure_does_not_gain_a_root_retry_action() -> None:
     message = _message(

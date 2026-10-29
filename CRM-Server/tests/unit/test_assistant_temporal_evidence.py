@@ -260,3 +260,143 @@ def test_action_quote_miss_is_an_action_contract_error() -> None:
                 )
             ],
         )
+
+
+
+FUTURES = (
+    "今天微信联系了上海期货信息技术有限公司的代理商商务左总对齐合同和发票方面的情况，"
+    "目前合同已经走完盖章流程，左总反馈发票今天可以开具，预计11月份可以完成付款；"
+    "11月15号跟进付款方面的情况"
+)
+
+
+def _span(raw, start, end, kind, role, ref, owner=""):
+    return {
+        "raw_text": raw,
+        "quote_start": start,
+        "quote_end": end,
+        "kind": kind,
+        "role": role,
+        "owner": owner,
+        "action_ref": ref,
+        "confidence": 0.9,
+    }
+
+
+def _futures_mentions(*, month_kind: str = "UNKNOWN") -> list[dict[str, object]]:
+    return [
+        _span("今天", 0, 2, "RELATIVE_DAY", "SALES_FOLLOW_UP", "a1"),
+        _span("今天", 59, 61, "RELATIVE_DAY", "CUSTOMER_COMMITMENT", "a3", "左总"),
+        _span("11月份", 68, 72, month_kind, "CUSTOMER_COMMITMENT", "a4", "左总"),
+        _span("11月15号", 79, 85, "MONTH_DAY", "SALES_FOLLOW_UP", "a5"),
+    ]
+
+
+def _act(ref, role, text, status, start, end, owner=""):
+    return {
+        "action_ref": ref,
+        "owner_role": role,
+        "owner_text": owner,
+        "action_text": text,
+        "action_status": status,
+        "evidence_quote": FUTURES[start:end],
+        "quote_start": start,
+        "quote_end": end,
+    }
+
+
+def _futures_actions() -> list[dict[str, object]]:
+    return [
+        _act("a1", "SALES", "微信联系对齐合同和发票", "COMPLETED", 0, 39),
+        _act("a3", "CUSTOMER", "发票今天可以开具", "COMMITTED", 53, 65, "左总"),
+        _act("a4", "CUSTOMER", "预计11月份可以完成付款", "PLANNED", 66, 78, "左总"),
+        _act("a5", "SALES", "11月15号跟进付款方面的情况", "PLANNED", 79, 94),
+    ]
+
+
+def test_digit_month_is_a_span_and_does_not_swallow_the_follow_up_day() -> None:
+    spans = [(item.kind, item.raw_text) for item in find_time_spans(FUTURES)]
+    assert spans == [
+        ("RELATIVE_DAY", "今天"),
+        ("RELATIVE_DAY", "今天"),
+        ("UNKNOWN", "11月份"),
+        ("MONTH_DAY", "11月15号"),
+    ]
+    ensure_mentions_cover_source(FUTURES, _futures_mentions())
+
+
+def test_digit_month_commitment_stays_month_level_and_sales_keeps_november_15() -> None:
+    draft = _draft(FUTURES)
+    attach_model_evidence(
+        draft,
+        segment_id="seg_futures",
+        segment_text=FUTURES,
+        anchor=datetime(2026, 10, 29, 19, 0),
+        mentions=_futures_mentions(),
+        actions=_futures_actions(),
+    )
+    listed = draft.content_json["temporal_evidence"]["mentions"]
+    mentions = {item["raw_text"]: item for item in listed}
+    todays = [item for item in listed if item["raw_text"] == "今天"]
+    assert [item["role"] for item in todays] == ["OTHER", "CUSTOMER_COMMITMENT"]
+    assert mentions["11月份"]["year"] == 2026
+    assert mentions["11月份"]["month"] == 11
+    assert mentions["11月份"]["day"] is None
+    assert mentions["11月份"]["resolved_at"] is None
+    assert mentions["11月份"]["resolution_status"] == "RESOLVED"
+    assert mentions["11月份"]["role"] == "CUSTOMER_COMMITMENT"
+    assert mentions["11月15号"]["role"] == "SALES_FOLLOW_UP"
+    assert mentions["11月15号"]["resolved_at"] == "2026-11-15T00:00:00"
+    texts = [item["text"] for item in draft.content_json["customer_commitments"]]
+    assert "左总发票今天可以开具。" in texts
+    assert "左总预计11月份可以完成付款。" in texts
+    assert temporal_waiting(draft) is None
+    resolved, granularity = resolved_sales_follow_up(draft)
+    assert (resolved, granularity) == (datetime(2026, 11, 15), "DATE")
+
+
+def test_past_digit_month_uses_next_year() -> None:
+    text = "预计11月份可以完成付款"
+    draft = _draft(text)
+    attach_model_evidence(
+        draft,
+        segment_id="seg_past",
+        segment_text=text,
+        anchor=datetime(2026, 12, 2, 9, 0),
+        mentions=[{
+            "raw_text": "11月份",
+            "quote_start": 2,
+            "quote_end": 6,
+            "kind": "UNKNOWN",
+            "role": "CUSTOMER_COMMITMENT",
+            "owner": "左总",
+            "action_ref": "a1",
+            "confidence": 0.9,
+        }],
+        actions=[{
+            "action_ref": "a1",
+            "owner_role": "CUSTOMER",
+            "owner_text": "左总",
+            "action_text": "预计11月份可以完成付款",
+            "action_status": "COMMITTED",
+            "evidence_quote": text,
+            "quote_start": 0,
+            "quote_end": len(text),
+        }],
+    )
+    mention = draft.content_json["temporal_evidence"]["mentions"][0]
+    assert (mention["year"], mention["month"], mention["day"]) == (2027, 11, None)
+    assert temporal_waiting(draft) is None
+
+
+def test_wrong_kind_for_digit_month_is_still_rejected() -> None:
+    draft = _draft(FUTURES)
+    with pytest.raises(TemporalContractError, match="temporal mention does not match a source span"):
+        attach_model_evidence(
+            draft,
+            segment_id="seg_futures",
+            segment_text=FUTURES,
+            anchor=datetime(2026, 10, 29, 19, 0),
+            mentions=_futures_mentions(month_kind="MONTH_DAY"),
+            actions=_futures_actions(),
+        )
