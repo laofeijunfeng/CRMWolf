@@ -308,6 +308,38 @@ def test_root_model_failures_use_fixed_copy_and_retry_only_three_codes() -> None
             assert envelope.suggested_actions == []
 
 
+def test_organize_failure_keeps_saved_content_sentence_and_skips_root_retry() -> None:
+    from app.services.assistant.failure_contract import ORGANIZE_FAILURE_MESSAGE
+
+    message = _message(
+        "acm_123:atn_1:4",
+        ORGANIZE_FAILURE_MESSAGE,
+        outcome="failure",
+        error_code="UPSTREAM_TIMEOUT",
+        retryable=True,
+    )
+    envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+    error = envelope.blocks[0]
+    assert error.type == "error"
+    assert error.code == "UPSTREAM_TIMEOUT"
+    assert error.title == "整理未完成"
+    assert error.message == ORGANIZE_FAILURE_MESSAGE
+    assert error.retryable is True
+    assert error.trace_id is None
+    assert envelope.suggested_actions == []
+
+    hidden = _message(
+        "acm_123:atn_1:5",
+        ORGANIZE_FAILURE_MESSAGE,
+        outcome="failure",
+        error_code="CONFIGURATION_ERROR",
+        retryable=False,
+    )
+    denied = project_assistant_message(hidden, active_waiting=False, active_boundary=False)
+    assert denied.blocks[0].retryable is False
+    assert denied.suggested_actions == []
+
+
 def test_downstream_failure_does_not_gain_a_root_retry_action() -> None:
     message = _message(
         "entry:turn:1",

@@ -170,7 +170,7 @@ const endProcessing = (): void => {
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
   const base = 'Agent 正在处理，通常需要 30–60 秒…'
-  if (elapsedSeconds.value >= 60) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容已保存，刷新后可继续）`
+  if (elapsedSeconds.value >= 60) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容已保存，处理仍在后台继续，刷新后会自动恢复）`
   if (elapsedSeconds.value >= 15) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容不会丢失，请稍候）`
   return base
 })

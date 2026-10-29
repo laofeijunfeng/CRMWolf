@@ -21,6 +21,7 @@ from app.models.assistant import AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.coordinator import AssistantInput
 from app.services.assistant.events import ProgressReporter, TurnStage
+from app.services.assistant.failure_contract import AssistantStageFailure
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import InvalidTaskTransitionError, TaskStateConflictError, load_waiting
 from app.utils.time import business_now
@@ -706,6 +707,67 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             )
             if followup is not None:
                 followup_turn_id = followup.id
+            return
+        except AssistantStageFailure as exc:
+            now = business_now()
+            fence = db.execute(
+                update(AssistantTurn)
+                .where(
+                    AssistantTurn.id == turn_id,
+                    AssistantTurn.status == "RUNNING",
+                    AssistantTurn.lease_owner == owner,
+                    AssistantTurn.lease_version == version,
+                    AssistantTurn.lease_expires_at > now,
+                )
+                .values(
+                    status="FAILED",
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    last_error_code=exc.code.value,
+                    last_modified_time=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if fence.rowcount != 1:
+                db.rollback()
+                return
+            released = db.execute(
+                update(AssistantTask)
+                .where(
+                    AssistantTask.id == turn.task_id,
+                    AssistantTask.active_turn_id == turn_id,
+                )
+                .values(active_turn_id=None)
+                .execution_options(synchronize_session=False)
+            )
+            if released.rowcount != 1:
+                db.rollback()
+                return
+            db.refresh(turn)
+            add_event(
+                db,
+                turn,
+                "error",
+                {
+                    "code": exc.code.value,
+                    "stage": exc.stage,
+                    "retryable": exc.retryable,
+                    "message": exc.user_message,
+                    "task_public_id": exc.task_public_id,
+                },
+            )
+            db.commit()
+            logger.info(
+                "assistant_turn_terminal result=failed task=%s turn=%s lease_version=%s attempts=%s "
+                "last_seq=%s event_name=error code=%s stage=%s",
+                exc.task_public_id,
+                turn.public_id,
+                version,
+                turn.attempts,
+                max(turn.next_seq - 1, 0),
+                exc.code.value,
+                exc.stage,
+            )
             return
         except asyncio.CancelledError:
             db.rollback()

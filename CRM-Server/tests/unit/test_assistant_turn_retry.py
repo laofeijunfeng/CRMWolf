@@ -252,3 +252,120 @@ def test_activity_receipt_blocks_reprocess(
     assert response.json()["status"] == "FAILED"
     assert response.json()["reprocess_allowed"] is False
     assert scheduled == []
+
+
+def test_organize_stage_failure_is_failed_and_reprocessed_without_a_new_request(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    from app.models.assistant_conversation import AssistantConversationEntry
+    from app.services.assistant.failure_contract import (
+        ORGANIZE_FAILURE_MESSAGE,
+        AssistantFailureCode,
+        AssistantStageFailure,
+    )
+
+    task, turn = retryable_turn
+    requests_before = db_session.query(AssistantRequest).count()
+    entries_before = db_session.query(AssistantConversationEntry).count()
+    from app.services.assistant.contracts import TaskDraft
+
+    source = "今天跟客户确认服务器准备情况"
+
+    async def handle_task(db: Session, current: AssistantTask, _user_input: object, reporter: object = None) -> None:
+        current.draft_json = TaskDraft(source_segments=[source]).model_dump(mode="json")
+        current.last_error_code = "UPSTREAM_TIMEOUT"
+        current.committed_json = []
+        db.flush()
+        raise AssistantStageFailure(
+            code=AssistantFailureCode.UPSTREAM_TIMEOUT,
+            stage="structure",
+            retryable=True,
+            user_message=ORGANIZE_FAILURE_MESSAGE,
+            task_public_id=current.public_id,
+        )
+
+    monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=handle_task))
+    factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
+    asyncio.run(turns.execute_turn(turn.id, factory=factory))
+    db_session.expire_all()
+    latest_turn = db_session.get(AssistantTurn, turn.id)
+    latest_task = db_session.get(AssistantTask, task.id)
+    assert latest_turn is not None and latest_task is not None
+    assert latest_turn.status == "FAILED"
+    assert latest_turn.last_error_code == "UPSTREAM_TIMEOUT"
+    assert latest_task.status == "ACTIVE"
+    assert latest_task.active_turn_id is None
+    assert latest_task.last_error_code == "UPSTREAM_TIMEOUT"
+    assert latest_task.draft_json["source_segments"] == [source]
+    assert latest_task.committed_json == []
+    events = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id).all()
+    errors = [event for event in events if event.event == "error"]
+    assert len(errors) == 1
+    assert errors[0].data_json["code"] == "UPSTREAM_TIMEOUT"
+    assert errors[0].data_json["stage"] == "structure"
+    assert errors[0].data_json["retryable"] is True
+    assert errors[0].data_json["task_public_id"] == task.public_id
+    assert errors[0].data_json["message"] == ORGANIZE_FAILURE_MESSAGE
+    assert not any(event.event == "waiting" for event in events)
+    assert db_session.query(AssistantRequest).count() == requests_before
+    assert db_session.query(AssistantConversationEntry).count() == entries_before
+
+    scheduled: list[int] = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry",
+        json={"expected_lease_version": latest_turn.lease_version, "after_seq": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "PENDING"
+    assert response.json()["reprocess_allowed"] is False
+    assert scheduled == [turn.id]
+    db_session.expire_all()
+    assert db_session.query(AssistantTurn).count() == 1
+    assert db_session.query(AssistantRequest).count() == requests_before
+    assert db_session.query(AssistantConversationEntry).count() == entries_before
+
+
+def test_unexpected_turn_exception_rolls_back_uncommitted_task_edits(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, turn = retryable_turn
+    original_goal = task.goal
+
+    async def handle_task(db: Session, current: AssistantTask, _user_input: object, reporter: object = None) -> None:
+        current.goal = "不应提交的目标"
+        db.flush()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=handle_task))
+    factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
+    asyncio.run(turns.execute_turn(turn.id, factory=factory))
+    db_session.expire_all()
+    latest_turn = db_session.get(AssistantTurn, turn.id)
+    latest_task = db_session.get(AssistantTask, task.id)
+    assert latest_turn is not None and latest_task is not None
+    assert latest_turn.status == "FAILED"
+    assert latest_task.goal == original_goal
+    assert latest_task.status == "ACTIVE"
+
+
+def test_recover_pending_turn_does_not_create_entry_or_request(
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    from app.models.assistant_conversation import AssistantConversationEntry
+
+    _task, turn = retryable_turn
+    requests_before = db_session.query(AssistantRequest).count()
+    entries_before = db_session.query(AssistantConversationEntry).count()
+    scheduled: list[int] = []
+    monkeypatch.setattr(turns, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    recovered = asyncio.run(turns.recover_turns())
+    assert turn.id in scheduled
+    assert recovered >= 1
+    db_session.expire_all()
+    assert db_session.query(AssistantRequest).count() == requests_before
+    assert db_session.query(AssistantConversationEntry).count() == entries_before
+    assert db_session.get(AssistantTurn, turn.id).status == "PENDING"

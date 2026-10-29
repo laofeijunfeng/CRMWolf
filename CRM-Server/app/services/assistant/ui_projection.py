@@ -31,6 +31,7 @@ from app.services.agent.ui.schemas import (
     TextBlock,
 )
 from app.services.assistant.failure_contract import (
+    ORGANIZE_FAILURE_MESSAGE,
     ROOT_RETRYABLE_FAILURE_CODES,
     is_root_failure_code,
     root_failure_code,
@@ -194,18 +195,25 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
         )
         return _envelope(message, (notice,), route="WORKFLOW", state="final")
     actions: tuple[AgentUIAction, ...] = ()
-    trace_id = None
+    trace_id = _reply_entry_id(message.id)
     retryable = False
     title = _ERROR_TITLES.get(code, "遇到问题" if code == "INTERNAL_ERROR" else "这次没处理成")
-    if is_root_failure_code(code):
+    if is_root_failure_code(code) and trace_id is not None:
         failure = root_failure_code(code)
         presentation = root_failure_presentation(failure)
         title = presentation.title
         text = presentation.message
-        trace_id = _reply_entry_id(message.id)
-        retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES and trace_id is not None
-        if retryable and trace_id is not None:
+        retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES
+        if retryable:
             actions = (RetryAction(type="retry", action_id=f"retry:{trace_id}", label="重试"),)
+    elif is_root_failure_code(code):
+        # Turn-event organize/quality failures reuse the root codes but must not
+        # offer the root entry retry or replace the saved-content sentence.
+        failure = root_failure_code(code)
+        title = "整理未完成"
+        text = text or ORGANIZE_FAILURE_MESSAGE
+        retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES
+        trace_id = None
     error = ErrorBlock(
         id="b_error_1",
         type="error",

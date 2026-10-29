@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 from pydantic import ValidationError
 
@@ -22,6 +22,12 @@ from app.services.assistant.events import (
 )
 from app.services.assistant.events import (
     stage as mk_stage,
+)
+from app.services.assistant.failure_contract import (
+    ORGANIZE_FAILURE_MESSAGE,
+    AssistantStageFailure,
+    classify_organize_failure,
+    failure_cause,
 )
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.quality_gate import QualityGateOutcome
@@ -295,22 +301,62 @@ def _record_structuring_failure(
     exc: BaseException,
     *,
     stage: str,
-) -> tuple[AssistantTask, str, None, bool]:
+) -> NoReturn:
     draft.quality_score = DraftField(status="MISSING")
     draft.score_reason = None
     draft.score_detail = {}
+    code, retryable = classify_organize_failure(exc)
+    detail = _structuring_failure(exc, stage=stage)
+    detail.update(code=code.value, stage="structure", retryable=retryable)
     result = apply_task_update(
         db,
         task,
         TaskUpdate(
             draft=draft,
-            error_code="STRUCTURING_UNAVAILABLE",
+            error_code=code.value,
             action_actor="SYSTEM",
             action_name="structure_draft",
-            action_result=_structuring_failure(exc, stage=stage),
+            action_result=detail,
         ),
     )
-    return result.task, "整理暂时没有完成，请稍后重试。", None, True
+    raise AssistantStageFailure(
+        code=code,
+        stage="structure",
+        retryable=retryable,
+        user_message=ORGANIZE_FAILURE_MESSAGE,
+        task_public_id=result.task.public_id,
+    )
+
+
+def raise_quality_gate_failure(db: Session, task: AssistantTask, exc: BaseException) -> NoReturn:
+    """Persist a technical quality failure and stop the turn. Never asks a field."""
+
+    code, retryable = classify_organize_failure(exc)
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            error_code=code.value,
+            action_actor="SYSTEM",
+            action_name="quality_gate",
+            action_result={
+                "passed": False,
+                "retryable": retryable,
+                "code": code.value,
+                "stage": "quality_gate",
+                "failure": "quality_gate",
+                "error_type": type(exc).__name__,
+                "cause": failure_cause(exc),
+            },
+        ),
+    )
+    raise AssistantStageFailure(
+        code=code,
+        stage="quality_gate",
+        retryable=retryable,
+        user_message=ORGANIZE_FAILURE_MESSAGE,
+        task_public_id=result.task.public_id,
+    )
 
 
 async def intake_step(
@@ -403,19 +449,19 @@ async def intake_step(
         )
         reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
     except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
-        # Transient LLM failure must not kill the task: it stays ACTIVE.
-        return _record_structuring_failure(db, task, draft, exc, stage="structure")
+        # Technical failure keeps the task ACTIVE but must not look like success.
+        _record_structuring_failure(db, task, draft, exc, stage="structure")
 
     try:
         draft = apply_structured_draft(task, structured, correction_text=user_text)
     except (ValueError, TypeError, ValidationError) as exc:
         draft = TaskDraft.model_validate(task.draft_json or {})
-        return _record_structuring_failure(db, task, draft, exc, stage="apply")
+        _record_structuring_failure(db, task, draft, exc, stage="apply")
     try:
         reconcile_action_evidence(draft, task.activity_kind or "FOLLOW_UP")
     except (ValueError, TypeError, ValidationError) as exc:
         draft = TaskDraft.model_validate(task.draft_json or {})
-        return _record_structuring_failure(db, task, draft, exc, stage="reconcile")
+        _record_structuring_failure(db, task, draft, exc, stage="reconcile")
     draft.quality_score = DraftField(status="MISSING")
     draft.score_reason = None
     draft.score_detail = {}
@@ -459,18 +505,8 @@ async def intake_step(
         ):
             raise ValueError("quality gate returned an invalid outcome")
         reporter.stage_done(_S_GATE, ms=int((time.monotonic() - _t0) * 1000), score=gate_outcome.score)
-    except (AssistantLLMError, TimeoutError, ValueError, TypeError):
-        result = apply_task_update(
-            db,
-            task,
-            TaskUpdate(
-                error_code="QUALITY_GATE_UNAVAILABLE",
-                action_actor="SYSTEM",
-                action_name="quality_gate",
-                action_result={"passed": False, "retryable": True},
-            ),
-        )
-        return result.task, "评分暂时没有完成，请稍后重试。", None, True
+    except (AssistantLLMError, TimeoutError, ValueError, TypeError) as exc:
+        raise_quality_gate_failure(db, task, exc)
 
     draft.score_reason = gate_outcome.reason
     draft.score_detail = {

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -21,7 +22,7 @@ from app.services.assistant.confirmation import execute_confirmation, freeze_con
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter
-from app.services.assistant.intake_flow import intake_step, kind_waiting
+from app.services.assistant.intake_flow import intake_step, kind_waiting, raise_quality_gate_failure
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
@@ -32,6 +33,8 @@ from app.services.assistant.task_state import (
     load_waiting,
 )
 from app.utils.time import resolve_follow_up_time
+
+logger = logging.getLogger(__name__)
 
 
 class AssistantInput(BaseModel):
@@ -166,7 +169,12 @@ class AssistantCoordinator:
                 clear_waiting=True,
                 action_actor="USER",
                 action_name="cancel_task",
+                action_input={"source": "explicit_user_cancel", "input_kind": "cancel"},
             ),
+        )
+        logger.info(
+            "assistant_task_cancelled source=explicit_user_cancel task=%s",
+            result.task.public_id,
         )
         return CoordinatorOutcome(
             reply=CoordinatorReply(
@@ -559,25 +567,8 @@ class AssistantCoordinator:
                 kind=task.activity_kind or "FOLLOW_UP",
                 content_json=draft.content_json,
             )
-        except (AssistantLLMError, TimeoutError, ValueError, TypeError):
-            result = apply_task_update(
-                db,
-                task,
-                TaskUpdate(
-                    error_code="QUALITY_GATE_UNAVAILABLE",
-                    action_actor="SYSTEM",
-                    action_name="quality_gate",
-                    action_result={"passed": False, "retryable": True},
-                ),
-            )
-            return CoordinatorOutcome(
-                CoordinatorReply(
-                    task_public_id=result.task.public_id,
-                    status=result.task.status,
-                    message="评分暂时没有完成，请稍后重试。",
-                ),
-                result.task,
-            )
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError) as exc:
+            raise_quality_gate_failure(db, task, exc)
         if not gate_outcome.passed:
             gap = TaskWaiting(
                 type=AssistantWaitingType.FIELD,

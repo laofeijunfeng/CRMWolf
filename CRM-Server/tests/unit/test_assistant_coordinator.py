@@ -126,6 +126,13 @@ async def test_cancel_closes_task_and_clears_waiting(db_session):
     assert outcome.task.status == AssistantTaskStatus.CANCELLED
     assert outcome.task.waiting_type is None
     assert "当前这件已停下" in outcome.reply.message
+    action = (
+        db_session.query(AssistantAction)
+        .filter_by(task_id=outcome.task.id, action="cancel_task")
+        .one()
+    )
+    assert action.actor == "USER"
+    assert action.input_json == {"source": "explicit_user_cancel", "input_kind": "cancel"}
 
 
 async def test_blank_field_answer_reasks_same_question(db_session):

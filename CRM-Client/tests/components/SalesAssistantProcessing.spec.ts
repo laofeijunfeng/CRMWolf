@@ -96,27 +96,67 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(wrapper.text()).not.toContain('已写入')
   })
 
-  it('reads the business result after the stream is lost without retrying the turn', async () => {
+  it('reads an organize failure after the stream is lost without cancelling or retrying', async () => {
+    const failure = '内容已保存，但整理未完成，尚未写入客户活动'
     const current = makeTask({ processing_turn_id: 'atn_one', processing_turn_status: 'RUNNING' })
-    const finished = makeTask({ waiting: field() })
+    const finished = makeTask({ reprocess_turn_id: 'atn_one' })
     mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))
-    mocks.get.mockResolvedValue(view({ focused_task: finished, messages: [message('user', '只收下一次的跟进', null, 'user'), message('result', '整理暂时没有完成，请稍后重试。', finished)] }))
+    mocks.get.mockResolvedValue(view({ focused_task: finished, messages: [message('user', '只收下一次的跟进', null, 'user'), message('result', failure, finished)] }))
     drive((handlers) => { handlers.onAccepted('atn_one', 1); handlers.onNetworkLost() })
     mocks.turn.mockResolvedValue({
-      turn_id: 'atn_one', status: 'SUCCEEDED', lease_version: 1, reprocess_allowed: false,
-      events: [{ seq: 2, event: 'waiting', data: { message: '整理暂时没有完成，请稍后重试。' } }],
+      turn_id: 'atn_one', status: 'FAILED', lease_version: 1, reprocess_allowed: true,
+      events: [{ seq: 2, event: 'error', data: { code: 'UPSTREAM_TIMEOUT', stage: 'structure', retryable: true, message: failure, task_public_id: 'ast_one' } }],
       task: finished
     })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper, '只收下一次的跟进')
     expect(mocks.retry).not.toHaveBeenCalled()
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(mocks.choice).not.toHaveBeenCalled()
     expect(mocks.turn).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('整理暂时没有完成，请稍后重试。')
+    expect(wrapper.text()).toContain(failure)
+    expect(wrapper.text()).toContain('重新处理')
+    expect(wrapper.text()).not.toContain('刷新后可继续')
     expect(wrapper.text()).not.toContain('连接中断')
     expect(wrapper.text()).not.toContain('重试同步')
     expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(mocks.choice).not.toHaveBeenCalled()
+  })
+
+  it('hides reprocess when the organize failure is not retryable', async () => {
+    const failure = '内容已保存，但整理未完成，尚未写入客户活动'
+    const finished = makeTask({ reprocess_turn_id: null })
+    show(view({ focused_task: finished, messages: [message('result', failure, finished, 'assistant')] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(wrapper.text()).toContain(failure)
+    expect(wrapper.text()).not.toContain('重新处理')
+    wrapper.unmount()
+    expect(mocks.command).not.toHaveBeenCalled()
+  })
+
+  it('promises only that a saved turn keeps running after one minute', async () => {
+    vi.useFakeTimers()
+    const current = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))
+    drive(async () => { await new Promise<void>(() => undefined) })
+    const wrapper = mount(SalesAssistantChat)
+    try {
+      await flushPromises()
+      await send(wrapper)
+      await vi.advanceTimersByTimeAsync(60_000)
+      await flushPromises()
+      expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续，刷新后会自动恢复')
+      expect(wrapper.text()).not.toContain('刷新后可继续')
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(mocks.choice).not.toHaveBeenCalled()
   })
 
   it('keeps polling a live turn with GET and does not restart it', async () => {
