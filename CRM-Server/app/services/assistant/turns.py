@@ -157,6 +157,7 @@ def accept_submit(
             "OBJECT_SELECTION": "submit_field",
             "FIELD": "submit_field",
             "CONFIRMATION": "confirm",
+            "FOLLOW_UP_DISPOSITION": "submit_field",
         }
         revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
         if kind != allowed[waiting.type] and not revising:
@@ -176,6 +177,10 @@ def accept_submit(
                 or text is not None
             ):
                 raise AssistantStateConflict("请选择当前签发的客户")
+        elif waiting.type == "FOLLOW_UP_DISPOSITION":
+            offered = {candidate.get("id") for candidate in waiting.candidates}
+            if not isinstance(choice, str) or choice not in offered or text is not None:
+                raise AssistantStateConflict("请选择当前签发的历史任务处理")
         elif waiting.type == "FIELD" and waiting.field == "temporal_choice":
             offered: set[str] = set()
             for candidate in waiting.candidates:
@@ -692,6 +697,8 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             db.refresh(turn)
             db.refresh(outcome.task)
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
+            if outcome.reply.card:
+                data["card"] = outcome.reply.card
             if followup is not None:
                 data["next_turn_id"] = followup.public_id
             add_event(db, turn, "waiting", data)

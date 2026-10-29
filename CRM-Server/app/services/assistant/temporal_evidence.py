@@ -33,6 +33,7 @@ _CLOCK = re.compile(
     r"(?:[的\s]*)(?:(上午|下午|晚上|中午|早上)?(?:(\d{1,2})[:：](\d{2})(?::(\d{2}))?"
     r"|([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?))"
 )
+_PERIOD = re.compile(r"[的\s]*(?:上午|下午|晚上|中午|早上)")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("RELATIVE_MONTH", re.compile(r"下个?月\s*([0-9]{1,2})\s*[号日]")),
     ("MONTH_END", re.compile(r"下个?月底|下月末|本月底|这个月底|这个月末|本月末|月底")),
@@ -40,6 +41,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("UNKNOWN", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
     ("RELATIVE_WEEKDAY", re.compile(r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
+    ("RELATIVE_WEEK", re.compile(r"(?:下个?|本|这)(?:周|星期|礼拜)(?![一二三四五六日天期])")),
     ("RELATIVE_DAY", re.compile(r"大后天|后天|明天|今天|今日")),
     ("DAY_OF_MONTH", re.compile(r"([0-9]{1,2})\s*[号日]")),
 )
@@ -579,6 +581,14 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
             "ambiguity_reason": None,
             "candidates": [],
         }
+    if kind == "RELATIVE_WEEK":
+        return {
+            "resolution_status": "RESOLVED",
+            "granularity": "UNKNOWN",
+            "resolved_at": None,
+            "ambiguity_reason": None,
+            "candidates": [],
+        }
     if kind == "RELATIVE_DAY":
         offsets = {"今天": 0, "今日": 0, "明天": 1, "后天": 2, "大后天": 3}
         key = next(name for name in offsets if found.raw_text.startswith(name))
@@ -846,9 +856,12 @@ def _exact_slice(text: str, start: int, end: int, raw: str) -> str:
 
 def _extend_clock(text: str, end: int) -> int:
     match = _CLOCK.match(text[end:])
-    if match is None or not match.group(0).strip(" 的"):
-        return end
-    return end + match.end()
+    if match is not None and match.group(0).strip(" 的"):
+        return end + match.end()
+    period = _PERIOD.match(text[end:])
+    if period is not None and period.group(0).strip(" 的"):
+        return end + period.end()
+    return end
 
 
 def _clock_in_text(raw: str) -> tuple[int, int] | None:

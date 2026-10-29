@@ -56,6 +56,7 @@ class CoordinatorReply(BaseModel):
     status: str
     message: str = Field(min_length=1, max_length=2000)
     waiting: TaskWaiting | None = None
+    card: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,9 @@ class AssistantCoordinator:
                 item.get("kind") == "customer_activity" for item in task.committed_json or []
             ):
                 raise InvalidTaskTransitionError("proposal continuation requires a committed activity")
+            handled = await self._open_follow_up_or_none(db, task)
+            if handled is not None:
+                return handled
             from app.services.assistant.proposals import offer_next_proposal
 
             updated, message, _ = await offer_next_proposal(db, task)
@@ -203,6 +207,8 @@ class AssistantCoordinator:
             return await self._answer_activity_kind(db, task, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.OBJECT_SELECTION:
             return await self._answer_object_selection(db, task, waiting, user_input, reporter=reporter)
+        if waiting.type == AssistantWaitingType.FOLLOW_UP_DISPOSITION:
+            return await self._answer_open_follow_up(db, task, user_input)
         if waiting.field == "temporal_choice":
             return await self._answer_temporal_choice(db, task, waiting, user_input, reporter=reporter)
         return await self._answer_field(db, task, waiting, user_input, reporter=reporter)
@@ -865,6 +871,42 @@ class AssistantCoordinator:
 
         return await self._prepare_confirmation(db, updated)
 
+    async def _open_follow_up_or_none(self, db: Session, task: AssistantTask) -> CoordinatorOutcome | None:
+        from app.services.assistant.open_follow_up_disposition import advance_open_follow_up
+
+        outcome = await advance_open_follow_up(db, task)
+        if outcome is None:
+            return None
+        return CoordinatorOutcome(
+            CoordinatorReply(
+                task_public_id=outcome.task.public_id,
+                status=outcome.task.status,
+                message=outcome.message,
+                waiting=load_waiting(outcome.task),
+                card="follow_up_disposition",
+            ),
+            outcome.task,
+            start_followup=outcome.start_followup,
+        )
+
+    async def _answer_open_follow_up(
+        self, db: Session, task: AssistantTask, user_input: AssistantInput,
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.open_follow_up_disposition import settle_open_follow_up
+
+        outcome = await settle_open_follow_up(db, task, (user_input.choice or "").strip())
+        return CoordinatorOutcome(
+            CoordinatorReply(
+                task_public_id=outcome.task.public_id,
+                status=outcome.task.status,
+                message=outcome.message,
+                waiting=load_waiting(outcome.task),
+                card="follow_up_disposition",
+            ),
+            outcome.task,
+            start_followup=outcome.start_followup,
+        )
+
     async def _advance(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
         """No waiting: server-gated proposal flow, then chooser nomination."""
 
@@ -874,6 +916,9 @@ class AssistantCoordinator:
             and any(str(item.get("kind", "")) == "customer_activity" for item in task.committed_json or [])
             and task.status == AssistantTaskStatus.ACTIVE
         ):
+            handled = await self._open_follow_up_or_none(db, task)
+            if handled is not None:
+                return handled
             from app.services.assistant.proposals import offer_next_proposal
 
             proposed_task, message, offered = await offer_next_proposal(db, task)

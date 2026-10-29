@@ -10,7 +10,7 @@ from app.services.assistant.action_evidence import (
     SourceSegment,  # noqa: TC001 - Pydantic resolves the source-record schema at runtime.
 )
 
-WaitingType = Literal["FIELD", "CONFIRMATION", "ACTIVITY_KIND", "OBJECT_SELECTION"]
+WaitingType = Literal["FIELD", "CONFIRMATION", "ACTIVITY_KIND", "OBJECT_SELECTION", "FOLLOW_UP_DISPOSITION"]
 Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
@@ -244,6 +244,7 @@ class TaskAuthority(BaseModel):
     activity_public_id: str | None = Field(default=None, max_length=64)
     confirmation_receipt: str | None = Field(default=None, max_length=128)
     frozen_activity_command: dict[str, object] | None = None
+    open_follow_up_batch: dict[str, object] | None = None
 
 
 class AssistantTaskSnapshot(BaseModel):

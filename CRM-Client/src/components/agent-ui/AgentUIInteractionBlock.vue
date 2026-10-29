@@ -95,6 +95,24 @@ const canCancel = computed(() => (
 const isCompactTaskCompletion = computed(() => (
   props.block.presentation === 'COMPACT_TASK_COMPLETION'
 ))
+const isOpenFollowUpDisposition = computed(() => (
+  props.block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION'
+))
+const dispositionItems = computed(() => props.block.disposition_items ?? [])
+const dispositionTotal = computed(() => dispositionItems.value.length)
+const dispositionCurrentIndex = computed(() => {
+  const index = dispositionItems.value.findIndex(item => item.state === 'current')
+  return index === -1 ? null : index + 1
+})
+const dispositionProgress = computed(() => (
+  dispositionCurrentIndex.value === null
+    ? `已处理 ${dispositionTotal.value} / ${dispositionTotal.value}`
+    : `待确认 ${dispositionCurrentIndex.value} / ${dispositionTotal.value}`
+))
+const evidenceOpenId = ref<string | null>(null)
+const toggleEvidence = (itemId: string): void => {
+  evidenceOpenId.value = evidenceOpenId.value === itemId ? null : itemId
+}
 const compactCompletionOption = computed(() => props.block.options[0])
 const compactCompletionSucceeded = computed(() => props.block.state === 'SUBMITTED')
 
@@ -431,6 +449,80 @@ const submit = async (): Promise<void> => {
     >
       {{ compactStateLabel }}
     </span>
+  </section>
+
+  <section
+    v-else-if="isOpenFollowUpDisposition"
+    ref="interactionRef"
+    class="agent-ui-interaction grid gap-3 rounded-wolf-surface border border-[#bfdbfe] bg-white p-3"
+    :aria-labelledby="`${block.id}-prompt`"
+    :aria-busy="submitting"
+  >
+    <header class="flex items-start justify-between gap-3 border-b border-[#bfdbfe] bg-[#eff6ff] -m-3 mb-0 rounded-t-wolf-surface px-3 py-3">
+      <div>
+        <h4 class="m-0 text-[13px] font-semibold text-foreground">历史跟进任务</h4>
+        <p class="m-0 mt-0.5 text-xs text-muted-foreground">该客户 · 你当前可操作的未完成任务</p>
+      </div>
+      <span class="shrink-0 text-xs font-semibold text-[#1d4ed8]">{{ dispositionProgress }}</span>
+    </header>
+    <p :id="`${block.id}-prompt`" class="m-0 text-[13px] text-[#334155]">{{ block.prompt }}</p>
+    <ol class="m-0 grid list-none gap-0 p-0">
+      <li
+        v-for="(item, index) in dispositionItems"
+        :key="item.item_id"
+        class="grid gap-2 border-t border-border py-3"
+        :class="item.state === 'current' ? 'border-l-2 border-l-[#2563eb] pl-3' : ''"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="m-0 text-sm font-semibold text-foreground">{{ index + 1 }} {{ item.title }}</p>
+            <p v-if="item.owner_line" class="m-0 mt-0.5 text-xs text-muted-foreground">{{ item.owner_line }}</p>
+          </div>
+          <span class="shrink-0 text-xs text-[#1d4ed8]">{{ item.state === 'current' ? '当前待确认' : item.state === 'waiting' ? '待逐条确认' : item.result_title }}</span>
+        </div>
+        <div v-if="item.related" class="flex flex-wrap items-center gap-2" @mouseenter="evidenceOpenId = item.item_id" @mouseleave="evidenceOpenId = null">
+          <span class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-xs text-[#1d4ed8]">与本次跟进相关</span>
+          <button
+            type="button"
+            class="min-h-11 px-1 text-xs text-[#1d4ed8] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2563eb]"
+            :aria-expanded="evidenceOpenId === item.item_id"
+            :aria-describedby="`${block.id}-evidence-${item.item_id}`"
+            @click="toggleEvidence(item.item_id)"
+            @focus="evidenceOpenId = item.item_id"
+          >
+            {{ evidenceOpenId === item.item_id ? '依据已聚焦' : '查看依据' }}
+          </button>
+          <div
+            v-if="evidenceOpenId === item.item_id"
+            :id="`${block.id}-evidence-${item.item_id}`"
+            role="tooltip"
+            class="basis-full rounded-wolf border border-border bg-white p-3 text-xs leading-5"
+          >
+            <strong>关联依据</strong>
+            <p v-if="item.evidence_quote" class="m-0 mt-1">本次跟进：“{{ item.evidence_quote }}”</p>
+            <p v-if="item.evidence_reason" class="m-0 mt-1">{{ item.evidence_reason }}</p>
+            <p class="m-0 mt-2 text-muted-foreground">关联仅用于提示，不代表任务已完成；仍由你逐条决定。</p>
+          </div>
+        </div>
+        <div v-if="item.state === 'current' && isActive" class="grid gap-2 sm:grid-cols-3">
+          <button
+            v-for="option in block.options"
+            :key="option.value"
+            type="button"
+            class="grid min-h-[52px] rounded-wolf border px-3 py-2 text-left"
+            :class="option.value.endsWith(':complete') ? 'border-[#1d4ed8] bg-[#2563eb] text-white' : 'border-border bg-white'"
+            :disabled="controlsDisabled || option.disabled"
+            @click="handleOptionClick(option.value)"
+          >
+            <span class="text-sm font-semibold">{{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}</span>
+            <small v-if="option.description" class="text-xs opacity-80">{{ option.description }}</small>
+          </button>
+        </div>
+        <p v-if="item.state === 'current' && isActive" class="m-0 text-xs text-muted-foreground">只处理这一条，提交后继续下一条。</p>
+        <p v-else-if="item.result_message" class="m-0 text-xs" :class="item.state === 'failed' ? 'text-[#b91c1c]' : item.state === 'unknown' ? 'text-[#92400e]' : item.state === 'complete' ? 'text-[#047857]' : 'text-muted-foreground'">{{ item.result_message }}</p>
+      </li>
+    </ol>
+    <p class="m-0 text-xs text-muted-foreground">只有选择“已完成”才会更新这一条任务。“不管了”仅跳过本次，不代表与本次跟进无关。</p>
   </section>
 
   <section

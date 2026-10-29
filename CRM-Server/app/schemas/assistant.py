@@ -33,6 +33,7 @@ class AssistantTaskView(BaseModel):
     processing_turn_id: str | None = None
     processing_turn_status: TurnStatus | None = None
     reprocess_turn_id: str | None = None
+    follow_up_disposition: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def match_processing_pointer(self) -> AssistantTaskView:

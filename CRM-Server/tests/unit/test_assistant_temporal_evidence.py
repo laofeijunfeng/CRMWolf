@@ -400,3 +400,82 @@ def test_wrong_kind_for_digit_month_is_still_rejected() -> None:
             mentions=_futures_mentions(month_kind="MONTH_DAY"),
             actions=_futures_actions(),
         )
+
+
+FOLLOW_UP_WITH_AFTERNOON_AND_WEEK = (
+    "今天下午电话跟进广东智通人才连锁股份有限公司，已和下周三确认预算并发送正式报价，客户预计下周反馈。"
+)
+
+
+def test_afternoon_without_clock_and_bare_week_are_source_spans() -> None:
+    spans = [(item.kind, item.raw_text) for item in find_time_spans(FOLLOW_UP_WITH_AFTERNOON_AND_WEEK)]
+    assert spans == [
+        ("RELATIVE_DAY", "今天下午"),
+        ("RELATIVE_WEEKDAY", "下周三"),
+        ("RELATIVE_WEEK", "下周"),
+    ]
+    assert [(item.kind, item.raw_text) for item in find_time_spans("下周三")] == [
+        ("RELATIVE_WEEKDAY", "下周三")
+    ]
+    assert find_time_spans("我下周三下午三点发方案")[0].raw_text == "下周三下午三点"
+
+
+def test_model_quotes_of_afternoon_and_bare_week_cover_the_source() -> None:
+    text = FOLLOW_UP_WITH_AFTERNOON_AND_WEEK
+    mentions = [
+        ModelTemporalMention(
+            raw_text="今天下午",
+            quote_start=0,
+            quote_end=4,
+            kind="RELATIVE_DAY",
+            role="SALES_FOLLOW_UP",
+            confidence=1,
+        ),
+        ModelTemporalMention(
+            raw_text="下周三",
+            quote_start=text.find("下周三"),
+            quote_end=text.find("下周三") + 3,
+            kind="RELATIVE_WEEKDAY",
+            role="SALES_FOLLOW_UP",
+            action_ref="a1",
+            confidence=1,
+        ),
+        ModelTemporalMention(
+            raw_text="下周",
+            quote_start=text.rfind("下周"),
+            quote_end=text.rfind("下周") + 2,
+            kind="RELATIVE_WEEK",
+            role="CUSTOMER_COMMITMENT",
+            confidence=1,
+        ),
+    ]
+    ensure_mentions_cover_source(text, mentions)
+    draft = _draft(text)
+    attach_model_evidence(
+        draft,
+        segment_id="seg_follow_up",
+        segment_text=text,
+        anchor=datetime(2026, 10, 29, 21, 36),
+        mentions=mentions,
+        actions=[
+            {
+                "action_ref": "a1",
+                "owner_role": "SALES",
+                "owner_text": "我",
+                "action_text": "确认预算并发送正式报价",
+                "action_status": "PLANNED",
+                "evidence_quote": "下周三确认预算并发送正式报价",
+                "quote_start": text.find("下周三确认预算并发送正式报价"),
+                "quote_end": text.find("下周三确认预算并发送正式报价") + len("下周三确认预算并发送正式报价"),
+            }
+        ],
+    )
+    stored = {item["raw_text"]: item for item in draft.content_json["temporal_evidence"]["mentions"]}
+    assert stored["今天下午"]["resolved_at"] == "2026-10-29T00:00:00"
+    assert stored["下周三"]["resolved_at"] == "2026-11-04T00:00:00"
+    assert stored["下周"]["resolution_status"] == "RESOLVED"
+    assert stored["下周"]["granularity"] == "UNKNOWN"
+    assert stored["下周"]["resolved_at"] is None
+    assert temporal_waiting(draft) is None
+    resolved, granularity = resolved_sales_follow_up(draft)
+    assert (resolved, granularity) == (datetime(2026, 11, 4), "DATE")

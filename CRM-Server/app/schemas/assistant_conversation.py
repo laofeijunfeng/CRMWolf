@@ -69,7 +69,7 @@ class ConversationMessage(ConversationModel):
     at: str
     task: AssistantTaskView | None = None
     boundary: ConversationBoundary | None = None
-    outcome: Literal["activity_written", "failure"] | None = None
+    outcome: Literal["activity_written", "failure", "follow_up_disposition"] | None = None
     ui: AgentUIEnvelope | None = None
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.
     error_code: str | None = Field(default=None, exclude=True)

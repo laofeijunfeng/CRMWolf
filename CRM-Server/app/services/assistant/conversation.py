@@ -174,6 +174,7 @@ class ConversationService:
                         raise ValueError("missing result message")
                     error_code = data.get("code") if event.event == "error" else None
                     retryable = data.get("retryable") if event.event == "error" else None
+                    card = data.get("card")
                     result.append(
                         ConversationMessage(
                             id=f"{row.public_id}:{turn.public_id}:{event.seq}",
@@ -188,6 +189,8 @@ class ConversationService:
                             and row.command_json.get("waiting_field") == "activity_write"
                             and any(r.kind == "customer_activity" for r in snapshot.committed)
                             and turn.input_json.get("kind") == "confirm"
+                            else "follow_up_disposition"
+                            if card == "follow_up_disposition"
                             else None,
                             error_code=error_code if isinstance(error_code, str) else None,
                             retryable=retryable if isinstance(retryable, bool) else None,

@@ -331,13 +331,26 @@ class InteractionConfirmationFact(AgentUIContractModel):
     options: list[InteractionOption] = Field(default_factory=list, max_length=10)
 
 
+class OpenFollowUpDispositionCardItem(AgentUIContractModel):
+    item_id: str = Field(min_length=1, max_length=32)
+    title: str = Field(min_length=1, max_length=255)
+    owner_line: str | None = Field(default=None, max_length=300)
+    related: bool = False
+    evidence_quote: str | None = Field(default=None, max_length=255)
+    evidence_reason: str | None = Field(default=None, max_length=500)
+    state: Literal["current", "waiting", "complete", "hold", "skip", "failed", "unknown"]
+    result_title: str | None = Field(default=None, max_length=80)
+    result_message: str | None = Field(default=None, max_length=500)
+
+
 class InteractionBlock(AgentUIBlockBase):
     type: Literal["interaction"]
     interaction_id: str = Field(min_length=1, max_length=128)
     interaction_type: Literal["choice", "form", "confirmation", "text_input"]
     business_action: str | None = Field(default=None, min_length=1, max_length=128)
     allow_cancel: bool = False
-    presentation: Literal["COMPACT_TASK_COMPLETION"] | None = None
+    presentation: Literal["COMPACT_TASK_COMPLETION", "OPEN_FOLLOW_UP_DISPOSITION"] | None = None
+    disposition_items: list[OpenFollowUpDispositionCardItem] = Field(default_factory=list, max_length=100)
     state: Literal["ACTIVE", "SUBMITTED", "EXPIRED", "CANCELLED", "READ_ONLY"]
     prompt: str = Field(min_length=1, max_length=10000)
     fields: list[InteractionField] = Field(default_factory=list, max_length=20)
@@ -378,8 +391,27 @@ class InteractionBlock(AgentUIBlockBase):
             or self.max_selections != 1
             or not self.submit_on_select
             or len(self.options) != 1
+            or self.disposition_items
         ):
             raise ValueError("compact task completion requires one submit-on-select choice")
+        if self.presentation == "OPEN_FOLLOW_UP_DISPOSITION":
+            active_shape = (
+                self.state == "ACTIVE"
+                and self.submit_on_select
+                and len(self.options) == 3
+            )
+            readonly_shape = self.state != "ACTIVE" and not self.submit_on_select
+            if (
+                self.interaction_type != "choice"
+                or self.selection_mode != "single"
+                or self.min_selections != 1
+                or self.max_selections != 1
+                or not self.disposition_items
+                or not (active_shape or readonly_shape)
+            ):
+                raise ValueError("open follow-up disposition requires the frozen task list and one current choice")
+        elif self.disposition_items:
+            raise ValueError("disposition items require the open follow-up presentation")
 
         if self.interaction_type == "choice":
             if (

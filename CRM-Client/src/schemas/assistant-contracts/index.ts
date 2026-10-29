@@ -113,7 +113,7 @@ export type ProposalConfirmation = Extract<ConfirmationPayload, { kind: 'proposa
 
 
 export const TaskWaitingSchema = z.object({
-  type: z.enum(['FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION']),
+  type: z.enum(['FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION', 'FOLLOW_UP_DISPOSITION']),
   field: z.string().nullable().optional(),
   question_id: z.string().min(1),
   prompt: z.string().min(1),
@@ -184,6 +184,24 @@ export const AssistantTaskViewSchema = z.object({
   processing_turn_id: z.string().min(1).nullable().optional(),
   processing_turn_status: AssistantTurnStatusSchema.nullable().optional(),
   reprocess_turn_id: z.string().min(1).nullable().optional(),
+  follow_up_disposition: z.object({
+    status: z.enum(['ACTIVE', 'DONE', 'OVERFLOW', 'QUERY_FAILED']),
+    customer_name: z.string(),
+    activity_kind_label: z.string(),
+    total: z.number().int().nonnegative(),
+    current_index: z.number().int().positive().nullable(),
+    items: z.array(z.object({
+      item_id: z.string().min(1),
+      title: z.string().min(1),
+      owner_line: z.string().nullable().optional(),
+      related: z.boolean(),
+      evidence_quote: z.string().nullable().optional(),
+      evidence_reason: z.string().nullable().optional(),
+      state: z.enum(['current', 'waiting', 'complete', 'hold', 'skip', 'failed', 'unknown']),
+      result_title: z.string().nullable().optional(),
+      result_message: z.string().nullable().optional()
+    }).strict()).max(100)
+  }).strict().nullable().optional(),
 }).strict().superRefine((task, ctx) => {
   if ((task.processing_turn_id == null) !== (task.processing_turn_status == null)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['processing_turn_id'], message: '处理轮次 ID 和状态必须同时提供' })
@@ -217,7 +235,7 @@ export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
-  outcome: z.enum(['activity_written', 'failure']).nullable(),
+  outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition']).nullable(),
   ui: AgentUIEnvelopeSchema.nullable()
 }).strict()
 export const ConversationViewSchema = z.object({

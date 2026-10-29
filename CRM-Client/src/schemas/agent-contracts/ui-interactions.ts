@@ -56,13 +56,26 @@ export const InteractionConfirmationFactSchema = z.object({
   options: z.array(InteractionOptionSchema).max(10).default([])
 }).strict()
 
+export const OpenFollowUpDispositionCardItemSchema = z.object({
+  item_id: z.string().min(1).max(32),
+  title: z.string().min(1).max(255),
+  owner_line: z.string().max(300).nullable().optional(),
+  related: z.boolean().default(false),
+  evidence_quote: z.string().max(255).nullable().optional(),
+  evidence_reason: z.string().max(500).nullable().optional(),
+  state: z.enum(['current', 'waiting', 'complete', 'hold', 'skip', 'failed', 'unknown']),
+  result_title: z.string().max(80).nullable().optional(),
+  result_message: z.string().max(500).nullable().optional()
+}).strict()
+
 export const InteractionBlockObjectSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.literal('interaction'),
   interaction_id: z.string().min(1).max(128),
   interaction_type: z.enum(['choice', 'form', 'confirmation', 'text_input']),
   business_action: z.string().min(1).max(128).nullable().optional(),
-  presentation: z.literal('COMPACT_TASK_COMPLETION').nullable().optional(),
+  presentation: z.enum(['COMPACT_TASK_COMPLETION', 'OPEN_FOLLOW_UP_DISPOSITION']).nullable().optional(),
+  disposition_items: z.array(OpenFollowUpDispositionCardItemSchema).max(100).default([]),
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
   fields: z.array(InteractionFieldSchema).max(20).default([]),
@@ -101,12 +114,37 @@ export function validateInteractionBlock(
     block.min_selections !== 1 ||
     block.max_selections !== 1 ||
     block.submit_on_select !== true ||
-    block.options.length !== 1
+    block.options.length !== 1 ||
+    block.disposition_items.length > 0
   )) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'compact task completion requires one submit-on-select choice',
       path: ['presentation']
+    })
+  }
+  if (block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION') {
+    const activeShape = block.state === 'ACTIVE' && block.submit_on_select === true && block.options.length === 3
+    const readonlyShape = block.state !== 'ACTIVE' && block.submit_on_select !== true
+    if (
+      block.interaction_type !== 'choice' ||
+      block.selection_mode !== 'single' ||
+      block.min_selections !== 1 ||
+      block.max_selections !== 1 ||
+      block.disposition_items.length === 0 ||
+      (!activeShape && !readonlyShape)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'open follow-up disposition requires the frozen task list and one current choice',
+        path: ['presentation']
+      })
+    }
+  } else if (block.disposition_items.length > 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'disposition items require the open follow-up presentation',
+      path: ['disposition_items']
     })
   }
 

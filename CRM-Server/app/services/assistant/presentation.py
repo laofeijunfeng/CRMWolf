@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from app.models.assistant_turn import AssistantTurn
 from app.schemas.assistant import AssistantTaskView
+from app.services.assistant.open_follow_up_disposition import public_disposition
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -61,5 +62,6 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
             "processing_turn_id": turn.public_id if turn is not None else None,
             "processing_turn_status": turn.status if turn is not None else None,
             "reprocess_turn_id": reprocess_turn_id,
+            "follow_up_disposition": public_disposition(task),
         }
     )

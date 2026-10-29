@@ -356,3 +356,67 @@ it('does not reopen a submitted confirmation when its parent releases a transien
   await wrapper.findAll('button')[1]?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([['act_confirmation_retry', { choice: 'confirm' }]])
 })
+
+it('shows every open follow-up and submits only the current three-way choice', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_open_follow_up',
+    type: 'interaction',
+    interaction_id: 'int_open_follow_up',
+    interaction_type: 'choice',
+    business_action: 'settle_follow_up_disposition',
+    presentation: 'OPEN_FOLLOW_UP_DISPOSITION',
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    state: 'ACTIVE',
+    prompt: '还发现 2 条未完成的历史任务，请逐条处理。',
+    fields: [],
+    options: [
+      { value: 'i1:complete', label: '已完成', description: '标记此任务完成', disabled: false },
+      { value: 'i1:hold', label: '先放着', description: '保持未完成', disabled: false },
+      { value: 'i1:skip', label: '不管了', description: '仅跳过本次', disabled: false },
+    ],
+    disposition_items: [
+      {
+        item_id: 'i1',
+        title: '联系客户确认采购安排',
+        owner_line: '负责人：我 · 计划 10 月 28 日',
+        related: true,
+        evidence_quote: '已和林女士核对采购安排',
+        evidence_reason: '本次跟进与任务均明确提到“确认采购安排”，且属于同一客户。',
+        state: 'current',
+        result_title: null,
+        result_message: null,
+      },
+      {
+        item_id: 'i2',
+        title: '补充安全测评报告',
+        owner_line: '负责人：我 · 计划 11 月 2 日',
+        related: false,
+        evidence_quote: null,
+        evidence_reason: null,
+        state: 'waiting',
+        result_title: null,
+        result_message: null,
+      },
+    ],
+    submit_label: '提交',
+    submit_action_id: 'act_follow_up_1',
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.text()).toContain('历史跟进任务')
+  expect(wrapper.text()).toContain('与本次跟进相关')
+  expect(wrapper.text()).toContain('查看依据')
+  expect(wrapper.text()).toContain('补充安全测评报告')
+  expect(wrapper.text()).not.toContain('全部完成')
+  await wrapper.get('button[aria-describedby]').trigger('focus')
+  expect(wrapper.text()).toContain('已和林女士核对采购安排')
+  await wrapper.get('button.bg-\\[\\#2563eb\\], button').trigger('click')
+  const complete = wrapper.findAll('button').find(button => button.text().includes('已完成'))
+  await complete?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([
+    ['act_follow_up_1', { choice: 'i1:complete' }],
+  ])
+})

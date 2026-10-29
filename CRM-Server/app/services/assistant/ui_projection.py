@@ -27,6 +27,7 @@ from app.services.agent.ui.schemas import (
     InteractionField,
     InteractionOption,
     NoticeBlock,
+    OpenFollowUpDispositionCardItem,
     RetryAction,
     TextBlock,
 )
@@ -168,6 +169,9 @@ def project_assistant_message(
 
     if message.outcome == "failure":
         return _project_failure(message)
+    disposition = _project_disposition(message, active_waiting=active_waiting)
+    if disposition is not None:
+        return disposition
     if message.outcome == "activity_written":
         return _envelope(message, (_result_block(message),), route="WORKFLOW")
     if message.boundary is not None:
@@ -239,6 +243,105 @@ def _reply_entry_id(message_id: str) -> str | None:
     if not entry_id or len(entry_id) > 128:
         return None
     return entry_id
+
+
+
+def _project_disposition(message: ConversationMessage, *, active_waiting: bool) -> AgentUIEnvelope | None:
+    task = message.task
+    if task is None or not isinstance(task.follow_up_disposition, dict):
+        return None
+    waiting = task.waiting
+    showing = message.outcome == "follow_up_disposition" or (
+        waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION"
+    )
+    if not showing:
+        return None
+    payload = task.follow_up_disposition
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        notice = NoticeBlock(
+            id="b_notice_disposition",
+            type="notice",
+            tone="warning" if payload.get("status") in {"OVERFLOW", "QUERY_FAILED"} else "info",
+            title="历史跟进任务",
+            text=_plain(message.text) or _UNAVAILABLE,
+        )
+        return _envelope(message, (notice,), route="WORKFLOW")
+    active = active_waiting and waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION"
+    current = next((item for item in items if isinstance(item, dict) and item.get("state") == "current"), None)
+    options = []
+    if active and current is not None:
+        item_id = str(current.get("item_id") or "")
+        options = [
+            InteractionOption(value=f"{item_id}:complete", label="已完成", description="标记此任务完成"),
+            InteractionOption(value=f"{item_id}:hold", label="先放着", description="保持未完成"),
+            InteractionOption(value=f"{item_id}:skip", label="不管了", description="仅跳过本次"),
+        ]
+    elif not active:
+        options = [
+            InteractionOption(value="complete", label="已完成", disabled=True),
+            InteractionOption(value="hold", label="先放着", disabled=True),
+            InteractionOption(value="skip", label="不管了", disabled=True),
+        ]
+    if not options:
+        options = [
+            InteractionOption(value="complete", label="已完成", disabled=True),
+            InteractionOption(value="hold", label="先放着", disabled=True),
+            InteractionOption(value="skip", label="不管了", disabled=True),
+        ]
+        active = False
+    cards = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        cards.append(OpenFollowUpDispositionCardItem(
+            item_id=str(item.get("item_id") or ""),
+            title=str(item.get("title") or "跟进任务"),
+            owner_line=item.get("owner_line") if isinstance(item.get("owner_line"), str) else None,
+            related=bool(item.get("related")),
+            evidence_quote=item.get("evidence_quote") if isinstance(item.get("evidence_quote"), str) else None,
+            evidence_reason=item.get("evidence_reason") if isinstance(item.get("evidence_reason"), str) else None,
+            state=item.get("state") if item.get("state") in {
+                "current", "waiting", "complete", "hold", "skip", "failed", "unknown",
+            } else "waiting",
+            result_title=item.get("result_title") if isinstance(item.get("result_title"), str) else None,
+            result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
+        ))
+    total = payload.get("total") if isinstance(payload.get("total"), int) else len(cards)
+    customer = payload.get("customer_name") or ""
+    kind = payload.get("activity_kind_label") or ""
+    detail = " · ".join(part for part in (str(customer), str(kind)) if part)
+    notice = NoticeBlock(
+        id="b_notice_written",
+        type="notice",
+        tone="success",
+        title="本次跟进已写入",
+        text=detail or "本次跟进已写入",
+    )
+    prompt = _plain(waiting.prompt) if waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION" else (
+        _plain(message.text) or f"还发现 {total} 条未完成的历史任务，请逐条处理。"
+    )
+    interaction = InteractionBlock(
+        id="b_interaction_1",
+        type="interaction",
+        interaction_id=_interaction_id(message),
+        interaction_type="choice",
+        business_action="settle_follow_up_disposition",
+        presentation="OPEN_FOLLOW_UP_DISPOSITION",
+        state="ACTIVE" if active else "READ_ONLY",
+        prompt=prompt,
+        options=options,
+        disposition_items=cards,
+        selection_mode="single",
+        min_selections=1,
+        max_selections=1,
+        submit_on_select=active,
+        submit_action_id=_action_id(waiting) if active and waiting is not None else None,
+    )
+    blocks: list[TextBlock | NoticeBlock | InteractionBlock] = [notice, interaction]
+    if not active and _plain(message.text) and _plain(message.text) != prompt:
+        blocks.append(_text_block(_plain(message.text)))
+    return _envelope(message, tuple(blocks), route="WORKFLOW")
 
 
 def _waiting_blocks(

@@ -1345,9 +1345,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -1357,6 +1357,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -1529,6 +1537,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -1822,6 +1875,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -3137,9 +3297,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -3149,6 +3309,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -3321,6 +3489,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -3614,6 +3827,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -5056,9 +5376,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -5068,6 +5388,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -5240,6 +5568,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -5533,6 +5906,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -7124,9 +7604,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -7136,6 +7616,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -7308,6 +7796,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -7601,6 +8134,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -9310,9 +9950,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -9322,6 +9962,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -9494,6 +10142,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -9787,6 +10480,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -11140,9 +11940,9 @@
             "presentation": {
               "anyOf": [
                 {
-                  "const": "COMPACT_TASK_COMPLETION",
                   "enum": [
-                    "COMPACT_TASK_COMPLETION"
+                    "COMPACT_TASK_COMPLETION",
+                    "OPEN_FOLLOW_UP_DISPOSITION"
                   ],
                   "type": "string"
                 },
@@ -11152,6 +11952,14 @@
               ],
               "default": null,
               "title": "Presentation"
+            },
+            "disposition_items": {
+              "items": {
+                "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+              },
+              "maxItems": 100,
+              "title": "Disposition Items",
+              "type": "array"
             },
             "state": {
               "enum": [
@@ -11324,6 +12132,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -11617,6 +12470,113 @@
             "type"
           ],
           "title": "OpenEntityAction",
+          "type": "object"
+        },
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
           "type": "object"
         },
         "PaginationBlock": {
@@ -16435,6 +17395,51 @@
               "minLength": 1,
               "title": "Value",
               "type": "string"
+            },
+            "group": {
+              "default": "write",
+              "enum": [
+                "write",
+                "activity_kind",
+                "context",
+                "score"
+              ],
+              "title": "Group",
+              "type": "string"
+            },
+            "status_label": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status Label"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source"
+            },
+            "options": {
+              "items": {
+                "$ref": "#/$defs/InteractionOption"
+              },
+              "maxItems": 10,
+              "title": "Options",
+              "type": "array"
             }
           },
           "required": [
@@ -16607,7 +17612,114 @@
           "title": "InteractionOption",
           "type": "object"
         },
-        "JsonValue": {}
+        "JsonValue": {},
+        "OpenFollowUpDispositionCardItem": {
+          "additionalProperties": false,
+          "properties": {
+            "item_id": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "Item Id",
+              "type": "string"
+            },
+            "title": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            },
+            "owner_line": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Owner Line"
+            },
+            "related": {
+              "default": false,
+              "title": "Related",
+              "type": "boolean"
+            },
+            "evidence_quote": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Quote"
+            },
+            "evidence_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Reason"
+            },
+            "state": {
+              "enum": [
+                "current",
+                "waiting",
+                "complete",
+                "hold",
+                "skip",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "result_title": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Title"
+            },
+            "result_message": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Message"
+            }
+          },
+          "required": [
+            "item_id",
+            "title",
+            "state"
+          ],
+          "title": "OpenFollowUpDispositionCardItem",
+          "type": "object"
+        }
       },
       "additionalProperties": false,
       "properties": {
@@ -16663,9 +17775,9 @@
         "presentation": {
           "anyOf": [
             {
-              "const": "COMPACT_TASK_COMPLETION",
               "enum": [
-                "COMPACT_TASK_COMPLETION"
+                "COMPACT_TASK_COMPLETION",
+                "OPEN_FOLLOW_UP_DISPOSITION"
               ],
               "type": "string"
             },
@@ -16675,6 +17787,14 @@
           ],
           "default": null,
           "title": "Presentation"
+        },
+        "disposition_items": {
+          "items": {
+            "$ref": "#/$defs/OpenFollowUpDispositionCardItem"
+          },
+          "maxItems": 100,
+          "title": "Disposition Items",
+          "type": "array"
         },
         "state": {
           "enum": [
