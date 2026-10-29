@@ -168,3 +168,130 @@ describe('conversation load failures', () => {
     expect(text).toContain('对话加载失败，请重试；不会自动开始新的记录。')
   })
 })
+
+
+function rejectedCommand(status: number, message = 'rejected'): Error {
+  return Object.assign(new Error(message), { isAxiosError: true, response: { status, data: {} } })
+}
+
+async function submitCardText(wrapper: ReturnType<typeof mount>, value: string): Promise<void> {
+  const input = wrapper.find('input[type="text"]')
+  expect(input.exists()).toBe(true)
+  await input.setValue(value)
+  const button = wrapper.findAll('button').find((item) => item.text() === '提交')
+  expect(button).toBeDefined()
+  await button?.trigger('click')
+  await flushPromises()
+}
+
+describe('customer name text input', () => {
+  it('submits trimmed text_input values with the current waiting gate', async () => {
+    const prompt = '未找到对应客户，请核对并提供客户准确名称。'
+    const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
+    const next = makeTask({ waiting: field({ field: 'content', prompt: '请补充沟通内容', action_id: 'action2', expected_version: 2, question_id: 'q2' }) })
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockResolvedValue(reply(view({
+      version: 1,
+      focused_task: next,
+      messages: [message('one', prompt, current), message('two', '请补充沟通内容', next)]
+    })))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '  星河  科技  ')
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(mocks.command).toHaveBeenCalledWith(expect.objectContaining({
+      expected_version: 0,
+      input: expect.objectContaining({
+        kind: 'submit_field',
+        text: '星河  科技',
+        action_id: 'action1',
+        expected_version: 1,
+        client_request_id: expect.any(String)
+      })
+    }))
+    const requestId = mocks.command.mock.calls[0]?.[0].input.client_request_id as string
+    expect(requestId.length).toBeGreaterThanOrEqual(8)
+    expect(wrapper.text()).toContain('请补充沟通内容')
+    expect(wrapper.text()).not.toContain('提交处理中')
+  })
+
+  it('reads the text payload for a non-customer text input', async () => {
+    const current = makeTask({ waiting: field({ field: 'next_action', prompt: '请补充下一步' }) })
+    show(view({ focused_task: current, messages: [message('one', '请补充下一步', current)] }))
+    mocks.command.mockResolvedValue(reply(view({ version: 1, focused_task: current, messages: [message('one', '请补充下一步', current)] })))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '周三复盘')
+    expect(mocks.command).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.objectContaining({ kind: 'submit_field', text: '周三复盘', action_id: 'action1', expected_version: 1 })
+    }))
+  })
+
+  it('keeps a blank customer name on the card and does not send it', async () => {
+    const prompt = '未找到对应客户，请核对并提供客户准确名称。'
+    const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '   ')
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请填写客户名称')
+    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(wrapper.findAll('button').some((button) => button.text() === '提交' && button.attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('unlocks the card after an explicit validation failure and does not replay it', async () => {
+    const prompt = '未找到对应客户，请核对并提供客户准确名称。'
+    const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValueOnce(rejectedCommand(422))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '星河科技')
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('这次提交没有被接受，请按当前提示修改后再提交。')
+    expect(wrapper.text()).not.toContain('提交处理中')
+    await wrapper.get('[role="alert"]').get('button').trigger('click')
+    await flushPromises()
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    mocks.command.mockResolvedValue(reply(view({ version: 1, focused_task: current, messages: [message('one', prompt, current)] })))
+    await submitCardText(wrapper, '星河科技')
+    expect(mocks.command).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the existing conflict and login sentences for explicit 409 and 401', async () => {
+    const prompt = '未找到对应客户，请核对并提供客户准确名称。'
+    const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValueOnce(rejectedCommand(409, 'conflict'))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '星河科技')
+    expect(wrapper.get('[role="alert"]').text()).toContain('会话已更新，请查看当前提示；未接受的内容可重新发送。')
+    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+
+    mocks.command.mockRejectedValueOnce(rejectedCommand(401, 'unauthorized'))
+    await submitCardText(wrapper, '另一家公司')
+    expect(wrapper.get('[role="alert"]').text()).toContain('登录状态已失效，请重新登录后重试；不会自动开始新的记录。')
+    expect(mocks.command).toHaveBeenCalledTimes(2)
+    await flushPromises()
+    expect(mocks.command).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an unknown network result locked and does not send it again', async () => {
+    const prompt = '未找到对应客户，请核对并提供客户准确名称。'
+    const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValue(Object.assign(new Error('Network Error'), { isAxiosError: true, response: undefined }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await submitCardText(wrapper, '星河科技')
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[role="alert"]').text()).toContain('发送状态待确认：Network Error')
+    expect(wrapper.text()).toContain('提交处理中')
+    await flushPromises()
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('button').some((button) => button.text() === '重试同步')).toBe(true)
+  })
+})

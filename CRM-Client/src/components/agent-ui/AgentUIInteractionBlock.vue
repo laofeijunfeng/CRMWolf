@@ -78,13 +78,11 @@ watch(
 )
 
 watch(() => props.locked, (locked, previous) => {
-  if (
-    previous === true && locked !== true && props.block.state === 'ACTIVE'
+  if (previous !== true || locked === true || props.block.state !== 'ACTIVE') return
+  const releaseTextInput = props.block.interaction_type === 'text_input'
+  const releaseFollowUpForm = props.block.interaction_type === 'form'
     && props.block.business_action === 'provide_follow_up_content'
-    && (props.block.interaction_type === 'text_input' || props.block.interaction_type === 'form')
-  ) {
-    submitting.value = false
-  }
+  if (releaseTextInput || releaseFollowUpForm) submitting.value = false
 })
 
 const isActive = computed(() => props.block.state === 'ACTIVE' && props.block.submit_action_id !== null)
@@ -373,6 +371,9 @@ const submit = async (): Promise<void> => {
     const field = props.block.fields[0]
     submitting.value = true
     emit('submit', actionId, { text: field === undefined ? '' : textValue(field) })
+    void nextTick(() => {
+      if (props.locked !== true && props.block.state === 'ACTIVE') submitting.value = false
+    })
     return
   }
   submitting.value = true

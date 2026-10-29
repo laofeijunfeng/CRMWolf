@@ -43,6 +43,17 @@ const emit = defineEmits<{
 const entries = ref<ChatEntry[]>([])
 const inputText = ref('')
 const submitting = ref(false)
+const heldActionIds = ref<ReadonlySet<string>>(new Set())
+const holdAction = (actionId: string | null): void => {
+  if (actionId === null || heldActionIds.value.has(actionId)) return
+  heldActionIds.value = new Set([...heldActionIds.value, actionId])
+}
+const releaseAction = (actionId: string | null): void => {
+  if (actionId === null || !heldActionIds.value.has(actionId)) return
+  const next = new Set(heldActionIds.value)
+  next.delete(actionId)
+  heldActionIds.value = next
+}
 const seq = ref(0)
 const conversation = shallowRef<ConversationView | null>(null)
 const loadingConversation = ref(true)
@@ -58,6 +69,21 @@ const KIND_LABELS: Record<string, string> = {
   OFFLINE_MEETING: '线下会议'
 }
 
+const SESSION_UPDATED_MESSAGE = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
+const LOGIN_EXPIRED_MESSAGE = '登录状态已失效，请重新登录后重试；不会自动开始新的记录。'
+const REJECTED_SUBMIT_MESSAGE = '这次提交没有被接受，请按当前提示修改后再提交。'
+type CommandFailure = 'conflict' | 'auth' | 'rejected'
+type CommandOutcome = 'accepted' | 'explicit' | 'unknown'
+
+const explicitCommandFailure = (error: unknown): CommandFailure | null => {
+  if (!isAxiosError(error)) return null
+  const status = error.response?.status
+  if (status === 401) return 'auth'
+  if (status === 409) return 'conflict'
+  if (status === 400 || status === 403 || status === 404 || status === 422) return 'rejected'
+  return null
+}
+
 const conversationLoadErrorMessage = (error: unknown): string => {
   const noNewRecord = '；不会自动开始新的记录。'
   if (!isAxiosError(error)) return `对话加载失败，请重试${noNewRecord}`
@@ -65,7 +91,7 @@ const conversationLoadErrorMessage = (error: unknown): string => {
   if (responseData?.error_code === 'DATABASE_SCHEMA_MISMATCH') {
     return `数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试${noNewRecord}`
   }
-  if (error.response?.status === 401) return `登录状态已失效，请重新登录后重试${noNewRecord}`
+  if (error.response?.status === 401) return LOGIN_EXPIRED_MESSAGE
   if (error.response === undefined) return `服务或网络暂时不可用，请检查网络后重试${noNewRecord}`
   if (error.response.status >= 500) return `服务暂时不可用，请稍后重试${noNewRecord}`
   return `对话加载失败，请重试${noNewRecord}`
@@ -513,15 +539,17 @@ const submitText = async (): Promise<void> => {
   await dispatchConversation(() => assistantApi.conversationText(request), text)
 }
 
-const submit = async (input: SubmitAssistantInput, displayText: string, source: TaskWaiting | null = null): Promise<void> => {
-  if (submitting.value || resultPending.value || task.value === null || conversation.value === null) return
-  if (source !== null && (task.value.waiting?.action_id !== source.action_id || task.value.waiting?.expected_version !== source.expected_version)) return
+const submit = async (input: SubmitAssistantInput, displayText: string, source: TaskWaiting | null = null): Promise<boolean> => {
+  if (submitting.value || resultPending.value || task.value === null || conversation.value === null) return false
+  if (source !== null && (task.value.waiting?.action_id !== source.action_id || task.value.waiting?.expected_version !== source.expected_version)) return false
   const payload: SubmitAssistantInput = { ...input, client_request_id: crypto.randomUUID(),
     action_id: source?.action_id ?? undefined, expected_version: source?.expected_version ?? undefined }
   const request = { task_public_id: task.value.public_id, input: payload, expected_version: conversation.value.version }
   pushEntry('user', displayText)
   inputText.value = ''
-  await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+  const outcome = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+  if (outcome !== 'unknown') releaseAction(source?.action_id ?? null)
+  return true
 }
 
 const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<void> => {
@@ -547,7 +575,7 @@ const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<voi
       resultPending.value = false
       await refreshConversation()
       if (historyError.value === '') {
-        historyError.value = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
+        historyError.value = SESSION_UPDATED_MESSAGE
       }
       return
     }
@@ -558,37 +586,47 @@ const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<voi
   }
 }
 
-const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<void> => {
-  if (disposed) return
+const restoreUnacceptedText = (): void => {
+  pendingConversation.value = null
+  if (unacceptedText.value !== '') inputText.value = unacceptedText.value
+  unacceptedText.value = ''
+}
+
+const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<CommandOutcome> => {
+  if (disposed) return 'explicit'
   const requestOrder = ++viewRequestSequence
   submitting.value = true
   routing.value = true
   pendingConversation.value = send
   try {
     const response = await send()
-    if (disposed) return
+    if (disposed) return 'accepted'
     pendingConversation.value = null
     unacceptedText.value = ''
     applyConversation(response.conversation, false, requestOrder)
     routing.value = false
     if (response.submission !== null) await runPrepared(response.submission, displayText)
     else resultPending.value = false
+    return resultPending.value ? 'unknown' : 'accepted'
   } catch (error) {
-    if (disposed) return
-    if (isAxiosError(error) && error.response?.status === 409) {
-      // A rejected stale command must not stay in an endless same-version retry loop.
+    if (disposed) return 'explicit'
+    const failure = explicitCommandFailure(error)
+    if (failure !== null) {
+      // A rejected command must not stay replayable or look still in progress.
       resultPending.value = false
-      await refreshConversation()
-      if (conversation.value?.has_pending_request !== true) {
-        pendingConversation.value = null
-        if (unacceptedText.value !== '') inputText.value = unacceptedText.value
-        unacceptedText.value = ''
+      if (failure === 'conflict') {
+        await refreshConversation()
+        if (conversation.value?.has_pending_request !== true) restoreUnacceptedText()
+        historyError.value = SESSION_UPDATED_MESSAGE
+      } else {
+        restoreUnacceptedText()
+        historyError.value = failure === 'auth' ? LOGIN_EXPIRED_MESSAGE : REJECTED_SUBMIT_MESSAGE
       }
-      historyError.value = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
-    } else {
-      resultPending.value = true
-      historyError.value = `发送状态待确认：${error instanceof Error ? error.message : '网络请求失败'}`
+      return 'explicit'
     }
+    resultPending.value = true
+    historyError.value = `发送状态待确认：${error instanceof Error ? error.message : '网络请求失败'}`
+    return 'unknown'
   } finally {
     if (!disposed) { routing.value = false; submitting.value = false }
   }
@@ -607,12 +645,12 @@ const choiceLabel = (choice: string, source: TaskWaiting | null): string => {
   return 'account_name' in candidate ? candidate.account_name : candidate.label
 }
 
-const pickKind = (choice: string, source: TaskWaiting | null): Promise<void> =>
+const pickKind = (choice: string, source: TaskWaiting | null): Promise<boolean> =>
   submit({ kind: 'submit_field', choice }, choiceLabel(choice, source), source)
 
-const confirmWrite = (source: TaskWaiting | null): Promise<void> =>
+const confirmWrite = (source: TaskWaiting | null): Promise<boolean> =>
   submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
-const rejectWrite = (source: TaskWaiting | null): Promise<void> =>
+const rejectWrite = (source: TaskWaiting | null): Promise<boolean> =>
   submit({ kind: 'confirm', choice: 'reject' }, '取消', source)
 const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<void> => {
   const pending = conversation.value?.pending_choice
@@ -812,6 +850,16 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
     if (typed !== '') void submit({ kind: 'submit_field', text: typed }, typed, entry.waiting)
     return
   }
+  if (block.interaction_type === 'text_input') {
+    const answer = typeof values['text'] === 'string' ? values['text'].trim() : ''
+    if (answer === '') return
+    const actionId = block.submit_action_id
+    holdAction(actionId)
+    void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting).then((started) => {
+      if (!started) releaseAction(actionId)
+    })
+    return
+  }
   const fieldKey = block.fields[0]?.key
   const raw = fieldKey === undefined ? values['text'] : values[fieldKey]
   const answer = typeof raw === 'string' ? raw.trim() : ''
@@ -940,6 +988,7 @@ void loadConversation()
               v-if="entry.ui"
               :message="entry.ui"
               :disabled="busy"
+              :locked-action-ids="heldActionIds"
               @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
               @action="(actionId) => { void retryRootFailure(entry, actionId) }"
             />
