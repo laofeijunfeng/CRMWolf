@@ -332,19 +332,41 @@ async def test_stale_window_and_changed_retry_are_rejected_without_duplicate_tur
 
 
 async def test_model_error_fails_closed_and_releases_conversation(db):
+    from app.services.assistant.failure_contract import AssistantFailureCode
     from app.services.assistant.model_transport import AssistantLLMError
 
     class Broken:
         async def classify(self, *a, **kw):
-            raise AssistantLLMError("model down")
+            raise AssistantLLMError("model down", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
 
     service = ConversationService(classifier=Broken())
     state = service.open(db, team_id=1, user_id=2)
     response = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
     assert response.submission is None
     assert db.query(AssistantTask).count() == 0
+    assert db.query(AssistantTurn).count() == 0
     assert response.conversation.pending_choice is None
-    assert "没有写入" in response.conversation.messages[-1].text
+    assert response.conversation.has_pending_request is False
+    message = response.conversation.messages[-1]
+    assert message.text == "模型服务响应超时，本次没有写入客户活动。"
+    assert message.ui is not None
+    error = message.ui.blocks[0]
+    assert error.type == "error"
+    assert error.code == "UPSTREAM_TIMEOUT"
+    assert error.title == "模型服务响应超时"
+    assert error.retryable is True
+    assert error.trace_id is not None
+    assert message.ui.suggested_actions[0].action_id == f"retry:{error.trace_id}"
+    entry = db.query(AssistantConversationEntry).one()
+    assert entry.public_id == error.trace_id
+    assert entry.error_code == "UPSTREAM_TIMEOUT"
+    assert bool(entry.error_retryable) is True
+    assert entry.state == "READY"
+    assert entry.decision_json == {}
+    refreshed = service.read(db, team_id=1, user_id=2)
+    again = refreshed.messages[-1]
+    assert again.ui is not None and again.ui.blocks[0].trace_id == entry.public_id
+    assert "model down" not in again.text
 
 
 def test_history_paginates_more_than_fifty_entries_without_cross_owner_data(db):
@@ -1349,3 +1371,141 @@ async def test_other_waiting_inputs_keep_their_existing_constraints(db):
     assert accepted.submission is not None
     assert accepted.submission.input.choice == "EXPLICITLY_NONE"
     assert db.query(AssistantTurn).count() == 1
+
+
+async def test_root_configuration_failure_has_no_retry_and_hides_provider_text(db, caplog):
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class Broken:
+        async def classify(self, *a, **kw):
+            raise AssistantLLMError(
+                "AI 配置无效",
+                code=AssistantFailureCode.CONFIGURATION_ERROR,
+                cause=RuntimeError("https://secret.example sk-live"),
+            )
+
+    service = ConversationService(classifier=Broken())
+    state = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    message = response.conversation.messages[-1]
+    assert message.text == "模型配置暂不可用，本次没有写入客户活动，请联系管理员。"
+    assert message.ui is not None
+    assert message.ui.blocks[0].retryable is False
+    assert message.ui.suggested_actions == []
+    assert "secret.example" not in message.text
+    assert "sk-live" not in caplog.text
+    assert db.query(AssistantTask).count() == 0
+
+
+async def test_root_retry_reuses_the_same_entry_and_rejects_a_second_claim(db):
+    from datetime import timedelta
+
+    from app.crud.assistant_conversation import ConversationConflict
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+    from app.utils.time import business_now
+
+    class Once:
+        def __init__(self):
+            self.calls = 0
+            self.leases = []
+
+        async def classify(self, db, **kwargs):
+            from app.crud import assistant_conversation as crud
+
+            self.calls += 1
+            conversation = crud.owned_conversation(db, team_id=1, user_id=2)
+            self.leases.append(conversation.lease_expires_at)
+            if self.calls == 1:
+                raise AssistantLLMError("down", code=AssistantFailureCode.UPSTREAM_UNAVAILABLE)
+            return decision()
+
+    classifier = Once()
+    service = ConversationService(classifier=classifier)
+    state = service.open(db, team_id=1, user_id=2)
+    failed = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version, key="same-key"))
+    entry = db.query(AssistantConversationEntry).one()
+    original = (
+        entry.public_id,
+        entry.client_request_id,
+        entry.input_fingerprint,
+        entry.user_text,
+        dict(entry.command_json),
+    )
+    assert failed.conversation.messages[-1].ui.suggested_actions[0].label == "重试"
+    retried = await service.retry_entry(
+        db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=failed.conversation.version
+    )
+    db.refresh(entry)
+    assert db.query(AssistantConversationEntry).count() == 1
+    assert (entry.public_id, entry.client_request_id, entry.input_fingerprint, entry.user_text) == original[:4]
+    assert entry.command_json["operation"] == "text"
+    assert entry.command_json["text"] == original[4]["text"]
+    assert entry.error_code is None
+    assert retried.submission is not None
+    assert classifier.calls == 2
+    assert all(item - business_now() <= timedelta(seconds=180) for item in classifier.leases)
+    assert all(item - business_now() >= timedelta(seconds=120) for item in classifier.leases)
+    with pytest.raises(ConversationConflict):
+        await service.retry_entry(
+            db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=retried.conversation.version
+        )
+
+
+async def test_root_retry_failure_updates_the_original_entry(db):
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class Always:
+        async def classify(self, *a, **kw):
+            raise AssistantLLMError("bad json", code=AssistantFailureCode.MODEL_OUTPUT_INVALID)
+
+    service = ConversationService(classifier=Always())
+    state = service.open(db, team_id=1, user_id=2)
+    failed = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    entry = db.query(AssistantConversationEntry).one()
+    again = await service.retry_entry(
+        db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=failed.conversation.version
+    )
+    db.refresh(entry)
+    assert db.query(AssistantConversationEntry).count() == 1
+    assert entry.error_code == "MODEL_OUTPUT_INVALID"
+    assert entry.state == "READY"
+    assert again.conversation.has_pending_request is False
+    assert again.conversation.messages[-1].text == "模型返回结果格式异常，本次没有写入客户活动。"
+    assert db.query(AssistantTask).count() == 0
+
+
+async def test_lost_root_lease_is_not_stored_as_model_failure(db):
+    from datetime import timedelta
+
+    from app.crud import assistant_conversation as crud
+    from app.utils.time import business_now
+
+    class Slow:
+        async def classify(self, *a, **kw):
+            return decision()
+
+    service = ConversationService(classifier=Slow())
+    state = service.open(db, team_id=1, user_id=2)
+    conversation = crud.owned_conversation(db, team_id=1, user_id=2)
+
+    real_renew = crud.renew_model_lease
+
+    def expire(db, conversation, entry, *, lease_version, seconds):
+        conversation.lease_expires_at = business_now() - timedelta(seconds=1)
+        db.commit()
+        return real_renew(db, conversation, entry, lease_version=lease_version, seconds=seconds)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(crud, "renew_model_lease", expire)
+    try:
+        with pytest.raises(crud.ConversationConflict):
+            await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    finally:
+        monkeypatch.undo()
+    entry = db.query(AssistantConversationEntry).one()
+    assert entry.error_code is None
+    assert entry.state == "ROUTING"
+    assert conversation.busy_entry_id == entry.public_id

@@ -524,6 +524,40 @@ const submit = async (input: SubmitAssistantInput, displayText: string, source: 
   await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
 }
 
+const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<void> => {
+  if (submitting.value || resultPending.value || conversation.value === null) return
+  if (entry.role !== 'assistant' || entry.serverId === undefined || !entry.serverId.endsWith(':reply')) return
+  const entryId = entry.serverId.slice(0, -':reply'.length)
+  if (actionId !== `retry:${entryId}`) return
+  const action = entry.ui?.suggested_actions.find((item) => item.action_id === actionId)
+  if (action === undefined || action.type !== 'retry') return
+  const requestOrder = ++viewRequestSequence
+  submitting.value = true
+  routing.value = true
+  try {
+    const response = await assistantApi.retryConversationEntry(entryId, conversation.value.version)
+    if (disposed) return
+    applyConversation(response.conversation, false, requestOrder)
+    routing.value = false
+    if (response.submission !== null) await runPrepared(response.submission, '')
+    else resultPending.value = false
+  } catch (error) {
+    if (disposed) return
+    if (isAxiosError(error) && error.response?.status === 409) {
+      resultPending.value = false
+      await refreshConversation()
+      if (historyError.value === '') {
+        historyError.value = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
+      }
+      return
+    }
+    await refreshConversation()
+    resultPending.value = conversation.value?.has_pending_request === true
+  } finally {
+    if (!disposed) { routing.value = false; submitting.value = false }
+  }
+}
+
 const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<void> => {
   if (disposed) return
   const requestOrder = ++viewRequestSequence
@@ -907,6 +941,7 @@ void loadConversation()
               :message="entry.ui"
               :disabled="busy"
               @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
+              @action="(actionId) => { void retryRootFailure(entry, actionId) }"
             />
             <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示，原记录仍保留。</div>
             <button

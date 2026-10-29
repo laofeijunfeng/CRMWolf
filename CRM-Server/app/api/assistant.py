@@ -28,6 +28,7 @@ from app.schemas.assistant import (
 from app.schemas.assistant_conversation import (
     ConversationChoiceRequest,
     ConversationCommandRequest,
+    ConversationEntryRetryRequest,
     ConversationKindRequest,
     ConversationReply,
     ConversationTextRequest,
@@ -574,6 +575,27 @@ async def conversation_command(
 ) -> ConversationReply:
     try:
         return await _conversation_service.command(db, team_id=team_id, user_id=int(current_user.id), request=request)
+    except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/conversation/entries/{entry_id}/retry", response_model=ConversationReply)
+async def retry_conversation_entry(
+    entry_id: str,
+    request: ConversationEntryRetryRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ConversationReply:
+    try:
+        return await _conversation_service.retry_entry(
+            db,
+            team_id=team_id,
+            user_id=int(current_user.id),
+            entry_id=entry_id,
+            expected_version=request.expected_version,
+        )
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

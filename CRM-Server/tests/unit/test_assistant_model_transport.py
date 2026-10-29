@@ -432,3 +432,112 @@ async def test_illegal_action_model_is_not_a_temporal_mention_error():
     )
     with pytest.raises(ActionContractError, match="action quote is not in the source"):
         apply_structured_draft(task, structured, correction_text=text)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [
+        (401, "CONFIGURATION_ERROR"),
+        (403, "CONFIGURATION_ERROR"),
+        (404, "CONFIGURATION_ERROR"),
+        (422, "CONFIGURATION_ERROR"),
+        (408, "UPSTREAM_TIMEOUT"),
+        (429, "UPSTREAM_UNAVAILABLE"),
+        (500, "UPSTREAM_UNAVAILABLE"),
+        (503, "UPSTREAM_UNAVAILABLE"),
+    ],
+)
+async def test_transport_classifies_http_status_without_leaking_provider_text(monkeypatch, status_code, expected):
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    original_client = httpx.AsyncClient
+
+    def respond(request):
+        return httpx.Response(status_code, json={"error": {"message": "provider said https://secret.example sk-live"}})
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    with pytest.raises(AssistantLLMError) as caught:
+        await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="classify", user_prompt="text", response_model=KindDecision, error_prefix="分类",
+        )
+    assert caught.value.code is AssistantFailureCode(expected)
+    assert caught.value.retryable is (expected in {"UPSTREAM_TIMEOUT", "UPSTREAM_UNAVAILABLE", "MODEL_OUTPUT_INVALID"})
+    assert "secret.example" not in str(caught.value)
+    assert "sk-live" not in str(caught.value)
+    assert "ai.example" not in str(caught.value)
+
+
+async def test_transport_classifies_timeout_and_invalid_output(monkeypatch):
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    original_client = httpx.AsyncClient
+
+    def timeout(request):
+        raise httpx.ReadTimeout("timed out at https://ai.example/v1", request=request)
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(timeout), **kwargs),
+    )
+    with pytest.raises(AssistantLLMError) as timed:
+        await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="classify", user_prompt="text", response_model=KindDecision, error_prefix="分类",
+        )
+    assert timed.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
+    assert timed.value.retryable is True
+    assert "ai.example" not in str(timed.value)
+
+    def invalid(request):
+        return httpx.Response(200, content=b"not-json")
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(invalid), **kwargs),
+    )
+    with pytest.raises(AssistantLLMError) as parsed:
+        await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="classify", user_prompt="text", response_model=KindDecision, error_prefix="分类",
+        )
+    assert parsed.value.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
+    assert "not-json" not in str(parsed.value)
+
+
+def test_missing_and_undecryptable_credentials_are_configuration_errors(monkeypatch):
+    from cryptography.fernet import InvalidToken
+
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    monkeypatch.setattr(model_transport.ai_config_crud, "get_config", lambda db, team_id: None)
+    with pytest.raises(AssistantLLMError) as missing:
+        model_transport.team_model_credentials(object(), 1)
+    assert missing.value.code is AssistantFailureCode.CONFIGURATION_ERROR
+    assert missing.value.retryable is False
+
+    monkeypatch.setattr(model_transport.ai_config_crud, "get_config", lambda db, team_id: Config())
+
+    def explode(db, team_id):
+        raise InvalidToken("secret-token")
+
+    monkeypatch.setattr(model_transport.ai_config_crud, "get_decrypted_api_key", explode)
+    with pytest.raises(AssistantLLMError) as invalid:
+        model_transport.team_model_credentials(object(), 1)
+    assert invalid.value.code is AssistantFailureCode.CONFIGURATION_ERROR
+    assert "secret-token" not in str(invalid.value)
+
+
+def test_legacy_assistant_error_constructor_stays_internal():
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    error = AssistantLLMError("下游原句")
+    assert error.code is AssistantFailureCode.INTERNAL_ERROR
+    assert error.retryable is False
+    assert str(error) == "下游原句"

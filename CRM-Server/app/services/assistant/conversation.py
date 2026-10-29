@@ -25,7 +25,14 @@ from app.schemas.assistant_conversation import (
     PreparedSubmission,
 )
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft
-from app.services.assistant.conversation_router import ConversationRootClassifier
+from app.services.assistant.conversation_router import ROOT_MODEL_LEASE_SECONDS, ConversationRootClassifier
+from app.services.assistant.failure_contract import (
+    AssistantFailureCode,
+    is_root_failure_code,
+    root_failure_code,
+    root_failure_presentation,
+    root_failure_retryable,
+)
 from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.presentation import task_view
 from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority, load_draft, load_waiting
@@ -130,6 +137,7 @@ class ConversationService:
                 snapshot = AssistantTaskView.model_validate(row.task_snapshot_json) if row.task_snapshot_json else None
             except ValidationError:
                 snapshot = None
+            root_failure = is_root_failure_code(row.error_code)
             result.append(
                 ConversationMessage(
                     id=f"{row.public_id}:reply",
@@ -140,6 +148,9 @@ class ConversationService:
                     boundary=ConversationBoundary(entry_id=row.public_id, prompt=row.reply_text)
                     if row.state == "CHOICE"
                     else None,
+                    outcome="failure" if root_failure else None,
+                    error_code=row.error_code if root_failure else None,
+                    retryable=bool(row.error_retryable) if root_failure else None,
                 )
             )
         next_id = row.turn_public_id
@@ -307,17 +318,39 @@ class ConversationService:
         )
         if not execute:
             return self._reply(db, conversation, entry)
+        return await self._process_root_entry(db, conversation, entry, lease_version=lease_version)
+
+    async def retry_entry(
+        self, db: Session, *, team_id: int, user_id: int, entry_id: str, expected_version: int
+    ) -> ConversationReply:
+        conversation = self._conversation(db, team_id, user_id)
+        entry = crud.owned_entry(db, conversation, entry_id)
+        if entry is None:
+            raise crud.ConversationConflict("会话状态已变化，请刷新后重试。")
+        lease_version = crud.claim_root_retry(db, conversation, entry, expected_version=expected_version)
+        return await self._process_root_entry(db, conversation, entry, lease_version=lease_version)
+
+    async def _process_root_entry(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        lease_version: int,
+    ) -> ConversationReply:
         if entry.state == "ROUTING":
             tasks = crud.candidates(db, conversation)
-            recent = self.read(db, team_id=team_id, user_id=user_id).messages[-12:]
+            recent = self.read(db, team_id=conversation.team_id, user_id=conversation.user_id).messages[-12:]
+            recent_messages = [{"role": message.role, "text": message.text[:2000]} for message in recent]
             try:
-                decision = await self.classifier.classify(
+                decision = await self._classify_root(
                     db,
-                    team_id=team_id,
-                    text=raw,
-                    tasks=self._root_context(tasks),
-                    focused_task_public_id=conversation.focused_task_public_id,
-                    recent_messages=[{"role": m.role, "text": m.text[:2000]} for m in recent],
+                    conversation,
+                    entry,
+                    lease_version=lease_version,
+                    text=entry.user_text,
+                    tasks=tasks,
+                    recent_messages=recent_messages,
                 )
                 plan = decision.semantic_plan
                 if (
@@ -336,27 +369,85 @@ class ConversationService:
                     )
                     if referenced:
                         tasks = referenced
-                        decision = await self.classifier.classify(
+                        decision = await self._classify_root(
                             db,
-                            team_id=team_id,
-                            text=raw,
-                            tasks=self._root_context(tasks),
-                            focused_task_public_id=conversation.focused_task_public_id,
-                            recent_messages=[{"role": m.role, "text": m.text[:2000]} for m in recent],
+                            conversation,
+                            entry,
+                            lease_version=lease_version,
+                            text=entry.user_text,
+                            tasks=tasks,
+                            recent_messages=recent_messages,
                         )
-            except (AssistantLLMError, ValidationError, TimeoutError, ValueError):
-                return self._finish_message(
+            except crud.ConversationConflict:
+                raise
+            except AssistantLLMError as exc:
+                return self._finish_root_failure(db, conversation, entry, exc, lease_version=lease_version)
+            except Exception as exc:
+                return self._finish_root_failure(
                     db,
                     conversation,
                     entry,
-                    "暂时无法判断这次沟通，没有写入客户活动，请稍后重新发送。",
+                    AssistantLLMError("处理失败", code=AssistantFailureCode.INTERNAL_ERROR, cause=exc),
                     lease_version=lease_version,
                 )
             entry.decision_json = decision.model_dump(mode="json")
-            entry.command_json = {**entry.command_json, "route_candidate_ids": [t.public_id for t in tasks]}
+            entry.command_json = {**entry.command_json, "route_candidate_ids": [task.public_id for task in tasks]}
             entry.state = "ROUTED"
             crud.save(db, conversation, entry, lease_version=lease_version)
         return self._route(db, conversation, entry, lease_version=lease_version)
+
+    async def _classify_root(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        lease_version: int,
+        text: str,
+        tasks: list[AssistantTask],
+        recent_messages: list[dict[str, str]],
+    ) -> ConversationDecision:
+        crud.renew_model_lease(
+            db, conversation, entry, lease_version=lease_version, seconds=ROOT_MODEL_LEASE_SECONDS
+        )
+        try:
+            return await self.classifier.classify(
+                db,
+                team_id=conversation.team_id,
+                text=text,
+                tasks=self._root_context(tasks),
+                focused_task_public_id=conversation.focused_task_public_id,
+                recent_messages=recent_messages,
+            )
+        except crud.ConversationConflict:
+            raise
+        except AssistantLLMError:
+            raise
+        except Exception as exc:
+            raise AssistantLLMError("处理失败", code=AssistantFailureCode.INTERNAL_ERROR, cause=exc) from exc
+
+    def _finish_root_failure(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        exc: AssistantLLMError,
+        *,
+        lease_version: int,
+    ) -> ConversationReply:
+        code = root_failure_code(exc.code)
+        logger.warning(
+            "assistant root model failure: entry=%s code=%s error_type=%s",
+            entry.public_id,
+            code.value,
+            type(exc.cause).__name__ if exc.cause is not None else type(exc).__name__,
+        )
+        entry.reply_text = root_failure_presentation(code).message
+        entry.error_code = code.value
+        entry.error_retryable = root_failure_retryable(code)
+        entry.state = "READY"
+        crud.save(db, conversation, entry, finish=True, lease_version=lease_version)
+        return self._reply(db, conversation, entry)
 
     @staticmethod
     def _root_context(tasks: list[AssistantTask]) -> list[dict[str, object]]:

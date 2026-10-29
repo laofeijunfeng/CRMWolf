@@ -39,6 +39,7 @@ field_answer仅在本句直接回答候选当前FIELD问题时为true；一般�
 
 # The team model needed 70s and 108s for the ambiguous follow-up. 45s failed closed.
 ROOT_UNDERSTANDING_TIMEOUT_SECONDS = 150
+ROOT_MODEL_LEASE_SECONDS = 180
 
 
 class ConversationRootClassifier:

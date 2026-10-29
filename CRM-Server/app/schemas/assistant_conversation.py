@@ -45,6 +45,10 @@ class ConversationCommandRequest(ConversationModel):
     expected_version: int = Field(ge=0)
 
 
+class ConversationEntryRetryRequest(ConversationModel):
+    expected_version: int = Field(ge=0)
+
+
 class ConversationKindRequest(ConversationModel):
     task_public_id: str = Field(min_length=1, max_length=64)
     kind: Literal["FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"]

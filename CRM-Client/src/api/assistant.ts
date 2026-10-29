@@ -290,6 +290,15 @@ export const assistantApi = {
     const payload: unknown = await request.post('/v1/assistant/conversation/messages', input, { timeout: 150_000 })
     return ConversationReplySchema.parse(payload)
   },
+  async retryConversationEntry(entryId: string, expectedVersion: number): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post(
+      `/v1/assistant/conversation/entries/${encodeURIComponent(entryId)}/retry`,
+      { expected_version: expectedVersion },
+      { timeout: 150_000 }
+    )
+    return ConversationReplySchema.parse(payload)
+  },
   async conversationChoice(input: { entry_id: string; choice: 'CONTINUE' | 'NEW' | 'CANCEL'; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
     const payload: unknown = await request.post('/v1/assistant/conversation/choices', input)

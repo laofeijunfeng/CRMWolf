@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantTurn, AssistantTurnEvent
+from app.services.assistant.failure_contract import ROOT_RETRYABLE_FAILURE_CODES
 from app.services.assistant.turns import fingerprint
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
@@ -254,6 +255,112 @@ def save(
         raise ConversationConflict("会话处理权已变化，请同步最新状态。")
     db.commit()
     db.refresh(conversation)
+
+
+def renew_model_lease(
+    db: Session,
+    conversation: AssistantConversation,
+    entry: AssistantConversationEntry,
+    *,
+    lease_version: int,
+    seconds: int,
+) -> None:
+    """Extend an unexpired owned lease without moving the conversation version."""
+    now = business_now()
+    changed = db.execute(
+        update(AssistantConversation)
+        .where(
+            AssistantConversation.id == conversation.id,
+            AssistantConversation.team_id == conversation.team_id,
+            AssistantConversation.user_id == conversation.user_id,
+            AssistantConversation.busy_entry_id == entry.public_id,
+            AssistantConversation.version == lease_version,
+            AssistantConversation.lease_expires_at > now,
+        )
+        .values(lease_expires_at=now + timedelta(seconds=seconds))
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise ConversationConflict("会话处理权已变化，请同步最新状态。")
+    db.commit()
+    db.refresh(conversation)
+
+
+def claim_root_retry(
+    db: Session,
+    conversation: AssistantConversation,
+    entry: AssistantConversationEntry,
+    *,
+    expected_version: int,
+) -> int:
+    """Reopen one owned Root failure without creating another entry."""
+    now = business_now()
+    command = entry.command_json if isinstance(entry.command_json, dict) else {}
+    eligible = (
+        entry.conversation_id == conversation.id
+        and entry.team_id == conversation.team_id
+        and entry.user_id == conversation.user_id
+        and entry.state == "READY"
+        and bool(entry.error_retryable)
+        and entry.error_code in {code.value for code in ROOT_RETRYABLE_FAILURE_CODES}
+        and command.get("operation") == "text"
+        and entry.task_public_id is None
+        and entry.turn_public_id is None
+        and entry.task_snapshot_json is None
+        and conversation.pending_choice_id is None
+        and conversation.busy_entry_id is None
+        and (conversation.lease_expires_at is None or conversation.lease_expires_at <= now)
+    )
+    if not eligible:
+        raise ConversationConflict("会话状态已变化，请刷新后重试。")
+    changed = db.execute(
+        update(AssistantConversation)
+        .where(
+            AssistantConversation.id == conversation.id,
+            AssistantConversation.team_id == conversation.team_id,
+            AssistantConversation.user_id == conversation.user_id,
+            AssistantConversation.version == expected_version,
+            AssistantConversation.busy_entry_id.is_(None),
+            AssistantConversation.pending_choice_id.is_(None),
+            or_(
+                AssistantConversation.lease_expires_at.is_(None),
+                AssistantConversation.lease_expires_at <= now,
+            ),
+        )
+        .values(
+            version=AssistantConversation.version + 1,
+            busy_entry_id=entry.public_id,
+            lease_expires_at=now + timedelta(seconds=120),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise ConversationConflict("会话状态已变化，请刷新后重试。")
+    reopened = db.execute(
+        update(AssistantConversationEntry)
+        .where(
+            AssistantConversationEntry.id == entry.id,
+            AssistantConversationEntry.team_id == conversation.team_id,
+            AssistantConversationEntry.user_id == conversation.user_id,
+            AssistantConversationEntry.state == "READY",
+            AssistantConversationEntry.error_retryable.is_(True),
+            AssistantConversationEntry.error_code.in_([code.value for code in ROOT_RETRYABLE_FAILURE_CODES]),
+            AssistantConversationEntry.task_public_id.is_(None),
+            AssistantConversationEntry.turn_public_id.is_(None),
+            AssistantConversationEntry.task_snapshot_json.is_(None),
+        )
+        .values(state="ROUTING", reply_text=None, error_code=None, error_retryable=None)
+        .execution_options(synchronize_session=False)
+    )
+    if reopened.rowcount != 1:
+        db.rollback()
+        raise ConversationConflict("会话状态已变化，请刷新后重试。")
+    db.commit()
+    db.refresh(conversation)
+    db.refresh(entry)
+    return conversation.version
 
 
 def owned_turn(

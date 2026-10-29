@@ -23,4 +23,7 @@ def test_revision_151_is_present_and_descends_from_150() -> None:
         "02352b41bcb6",
         "156_assistant_historical_messages",
     )
-    assert script.get_heads() == ["157_merge_assistant_conversation_paths"]
+    assert script.get_revision("158_assistant_model_failure_feedback").down_revision == (
+        "157_merge_assistant_conversation_paths"
+    )
+    assert script.get_heads() == ["158_assistant_model_failure_feedback"]

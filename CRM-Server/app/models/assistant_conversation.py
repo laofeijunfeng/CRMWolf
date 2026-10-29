@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003 -- SQLAlchemy resolves Mapped types at runtime.
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -45,6 +45,8 @@ class AssistantConversationEntry(Base):
     task_public_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     turn_public_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reply_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_retryable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     task_snapshot_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     created_time: Mapped[datetime] = mapped_column(DateTime, default=business_now, nullable=False)
     __table_args__ = (

@@ -275,3 +275,50 @@ def test_different_prose_stays_beside_the_field_prompt() -> None:
     assert [block.type for block in envelope.blocks] == ["text", "interaction"]
     assert envelope.blocks[0].text == "整理暂时没有完成，请稍后重试。"
     assert envelope.blocks[1].prompt == "请补充客户名称"
+
+
+def test_root_model_failures_use_fixed_copy_and_retry_only_three_codes() -> None:
+    cases = {
+        "CONFIGURATION_ERROR": (False, "模型配置不可用"),
+        "UPSTREAM_UNAVAILABLE": (True, "模型服务不可达"),
+        "UPSTREAM_TIMEOUT": (True, "模型服务响应超时"),
+        "MODEL_OUTPUT_INVALID": (True, "模型返回格式异常"),
+        "INTERNAL_ERROR": (False, "处理失败"),
+    }
+    for code, (retryable, title) in cases.items():
+        message = _message(
+            "acm_123:reply",
+            "供应商原文 https://secret.example",
+            outcome="failure",
+            error_code=code,
+            retryable=retryable,
+        )
+        envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+        error = envelope.blocks[0]
+        assert error.type == "error"
+        assert error.code == code
+        assert error.title == title
+        assert "secret.example" not in error.message
+        assert "本次没有写入客户活动" in error.message
+        assert error.trace_id == "acm_123"
+        if retryable:
+            assert envelope.suggested_actions[0].action_id == "retry:acm_123"
+            assert envelope.suggested_actions[0].label == "重试"
+        else:
+            assert envelope.suggested_actions == []
+
+
+def test_downstream_failure_does_not_gain_a_root_retry_action() -> None:
+    message = _message(
+        "entry:turn:1",
+        "处理未完成请重试",
+        outcome="failure",
+        error_code="RETRYABLE_DEPENDENCY_FAILURE",
+        retryable=True,
+    )
+    envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+    assert envelope.blocks[0].type == "error"
+    assert envelope.blocks[0].message == "处理未完成请重试"
+    assert envelope.blocks[0].retryable is False
+    assert envelope.suggested_actions == []
+    assert envelope.blocks[0].trace_id is None

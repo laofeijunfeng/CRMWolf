@@ -18,6 +18,7 @@ from app.services.agent.ui.markdown import contains_raw_html, project_agent_mark
 from app.services.agent.ui.schemas import (
     ActionResultBlock,
     AgentErrorCode,
+    AgentUIAction,
     AgentUIEnvelope,
     AgentUIMetadata,
     ErrorBlock,
@@ -26,7 +27,14 @@ from app.services.agent.ui.schemas import (
     InteractionField,
     InteractionOption,
     NoticeBlock,
+    RetryAction,
     TextBlock,
+)
+from app.services.assistant.failure_contract import (
+    ROOT_RETRYABLE_FAILURE_CODES,
+    is_root_failure_code,
+    root_failure_code,
+    root_failure_presentation,
 )
 
 if TYPE_CHECKING:
@@ -56,6 +64,7 @@ _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
         "ACTION_ALREADY_CONSUMED",
         "UPSTREAM_TIMEOUT",
         "UPSTREAM_UNAVAILABLE",
+        "MODEL_OUTPUT_INVALID",
     }
 )
 _ERROR_TITLES: dict[str, str] = {
@@ -184,15 +193,39 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
             text=text or _UNKNOWN_TEXT,
         )
         return _envelope(message, (notice,), route="WORKFLOW", state="final")
+    actions: tuple[AgentUIAction, ...] = ()
+    trace_id = None
+    retryable = False
+    title = _ERROR_TITLES.get(code, "遇到问题" if code == "INTERNAL_ERROR" else "这次没处理成")
+    if is_root_failure_code(code):
+        failure = root_failure_code(code)
+        presentation = root_failure_presentation(failure)
+        title = presentation.title
+        text = presentation.message
+        trace_id = _reply_entry_id(message.id)
+        retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES and trace_id is not None
+        if retryable and trace_id is not None:
+            actions = (RetryAction(type="retry", action_id=f"retry:{trace_id}", label="重试"),)
     error = ErrorBlock(
         id="b_error_1",
         type="error",
         code=_as_error_code(code),
-        title=_ERROR_TITLES.get(code, "遇到问题" if code == "INTERNAL_ERROR" else "这次没处理成"),
+        title=title,
         message=text,
-        retryable=bool(message.retryable) and code == "RETRYABLE_DEPENDENCY_FAILURE",
+        retryable=retryable,
+        trace_id=trace_id,
     )
-    return _envelope(message, (error,), route="WORKFLOW", state="failed")
+    return _envelope(message, (error,), route="WORKFLOW", state="failed", actions=actions)
+
+
+def _reply_entry_id(message_id: str) -> str | None:
+    suffix = ":reply"
+    if not message_id.endswith(suffix):
+        return None
+    entry_id = message_id[: -len(suffix)]
+    if not entry_id or len(entry_id) > 128:
+        return None
+    return entry_id
 
 
 def _waiting_blocks(
@@ -502,6 +535,7 @@ def _envelope(
     *,
     route: Literal["QUERY", "WORKFLOW", "CLARIFY", "CHITCHAT"] | None,
     state: Literal["streaming", "final", "failed"] = "final",
+    actions: tuple[AgentUIAction, ...] = (),
 ) -> AgentUIEnvelope:
     label = _accessibility(blocks)
     return AgentUIEnvelope(
@@ -511,7 +545,7 @@ def _envelope(
         role="assistant",
         state=state,
         blocks=list(blocks),
-        suggested_actions=[],
+        suggested_actions=list(actions),
         metadata=AgentUIMetadata(display="MESSAGE", route=route, accessibility_label=label),
     )
 
