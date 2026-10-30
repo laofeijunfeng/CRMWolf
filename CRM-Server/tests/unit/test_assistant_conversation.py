@@ -1070,7 +1070,7 @@ def month_ambiguity(db):
                 "action_ref": f"a{index}",
                 "owner_role": "SALES",
                 "owner_text": "我",
-                "action_text": "完成准备" if span.kind == "MONTH_END" else "联系叶老师",
+                "action_text": "完成准备" if span.kind == "MONTH_SEGMENT" else "联系叶老师",
                 "action_status": "PLANNED",
                 "evidence_quote": span.raw_text,
                 "quote_start": span.start,

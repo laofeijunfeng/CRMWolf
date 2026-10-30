@@ -420,3 +420,43 @@ it('shows every open follow-up and submits only the current three-way choice', a
     ['act_follow_up_1', { choice: 'i1:complete' }],
   ])
 })
+
+it('splits a customer month segment from a dated sales follow-up', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_activity',
+    type: 'interaction',
+    interaction_id: 'ix_activity',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '通力电梯', group: 'write' },
+      { key: 'summary', label: '摘要', value: '客户说下个月初付款，11 月 5 号跟进下付款进展。', group: 'write' },
+      { key: 'next_action', label: '下一步', value: '跟进付款进展', group: 'write' },
+      { key: 'customer_commitment', label: '客户承诺', value: '下个月初付款（模糊时间，未确定具体日期）', group: 'write' },
+      { key: 'next_follow_time', label: '跟进时间', value: '11 月 5 号（日期，未指定具体时刻）', group: 'write' },
+      { key: 'activity_kind', label: '活动类型', value: '电话跟进', group: 'activity_kind', status_label: '已识别' }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_1'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const rows = Object.fromEntries(wrapper.findAll('.activity-meta-row').map(row => [
+    row.get('dt').text(),
+    row.get('dd').text()
+  ]))
+
+  expect(rows['下一步']).toBe('跟进付款进展')
+  expect(rows['客户承诺']).toBe('下个月初付款（模糊时间，未确定具体日期）')
+  expect(rows['跟进时间']).toBe('11 月 5 号（日期，未指定具体时刻）')
+  expect(wrapper.text()).not.toContain('00:00')
+  expect(wrapper.text()).not.toContain('2026-11-01')
+})

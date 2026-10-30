@@ -875,7 +875,7 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
                 "action_ref": f"a{index}",
                 "owner_role": "SALES",
                 "owner_text": "我",
-                "action_text": "完成准备" if span.kind == "MONTH_END" else "联系叶老师",
+                "action_text": "完成准备" if span.kind == "MONTH_SEGMENT" else "联系叶老师",
                 "action_status": "PLANNED",
                 "evidence_quote": span.raw_text,
                 "quote_start": span.start,
@@ -886,6 +886,8 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
     draft.content = DraftField(status="CANDIDATE", value=text)
     draft.content_json = {"content": text, "next_action": "", "next_follow_time_text": ""}
     draft.source_segments = [text]
+    draft.channel_kind = "PHONE_FOLLOW_UP"
+    draft.channel_status = "recognized"
     attach_model_evidence(
         draft,
         segment_id="seg_example",
@@ -925,4 +927,4 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
     with factory() as independent:
         activity = independent.query(CustomerActivity).one()
         assert activity.next_follow_time == datetime(2026, 10, 30, 0, 0)
-        assert json.loads(activity.content_json)["customer_commitments"][0]["resolved_on"] == "2026-10-31"
+        assert json.loads(activity.content_json)["customer_commitments"][0]["resolved_on"] is None

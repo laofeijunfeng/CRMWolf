@@ -20,6 +20,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeKind, TimeRole
 
+StoredTimeKind = Literal[
+    "EXPLICIT_DATE",
+    "MONTH_DAY",
+    "DAY_OF_MONTH",
+    "MONTH_END",
+    "MONTH_SEGMENT",
+    "RELATIVE_DAY",
+    "RELATIVE_WEEK",
+    "RELATIVE_MONTH",
+    "RELATIVE_WEEKDAY",
+    "UNKNOWN",
+]
+MonthSegmentName = Literal["EARLY", "MIDDLE", "LATE"]
+MentionGranularity = Literal["DATE", "DATETIME", "UNKNOWN", "MONTH_SEGMENT"]
+
 PROTOCOL_VERSION = "temporal-evidence-v1"
 PARSER_VERSION: Literal["assistant-date-v2"] = "assistant-date-v2"
 POLICY_VERSION: Literal["bare-day-v1"] = "bare-day-v1"
@@ -36,7 +51,7 @@ _CLOCK = re.compile(
 _PERIOD = re.compile(r"[的\s]*(?:上午|下午|晚上|中午|早上)")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("RELATIVE_MONTH", re.compile(r"下个?月\s*([0-9]{1,2})\s*[号日]")),
-    ("MONTH_END", re.compile(r"下个?月底|下月末|本月底|这个月底|这个月末|本月末|月底")),
+    ("MONTH_SEGMENT", re.compile(r"(下个|这个|下|本)?月([初中末底])(?!旬)")),
     ("MONTH_DAY", re.compile(r"(?:(20\d{2})\s*年\s*)?([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*[号日]")),
     ("UNKNOWN", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
@@ -81,7 +96,7 @@ class StoredMention(BaseModel):
     source_segment_id: str
     quote_start: int
     quote_end: int
-    kind: TimeKind
+    kind: StoredTimeKind
     role: TimeRole
     owner: str = ""
     action_id: str | None = None
@@ -90,7 +105,8 @@ class StoredMention(BaseModel):
     day: int | None = None
     hour: int | None = None
     minute: int | None = None
-    granularity: Literal["DATE", "DATETIME", "UNKNOWN"] = "UNKNOWN"
+    segment: MonthSegmentName | None = None
+    granularity: MentionGranularity = "UNKNOWN"
     confidence: float = 0
     anchor_at: datetime
     timezone: Literal["Asia/Shanghai"] = "Asia/Shanghai"
@@ -400,6 +416,63 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     return None
 
 
+_FUZZY_TIME_LABEL = "（模糊时间，未确定具体日期）"
+_DATE_TIME_LABEL = "（日期，未指定具体时刻）"
+
+
+def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | None, str | None]:
+    """Return confirmation-card lines. None means that row stays absent or unchanged."""
+
+    raw = content_json.get("temporal_evidence")
+    if not isinstance(raw, dict) or raw.get("version") != PROTOCOL_VERSION:
+        return None, None
+    raw_mentions = raw.get("mentions")
+    raw_actions = raw.get("actions")
+    if not isinstance(raw_mentions, list) or not isinstance(raw_actions, list):
+        return None, None
+    mentions = [_stored_mention(item) for item in raw_mentions]
+    actions = [_stored_action(item) for item in raw_actions]
+    stored_commitments = content_json.get("customer_commitments")
+    stored_texts: dict[str, str] = {}
+    if isinstance(stored_commitments, list):
+        for item in stored_commitments:
+            if isinstance(item, dict) and isinstance(item.get("mention_id"), str) and isinstance(item.get("text"), str):
+                stored_texts[item["mention_id"]] = item["text"]
+    lines: list[str] = []
+    for mention in mentions:
+        if mention.state != "ACTIVE" or mention.role != "CUSTOMER_COMMITMENT":
+            continue
+        action = _action_for(mention, actions)
+        phrase = _card_phrase(mention.raw_text, action.action_text if action is not None else "")
+        if mention.granularity == "MONTH_SEGMENT":
+            lines.append(f"{phrase}{_FUZZY_TIME_LABEL}")
+            continue
+        fallback = stored_texts.get(mention.mention_id)
+        lines.append(fallback or phrase)
+    customer_line = "；".join(line for line in lines if line) or None
+    sales = _primary_sales(mentions, actions)
+    if sales is None or isinstance(sales, list):
+        return customer_line, None
+    sales_mention, _sales_action = sales
+    if not isinstance(sales_mention, StoredMention) or sales_mention.resolution_status != "RESOLVED":
+        return customer_line, None
+    if sales_mention.granularity == "DATE":
+        return customer_line, f"{sales_mention.raw_text}{_DATE_TIME_LABEL}"
+    if sales_mention.granularity == "MONTH_SEGMENT":
+        return customer_line, f"{sales_mention.raw_text}{_FUZZY_TIME_LABEL}"
+    if sales_mention.granularity == "DATETIME":
+        return customer_line, sales_mention.raw_text
+    return customer_line, None
+
+
+def _card_phrase(raw: str, verb: str) -> str:
+    if raw and verb and raw in verb:
+        return verb
+    if raw and verb:
+        return f"{raw}{verb}"
+    return verb or raw
+
+
 def match_temporal_choice_id(candidates: list[dict[str, object]], text: str) -> str | None:
     """Return the one current candidate id whose label equals text, ignoring whitespace."""
 
@@ -440,6 +513,7 @@ def apply_temporal_choice(draft: TaskDraft, choice_id: str) -> None:
         return
     if choice_id.startswith("role:"):
         _apply_role_choice(choice_id, mentions)
+        _link_actions(mentions, actions)
         _write_bundle(draft, mentions, actions)
         project_draft(draft)
         return
@@ -567,11 +641,34 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
     del segment_text
     hour_minute = _clock_in_text(found.raw_text)
     kind = found.kind
-    if kind == "MONTH_END":
-        month_shift = 1 if found.raw_text.startswith("下") else 0
-        year, month = _shift_month(anchor.year, anchor.month, month_shift)
-        day = calendar.monthrange(year, month)[1]
-        return _dated(year, month, day, hour_minute, anchor)
+    if kind == "MONTH_SEGMENT":
+        if hour_minute is not None:
+            return {
+                "resolution_status": "UNRESOLVED",
+                "ambiguity_reason": "DATE",
+                "granularity": "UNKNOWN",
+                "resolved_at": None,
+                "candidates": [],
+            }
+        prefix = found.groups[0] if found.groups else None
+        segment_char = found.groups[1] if len(found.groups) > 1 else None
+        segment = {"初": "EARLY", "中": "MIDDLE", "末": "LATE", "底": "LATE"}.get(segment_char or "")
+        if segment is None:
+            return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
+        year, month = _shift_month(anchor.year, anchor.month, 1 if prefix in {"下", "下个"} else 0)
+        return {
+            "year": year,
+            "month": month,
+            "day": None,
+            "hour": None,
+            "minute": None,
+            "segment": segment,
+            "resolved_at": None,
+            "granularity": "MONTH_SEGMENT",
+            "resolution_status": "RESOLVED",
+            "ambiguity_reason": None,
+            "candidates": [],
+        }
     if kind == "DAY_OF_MONTH":
         day = int(found.groups[0] or "0")
         options = _bare_day_candidates(day, anchor)
@@ -751,7 +848,8 @@ def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) ->
             action.owner_role = "INTERNAL"
         elif mention.role == "OTHER":
             action.owner_role = "OTHER"
-            action.action_status = "COMPLETED"
+            if mention.ambiguity_reason != "ROLE":
+                action.action_status = "COMPLETED"
 
 
 def _supersede_replacements(text: str, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
@@ -1011,5 +1109,7 @@ def _apply_role_choice(choice_id: str, mentions: list[StoredMention]) -> None:
             item.resolution_status = "RESOLVED"
         else:
             item.ambiguity_reason = None
+            if item.granularity == "MONTH_SEGMENT":
+                item.resolution_status = "RESOLVED"
 
 

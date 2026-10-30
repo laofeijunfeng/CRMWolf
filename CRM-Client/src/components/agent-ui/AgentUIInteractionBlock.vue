@@ -553,10 +553,17 @@ const submit = async (): Promise<void> => {
             <span>客户活动</span>
           </p>
           <p v-if="activityFact('summary')" class="activity-body">{{ activityFact('summary')?.value }}</p>
-          <dl v-if="activityFact('next_action') || activityFact('next_follow_time') || activityKindFact" class="activity-meta">
+          <dl
+            v-if="activityFact('next_action') || activityFact('customer_commitment') || activityFact('next_follow_time') || activityKindFact"
+            class="activity-meta"
+          >
             <div v-if="activityFact('next_action')" class="activity-meta-row">
               <dt>下一步</dt>
               <dd>{{ activityFact('next_action')?.value }}</dd>
+            </div>
+            <div v-if="activityFact('customer_commitment')" class="activity-meta-row">
+              <dt>客户承诺</dt>
+              <dd>{{ activityFact('customer_commitment')?.value }}</dd>
             </div>
             <div v-if="activityFact('next_follow_time')" class="activity-meta-row">
               <dt>跟进时间</dt>

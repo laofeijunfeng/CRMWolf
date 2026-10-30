@@ -369,3 +369,88 @@ def test_downstream_failure_does_not_gain_a_root_retry_action() -> None:
     assert envelope.blocks[0].retryable is False
     assert envelope.suggested_actions == []
     assert envelope.blocks[0].trace_id is None
+
+
+def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
+    content_json = {
+        "temporal_evidence": {
+            "version": "temporal-evidence-v1",
+            "mentions": [
+                {
+                    "mention_id": "tm_customer",
+                    "raw_text": "下个月初",
+                    "source_segment_id": "seg",
+                    "quote_start": 3,
+                    "quote_end": 7,
+                    "kind": "MONTH_SEGMENT",
+                    "role": "CUSTOMER_COMMITMENT",
+                    "action_id": "act_customer",
+                    "year": 2026,
+                    "month": 11,
+                    "segment": "EARLY",
+                    "granularity": "MONTH_SEGMENT",
+                    "anchor_at": "2026-10-30T09:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": None,
+                },
+                {
+                    "mention_id": "tm_sales",
+                    "raw_text": "11 月 5 号",
+                    "source_segment_id": "seg",
+                    "quote_start": 10,
+                    "quote_end": 18,
+                    "kind": "MONTH_DAY",
+                    "role": "SALES_FOLLOW_UP",
+                    "action_id": "act_sales",
+                    "granularity": "DATE",
+                    "anchor_at": "2026-10-30T09:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": "2026-11-05T00:00:00",
+                },
+            ],
+            "actions": [
+                {
+                    "action_id": "act_customer",
+                    "owner_role": "CUSTOMER",
+                    "action_text": "付款",
+                    "action_status": "COMMITTED",
+                    "source_segment_id": "seg",
+                    "evidence_quote": "下个月初",
+                    "quote_start": 3,
+                    "quote_end": 7,
+                    "temporal_mention_id": "tm_customer",
+                },
+                {
+                    "action_id": "act_sales",
+                    "owner_role": "SALES",
+                    "action_text": "跟进付款进展",
+                    "action_status": "PLANNED",
+                    "source_segment_id": "seg",
+                    "evidence_quote": "11 月 5 号",
+                    "quote_start": 10,
+                    "quote_end": 18,
+                    "temporal_mention_id": "tm_sales",
+                },
+            ],
+        }
+    }
+    waiting = _confirmation(
+        _preview(
+            activity_kind="PHONE_FOLLOW_UP",
+            next_action="跟进付款进展",
+            next_follow_time="2026-11-05T00:00:00",
+            next_follow_time_text="11 月 5 号",
+            next_follow_time_granularity="DATE",
+            content_json=content_json,
+        )
+    )
+    message = _message("m1", "确认后写入这条客户活动？", _task(waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    values = {fact.key: fact.value for fact in interaction.facts}
+    labels = {fact.key: fact.label for fact in interaction.facts}
+    assert labels["customer_commitment"] == "客户承诺"
+    assert values["customer_commitment"] == "下个月初付款（模糊时间，未确定具体日期）"
+    assert values["next_follow_time"] == "11 月 5 号（日期，未指定具体时刻）"
+    assert "00:00" not in values["next_follow_time"]
+    assert values["next_action"] == "跟进付款进展"

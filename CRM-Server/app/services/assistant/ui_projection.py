@@ -472,7 +472,11 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         _add_fact(facts, "next_action", "下一步", preview.next_action, group="write")
     elif preview.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
         _add_fact(facts, "next_action", "下一步", "未提供行动项", group="write")
-    follow_time = preview.next_follow_time_text or preview.next_follow_time
+    from app.services.assistant.temporal_evidence import confirmation_time_labels
+
+    commitment_line, follow_override = confirmation_time_labels(preview.content_json)
+    _add_fact(facts, "customer_commitment", "客户承诺", commitment_line, group="write")
+    follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
     _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
     status_label = "历史冻结" if not editable and preview.activity_kind else preview.channel_status_label
     options = [
