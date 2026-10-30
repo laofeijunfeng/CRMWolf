@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { AlertCircle, CheckCircle2, CircleSlash2 } from 'lucide-vue-next'
 
 import type { AgentUIBlock, EntityRef } from '@/schemas/agent-contracts'
@@ -6,7 +7,9 @@ import { isAgentEntityOpenable } from '@/components/agent/agentEntityNavigation'
 
 type ActionResultBlock = Extract<AgentUIBlock, { type: 'action_result' }>
 
-defineProps<{ block: ActionResultBlock }>()
+const props = defineProps<{ block: ActionResultBlock }>()
+const messageLines = computed(() => props.block.message.split('\n').map(line => line.trim()).filter(line => line !== ''))
+const multiline = computed(() => messageLines.value.length > 1)
 
 const emit = defineEmits<{
   'open-entity': [entityRef: EntityRef]
@@ -32,7 +35,10 @@ const classesByStatus = {
     </span>
     <div>
       <strong class="text-[13px] text-foreground">{{ block.title }}</strong>
-      <p class="mb-0 mt-1 text-[12px] text-muted-foreground">{{ block.message }}</p>
+      <template v-if="multiline">
+        <p v-for="(line, index) in messageLines" :key="index" class="mb-0 mt-1 text-sm text-foreground">{{ line }}</p>
+      </template>
+      <p v-else class="mb-0 mt-1 text-[12px] text-muted-foreground">{{ block.message }}</p>
       <button
         v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
         type="button"

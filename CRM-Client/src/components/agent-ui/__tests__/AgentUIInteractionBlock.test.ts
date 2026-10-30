@@ -500,3 +500,137 @@ it('shows a full month commitment separately from a sales date', () => {
   expect(wrapper.text()).not.toContain('11月1日')
   expect(wrapper.text()).not.toContain('00:00')
 })
+
+it('keeps activity facts visible and folds recognition source and evidence', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_density',
+    type: 'interaction',
+    interaction_id: 'ix_density',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '上海期货信息技术有限公司', group: 'write' },
+      { key: 'summary', label: '摘要', value: '今天通过微信对齐了合同和发票。', group: 'write' },
+      { key: 'next_action', label: '下一步', value: '11 月 15 日跟进付款', group: 'write' },
+      { key: 'next_follow_time', label: '跟进时间', value: '11 月 15 日', group: 'write' },
+      { key: 'activity_kind', label: '活动类型', value: '微信跟进', group: 'activity_kind', status_label: 'AI 已识别 · 高置信度', source: '从今天微信联系中识别' },
+      { key: 'change_signal', label: '客户上下文判断', value: '推进', group: 'context', source: '这次出现了新的确认或下一步。' },
+      { key: 'context_evidence', label: '依据', value: '2026-09-23 微信沟通；2026-09-01 上次拜访', group: 'context' },
+      { key: 'context_notice_1', label: '需要注意', value: '没有权限查看这部分内容', group: 'context' },
+      { key: 'score', label: '内容质量', value: '76 / 100', group: 'score' },
+      { key: 'score_reason', label: '评分依据', value: '主体和下一步都已整理', group: 'score' }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_1'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.get('.activity-title').text()).toBe('确认写入客户活动')
+  expect(wrapper.text()).toContain('待确认')
+  expect(wrapper.text()).not.toContain('等待你确认')
+  expect(wrapper.text()).not.toContain('本次将写入 CRM')
+  expect(wrapper.text()).toContain('上海期货信息技术有限公司')
+  expect(wrapper.text()).toContain('今天通过微信对齐了合同和发票。')
+  expect(wrapper.text()).toContain('没有权限查看这部分内容')
+  expect(wrapper.text()).toContain('这次出现了新的确认或下一步。')
+  expect(wrapper.get('.activity-notices').text()).toContain('没有权限查看这部分内容')
+
+  const basis = wrapper.get('details.activity-basis')
+  expect(basis.attributes('open')).toBeUndefined()
+  expect(basis.text()).toContain('查看依据')
+  expect(basis.text()).toContain('从今天微信联系中识别')
+  expect(basis.text()).toContain('2026-09-23 微信沟通')
+  expect(wrapper.get('.activity-kind').text()).not.toContain('识别来源')
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['取消', '确认写入'])
+})
+
+it('keeps an unrecognized activity type and its reason outside the fold', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_unknown_kind',
+    type: 'interaction',
+    interaction_id: 'ix_unknown_kind',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '通力电梯', group: 'write' },
+      { key: 'summary', label: '摘要', value: '聊了付款。', group: 'write' },
+      {
+        key: 'activity_kind',
+        label: '活动类型',
+        value: '请选择本次活动的主渠道',
+        group: 'activity_kind',
+        status_label: '未识别 · 需要确认',
+        source: '原文没有写明渠道',
+        options: [{ value: 'WECHAT_FOLLOW_UP', label: '微信跟进', disabled: false }]
+      }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: true, description: '先选择活动类型' },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_1'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.text()).toContain('等待选择类型')
+  expect(wrapper.get('.activity-caption').text()).toBe('为什么需要选择：原文没有写明渠道')
+  expect(wrapper.find('details.activity-basis').exists()).toBe(false)
+  expect(wrapper.get('button.activity-action.is-disabled, button[disabled].activity-action').text()).toContain('确认写入')
+})
+
+it('replays a historical activity confirmation without write actions', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_history',
+    type: 'interaction',
+    interaction_id: 'ix_history',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'READ_ONLY',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '上海期货信息技术有限公司', group: 'write' },
+      { key: 'summary', label: '摘要', value: '当时冻结的活动正文。', group: 'write' },
+      { key: 'activity_kind', label: '活动类型', value: '微信跟进', group: 'activity_kind', status_label: '历史冻结', source: '当时的识别来源' },
+      { key: 'change_signal', label: '客户上下文判断', value: '推进', group: 'context', source: '当时判断。' },
+      { key: 'score_reason', label: '评分依据', value: '当时评分理由', group: 'score' }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: null
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.get('.activity-title').text()).toBe('客户活动')
+  expect(wrapper.text()).toContain('历史只读')
+  expect(wrapper.text()).toContain('仅回看当时冻结的内容，不代表当前客户状态。')
+  expect(wrapper.text()).toContain('当时冻结的活动正文。')
+  expect(wrapper.find('button').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('确认写入')
+  expect(wrapper.text()).not.toContain('取消')
+  expect(wrapper.text()).not.toContain('修改类型')
+  expect(wrapper.text()).not.toContain('再次写入')
+  const basis = wrapper.get('details.activity-basis')
+  expect(basis.attributes('open')).toBeUndefined()
+  expect(basis.text()).toContain('当时的识别来源')
+})

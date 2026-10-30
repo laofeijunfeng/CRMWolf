@@ -37,3 +37,23 @@ describe('AgentUIActionResultBlock', () => {
     expect(wrapper.text()).toContain('回款记录 1')
   })
 })
+
+  it('renders activity success facts once and does not repeat the title', () => {
+    const wrapper = mount(AgentUIActionResultBlock, {
+      props: {
+        block: {
+          id: 'result-activity',
+          type: 'action_result',
+          action_id: 'action-activity',
+          status: 'SUCCESS',
+          title: '活动已写入',
+          message: '客户：上海期货信息技术有限公司\n活动类型：微信跟进\n下一步：11 月 15 日跟进付款'
+        }
+      }
+    })
+
+    expect(wrapper.text().match(/活动已写入/g)).toEqual(['活动已写入'])
+    expect(wrapper.text()).toContain('客户：上海期货信息技术有限公司')
+    expect(wrapper.text()).toContain('活动类型：微信跟进')
+    expect(wrapper.text()).toContain('下一步：11 月 15 日跟进付款')
+  })

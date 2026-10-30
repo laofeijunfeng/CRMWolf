@@ -208,7 +208,55 @@ def test_written_activity_is_a_result_block() -> None:
     assert result.type == "action_result"
     assert result.status == "SUCCESS"
     assert result.title == "活动已写入"
-    assert result.message == "活动已写入"
+    assert result.message == "客户活动"
+    assert result.message != result.title
+
+
+def test_written_activity_lists_accepted_snapshot_facts_once() -> None:
+    task = _task(
+        activity_kind="WECHAT_FOLLOW_UP",
+        draft=TaskDraft(
+            customer=DraftField(status="ACCEPTED", value="上海期货信息技术有限公司"),
+            next_action=DraftField(status="ACCEPTED", value="11 月 15 日跟进付款"),
+            content=DraftField(status="CANDIDATE", value="不该出现的候选正文"),
+        ),
+    )
+    message = _message("m1", "活动已写入", task, outcome="activity_written")
+    envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+    result = envelope.blocks[0]
+    assert result.type == "action_result"
+    assert result.title == "活动已写入"
+    assert result.message == "客户：上海期货信息技术有限公司\n活动类型：微信跟进\n下一步：11 月 15 日跟进付款"
+    assert "活动已写入" not in result.message
+    assert "不该出现的候选正文" not in result.message
+
+
+def test_confirmation_keeps_distinct_risk_notices_and_drops_the_repeated_summary() -> None:
+    waiting = _confirmation(
+        _preview(
+            change_signal="待确认",
+            change_summary="来源有冲突，先不判断变化。",
+            context_notices=["来源有冲突，先不判断变化。", "没有权限查看这部分内容", "没有权限查看这部分内容"],
+            channel_source_text="从微信二字识别",
+        )
+    )
+    message = _message("m1", "确认后写入这条客户活动？", _task(waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    interaction = envelope.blocks[0]
+    assert interaction.type == "interaction"
+    notices = [fact.value for fact in interaction.facts if fact.key.startswith("context_notice_")]
+    assert notices == ["没有权限查看这部分内容"]
+    assert interaction.submit_action_id == "act_1"
+
+
+def test_historical_activity_confirmation_cannot_be_submitted() -> None:
+    waiting = _confirmation(_preview())
+    message = _message("m1", "确认后写入这条客户活动？", _task(waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+    interaction = envelope.blocks[0]
+    assert interaction.type == "interaction"
+    assert interaction.state == "READ_ONLY"
+    assert interaction.submit_action_id is None
 
 
 def test_boundary_choice_is_active_only_while_pending() -> None:

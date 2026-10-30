@@ -205,6 +205,13 @@ const activityContext = computed(() => activityFact('change_signal'))
 const activityOpportunity = computed(() => activityFact('opportunity'))
 const activityEvidence = computed(() => activityFact('context_evidence'))
 const activityEvidenceLines = computed(() => (activityEvidence.value?.value ?? '').split('；').map(line => line.trim()).filter(line => line !== ''))
+const activityNotices = computed(() => props.block.facts.filter(fact => fact.key.startsWith('context_notice_')))
+const activitySourceFolded = computed(() => {
+  const fact = activityKindFact.value
+  if (fact === undefined || fact.source === null || fact.source === undefined || fact.source === '' || fact.status_label === '未识别 · 需要确认') return ''
+  return fact.source
+})
+const showActivityBasis = computed(() => activitySourceFolded.value !== '' || activityEvidenceLines.value.length > 0)
 const activityScoreNumber = computed(() => (activityScoreFact.value?.value ?? '').split('/')[0]?.trim() ?? '')
 const activityPassed = computed(() => {
   const score = Number(activityScoreNumber.value)
@@ -213,7 +220,7 @@ const activityPassed = computed(() => {
 const activityHistory = computed(() => props.block.state === 'READ_ONLY')
 const activityWaitingLabel = computed(() => {
   if (activityHistory.value) return '历史只读'
-  return activityKindFact.value?.status_label === '未识别 · 需要确认' ? '等待选择类型' : '等待你确认'
+  return activityKindFact.value?.status_label === '未识别 · 需要确认' ? '等待选择类型' : '待确认'
 })
 const activityActionOptions = computed(() => {
   const cancel = props.block.options.find(option => option.value === 'cancel')
@@ -537,15 +544,14 @@ const submit = async (): Promise<void> => {
   >
     <template v-if="isActivityConfirmation">
       <header class="activity-header">
-        <h2 :id="`${block.id}-prompt`" class="activity-title">{{ activityHistory ? '历史确认内容' : '确认写入客户活动' }}</h2>
+        <h2 :id="`${block.id}-prompt`" class="activity-title">{{ activityHistory ? '客户活动' : '确认写入客户活动' }}</h2>
         <span class="activity-pill" :class="activityHistory ? 'is-muted' : 'is-info'">{{ activityWaitingLabel }}</span>
       </header>
       <div class="activity-main">
-        <p v-if="activityHistory" class="activity-note">仅回看当时冻结的内容、类型与判断，不代表当前客户状态。</p>
+        <p v-if="activityHistory" class="activity-note">仅回看当时冻结的内容，不代表当前客户状态。</p>
         <section class="activity-section">
-          <div class="activity-section-head">
-            <h3 class="activity-kicker">{{ activityHistory ? '当时的写入预览' : '本次将写入 CRM' }}</h3>
-            <span v-if="activityScoreFact" class="activity-pill is-success">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : activityScoreFact.value }}</span>
+          <div v-if="activityScoreFact" class="activity-section-head">
+            <span class="activity-pill is-success">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : activityScoreFact.value }}</span>
           </div>
           <p v-if="activityFact('customer')" class="activity-customer">
             <b>{{ activityFact('customer')?.value }}</b>
@@ -577,7 +583,7 @@ const submit = async (): Promise<void> => {
                   <span v-if="activityKindFact.status_label" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
                   <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改类型' }}</button>
                 </div>
-                <p v-if="activityKindFact.source" class="activity-caption"><span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '为什么需要选择：' : '识别来源：' }}</span>{{ activityKindFact.source }}</p>
+                <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption"><span>为什么需要选择：</span>{{ activityKindFact.source }}</p>
               </dd>
             </div>
           </dl>
@@ -602,15 +608,18 @@ const submit = async (): Promise<void> => {
           </div>
           <p v-if="activityContext.source" class="activity-body">{{ activityContext.source }}</p>
           <p v-if="activityOpportunity" class="activity-inline"><span>关联商机</span><b>{{ activityOpportunity.value }}</b></p>
-          <p v-if="activityEvidenceLines[0]" class="activity-evidence"><b>关键依据</b><span>{{ activityEvidenceLines[0] }}</span></p>
           <p class="activity-caption">不写入活动正文，不自动修改商机阶段。</p>
-          <details v-if="activityEvidenceLines.length > 0" class="activity-details">
-            <summary>查看完整上下文依据 · {{ activityEvidenceLines.length }} 条</summary>
-            <div>
-              <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
-            </div>
-          </details>
         </section>
+        <ul v-if="activityNotices.length > 0" class="activity-notices">
+          <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
+        </ul>
+        <details v-if="showActivityBasis" class="activity-details activity-basis">
+          <summary>查看依据</summary>
+          <div>
+            <p v-if="activitySourceFolded">识别来源：{{ activitySourceFolded }}</p>
+            <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
+          </div>
+        </details>
         <details v-if="activityScoreReason" class="activity-details activity-score">
           <summary>查看评分依据 · 内容质量</summary>
           <div class="activity-score-body">
@@ -998,6 +1007,10 @@ const submit = async (): Promise<void> => {
   justify-content: space-between;
 }
 
+.activity-section-head > .activity-pill {
+  margin-left: auto;
+}
+
 .activity-kicker,
 .activity-context-title h3,
 .activity-kind-editor-head span:first-child {
@@ -1078,6 +1091,9 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   border: 0;
   background: transparent;
   padding: 0;
@@ -1091,7 +1107,6 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-caption,
-.activity-evidence,
 .activity-kind-editor > p,
 .activity-actions-hint {
   margin: 0;
@@ -1105,8 +1120,7 @@ const submit = async (): Promise<void> => {
   margin-top: 4px;
 }
 
-.activity-caption span,
-.activity-evidence b {
+.activity-caption span {
   color: #475569;
   font-weight: 600;
 }
@@ -1168,7 +1182,7 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-kind-option {
-  min-height: 32px;
+  min-height: 44px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;
@@ -1202,11 +1216,23 @@ const submit = async (): Promise<void> => {
   padding: 12px;
 }
 
-.activity-evidence {
+.activity-notices {
   display: grid;
-  gap: 2px;
-  border-left: 2px solid #cbd5e1;
-  padding-left: 10px;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-notices li {
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  padding: 10px 12px;
+  color: #92400e;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
 }
 
 .activity-details {
@@ -1221,7 +1247,7 @@ const submit = async (): Promise<void> => {
 .activity-details summary {
   display: flex;
   align-items: center;
-  min-height: 28px;
+  min-height: 44px;
   color: #475569;
   font-size: 13px;
   font-weight: 500;
@@ -1284,8 +1310,8 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-card :deep(.activity-action) {
-  height: 36px;
-  min-height: 36px;
+  height: auto;
+  min-height: 44px;
   border-radius: 8px;
   padding-right: 16px;
   padding-left: 16px;

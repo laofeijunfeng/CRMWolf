@@ -502,6 +502,19 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         ]
         if evidence:
             _add_fact(facts, "context_evidence", "依据", "；".join(evidence), group="context")
+    summary = _plain(preview.change_summary) if preview.change_signal else ""
+    seen_notices: set[str] = set()
+    notice_index = 0
+    for notice in preview.context_notices:
+        text = _plain(notice)
+        if not text or text in seen_notices or text == summary:
+            continue
+        # Keep the score facts. The interaction contract allows 20 facts.
+        if len(facts) >= 18:
+            break
+        seen_notices.add(text)
+        notice_index += 1
+        _add_fact(facts, f"context_notice_{notice_index}", "需要注意", text, group="context")
     _add_fact(facts, "score", "内容质量", f"{preview.score} / 100", group="score")
     _add_fact(facts, "score_reason", "评分依据", preview.score_reason, group="score")
     return facts[:20]
@@ -624,17 +637,41 @@ def _accepted_notice(draft: TaskDraft) -> NoticeBlock | None:
 
 
 def _result_block(message: ConversationMessage) -> ActionResultBlock:
-    text = _plain(message.text) or "活动已写入"
-    if text == "已记录这条客户活动。":
-        text = "活动已写入"
     return ActionResultBlock(
         id="b_result_1",
         type="action_result",
         action_id=_clip(message.id, 128),
         status="SUCCESS",
         title="活动已写入",
-        message=text,
+        message=_result_message(message),
     )
+
+
+def _accepted_value(field: object) -> str:
+    status = getattr(field, "status", None)
+    value = getattr(field, "value", None)
+    if status != "ACCEPTED":
+        return ""
+    return _plain(value) if isinstance(value, str) else ""
+
+
+def _result_message(message: ConversationMessage) -> str:
+    """Facts already on the write snapshot. Never a second success sentence."""
+
+    task = message.task
+    if task is None:
+        return "客户活动"
+    lines: list[str] = []
+    customer = _accepted_value(task.draft.customer)
+    if customer:
+        lines.append(f"客户：{customer}")
+    kind = _KIND_LABELS.get(task.activity_kind or "")
+    if kind:
+        lines.append(f"活动类型：{kind}")
+    next_action = _accepted_value(task.draft.next_action)
+    if next_action:
+        lines.append(f"下一步：{next_action}")
+    return "\n".join(lines) if lines else "客户活动"
 
 
 def _text_block(text: str) -> TextBlock:
