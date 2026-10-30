@@ -479,3 +479,30 @@ def test_model_quotes_of_afternoon_and_bare_week_cover_the_source() -> None:
     assert temporal_waiting(draft) is None
     resolved, granularity = resolved_sales_follow_up(draft)
     assert (resolved, granularity) == (datetime(2026, 11, 4), "DATE")
+
+
+def test_shorter_server_span_is_a_contract_gap() -> None:
+    from app.services.assistant.temporal_evidence import temporal_failure_origin
+
+    text = "今天再联系"
+    mention = ModelTemporalMention(
+        raw_text="今天下午",
+        quote_start=0,
+        quote_end=4,
+        kind="RELATIVE_DAY",
+        role="SALES_FOLLOW_UP",
+        confidence=1,
+    )
+    # The quote is not in this shorter source, so the model is wrong.
+    assert temporal_failure_origin(text, [mention]) == "model_output"
+    longer = "今天下午再联系"
+    short = ModelTemporalMention(
+        raw_text="今天",
+        quote_start=0,
+        quote_end=2,
+        kind="RELATIVE_DAY",
+        role="SALES_FOLLOW_UP",
+        confidence=1,
+    )
+    assert find_time_spans(longer)[0].raw_text == "今天下午"
+    assert temporal_failure_origin(longer, [short]) == "server_contract"

@@ -90,7 +90,7 @@ async function awaitResumeSettled(page: Page): Promise<void> {
   // Resume fires two API calls then renders; give it a beat and require the
   // processing indicator to be absent.
   await page.waitForTimeout(1_500)
-  await expect(page.getByText(/Agent 正在处理/).first()).toBeHidden({ timeout: 30_000 })
+  await expect(page.getByText(/内容已保存，处理仍在后台继续/).first()).toBeHidden({ timeout: 30_000 })
 }
 
 
@@ -585,12 +585,12 @@ test('s9 processing hint and stage list visible during turn', async ({ page }) =
   await textarea.press('Enter')
 
   // The processing indicator appears promptly after submit.
-  await expect(page.getByText(/Agent 正在处理/).first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(/内容已保存，处理仍在后台继续/).first()).toBeVisible({ timeout: 15_000 })
   // Stage preset for a text turn renders at least the first stage label.
-  await expect(page.getByText('判断活动类型').first()).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('正在判断活动类型').first()).toBeVisible({ timeout: 10_000 })
 
   // It clears once a waiting card arrives; settle via API (the UI card from
   // this turn stays live because no reload happens).
   await settleTail(page, 'reject')
-  await expect(page.getByText(/Agent 正在处理/).first()).toBeHidden({ timeout: 180_000 })
+  await expect(page.getByText(/内容已保存，处理仍在后台继续/).first()).toBeHidden({ timeout: 180_000 })
 })

@@ -251,13 +251,13 @@ async def execute_confirmation(
         TaskUpdate(
             action_actor="SYSTEM",
             action_name="show_write_receipt",
-            action_result={"label": "已记录这条客户活动。", "activity_public_id": write.activity_public_id},
+            action_result={"label": "活动已写入", "activity_public_id": write.activity_public_id},
             event_type="receipt",
             event_key=f"receipt:{command['submission_id']}",
             correlation_id=str(waiting.get("action_id") or ""),
         ),
     )
-    return result.task, "已记录这条客户活动。"
+    return result.task, "活动已写入"
 
 
 

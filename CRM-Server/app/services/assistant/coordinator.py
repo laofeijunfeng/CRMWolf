@@ -22,7 +22,13 @@ from app.services.assistant.confirmation import execute_confirmation, freeze_con
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter
-from app.services.assistant.intake_flow import intake_step, kind_waiting, raise_quality_gate_failure
+from app.services.assistant.intake_flow import (
+    _budget_exhausted,
+    fail_model_stage,
+    intake_step,
+    kind_waiting,
+    raise_quality_gate_failure,
+)
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
@@ -1068,16 +1074,31 @@ class AssistantCoordinator:
         from app.services.assistant.activity_channel import apply_channel_resolution, resolve_channel
         from app.services.assistant.events import stage as mk_stage
 
+        draft = load_draft(task)
+        if accept_source and append_source(db, task, draft, user_text):
+            task = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    draft=draft,
+                    action_actor="USER",
+                    action_name="accept_source",
+                    action_result={"segment_id": draft.source_records[-1].segment_id},
+                ),
+            ).task
+            db.commit()
+            db.refresh(task)
+            draft = load_draft(task)
+        if _budget_exhausted():
+            fail_model_stage(db, task, TimeoutError(), stage="classify", draft=draft)
         reporter.stage_start(mk_stage("classify"))
         started = time.monotonic()
-        decision = None
-        model_failed = False
         try:
             decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
-        except AssistantLLMError:
-            model_failed = True
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
+            fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))
-        resolution = resolve_channel(user_text, decision, model_failed=model_failed)
+        resolution = resolve_channel(user_text, decision, model_failed=False)
         draft = load_draft(task)
         if resolution.status == "family_unclear":
             if accept_source:

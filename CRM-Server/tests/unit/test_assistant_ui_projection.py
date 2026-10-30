@@ -207,8 +207,8 @@ def test_written_activity_is_a_result_block() -> None:
     result = envelope.blocks[0]
     assert result.type == "action_result"
     assert result.status == "SUCCESS"
-    assert result.title == "已写入"
-    assert result.message == "已记录这条客户活动。"
+    assert result.title == "活动已写入"
+    assert result.message == "活动已写入"
 
 
 def test_boundary_choice_is_active_only_while_pending() -> None:

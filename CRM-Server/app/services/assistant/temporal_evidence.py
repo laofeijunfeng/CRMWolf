@@ -52,6 +52,12 @@ _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
 class TemporalContractError(ValueError):
     """Model evidence contradicted the source text or the closed vocabulary."""
 
+    def __init__(self, message: str, *, failure_origin: str = "model_output") -> None:
+        super().__init__(message)
+        if failure_origin not in {"model_output", "server_contract"}:
+            failure_origin = "model_output"
+        self.failure_origin = failure_origin
+
 
 class ActionContractError(TemporalContractError):
     """Action model or action quote contradicted the source."""
@@ -144,6 +150,32 @@ def find_time_spans(text: str) -> list[FoundSpan]:
     return accepted
 
 
+_TIME_MARKS = ("今天", "明天", "后天", "周", "星期", "礼拜", "月", "点", "时", "午", "号", "日")
+
+
+def _mention_raw(item: object) -> str:
+    raw = getattr(item, "raw_text", None)
+    if raw is None and isinstance(item, dict):
+        raw = item.get("raw_text")
+    return raw if isinstance(raw, str) else ""
+
+
+def temporal_failure_origin(text: str, mentions: list[object]) -> str:
+    """Distinguish a bad model quote from a server span the canonical rules cannot cut."""
+
+    spans = find_time_spans(text)
+    server_raw = {span.raw_text for span in spans}
+    for item in mentions:
+        raw = _mention_raw(item)
+        if not raw or raw not in text or raw in server_raw:
+            continue
+        if not any(mark in raw for mark in _TIME_MARKS):
+            continue
+        if not spans or any(raw in span.raw_text or span.raw_text in raw for span in spans):
+            return "server_contract"
+    return "model_output"
+
+
 def ensure_mentions_cover_source(text: str, mentions: list[object]) -> None:
     """Production structuring must quote every time the server can locate."""
 
@@ -153,7 +185,10 @@ def ensure_mentions_cover_source(text: str, mentions: list[object]) -> None:
     covered = {_mention_span(text, item) for item in mentions}
     missing = [span.raw_text for span in spans if (span.start, span.end) not in covered]
     if missing or len(mentions) != len(spans):
-        raise TemporalContractError("temporal mentions do not cover the source")
+        raise TemporalContractError(
+            "temporal mentions do not cover the source",
+            failure_origin=temporal_failure_origin(text, mentions),
+        )
 
 
 def attach_model_evidence(
@@ -201,7 +236,8 @@ def attach_model_evidence(
         used.add((start, end))
         found = next((span for span in spans if span.start == start and span.end == end), None)
         if found is None or found.kind != mention.kind:
-            raise TemporalContractError("temporal mention does not match a source span")
+            origin = "model_output" if found is not None else temporal_failure_origin(segment_text, mentions)
+            raise TemporalContractError("temporal mention does not match a source span", failure_origin=origin)
         linked_id = action_ids.get(mention.action_ref) if mention.action_ref else None
         if mention.action_ref and linked_id is None:
             raise TemporalContractError("temporal mention points at an unknown action")
@@ -217,7 +253,10 @@ def attach_model_evidence(
         )
         built_mentions.append(stored)
     if len(used) != len(spans):
-        raise TemporalContractError("temporal mentions do not cover the source")
+        raise TemporalContractError(
+            "temporal mentions do not cover the source",
+            failure_origin=temporal_failure_origin(segment_text, mentions),
+        )
     _link_actions(built_mentions, built_actions)
     _supersede_replacements(segment_text, built_mentions, built_actions)
     previous = _bundle(draft)

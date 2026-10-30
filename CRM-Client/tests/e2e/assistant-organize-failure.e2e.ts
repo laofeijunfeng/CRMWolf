@@ -4,10 +4,10 @@ import { expect, test, type Page, type Route } from '@playwright/test'
  * Browser proof for organize/quality technical failure.
  * Every CRM request is intercepted. The storage token is not a credential.
  */
-const evidence = '/Users/eddie/Code/CRMWolf/.worktrees/crm-57-organize-recovery/.xwing-task/crmwolf/evidence'
+const evidence = '/Users/eddie/Code/CRMWolf/.worktrees/crm-61-model-failure-e2e/.xwing-task/crmwolf/evidence'
 const at = '2026-10-29T09:40:00'
 const userText = '今天下午和睿狐科技开了个线上会议，聊了 POC 部署。'
-const failureText = '内容已保存，但整理未完成，尚未写入客户活动'
+const failureText = '跟进整理超时，尚未写入客户活动。原始内容已保存，本次没有产生 CRM 活动。'
 
 function task(overrides: Record<string, unknown> = {}) {
   return {
@@ -188,11 +188,75 @@ test('processing hint after one minute does not promise refresh will always cont
   await page.goto('http://127.0.0.1:5174/assistant')
   await page.getByRole('textbox', { name: '客户沟通内容' }).fill(userText)
   await page.getByRole('button', { name: '发送', exact: true }).click()
-  await expect(page.getByText('Agent 正在处理')).toBeVisible()
+  await expect(page.getByText('内容已保存，处理仍在后台继续；关闭或刷新不会取消')).toBeVisible()
   await page.clock.fastForward(60_000)
-  await expect(page.getByText('内容已保存，处理仍在后台继续，刷新后会自动恢复')).toBeVisible()
+  await expect(page.getByText('内容已保存，处理仍在后台继续；关闭或刷新不会取消')).toBeVisible()
   await expect(page.getByText('刷新后可继续')).toHaveCount(0)
   expect(calls.filter((call) => call.startsWith('POST') && call.includes('/submit'))).toHaveLength(1)
   expect(calls.some((call) => call.includes('cancel') || call.endsWith('/choices'))).toBe(false)
   await page.screenshot({ path: `${evidence}/04-processing-keeps-running.png`, fullPage: true })
+})
+
+test('successful activity receipt shows the persisted write sentence', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const written = '活动已写入'
+  const ui = {
+    schema_version: 'crm.agent.ui.v1',
+    message_id: 22,
+    turn_id: 'acm_org:atn_org:5',
+    role: 'assistant',
+    state: 'final',
+    blocks: [{ id: 'b_result_1', type: 'action_result', action_id: 'receipt', status: 'SUCCESS', title: written, message: written }],
+    suggested_actions: [],
+    metadata: { display: 'MESSAGE', route: 'WORKFLOW', accessibility_label: written },
+  }
+  await install(page, async (route, path) => {
+    if (path.endsWith('/assistant/conversation/open') || path.endsWith('/assistant/conversation')) {
+      return fulfill(route, 200, {
+        public_id: 'asc_fixture', version: 4, focused_task: task({ status: 'ACTIVE' }), pending_choice: null,
+        has_pending_request: false, older_cursor: null,
+        messages: [
+          { id: 'acm_org:user', role: 'user', text: userText, at, task: null, boundary: null, outcome: null, ui: null },
+          { id: 'acm_org:atn_org:5', role: 'assistant', text: written, at, task: task(), boundary: null, outcome: 'activity_written', ui },
+        ],
+      })
+    }
+    return fulfill(route, 404, { detail: path })
+  })
+  await page.goto('http://127.0.0.1:5174/assistant')
+  await expect(page.getByText(written).first()).toBeVisible()
+  await page.screenshot({ path: `${evidence}/05-activity-written.png`, fullPage: true })
+})
+
+test('unknown activity commit offers refresh and not another write', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const notice = '客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。'
+  const ui = {
+    schema_version: 'crm.agent.ui.v1',
+    message_id: 23,
+    turn_id: 'acm_org:atn_org:6',
+    role: 'assistant',
+    state: 'final',
+    blocks: [{ id: 'b_notice_1', type: 'notice', tone: 'warning', title: '结果待核对', text: notice }],
+    suggested_actions: [],
+    metadata: { display: 'MESSAGE', route: 'WORKFLOW', accessibility_label: '结果待核对' },
+  }
+  await install(page, async (route, path) => {
+    if (path.endsWith('/assistant/conversation/open') || path.endsWith('/assistant/conversation')) {
+      return fulfill(route, 200, {
+        public_id: 'asc_fixture', version: 5, focused_task: task(), pending_choice: null,
+        has_pending_request: false, older_cursor: null,
+        messages: [
+          { id: 'acm_org:user', role: 'user', text: userText, at, task: null, boundary: null, outcome: null, ui: null },
+          { id: 'acm_org:atn_org:6', role: 'assistant', text: notice, at, task: task(), boundary: null, outcome: 'failure', ui },
+        ],
+      })
+    }
+    return fulfill(route, 404, { detail: path })
+  })
+  await page.goto('http://127.0.0.1:5174/assistant')
+  await expect(page.getByText(notice)).toBeVisible()
+  await expect(page.getByRole('button', { name: '重新写入' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '重新处理' })).toHaveCount(0)
+  await page.screenshot({ path: `${evidence}/06-unknown-commit.png`, fullPage: true })
 })

@@ -24,12 +24,12 @@ from app.services.assistant.events import (
     stage as mk_stage,
 )
 from app.services.assistant.failure_contract import (
-    ORGANIZE_FAILURE_MESSAGE,
-    QUALITY_GATE_FAILURE_MESSAGE,
     AssistantFailureCode,
     AssistantStageFailure,
-    classify_organize_failure,
+    attempt_budget_remaining,
+    classify_stage_failure,
     failure_cause,
+    stage_user_message,
 )
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.quality_gate import QualityGateOutcome
@@ -296,6 +296,62 @@ def _structuring_failure(exc: BaseException, *, stage: str) -> dict[str, object]
     }
 
 
+def _budget_exhausted() -> bool:
+    remaining = attempt_budget_remaining()
+    return remaining is not None and remaining < 1
+
+
+def fail_model_stage(
+    db: Session,
+    task: AssistantTask,
+    exc: BaseException,
+    *,
+    stage: str,
+    draft: TaskDraft | None = None,
+    detail: dict[str, object] | None = None,
+) -> NoReturn:
+    """Flush one technical failure. The caller must already have committed the source."""
+
+    public_stage = "structure" if stage in {"apply", "reconcile"} else stage
+    code, retryable, origin = classify_stage_failure(exc, public_stage)
+    if draft is not None and public_stage == "structure":
+        draft.quality_score = DraftField(status="MISSING")
+        draft.score_reason = None
+        draft.score_detail = {}
+    message = stage_user_message(code=code, stage=public_stage, activity_kind=task.activity_kind)
+    payload: dict[str, object] = dict(detail or {})
+    payload.update(
+        code=code.value,
+        stage=public_stage,
+        retryable=retryable,
+        failure_origin=origin,
+        message=message,
+    )
+    action_name = {
+        "classify": "classify_kind",
+        "quality_gate": "quality_gate",
+    }.get(public_stage, "structure_draft")
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            draft=draft,
+            error_code=code.value,
+            action_actor="SYSTEM",
+            action_name=action_name,
+            action_result=payload,
+        ),
+    )
+    raise AssistantStageFailure(
+        code=code,
+        stage=public_stage,
+        retryable=retryable,
+        user_message=message,
+        task_public_id=result.task.public_id,
+        failure_origin=origin,
+    )
+
+
 def _record_structuring_failure(
     db: Session,
     task: AssistantTask,
@@ -304,62 +360,27 @@ def _record_structuring_failure(
     *,
     stage: str,
 ) -> NoReturn:
-    draft.quality_score = DraftField(status="MISSING")
-    draft.score_reason = None
-    draft.score_detail = {}
-    code, retryable = classify_organize_failure(exc)
     detail = _structuring_failure(exc, stage=stage)
+    code, _, _ = classify_stage_failure(exc, "structure")
     if detail["failure"] == "provider_schema" and code is AssistantFailureCode.UPSTREAM_TIMEOUT:
         detail["failure"] = "upstream_timeout"
-    detail.update(code=code.value, stage="structure", retryable=retryable)
-    result = apply_task_update(
-        db,
-        task,
-        TaskUpdate(
-            draft=draft,
-            error_code=code.value,
-            action_actor="SYSTEM",
-            action_name="structure_draft",
-            action_result=detail,
-        ),
-    )
-    raise AssistantStageFailure(
-        code=code,
-        stage="structure",
-        retryable=retryable,
-        user_message=ORGANIZE_FAILURE_MESSAGE,
-        task_public_id=result.task.public_id,
-    )
+    fail_model_stage(db, task, exc, stage=stage, draft=draft, detail=detail)
 
 
 def raise_quality_gate_failure(db: Session, task: AssistantTask, exc: BaseException) -> NoReturn:
     """Persist a technical quality failure and stop the turn. Never asks a field."""
 
-    code, retryable = classify_organize_failure(exc)
-    result = apply_task_update(
+    fail_model_stage(
         db,
         task,
-        TaskUpdate(
-            error_code=code.value,
-            action_actor="SYSTEM",
-            action_name="quality_gate",
-            action_result={
-                "passed": False,
-                "retryable": retryable,
-                "code": code.value,
-                "stage": "quality_gate",
-                "failure": "quality_gate",
-                "error_type": type(exc).__name__,
-                "cause": failure_cause(exc),
-            },
-        ),
-    )
-    raise AssistantStageFailure(
-        code=code,
+        exc,
         stage="quality_gate",
-        retryable=retryable,
-        user_message=QUALITY_GATE_FAILURE_MESSAGE,
-        task_public_id=result.task.public_id,
+        detail={
+            "passed": False,
+            "failure": "quality_gate",
+            "error_type": type(exc).__name__,
+            "cause": failure_cause(exc),
+        },
     )
 
 
@@ -400,6 +421,8 @@ async def intake_step(
                 },
             ),
         ).task
+        db.commit()
+        db.refresh(task)
     kind_hinted = task.activity_kind is not None and user_text.strip() != "" and not _has_pending_kind_question(task)
     if from_waiting:
         if task.activity_kind is None:
@@ -412,9 +435,15 @@ async def intake_step(
         reporter.stage_start(_S_CLASSIFY)
         reporter.stage_done(_S_CLASSIFY, ms=0)
     elif task.activity_kind is None:
+        draft = TaskDraft.model_validate(task.draft_json or {})
+        if _budget_exhausted():
+            fail_model_stage(db, task, TimeoutError(), stage="classify", draft=draft)
         reporter.stage_start(_S_CLASSIFY)
         _t0 = time.monotonic()
-        decision = await structurer.classify(db, team_id=task.team_id, user_text=user_text)
+        try:
+            decision = await structurer.classify(db, team_id=task.team_id, user_text=user_text)
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
+            fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(_S_CLASSIFY, ms=int((time.monotonic() - _t0) * 1000))
         if decision.kind == "UNCLEAR":
             waiting = kind_waiting(task)
@@ -444,6 +473,8 @@ async def intake_step(
         task = result.task
 
     draft = TaskDraft.model_validate(task.draft_json or {})
+    if _budget_exhausted():
+        fail_model_stage(db, task, TimeoutError(), stage="structure", draft=draft)
 
     reporter.stage_start(_S_STRUCTURE)
     _t0 = time.monotonic()
@@ -485,6 +516,8 @@ async def intake_step(
         return task, "已整理完成。", None, False
 
     draft = TaskDraft.model_validate(task.draft_json or {})
+    if _budget_exhausted():
+        fail_model_stage(db, task, TimeoutError(), stage="quality_gate", draft=draft)
     reporter.stage_start(_S_GATE)
     _t0 = time.monotonic()
     try:

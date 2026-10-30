@@ -369,3 +369,35 @@ def test_recover_pending_turn_does_not_create_entry_or_request(
     assert db_session.query(AssistantRequest).count() == requests_before
     assert db_session.query(AssistantConversationEntry).count() == entries_before
     assert db_session.get(AssistantTurn, turn.id).status == "PENDING"
+
+
+def test_overdue_attempt_fails_closed_without_a_live_worker(
+    db_session: Session, retryable_turn: tuple[AssistantTask, AssistantTurn]
+) -> None:
+    task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_version = 4
+    turn.lease_expires_at = business_now() + timedelta(seconds=200)
+    db_session.commit()
+    turns.add_event(
+        db_session,
+        turn,
+        "attempt",
+        {"started_at": (business_now() - timedelta(seconds=181)).isoformat(), "attempt": 1},
+    )
+    db_session.commit()
+    assert turns.close_overdue_turn(db_session, task, turn) is True
+    db_session.refresh(turn)
+    db_session.refresh(task)
+    assert turn.status == "FAILED"
+    assert turn.last_error_code == "UPSTREAM_TIMEOUT"
+    assert task.active_turn_id is None
+    error = (
+        db_session.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="error")
+        .one()
+    )
+    assert error.data_json["retryable"] is True
+    assert error.data_json["activity_written"] is False
+    assert "尚未写入客户活动" in error.data_json["message"]

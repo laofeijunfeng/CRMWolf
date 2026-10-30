@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.crud.permission import permission_crud
 from app.schemas.customer_activity import CustomerActivityCreate
@@ -16,6 +18,7 @@ from app.services.customer_activity_access_policy import (
 )
 from app.services.customer_activity_write_service import (
     CustomerActivityFinalization,
+    CustomerActivitySubmissionConflictError,
     customer_activity_write_service,
 )
 
@@ -45,6 +48,18 @@ class RealActivityWriter:
         except (CustomerActivityAccessDeniedError, CustomerActivityCustomerNotFoundError):
             return WriteActivityResult(False, None, "PERMISSION_DENIED")
 
+        from app.services.assistant.turns import AssistantActivityCommitUnknownError
+
+        submission_id = str(command["submission_id"])
+        try:
+            existing = customer_activity_write_service.activity_crud.get_by_submission_id(
+                db, team_id=task.team_id, submission_id=submission_id
+            )
+        except SQLAlchemyError as exc:
+            raise AssistantActivityCommitUnknownError() from exc
+        if existing is not None and existing.submission_fingerprint != command.get("fingerprint"):
+            raise AssistantActivityCommitUnknownError()
+
         next_action = command.get("next_action")
         content_json = command["content_json"]
         score = int(command["score"])
@@ -61,15 +76,20 @@ class RealActivityWriter:
         finalization = CustomerActivityFinalization(
             title=obj_in.title, summary=obj_in.summary, content_json=content_json,
             next_action=obj_in.next_action, next_action_source=obj_in.next_action_source,
-            next_follow_time=datetime.fromisoformat(str(command["next_follow_time"])) if command.get("next_follow_time") else None,
+            next_follow_time=(
+                datetime.fromisoformat(str(command["next_follow_time"])) if command.get("next_follow_time") else None
+            ),
             next_follow_time_source="USER" if command.get("next_follow_time") else None,
             effectiveness_score=score, effectiveness_is_valid=score >= 60,
             effectiveness_reason=str(command["score_reason"]),
             effectiveness_detail_json=json.dumps(command["score_detail"], ensure_ascii=False),
         )
-        result = customer_activity_write_service.create_final_from_assistant2(
-            db, obj_in=obj_in, finalization=finalization,
-            customer_id=int(customer.id), creator_id=str(task.user_id), team_id=task.team_id,
-            actor_id=str(task.user_id),
-        )
+        try:
+            result = customer_activity_write_service.create_final_from_assistant2(
+                db, obj_in=obj_in, finalization=finalization,
+                customer_id=int(customer.id), creator_id=str(task.user_id), team_id=task.team_id,
+                actor_id=str(task.user_id),
+            )
+        except (CustomerActivitySubmissionConflictError, SQLAlchemyError) as exc:
+            raise AssistantActivityCommitUnknownError() from exc
         return WriteActivityResult(True, str(result.activity.id), None, int(customer.id))

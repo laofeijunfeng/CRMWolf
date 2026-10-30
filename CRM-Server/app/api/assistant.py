@@ -392,6 +392,11 @@ async def read_turn(
     )
     if turn is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="轮次不存在")
+    from app.services.assistant.turns import close_overdue_turn
+
+    if close_overdue_turn(db, task, turn):
+        db.refresh(turn)
+        db.refresh(task)
     return AssistantTurnView(
         turn_id=turn.public_id,
         status=turn.status,
@@ -492,6 +497,12 @@ async def submit_input(
                 current = stream_db.get(AssistantTurn, turn.id)
                 if current is None or current.team_id != team_id or current.user_id != user_id:
                     return
+                task_row = stream_db.get(AssistantTask, current.task_id)
+                if task_row is not None and task_row.team_id == team_id:
+                    from app.services.assistant.turns import close_overdue_turn
+
+                    if close_overdue_turn(stream_db, task_row, current):
+                        stream_db.refresh(current)
                 emitted = events_after(stream_db, turn_id=current.id, seq=seq)
                 frames = [(event.seq, event.event, event.data_json) for event in emitted]
                 finished = current.status in {"SUCCEEDED", "FAILED"}

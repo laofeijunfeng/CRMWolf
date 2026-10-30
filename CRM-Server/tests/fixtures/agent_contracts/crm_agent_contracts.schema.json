@@ -420,7 +420,9 @@
         "UNKNOWN_COMMIT_RESULT",
         "CONFIGURATION_ERROR",
         "STATE_CONFLICT",
-        "RETRYABLE_DEPENDENCY_FAILURE"
+        "RETRYABLE_DEPENDENCY_FAILURE",
+        "STRUCTURING_UNAVAILABLE",
+        "QUALITY_GATE_UNAVAILABLE"
       ],
       "type": "string"
     },
@@ -463,7 +465,9 @@
             "UNKNOWN_COMMIT_RESULT",
             "CONFIGURATION_ERROR",
             "STATE_CONFLICT",
-            "RETRYABLE_DEPENDENCY_FAILURE"
+            "RETRYABLE_DEPENDENCY_FAILURE",
+            "STRUCTURING_UNAVAILABLE",
+            "QUALITY_GATE_UNAVAILABLE"
           ],
           "title": "Code",
           "type": "string"
@@ -1243,7 +1247,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -3195,7 +3201,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -5274,7 +5282,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -7502,7 +7512,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -9848,7 +9860,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -11838,7 +11852,9 @@
                 "UNKNOWN_COMMIT_RESULT",
                 "CONFIGURATION_ERROR",
                 "STATE_CONFLICT",
-                "RETRYABLE_DEPENDENCY_FAILURE"
+                "RETRYABLE_DEPENDENCY_FAILURE",
+                "STRUCTURING_UNAVAILABLE",
+                "QUALITY_GATE_UNAVAILABLE"
               ],
               "title": "Code",
               "type": "string"
@@ -17195,7 +17211,9 @@
             "UNKNOWN_COMMIT_RESULT",
             "CONFIGURATION_ERROR",
             "STATE_CONFLICT",
-            "RETRYABLE_DEPENDENCY_FAILURE"
+            "RETRYABLE_DEPENDENCY_FAILURE",
+            "STRUCTURING_UNAVAILABLE",
+            "QUALITY_GATE_UNAVAILABLE"
           ],
           "title": "Code",
           "type": "string"

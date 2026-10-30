@@ -10,7 +10,7 @@ import logging
 import uuid
 from contextlib import suppress
 from contextvars import ContextVar
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select, update
@@ -21,7 +21,15 @@ from app.models.assistant import AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.coordinator import AssistantInput
 from app.services.assistant.events import ProgressReporter, TurnStage
-from app.services.assistant.failure_contract import AssistantStageFailure
+from app.services.assistant.failure_contract import (
+    ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+    ATTEMPT_DEADLINE_SECONDS,
+    AssistantFailureCode,
+    AssistantStageFailure,
+    bind_attempt_deadline,
+    reset_attempt_deadline,
+    stage_user_message,
+)
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import InvalidTaskTransitionError, TaskStateConflictError, load_waiting
 from app.utils.time import business_now
@@ -48,6 +56,13 @@ class AssistantUnknownCommitResultError(RuntimeError):
     """TRD §8 UNKNOWN_COMMIT_RESULT: CRM command outcome cannot be proven."""
 
     error_code = "UNKNOWN_COMMIT_RESULT"
+
+
+class AssistantActivityCommitUnknownError(AssistantUnknownCommitResultError):
+    """The activity submission cannot be proved, so it must not be written again."""
+
+    def __init__(self) -> None:
+        super().__init__(ACTIVITY_COMMIT_UNKNOWN_MESSAGE)
 
 
 class AssistantConfigurationError(RuntimeError):
@@ -302,6 +317,138 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     db.commit()
     turn = db.get(AssistantTurn, turn_id)
     return turn.lease_version if turn is not None else None
+
+
+
+def _error_payload(
+    db: Session,
+    turn: AssistantTurn,
+    task: AssistantTask | None,
+    *,
+    code: str,
+    stage: str | None,
+    retryable: bool,
+    message: str,
+    failure_origin: str | None,
+    started_at: datetime | None,
+    finished_at: datetime,
+) -> dict[str, object]:
+    request = db.get(AssistantRequest, turn.request_id) if turn.request_id is not None else None
+    elapsed = None
+    if started_at is not None:
+        elapsed = max(int((finished_at - started_at).total_seconds() * 1000), 0)
+    return {
+        "code": code,
+        "stage": stage,
+        "retryable": retryable,
+        "failure_origin": failure_origin,
+        "message": message,
+        "task_id": task.public_id if task is not None else None,
+        "task_public_id": task.public_id if task is not None else None,
+        "turn_id": turn.public_id,
+        "attempt": turn.attempts,
+        "client_request_id": request.client_request_id if request is not None else None,
+        "started_at": started_at.isoformat() if started_at is not None else None,
+        "finished_at": finished_at.isoformat(),
+        "elapsed_ms": elapsed,
+        "activity_written": task_has_customer_activity(task) if task is not None else False,
+    }
+
+
+def close_overdue_turn(db: Session, task: AssistantTask, turn: AssistantTurn) -> bool:
+    """Fail a dead attempt that missed the deadline. A live worker keeps its lease."""
+
+    if turn.status != "RUNNING" or live_worker(turn.id, turn.lease_version):
+        return False
+    event = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="attempt")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .first()
+    )
+    data = event.data_json if event is not None else None
+    raw = data.get("started_at") if isinstance(data, dict) else None
+    if not isinstance(raw, str):
+        return False
+    started = datetime.fromisoformat(raw)
+    now = business_now()
+    if started.tzinfo is None and now.tzinfo is not None:
+        started = started.replace(tzinfo=now.tzinfo)
+    if now < started + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS):
+        return False
+    stage_event = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="stage")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .first()
+    )
+    stage = "structure"
+    stage_data = stage_event.data_json if stage_event is not None else None
+    if isinstance(stage_data, dict) and stage_data.get("stage") in {"classify", "structure", "quality_gate", "write"}:
+        stage = str(stage_data["stage"])
+    message = stage_user_message(
+        code=AssistantFailureCode.UPSTREAM_TIMEOUT,
+        stage=stage,
+        activity_kind=task.activity_kind,
+    )
+    version = turn.lease_version
+    fence = db.execute(
+        update(AssistantTurn)
+        .where(
+            AssistantTurn.id == turn.id,
+            AssistantTurn.status == "RUNNING",
+            AssistantTurn.lease_version == version,
+        )
+        .values(
+            status="FAILED",
+            lease_owner=None,
+            lease_expires_at=None,
+            last_error_code=AssistantFailureCode.UPSTREAM_TIMEOUT.value,
+            last_modified_time=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if fence.rowcount != 1:
+        db.rollback()
+        return False
+    db.execute(
+        update(AssistantTask)
+        .where(AssistantTask.id == task.id, AssistantTask.active_turn_id == turn.id)
+        .values(active_turn_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            error_code=AssistantFailureCode.UPSTREAM_TIMEOUT.value,
+            action_actor="SYSTEM",
+            action_name="attempt_deadline",
+            action_result={"stage": stage, "retryable": True},
+        ),
+    )
+    db.refresh(turn)
+    add_event(
+        db,
+        turn,
+        "error",
+        _error_payload(
+            db,
+            turn,
+            task,
+            code=AssistantFailureCode.UPSTREAM_TIMEOUT.value,
+            stage=stage,
+            retryable=True,
+            message=message,
+            failure_origin=None,
+            started_at=started,
+            finished_at=now,
+        ),
+    )
+    db.commit()
+    return True
 
 
 def task_has_customer_activity(task: AssistantTask) -> bool:
@@ -597,6 +744,8 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
     db = factory()
     heartbeat: asyncio.Task[None] | None = None
     lease_token = None
+    deadline_token = None
+    attempt_started: datetime | None = None
     try:
         version = claim(db, turn_id=turn_id, owner=owner)
         if version is None:
@@ -608,6 +757,16 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
         if worker is not None:
             _workers[turn_id] = (version, worker)
         lease_token = _execution_lease.set((turn_id, owner, version))
+        attempt_started = business_now()
+        add_event(
+            db,
+            turn,
+            "attempt",
+            {"started_at": attempt_started.isoformat(), "attempt": turn.attempts},
+        )
+        db.commit()
+        db.refresh(turn)
+        deadline_token = bind_attempt_deadline(attempt_started)
         try:
             task = db.get(AssistantTask, turn.task_id)
             if task is None or task.team_id != turn.team_id or task.user_id != turn.user_id:
@@ -751,17 +910,23 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 db.rollback()
                 return
             db.refresh(turn)
+            failed_task = db.get(AssistantTask, turn.task_id)
             add_event(
                 db,
                 turn,
                 "error",
-                {
-                    "code": exc.code.value,
-                    "stage": exc.stage,
-                    "retryable": exc.retryable,
-                    "message": exc.user_message,
-                    "task_public_id": exc.task_public_id,
-                },
+                _error_payload(
+                    db,
+                    turn,
+                    failed_task,
+                    code=exc.code.value,
+                    stage=exc.stage,
+                    retryable=exc.retryable,
+                    message=exc.user_message,
+                    failure_origin=exc.failure_origin,
+                    started_at=attempt_started,
+                    finished_at=now,
+                ),
             )
             db.commit()
             logger.info(
@@ -775,6 +940,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 exc.code.value,
                 exc.stage,
             )
+            return
+        except AssistantActivityCommitUnknownError:
+            db.rollback()
+            _close_unknown_activity(db, turn_id=turn_id, owner=owner, version=version, started_at=attempt_started)
             return
         except asyncio.CancelledError:
             db.rollback()
@@ -842,6 +1011,8 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             else:
                 db.rollback()
     finally:
+        if deadline_token is not None:
+            reset_attempt_deadline(deadline_token)
         if lease_token is not None:
             _execution_lease.reset(lease_token)
         registered = _workers.get(turn_id)
@@ -854,6 +1025,82 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
         db.close()
         if followup_turn_id is not None:
             schedule_turn(followup_turn_id, factory=factory)
+
+
+
+def _close_unknown_activity(
+    db: Session,
+    *,
+    turn_id: int,
+    owner: str,
+    version: int,
+    started_at: datetime | None,
+) -> None:
+    turn = db.get(AssistantTurn, turn_id)
+    if turn is None or turn.lease_owner != owner or turn.lease_version != version or turn.status != "RUNNING":
+        return
+    task = db.get(AssistantTask, turn.task_id)
+    if task is None or task.team_id != turn.team_id:
+        return
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            clear_waiting=True,
+            error_code="UNKNOWN_COMMIT_RESULT",
+            action_actor="SYSTEM",
+            action_name="activity_commit_unknown",
+            action_result={"stage": "write", "retryable": False, "code": "UNKNOWN_COMMIT_RESULT"},
+        ),
+    )
+    now = business_now()
+    fence = db.execute(
+        update(AssistantTurn)
+        .where(
+            AssistantTurn.id == turn_id,
+            AssistantTurn.status == "RUNNING",
+            AssistantTurn.lease_owner == owner,
+            AssistantTurn.lease_version == version,
+        )
+        .values(
+            status="FAILED",
+            lease_owner=None,
+            lease_expires_at=None,
+            last_error_code="UNKNOWN_COMMIT_RESULT",
+            last_modified_time=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if fence.rowcount != 1:
+        db.rollback()
+        return
+    db.execute(
+        update(AssistantTask)
+        .where(AssistantTask.id == task.id, AssistantTask.active_turn_id == turn_id)
+        .values(active_turn_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    db.refresh(turn)
+    add_event(
+        db,
+        turn,
+        "error",
+        _error_payload(
+            db,
+            turn,
+            task,
+            code="UNKNOWN_COMMIT_RESULT",
+            stage="write",
+            retryable=False,
+            message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+            failure_origin=None,
+            started_at=started_at,
+            finished_at=now,
+        ),
+    )
+    db.commit()
 
 
 def schedule_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:

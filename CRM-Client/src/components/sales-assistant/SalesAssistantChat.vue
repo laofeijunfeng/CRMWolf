@@ -135,9 +135,9 @@ interface LiveStage {
 }
 
 const STAGE_LABELS: Record<StageName, string> = {
-  classify: '判断活动类型',
-  structure: '整理内容',
-  quality_gate: '评估记录质量',
+  classify: '正在判断活动类型',
+  structure: '正在整理跟进内容',
+  quality_gate: '正在评估记录质量',
   write: '写入客户活动'
 }
 
@@ -195,10 +195,7 @@ const endProcessing = (): void => {
 
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
-  const base = 'Agent 正在处理，通常需要 30–60 秒…'
-  if (elapsedSeconds.value >= 60) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容已保存，处理仍在后台继续，刷新后会自动恢复）`
-  if (elapsedSeconds.value >= 15) return `${base}（已 ${elapsedSeconds.value} 秒 · 内容不会丢失，请稍候）`
-  return base
+  return '内容已保存，处理仍在后台继续；关闭或刷新不会取消'
 })
 const pendingRequest = shallowRef<{ input: SubmitAssistantInput; targetId: string; displayText: string; turnId: string; cursor: number } | null>(null)
 const processingRecovery = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
@@ -357,7 +354,7 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
         stopAutoRecovery()
         recoveryNotice.value = ''
         resultPending.value = true
-        pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+        pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
         logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
           task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
         })
@@ -395,7 +392,7 @@ const startAutoRecovery = async (
     stopAutoRecovery()
     recoveryNotice.value = ''
     resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
     logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
       task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
     })
@@ -667,6 +664,13 @@ const showConversationRetry = computed(() => resultPending.value && !autoRecover
 const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showConversationRetry.value
   && (processingRecovery.value !== null || (pendingRequest.value?.turnId ?? '') !== ''))
 const showReprocess = computed(() => reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
+const showRefreshStatus = computed(() => {
+  if (autoRecovering.value) return false
+  if (showSyncResult.value || showReprocess.value) return true
+  const current = task.value
+  if (current == null || current.status !== 'ACTIVE' || current.waiting != null) return false
+  return entries.value.some((entry) => entry.outcome === 'failure')
+})
 
 const syncResult = async (): Promise<void> => {
   const activeRecovery = processingRecovery.value
@@ -683,7 +687,7 @@ const syncResult = async (): Promise<void> => {
     await refreshConversation()
   } catch {
     resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
   } finally {
     submitting.value = false
   }
@@ -714,7 +718,7 @@ const reprocessTurn = async (): Promise<void> => {
     }
   } catch {
     resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点同步结果。')
+    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
   } finally {
     submitting.value = false
   }
@@ -1006,6 +1010,7 @@ void loadConversation()
     </div>
 
     <div v-if="processing.stages.length > 0" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
+      <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
       <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
         <span>执行过程</span>
         <span class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processing.active ? '处理中' : '已更新' }}</span>
@@ -1039,7 +1044,8 @@ void loadConversation()
           <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button v-if="showSyncResult" size="sm" variant="outline" :disabled="submitting" @click="syncResult">同步结果</Button>
+          <Button v-if="showRefreshStatus" size="sm" variant="outline" :disabled="submitting" @click="showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
+          <p v-if="showReprocess" class="mb-0 text-xs text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
           <Button v-if="showReprocess" size="sm" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
           <Button v-if="showConversationRetry" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" size="sm" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">

@@ -191,8 +191,8 @@ async def test_confirmation_records_choice_and_receipt_once_for_the_same_request
     )
     visible = [(event.event_type, event.result_json.get("label")) for event in events]
     assert ("user_choice", "确认") in visible
-    assert ("receipt", "已记录这条客户活动。") in visible
-    assert first.reply.message == "已记录这条客户活动。"
+    assert ("receipt", "活动已写入") in visible
+    assert first.reply.message == "活动已写入"
 
 
 @pytest.mark.asyncio

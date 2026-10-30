@@ -36,12 +36,12 @@ describe('durable processing and recovery in a continuous conversation', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper)
-    expect(wrapper.text()).toContain('整理内容')
-    expect(wrapper.text()).toContain('Agent 正在处理')
+    expect(wrapper.text()).toContain('正在整理跟进内容')
+    expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
     finish?.()
     await flushPromises()
     expect(wrapper.text()).toContain('请补充客户名称')
-    expect(wrapper.text()).not.toContain('Agent 正在处理')
+    expect(wrapper.text()).not.toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
   })
 
   it('gets a completed result if the accepted stream ended without a waiting frame', async () => {
@@ -149,7 +149,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
       await send(wrapper)
       await vi.advanceTimersByTimeAsync(60_000)
       await flushPromises()
-      expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续，刷新后会自动恢复')
+      expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
       expect(wrapper.text()).not.toContain('刷新后可继续')
     } finally {
       wrapper.unmount()

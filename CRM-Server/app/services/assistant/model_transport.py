@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from app.crud.ai_config import ai_config_crud
 from app.services.assistant.failure_contract import (
     AssistantFailureCode,
+    attempt_budget_remaining,
     root_failure_retryable,
 )
 
@@ -57,6 +58,14 @@ class AssistantModelTransport:
                 f"{error_prefix}：AI 配置不完整",
                 code=AssistantFailureCode.CONFIGURATION_ERROR,
             )
+        remaining = attempt_budget_remaining()
+        if remaining is not None:
+            if remaining < 1:
+                raise AssistantLLMError(
+                    f"{error_prefix}：AI 请求超时",
+                    code=AssistantFailureCode.UPSTREAM_TIMEOUT,
+                )
+            timeout_seconds = min(timeout_seconds, remaining)
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds, trust_env=False) as client:
                 response = await client.post(

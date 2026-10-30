@@ -318,12 +318,12 @@ test('s9 processing and s2 kind card', async ({ page }) => {
   await send(page, '今天下午去拜访了客户，也开了个线上会，聊得还行')
   await page.waitForTimeout(800)
   const earlyShot = await appShot(page, 'actual-s9-processing.png')
-  const sawProcessing = await page.getByText(/Agent 正在处理/).first().isVisible({ timeout: 8_000 }).catch(() => false)
-  const sawStage = await page.getByText('判断活动类型').first().isVisible({ timeout: 3_000 }).catch(() => false)
+  const sawProcessing = await page.getByText(/内容已保存，处理仍在后台继续/).first().isVisible({ timeout: 8_000 }).catch(() => false)
+  const sawStage = await page.getByText('正在判断活动类型').first().isVisible({ timeout: 3_000 }).catch(() => false)
   let sawElapsed = false
   const watchUntil = Date.now() + 20_000
   while (Date.now() < watchUntil) {
-    if (!(await page.getByText(/Agent 正在处理/).first().isVisible().catch(() => false))) break
+    if (!(await page.getByText(/内容已保存，处理仍在后台继续/).first().isVisible().catch(() => false))) break
     if (await page.getByText(/已 \d+ 秒/).first().isVisible().catch(() => false)) {
       sawElapsed = true
       await appShot(page, 'actual-s9-elapsed.png')
@@ -348,8 +348,8 @@ test('s9 processing and s2 kind card', async ({ page }) => {
   record({
     id: 's9',
     scene: '执行过程可见（处理提示 + 阶段清单）',
-    expected: '发送后立刻锁定并显示「Agent 正在处理」与阶段清单；15 秒后出现已耗时提示。',
-    actual: `处理提示=${sawProcessing} 判断活动类型阶段=${sawStage} 已耗时=${sawElapsed}`,
+    expected: '发送后立刻锁定并显示后台继续提示与阶段清单。',
+    actual: `处理提示=${sawProcessing} 正在判断活动类型阶段=${sawStage} 已耗时=${sawElapsed}`,
     verdict: sawProcessing && sawStage ? 'pass' : 'gap',
     expectedShot: 'screenshots/expected-s9.png',
     actualShot: sawElapsed ? 'screenshots/actual-s9-elapsed.png' : 'screenshots/actual-s9-processing.png'
@@ -714,7 +714,7 @@ test('o5 reload recovery mid-turn', async ({ page }) => {
   await openAssistant(page)
   await send(page, `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`)
   // Wait until the turn is in flight (processing visible), then reload.
-  await page.getByText(/Agent 正在处理/).first().isVisible({ timeout: 15_000 }).catch(() => false)
+  await page.getByText(/内容已保存，处理仍在后台继续/).first().isVisible({ timeout: 15_000 }).catch(() => false)
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.locator('textarea').first().waitFor({ timeout: 30_000 })
   await page.waitForTimeout(1_000)

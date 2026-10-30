@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 _RAW_HTML_RE = re.compile(r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>")
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _UNAVAILABLE = "这条结果暂时无法显示，原记录仍保留。"
-_UNKNOWN_TEXT = "处理未完成，结果待核对，请查看最新任务状态。"
+_UNKNOWN_TEXT = "客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。"
 
 _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
     {
@@ -69,6 +69,8 @@ _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
         "UPSTREAM_TIMEOUT",
         "UPSTREAM_UNAVAILABLE",
         "MODEL_OUTPUT_INVALID",
+        "STRUCTURING_UNAVAILABLE",
+        "QUALITY_GATE_UNAVAILABLE",
     }
 )
 _ERROR_TITLES: dict[str, str] = {
@@ -212,12 +214,18 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
         retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES
         if retryable:
             actions = (RetryAction(type="retry", action_id=f"retry:{trace_id}", label="重试"),)
+    elif code in {"STRUCTURING_UNAVAILABLE", "QUALITY_GATE_UNAVAILABLE"}:
+        title = "评估未完成" if code == "QUALITY_GATE_UNAVAILABLE" or "质量评估" in text else "整理未完成"
+        retryable = message.retryable is True
+        trace_id = None
     elif is_root_failure_code(code):
         # Turn-event organize/quality failures reuse the root codes but must not
         # offer the root entry retry or replace the saved-content sentence.
         failure = root_failure_code(code)
-        if text == QUALITY_GATE_FAILURE_MESSAGE:
+        if "质量评估" in text or text == QUALITY_GATE_FAILURE_MESSAGE:
             title = QUALITY_GATE_FAILURE_TITLE
+        elif "活动类型判断" in text:
+            title = "活动类型判断未完成"
         else:
             title = "整理未完成"
             text = text or ORGANIZE_FAILURE_MESSAGE
@@ -612,13 +620,15 @@ def _accepted_notice(draft: TaskDraft) -> NoticeBlock | None:
 
 
 def _result_block(message: ConversationMessage) -> ActionResultBlock:
-    text = _plain(message.text) or "已写入"
+    text = _plain(message.text) or "活动已写入"
+    if text == "已记录这条客户活动。":
+        text = "活动已写入"
     return ActionResultBlock(
         id="b_result_1",
         type="action_result",
         action_id=_clip(message.id, 128),
         status="SUCCESS",
-        title="已写入",
+        title="活动已写入",
         message=text,
     )
 

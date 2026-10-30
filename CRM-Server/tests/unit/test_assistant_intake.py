@@ -214,18 +214,18 @@ async def test_structuring_failure_fails_closed(db_session):
 
     updated, failure = await _stage_failure(db_session, task, "随便一句", structurer)
 
-    assert failure.code is AssistantFailureCode.INTERNAL_ERROR
+    assert failure.code is AssistantFailureCode.STRUCTURING_UNAVAILABLE
     assert failure.retryable is False
     assert failure.stage == "structure"
-    assert failure.user_message == ORGANIZE_FAILURE_MESSAGE
+    assert "依赖暂不可用" in failure.user_message
     assert updated.status == AssistantTaskStatus.ACTIVE
     assert updated.waiting_type is None
-    assert updated.last_error_code == "INTERNAL_ERROR"
+    assert updated.last_error_code == "STRUCTURING_UNAVAILABLE"
     assert updated.committed_json == []
     assert TaskDraft.model_validate(updated.draft_json).source_segments == ["随便一句"]
     logged = _structure_failure(db_session, updated.id)
     assert logged["failure"] == "provider_schema"
-    assert logged["code"] == "INTERNAL_ERROR"
+    assert logged["code"] == "STRUCTURING_UNAVAILABLE"
     assert logged["retryable"] is False
     assert logged["error_type"] == "AssistantLLMError"
     assert "模型不可用" in logged["cause"]
@@ -850,7 +850,7 @@ async def test_temporal_contract_failure_keeps_its_cause(db_session):
         db_session, task, "我下周三联系叶老师", MissingTime(KindDecision(kind="FOLLOW_UP"))
     )
     assert failure.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
-    assert failure.user_message == ORGANIZE_FAILURE_MESSAGE
+    assert failure.user_message == "整理结果未通过校验，尚未写入客户活动。"
     assert updated.waiting_type is None
     assert updated.last_error_code == "MODEL_OUTPUT_INVALID"
     logged = _structure_failure(db_session, updated.id)
@@ -883,7 +883,7 @@ async def test_action_contract_failure_is_not_a_draft_merge(db_session):
         db_session, task, text, FakeStructurer(KindDecision(kind="FOLLOW_UP"), structured)
     )
     assert failure.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
-    assert failure.user_message == ORGANIZE_FAILURE_MESSAGE
+    assert failure.user_message == "整理结果未通过校验，尚未写入客户活动。"
     assert updated.waiting_type is None
     logged = _structure_failure(db_session, updated.id)
     assert logged["failure"] == "action_evidence"
@@ -1005,3 +1005,66 @@ async def test_month_only_commitment_survives_structuring(db_session):
     assert "11月15号" in (draft.next_action.value or "")
     logged = _structure_failure(db_session, updated.id)
     assert logged["accepted"] is True
+
+
+async def test_classify_timeout_keeps_saved_source_after_rollback(db_session):
+    from app.services.assistant.failure_contract import CLASSIFY_TIMEOUT_MESSAGE
+
+    task = _make_task(db_session)
+    text = "今天下午和客户通了电话，下周三再确认。"
+
+    class TimeoutClassifier:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def classify(self, db, *, team_id, user_text):
+            self.calls += 1
+            raise AssistantLLMError("活动类型判断：AI 请求超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
+
+        async def structure(self, db, *, team_id, kind, user_text):
+            raise AssertionError("structure must not run")
+
+    classifier = TimeoutClassifier()
+    with pytest.raises(AssistantStageFailure) as caught:
+        await intake_step(db_session, task, text, classifier)
+    assert classifier.calls == 1
+    assert caught.value.stage == "classify"
+    assert caught.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
+    assert caught.value.retryable is True
+    assert caught.value.user_message == CLASSIFY_TIMEOUT_MESSAGE
+    db_session.rollback()
+    db_session.refresh(task)
+    assert text in TaskDraft.model_validate(task.draft_json).source_segments
+    assert task.committed_json == []
+
+
+async def test_exhausted_attempt_budget_does_not_call_the_model(db_session):
+    from datetime import timedelta
+
+    from app.services.assistant.failure_contract import bind_attempt_deadline, reset_attempt_deadline
+    from app.utils.time import business_now
+
+    task = _make_task(db_session)
+
+    class Guard:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def classify(self, db, *, team_id, user_text):
+            self.calls += 1
+            raise AssertionError("model must not be called")
+
+        async def structure(self, db, *, team_id, kind, user_text):
+            self.calls += 1
+            raise AssertionError("model must not be called")
+
+    guard = Guard()
+    token = bind_attempt_deadline(business_now() - timedelta(seconds=180))
+    try:
+        with pytest.raises(AssistantStageFailure) as caught:
+            await intake_step(db_session, task, "今天下午和客户通了电话", guard)
+    finally:
+        reset_attempt_deadline(token)
+    assert guard.calls == 0
+    assert caught.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
+    assert caught.value.stage == "classify"
