@@ -80,12 +80,31 @@ async function installShell(page: Page, handler: (route: Route, path: string) =>
   })
 }
 
+function successUi() {
+  return {
+    schema_version: 'crm.agent.ui.v1',
+    message_id: 22,
+    turn_id: 'result-1',
+    role: 'assistant',
+    state: 'final',
+    blocks: [{
+      id: 'b_result_1', type: 'action_result', action_id: 'result-1', status: 'SUCCESS',
+      title: '活动已写入', message: '已记录这条客户活动。'
+    }],
+    suggested_actions: [],
+    metadata: { display: 'MESSAGE', route: 'WORKFLOW', accessibility_label: '活动已写入' }
+  }
+}
+
 function conversation(withResult: boolean) {
   const messages = [
-    { id: 'user-1', role: 'user', text: userText, at, task: null, boundary: null, outcome: null }
+    { id: 'user-1', role: 'user', text: userText, at, task: null, boundary: null, outcome: null, ui: null }
   ]
   if (withResult) {
-    messages.push({ id: 'result-1', role: 'assistant', text: '已记录这条客户活动。', at, task: task(), boundary: null, outcome: 'activity_written' } as never)
+    messages.push({
+      id: 'result-1', role: 'assistant', text: '已记录这条客户活动。', at, task: task(), boundary: null,
+      outcome: 'activity_written', ui: successUi()
+    } as never)
   }
   return {
     public_id: 'asc_fixture',
@@ -115,10 +134,11 @@ test('normal send shows every stage and the written result', async ({ page }) =>
   if (address === null || typeof address === 'string') throw new Error('sse server did not bind')
   const submitUrl = `http://127.0.0.1:${address.port}/submit`
   let submitted = false
+  let showResult = false
   try {
     await installShell(page, async (route, path) => {
       if (path.endsWith('/assistant/conversation/open') || (path.endsWith('/assistant/conversation') && route.request().method() === 'GET')) {
-        return fulfill(route, 200, conversation(submitted))
+        return fulfill(route, 200, conversation(showResult))
       }
       if (path.endsWith('/assistant/conversation/messages')) {
         submitted = true
@@ -138,14 +158,18 @@ test('normal send shows every stage and the written result', async ({ page }) =>
     await page.getByRole('textbox', { name: '客户沟通内容' }).fill(userText)
     await page.getByRole('button', { name: '发送', exact: true }).click()
     await expect(page.getByText('正在判断活动类型')).toBeVisible()
-    await expect(page.getByText('整理内容')).toBeVisible()
+    await expect(page.getByText('正在整理跟进内容')).toBeVisible()
     await expect(page.getByText('评估记录质量')).toBeVisible()
     await expect(page.getByText('写入客户活动')).toBeVisible()
     await expect(page.getByText('86 分')).toBeVisible()
     await page.screenshot({ path: `${evidence}/01-normal-stages.png`, fullPage: true })
+    showResult = true
     releaseResult()
     await expect(page.getByText('已记录这条客户活动。')).toBeVisible()
-    await expect(page.getByText('已写入')).toBeVisible()
+    await expect(page.getByText('活动已写入')).toBeVisible()
+    await expect(page.getByText('执行过程')).toHaveCount(0)
+    await expect(page.getByText('原始内容已保存')).toHaveCount(0)
+    await expect(page.getByText('已更新')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '重试同步' })).toHaveCount(0)
     await expect(page.getByText('遇到问题')).toHaveCount(0)
     await expect(page.getByText('稍后重试')).toHaveCount(0)
@@ -201,8 +225,10 @@ test('a lost submit still finishes on the written result', async ({ page }) => {
   await page.getByRole('textbox', { name: '客户沟通内容' }).fill(userText)
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect(page.getByText('已记录这条客户活动。')).toBeVisible()
-  await expect(page.getByText('已写入')).toBeVisible()
-  await expect(page.getByText('写入客户活动')).toBeVisible()
+  await expect(page.getByText('活动已写入')).toBeVisible()
+  await expect(page.getByText('写入客户活动')).toHaveCount(0)
+  await expect(page.getByText('执行过程')).toHaveCount(0)
+  await expect(page.getByText('已更新')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '重试同步' })).toHaveCount(0)
   await expect(page.getByText('遇到问题')).toHaveCount(0)
   await expect(page.getByText('稍后重试')).toHaveCount(0)

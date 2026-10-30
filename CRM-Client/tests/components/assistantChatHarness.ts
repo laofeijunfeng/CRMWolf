@@ -165,7 +165,7 @@ const withFixtureUi = (state: ConversationView): ConversationView => {
   }
   return {
     ...state,
-    messages: state.messages.map((item) => ({ ...item, ui: fixtureEnvelope(item, item.id === liveId, state.pending_choice?.entry_id ?? null) }))
+    messages: state.messages.map((item) => ({ ...item, ui: item.ui ?? fixtureEnvelope(item, item.id === liveId, state.pending_choice?.entry_id ?? null) }))
   }
 }
 

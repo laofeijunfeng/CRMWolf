@@ -299,3 +299,211 @@ describe('focus changes during recovery', () => {
     }
   })
 })
+
+const resultEnvelope = (blocks: ReadonlyArray<Record<string, unknown>>) => ({
+  schema_version: 'crm.agent.ui.v1' as const,
+  message_id: 8,
+  turn_id: 'turn-result',
+  role: 'assistant' as const,
+  state: 'final' as const,
+  blocks,
+  suggested_actions: [],
+  metadata: { display: 'MESSAGE' as const, route: 'WORKFLOW' as const, accessibility_label: '结果' }
+})
+
+describe('local process card after an authoritative result', () => {
+  it('keeps the write stage visible until the server result arrives', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    show(view({ focused_task: current, messages: [message('one', '确认？', current)] }))
+    mocks.command.mockResolvedValue(reply(view({ focused_task: current, messages: [message('one', '确认？', current)] }), prepared(current, 'confirm')))
+    let finish: (() => void) | undefined
+    drive(async () => { await new Promise<void>((resolve) => { finish = resolve }) })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('写入客户活动')
+    expect(wrapper.text()).toContain('处理中')
+    expect(wrapper.text()).not.toContain('已更新')
+    expect(wrapper.text()).not.toContain('本次跟进已写入')
+    finish?.()
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('hides the process card once the activity write result is on screen', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const written = makeTask({ version: 4, committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    const success = {
+      ...message('result', '活动已写入', written),
+      outcome: 'activity_written' as const
+    }
+    mocks.get.mockResolvedValue(view({
+      version: 4,
+      focused_task: written,
+      messages: [message('user', '确认', null, 'user'), success]
+    }))
+    drive((handlers) => {
+      handlers.onStage({ stage: 'write', phase: 'done', ms: 20 })
+      handlers.onWaiting({ task: written, message: '活动已写入' })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('已写入')
+    expect(wrapper.text()).not.toContain('执行过程')
+    expect(wrapper.text()).not.toContain('原始内容已保存')
+    expect(wrapper.text()).not.toContain('已更新')
+    wrapper.unmount()
+  })
+
+  it('hides the process card for the follow-up success notice without a second success card', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const written = makeTask({ version: 4, committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    const success = {
+      ...message('result', '睿狐科技 · 普通跟进', written),
+      outcome: 'follow_up_disposition' as const,
+      ui: resultEnvelope([{
+        id: 'b_notice_written', type: 'notice', tone: 'success', title: '本次跟进已写入', text: '睿狐科技 · 普通跟进'
+      }])
+    }
+    mocks.get.mockResolvedValue(view({ version: 4, focused_task: written, messages: [message('user', '确认', null, 'user'), success] }))
+    drive((handlers) => { handlers.onWaiting({ task: written, message: '本次跟进已写入' }) })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('本次跟进已写入')
+    expect(wrapper.text()).not.toContain('执行过程')
+    expect(wrapper.text()).not.toContain('已更新')
+    wrapper.unmount()
+  })
+
+  it('does not rebuild a process card when replaying a historical success', async () => {
+    const written = makeTask({ committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] })
+    const success = { ...message('result', '活动已写入', written), outcome: 'activity_written' as const }
+    show(view({ focused_task: written, messages: [message('user', '上次的跟进', null, 'user'), success] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(wrapper.text()).toContain('已写入')
+    expect(wrapper.text()).not.toContain('执行过程')
+    expect(wrapper.text()).not.toContain('原始内容已保存')
+    wrapper.unmount()
+  })
+
+  it('keeps a new turn\'s process card when an older success is already on screen', async () => {
+    const previous = makeTask({ public_id: 'ast_old', committed: [{ kind: 'customer_activity', public_id: 'act_old' }] })
+    const old = { ...message('old', '活动已写入', previous), outcome: 'activity_written' as const }
+    const current = makeTask()
+    show(view({ focused_task: current, messages: [message('user', '上次', null, 'user'), old] }))
+    mocks.text.mockResolvedValue(reply(view({
+      version: 2,
+      focused_task: current,
+      messages: [message('user', '上次', null, 'user'), old, message('next-user', '今天又沟通了一次', null, 'user')]
+    }), prepared(current)))
+    let finish: (() => void) | undefined
+    drive(async (handlers) => {
+      handlers.onStage({ stage: 'structure', phase: 'start' })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper, '今天又沟通了一次')
+    expect(wrapper.text()).toContain('已写入')
+    expect(wrapper.text()).toContain('执行过程')
+    expect(wrapper.text()).toContain('正在整理跟进内容')
+    expect(wrapper.text()).toContain('处理中')
+    finish?.()
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('keeps the stage list after a known failure but does not say it was updated', async () => {
+    const current = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))
+    const failure = '跟进整理超时，尚未写入客户活动。原始内容已保存，本次没有产生 CRM 活动。'
+    mocks.get.mockResolvedValue(view({
+      version: 2,
+      focused_task: current,
+      messages: [{ ...message('failure', failure, current), outcome: 'failure' as const }]
+    }))
+    drive((handlers) => handlers.onError({ code: 'UPSTREAM_TIMEOUT', retryable: true, message: failure }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.text()).toContain(failure)
+    expect(wrapper.text()).toContain('执行过程')
+    expect(wrapper.text()).toContain('原始内容已保存')
+    expect(wrapper.text()).not.toContain('已更新')
+    expect(wrapper.text()).not.toContain('本次跟进已写入')
+    expect(wrapper.text()).not.toContain('已写入')
+    wrapper.unmount()
+  })
+
+  it('keeps the process card for an unknown commit without pretending it succeeded', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    const notice = '客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。'
+    const unknown = {
+      ...message('unknown', notice, current),
+      outcome: 'failure' as const,
+      ui: resultEnvelope([{ id: 'b_notice_1', type: 'notice', tone: 'warning', title: '结果待核对', text: notice }])
+    }
+    mocks.get.mockResolvedValue(view({ version: 4, focused_task: current, messages: [message('user', '确认', null, 'user'), unknown] }))
+    drive((handlers) => handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: notice }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('结果待核对')
+    expect(wrapper.text()).toContain('执行过程')
+    expect(wrapper.text()).toContain('写入客户活动')
+    expect(wrapper.text()).not.toContain('已更新')
+    expect(wrapper.text()).not.toContain('本次跟进已写入')
+    expect(wrapper.text()).not.toContain('重新写入')
+    wrapper.unmount()
+  })
+
+  it('keeps stage progress while a reloaded turn is still running', async () => {
+    const current = makeTask({ processing_turn_id: 'atn_one', processing_turn_status: 'RUNNING' })
+    show(view({ focused_task: current, messages: [message('user', '已收下的原句', null, 'user')] }))
+    mocks.turn.mockResolvedValue({
+      turn_id: 'atn_one', status: 'RUNNING', lease_version: 1, reprocess_allowed: false,
+      events: [{ seq: 2, event: 'stage', data: { stage: 'write', phase: 'start' } }],
+      task: current
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(wrapper.text()).toContain('写入客户活动')
+    expect(wrapper.text()).toContain('处理中')
+    expect(wrapper.text()).not.toContain('已更新')
+    wrapper.unmount()
+  })
+
+  it('drops the previous process card when the conversation moves to another item', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    const next = makeTask({ public_id: 'ast_new', version: 2, waiting: field({ action_id: 'new-action', expected_version: 2 }) })
+    mocks.get.mockResolvedValue(view({ version: 5, focused_task: next, messages: [message('new', '新沟通等待客户', next)] }))
+    drive((handlers) => { handlers.onStage({ stage: 'write', phase: 'start' }) })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('新沟通等待客户')
+    expect(wrapper.text()).not.toContain('执行过程')
+    expect(wrapper.text()).not.toContain('原始内容已保存')
+    wrapper.unmount()
+  })
+})

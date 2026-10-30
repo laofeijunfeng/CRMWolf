@@ -141,11 +141,43 @@ const STAGE_LABELS: Record<StageName, string> = {
   write: '写入客户活动'
 }
 
-const processing = ref<{ active: boolean; stages: LiveStage[]; startedAt: number }>({
+type EpisodeSettlement = 'none' | 'failed' | 'unknown'
+const processing = ref<{
+  active: boolean
+  stages: LiveStage[]
+  startedAt: number
+  episode: number
+  baselineIds: string[]
+  authoritativeWrite: boolean
+  settlement: EpisodeSettlement
+}>({
   active: false,
   stages: [],
-  startedAt: 0
+  startedAt: 0,
+  episode: 0,
+  baselineIds: [],
+  authoritativeWrite: false,
+  settlement: 'none'
 })
+const serverMessageIds = (): string[] => entries.value.flatMap((entry) =>
+  entry.serverId !== undefined && !entry.serverId.startsWith('current:') ? [entry.serverId] : [])
+const startEpisode = (): void => {
+  processing.value.episode += 1
+  processing.value.baselineIds = serverMessageIds()
+  processing.value.authoritativeWrite = false
+  processing.value.settlement = 'none'
+}
+const resetProcessingEpisode = (): void => {
+  processing.value.episode = 0
+  processing.value.baselineIds = []
+  processing.value.authoritativeWrite = false
+  processing.value.settlement = 'none'
+  processing.value.stages = []
+}
+const noteEpisodeFailure = (code: string | undefined): void => {
+  if (processing.value.episode === 0 || processing.value.authoritativeWrite) return
+  processing.value.settlement = code === 'UNKNOWN_COMMIT_RESULT' ? 'unknown' : 'failed'
+}
 const elapsedSeconds = ref(0)
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
 
@@ -157,11 +189,10 @@ const presetStages = (input: SubmitAssistantInput, hasWaiting: boolean): StageNa
 }
 
 const beginProcessing = (input: SubmitAssistantInput, hasWaiting: boolean): void => {
-  processing.value = {
-    active: true,
-    stages: presetStages(input, hasWaiting).map((name) => ({ name, status: 'pending' })),
-    startedAt: Date.now()
-  }
+  startEpisode()
+  processing.value.active = true
+  processing.value.stages = presetStages(input, hasWaiting).map((name) => ({ name, status: 'pending' }))
+  processing.value.startedAt = Date.now()
   elapsedSeconds.value = 0
   if (elapsedTimer !== null) clearInterval(elapsedTimer)
   elapsedTimer = setInterval(() => {
@@ -190,6 +221,7 @@ const endProcessing = (): void => {
     clearInterval(elapsedTimer)
     elapsedTimer = null
   }
+  // Keep stages. This also runs while recovery is still reading the turn.
   processing.value.active = false
 }
 
@@ -203,6 +235,15 @@ const reprocessTarget = shallowRef<{ targetId: string; turnId: string; cursor: n
 const recoveryNotice = ref('')
 const autoRecovering = ref(false)
 const reprocessAllowed = ref(false)
+const processingInFlight = computed(() => processing.value.active || autoRecovering.value || processingRecovery.value !== null)
+const showProcessCard = computed(() => processing.value.stages.length > 0
+  && !(processing.value.authoritativeWrite && !processingInFlight.value))
+const processChip = computed((): string => {
+  if (!showProcessCard.value) return ''
+  if (processingInFlight.value) return '处理中'
+  if (processing.value.settlement === 'failed' || processing.value.settlement === 'unknown') return ''
+  return '已更新'
+})
 const seenEventKeys = new Set<string>()
 const RECOVERY_POLLS = 90
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null
@@ -286,12 +327,14 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): strin
       pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
       const entry = entries.value[entries.value.length - 1]
       if (entry !== undefined) entry.outcome = 'failure'
+      noteEpisodeFailure(typeof event.data['code'] === 'string' ? event.data['code'] : undefined)
     }
   }
   return reply
 }
 
 const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor: number }): Promise<boolean> => {
+  if (processing.value.episode === 0) startEpisode()
   const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
   const seqs = turn.events.map((event) => event.seq)
   if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
@@ -471,6 +514,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         pushEntry('assistant', event.message)
         const entry = entries.value[entries.value.length - 1]
         if (entry !== undefined) entry.outcome = 'failure'
+        noteEpisodeFailure(event.code)
       },
       onNetworkLost: () => { if (active()) disconnected = true },
       onTerminalInvalid: () => { if (active()) terminalInvalid = true }
@@ -879,6 +923,36 @@ const showExplicitNone = (entry: ChatEntry): boolean => {
     && block.fields[0]?.key === 'next_action'
 }
 
+const entryBlocks = (entry: ChatEntry): NonNullable<ChatEntry['ui']>['blocks'] => entry.ui?.blocks ?? []
+const isUnknownResult = (entry: ChatEntry): boolean => entryBlocks(entry).some((block) =>
+  (block.type === 'error' && block.code === 'UNKNOWN_COMMIT_RESULT')
+  || (block.type === 'notice' && block.title === '结果待核对'))
+const isAuthoritativeWrite = (entry: ChatEntry): boolean => {
+  if (entry.role !== 'assistant') return false
+  if (entry.outcome === 'activity_written') return true
+  return entryBlocks(entry).some((block) =>
+    (block.type === 'action_result' && block.status === 'SUCCESS')
+    || (block.type === 'notice' && block.title === '本次跟进已写入'))
+}
+const noteEpisodeMessages = (): void => {
+  if (processing.value.episode === 0) return
+  const baseline = new Set(processing.value.baselineIds)
+  let sawFailure = false
+  let sawUnknown = false
+  for (const entry of entries.value) {
+    if (entry.serverId === undefined || baseline.has(entry.serverId)) continue
+    if (isAuthoritativeWrite(entry)) {
+      processing.value.authoritativeWrite = true
+      continue
+    }
+    if (isUnknownResult(entry)) sawUnknown = true
+    else if (entry.role === 'assistant' && entry.outcome === 'failure') sawFailure = true
+  }
+  if (processing.value.authoritativeWrite) return
+  if (sawUnknown) processing.value.settlement = 'unknown'
+  else if (sawFailure) processing.value.settlement = 'failed'
+}
+
 const applyConversation = (view: ConversationView, older = false, requestOrder = ++viewRequestSequence): void => {
   if (disposed) return
   if (!older && conversation.value !== null && (view.version < conversation.value.version
@@ -895,6 +969,7 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
       resultPending.value = false
       submitting.value = false
       endProcessing()
+      resetProcessingEpisode()
     }
     conversation.value = view
     task.value = view.focused_task
@@ -925,6 +1000,7 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   }
   if (!older && current !== null) adoptProcessingTurn(current)
   if (!older && view.has_pending_request) resultPending.value = true
+  if (!older) noteEpisodeMessages()
   if (!older) scrollToBottom()
 }
 
@@ -1009,11 +1085,11 @@ void loadConversation()
       </template>
     </div>
 
-    <div v-if="processing.stages.length > 0" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
+    <div v-if="showProcessCard" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
       <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
       <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
         <span>执行过程</span>
-        <span class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processing.active ? '处理中' : '已更新' }}</span>
+        <span v-if="processChip" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processChip }}</span>
       </div>
       <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-emerald-700' : stageItem.status === 'running' ? 'font-medium text-[#1d4ed8]' : 'text-muted-foreground'">
         <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-emerald-600 bg-emerald-600' : stageItem.status === 'running' ? 'border-[#2563eb] bg-white' : 'border-border'"></span>
