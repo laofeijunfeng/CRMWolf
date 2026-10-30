@@ -454,3 +454,93 @@ def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
     assert values["next_follow_time"] == "11 月 5 号（日期，未指定具体时刻）"
     assert "00:00" not in values["next_follow_time"]
     assert values["next_action"] == "跟进付款进展"
+
+
+def test_confirmation_card_labels_a_full_month_without_a_default_day() -> None:
+    content_json = {
+        "temporal_evidence": {
+            "version": "temporal-evidence-v1",
+            "mentions": [
+                {
+                    "mention_id": "tm_customer",
+                    "raw_text": "11月份",
+                    "source_segment_id": "seg",
+                    "quote_start": 2,
+                    "quote_end": 6,
+                    "kind": "UNKNOWN",
+                    "role": "CUSTOMER_COMMITMENT",
+                    "action_id": "act_customer",
+                    "year": 2026,
+                    "month": 11,
+                    "day": None,
+                    "granularity": "UNKNOWN",
+                    "anchor_at": "2026-10-29T19:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": None,
+                },
+                {
+                    "mention_id": "tm_sales",
+                    "raw_text": "11月15号",
+                    "source_segment_id": "seg",
+                    "quote_start": 20,
+                    "quote_end": 26,
+                    "kind": "MONTH_DAY",
+                    "role": "SALES_FOLLOW_UP",
+                    "action_id": "act_sales",
+                    "year": 2026,
+                    "month": 11,
+                    "day": 15,
+                    "granularity": "DATE",
+                    "anchor_at": "2026-10-29T19:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": "2026-11-15T00:00:00",
+                },
+            ],
+            "actions": [
+                {
+                    "action_id": "act_customer",
+                    "owner_role": "CUSTOMER",
+                    "action_text": "预计11月份可以完成付款",
+                    "action_status": "COMMITTED",
+                    "source_segment_id": "seg",
+                    "evidence_quote": "预计11月份可以完成付款",
+                    "quote_start": 0,
+                    "quote_end": 12,
+                    "temporal_mention_id": "tm_customer",
+                },
+                {
+                    "action_id": "act_sales",
+                    "owner_role": "SALES",
+                    "action_text": "11月15号跟进付款方面的情况",
+                    "action_status": "PLANNED",
+                    "source_segment_id": "seg",
+                    "evidence_quote": "11月15号跟进付款方面的情况",
+                    "quote_start": 13,
+                    "quote_end": 28,
+                    "temporal_mention_id": "tm_sales",
+                },
+            ],
+        }
+    }
+    waiting = _confirmation(
+        _preview(
+            activity_kind="WECHAT_FOLLOW_UP",
+            title="微信跟进",
+            summary="预计11月份可以完成付款，11月15号跟进。",
+            next_action="11月15号跟进付款方面的情况",
+            next_follow_time="2026-11-15T00:00:00",
+            next_follow_time_text="11月15号",
+            next_follow_time_granularity="DATE",
+            content_json=content_json,
+        )
+    )
+    message = _message("m_full_month", "确认后写入这条客户活动？", _task(waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    values = {fact.key: fact.value for fact in interaction.facts}
+    assert values["customer_commitment"] == "预计11月份可以完成付款（整月，未确定具体日期）"
+    assert values["next_follow_time"] == "11月15号（日期，未指定具体时刻）"
+    assert values["next_action"] == "11月15号跟进付款方面的情况"
+    assert "11月1日" not in values["customer_commitment"]
+    assert "11月30" not in values["customer_commitment"]
+    assert "00:00" not in values["next_follow_time"]

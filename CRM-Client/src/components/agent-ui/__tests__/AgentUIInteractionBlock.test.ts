@@ -460,3 +460,43 @@ it('splits a customer month segment from a dated sales follow-up', () => {
   expect(wrapper.text()).not.toContain('00:00')
   expect(wrapper.text()).not.toContain('2026-11-01')
 })
+
+it('shows a full month commitment separately from a sales date', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_full_month',
+    type: 'interaction',
+    interaction_id: 'ix_full_month',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '上海期货信息技术有限公司', group: 'write' },
+      { key: 'summary', label: '摘要', value: '预计11月份可以完成付款，11月15号跟进付款方面的情况。', group: 'write' },
+      { key: 'next_action', label: '下一步', value: '11月15号跟进付款方面的情况', group: 'write' },
+      { key: 'customer_commitment', label: '客户承诺', value: '预计11月份可以完成付款（整月，未确定具体日期）', group: 'write' },
+      { key: 'next_follow_time', label: '跟进时间', value: '11月15号（日期，未指定具体时刻）', group: 'write' },
+      { key: 'activity_kind', label: '活动类型', value: '微信跟进', group: 'activity_kind', status_label: '已识别' }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_1'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const rows = Object.fromEntries(wrapper.findAll('.activity-meta-row').map(row => [
+    row.get('dt').text(),
+    row.get('dd').text()
+  ]))
+
+  expect(rows['客户承诺']).toBe('预计11月份可以完成付款（整月，未确定具体日期）')
+  expect(rows['跟进时间']).toBe('11月15号（日期，未指定具体时刻）')
+  expect(rows['下一步']).toBe('11月15号跟进付款方面的情况')
+  expect(wrapper.text()).not.toContain('11月1日')
+  expect(wrapper.text()).not.toContain('00:00')
+})

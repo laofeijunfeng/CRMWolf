@@ -55,7 +55,7 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
 - content_json 必须完整填写：content、customer_feedback、current_progress、risks、next_action、next_action_absence_reason、next_follow_time_text；没有对应事实的字段也必须返回空值，不得省略。
 - next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，不得把缺少行动推断成暂无行动。
 - 不确定的信息一律留空，禁止编造。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。月初、月中、月末、月底用 MONTH_SEGMENT，不要当成某一天。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、action_status、evidence_quote、quote_start、quote_end。owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
 - quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
 只输出结构化结果。"""
@@ -71,7 +71,7 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
 - participants 区分我方与客户方成员及其角色，只有「双方参会」时保留原样。
 - next_action 填首要行动项，尽量含负责人和时间；原文没有则留空。
 - 不确定的信息一律留空，禁止编造。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。月初、月中、月末、月底用 MONTH_SEGMENT，不要当成某一天。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、action_status、evidence_quote、quote_start、quote_end。owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
 - quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
 只输出结构化结果。"""

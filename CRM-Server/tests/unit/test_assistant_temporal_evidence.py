@@ -325,7 +325,7 @@ def test_digit_month_is_a_span_and_does_not_swallow_the_follow_up_day() -> None:
     assert spans == [
         ("RELATIVE_DAY", "今天"),
         ("RELATIVE_DAY", "今天"),
-        ("UNKNOWN", "11月份"),
+        ("FULL_MONTH", "11月份"),
         ("MONTH_DAY", "11月15号"),
     ]
     ensure_mentions_cover_source(FUTURES, _futures_mentions())
@@ -345,6 +345,8 @@ def test_digit_month_commitment_stays_month_level_and_sales_keeps_november_15() 
     mentions = {item["raw_text"]: item for item in listed}
     todays = [item for item in listed if item["raw_text"] == "今天"]
     assert [item["role"] for item in todays] == ["OTHER", "CUSTOMER_COMMITMENT"]
+    assert mentions["11月份"]["kind"] == "FULL_MONTH"
+    assert mentions["11月份"]["granularity"] == "FULL_MONTH"
     assert mentions["11月份"]["year"] == 2026
     assert mentions["11月份"]["month"] == 11
     assert mentions["11月份"]["day"] is None
@@ -391,8 +393,204 @@ def test_past_digit_month_uses_next_year() -> None:
         }],
     )
     mention = draft.content_json["temporal_evidence"]["mentions"][0]
+    assert mention["kind"] == "FULL_MONTH"
+    assert mention["granularity"] == "FULL_MONTH"
     assert (mention["year"], mention["month"], mention["day"]) == (2027, 11, None)
     assert temporal_waiting(draft) is None
+
+
+def test_legacy_unknown_month_kind_normalizes_to_full_month() -> None:
+    draft = _draft(FUTURES)
+    attach_model_evidence(
+        draft,
+        segment_id="seg_futures",
+        segment_text=FUTURES,
+        anchor=datetime(2026, 10, 29, 19, 0),
+        mentions=_futures_mentions(month_kind="FULL_MONTH"),
+        actions=_futures_actions(),
+    )
+    mention = next(item for item in draft.content_json["temporal_evidence"]["mentions"] if item["raw_text"] == "11月份")
+    assert mention["kind"] == "FULL_MONTH"
+    assert mention["granularity"] == "FULL_MONTH"
+    from app.services.assistant.temporal_evidence import confirmation_time_labels
+
+    customer, follow = confirmation_time_labels(draft.content_json)
+    assert customer is not None and "预计11月份可以完成付款（整月，未确定具体日期）" in customer
+    assert follow == "11月15号（日期，未指定具体时刻）"
+    assert "11月1号" not in (customer or "")
+    assert "11月30" not in (customer or "")
+    assert "00:00" not in (follow or "")
+
+
+def test_explicit_year_and_bare_month_stay_month_level() -> None:
+    anchor = datetime(2026, 12, 2, 9, 0)
+    cases = {
+        "预计11月可以完成付款": ("11月", 2027, 11),
+        "2026年11月份可以完成付款": ("11月份", 2026, 11),
+        "2026年11月初付款": ("11月初", 2026, 11),
+        "11月初付款": ("11月初", 2027, 11),
+    }
+    for text, (raw, year, month) in cases.items():
+        spans = find_time_spans(text)
+        assert [(span.kind, span.raw_text) for span in spans] == [
+            ("FULL_MONTH" if "初" not in raw else "MONTH_SEGMENT", raw)
+        ]
+        draft = _draft(text)
+        span = spans[0]
+        attach_model_evidence(
+            draft,
+            segment_id="seg_month_case",
+            segment_text=text,
+            anchor=anchor,
+            mentions=[{
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": "UNKNOWN" if span.kind == "FULL_MONTH" else span.kind,
+                "role": "CUSTOMER_COMMITMENT",
+                "owner": "左总",
+                "action_ref": "a1",
+                "confidence": 0.9,
+            }],
+            actions=[{
+                "action_ref": "a1",
+                "owner_role": "CUSTOMER",
+                "owner_text": "左总",
+                "action_text": text,
+                "action_status": "COMMITTED",
+                "evidence_quote": text,
+                "quote_start": 0,
+                "quote_end": len(text),
+            }],
+        )
+        mention = draft.content_json["temporal_evidence"]["mentions"][0]
+        assert mention["raw_text"] == raw
+        assert (mention["year"], mention["month"], mention["day"], mention["resolved_at"]) == (year, month, None, None)
+        if span.kind == "FULL_MONTH":
+            assert mention["granularity"] == "FULL_MONTH"
+        else:
+            assert mention["granularity"] == "MONTH_SEGMENT"
+            assert mention["segment"] == "EARLY"
+        assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+
+
+def test_full_month_label_on_a_date_is_rejected() -> None:
+    text = "11月15号跟进付款"
+    draft = _draft(text)
+    span = find_time_spans(text)[0]
+    assert span.kind == "MONTH_DAY"
+    with pytest.raises(TemporalContractError, match="does not match a source span") as caught:
+        attach_model_evidence(
+            draft,
+            segment_id="seg_conflict",
+            segment_text=text,
+            anchor=datetime(2026, 10, 29, 19, 0),
+            mentions=[{
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": "FULL_MONTH",
+                "role": "SALES_FOLLOW_UP",
+                "action_ref": "a1",
+                "confidence": 1,
+            }],
+            actions=[{
+                "action_ref": "a1",
+                "owner_role": "SALES",
+                "action_text": "跟进付款",
+                "action_status": "PLANNED",
+                "evidence_quote": text,
+                "quote_start": 0,
+                "quote_end": len(text),
+            }],
+        )
+    assert caught.value.failure_origin == "model_output"
+
+
+def test_sales_full_month_does_not_become_a_dated_follow_up() -> None:
+    text = "我11月份再联系"
+    draft = _draft(text)
+    span = find_time_spans(text)[0]
+    attach_model_evidence(
+        draft,
+        segment_id="seg_sales_month",
+        segment_text=text,
+        anchor=datetime(2026, 10, 29, 19, 0),
+        mentions=[{
+            "raw_text": span.raw_text,
+            "quote_start": span.start,
+            "quote_end": span.end,
+            "kind": "FULL_MONTH",
+            "role": "SALES_FOLLOW_UP",
+            "action_ref": "a1",
+            "confidence": 1,
+        }],
+        actions=[{
+            "action_ref": "a1",
+            "owner_role": "SALES",
+            "action_text": "再联系",
+            "action_status": "PLANNED",
+            "evidence_quote": text,
+            "quote_start": 0,
+            "quote_end": len(text),
+        }],
+    )
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+    from app.services.assistant.temporal_evidence import confirmation_time_labels, sales_evidence_overlay
+
+    assert sales_evidence_overlay(draft) is None
+    assert confirmation_time_labels(draft.content_json)[1] == "11月份（整月，未确定具体日期）"
+
+
+def test_month_segment_with_clock_still_asks_for_a_date() -> None:
+    draft = _attach("下个月初下午三点跟进", datetime(2026, 10, 29, 19, 0))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["candidates"] == []
+    assert "无法确定为唯一日期" in waiting["prompt"]
+    mention = draft.content_json["temporal_evidence"]["mentions"][0]
+    assert mention["resolved_at"] is None
+    assert mention["day"] is None
+
+
+def test_stored_unknown_month_still_displays_as_full_month() -> None:
+    from app.services.assistant.temporal_evidence import confirmation_time_labels
+
+    content = {
+        "customer_commitments": [{"mention_id": "tm_old", "text": "左总预计11月份可以完成付款。"}],
+        "temporal_evidence": {
+            "version": "temporal-evidence-v1",
+            "mentions": [{
+                "mention_id": "tm_old",
+                "raw_text": "11月份",
+                "source_segment_id": "seg",
+                "quote_start": 2,
+                "quote_end": 6,
+                "kind": "UNKNOWN",
+                "role": "CUSTOMER_COMMITMENT",
+                "action_id": "act_old",
+                "year": 2026,
+                "month": 11,
+                "day": None,
+                "granularity": "UNKNOWN",
+                "anchor_at": "2026-10-29T19:00:00",
+                "resolution_status": "RESOLVED",
+                "resolved_at": None,
+            }],
+            "actions": [{
+                "action_id": "act_old",
+                "owner_role": "CUSTOMER",
+                "action_text": "预计11月份可以完成付款",
+                "action_status": "COMMITTED",
+                "source_segment_id": "seg",
+                "evidence_quote": "预计11月份可以完成付款",
+                "quote_start": 0,
+                "quote_end": 12,
+                "temporal_mention_id": "tm_old",
+            }],
+        },
+    }
+    assert confirmation_time_labels(content)[0] == "预计11月份可以完成付款（整月，未确定具体日期）"
 
 
 def test_wrong_kind_for_digit_month_is_still_rejected() -> None:
@@ -773,6 +971,24 @@ def test_legacy_month_end_evidence_is_not_rescanned() -> None:
     assert stored["kind"] == "MONTH_END"
     assert stored["resolved_at"] == "2026-10-31T00:00:00"
     assert draft.content_json["customer_commitments"][0]["resolved_on"] == "2026-10-31"
+
+
+
+def test_role_choice_restores_a_full_month_without_asking_for_a_day() -> None:
+    text = "11月份付款，11月15号跟进"
+    draft = _attach(text, datetime(2026, 10, 29, 19, 0))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    choice = next(item["id"] for item in waiting["candidates"] if str(item["id"]).endswith(":customer"))
+    apply_temporal_choice(draft, choice)
+    assert temporal_waiting(draft) is None
+    mentions = {item["raw_text"]: item for item in draft.content_json["temporal_evidence"]["mentions"]}
+    assert mentions["11月份"]["role"] == "CUSTOMER_COMMITMENT"
+    assert mentions["11月份"]["granularity"] == "FULL_MONTH"
+    assert mentions["11月份"]["resolution_status"] == "RESOLVED"
+    assert mentions["11月份"]["resolved_at"] is None
+    resolved, granularity = resolved_sales_follow_up(draft)
+    assert (resolved, granularity) == (datetime(2026, 11, 15), "DATE")
 
 
 def test_role_choice_restores_a_month_segment_without_asking_for_a_day() -> None:

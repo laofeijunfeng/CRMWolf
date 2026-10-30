@@ -927,7 +927,8 @@ FUTURES_TEXT = (
 )
 
 
-async def test_month_only_commitment_survives_structuring(db_session):
+@pytest.mark.parametrize("month_kind", ["UNKNOWN", "FULL_MONTH"])
+async def test_month_only_commitment_survives_structuring(db_session, month_kind):
     from app.services.assistant.llm_contracts import ModelTemporalMention
 
     task = _make_task(db_session, activity_kind="FOLLOW_UP")
@@ -966,7 +967,7 @@ async def test_month_only_commitment_survives_structuring(db_session):
         temporal_mentions=[
             mention("今天", 0, 2, "RELATIVE_DAY", "SALES_FOLLOW_UP", "a1"),
             mention("今天", 59, 61, "RELATIVE_DAY", "CUSTOMER_COMMITMENT", "a3", "左总"),
-            mention("11月份", 68, 72, "UNKNOWN", "CUSTOMER_COMMITMENT", "a4", "左总"),
+            mention("11月份", 68, 72, month_kind, "CUSTOMER_COMMITMENT", "a4", "左总"),
             mention("11月15号", 79, 85, "MONTH_DAY", "SALES_FOLLOW_UP", "a5"),
         ],
         actions=[
@@ -998,13 +999,137 @@ async def test_month_only_commitment_survives_structuring(db_session):
     assert "左总发票今天可以开具。" in commitments
     assert "左总预计11月份可以完成付款。" in commitments
     month = next(item for item in draft.content_json["temporal_evidence"]["mentions"] if item["raw_text"] == "11月份")
+    assert month["kind"] == "FULL_MONTH"
+    assert month["granularity"] == "FULL_MONTH"
     assert month["role"] == "CUSTOMER_COMMITMENT"
     assert month["resolution_status"] == "RESOLVED"
+    assert month["day"] is None
     assert month["resolved_at"] is None
     assert draft.content_json["next_follow_time_text"] == "11月15号"
     assert "11月15号" in (draft.next_action.value or "")
+    from app.services.assistant.temporal_evidence import confirmation_time_labels
+
+    customer, follow = confirmation_time_labels(draft.content_json)
+    assert customer is not None and "预计11月份可以完成付款（整月，未确定具体日期）" in customer
+    assert follow == "11月15号（日期，未指定具体时刻）"
+    dated = [item for item in draft.content_json["action_evidence"] if item.get("due_at")]
+    assert dated
+    assert {item["due_at"][:10] for item in dated} == {"2026-11-15"}
+    assert all(item.get("granularity") == "DATE" for item in dated)
     logged = _structure_failure(db_session, updated.id)
     assert logged["accepted"] is True
+
+
+async def test_conflicting_month_kind_fails_closed_through_structuring(db_session):
+    from app.services.assistant.llm_contracts import ModelTemporalMention
+
+    task = _make_task(db_session, activity_kind="FOLLOW_UP")
+    structured = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content="预计11月份可以完成付款。",
+        customer_name="上海期货信息技术有限公司",
+        next_action="11月15号跟进付款方面的情况",
+        next_follow_time_text="11月15号",
+        temporal_mentions=[
+            ModelTemporalMention(
+                raw_text="今天",
+                quote_start=0,
+                quote_end=2,
+                kind="RELATIVE_DAY",
+                role="OTHER",
+                action_ref="a1",
+                confidence=1,
+            ),
+            ModelTemporalMention(
+                raw_text="今天",
+                quote_start=59,
+                quote_end=61,
+                kind="RELATIVE_DAY",
+                role="CUSTOMER_COMMITMENT",
+                action_ref="a3",
+                confidence=1,
+            ),
+            ModelTemporalMention(
+                raw_text="11月份",
+                quote_start=68,
+                quote_end=72,
+                kind="MONTH_SEGMENT",
+                role="CUSTOMER_COMMITMENT",
+                owner="左总",
+                action_ref="a4",
+                confidence=1,
+            ),
+            ModelTemporalMention(
+                raw_text="11月15号",
+                quote_start=79,
+                quote_end=85,
+                kind="MONTH_DAY",
+                role="SALES_FOLLOW_UP",
+                action_ref="a5",
+                confidence=1,
+            ),
+        ],
+        actions=[
+            ModelDraftAction(
+                action_ref="a1",
+                owner_role="SALES",
+                action_text="微信联系对齐合同和发票",
+                action_status="COMPLETED",
+                evidence_quote=FUTURES_TEXT[0:39],
+                quote_start=0,
+                quote_end=39,
+            ),
+            ModelDraftAction(
+                action_ref="a3",
+                owner_role="CUSTOMER",
+                owner_text="左总",
+                action_text="发票今天可以开具",
+                action_status="COMMITTED",
+                evidence_quote=FUTURES_TEXT[53:65],
+                quote_start=53,
+                quote_end=65,
+            ),
+            ModelDraftAction(
+                action_ref="a4",
+                owner_role="CUSTOMER",
+                owner_text="左总",
+                action_text="预计11月份可以完成付款",
+                action_status="PLANNED",
+                evidence_quote=FUTURES_TEXT[66:78],
+                quote_start=66,
+                quote_end=78,
+            ),
+            ModelDraftAction(
+                action_ref="a5",
+                owner_role="SALES",
+                action_text="11月15号跟进付款方面的情况",
+                action_status="PLANNED",
+                evidence_quote=FUTURES_TEXT[79:94],
+                quote_start=79,
+                quote_end=94,
+            ),
+        ],
+        content_json={
+            "content": "预计11月份可以完成付款。",
+            "customer_feedback": "预计11月份可以完成付款。",
+            "current_progress": "目前合同已经走完盖章流程。",
+            "next_action": "11月15号跟进付款方面的情况",
+            "next_follow_time_text": "11月15号",
+        },
+    )
+    updated, failure = await _stage_failure(
+        db_session,
+        task,
+        FUTURES_TEXT,
+        FakeStructurer(KindDecision(kind="FOLLOW_UP"), structured),
+    )
+    assert failure.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
+    assert failure.failure_origin == "model_output"
+    assert failure.user_message == "整理结果未通过校验，尚未写入客户活动。"
+    logged = _structure_failure(db_session, updated.id)
+    assert logged["failure"] == "temporal_evidence"
+    assert logged["failure_origin"] == "model_output"
+    assert "temporal mention does not match a source span" in logged["cause"]
 
 
 async def test_classify_timeout_keeps_saved_source_after_rollback(db_session):

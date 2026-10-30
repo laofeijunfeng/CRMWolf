@@ -30,10 +30,11 @@ StoredTimeKind = Literal[
     "RELATIVE_WEEK",
     "RELATIVE_MONTH",
     "RELATIVE_WEEKDAY",
+    "FULL_MONTH",
     "UNKNOWN",
 ]
 MonthSegmentName = Literal["EARLY", "MIDDLE", "LATE"]
-MentionGranularity = Literal["DATE", "DATETIME", "UNKNOWN", "MONTH_SEGMENT"]
+MentionGranularity = Literal["DATE", "DATETIME", "UNKNOWN", "MONTH_SEGMENT", "FULL_MONTH"]
 
 PROTOCOL_VERSION = "temporal-evidence-v1"
 PARSER_VERSION: Literal["assistant-date-v2"] = "assistant-date-v2"
@@ -51,9 +52,11 @@ _CLOCK = re.compile(
 _PERIOD = re.compile(r"[的\s]*(?:上午|下午|晚上|中午|早上)")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("RELATIVE_MONTH", re.compile(r"下个?月\s*([0-9]{1,2})\s*[号日]")),
+    ("MONTH_SEGMENT", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*([初中末底])(?!旬)")),
     ("MONTH_SEGMENT", re.compile(r"(下个|这个|下|本)?月([初中末底])(?!旬)")),
     ("MONTH_DAY", re.compile(r"(?:(20\d{2})\s*年\s*)?([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*[号日]")),
-    ("UNKNOWN", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
+    ("FULL_MONTH", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
+    ("FULL_MONTH", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月(?!份|\d|初|中|末|底)")),
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
     ("RELATIVE_WEEKDAY", re.compile(r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
     ("RELATIVE_WEEK", re.compile(r"(?:下个?|本|这)(?:周|星期|礼拜)(?![一二三四五六日天期])")),
@@ -251,7 +254,7 @@ def attach_model_evidence(
             raise TemporalContractError("duplicate temporal span")
         used.add((start, end))
         found = next((span for span in spans if span.start == start and span.end == end), None)
-        if found is None or found.kind != mention.kind:
+        if found is None or not _kind_compatible(found.kind, mention.kind):
             origin = "model_output" if found is not None else temporal_failure_origin(segment_text, mentions)
             raise TemporalContractError("temporal mention does not match a source span", failure_origin=origin)
         linked_id = action_ids.get(mention.action_ref) if mention.action_ref else None
@@ -417,6 +420,7 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
 
 
 _FUZZY_TIME_LABEL = "（模糊时间，未确定具体日期）"
+_FULL_MONTH_LABEL = "（整月，未确定具体日期）"
 _DATE_TIME_LABEL = "（日期，未指定具体时刻）"
 
 
@@ -444,6 +448,9 @@ def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | Non
             continue
         action = _action_for(mention, actions)
         phrase = _card_phrase(mention.raw_text, action.action_text if action is not None else "")
+        if _full_month_mention(mention):
+            lines.append(f"{phrase}{_FULL_MONTH_LABEL}")
+            continue
         if mention.granularity == "MONTH_SEGMENT":
             lines.append(f"{phrase}{_FUZZY_TIME_LABEL}")
             continue
@@ -458,6 +465,8 @@ def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | Non
         return customer_line, None
     if sales_mention.granularity == "DATE":
         return customer_line, f"{sales_mention.raw_text}{_DATE_TIME_LABEL}"
+    if _full_month_mention(sales_mention):
+        return customer_line, f"{sales_mention.raw_text}{_FULL_MONTH_LABEL}"
     if sales_mention.granularity == "MONTH_SEGMENT":
         return customer_line, f"{sales_mention.raw_text}{_FUZZY_TIME_LABEL}"
     if sales_mention.granularity == "DATETIME":
@@ -637,8 +646,43 @@ def _resolve_span(
     return base.model_copy(update=resolved)
 
 
+def _kind_compatible(server_kind: str, model_kind: str) -> bool:
+    """Server kind wins. A full month still accepts the legacy UNKNOWN alias."""
+
+    if server_kind == model_kind:
+        return True
+    return server_kind == "FULL_MONTH" and model_kind == "UNKNOWN"
+
+
+def _full_month_mention(mention: StoredMention) -> bool:
+    """Resolved whole-month evidence, including drafts stored before FULL_MONTH existed."""
+
+    if mention.kind == "FULL_MONTH" or mention.granularity == "FULL_MONTH":
+        return mention.resolution_status == "RESOLVED" and mention.resolved_at is None and mention.day is None
+    return (
+        mention.kind == "UNKNOWN"
+        and mention.granularity == "UNKNOWN"
+        and mention.resolution_status == "RESOLVED"
+        and mention.day is None
+        and mention.resolved_at is None
+        and mention.month is not None
+        and re.fullmatch(r"(?:1[0-2]|[1-9])\s*月份?", re.sub(r"\s+", "", mention.raw_text)) is not None
+    )
+
+
+def _explicit_year(text: str, start: int) -> int | None:
+    match = re.search(r"(20\d{2})\s*年\s*$", text[:start])
+    return int(match.group(1)) if match else None
+
+
+def _year_for_month(text: str, start: int, month: int, anchor: datetime) -> int:
+    explicit = _explicit_year(text, start)
+    if explicit is not None:
+        return explicit
+    return anchor.year if month >= anchor.month else anchor.year + 1
+
+
 def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict[str, object]:
-    del segment_text
     hour_minute = _clock_in_text(found.raw_text)
     kind = found.kind
     if kind == "MONTH_SEGMENT":
@@ -650,12 +694,18 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
                 "resolved_at": None,
                 "candidates": [],
             }
-        prefix = found.groups[0] if found.groups else None
+        first = found.groups[0] if found.groups else None
         segment_char = found.groups[1] if len(found.groups) > 1 else None
         segment = {"初": "EARLY", "中": "MIDDLE", "末": "LATE", "底": "LATE"}.get(segment_char or "")
         if segment is None:
             return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        year, month = _shift_month(anchor.year, anchor.month, 1 if prefix in {"下", "下个"} else 0)
+        if first and first.isdigit():
+            month = int(first)
+            if not 1 <= month <= 12:
+                return {"month": month, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
+            year = _year_for_month(segment_text, found.start, month, anchor)
+        else:
+            year, month = _shift_month(anchor.year, anchor.month, 1 if first in {"下", "下个"} else 0)
         return {
             "year": year,
             "month": month,
@@ -699,12 +749,20 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
         if month < 1 or month > 12 or day < 1 or day > calendar.monthrange(year, month)[1]:
             return {"month": month, "day": day, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
         return _dated(year, month, day, hour_minute, anchor)
-    if kind == "UNKNOWN":
+    if kind == "FULL_MONTH":
+        if hour_minute is not None:
+            return {
+                "resolution_status": "UNRESOLVED",
+                "ambiguity_reason": "DATE",
+                "granularity": "UNKNOWN",
+                "resolved_at": None,
+                "candidates": [],
+            }
         month_text = found.groups[0] if found.groups else None
         month = int(month_text) if month_text and month_text.isdigit() else 0
         if not 1 <= month <= 12:
             return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        year = anchor.year if month >= anchor.month else anchor.year + 1
+        year = _year_for_month(segment_text, found.start, month, anchor)
         return {
             "year": year,
             "month": month,
@@ -712,7 +770,7 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
             "hour": None,
             "minute": None,
             "resolved_at": None,
-            "granularity": "UNKNOWN",
+            "granularity": "FULL_MONTH",
             "resolution_status": "RESOLVED",
             "ambiguity_reason": None,
             "candidates": [],
@@ -1109,7 +1167,7 @@ def _apply_role_choice(choice_id: str, mentions: list[StoredMention]) -> None:
             item.resolution_status = "RESOLVED"
         else:
             item.ambiguity_reason = None
-            if item.granularity == "MONTH_SEGMENT":
+            if item.granularity in {"MONTH_SEGMENT", "FULL_MONTH"}:
                 item.resolution_status = "RESOLVED"
 
 
