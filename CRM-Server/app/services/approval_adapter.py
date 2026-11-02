@@ -451,12 +451,16 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
         }
 
     if business_type == BusinessType.INVOICE:
+        remark = getattr(entity, "remark", None)
+        remark_text = str(remark).strip() if remark is not None else ""
         return {
             "客户名称": _customer_name(db, business_type, entity),
             "开票抬头": getattr(entity, "invoice_title_text", None),
             "发票类型": _invoice_type_label(getattr(entity, "invoice_type", None)),
             "开票金额": _format_currency(getattr(entity, "invoice_amount", None)),
+            "备注": remark_text or "无",
         }
+
 
     if business_type == BusinessType.INVOICE_REISSUE:
         original = getattr(entity, "original_invoice_application", None)

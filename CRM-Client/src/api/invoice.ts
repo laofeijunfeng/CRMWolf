@@ -54,6 +54,7 @@ export interface InvoiceTitleListResponse {
   invoice_title_id: number
   invoice_amount: number
   invoice_type: InvoiceType
+  remark?: string | null
   payment_record_id?: number
 }
 
@@ -63,6 +64,7 @@ export interface InvoiceApplicationUpdate {
   invoice_amount?: number
   invoice_type?: InvoiceType
   payment_record_id?: number
+  remark?: string | null
 }
 
 export type InvoiceType = 'VAT_SPECIAL' | 'VAT_NORMAL'
@@ -165,6 +167,7 @@ export interface InvoiceApplicationResponse {
   invoice_bank_account: string | null
   invoice_address: string | null
   invoice_phone: string | null
+  remark: string | null
   invoice_number: string | null
   // Task 6: 新增字段（发票文件上传）
   invoice_file_path: string | null

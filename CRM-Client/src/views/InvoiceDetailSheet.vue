@@ -1166,6 +1166,13 @@ onBeforeUnmount((): void => {
                     </span>
                     <span class="attribute-value mono-value">{{ formatDateTime(invoiceInfo.issued_time) }}</span>
                   </div>
+                  <div class="attribute-item attribute-item--wide">
+                    <span class="attribute-label">
+                      <FileText aria-hidden="true" />
+                      备注
+                    </span>
+                    <span class="attribute-value">{{ invoiceInfo.remark?.trim() ? invoiceInfo.remark : '无' }}</span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1919,6 +1926,10 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
   min-width: 0;
+}
+
+.attribute-item--wide {
+  grid-column: 1 / -1;
 }
 
 .attribute-label {

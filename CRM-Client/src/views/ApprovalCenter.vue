@@ -1044,6 +1044,12 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
         { key: 'title', label: '发票抬头', value: entityDetailValue('invoice_title_text') ?? subjectName.value, wide: true },
         commonCustomerField,
         { key: 'amount', label: '开票金额', value: entityDetailValue('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+        {
+          key: 'remark',
+          label: '备注',
+          value: entityDetailValue('remark')?.toString().trim() ? entityDetailValue('remark') : '无',
+          wide: true,
+        },
         { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
         { key: 'status', label: '发票状态', value: invoiceStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
         { key: 'taxpayer_id', label: '纳税人识别号', value: entityDetailValue('invoice_taxpayer_id'), type: 'mono', wide: true },

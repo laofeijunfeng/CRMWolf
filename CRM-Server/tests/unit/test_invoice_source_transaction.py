@@ -167,3 +167,40 @@ def test_invoice_update_checks_locked_current_status_not_stale_instance(db):
     db.rollback()
     assert db.query(InvoiceApplication).filter_by(id=application.id).one().invoice_amount == Decimal("800")
     assert _revision(db) == 2
+
+
+def test_invoice_remark_is_optional_and_editable_before_approval(db):
+    created = invoice_application_crud.create(db, InvoiceApplicationCreate(
+        payment_plan_id=1, invoice_title_id=1,
+        invoice_amount=Decimal("800"), invoice_type=InvoiceType.VAT_NORMAL,
+        remark="  请写上合同号  ",
+    ), "1", 1)
+    assert created.remark == "请写上合同号"
+
+    cleared = invoice_application_crud.update(db, created, InvoiceApplicationUpdate(remark="   "))
+    assert cleared.remark is None
+
+    restored = invoice_application_crud.update(
+        db, cleared, InvoiceApplicationUpdate(remark="分开邮寄"),
+    )
+    assert restored.remark == "分开邮寄"
+
+    db.connection().exec_driver_sql(
+        "UPDATE crm_invoice_applications SET status = 'PENDING_REVIEW' WHERE id = ?",
+        (restored.id,),
+    )
+    with pytest.raises(ValueError, match="只有草稿或已拒绝状态"):
+        invoice_application_crud.update(db, restored, InvoiceApplicationUpdate(remark="不能改"))
+    db.rollback()
+    assert db.query(InvoiceApplication).filter_by(id=restored.id).one().remark == "分开邮寄"
+
+
+def test_invoice_remark_rejects_text_over_500_characters():
+    with pytest.raises(ValueError):
+        InvoiceApplicationCreate(
+            payment_plan_id=1,
+            invoice_title_id=1,
+            invoice_amount=Decimal("800"),
+            invoice_type=InvoiceType.VAT_NORMAL,
+            remark="注" * 501,
+        )

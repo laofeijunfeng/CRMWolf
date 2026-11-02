@@ -115,3 +115,27 @@ def test_payment_get_submitter_keeps_creator_name():
     submitter_id, submitter_name = a.get_submitter(pay)
     assert submitter_id == "ou_creator"
     assert submitter_name == "张三"
+
+
+def test_invoice_card_shows_remark_or_none():
+    from types import SimpleNamespace
+
+    from app.services.approval_adapter import get_approval_card_fields
+
+    filled = SimpleNamespace(
+        customer_id=None,
+        invoice_title_text="通力电梯有限公司",
+        invoice_type="VAT_SPECIAL",
+        invoice_amount=13158,
+        remark="请把发票备注栏写上合同号",
+    )
+    empty = SimpleNamespace(
+        customer_id=None,
+        invoice_title_text="通力电梯有限公司",
+        invoice_type="VAT_SPECIAL",
+        invoice_amount=13158,
+        remark=None,
+    )
+
+    assert get_approval_card_fields(None, BusinessType.INVOICE, filled)["备注"] == "请把发票备注栏写上合同号"
+    assert get_approval_card_fields(None, BusinessType.INVOICE, empty)["备注"] == "无"

@@ -98,6 +98,8 @@ class InvoiceApplication(Base):
     invoice_bank_account = Column(String(100), comment="开户账号（开票时的快照）")
     invoice_address = Column(String(500), comment="开票地址（开票时的快照）")
     invoice_phone = Column(String(50), comment="电话（开票时的快照）")
+    remark = Column(String(500), nullable=True, comment="申请备注")
+
 
     # Task 2: 发票文件上传字段
     invoice_file_path = Column(String(500), comment="发票文件路径（相对路径）")

@@ -466,6 +466,7 @@ class InvoiceApplicationCRUD:
             invoice_amount=obj_in.invoice_amount,
             invoice_type=obj_in.invoice_type,
             payment_record_id=obj_in.payment_record_id,
+            remark=obj_in.remark,
             status=InvoiceApplicationStatus.DRAFT,
             invoice_title_type=invoice_title.title_type,
             invoice_title_text=invoice_title.title,

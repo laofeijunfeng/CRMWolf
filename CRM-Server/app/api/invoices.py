@@ -523,6 +523,7 @@ def _populate_application_list_info(projection_db: Session, applications, team_i
             invoice_bank_account=application.invoice_bank_account,
             invoice_address=application.invoice_address,
             invoice_phone=application.invoice_phone,
+            remark=application.remark,
             created_time=application.created_time,
             last_modified_time=application.last_modified_time,
             invoice_file_path=application.invoice_file_path,
@@ -1366,6 +1367,7 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
         invoice_bank_account=application.invoice_bank_account,
         invoice_address=application.invoice_address,
         invoice_phone=application.invoice_phone,
+        remark=application.remark,
         created_time=application.created_time,
         last_modified_time=application.last_modified_time,
 

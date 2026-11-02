@@ -1730,6 +1730,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "invoice_title_text": invoice.invoice_title_text,
             "invoice_type": invoice.invoice_type,
             "invoice_amount": money(invoice.invoice_amount),
+            "remark": invoice.remark,
             "invoice_taxpayer_id": invoice.invoice_taxpayer_id,
             "invoice_bank_name": invoice.invoice_bank_name,
             "invoice_bank_account": invoice.invoice_bank_account,

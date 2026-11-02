@@ -42,6 +42,7 @@ import {
   SearchableSelectField,
   SelectField,
   SelectionSummary,
+  TextareaField,
 } from '@/components/crmwolf'
 
 interface FixedCustomer {
@@ -72,6 +73,7 @@ interface InvoiceApplicationForm {
   invoiceTitleId: string
   invoiceType: InvoiceType
   invoiceAmount: string
+  remark: string
 }
 
 interface InvoiceApplicationFormErrors {
@@ -110,6 +112,7 @@ const form = reactive<InvoiceApplicationForm>({
   invoiceTitleId: '',
   invoiceType: 'VAT_SPECIAL',
   invoiceAmount: '',
+  remark: '',
 })
 
 const initialForm = ref<InvoiceApplicationForm>({ ...form })
@@ -158,8 +161,8 @@ const description = computed<string>(() => {
   }
 
   return isRejectedEditMode.value
-    ? '调整发票抬头、发票类型或开票金额后重新提交审批。'
-    : '调整发票抬头、发票类型或开票金额。'
+    ? '调整发票抬头、发票类型、开票金额或备注后重新提交审批。'
+    : '调整发票抬头、发票类型、开票金额或备注。'
 })
 const submitButtonText = computed<string>(() => {
   if (submitting.value) return '提交中...'
@@ -265,6 +268,7 @@ function resetForm(keepCurrentCreatePaymentPlan = false): void {
   form.invoiceAmount = application?.invoice_amount !== undefined
     ? String(application.invoice_amount)
     : shouldKeepCreatePaymentPlan ? previousInvoiceAmount : ''
+  form.remark = application?.remark ?? ''
   clearErrors()
   initialForm.value = { ...form }
 }
@@ -306,6 +310,7 @@ function buildCreatePayload(): InvoiceApplicationCreate {
     invoice_title_id: Number(form.invoiceTitleId),
     invoice_amount: Number(form.invoiceAmount),
     invoice_type: form.invoiceType,
+    remark: form.remark.trim() === '' ? null : form.remark.trim(),
   }
 }
 
@@ -314,6 +319,7 @@ function buildUpdatePayload(): InvoiceApplicationUpdate {
     invoice_title_id: Number(form.invoiceTitleId),
     invoice_amount: Number(form.invoiceAmount),
     invoice_type: form.invoiceType,
+    remark: form.remark.trim() === '' ? null : form.remark.trim(),
   }
 }
 
@@ -703,6 +709,17 @@ watch(
           placeholder="请输入开票金额"
           :disabled="submitting"
           :error="errors.invoiceAmount"
+        />
+
+        <TextareaField
+          id="invoice-application-remark"
+          v-model="form.remark"
+          class="invoice-application-dialog__field"
+          label="备注（选填）"
+          placeholder="请把发票备注栏写上合同号，并分开邮寄。"
+          helper-text="不填也可以提交。填写后会出现在审批通知和发票申请单里。"
+          :maxlength="500"
+          :disabled="submitting"
         />
 
         <SelectionSummary

@@ -113,8 +113,20 @@ class InvoiceApplicationBase(BaseModel):
     payment_record_id: Optional[int] = Field(None, description="关联回款记录ID")
 
 
+
+
+
 class InvoiceApplicationCreate(InvoiceApplicationBase):
-    pass
+    remark: Optional[str] = Field(None, max_length=500, description="申请备注")
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_remark(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
 
 
 class InvoiceApplicationUpdate(BaseModel):
@@ -122,6 +134,16 @@ class InvoiceApplicationUpdate(BaseModel):
     invoice_amount: Optional[Decimal] = Field(None, gt=0, description="开票金额")
     invoice_type: Optional[InvoiceTypeEnum] = Field(None, description="发票类型")
     payment_record_id: Optional[int] = Field(None, description="关联回款记录ID")
+    remark: Optional[str] = Field(None, max_length=500, description="申请备注")
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_remark(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
 
 
 class InvoiceReissueApplicationCreate(BaseModel):
@@ -236,6 +258,8 @@ class InvoiceApplicationResponse(InvoiceApplicationBase):
     invoice_bank_account: Optional[str] = Field(None, description="开户账号（开票快照）")
     invoice_address: Optional[str] = Field(None, description="开票地址（开票快照）")
     invoice_phone: Optional[str] = Field(None, description="电话（开票快照）")
+    remark: Optional[str] = Field(None, description="申请备注")
+
 
     # Task 2: 发票文件上传字段
     invoice_file_path: Optional[str] = Field(None, description="发票文件路径（相对路径）")
