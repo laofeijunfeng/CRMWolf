@@ -164,6 +164,46 @@ const fields: ListFieldDefinition[] = [
     filter: true,
     sort: true
   },
+  {
+    key: 'renewal_headcount',
+    label: '续购人数',
+    type: 'number',
+    column: { align: 'right', width: '110px' },
+    filter: false,
+    sort: false,
+    filterDisabledReason: '构成只在列表里查看，不提供筛选',
+    sortDisabledReason: '构成只在列表里查看，不提供排序',
+  },
+  {
+    key: 'renewal_amount',
+    label: '续购金额',
+    type: 'number',
+    column: { align: 'right', width: '140px' },
+    filter: false,
+    sort: false,
+    filterDisabledReason: '构成只在列表里查看，不提供筛选',
+    sortDisabledReason: '构成只在列表里查看，不提供排序',
+  },
+  {
+    key: 'expansion_headcount',
+    label: '增购人数',
+    type: 'number',
+    column: { align: 'right', width: '110px' },
+    filter: false,
+    sort: false,
+    filterDisabledReason: '构成只在列表里查看，不提供筛选',
+    sortDisabledReason: '构成只在列表里查看，不提供排序',
+  },
+  {
+    key: 'expansion_amount',
+    label: '增购金额',
+    type: 'number',
+    column: { align: 'right', width: '140px' },
+    filter: false,
+    sort: false,
+    filterDisabledReason: '构成只在列表里查看，不提供筛选',
+    sortDisabledReason: '构成只在列表里查看，不提供排序',
+  },
   { key: 'owner_name', label: '负责人', type: 'text', column: { width: '110px' }, filter: true, sort: true },
   { key: 'commission_member_name', label: '团队成员', type: 'text', column: { width: '110px' }, filter: true, sort: true },
   { key: 'payment_date', label: '回款日期', type: 'date', column: { width: '120px' }, filter: true, sort: true },
@@ -1000,6 +1040,12 @@ defineExpose({
           />
         </div>
         <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
+        <p v-if="row.composition" class="payment-record-mobile-card-composition">
+          续购 {{ row.composition.renewal.headcount }} 人
+          <AmountText :value="row.composition.renewal.amount" />
+          ，增购 {{ row.composition.expansion.headcount }} 人
+          <AmountText :value="row.composition.expansion.amount" />
+        </p>
         <div class="payment-record-mobile-card-meta">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
           <span>发票抬头：{{ row.invoice_title_text || '-' }}</span>
@@ -1065,6 +1111,18 @@ defineExpose({
       <!-- 回款金额 -->
       <template #cell-actual_amount="{ row }">
         <AmountText :value="row.actual_amount" />
+      </template>
+      <template #cell-renewal_headcount="{ row }">
+        <span v-if="row.composition">{{ row.composition.renewal.headcount }}</span>
+      </template>
+      <template #cell-renewal_amount="{ row }">
+        <AmountText v-if="row.composition" :value="row.composition.renewal.amount" />
+      </template>
+      <template #cell-expansion_headcount="{ row }">
+        <span v-if="row.composition">{{ row.composition.expansion.headcount }}</span>
+      </template>
+      <template #cell-expansion_amount="{ row }">
+        <AmountText v-if="row.composition" :value="row.composition.expansion.amount" />
       </template>
 
       <template #cell-created_time="{ row }">

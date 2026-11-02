@@ -36,6 +36,7 @@ from app.crud.payment import (
     PaymentRecordIdempotentReplay,
     payment_plan_crud,
     payment_record_crud,
+    payment_record_request_body,
     payment_record_request_fingerprint,
     query_pending_approval_me,
 )
@@ -47,6 +48,7 @@ from app.models.command_execution import CommandExecutionStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.schemas.command import CommandEffect, CommandResource
 from app.schemas.list_export import PaymentPlanListExportRequest, PaymentRecordListExportRequest
+from app.schemas.payment_composition import composition_payload
 from app.schemas.payment import (
     ContractPaymentSummary,
     PaginatedResponse,
@@ -95,9 +97,14 @@ logger = logging.getLogger(__name__)
 
 def _payment_record_request_data(record_data: object) -> object:
     """Serialize request data while keeping direct API-call test doubles compatible."""
+    if isinstance(record_data, PaymentRecordCreate):
+        return payment_record_request_body(record_data)
     model_dump = getattr(record_data, "model_dump", None)
     if callable(model_dump):
-        return model_dump(mode="json")
+        payload = model_dump(mode="json")
+        if isinstance(payload, dict) and payload.get("composition") is None:
+            payload.pop("composition", None)
+        return payload
     if hasattr(record_data, "__dict__"):
         return vars(record_data)
     return record_data
@@ -525,6 +532,7 @@ def _build_payment_record_list_items(
             "commission_member_id": getattr(record, "commission_member_id", None),
             "commission_member_name": getattr(record, "commission_member_name", None),
             "notes": getattr(record, "notes", None),
+            "composition": composition_payload(record),
             "creator_id": getattr(record, "creator_id", None),
             "creator_name": getattr(record, "creator_name", None),
             "approval_phase": _enum_value(getattr(record, "approval_phase", None)),
@@ -596,6 +604,29 @@ def _build_payment_record_list_items(
     return items
 
 
+
+def _composition_segment(item: dict, segment: str) -> dict | None:
+    composition = item.get("composition")
+    if not isinstance(composition, dict):
+        return None
+    value = composition.get(segment)
+    return value if isinstance(value, dict) else None
+
+
+def _composition_export_count(item: dict, segment: str) -> str | None:
+    value = _composition_segment(item, segment)
+    if value is None or value.get("headcount") is None:
+        return None
+    return str(int(value["headcount"]))
+
+
+def _composition_export_amount(item: dict, segment: str):
+    value = _composition_segment(item, segment)
+    if value is None or value.get("amount") is None:
+        return None
+    return value["amount"]
+
+
 def _payment_record_export_row(item: dict) -> dict[str, object]:
     created_time = item.get("created_time")
     if isinstance(created_time, str):
@@ -615,6 +646,10 @@ def _payment_record_export_row(item: dict) -> dict[str, object]:
         "license_type": LICENSE_TYPE_LABELS.get(license_type, license_type) if license_type is not None else None,
         "purchase_type": PURCHASE_TYPE_LABELS.get(purchase_type, purchase_type) if purchase_type is not None else None,
         "actual_amount": item.get("actual_amount"),
+        "renewal_headcount": _composition_export_count(item, "renewal"),
+        "renewal_amount": _composition_export_amount(item, "renewal"),
+        "expansion_headcount": _composition_export_count(item, "expansion"),
+        "expansion_amount": _composition_export_amount(item, "expansion"),
         "owner_name": item.get("owner_name"),
         "commission_member_name": item.get("commission_member_name"),
         "payment_date": payment_date,
@@ -662,6 +697,7 @@ def _payment_record_response(
         "payment_date": record.payment_date,
         "proof_attachment": record.proof_attachment,
         "notes": record.notes,
+        "composition": composition_payload(record),
         "creator_id": record.creator_id,
         "creator_name": record.creator_name,
         "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, "value") else record.approval_phase,

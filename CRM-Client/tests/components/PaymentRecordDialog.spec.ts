@@ -460,4 +460,66 @@ describe('PaymentRecordDialog', () => {
     expect(source).not.toContain('@ts-ignore')
     expect(source).not.toContain('toISOString')
   })
+
+  it('补充信息默认收起，不填构成时仍按一笔回款提交', async () => {
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        defaultAmount: 150000,
+        defaultPayerName: '星河科技',
+      },
+    })
+    const supplementTrigger = wrapper.get('button.payment-record-dialog__supplement-trigger')
+    expect(supplementTrigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.text()).toContain('登记实际到账信息；提交后将重算回款计划与合同状态。')
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+    const payload = wrapper.emitted('submit')?.[0]?.[0] as { composition?: unknown }
+    expect(payload.composition).toBeUndefined()
+  })
+
+  it('只填续购时说明合计少 5 万，并且不提交', async () => {
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        defaultAmount: 150000,
+        defaultPayerName: '星河科技',
+      },
+    })
+    await openSupplementArea(wrapper)
+    await wrapper.get('input[name="renewal_headcount"]').setValue('100')
+    await wrapper.get('input[name="renewal_amount"]').setValue('100000.00')
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('两段合计 ¥100,000.00，比这笔回款少 ¥50,000.00。')
+  })
+
+  it('两段合计等于回款金额时提交构成，且改回款金额不改两段', async () => {
+    const wrapper = mount(PaymentRecordDialog, {
+      props: {
+        open: true,
+        defaultAmount: 150000,
+        defaultPayerName: '星河科技',
+      },
+    })
+    await openSupplementArea(wrapper)
+    await wrapper.get('input[name="renewal_headcount"]').setValue('100')
+    await wrapper.get('input[name="renewal_amount"]').setValue('100000.00')
+    await wrapper.get('input[name="expansion_headcount"]').setValue('50')
+    await wrapper.get('input[name="expansion_amount"]').setValue('50000.00')
+    await wrapper.get('input[name="actual_amount"]').setValue('160000.00')
+    expect((wrapper.get('input[name="renewal_amount"]').element as HTMLInputElement).value).toBe('100000.00')
+    expect((wrapper.get('input[name="expansion_amount"]').element as HTMLInputElement).value).toBe('50000.00')
+    await wrapper.get('input[name="actual_amount"]').setValue('150000.00')
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      actual_amount: 150000,
+      composition: {
+        renewal: { headcount: 100, amount: 100000 },
+        expansion: { headcount: 50, amount: 50000 },
+      },
+    })
+  })
 })

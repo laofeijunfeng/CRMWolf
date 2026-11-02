@@ -2,6 +2,11 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { PaymentPlanResponse, PaymentPlanStatus, PaymentRecordCreate } from '@/api/payment'
+import PaymentCompositionFields from '@/components/dialogs/PaymentCompositionFields.vue'
+import {
+  emptyCompositionForm,
+  validatePaymentComposition,
+} from '@/components/dialogs/paymentComposition'
 import paymentApi from '@/api/payment'
 import customerApi, {
   type CustomerMemberAccessLevel,
@@ -73,6 +78,10 @@ interface PaymentRecordForm {
   proofAttachment: string
   commissionMemberId: string
   notes: string
+  renewalHeadcount: string
+  renewalAmount: string
+  expansionHeadcount: string
+  expansionAmount: string
 }
 
 interface PaymentRecordErrors {
@@ -81,6 +90,7 @@ interface PaymentRecordErrors {
   paymentDate: string
   commissionMemberId: string
   notes: string
+  composition: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -112,6 +122,7 @@ const form = reactive<PaymentRecordForm>({
   proofAttachment: '',
   commissionMemberId: '',
   notes: '',
+  ...emptyCompositionForm(),
 })
 
 const errors = reactive<PaymentRecordErrors>({
@@ -120,6 +131,7 @@ const errors = reactive<PaymentRecordErrors>({
   paymentDate: '',
   commissionMemberId: '',
   notes: '',
+  composition: '',
 })
 
 const loadingCommissionMembers = ref(false)
@@ -179,6 +191,10 @@ const hasFormChanges = computed(() =>
     proofAttachment: form.proofAttachment,
     commissionMemberId: form.commissionMemberId,
     notes: form.notes,
+    renewalHeadcount: form.renewalHeadcount,
+    renewalAmount: form.renewalAmount,
+    expansionHeadcount: form.expansionHeadcount,
+    expansionAmount: form.expansionAmount,
   }) !== initialFormSnapshot.value
 )
 const paymentPlanRemainingAmount = computed(() =>
@@ -238,6 +254,7 @@ const validationErrorItems = computed(() => [
   { field: 'paymentDate', label: '回款日期', message: errors.paymentDate, targetId: 'payment-record-date' },
   { field: 'commissionMemberId', label: '团队成员', message: errors.commissionMemberId, targetId: 'payment-record-commission-member' },
   { field: 'notes', label: '备注', message: errors.notes, targetId: 'payment-record-notes' },
+  { field: 'composition', label: '构成', message: errors.composition, targetId: 'payment-record-renewal-headcount' },
 ].filter((item): item is { field: string; label: string; message: string; targetId: string } => item.message.length > 0))
 
 function getLocalDateString(date: Date = new Date()): string {
@@ -272,6 +289,7 @@ function clearErrors(): void {
   errors.paymentDate = ''
   errors.commissionMemberId = ''
   errors.notes = ''
+  errors.composition = ''
 }
 
 function resetForm(): void {
@@ -281,6 +299,7 @@ function resetForm(): void {
   form.proofAttachment = ''
   form.commissionMemberId = String(userStore.userInfo?.id ?? '')
   form.notes = ''
+  Object.assign(form, emptyCompositionForm())
   resetPendingCustomerMember()
   clearErrors()
   commissionMembersError.value = null
@@ -332,15 +351,29 @@ function validateForm(): boolean {
     errors.notes = '备注不能超过 200 字'
   }
 
+  const composition = validatePaymentComposition(form, form.actualAmount)
+  if (!composition.valid) {
+    errors.composition = composition.message
+    supplementOpen.value = true
+  }
+
   return !hasAmountError.value
     && !hasActualPayerNameError.value
     && !hasPaymentDateError.value
     && !hasCommissionMemberError.value
     && !hasNotesError.value
+    && errors.composition.length === 0
 }
 
 watch(
   () => errors.notes,
+  (message) => {
+    if (message.length > 0) supplementOpen.value = true
+  },
+)
+
+watch(
+  () => errors.composition,
   (message) => {
     if (message.length > 0) supplementOpen.value = true
   },
@@ -354,6 +387,7 @@ async function focusFirstError(): Promise<void> {
     ['paymentDate', 'payment-record-date'],
     ['commissionMemberId', 'payment-record-commission-member'],
     ['notes', 'payment-record-notes'],
+    ['composition', 'payment-record-renewal-headcount'],
   ]
 
   for (const [field, id] of fieldIds) {
@@ -396,6 +430,11 @@ function handleSubmit(): void {
   const notes = trimmedOptional(form.notes)
   if (notes !== undefined) {
     payload.notes = notes
+  }
+
+  const composition = validatePaymentComposition(form, form.actualAmount)
+  if (composition.composition !== null) {
+    payload.composition = composition.composition
   }
 
   emit('submit', payload)
@@ -742,6 +781,12 @@ watch(
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
+              <PaymentCompositionFields
+                id-prefix="payment-record"
+                :form="form"
+                :actual-amount="form.actualAmount"
+                :disabled="isSubmitting"
+              />
               <div class="payment-record-dialog__optional-grid">
                 <InputField
                   id="payment-record-proof"

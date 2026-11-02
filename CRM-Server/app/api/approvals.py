@@ -34,6 +34,7 @@ from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
 from app.models.approval import Approval, ApprovalAction, ApprovalRecord, ApprovalStatus
 from app.models.contract import ContractStatus
+from app.models.payment import PaymentRecord
 from app.models.user import User
 from app.schemas.approval import (
     ApprovalActionEnum,
@@ -1615,6 +1616,24 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
     }
 
 
+
+def _payment_composition_detail(record: PaymentRecord) -> dict[str, int | float]:
+    values = (
+        record.renewal_headcount,
+        record.renewal_amount,
+        record.expansion_headcount,
+        record.expansion_amount,
+    )
+    if any(value is None for value in values):
+        return {}
+    return {
+        "renewal_headcount": int(record.renewal_headcount),
+        "renewal_amount": float(record.renewal_amount),
+        "expansion_headcount": int(record.expansion_headcount),
+        "expansion_amount": float(record.expansion_amount),
+    }
+
+
 def _build_approval_entity_detail(approval: Approval, db: Session) -> dict:
     try:
         return _build_approval_entity_detail_unsafe(approval, db)
@@ -1706,6 +1725,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "confirmation_notes": record.confirmation_notes,
             "proof_attachment": record.proof_attachment,
             "notes": record.notes,
+            **_payment_composition_detail(record),
             "plan_number": plan.plan_number if plan else None,
             "stage_name": plan.stage_name if plan else None,
             "planned_amount": money(plan.planned_amount) if plan else None,

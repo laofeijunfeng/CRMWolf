@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Date, Numeric, ForeignKey, Index
+from sqlalchemy import Column, BigInteger, CheckConstraint, Integer, String, Text, DateTime, Date, Numeric, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.utils.time import business_now
@@ -119,6 +119,11 @@ class PaymentRecord(Base):
     payment_date = Column(Date, nullable=False, comment="实际回款日期")
     proof_attachment = Column(String(500), comment="回款凭证附件URL")
     notes = Column(Text, comment="备注")
+    renewal_headcount = Column(Integer, nullable=True, comment="续购人数")
+    renewal_amount = Column(Numeric(12, 2), nullable=True, comment="续购金额")
+    expansion_headcount = Column(Integer, nullable=True, comment="增购人数")
+    expansion_amount = Column(Numeric(12, 2), nullable=True, comment="增购金额")
+
     commission_member_id = Column(String(100), nullable=True, comment="提成协作成员系统用户ID")
     commission_member_name = Column(String(100), nullable=True, comment="提成协作成员姓名")
     creator_id = Column(String(100), nullable=False, comment="创建人（登记人）系统用户ID")
@@ -155,6 +160,16 @@ class PaymentRecord(Base):
         Index('idx_payment_record_number', 'record_number'),
         Index('uq_payment_record_idempotency', 'team_id', 'idempotency_key', unique=True),
         Index('idx_payment_record_deal_journey_id', 'deal_journey_id'),
+        CheckConstraint(
+            "("
+            "renewal_headcount IS NULL AND renewal_amount IS NULL "
+            "AND expansion_headcount IS NULL AND expansion_amount IS NULL"
+            ") OR ("
+            "renewal_headcount IS NOT NULL AND renewal_amount IS NOT NULL "
+            "AND expansion_headcount IS NOT NULL AND expansion_amount IS NOT NULL"
+            ")",
+            name="ck_payment_record_composition_complete",
+        ),
     )
 
     def __repr__(self):

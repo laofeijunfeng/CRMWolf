@@ -569,9 +569,21 @@ class PaymentRecordIdempotentReplay(ValueError):
         self.record = record
 
 
+def payment_record_request_body(obj_in: PaymentRecordCreate) -> dict:
+    """Serialize a create body without treating an absent composition as a new field.
+
+    Older retries do not contain composition. Keeping a null value out of the
+    fingerprint preserves those retries across this deploy.
+    """
+    payload = obj_in.model_dump(mode="json")
+    if payload.get("composition") is None:
+        payload.pop("composition", None)
+    return payload
+
+
 def payment_record_request_fingerprint(plan_id: int, obj_in: PaymentRecordCreate) -> str:
     """生成稳定的回款登记请求指纹，避免重试时重复写入或错用幂等键。"""
-    payload = {"plan_id": plan_id, **obj_in.model_dump(mode="json")}
+    payload = {"plan_id": plan_id, **payment_record_request_body(obj_in)}
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -1033,6 +1045,21 @@ class PaymentRecordCRUD:
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
         record_data = obj_in.model_dump()
+        composition = record_data.pop("composition", None)
+        if composition is None:
+            record_data.update({
+                "renewal_headcount": None,
+                "renewal_amount": None,
+                "expansion_headcount": None,
+                "expansion_amount": None,
+            })
+        else:
+            record_data.update({
+                "renewal_headcount": composition["renewal"]["headcount"],
+                "renewal_amount": composition["renewal"]["amount"],
+                "expansion_headcount": composition["expansion"]["headcount"],
+                "expansion_amount": composition["expansion"]["amount"],
+            })
         if not record_data.get("actual_payer_name"):
             customer = customer_crud.get_by_id(db, plan.contract.customer_id) if plan.contract else None
             record_data["actual_payer_name"] = customer.account_name if customer else None
@@ -1136,6 +1163,8 @@ class PaymentRecordCRUD:
         db.refresh(db_obj)
 
         update_data = obj_in.model_dump(exclude_unset=True)
+        composition_set = "composition" in update_data
+        composition = update_data.pop("composition", None)
         commission_member_id = update_data.pop("commission_member_id", None)
         plan = None
 
@@ -1171,6 +1200,20 @@ class PaymentRecordCRUD:
                 )
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+
+        if composition_set:
+            if composition is None:
+                db_obj.renewal_headcount = None
+                db_obj.renewal_amount = None
+                db_obj.expansion_headcount = None
+                db_obj.expansion_amount = None
+            else:
+                db_obj.renewal_headcount = composition["renewal"]["headcount"]
+                db_obj.renewal_amount = composition["renewal"]["amount"]
+                db_obj.expansion_headcount = composition["expansion"]["headcount"]
+                db_obj.expansion_amount = composition["expansion"]["amount"]
+        from app.schemas.payment_composition import assert_record_composition_matches
+        assert_record_composition_matches(db_obj)
 
         if commission_member_id is not None:
             commission_member_id = str(commission_member_id)

@@ -425,6 +425,24 @@ def get_approval_action_path(business_type: str) -> str:
     return paths.get(business_type, "/approvals")
 
 
+
+def _payment_composition_card_fields(entity: object) -> dict[str, str] | None:
+    """Show both segments only when the payment actually recorded a composition."""
+    renewal_headcount = getattr(entity, "renewal_headcount", None)
+    renewal_amount = getattr(entity, "renewal_amount", None)
+    expansion_headcount = getattr(entity, "expansion_headcount", None)
+    expansion_amount = getattr(entity, "expansion_amount", None)
+    values = (renewal_headcount, renewal_amount, expansion_headcount, expansion_amount)
+    if any(value is None for value in values):
+        return None
+    return {
+        "续购人数": _format_count(renewal_headcount),
+        "续购金额": _format_currency(renewal_amount),
+        "增购人数": _format_count(expansion_headcount),
+        "增购金额": _format_currency(expansion_amount),
+    }
+
+
 def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> dict[str, str]:
     if entity is None:
         return {}
@@ -473,13 +491,17 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
         }
 
     if business_type == BusinessType.PAYMENT:
-        return {
+        fields = {
             "客户名称": _customer_name(db, business_type, entity),
             "实际付款方": getattr(entity, "actual_payer_name", None),
             "回款金额": _format_currency(getattr(entity, "actual_amount", None)),
             "回款日期": _format_date(getattr(entity, "payment_date", None)),
-            "备注": getattr(entity, "notes", None),
         }
+        composition = _payment_composition_card_fields(entity)
+        if composition is not None:
+            fields.update(composition)
+        fields["备注"] = getattr(entity, "notes", None)
+        return fields
 
     if business_type == BusinessType.LICENSE:
         deployment_info = getattr(entity, "deployment_info", None)

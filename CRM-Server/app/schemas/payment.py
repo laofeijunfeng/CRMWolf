@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Generic, TypeVar
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Optional, List, Generic, TypeVar, Self
 from datetime import date, datetime
 from enum import Enum
+
+from app.schemas.payment_composition import PaymentComposition
 
 T = TypeVar('T')
 
@@ -72,6 +74,7 @@ class PaymentRecordInfo(BaseModel):
     actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
     payment_date: date
     proof_attachment: Optional[str]
+    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；没填则为空")
     commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
     commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
     creator_id: Optional[str] = Field(None, description="登记人ID")
@@ -144,6 +147,13 @@ class PaymentRecordBase(BaseModel):
 
 class PaymentRecordCreate(PaymentRecordBase):
     commission_member_id: str = Field(..., min_length=1, max_length=100, description="提成协作成员用户ID")
+    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；不填则不记")
+
+    @model_validator(mode="after")
+    def composition_matches_payment_amount(self) -> Self:
+        if self.composition is not None:
+            self.composition.matches(self.actual_amount)
+        return self
 
 
 class PaymentRecordUpdate(BaseModel):
@@ -153,10 +163,18 @@ class PaymentRecordUpdate(BaseModel):
     proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
     commission_member_id: Optional[str] = Field(None, min_length=1, max_length=100, description="提成协作成员用户ID")
     notes: Optional[str] = Field(None, description="备注")
+    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；传空表示清除")
+
+    @model_validator(mode="after")
+    def composition_matches_payment_amount(self) -> Self:
+        if self.composition is not None and self.actual_amount is not None:
+            self.composition.matches(self.actual_amount)
+        return self
 
 
 class PaymentRecordResponse(PaymentRecordBase):
     id: int
+    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；没填则为空")
     payment_plan_id: int
     record_number: Optional[str] = Field(None, description="回款记录编号")
     creator_id: str

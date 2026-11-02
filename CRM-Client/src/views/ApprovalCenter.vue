@@ -1098,7 +1098,14 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
           value: entityDetailValue('new_invoice_file_path') != null ? '已上传' : null
         }
       ]
-    case 'PAYMENT':
+    case 'PAYMENT': {
+      const renewalHeadcount = entityDetailValue('renewal_headcount')
+      const compositionFields = renewalHeadcount == null ? [] : [
+        { key: 'renewal_headcount', label: '续购人数', value: renewalHeadcount },
+        { key: 'renewal_amount', label: '续购金额', value: entityDetailValue('renewal_amount'), type: 'amount' as const },
+        { key: 'expansion_headcount', label: '增购人数', value: entityDetailValue('expansion_headcount') },
+        { key: 'expansion_amount', label: '增购金额', value: entityDetailValue('expansion_amount'), type: 'amount' as const },
+      ]
       return [
         { key: 'number', label: '回款编号', value: entityDetailValue('record_number') ?? subjectNumber.value, type: 'copy' },
         { key: 'amount', label: '回款金额', value: entityDetailValue('actual_amount') ?? subjectAmount.value, type: 'amount' },
@@ -1114,8 +1121,10 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
         { key: 'planned_amount', label: '计划金额', value: entityDetailValue('planned_amount'), type: 'amount' },
         { key: 'due_date', label: '计划日期', value: formatDateValue(entityDetailValue('due_date')) },
         { key: 'proof', label: '回款凭证', value: entityDetailValue('proof_attachment'), wide: true },
+        ...compositionFields,
         { key: 'notes', label: '备注', value: entityDetailValue('notes'), wide: true }
       ]
+    }
     case 'LICENSE':
       return [
         { key: 'number', label: '申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },

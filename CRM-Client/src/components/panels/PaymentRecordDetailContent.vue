@@ -560,6 +560,33 @@ watch(
               </CardContent>
             </Card>
 
+            <Card v-if="detailRecord?.composition" class="info-card">
+              <CardHeader class="section-heading">
+                <CardTitle class="section-title">构成</CardTitle>
+                <CardDescription>续购和增购的人数与金额。</CardDescription>
+              </CardHeader>
+              <CardContent class="section-content">
+                <div class="attributes-grid">
+                  <div class="attribute-item">
+                    <span class="attribute-label">续购人数</span>
+                    <span class="attribute-value mono-value">{{ detailRecord.composition.renewal.headcount }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">续购金额</span>
+                    <AmountText :value="detailRecord.composition.renewal.amount" />
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">增购人数</span>
+                    <span class="attribute-value mono-value">{{ detailRecord.composition.expansion.headcount }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">增购金额</span>
+                    <AmountText :value="detailRecord.composition.expansion.amount" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             <!-- Payment Plan Status Card: useful when confirming a timed-out submission. -->
             <Card v-if="detailRecord?.payment_plan" class="info-card">
               <CardHeader class="section-heading">

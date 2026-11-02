@@ -200,6 +200,7 @@ describe('EditRecordDialog', () => {
       actual_payer_name: '新的付款方',
       proof_attachment: 'https://example.com/new-proof.pdf',
       notes: '更新备注',
+      composition: null,
     }])
   })
 

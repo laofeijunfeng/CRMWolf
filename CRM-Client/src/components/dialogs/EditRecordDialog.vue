@@ -2,6 +2,12 @@
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ChevronDown } from 'lucide-vue-next'
 import type { PaymentRecordInfo, PaymentRecordResponse, PaymentRecordUpdate } from '@/api/payment'
+import PaymentCompositionFields from '@/components/dialogs/PaymentCompositionFields.vue'
+import {
+  compositionFormFrom,
+  emptyCompositionForm,
+  validatePaymentComposition,
+} from '@/components/dialogs/paymentComposition'
 import {
   Dialog,
   DialogContent,
@@ -44,6 +50,10 @@ interface EditRecordForm {
   paymentDate: string
   proofAttachment: string
   notes: string
+  renewalHeadcount: string
+  renewalAmount: string
+  expansionHeadcount: string
+  expansionAmount: string
 }
 
 interface EditRecordErrors {
@@ -51,6 +61,7 @@ interface EditRecordErrors {
   actualPayerName: string
   paymentDate: string
   notes: string
+  composition: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -65,6 +76,7 @@ const form = reactive<EditRecordForm>({
   paymentDate: '',
   proofAttachment: '',
   notes: '',
+  ...emptyCompositionForm(),
 })
 
 const initialForm = ref<EditRecordForm | null>(null)
@@ -76,6 +88,7 @@ const errors = reactive<EditRecordErrors>({
   actualPayerName: '',
   paymentDate: '',
   notes: '',
+  composition: '',
 })
 
 const visible = computed({
@@ -103,6 +116,9 @@ const validationErrorItems = computed((): FormErrorSummaryItem[] => {
   if (errors.notes.length > 0) {
     items.push({ field: 'notes', label: '备注', message: errors.notes, targetId: 'edit-record-notes' })
   }
+  if (errors.composition.length > 0) {
+    items.push({ field: 'composition', label: '构成', message: errors.composition, targetId: 'edit-record-renewal-headcount' })
+  }
 
   return items
 })
@@ -112,6 +128,7 @@ function clearErrors(): void {
   errors.actualPayerName = ''
   errors.paymentDate = ''
   errors.notes = ''
+  errors.composition = ''
 }
 
 function normalizeDateString(value: string): string {
@@ -126,6 +143,7 @@ function resetForm(): void {
   form.paymentDate = ''
   form.proofAttachment = ''
   form.notes = ''
+  Object.assign(form, emptyCompositionForm())
   supplementOpen.value = false
   clearErrors()
 }
@@ -136,6 +154,7 @@ function populateForm(record: EditablePaymentRecord): void {
   form.paymentDate = normalizeDateString(record.payment_date)
   form.proofAttachment = record.proof_attachment ?? ''
   form.notes = record.notes ?? ''
+  Object.assign(form, compositionFormFrom(record.composition))
   initialForm.value = { ...form }
   supplementOpen.value = false
   clearErrors()
@@ -190,7 +209,13 @@ function validateForm(): boolean {
     supplementOpen.value = true
   }
 
-  return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value
+  const composition = validatePaymentComposition(form, form.actualAmount)
+  if (!composition.valid) {
+    errors.composition = composition.message
+    supplementOpen.value = true
+  }
+
+  return !hasAmountError.value && !hasActualPayerNameError.value && !hasPaymentDateError.value && !hasNotesError.value && errors.composition.length === 0
 }
 
 async function focusFirstError(): Promise<void> {
@@ -200,6 +225,7 @@ async function focusFirstError(): Promise<void> {
     ['actualPayerName', 'edit-record-payer-name'],
     ['paymentDate', 'edit-record-date'],
     ['notes', 'edit-record-notes'],
+    ['composition', 'edit-record-renewal-headcount'],
   ]
 
   for (const [field, id] of fieldIds) {
@@ -222,12 +248,14 @@ function handleSubmit(): void {
     return
   }
 
+  const composition = validatePaymentComposition(form, form.actualAmount)
   const payload: PaymentRecordUpdate = {
     actual_amount: Number(form.actualAmount.trim()),
     actual_payer_name: form.actualPayerName.trim(),
     payment_date: form.paymentDate.trim(),
     proof_attachment: form.proofAttachment.trim(),
     notes: form.notes.trim(),
+    composition: composition.composition,
   }
 
   emit('submit', props.record.id, payload)
@@ -242,6 +270,10 @@ const hasFormChanges = computed(() => {
     || form.paymentDate !== initial.paymentDate
     || form.proofAttachment.trim() !== initial.proofAttachment.trim()
     || form.notes.trim() !== initial.notes.trim()
+    || form.renewalHeadcount.trim() !== initial.renewalHeadcount.trim()
+    || form.renewalAmount.trim() !== initial.renewalAmount.trim()
+    || form.expansionHeadcount.trim() !== initial.expansionHeadcount.trim()
+    || form.expansionAmount.trim() !== initial.expansionAmount.trim()
 })
 
 async function handleOpenChange(open: boolean): Promise<void> {
@@ -294,7 +326,7 @@ watch(
       <DialogHeader>
         <DialogTitle>修改回款记录</DialogTitle>
         <DialogDescription>
-          修改已登记的回款金额、日期和凭证备注，保存后由上层流程继续处理审批。
+          修改已登记的回款金额、日期、构成和凭证备注，保存后由上层流程继续处理审批。
         </DialogDescription>
       </DialogHeader>
 
@@ -362,6 +394,12 @@ watch(
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
+              <PaymentCompositionFields
+                id-prefix="edit-record"
+                :form="form"
+                :actual-amount="form.actualAmount"
+                :disabled="isSubmitting || record === null"
+              />
               <div class="edit-record-dialog__optional-grid">
                 <InputField
                   id="edit-record-proof"

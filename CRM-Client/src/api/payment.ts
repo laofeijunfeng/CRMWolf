@@ -17,6 +17,17 @@ export type PaymentPlanExportTab = 'all' | 'pending' | 'partial' | 'completed'
 export type PaymentRecordExportTab = 'all' | 'pending_submit' | 'pending_approval' | 'rejected' | 'confirmed'
 
 
+
+export interface PaymentCompositionSegment {
+  headcount: number
+  amount: number
+}
+
+export interface PaymentComposition {
+  renewal: PaymentCompositionSegment
+  expansion: PaymentCompositionSegment
+}
+
 export interface PaymentPlanCreate {
   stage_name: string
   planned_amount: number
@@ -69,6 +80,7 @@ export interface PaymentRecordInfo {
   actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
+  composition?: PaymentComposition | null
   commission_member_id?: string | null
   commission_member_name?: string | null
   creator_id?: string
@@ -135,6 +147,7 @@ export interface PaymentRecordCreate {
   proof_attachment?: string
   commission_member_id: string
   notes?: string
+  composition?: PaymentComposition | null
 }
 
 export interface PaymentRecordUpdate {
@@ -144,6 +157,7 @@ export interface PaymentRecordUpdate {
   proof_attachment?: string
   commission_member_id?: string
   notes?: string
+  composition?: PaymentComposition | null
 }
 
 export interface PaymentRecordResponse {
@@ -154,6 +168,7 @@ export interface PaymentRecordResponse {
   actual_payer_name?: string | null
   payment_date: string
   proof_attachment?: string
+  composition?: PaymentComposition | null
   commission_member_id?: string | null
   commission_member_name?: string | null
   notes?: string

@@ -404,6 +404,22 @@
       "label": "回款金额",
       "type": "currency"
     },
+    "renewal_headcount": {
+      "label": "续购人数",
+      "type": "text"
+    },
+    "renewal_amount": {
+      "label": "续购金额",
+      "type": "currency"
+    },
+    "expansion_headcount": {
+      "label": "增购人数",
+      "type": "text"
+    },
+    "expansion_amount": {
+      "label": "增购金额",
+      "type": "currency"
+    },
     "owner_name": {
       "label": "负责人",
       "type": "text"
