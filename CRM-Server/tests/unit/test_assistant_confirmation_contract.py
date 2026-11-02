@@ -103,6 +103,9 @@ def prepared(db):
         "next_follow_time_text": "周五",
     }
     draft = TaskDraft(
+        channel_kind="PHONE_FOLLOW_UP",
+        channel_status="selected",
+        channel_source="user",
         customer=DraftField(status="CANDIDATE", value="睿狐科技"),
         content=DraftField(status="CANDIDATE", value=canonical["content"]),
         next_action=DraftField(status="CANDIDATE", value=canonical["next_action"]),
@@ -757,7 +760,11 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
         ]
     )
     task, customer, _ = prepared(db)
-    task.draft_json = TaskDraft().model_dump(mode="json")
+    task.draft_json = TaskDraft(
+        channel_kind="PHONE_FOLLOW_UP",
+        channel_status="selected",
+        channel_source="user",
+    ).model_dump(mode="json")
     session.commit()
     original, supplement = f"我{deadline}发方案", "补充：客户确认预算已批准"
 
@@ -841,7 +848,7 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
         assert task_row.source_activity_id == activity.id
         assert task_row.evidence_json["anchor_at"] == "2026-10-08T23:59:00"
         assert task_row.evidence_json["evidence_quote"] == original
-        assert task_row.evidence_json["parser_version"] == "assistant-date-v1"
+        assert task_row.evidence_json["parser_version"] == "assistant-date-v2"
         assert activity.source_content == f"{original}\n{supplement}"
 
 
@@ -928,3 +935,160 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
         activity = independent.query(CustomerActivity).one()
         assert activity.next_follow_time == datetime(2026, 10, 30, 0, 0)
         assert json.loads(activity.content_json)["customer_commitments"][0]["resolved_on"] is None
+
+
+async def test_relative_year_real_response_reaches_confirmation_without_writing_until_confirm(db, monkeypatch):
+    from datetime import datetime
+    from pathlib import Path
+
+    from app.services.assistant.llm_contracts import StructuredFollowUp, StructureDraftResult
+    from app.services.assistant.quality_gate import QualityGateOutcome
+
+    session, factory, _ = db
+    task, customer, _ = prepared(db)
+    fixture = json.loads(
+        (Path(__file__).parents[1] / "fixtures/assistant_relative_year_real_response.json").read_text()
+    )
+    raw = StructuredFollowUp.model_validate_json(fixture["response"])
+    customer.account_name = raw.customer_name
+    task.created_time = datetime(2026, 11, 2, 13, 20)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: datetime(2026, 11, 2, 13, 20))
+    task.draft_json = TaskDraft(
+        channel_kind="WECHAT_FOLLOW_UP",
+        channel_status="selected",
+        channel_source="user",
+        customer=DraftField(status="ACCEPTED", value=customer.account_name),
+    ).model_dump(mode="json")
+    session.commit()
+
+    class Structurer:
+        async def structure(self, db, *, team_id, kind, user_text):
+            assert user_text == fixture["source"]
+            return StructureDraftResult(kind_confirmed="FOLLOW_UP", **raw.model_dump())
+
+    class Gate:
+        calls = 0
+
+        async def evaluate(self, db, **kwargs):
+            self.calls += 1
+            assert "得明年再看看" in kwargs["content"]
+            return QualityGateOutcome(True, 85, "事实及下一步完整", None, None, {})
+
+    gate = Gate()
+    coordinator = AssistantCoordinator(
+        NoChooser(), structurer=Structurer(), quality_gate=gate, writer=RealActivityWriter()
+    )
+    outcome = await coordinator.handle_task(session, task, AssistantInput(kind="text", text=fixture["source"]))
+    assert outcome.reply.waiting.type == "CONFIRMATION"
+    command = outcome.task.authority_json["frozen_activity_command"]
+    assert command["next_follow_time"] == "2027-01-15T00:00:00"
+    assert command["next_follow_time_granularity"] == "DATE"
+    assert command["customer_name"] == raw.customer_name
+    assert session.query(CustomerActivity).count() == 0 and outcome.task.committed_json == []
+    session.commit()
+    await coordinator.handle_task(session, outcome.task, AssistantInput(kind="confirm", choice="confirm"))
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).one()
+        assert activity.next_follow_time == datetime(2027, 1, 15)
+        assert activity.effectiveness_score == 85
+    assert gate.calls == 1
+
+
+async def test_vague_year_wait_is_single_and_date_reply_restructures_and_rescores_full_draft(db, monkeypatch):
+    from datetime import datetime
+
+    from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, StructureDraftResult
+    from app.services.assistant.quality_gate import QualityGateOutcome
+
+    session, _, _ = db
+    task, customer, _ = prepared(db)
+    task.draft_json = TaskDraft(customer=DraftField(status="ACCEPTED", value=customer.account_name)).model_dump(
+        mode="json"
+    )
+    session.commit()
+    original = "微信联系了睿狐科技，客户没有采购计划。大概明年联系杨老师"
+    answer = "2027年1月15号"
+    current = datetime(2026, 11, 2, 13)
+    monkeypatch.setattr("app.utils.time.business_now", lambda: current)
+    action_start = original.index("大概")
+    year_start = original.index("明年")
+
+    class Structurer:
+        def __init__(self):
+            self.calls = []
+
+        async def structure(self, db, *, team_id, kind, user_text):
+            self.calls.append(user_text)
+            expected = original if len(self.calls) == 1 else original + "\n" + answer
+            assert user_text == expected
+            mentions = [
+                ModelTemporalMention(
+                    raw_text="明年",
+                    quote_start=year_start,
+                    quote_end=year_start + 2,
+                    kind="UNKNOWN",
+                    role="SALES_FOLLOW_UP",
+                    action_ref="s",
+                )
+            ]
+            if len(self.calls) == 2:
+                mentions.append(
+                    ModelTemporalMention(
+                        raw_text=answer,
+                        quote_start=len(original) + 1,
+                        quote_end=len(expected),
+                        kind="MONTH_DAY",
+                        role="SALES_FOLLOW_UP",
+                        action_ref="s",
+                    )
+                )
+            return StructureDraftResult(
+                kind_confirmed=kind,
+                content=expected,
+                customer_name="睿狐科技",
+                next_action="联系杨老师",
+                next_follow_time_text="明年" if len(self.calls) == 1 else answer,
+                temporal_mentions=mentions,
+                actions=[
+                    ModelDraftAction(
+                        action_ref="s",
+                        owner_role="SALES",
+                        action_text="联系杨老师",
+                        action_status="PLANNED",
+                        evidence_quote=original[action_start:],
+                        quote_start=action_start,
+                        quote_end=len(original),
+                    )
+                ],
+            )
+
+    class Gate:
+        def __init__(self):
+            self.inputs = []
+
+        async def evaluate(self, db, **kwargs):
+            self.inputs.append(kwargs)
+            return QualityGateOutcome(True, 85, "事实及下一步完整", None, None, {})
+
+    structurer, gate = Structurer(), Gate()
+    coordinator = AssistantCoordinator(
+        NoChooser(), structurer=structurer, quality_gate=gate, writer=RealActivityWriter()
+    )
+    waiting = await coordinator.handle_task(session, task, AssistantInput(kind="text", text=original))
+    assert waiting.reply.waiting.type == "FIELD" and waiting.reply.waiting.field == "next_follow_time"
+    assert not waiting.reply.waiting.candidates
+    assert waiting.task.authority_json.get("frozen_activity_command") is None
+    assert session.query(CustomerActivity).count() == 0
+    # Cross-year execution must not reinterpret the already recorded original year.
+    current = datetime(2027, 1, 2, 10)
+    recovered = await coordinator.handle_task(session, waiting.task, AssistantInput(kind="submit_field", text=answer))
+    assert recovered.task.public_id == task.public_id
+    assert recovered.reply.waiting.type == "CONFIRMATION"
+    command = recovered.task.authority_json["frozen_activity_command"]
+    assert command["next_follow_time"] == "2027-01-15T00:00:00"
+    assert command["next_action"] == "联系杨老师"
+    assert command["customer_name"] == "睿狐科技"
+    assert gate.inputs[-1]["user_text"] == original + "\n" + answer
+    assert len(gate.inputs) == 2
+    assert session.query(CustomerActivity).count() == 0 and recovered.task.committed_json == []

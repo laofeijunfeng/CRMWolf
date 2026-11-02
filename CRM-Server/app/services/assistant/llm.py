@@ -153,9 +153,9 @@ class AssistantLLM:
             "会议纪要整理" if meeting else "跟进整理",
         )
         _require_complete_content(response.content_json)
-        from app.services.assistant.temporal_evidence import ensure_mentions_cover_source
+        from app.services.assistant.temporal_evidence import validate_temporal_quotes
 
-        ensure_mentions_cover_source(user_text, response.temporal_mentions)
+        validate_temporal_quotes(user_text, response.temporal_mentions)
         if meeting:
             return StructureDraftResult(
                 kind_confirmed=kind,

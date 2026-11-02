@@ -158,9 +158,17 @@ def _merge_canonical(
     return merged
 
 
-def apply_structured_draft(task: AssistantTask, structured: object, *, correction_text: str = "") -> TaskDraft:
+def apply_structured_draft(
+    task: AssistantTask,
+    structured: object,
+    *,
+    correction_text: str = "",
+    temporal_answer_id: str | None = None,
+    model_source_text: str | None = None,
+) -> TaskDraft:
     """Merge typed model facts while preserving user-accepted scalar slots."""
     draft = TaskDraft.model_validate(task.draft_json or {})
+    original = draft.model_copy(deep=True)
     kind = task.activity_kind or getattr(structured, "kind_confirmed", "FOLLOW_UP")
     payload = getattr(structured, "content_json", None)
     if payload is None:
@@ -228,9 +236,46 @@ def apply_structured_draft(task: AssistantTask, structured: object, *, correctio
     _patch("customer", str(getattr(structured, "customer_name", "")))
     mentions = list(getattr(structured, "temporal_mentions", []) or [])
     actions = list(getattr(structured, "actions", []) or [])
-    if mentions or actions:
-        from app.services.assistant.temporal_evidence import TemporalContractError, attach_model_evidence
+    from app.services.assistant.temporal_evidence import (
+        TemporalContractError,
+        apply_temporal_answer,
+        attach_model_evidence,
+        find_time_spans,
+    )
 
+    if temporal_answer_id is not None:
+        record = next((item for item in reversed(draft.source_records) if item.text == correction_text), None)
+        if record is None or model_source_text is None:
+            raise TemporalContractError("temporal answer has no source segment")
+        # Answering a date wait cannot change customer binding or the next action.
+        draft.customer = original.customer
+        draft.next_action = original.next_action
+        draft.content_json["next_action" if kind == "FOLLOW_UP" else "next_step_summary"] = (
+            original.next_action.value or ""
+        )
+        apply_temporal_answer(
+            draft,
+            target_id=temporal_answer_id,
+            source_text=model_source_text,
+            answer_segment_id=record.segment_id,
+            mentions=mentions,
+            actions=actions,
+        )
+    elif (
+        mentions
+        or actions
+        or (
+            kind == "FOLLOW_UP"
+            and find_time_spans(correction_text)
+            # Legacy drafts without an evidence bundle still resolve an explicitly
+            # accepted date through their existing server-side confirmation parser.
+            and not (
+                original.next_follow_time.status == "ACCEPTED"
+                and original.next_follow_time.value == correction_text
+                and "temporal_evidence" not in original.content_json
+            )
+        )
+    ):
         record = next((item for item in reversed(draft.source_records) if item.text == correction_text), None)
         if record is None:
             raise TemporalContractError("temporal evidence has no source segment")
@@ -393,6 +438,7 @@ async def intake_step(
     reporter: ProgressReporter | None = None,
     from_waiting: bool = False,
     accept_source: bool = True,
+    temporal_answer_id: str | None = None,
 ) -> tuple[AssistantTask, str, TaskWaiting | None, bool]:
     """Run one intake pass; returns (task, message, waiting, failed)."""
 
@@ -479,8 +525,9 @@ async def intake_step(
     reporter.stage_start(_S_STRUCTURE)
     _t0 = time.monotonic()
     try:
+        structure_text = "\n".join(record.text for record in draft.source_records) if temporal_answer_id else user_text
         structured = await structurer.structure(
-            db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=user_text
+            db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=structure_text
         )
         reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
     except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
@@ -488,7 +535,13 @@ async def intake_step(
         _record_structuring_failure(db, task, draft, exc, stage="structure")
 
     try:
-        draft = apply_structured_draft(task, structured, correction_text=user_text)
+        draft = apply_structured_draft(
+            task,
+            structured,
+            correction_text=user_text,
+            temporal_answer_id=temporal_answer_id,
+            model_source_text=structure_text,
+        )
     except (ValueError, TypeError, ValidationError) as exc:
         draft = TaskDraft.model_validate(task.draft_json or {})
         _record_structuring_failure(db, task, draft, exc, stage="apply")

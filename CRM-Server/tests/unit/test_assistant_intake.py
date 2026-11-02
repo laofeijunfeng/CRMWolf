@@ -1020,7 +1020,7 @@ async def test_month_only_commitment_survives_structuring(db_session, month_kind
     assert logged["accepted"] is True
 
 
-async def test_conflicting_month_kind_fails_closed_through_structuring(db_session):
+async def test_conflicting_model_month_kind_uses_server_semantics_through_structuring(db_session):
     from app.services.assistant.llm_contracts import ModelTemporalMention
 
     task = _make_task(db_session, activity_kind="FOLLOW_UP")
@@ -1117,19 +1117,17 @@ async def test_conflicting_month_kind_fails_closed_through_structuring(db_sessio
             "next_follow_time_text": "11月15号",
         },
     )
-    updated, failure = await _stage_failure(
+    updated, _, waiting, failed = await intake_step(
         db_session,
         task,
         FUTURES_TEXT,
         FakeStructurer(KindDecision(kind="FOLLOW_UP"), structured),
     )
-    assert failure.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
-    assert failure.failure_origin == "model_output"
-    assert failure.user_message == "整理结果未通过校验，尚未写入客户活动。"
-    logged = _structure_failure(db_session, updated.id)
-    assert logged["failure"] == "temporal_evidence"
-    assert logged["failure_origin"] == "model_output"
-    assert "temporal mention does not match a source span" in logged["cause"]
+    assert failed is False and waiting is None
+    draft = TaskDraft.model_validate(updated.draft_json)
+    month = next(item for item in draft.content_json["temporal_evidence"]["mentions"] if item["raw_text"] == "11月份")
+    assert month["kind"] == "FULL_MONTH" and month["day"] is None and month["resolved_at"] is None
+    assert updated.committed_json == []
 
 
 async def test_classify_timeout_keeps_saved_source_after_rollback(db_session):
@@ -1193,3 +1191,134 @@ async def test_exhausted_attempt_budget_does_not_call_the_model(db_session):
     assert guard.calls == 0
     assert caught.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
     assert caught.value.stage == "classify"
+
+
+async def test_date_answer_restructures_full_source_but_only_replaces_waiting_action_time(db_session):
+    from datetime import datetime
+
+    from app.services.assistant.action_evidence import SourceSegment
+    from app.services.assistant.llm_contracts import ModelTemporalMention
+    from app.services.assistant.temporal_evidence import (
+        attach_model_evidence,
+        resolved_sales_follow_up,
+        temporal_waiting,
+    )
+
+    original = "今天微信联系了通力电梯，杨老师说没有采购计划。大概明年联系杨老师"
+    answer = "2027年1月15号"
+    old_anchor = datetime(2026, 11, 2, 13)
+    draft = TaskDraft(
+        customer=DraftField(status="ACCEPTED", value="通力电梯"),
+        content=DraftField(status="CANDIDATE", value=original),
+        content_json={"content": original},
+        source_segments=[original],
+        source_records=[SourceSegment(segment_id="seg_original", recorded_at=old_anchor, text=original)],
+    )
+    start = original.index("明年")
+    act_start = original.index("大概")
+    attach_model_evidence(
+        draft,
+        segment_id="seg_original",
+        segment_text=original,
+        anchor=old_anchor,
+        mentions=[
+            ModelTemporalMention(
+                raw_text="明年",
+                quote_start=start,
+                quote_end=start + 2,
+                kind="UNKNOWN",
+                role="SALES_FOLLOW_UP",
+                action_ref="sales",
+            )
+        ],
+        actions=[
+            ModelDraftAction(
+                action_ref="sales",
+                owner_role="SALES",
+                owner_text="我",
+                action_text="联系杨老师",
+                action_status="PLANNED",
+                evidence_quote=original[act_start:],
+                quote_start=act_start,
+                quote_end=len(original),
+            )
+        ],
+    )
+    target = next(
+        m["mention_id"] for m in draft.content_json["temporal_evidence"]["mentions"] if m["raw_text"] == "明年"
+    )
+    assert temporal_waiting(draft)["reason"] == "DATE"
+    old_action = draft.next_action.value
+    task = _make_task(db_session, activity_kind="FOLLOW_UP", draft_json=draft.model_dump(mode="json"))
+    full = original + "\n" + answer
+    new_start = len(original) + 1
+    structured = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content=full,
+        customer_name="不能借日期回复换客户",
+        next_action="不能借日期回复改成签合同",
+        next_follow_time_text=answer,
+        temporal_mentions=[
+            ModelTemporalMention(
+                raw_text="明年",
+                quote_start=start,
+                quote_end=start + 2,
+                kind="UNKNOWN",
+                role="SALES_FOLLOW_UP",
+                action_ref="sales",
+            ),
+            ModelTemporalMention(
+                raw_text=answer,
+                quote_start=new_start,
+                quote_end=len(full),
+                kind="MONTH_DAY",
+                role="SALES_FOLLOW_UP",
+                action_ref="sales",
+            ),
+        ],
+        actions=[
+            ModelDraftAction(
+                action_ref="sales",
+                owner_role="SALES",
+                action_text="联系杨老师",
+                action_status="PLANNED",
+                evidence_quote=original[act_start:],
+                quote_start=act_start,
+                quote_end=len(original),
+            )
+        ],
+    )
+
+    class FullStructurer(FakeStructurer):
+        async def structure(self, db, *, team_id, kind, user_text):
+            assert user_text == full
+            return self.structured
+
+    gate = RecordingGate(_score())
+    updated, _, waiting, failed = await intake_step(
+        db_session,
+        task,
+        answer,
+        FullStructurer(KindDecision(kind="FOLLOW_UP"), structured),
+        gate=gate,
+        from_waiting=True,
+        temporal_answer_id=target,
+    )
+    assert failed is False and waiting is None
+    final = TaskDraft.model_validate(updated.draft_json)
+    assert final.customer.value == "通力电梯"
+    assert final.next_action.value == old_action
+    assert final.source_segments == [original, answer]
+    assert final.source_records[0].recorded_at == old_anchor
+    assert temporal_waiting(final) is None
+    assert resolved_sales_follow_up(final) == (datetime(2027, 1, 15), "DATE")
+    assert gate.calls[0]["user_text"] == full
+    assert "没有采购计划" in gate.calls[0]["content"]
+    assert final.quality_score.value == "82"
+    bundle = final.content_json["temporal_evidence"]
+    old = next(m for m in bundle["mentions"] if m["mention_id"] == target)
+    assert old["state"] == "SUPERSEDED" and old["anchor_at"] == old_anchor.isoformat()
+    new = next(m for m in bundle["mentions"] if m["raw_text"] == answer)
+    assert new["source_segment_id"] == final.source_records[-1].segment_id
+    assert new["correction_of"] == target
+    assert updated.committed_json == [] and updated.authority_json.get("frozen_activity_command") is None

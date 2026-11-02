@@ -645,6 +645,9 @@ class AssistantCoordinator:
             return await self._answer_follow_up_customer(db, task, text, reporter)
 
         draft = load_draft(task)
+        from app.services.assistant.temporal_evidence import temporal_answer_target
+
+        temporal_answer_id = temporal_answer_target(draft) if field_name == "next_follow_time" else None
         slot: DraftField | None = getattr(draft, field_name, None)
         if slot is None or field_name == "quality_score":
             raise ValueError(f"waiting field {field_name!r} is not a user-editable draft slot")
@@ -710,6 +713,7 @@ class AssistantCoordinator:
                 gate=self._quality_gate,
                 reporter=reporter,
                 from_waiting=True,
+                temporal_answer_id=temporal_answer_id,
             )
             if failed or paused is not None:
                 return CoordinatorOutcome(

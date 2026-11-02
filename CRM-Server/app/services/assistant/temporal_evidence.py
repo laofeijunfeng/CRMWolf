@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.assistant.contracts import DraftField, TaskDraft
-from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeKind, TimeRole
+from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeRole
 
 StoredTimeKind = Literal[
     "EXPLICIT_DATE",
@@ -31,6 +31,7 @@ StoredTimeKind = Literal[
     "RELATIVE_MONTH",
     "RELATIVE_WEEKDAY",
     "FULL_MONTH",
+    "RELATIVE_YEAR_DATE",
     "UNKNOWN",
 ]
 MonthSegmentName = Literal["EARLY", "MIDDLE", "LATE"]
@@ -42,7 +43,6 @@ POLICY_VERSION: Literal["bare-day-v1"] = "bare-day-v1"
 Resolution = Literal["RESOLVED", "AMBIGUOUS", "UNRESOLVED", "EXPLICITLY_NONE"]
 EvidenceState = Literal["ACTIVE", "SUPERSEDED", "EXPLICITLY_NONE"]
 ActionStatus = Literal["PLANNED", "COMPLETED", "COMMITTED", "UNKNOWN"]
-_UNCERTAIN = re.compile(r"大概|大约|左右|前后|差不多|可能|也许")
 _REPLACEMENT = re.compile(r"改为|改到|应为|而是")
 _LABEL_WHITESPACE = re.compile(r"\s+")
 _CLOCK = re.compile(
@@ -50,7 +50,13 @@ _CLOCK = re.compile(
     r"|([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?))"
 )
 _PERIOD = re.compile(r"[的\s]*(?:上午|下午|晚上|中午|早上)")
+_YEAR_OFFSETS = {"今年": 0, "明年": 1, "后年": 2, "去年": -1}
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "RELATIVE_YEAR_DATE",
+        re.compile(r"(今年|明年|后年|去年)[\s，,、]*(?:(20\d{2})\s*年\s*)?([0-9]{1,2})\s*月\s*([0-9]{1,2})\s*[号日]"),
+    ),
+    ("UNKNOWN", re.compile(r"今年|明年|后年|去年|年初|年中|年底|年末")),
     ("RELATIVE_MONTH", re.compile(r"下个?月\s*([0-9]{1,2})\s*[号日]")),
     ("MONTH_SEGMENT", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*([初中末底])(?!旬)")),
     ("MONTH_SEGMENT", re.compile(r"(下个|这个|下|本)?月([初中末底])(?!旬)")),
@@ -84,11 +90,20 @@ class ActionContractError(TemporalContractError):
 class FoundSpan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: TimeKind
+    kind: StoredTimeKind
     start: int
     end: int
     raw_text: str
     groups: tuple[str | None, ...] = ()
+
+
+class QuotedAction(BaseModel):
+    """Original model action quote with durable source-local coordinates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_segment_id: str
+    action: ModelDraftAction
 
 
 class StoredMention(BaseModel):
@@ -121,6 +136,8 @@ class StoredMention(BaseModel):
     correction_of: str | None = None
     state: EvidenceState = "ACTIVE"
     candidates: list[str] = Field(default_factory=list)
+    source_quotes: list[ModelTemporalMention] = Field(default_factory=list)
+    source_actions: list[QuotedAction] = Field(default_factory=list)
 
 
 class StoredAction(BaseModel):
@@ -169,45 +186,36 @@ def find_time_spans(text: str) -> list[FoundSpan]:
     return accepted
 
 
-_TIME_MARKS = ("今天", "明天", "后天", "周", "星期", "礼拜", "月", "点", "时", "午", "号", "日")
+def validate_temporal_quotes(text: str, mentions: list[object]) -> None:
+    """Validate source truth, independently of scanner coverage or model kind."""
 
-
-def _mention_raw(item: object) -> str:
-    raw = getattr(item, "raw_text", None)
-    if raw is None and isinstance(item, dict):
-        raw = item.get("raw_text")
-    return raw if isinstance(raw, str) else ""
-
-
-def temporal_failure_origin(text: str, mentions: list[object]) -> str:
-    """Distinguish a bad model quote from a server span the canonical rules cannot cut."""
-
-    spans = find_time_spans(text)
-    server_raw = {span.raw_text for span in spans}
     for item in mentions:
-        raw = _mention_raw(item)
-        if not raw or raw not in text or raw in server_raw:
-            continue
-        if not any(mark in raw for mark in _TIME_MARKS):
-            continue
-        if not spans or any(raw in span.raw_text or span.raw_text in raw for span in spans):
-            return "server_contract"
-    return "model_output"
+        _mention_span(text, item)
 
 
-def ensure_mentions_cover_source(text: str, mentions: list[object]) -> None:
-    """Production structuring must quote every time the server can locate."""
+def _canonical_spans(text: str, mentions: list[ModelTemporalMention]) -> list[FoundSpan]:
+    """Union source grammar and quotes; normalize a whole overlapping expression once."""
 
     spans = find_time_spans(text)
-    if not spans:
-        return
-    covered = {_mention_span(text, item) for item in mentions}
-    missing = [span.raw_text for span in spans if (span.start, span.end) not in covered]
-    if missing or len(mentions) != len(spans):
-        raise TemporalContractError(
-            "temporal mentions do not cover the source",
-            failure_origin=temporal_failure_origin(text, mentions),
+    for mention in mentions:
+        spans.append(
+            FoundSpan(kind="UNKNOWN", start=mention.quote_start, end=mention.quote_end, raw_text=mention.raw_text)
         )
+    spans.sort(key=lambda item: (item.start, -(item.end - item.start)))
+    merged: list[FoundSpan] = []
+    for span in spans:
+        if not merged or span.start >= merged[-1].end:
+            merged.append(span)
+            continue
+        previous = merged[-1]
+        if span.end <= previous.end:
+            continue
+        # A crossing quote is valid source evidence, not a scanner-format error.
+        # The whole expression must normalize; an inner date cannot stand for it.
+        merged[-1] = FoundSpan(
+            kind="UNKNOWN", start=previous.start, end=span.end, raw_text=text[previous.start : span.end]
+        )
+    return merged
 
 
 def attach_model_evidence(
@@ -219,20 +227,36 @@ def attach_model_evidence(
     mentions: list[object],
     actions: list[object],
 ) -> None:
-    """Validate one segment and store protocol v1 beside the canonical draft."""
+    """Quote truth and server normalization are separate; omissions cannot hide dates."""
 
-    if not mentions and not actions:
+    quoted: list[ModelTemporalMention] = []
+    for item in mentions:
+        mention = _read_mention(item)
+        start, end = _snap_span(segment_text, mention)
+        quoted.append(mention.model_copy(update={"quote_start": start, "quote_end": end}))
+    spans = _canonical_spans(segment_text, quoted)
+    if not spans and not actions:
         return
-    spans = find_time_spans(segment_text)
     built_mentions: list[StoredMention] = []
     built_actions: list[StoredAction] = []
     action_ids: dict[str, str] = {}
+    quoted_actions: dict[str, QuotedAction] = {}
     for item in actions:
         action = _read_action(item)
         quote = _exact_slice(segment_text, action.quote_start, action.quote_end, action.evidence_quote)
-        identity = f"{action.owner_role}:{action.action_text}:{action.quote_start}:{action.quote_end}"
+        start, end = action.quote_start, action.quote_end
+        if segment_text[start:end] != quote:
+            start = segment_text.index(quote)
+            end = start + len(quote)
+        identity = f"{segment_id}:{action.owner_role}:{action.action_text}:{start}:{end}"
         action_id = "act_" + sha256(identity.encode()).hexdigest()[:16]
+        if action.action_ref in action_ids:
+            raise ActionContractError("duplicate action reference")
         action_ids[action.action_ref] = action_id
+        quoted_actions[action.action_ref] = QuotedAction(
+            source_segment_id=segment_id,
+            action=action.model_copy(update={"quote_start": start, "quote_end": end}),
+        )
         built_actions.append(
             StoredAction(
                 action_id=action_id,
@@ -241,51 +265,286 @@ def attach_model_evidence(
                 action_text=action.action_text,
                 source_segment_id=segment_id,
                 evidence_quote=quote,
-                quote_start=action.quote_start,
-                quote_end=action.quote_end,
+                quote_start=start,
+                quote_end=end,
                 action_status=action.action_status,
             )
         )
-    used: set[tuple[int, int]] = set()
-    for item in mentions:
-        mention = _read_mention(item)
-        start, end = _snap_span(segment_text, mention)
-        if (start, end) in used:
-            raise TemporalContractError("duplicate temporal span")
-        used.add((start, end))
-        found = next((span for span in spans if span.start == start and span.end == end), None)
-        if found is None or not _kind_compatible(found.kind, mention.kind):
-            origin = "model_output" if found is not None else temporal_failure_origin(segment_text, mentions)
-            raise TemporalContractError("temporal mention does not match a source span", failure_origin=origin)
-        linked_id = action_ids.get(mention.action_ref) if mention.action_ref else None
-        if mention.action_ref and linked_id is None:
+    for mention in quoted:
+        if mention.action_ref and mention.action_ref not in action_ids:
             raise TemporalContractError("temporal mention points at an unknown action")
+    for found in spans:
+        sources = [item for item in quoted if found.start <= item.quote_start and item.quote_end <= found.end]
+        nominated = {action_ids[item.action_ref] for item in sources if item.action_ref}
+        related = [item for item in built_actions if _same_action_clause(segment_text, found, item)]
+        linked = next((item for item in related if item.action_id in nominated), None)
+        if linked is None and len(related) == 1:
+            linked = related[0]
+        hint = next(
+            (item for item in sources if item.quote_start == found.start and item.quote_end == found.end),
+            sources[0] if sources else None,
+        )
         stored = _resolve_span(
             found,
             segment_text=segment_text,
             segment_id=segment_id,
             anchor=anchor,
-            action_id=linked_id,
-            model_role=mention.role,
-            model_owner=mention.owner,
-            confidence=mention.confidence,
+            action_id=linked.action_id if linked else None,
+            model_role=hint.role if hint else "OTHER",
+            model_owner=hint.owner if hint else "",
+            confidence=hint.confidence if hint else 0,
         )
+        stored.source_quotes = sources
+        stored.source_actions = [
+            quoted_actions[ref] for ref in dict.fromkeys(item.action_ref for item in sources if item.action_ref)
+        ]
+        if _background_year(segment_text, found):
+            stored.role = "CUSTOMER_ACTION" if linked and linked.owner_role == "CUSTOMER" else "OTHER"
+            stored.ambiguity_reason = None
+        if len(nominated) > 1:
+            stored.ambiguity_reason = "ROLE"
+            stored.resolution_status = "AMBIGUOUS"
+        if stored.role == "SALES_FOLLOW_UP" and linked is None:
+            # Source-derived action, not model-invented text. Missing model evidence
+            # must not make an explicit source action/date disappear from the gate.
+            start, end = _clause_start(segment_text, found.start), _clause_end(segment_text, found.end)
+            raw_quote = segment_text[start:end]
+            quote = raw_quote.strip()
+            if quote:
+                start += len(raw_quote) - len(raw_quote.lstrip())
+                end = start + len(quote)
+                action_id = "act_" + sha256(f"{segment_id}:{start}:{end}:SALES".encode()).hexdigest()[:16]
+                linked = StoredAction(
+                    action_id=action_id,
+                    owner_role="SALES",
+                    owner_text="我",
+                    action_text=_source_action_text(quote),
+                    source_segment_id=segment_id,
+                    evidence_quote=quote,
+                    quote_start=start,
+                    quote_end=end,
+                    action_status="PLANNED",
+                )
+                built_actions.append(linked)
+                stored.action_id = action_id
         built_mentions.append(stored)
-    if len(used) != len(spans):
-        raise TemporalContractError(
-            "temporal mentions do not cover the source",
-            failure_origin=temporal_failure_origin(segment_text, mentions),
-        )
     _link_actions(built_mentions, built_actions)
     _supersede_replacements(segment_text, built_mentions, built_actions)
+    _guard_conflicting_dates(built_mentions, built_actions)
     previous = _bundle(draft)
     merged_mentions, merged_actions = _merge_history(previous, built_mentions, built_actions)
-    draft.content_json["temporal_evidence"] = {
-        "version": PROTOCOL_VERSION,
-        "mentions": [item.model_dump(mode="json") for item in merged_mentions],
-        "actions": [item.model_dump(mode="json") for item in merged_actions],
-    }
+    _write_bundle(draft, merged_mentions, merged_actions)
     project_draft(draft)
+
+
+def temporal_answer_target(draft: TaskDraft) -> str | None:
+    """Only an unresolved sales date authorizes a full-context date answer."""
+
+    spec = temporal_waiting(draft)
+    if spec is None or spec.get("reason") != "DATE":
+        return None
+    bundle = _bundle(draft)
+    if bundle is None:
+        return None
+    for raw in bundle[0]:
+        item = _stored_mention(raw)
+        if (
+            item.mention_id == spec.get("mention_id")
+            and item.role == "SALES_FOLLOW_UP"
+            and item.ambiguity_reason != "ROLE"
+        ):
+            return item.mention_id
+    return None
+
+
+def apply_temporal_answer(
+    draft: TaskDraft,
+    *,
+    target_id: str,
+    source_text: str,
+    answer_segment_id: str,
+    mentions: list[object],
+    actions: list[object],
+) -> None:
+    """Restructure all source semantics, but consume only the current date wait.
+
+    Old evidence keeps its anchor and prior role/choice decisions. Global model
+    offsets must map to one durable source; a reply never replans other actions.
+    """
+
+    previous = _bundle(draft)
+    if previous is None or temporal_answer_target(draft) != target_id:
+        raise TemporalContractError("temporal answer does not match the current wait")
+    records = draft.source_records
+    if source_text != "\n".join(record.text for record in records):
+        raise TemporalContractError("temporal answer source does not match source records")
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    for record in records:
+        ranges.append((offset, offset + len(record.text)))
+        offset += len(record.text) + 1
+
+    def source_index(start: int, end: int) -> int:
+        for index, (left, right) in enumerate(ranges):
+            if left <= start < end <= right:
+                return index
+        raise TemporalContractError("temporal quote crosses source segments")
+
+    quoted_actions: dict[str, QuotedAction] = {}
+    for item in actions:
+        action = _read_action(item)
+        _exact_slice(source_text, action.quote_start, action.quote_end, action.evidence_quote)
+        start, end = action.quote_start, action.quote_end
+        if source_text[start:end] != action.evidence_quote:
+            start = source_text.index(action.evidence_quote)
+            end = start + len(action.evidence_quote)
+        index = source_index(start, end)
+        if action.action_ref in quoted_actions:
+            raise ActionContractError("duplicate action reference")
+        quoted_actions[action.action_ref] = QuotedAction(
+            source_segment_id=records[index].segment_id,
+            action=action.model_copy(
+                update={
+                    "quote_start": start - ranges[index][0],
+                    "quote_end": end - ranges[index][0],
+                }
+            ),
+        )
+    quotes: dict[str, list[ModelTemporalMention]] = {record.segment_id: [] for record in records}
+    for item in mentions:
+        mention = _read_mention(item)
+        start, end = _snap_span(source_text, mention)
+        index = source_index(start, end)
+        if mention.action_ref and mention.action_ref not in quoted_actions:
+            raise TemporalContractError("temporal mention points at an unknown action")
+        quotes[records[index].segment_id].append(
+            mention.model_copy(
+                update={
+                    "quote_start": start - ranges[index][0],
+                    "quote_end": end - ranges[index][0],
+                }
+            )
+        )
+    old_mentions, old_actions = previous
+    stored = [_stored_mention(item) for item in old_mentions]
+    bound = [_stored_action(item) for item in old_actions]
+    target = next(item for item in stored if item.mention_id == target_id)
+    target_action = _action_for(target, bound)
+    if target_action is None or target_action.owner_role != "SALES" or target_action.action_status != "PLANNED":
+        raise TemporalContractError("temporal answer has no current sales action")
+    answer = next((record for record in records if record.segment_id == answer_segment_id), None)
+    if answer is None:
+        raise TemporalContractError("temporal answer has no source segment")
+
+    # Preserve every legal quote, including newly mentioned unknown old phrases,
+    # without letting fresh model roles overwrite earlier server decisions.
+    for record in records:
+        if record.segment_id == answer_segment_id:
+            continue
+        for quote in quotes[record.segment_id]:
+            matched = next(
+                (
+                    item
+                    for item in stored
+                    if item.source_segment_id == record.segment_id
+                    and item.quote_start < quote.quote_end
+                    and quote.quote_start < item.quote_end
+                ),
+                None,
+            )
+            if matched is None:
+                found = FoundSpan(kind="UNKNOWN", start=quote.quote_start, end=quote.quote_end, raw_text=quote.raw_text)
+                matched = _resolve_span(
+                    found,
+                    segment_text=record.text,
+                    segment_id=record.segment_id,
+                    anchor=record.recorded_at,
+                    action_id=None,
+                    model_role="OTHER",
+                    model_owner="",
+                    confidence=quote.confidence,
+                )
+                stored.append(matched)
+            if quote not in matched.source_quotes:
+                matched.source_quotes.append(quote)
+            if quote.action_ref:
+                source_action = quoted_actions[quote.action_ref]
+                if source_action not in matched.source_actions:
+                    matched.source_actions.append(source_action)
+
+    spans = _canonical_spans(answer.text, quotes[answer_segment_id])
+    replacements: list[StoredMention] = []
+    for span in spans:
+        item = _resolve_span(
+            span,
+            segment_text=answer.text,
+            segment_id=answer.segment_id,
+            anchor=answer.recorded_at,
+            action_id=target_action.action_id,
+            model_role="SALES_FOLLOW_UP",
+            model_owner="我",
+            confidence=0,
+        )
+        item.source_quotes = [
+            q for q in quotes[answer_segment_id] if span.start <= q.quote_start and q.quote_end <= span.end
+        ]
+        item.source_actions = [
+            quoted_actions[ref]
+            for ref in dict.fromkeys(quote.action_ref for quote in item.source_quotes if quote.action_ref)
+        ]
+        item.correction_of = target_id
+        replacements.append(item)
+    if len(replacements) == 1 and replacements[0].role == "SALES_FOLLOW_UP":
+        replacement = replacements[0]
+        if replacement.resolution_status == "RESOLVED" and replacement.resolved_at is not None:
+            for item in stored:
+                if item.state == "ACTIVE" and item.action_id == target_action.action_id:
+                    item.state = "SUPERSEDED"
+            target_action.temporal_mention_id = replacement.mention_id
+    elif len(replacements) > 1:
+        for item in replacements:
+            item.resolution_status = "AMBIGUOUS"
+            item.ambiguity_reason = "DATE"
+            item.resolved_at = None
+    stored.extend(replacements)
+    _write_bundle(draft, stored, bound)
+    project_draft(draft)
+
+
+def _source_action_text(quote: str) -> str:
+    # Keep the action itself source-derived, without putting its date in the
+    # downstream task title. The original quote remains untouched for auditing.
+    text = quote
+    for span in reversed(find_time_spans(quote)):
+        text = text[: span.start] + text[span.end :]
+    return re.sub(r"^(本人|我们|我)(?:将|会|负责|计划|要|在)?", "", text.strip()).strip(" ，,、")
+
+
+def _same_action_clause(text: str, found: FoundSpan, action: StoredAction) -> bool:
+    if action.quote_start < found.end and found.start < action.quote_end:
+        return True
+    start, end = _clause_start(text, found.start), _clause_end(text, found.end)
+    if start <= action.quote_start < end:
+        return True
+    between = text[found.end : action.quote_start]
+    return found.end <= action.quote_start and re.fullmatch(r"[\s，,、]*", between) is not None
+
+
+def _background_year(text: str, found: FoundSpan) -> bool:
+    if found.kind != "UNKNOWN":
+        return False
+    clause = _clause(text, found.start)
+    if re.fullmatch(r"\s*(今年|明年|后年|去年)?快?年[底末]了?\s*", clause):
+        return True
+    after = text[found.end : _clause_end(text, found.end)].strip()
+    if re.match(r"(?:目前|暂时|现在|仍然|还是)?(?:没有|暂无|没|无|不再).{0,8}(?:采购|购买|预算|计划|需求)", after):
+        return True
+    if re.fullmatch(r"再看看?", after):
+        prefix = text[: found.start]
+        # A previously contacted person's name alone is not customer speech.
+        reports = list(re.finditer(r"(?:客户|老师|总|经理)(?:反馈|表示|说)", prefix))
+        return bool(reports and not re.search(r"我|我们|本人", prefix[reports[-1].end() :]))
+    return False
 
 
 def project_draft(draft: TaskDraft) -> None:
@@ -365,7 +624,8 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     raw_mentions, raw_actions = bundle
     mentions = [item for item in (_stored_mention(raw) for raw in raw_mentions) if item.state == "ACTIVE"]
     actions = [item for item in (_stored_action(raw) for raw in raw_actions) if item.state == "ACTIVE"]
-    unresolved_roles = [item for item in mentions if item.ambiguity_reason == "ROLE"]
+    action_times = [item for item in mentions if item.role == "SALES_FOLLOW_UP" or item.ambiguity_reason == "ROLE"]
+    unresolved_roles = [item for item in action_times if item.ambiguity_reason == "ROLE"]
     if len(unresolved_roles) >= 2:
         left, right = unresolved_roles[0], unresolved_roles[1]
         return {
@@ -382,7 +642,7 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
                 },
             ],
         }
-    ambiguous = next((item for item in mentions if item.resolution_status == "AMBIGUOUS" and item.candidates), None)
+    ambiguous = next((item for item in action_times if item.resolution_status == "AMBIGUOUS" and item.candidates), None)
     if ambiguous is not None:
         day = ambiguous.day or 0
         return {
@@ -396,7 +656,7 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     vague = next(
         (
             item
-            for item in mentions
+            for item in action_times
             if item.resolution_status in {"AMBIGUOUS", "UNRESOLVED"} and not item.candidates
         ),
         None,
@@ -404,6 +664,7 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     if vague is not None:
         return {
             "reason": "DATE",
+            "mention_id": vague.mention_id,
             "prompt": f"“{vague.raw_text}”无法确定为唯一日期，请补充具体日期。",
             "candidates": [],
         }
@@ -595,7 +856,7 @@ def sales_evidence_overlay(draft: TaskDraft) -> dict[str, object] | None:
         "action": action.action_text,
         "owner": "我",
         "due_date": mention.raw_text,
-        "segment_id": mention.source_segment_id,
+        "segment_id": action.source_segment_id,
         "evidence_quote": action.evidence_quote,
         "quote_start": action.quote_start,
         "quote_end": action.quote_end,
@@ -636,22 +897,24 @@ def _resolve_span(
         anchor_at=anchor,
         ambiguity_reason=reason,
     )
-    if reason == "UNCERTAIN":
-        return base.model_copy(update={"resolution_status": "AMBIGUOUS", "granularity": "UNKNOWN"})
+    before, after = segment_text[: found.start], segment_text[found.end :]
+    uncertain = re.search(r"(?:大概|大约|差不多|可能|也许)\s*$", before) or re.match(
+        r"\s*(?:左右|前后|大概|大约|可能|也许)", after
+    )
+    if uncertain:
+        return base.model_copy(
+            update={
+                "resolution_status": "AMBIGUOUS",
+                "granularity": "UNKNOWN",
+                "ambiguity_reason": reason or "UNCERTAIN",
+            }
+        )
     resolved = _resolve_kind(found, anchor, segment_text)
     if reason == "ROLE":
         resolved["ambiguity_reason"] = "ROLE"
         if resolved.get("resolution_status") == "RESOLVED":
             resolved["resolution_status"] = "AMBIGUOUS"
     return base.model_copy(update=resolved)
-
-
-def _kind_compatible(server_kind: str, model_kind: str) -> bool:
-    """Server kind wins. A full month still accepts the legacy UNKNOWN alias."""
-
-    if server_kind == model_kind:
-        return True
-    return server_kind == "FULL_MONTH" and model_kind == "UNKNOWN"
 
 
 def _full_month_mention(mention: StoredMention) -> bool:
@@ -685,6 +948,21 @@ def _year_for_month(text: str, start: int, month: int, anchor: datetime) -> int:
 def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict[str, object]:
     hour_minute = _clock_in_text(found.raw_text)
     kind = found.kind
+    if kind == "RELATIVE_YEAR_DATE":
+        relative, explicit, month_text, day_text = found.groups[:4]
+        year = int(explicit) if explicit else anchor.year + _YEAR_OFFSETS[relative or "今年"]
+        month, day = int(month_text or 0), int(day_text or 0)
+        try:
+            datetime(year, month, day)
+        except ValueError:
+            return {
+                "year": year,
+                "month": month,
+                "day": day,
+                "resolution_status": "UNRESOLVED",
+                "granularity": "UNKNOWN",
+            }
+        return _dated(year, month, day, hour_minute, anchor)
     if kind == "MONTH_SEGMENT":
         if hour_minute is not None:
             return {
@@ -790,7 +1068,10 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
         return _dated(target.year, target.month, target.day, hour_minute, anchor)
     if kind == "RELATIVE_WEEKDAY":
         prefix = found.raw_text[0] if found.raw_text[0] in {"下", "本", "这"} else ""
-        day_name = found.raw_text[-1]
+        weekday = re.match(r"(?:下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])", found.raw_text)
+        if weekday is None:
+            return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
+        day_name = weekday.group(1)
         offset = _WEEKDAYS[day_name] - anchor.weekday()
         if prefix == "下" or (prefix == "" and offset < 0):
             offset += 7
@@ -855,15 +1136,24 @@ def _shift_month(year: int, month: int, shift: int) -> tuple[int, int]:
 
 def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeRole, ActionStatus, str | None]:
     clause = _clause(text, found.start)
-    if _UNCERTAIN.search(clause):
-        return model_role, "UNKNOWN", "UNCERTAIN"
-    if found.raw_text.startswith(("今天", "今日")) and re.search(r"找|联系|确认", clause) and "再" not in clause:
+    if (
+        found.raw_text.startswith(("今天", "今日"))
+        and re.search(r"找|联系|确认|电话跟进", clause)
+        and "再" not in clause
+    ):
         return "OTHER", "COMPLETED", None
     if re.search(r"反馈|预计|承诺|会完成", clause) and re.search(r"老师|总|经理|客户", clause):
         return "CUSTOMER_COMMITMENT", "COMMITTED", None
     before = clause[: max(0, found.start - _clause_start(text, found.start))]
-    after = text[found.end : _clause_end(text, found.end)]
-    if re.search(r"再找|再联系|等\s*$", before) or re.match(r"\s*(再)?(找|联系)", after):
+    action_after = text[found.end :]
+    customer = r"(?:客户|[\u4e00-\u9fff]{1,8}(?:老师|总|经理|工))"
+    verb = r"(?:会|将|再)?(?:找|联系|回复|反馈|发送|给|完成|发|交|确认|采购|支付)"
+    after_actor = action_after.lstrip(" ，,、\t\n")
+    if (re.search(customer + r"\s*$", before) and re.match(r"[\s，,、]*" + verb, action_after)) or (
+        not re.match(verb, after_actor) and re.match(customer + verb, after_actor)
+    ):
+        return "CUSTOMER_COMMITMENT", "COMMITTED", None
+    if re.search(r"再找|再联系|等\s*$", before) or re.match(r"[\s，,、]*(再)?(找|联系)", action_after):
         return "SALES_FOLLOW_UP", "PLANNED", None
     if re.search(r"(我|我们|本人)\s*$", before) or clause.startswith(("我", "我们", "本人")):
         return "SALES_FOLLOW_UP", "PLANNED", None
@@ -891,6 +1181,14 @@ def _owner_from_clause(text: str, found: FoundSpan, role: TimeRole) -> str:
 
 def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) -> None:
     for mention in mentions:
+        if (
+            mention.role == "OTHER"
+            and mention.ambiguity_reason != "ROLE"
+            and any(item.action_id == mention.action_id and item.role != "OTHER" for item in mentions)
+        ):
+            # A broad model action quote may also cover communication background.
+            # Keep its audit link, but never let it replace the actionable date.
+            continue
         action = next((item for item in actions if item.action_id == mention.action_id), None)
         if action is None:
             continue
@@ -908,6 +1206,27 @@ def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) ->
             action.owner_role = "OTHER"
             if mention.ambiguity_reason != "ROLE":
                 action.action_status = "COMPLETED"
+
+
+def _guard_conflicting_dates(mentions: list[StoredMention], actions: list[StoredAction]) -> None:
+    """One action cannot silently choose the last of multiple distinct dates."""
+
+    for action in actions:
+        active = [
+            item
+            for item in mentions
+            if item.state == "ACTIVE" and item.action_id == action.action_id and item.role == "SALES_FOLLOW_UP"
+        ]
+        if len(active) < 2:
+            continue
+        dates = {(item.resolution_status, item.resolved_at, item.granularity) for item in active}
+        if len(dates) == 1 and active[0].resolution_status == "RESOLVED":
+            continue
+        for item in active:
+            item.resolution_status = "AMBIGUOUS"
+            item.ambiguity_reason = item.ambiguity_reason if item.ambiguity_reason == "ROLE" else "DATE"
+            item.resolved_at = None
+            item.candidates = []
 
 
 def _supersede_replacements(text: str, mentions: list[StoredMention], actions: list[StoredAction]) -> None:

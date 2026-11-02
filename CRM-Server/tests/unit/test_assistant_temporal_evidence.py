@@ -15,10 +15,10 @@ from app.services.assistant.temporal_evidence import (
     TemporalContractError,
     apply_temporal_choice,
     attach_model_evidence,
-    ensure_mentions_cover_source,
     find_time_spans,
     resolved_sales_follow_up,
     temporal_waiting,
+    validate_temporal_quotes,
 )
 
 ANCHOR = datetime(2026, 10, 27, 15, 0)
@@ -179,9 +179,13 @@ def test_illegal_span_is_a_contract_failure() -> None:
         )
 
 
-def test_model_must_cover_every_source_time() -> None:
-    with pytest.raises(TemporalContractError):
-        ensure_mentions_cover_source(EXAMPLE, [])
+def test_server_still_builds_time_evidence_when_model_omits_quotes() -> None:
+    validate_temporal_quotes(EXAMPLE, [])
+    draft = _draft(EXAMPLE)
+    attach_model_evidence(draft, segment_id="seg_omitted", segment_text=EXAMPLE, anchor=ANCHOR, mentions=[], actions=[])
+    stored = draft.content_json["temporal_evidence"]["mentions"]
+    assert [item["raw_text"] for item in stored] == ["今天", "本月底", "30 号"]
+    assert temporal_waiting(draft) is not None
 
 
 def test_choice_id_from_outside_the_waiting_set_is_rejected() -> None:
@@ -213,7 +217,7 @@ def test_public_model_instances_are_accepted() -> None:
         quote_start=text.find("会完成"),
         quote_end=text.find("会完成") + len("会完成"),
     )
-    ensure_mentions_cover_source(text, [mention])
+    validate_temporal_quotes(text, [mention])
     draft = _draft(text)
     attach_model_evidence(
         draft,
@@ -240,7 +244,7 @@ def test_extra_mention_field_is_rejected() -> None:
         "iso_date": "2026-10-31",
     }
     with pytest.raises(TemporalContractError, match="illegal temporal mention"):
-        ensure_mentions_cover_source(text, [mention])
+        validate_temporal_quotes(text, [mention])
 
 
 def test_action_quote_miss_is_an_action_contract_error() -> None:
@@ -328,7 +332,7 @@ def test_digit_month_is_a_span_and_does_not_swallow_the_follow_up_day() -> None:
         ("FULL_MONTH", "11月份"),
         ("MONTH_DAY", "11月15号"),
     ]
-    ensure_mentions_cover_source(FUTURES, _futures_mentions())
+    validate_temporal_quotes(FUTURES, _futures_mentions())
 
 
 def test_digit_month_commitment_stays_month_level_and_sales_keeps_november_15() -> None:
@@ -474,18 +478,18 @@ def test_explicit_year_and_bare_month_stay_month_level() -> None:
         assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
 
 
-def test_full_month_label_on_a_date_is_rejected() -> None:
+def test_server_resolves_date_even_when_model_labels_it_full_month() -> None:
     text = "11月15号跟进付款"
     draft = _draft(text)
     span = find_time_spans(text)[0]
     assert span.kind == "MONTH_DAY"
-    with pytest.raises(TemporalContractError, match="does not match a source span") as caught:
-        attach_model_evidence(
-            draft,
-            segment_id="seg_conflict",
-            segment_text=text,
-            anchor=datetime(2026, 10, 29, 19, 0),
-            mentions=[{
+    attach_model_evidence(
+        draft,
+        segment_id="seg_conflict",
+        segment_text=text,
+        anchor=datetime(2026, 10, 29, 19, 0),
+        mentions=[
+            {
                 "raw_text": span.raw_text,
                 "quote_start": span.start,
                 "quote_end": span.end,
@@ -493,8 +497,10 @@ def test_full_month_label_on_a_date_is_rejected() -> None:
                 "role": "SALES_FOLLOW_UP",
                 "action_ref": "a1",
                 "confidence": 1,
-            }],
-            actions=[{
+            }
+        ],
+        actions=[
+            {
                 "action_ref": "a1",
                 "owner_role": "SALES",
                 "action_text": "跟进付款",
@@ -502,9 +508,10 @@ def test_full_month_label_on_a_date_is_rejected() -> None:
                 "evidence_quote": text,
                 "quote_start": 0,
                 "quote_end": len(text),
-            }],
-        )
-    assert caught.value.failure_origin == "model_output"
+            }
+        ],
+    )
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 15), "DATE")
 
 
 def test_sales_full_month_does_not_become_a_dated_follow_up() -> None:
@@ -593,17 +600,19 @@ def test_stored_unknown_month_still_displays_as_full_month() -> None:
     assert confirmation_time_labels(content)[0] == "预计11月份可以完成付款（整月，未确定具体日期）"
 
 
-def test_wrong_kind_for_digit_month_is_still_rejected() -> None:
+def test_server_month_kind_does_not_depend_on_model_classification() -> None:
     draft = _draft(FUTURES)
-    with pytest.raises(TemporalContractError, match="temporal mention does not match a source span"):
-        attach_model_evidence(
-            draft,
-            segment_id="seg_futures",
-            segment_text=FUTURES,
-            anchor=datetime(2026, 10, 29, 19, 0),
-            mentions=_futures_mentions(month_kind="MONTH_DAY"),
-            actions=_futures_actions(),
-        )
+    attach_model_evidence(
+        draft,
+        segment_id="seg_futures",
+        segment_text=FUTURES,
+        anchor=datetime(2026, 10, 29, 19, 0),
+        mentions=_futures_mentions(month_kind="MONTH_DAY"),
+        actions=_futures_actions(),
+    )
+    month = next(item for item in draft.content_json["temporal_evidence"]["mentions"] if item["raw_text"] == "11月份")
+    assert month["kind"] == "FULL_MONTH" and month["day"] is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 15), "DATE")
 
 
 FOLLOW_UP_WITH_AFTERNOON_AND_WEEK = (
@@ -653,7 +662,7 @@ def test_model_quotes_of_afternoon_and_bare_week_cover_the_source() -> None:
             confidence=1,
         ),
     ]
-    ensure_mentions_cover_source(text, mentions)
+    validate_temporal_quotes(text, mentions)
     draft = _draft(text)
     attach_model_evidence(
         draft,
@@ -685,31 +694,24 @@ def test_model_quotes_of_afternoon_and_bare_week_cover_the_source() -> None:
     assert (resolved, granularity) == (datetime(2026, 11, 4), "DATE")
 
 
-def test_shorter_server_span_is_a_contract_gap() -> None:
-    from app.services.assistant.temporal_evidence import temporal_failure_origin
-
+def test_quote_truth_is_independent_of_shorter_or_longer_scanner_span() -> None:
     text = "今天再联系"
-    mention = ModelTemporalMention(
-        raw_text="今天下午",
-        quote_start=0,
-        quote_end=4,
-        kind="RELATIVE_DAY",
-        role="SALES_FOLLOW_UP",
-        confidence=1,
+    fake = ModelTemporalMention(
+        raw_text="今天下午", quote_start=0, quote_end=4, kind="RELATIVE_DAY", role="SALES_FOLLOW_UP", confidence=1
     )
-    # The quote is not in this shorter source, so the model is wrong.
-    assert temporal_failure_origin(text, [mention]) == "model_output"
+    with pytest.raises(TemporalContractError, match="temporal span is not in the source"):
+        validate_temporal_quotes(text, [fake])
     longer = "今天下午再联系"
     short = ModelTemporalMention(
-        raw_text="今天",
-        quote_start=0,
-        quote_end=2,
-        kind="RELATIVE_DAY",
-        role="SALES_FOLLOW_UP",
-        confidence=1,
+        raw_text="今天", quote_start=0, quote_end=2, kind="RELATIVE_DAY", role="SALES_FOLLOW_UP", confidence=1
     )
-    assert find_time_spans(longer)[0].raw_text == "今天下午"
-    assert temporal_failure_origin(longer, [short]) == "server_contract"
+    validate_temporal_quotes(longer, [short])
+    draft = _draft(longer)
+    attach_model_evidence(
+        draft, segment_id="seg_short", segment_text=longer, anchor=ANCHOR, mentions=[short], actions=[]
+    )
+    assert draft.content_json["temporal_evidence"]["mentions"][0]["raw_text"] == "今天下午"
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 10, 27), "DATE")
 
 
 TARGET = "客户说下个月初付款，11 月 5 号跟进下付款进展"
@@ -852,39 +854,40 @@ def test_uncertain_month_segment_asks_for_a_date() -> None:
     assert "无法确定为唯一日期" in waiting["prompt"]
 
 
-def test_wrong_kind_or_extra_time_rejects_the_segment() -> None:
+def test_kind_difference_normalizes_but_fabricated_extra_time_is_rejected() -> None:
     text = "客户说下个月初付款"
     span = find_time_spans(text)[0]
     draft = _draft(text)
-    with pytest.raises(TemporalContractError, match="does not match a source span"):
-        attach_model_evidence(
-            draft,
-            segment_id="seg_bad",
-            segment_text=text,
-            anchor=TARGET_ANCHOR,
-            mentions=[
-                {
-                    "raw_text": span.raw_text,
-                    "quote_start": span.start,
-                    "quote_end": span.end,
-                    "kind": "MONTH_DAY",
-                    "role": "CUSTOMER_COMMITMENT",
-                    "action_ref": "a0",
-                    "confidence": 1,
-                }
-            ],
-            actions=[
-                {
-                    "action_ref": "a0",
-                    "owner_role": "CUSTOMER",
-                    "action_text": "付款",
-                    "action_status": "COMMITTED",
-                    "evidence_quote": span.raw_text,
-                    "quote_start": span.start,
-                    "quote_end": span.end,
-                }
-            ],
-        )
+    attach_model_evidence(
+        draft,
+        segment_id="seg_bad",
+        segment_text=text,
+        anchor=TARGET_ANCHOR,
+        mentions=[
+            {
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": "MONTH_DAY",
+                "role": "CUSTOMER_COMMITMENT",
+                "action_ref": "a0",
+                "confidence": 1,
+            }
+        ],
+        actions=[
+            {
+                "action_ref": "a0",
+                "owner_role": "CUSTOMER",
+                "action_text": "付款",
+                "action_status": "COMMITTED",
+                "evidence_quote": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+            }
+        ],
+    )
+    mention = draft.content_json["temporal_evidence"]["mentions"][0]
+    assert mention["kind"] == "MONTH_SEGMENT" and mention["day"] is None
     with pytest.raises(TemporalContractError, match="temporal span is not in the source"):
         attach_model_evidence(
             _draft(text),

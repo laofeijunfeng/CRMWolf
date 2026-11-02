@@ -387,7 +387,7 @@ async def test_http_200_structured_output_reaches_draft(monkeypatch, kind, shape
             assert bundle["actions"][0]["action_text"] == "完成准备"
 
 
-async def test_http_200_missing_time_stays_a_temporal_contract_error(monkeypatch):
+async def test_http_200_missing_time_is_normalized_from_source_without_model_contract_error(monkeypatch):
     text = "我下周三联系叶老师"
     payload = {
         "content": text,
@@ -399,10 +399,16 @@ async def test_http_200_missing_time_stays_a_temporal_contract_error(monkeypatch
         "content_json": _follow_content(text, "联系叶老师", "下周三"),
     }
     _mock_completion(monkeypatch, payload)
-    with pytest.raises(TemporalContractError, match="temporal mentions do not cover the source") as caught:
-        await AssistantLLM().structure_draft(object(), team_id=1, kind="FOLLOW_UP", user_text=text)
-    assert not isinstance(caught.value, AssistantLLMError)
-    assert "model_type" not in str(caught.value)
+    result = await AssistantLLM().structure_draft(object(), team_id=1, kind="FOLLOW_UP", user_text=text)
+    draft = TaskDraft(
+        source_segments=[text],
+        source_records=[SourceSegment(segment_id="seg_omitted", recorded_at=datetime(2026, 10, 27, 15), text=text)],
+    )
+    task = SimpleNamespace(draft_json=draft.model_dump(mode="json"), activity_kind="FOLLOW_UP")
+    merged = apply_structured_draft(task, result, correction_text=text)
+    from app.services.assistant.temporal_evidence import resolved_sales_follow_up
+
+    assert resolved_sales_follow_up(merged) == (datetime(2026, 11, 4), "DATE")
 
 
 async def test_illegal_action_model_is_not_a_temporal_mention_error():
@@ -541,3 +547,28 @@ def test_legacy_assistant_error_constructor_stays_internal():
     assert error.code is AssistantFailureCode.INTERNAL_ERROR
     assert error.retryable is False
     assert str(error) == "下游原句"
+
+
+async def test_http_200_fabricated_time_is_still_rejected(monkeypatch):
+    text = "contact Yang"
+    payload = {
+        "content": text,
+        "customer_name": "Shanghai Shipyard",
+        "next_action": text,
+        "next_follow_time_text": "2027-01-15",
+        "temporal_mentions": [
+            {
+                "raw_text": "2027-01-15",
+                "quote_start": 0,
+                "quote_end": 10,
+                "kind": "EXPLICIT_DATE",
+                "role": "SALES_FOLLOW_UP",
+                "action_ref": "",
+            }
+        ],
+        "actions": [],
+        "content_json": _follow_content(text, text, "2027-01-15"),
+    }
+    _mock_completion(monkeypatch, payload)
+    with pytest.raises(TemporalContractError, match="not in the source"):
+        await AssistantLLM().structure_draft(object(), team_id=1, kind="FOLLOW_UP", user_text=text)
