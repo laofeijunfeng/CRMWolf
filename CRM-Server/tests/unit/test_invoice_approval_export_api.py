@@ -590,3 +590,205 @@ def test_invoice_and_approval_export_unknown_filter_returns_400(client, monkeypa
     assert "未知筛选字段" in invoice_response.text
     assert approval_response.status_code == 400, approval_response.text
     assert "未知筛选字段" in approval_response.text
+
+
+def _reissue_payload(**overrides):
+    payload = {
+        "reason": "税号再次更正",
+        "invoice_title_type": "COMPANY",
+        "invoice_title_text": "武汉微派网络科技有限公司",
+        "invoice_taxpayer_id": "91420100MA4K2N3X8C",
+        "invoice_amount": "800.00",
+        "invoice_type": "VAT_NORMAL",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _seed_reissue_red_offset(db_session, reissue: InvoiceReissueApplication) -> InvoiceRedOffset:
+    from app.models.invoice import InvoiceRedOffsetSourceType
+
+    red_offset = InvoiceRedOffset(
+        team_id=reissue.team_id,
+        invoice_application_id=reissue.original_invoice_application_id,
+        source_type=InvoiceRedOffsetSourceType.REISSUE,
+        reissue_application_id=reissue.id,
+        red_invoice_file_path=reissue.red_invoice_file_path or "invoices/reissue-red.pdf",
+        red_invoice_number=reissue.red_invoice_number,
+        reason=reissue.reason,
+        created_by=reissue.applicant_id,
+        red_offset_time=reissue.completed_time or datetime(2026, 8, 20, 9, 0, 0),
+    )
+    db_session.add(red_offset)
+    return red_offset
+
+
+def test_completed_reissue_can_start_another_and_pending_status_keeps_current_file(client, db_session, monkeypatch):
+    _grant(monkeypatch, "invoice_reissue:create", "invoice:view:all")
+    _seed_graph(db_session)
+    original = _seed_invoice(
+        db_session,
+        application_number="INV-REPEAT",
+        invoice_file_path="invoices/original.pdf",
+        invoice_number="OLD-NO",
+        status=InvoiceApplicationStatus.ISSUED,
+    )
+    db_session.flush()
+    first = _seed_completed_reissue(
+        db_session,
+        original,
+        application_number="INVR-FIRST",
+        new_invoice_file_path="invoices/first-new.pdf",
+        new_invoice_number="NEW-1",
+        completed_time=datetime(2026, 8, 3, 9, 12, 0),
+        created_time=datetime(2026, 8, 1, 9, 0, 0),
+    )
+    db_session.flush()
+    _seed_reissue_red_offset(db_session, first)
+    db_session.commit()
+
+    created = client.post(f"/v1/invoice-applications/{original.id}/reissues", json=_reissue_payload())
+    assert created.status_code == 200, created.text
+
+    detail = client.get(f"/v1/invoice-applications/{original.id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["invoice_effective_status"] == "REISSUE_PENDING"
+    assert body["reissue_status"] == "REISSUE_PENDING"
+    assert body["current_reissue_id"] == first.id
+    assert body["current_invoice_file_path"] == "invoices/first-new.pdf"
+    assert body["current_invoice_number"] == "NEW-1"
+
+    pending = client.get("/v1/invoice-applications", params={"invoice_effective_status": "REISSUE_PENDING"})
+    reissued = client.get("/v1/invoice-applications", params={"invoice_effective_status": "REISSUED"})
+    assert pending.status_code == 200
+    assert reissued.status_code == 200
+    assert [item["application_number"] for item in pending.json()["items"]] == ["INV-REPEAT"]
+    assert reissued.json()["items"] == []
+
+    blocked = client.post(f"/v1/invoice-applications/{original.id}/reissues", json=_reissue_payload(reason="第三次"))
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "该发票已有未完成的重开申请"
+
+
+def test_two_completed_reissues_download_the_later_new_invoice(client, db_session, monkeypatch):
+    _grant(monkeypatch, "invoice:view:all")
+    _seed_graph(db_session)
+    original = _seed_invoice(
+        db_session,
+        application_number="INV-TWICE",
+        invoice_file_path="invoices/original.pdf",
+        invoice_number="OLD-NO",
+    )
+    db_session.flush()
+    first = _seed_completed_reissue(
+        db_session,
+        original,
+        application_number="INVR-1",
+        new_invoice_file_path="invoices/first-new.pdf",
+        new_invoice_number="NEW-1",
+        completed_time=datetime(2026, 8, 3, 9, 12, 0),
+        created_time=datetime(2026, 8, 1, 9, 0, 0),
+    )
+    second = _seed_completed_reissue(
+        db_session,
+        original,
+        application_number="INVR-2",
+        new_invoice_file_path="invoices/second-new.ofd",
+        new_invoice_number="NEW-2",
+        completed_time=datetime(2026, 10, 18, 11, 26, 0),
+        created_time=datetime(2026, 10, 1, 9, 0, 0),
+    )
+    db_session.flush()
+    _seed_reissue_red_offset(db_session, first)
+    _seed_reissue_red_offset(db_session, second)
+    db_session.commit()
+
+    response = client.get("/v1/invoice-applications")
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["invoice_effective_status"] == "REISSUED"
+    assert item["current_reissue_id"] == second.id
+    assert item["current_invoice_file_path"] == "invoices/second-new.ofd"
+    assert item["current_invoice_number"] == "NEW-2"
+
+    detail = client.get(f"/v1/invoice-applications/{original.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["current_reissue_id"] == second.id
+    assert [reissue["application_number"] for reissue in detail.json()["reissue_applications"]] == ["INVR-1", "INVR-2"]
+
+
+def test_manual_red_offset_still_cannot_be_reissued(client, db_session, monkeypatch):
+    from app.models.invoice import InvoiceRedOffsetSourceType
+
+    _grant(monkeypatch, "invoice_reissue:create", "invoice:view:all")
+    _seed_graph(db_session)
+    original = _seed_invoice(
+        db_session,
+        application_number="INV-RED",
+        invoice_file_path="invoices/original.pdf",
+        invoice_number="OLD-NO",
+    )
+    db_session.flush()
+    db_session.add(InvoiceRedOffset(
+        team_id=1,
+        invoice_application_id=original.id,
+        source_type=InvoiceRedOffsetSourceType.MANUAL,
+        reissue_application_id=None,
+        red_invoice_file_path="invoices/manual-red.pdf",
+        red_invoice_number="RED-1",
+        reason="单独冲红",
+        created_by="1",
+        red_offset_time=datetime(2026, 8, 21, 9, 0, 0),
+    ))
+    db_session.commit()
+
+    denied = client.post(f"/v1/invoice-applications/{original.id}/reissues", json=_reissue_payload())
+    assert denied.status_code == 400
+    assert denied.json()["detail"] == "该发票已冲红，不可申请重开"
+
+    detail = client.get(f"/v1/invoice-applications/{original.id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["invoice_effective_status"] == "RED_OFFSET"
+    assert detail.json()["current_invoice_file_path"] is None
+
+
+def test_rejected_reissue_cannot_be_edited_after_a_newer_application(client, db_session, monkeypatch):
+    _grant(monkeypatch, "invoice:view:all")
+    _seed_graph(db_session)
+    original = _seed_invoice(db_session, application_number="INV-REJECT")
+    db_session.flush()
+    rejected = _seed_completed_reissue(
+        db_session,
+        original,
+        application_number="INVR-REJECTED",
+        status=InvoiceReissueApplicationStatus.REJECTED,
+        new_invoice_file_path=None,
+        new_invoice_number=None,
+        completed_time=None,
+        created_time=datetime(2026, 8, 1, 9, 0, 0),
+    )
+    db_session.commit()
+
+    updated = client.put(
+        f"/v1/invoice-applications/reissues/{rejected.id}",
+        json={"reason": "补充抬头"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["reason"] == "补充抬头"
+
+    _seed_completed_reissue(
+        db_session,
+        original,
+        application_number="INVR-LATER",
+        created_time=datetime(2026, 9, 1, 9, 0, 0),
+        completed_time=datetime(2026, 9, 2, 9, 0, 0),
+    )
+    db_session.commit()
+
+    blocked = client.put(
+        f"/v1/invoice-applications/reissues/{rejected.id}",
+        json={"reason": "不应该再改"},
+    )
+    assert blocked.status_code == 400
+    assert blocked.json()["detail"] == "这一张重开申请已不能再修改"

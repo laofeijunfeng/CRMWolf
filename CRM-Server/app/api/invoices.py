@@ -357,31 +357,21 @@ def _invoice_effective_status_from_maps(
 ) -> tuple[str, str]:
     reissues = reissues_by_original.get(application.id, [])
     red_offsets = red_offsets_by_invoice.get(application.id, [])
-    reissue_status = "NONE"
-    completed_reissues = [
-        reissue
+    has_open_reissue = any(
+        reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"}
         for reissue in reissues
-        if reissue.status == "COMPLETED" and reissue.new_invoice_file_path
-    ]
-    latest_completed_reissue = max(
-        completed_reissues,
-        key=lambda reissue: (reissue.completed_time or reissue.last_modified_time or reissue.created_time, reissue.id),
-        default=None,
     )
-    if latest_completed_reissue is not None:
-        reissue_status = "REISSUED"
-    elif any(reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"} for reissue in reissues):
-        reissue_status = "REISSUE_PENDING"
-    latest_red_offset = max(
-        red_offsets,
-        key=lambda red_offset: (red_offset.red_offset_time or red_offset.last_modified_time or red_offset.created_time, red_offset.id),
-        default=None,
+    has_completed_reissue = any(
+        reissue.status == "COMPLETED" and reissue.new_invoice_file_path
+        for reissue in reissues
     )
-    if latest_completed_reissue is not None:
-        return reissue_status, "REISSUED"
-    if latest_red_offset is not None:
-        return reissue_status, "RED_OFFSET"
-    return reissue_status, ("REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE")
+    if has_open_reissue:
+        return "REISSUE_PENDING", "REISSUE_PENDING"
+    if has_completed_reissue:
+        return "REISSUED", "REISSUED"
+    if red_offsets:
+        return "NONE", "RED_OFFSET"
+    return "NONE", "ACTIVE"
 
 
 def _current_invoice_file_fields(application, reissues: list, red_offsets: list) -> tuple[str | None, str | None, str | None, int | None]:
@@ -1344,46 +1334,14 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
 
     reissues = invoice_reissue_application_crud.get_by_original_invoice(db, application.id, team_id)
     red_offsets = invoice_red_offset_crud.get_by_invoice(db, application.id, team_id)
-    reissue_status = "NONE"
-    completed_reissues = [
-        reissue
-        for reissue in reissues
-        if reissue.status == "COMPLETED" and reissue.new_invoice_file_path
-    ]
-    latest_completed_reissue = max(
-        completed_reissues,
-        key=lambda reissue: (reissue.completed_time or reissue.last_modified_time or reissue.created_time, reissue.id),
-        default=None,
+    reissue_status, invoice_effective_status = _invoice_effective_status_from_maps(
+        application,
+        {application.id: reissues},
+        {application.id: red_offsets},
     )
-    if latest_completed_reissue is not None:
-        reissue_status = "REISSUED"
-    elif any(reissue.status in {"DRAFT", "PENDING_REVIEW", "APPROVED"} for reissue in reissues):
-        reissue_status = "REISSUE_PENDING"
-
-    latest_red_offset = max(
-        red_offsets,
-        key=lambda red_offset: (red_offset.red_offset_time or red_offset.last_modified_time or red_offset.created_time, red_offset.id),
-        default=None,
+    current_invoice_file_kind, current_invoice_file_path, current_invoice_number, current_reissue_id = (
+        _current_invoice_file_fields(application, reissues, red_offsets)
     )
-
-    if latest_completed_reissue is not None:
-        invoice_effective_status = "REISSUED"
-        current_invoice_file_kind = "reissue_new"
-        current_invoice_file_path = latest_completed_reissue.new_invoice_file_path
-        current_invoice_number = latest_completed_reissue.new_invoice_number
-        current_reissue_id = latest_completed_reissue.id
-    elif latest_red_offset is not None:
-        invoice_effective_status = "RED_OFFSET"
-        current_invoice_file_kind = None
-        current_invoice_file_path = None
-        current_invoice_number = None
-        current_reissue_id = None
-    else:
-        invoice_effective_status = "REISSUE_PENDING" if reissue_status == "REISSUE_PENDING" else "ACTIVE"
-        current_invoice_file_kind = "original" if application.invoice_file_path else None
-        current_invoice_file_path = application.invoice_file_path
-        current_invoice_number = application.invoice_number
-        current_reissue_id = None
 
     return InvoiceApplicationResponse(
         id=application.id,

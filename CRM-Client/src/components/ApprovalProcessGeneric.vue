@@ -89,6 +89,10 @@ const props = defineProps({
   title: {
     type: String,
     default: ''
+  },
+  allowResubmit: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -466,7 +470,7 @@ watch(
           撤回审批
         </Button>
         <Button
-          v-if="isSubmitter && canResubmit"
+          v-if="isSubmitter && canResubmit && allowResubmit"
           size="sm"
           data-testid="resubmit-btn"
           :disabled="actionPending || isLocked"

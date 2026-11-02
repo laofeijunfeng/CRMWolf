@@ -84,6 +84,16 @@ import { useUserStore } from '@/stores/user'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
+import {
+  buildReissueTimeline,
+  canCreateAnotherReissue,
+  canReviseReissue,
+  isOriginalBlueInvoiceBlocked,
+  latestCompletedReissue,
+  originalBlueFileName,
+  reissuePrefill,
+  type ReissueTimelineCard,
+} from '@/utils/invoiceReissueTimeline'
 import { logger } from '@/utils/logger'
 
 interface Props {
@@ -229,19 +239,14 @@ const canMarkIssued = computed<boolean>(() => {
     permissionStore.hasPermission('invoice:mark_issued')
 })
 
-const activeReissue = computed<InvoiceReissueApplicationResponse | null>(() => {
-  const reissues = invoiceInfo.value?.reissue_applications ?? []
-  return reissues.find((item) => ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(item.status)) ?? null
+const reissueTimeline = computed<ReissueTimelineCard[]>(() => {
+  return buildReissueTimeline(invoiceInfo.value?.reissue_applications ?? [])
 })
 
 const canCreateReissue = computed<boolean>(() => {
   const invoice = invoiceInfo.value
   if (invoice === null) return false
-  return invoice.status === 'ISSUED' &&
-    activeReissue.value === null &&
-    invoice.invoice_effective_status !== 'RED_OFFSET' &&
-    invoice.invoice_effective_status !== 'REISSUED' &&
-    permissionStore.hasPermission('invoice_reissue:create')
+  return canCreateAnotherReissue(invoice) && permissionStore.hasPermission('invoice_reissue:create')
 })
 
 const manualRedOffsets = computed<InvoiceRedOffsetResponse[]>(() => {
@@ -252,9 +257,10 @@ const canRedOffset = computed<boolean>(() => {
   const invoice = invoiceInfo.value
   if (invoice === null) return false
   return invoice.status === 'ISSUED' &&
-    activeReissue.value === null &&
+    latestCompletedReissue(invoice.reissue_applications) === null &&
     manualRedOffsets.value.length === 0 &&
     invoice.invoice_effective_status !== 'RED_OFFSET' &&
+    invoice.invoice_effective_status !== 'REISSUE_PENDING' &&
     invoice.invoice_effective_status !== 'REISSUED' &&
     permissionStore.hasPermission('invoice:mark_issued')
 })
@@ -286,65 +292,59 @@ const isSubmitterGeneric = computed<boolean>(() => {
   return invoiceInfo.value?.applicant_id === currentUserId.value
 })
 
+const originalInvoiceBlocked = computed<boolean>(() => {
+  const invoice = invoiceInfo.value
+  return invoice !== null && isOriginalBlueInvoiceBlocked(invoice)
+})
+
 const invoiceFiles = computed<FileAttachmentItem[]>(() => {
   const invoice = invoiceInfo.value
   if (invoice?.invoice_file_path === undefined || invoice.invoice_file_path === null) return []
 
+  const blocked = isOriginalBlueInvoiceBlocked(invoice)
   const file: FileAttachmentItem = {
     id: invoice.id,
-    name: getInvoiceFileName(invoice),
+    name: blocked ? originalBlueFileName(invoice.invoice_file_path) : getInvoiceFileName(invoice),
     extension: getFileExtension(invoice.invoice_file_path),
     status: invoiceFilePreviewLoading.value ? 'processing' : 'done',
   }
 
-  if (invoiceFilePreviewUrl.value.length > 0) {
+  if (!blocked && invoiceFilePreviewUrl.value.length > 0) {
     file.url = invoiceFilePreviewUrl.value
   }
 
-  if (invoice.invoice_number !== null && invoice.invoice_number.trim() !== '') {
+  if (blocked) {
+    file.description = '原蓝字发票已红冲，不能下载'
+  } else if (invoice.invoice_number !== null && invoice.invoice_number.trim() !== '') {
     file.description = `发票号码：${invoice.invoice_number}`
   }
 
   return [file]
 })
 
-const buildReissueFileName = (
-  reissue: InvoiceReissueApplicationResponse,
-  fileKind: ReissueFileKind,
-): string => {
-  const filePath = fileKind === 'red' ? reissue.red_invoice_file_path : reissue.new_invoice_file_path
-  const extension = getFileExtension(filePath)
-  const suffix = extension === '' ? '' : `.${extension}`
-  const fileLabel = fileKind === 'red' ? '红字发票' : '新蓝字发票'
-  return `${reissue.application_number}-${fileLabel}${suffix}`
-}
-
-const getReissueInvoiceFiles = (reissue: InvoiceReissueApplicationResponse): FileAttachmentItem[] => {
+const getReissueInvoiceFiles = (card: ReissueTimelineCard): FileAttachmentItem[] => {
+  const reissue = card.reissue
   const files: FileAttachmentItem[] = []
 
   if (reissue.red_invoice_file_path !== null && reissue.red_invoice_file_path.trim() !== '') {
-    const redFile: FileAttachmentItem = {
+    files.push({
       id: `reissue-${reissue.id}-red`,
-      name: buildReissueFileName(reissue, 'red'),
+      name: card.redFileName,
       extension: getFileExtension(reissue.red_invoice_file_path),
       status: 'done',
-    }
-    if (reissue.red_invoice_number !== null && reissue.red_invoice_number.trim() !== '') {
-      redFile.description = `发票号码：${reissue.red_invoice_number}`
-    }
-    files.push(redFile)
+      description: card.redCaption,
+    })
   }
 
   if (reissue.new_invoice_file_path !== null && reissue.new_invoice_file_path.trim() !== '') {
     const newFile: FileAttachmentItem = {
       id: `reissue-${reissue.id}-new`,
-      name: buildReissueFileName(reissue, 'new'),
+      name: card.newFileName,
       extension: getFileExtension(reissue.new_invoice_file_path),
       status: 'done',
+      description: card.newCaption,
     }
-    if (reissue.new_invoice_number !== null && reissue.new_invoice_number.trim() !== '') {
-      newFile.description = `发票号码：${reissue.new_invoice_number}`
-    }
+    if (card.isCurrent) newFile.descriptionTone = 'success'
     files.push(newFile)
   }
 
@@ -419,7 +419,7 @@ const loadInvoiceFilePreviewUrl = async (
 ): Promise<void> => {
   revokeInvoiceFilePreviewUrl()
   if (invoice.invoice_file_path === null || invoice.invoice_file_path.trim() === '') return
-  if (invoice.invoice_effective_status === 'REISSUED' || invoice.invoice_effective_status === 'RED_OFFSET') return
+  if (isOriginalBlueInvoiceBlocked(invoice)) return
 
   invoiceFilePreviewLoading.value = true
   try {
@@ -489,15 +489,7 @@ const resetState = (): void => {
 const fillReissueFormFromInvoice = (invoice: InvoiceApplicationResponse): void => {
   reissueForm.value = {
     reason: '',
-    invoice_title_type: (invoice.invoice_title_type === 'PERSONAL' ? 'PERSONAL' : 'COMPANY') as TitleType,
-    invoice_title_text: invoice.invoice_title_text,
-    invoice_taxpayer_id: invoice.invoice_taxpayer_id,
-    invoice_bank_name: invoice.invoice_bank_name ?? '',
-    invoice_bank_account: invoice.invoice_bank_account ?? '',
-    invoice_address: invoice.invoice_address ?? '',
-    invoice_phone: invoice.invoice_phone ?? '',
-    invoice_amount: Number(invoice.invoice_amount),
-    invoice_type: invoice.invoice_type,
+    ...reissuePrefill(invoice),
   }
 }
 
@@ -560,7 +552,7 @@ const submitReissueApproval = async (
 
 const handleEditReissue = (reissue: InvoiceReissueApplicationResponse): void => {
   if (reissue.applicant_id !== currentUserId.value) return
-  if (reissue.status !== 'DRAFT' && reissue.status !== 'REJECTED') return
+  if (!canReviseReissue(reissue, invoiceInfo.value?.reissue_applications ?? [])) return
   editingReissueApplication.value = reissue
   fillReissueFormFromReissue(reissue)
   reissueDialogOpen.value = true
@@ -920,7 +912,7 @@ const handleInvoiceIssued = async (): Promise<void> => {
 const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<void> => {
   const invoice = invoiceInfo.value
   if (invoice === null) return
-  if (invoice.invoice_effective_status === 'REISSUED' || invoice.invoice_effective_status === 'RED_OFFSET') {
+  if (isOriginalBlueInvoiceBlocked(invoice)) {
     toast.warning('原蓝字发票已红冲，不能下载')
     return
   }
@@ -938,7 +930,7 @@ const handleDownloadWithFeedback = async (_file?: FileAttachmentItem): Promise<v
 }
 
 const handlePreviewInvoiceFile = (_file: FileAttachmentItem): void => {
-  if (invoiceInfo.value?.invoice_effective_status === 'REISSUED' || invoiceInfo.value?.invoice_effective_status === 'RED_OFFSET') {
+  if (invoiceInfo.value !== null && isOriginalBlueInvoiceBlocked(invoiceInfo.value)) {
     toast.warning('原蓝字发票已红冲，不能预览')
     return
   }
@@ -1179,83 +1171,95 @@ onBeforeUnmount((): void => {
             </Card>
 
             <Card
-              v-for="reissue in invoiceInfo.reissue_applications"
-              :key="reissue.id"
+              v-for="card in reissueTimeline"
+              :key="card.reissue.id"
               class="info-card"
             >
               <CardHeader class="section-heading reissue-card-header">
                 <div class="reissue-card-heading">
                   <CardTitle class="section-title">重开记录</CardTitle>
                 </div>
-                <Button
-                  v-if="canCompleteReissue(reissue)"
-                  type="button"
-                  size="sm"
-                  @click="handleOpenCompleteReissue(reissue)"
-                >
-                  <Stamp data-icon="inline-start" aria-hidden="true" />
-                  完成重开
-                </Button>
+                <div class="reissue-card-actions">
+                  <Button
+                    v-if="canCompleteReissue(card.reissue)"
+                    type="button"
+                    size="sm"
+                    @click="handleOpenCompleteReissue(card.reissue)"
+                  >
+                    <Stamp data-icon="inline-start" aria-hidden="true" />
+                    完成重开
+                  </Button>
+                  <span class="reissue-card-meta">{{ card.heading }}</span>
+                </div>
               </CardHeader>
               <CardContent class="section-content">
                 <div class="attributes-grid">
                   <div class="attribute-item">
                     <span class="attribute-label">重开原因</span>
-                    <span class="attribute-value">{{ reissue.reason }}</span>
+                    <span class="attribute-value">{{ card.reissue.reason }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">新开票抬头</span>
-                    <span class="attribute-value">{{ reissue.invoice_title_text }}</span>
+                    <span class="attribute-value">{{ card.reissue.invoice_title_text }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">新税号</span>
-                    <span class="attribute-value mono-value">{{ reissue.invoice_taxpayer_id }}</span>
+                    <span class="attribute-value mono-value">{{ card.reissue.invoice_taxpayer_id }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">新开票金额</span>
-                    <AmountText class="attribute-amount" :value="reissue.invoice_amount" size="sm" tone="warning" />
+                    <AmountText class="attribute-amount" :value="card.reissue.invoice_amount" size="sm" tone="warning" />
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">新发票类型</span>
-                    <span class="attribute-value">{{ getInvoiceTypeText(reissue.invoice_type) }}</span>
+                    <span class="attribute-value">{{ getInvoiceTypeText(card.reissue.invoice_type) }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">红字发票号码</span>
-                    <span class="attribute-value mono-value">{{ formatText(reissue.red_invoice_number) }}</span>
+                    <span class="attribute-value mono-value">{{ formatText(card.reissue.red_invoice_number) }}</span>
                   </div>
                   <div class="attribute-item">
                     <span class="attribute-label">新发票号码</span>
-                    <span class="attribute-value mono-value">{{ formatText(reissue.new_invoice_number) }}</span>
+                    <span
+                      class="attribute-value mono-value"
+                      :class="{ 'reissue-number--current': card.isCurrent }"
+                    >{{ formatText(card.reissue.new_invoice_number) }}</span>
+                  </div>
+                  <div class="attribute-item">
+                    <span class="attribute-label">完成时间</span>
+                    <span class="attribute-value mono-value">{{ formatDateTime(card.reissue.completed_time) }}</span>
                   </div>
                 </div>
 
                 <div
-                  v-if="reissue.red_invoice_file_path || reissue.new_invoice_file_path"
+                  v-if="card.reissue.red_invoice_file_path || card.reissue.new_invoice_file_path"
                   class="invoice-detail-group"
                 >
                   <h4 class="invoice-detail-group-title">重开发票文件</h4>
                   <FileAttachment
                     mode="readonly"
-                    :files="getReissueInvoiceFiles(reissue)"
+                    :files="getReissueInvoiceFiles(card)"
                     :allow-preview="false"
+                    download-label="下载"
                     :show-header="false"
                     empty-text="暂无重开发票文件"
-                    @download="handleDownloadReissueAttachment(reissue, $event)"
+                    @download="handleDownloadReissueAttachment(card.reissue, $event)"
                   />
                 </div>
 
                 <div class="invoice-detail-group">
                   <ApprovalProcessGeneric
                     entity-type="INVOICE_REISSUE"
-                    :entity-id="reissue.id"
+                    :entity-id="card.reissue.id"
                     title="发票重开审批进度"
-                    :can-approve="canApproveReissue && reissue.status === 'PENDING_REVIEW'"
-                    :is-submitter="reissue.applicant_id === currentUserId"
+                    :can-approve="canApproveReissue && card.reissue.status === 'PENDING_REVIEW'"
+                    :is-submitter="card.reissue.applicant_id === currentUserId"
+                    :allow-resubmit="canReviseReissue(card.reissue, invoiceInfo.reissue_applications)"
                     @submitted="handleApprovalChanged"
                     @approved="handleApprovalChanged"
                     @rejected="handleApprovalChanged"
                     @withdrawn="handleApprovalChanged"
-                    @resubmit="handleEditReissue(reissue)"
+                    @resubmit="handleEditReissue(card.reissue)"
                   />
                 </div>
               </CardContent>
@@ -1366,8 +1370,9 @@ onBeforeUnmount((): void => {
                   <FileAttachment
                     mode="readonly"
                     :files="invoiceFiles"
-                    :allow-download="invoiceInfo.invoice_effective_status !== 'REISSUED' && invoiceInfo.invoice_effective_status !== 'RED_OFFSET'"
-                    :allow-preview="invoiceInfo.invoice_effective_status !== 'REISSUED' && invoiceInfo.invoice_effective_status !== 'RED_OFFSET'"
+                    :allow-download="!originalInvoiceBlocked"
+                    :allow-preview="!originalInvoiceBlocked"
+                    :download-disabled-label="originalInvoiceBlocked ? '不能下载' : ''"
                     :show-header="false"
                     empty-text="暂无发票文件"
                     @download="handleDownloadWithFeedback"
@@ -1987,6 +1992,26 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 
 .reissue-card-heading {
   min-width: 0;
+}
+
+.reissue-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $wolf-space-sm-v2;
+  margin-left: auto;
+}
+
+.reissue-card-meta {
+  color: $wolf-text-tertiary-v2;
+  font-size: $wolf-font-size-caption-v2;
+  line-height: $wolf-line-height-body-v2;
+  white-space: nowrap;
+}
+
+.reissue-number--current {
+  color: $wolf-success-text-v2;
+  font-weight: $wolf-font-weight-medium-v2;
 }
 
 .invoice-sheet-footer {

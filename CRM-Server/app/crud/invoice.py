@@ -323,12 +323,16 @@ class InvoiceApplicationCRUD:
                 )
             )
             status_predicates = []
-            if "REISSUED" in invoice_effective_status_values:
-                status_predicates.append(completed_reissue_exists)
-            if "RED_OFFSET" in invoice_effective_status_values:
-                status_predicates.append(and_(red_offset_exists, not_(completed_reissue_exists)))
             if "REISSUE_PENDING" in invoice_effective_status_values:
-                status_predicates.append(and_(not_(red_offset_exists), not_(completed_reissue_exists), pending_reissue_exists))
+                status_predicates.append(pending_reissue_exists)
+            if "REISSUED" in invoice_effective_status_values:
+                status_predicates.append(and_(completed_reissue_exists, not_(pending_reissue_exists)))
+            if "RED_OFFSET" in invoice_effective_status_values:
+                status_predicates.append(and_(
+                    red_offset_exists,
+                    not_(completed_reissue_exists),
+                    not_(pending_reissue_exists),
+                ))
             if "ACTIVE" in invoice_effective_status_values:
                 status_predicates.append(and_(not_(red_offset_exists), not_(completed_reissue_exists), not_(pending_reissue_exists)))
             if status_predicates:
@@ -688,7 +692,11 @@ class InvoiceReissueApplicationCRUD:
             raise ValueError("原发票申请不存在")
         if original_invoice.status != InvoiceApplicationStatus.ISSUED:
             raise ValueError("只有已开票的发票申请可以申请重开")
-        if invoice_red_offset_crud.get_by_invoice(db, original_invoice.id, team_id):
+        red_offsets = invoice_red_offset_crud.get_by_invoice(db, original_invoice.id, team_id)
+        if any(
+            red_offset.source_type == InvoiceRedOffsetSourceType.MANUAL or red_offset.reissue_application_id is None
+            for red_offset in red_offsets
+        ):
             raise ValueError("该发票已冲红，不可申请重开")
         if self.get_active_by_original_invoice(db, original_invoice.id, team_id):
             raise ValueError("该发票已有未完成的重开申请")
@@ -713,8 +721,7 @@ class InvoiceReissueApplicationCRUD:
         db_obj: InvoiceReissueApplication,
         obj_in: InvoiceReissueApplicationUpdate,
     ) -> InvoiceReissueApplication:
-        if db_obj.status not in [InvoiceReissueApplicationStatus.DRAFT, InvoiceReissueApplicationStatus.REJECTED]:
-            raise ValueError("只有草稿或已拒绝状态的重开申请可以编辑")
+        self._assert_can_revise(db, db_obj)
 
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -723,6 +730,28 @@ class InvoiceReissueApplicationCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def _assert_can_revise(self, db: Session, db_obj: InvoiceReissueApplication) -> None:
+        if db_obj.status not in [InvoiceReissueApplicationStatus.DRAFT, InvoiceReissueApplicationStatus.REJECTED]:
+            raise ValueError("只有草稿或已拒绝状态的重开申请可以编辑")
+
+        active = self.get_active_by_original_invoice(db, db_obj.original_invoice_application_id, db_obj.team_id)
+        if active is not None and active.id != db_obj.id:
+            raise ValueError("该发票已有未完成的重开申请")
+
+        newer = db.query(InvoiceReissueApplication.id).filter(
+            InvoiceReissueApplication.team_id == db_obj.team_id,
+            InvoiceReissueApplication.original_invoice_application_id == db_obj.original_invoice_application_id,
+            or_(
+                InvoiceReissueApplication.created_time > db_obj.created_time,
+                and_(
+                    InvoiceReissueApplication.created_time == db_obj.created_time,
+                    InvoiceReissueApplication.id > db_obj.id,
+                ),
+            ),
+        ).first()
+        if newer is not None:
+            raise ValueError("这一张重开申请已不能再修改")
 
     def complete(
         self,

@@ -47,6 +47,8 @@ const props = withDefaults(defineProps<{
   allowRemove?: boolean
   previewInDialog?: boolean
   showHeader?: boolean
+  downloadDisabledLabel?: string
+  downloadLabel?: string
 }>(), {
   mode: 'readonly',
   title: '附件',
@@ -62,7 +64,9 @@ const props = withDefaults(defineProps<{
   allowDownload: true,
   allowRemove: true,
   previewInDialog: true,
-  showHeader: true
+  showHeader: true,
+  downloadDisabledLabel: '',
+  downloadLabel: ''
 })
 
 const emit = defineEmits<{
@@ -308,7 +312,10 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
           </div>
           <div v-if="hasMeta(file)" class="file-attachment__meta">
             <span v-if="formatSize(file.size)">{{ formatSize(file.size) }}</span>
-            <span v-if="file.description">{{ file.description }}</span>
+            <span
+              v-if="file.description"
+              :class="{ 'file-attachment__description--success': file.descriptionTone === 'success' }"
+            >{{ file.description }}</span>
             <span v-if="shouldShowStatus(file)" class="file-attachment__status">{{ getStatusText(file) }}</span>
           </div>
           <Progress
@@ -335,7 +342,27 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
             <Eye class="w-4 h-4" aria-hidden="true" />
           </Button>
           <Button
-            v-if="allowDownload"
+            v-if="(downloadDisabledLabel ?? '').trim() !== ''"
+            type="button"
+            variant="outline"
+            size="sm"
+            class="file-attachment__download-disabled"
+            disabled
+          >
+            {{ downloadDisabledLabel }}
+          </Button>
+          <Button
+            v-else-if="(downloadLabel ?? '').trim() !== '' && allowDownload"
+            type="button"
+            variant="outline"
+            size="sm"
+            class="file-attachment__download-label"
+            @click="handleDownload(file)"
+          >
+            {{ downloadLabel }}
+          </Button>
+          <Button
+            v-else-if="allowDownload"
             type="button"
             variant="ghost"
             size="icon"
@@ -566,6 +593,19 @@ const renderDocxPreview = async (file: FileAttachmentItem): Promise<void> => {
   display: inline-flex;
   align-items: center;
   gap: $wolf-space-xs-v2;
+}
+
+.file-attachment__description--success {
+  color: $wolf-success-text-v2;
+}
+
+.file-attachment__download-disabled,
+.file-attachment__download-label {
+  min-width: 72px;
+}
+
+.file-attachment__download-disabled {
+  color: $wolf-text-tertiary-v2;
 }
 
 .file-attachment__action {

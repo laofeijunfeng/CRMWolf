@@ -11,6 +11,7 @@ export interface FileAttachmentItem {
   progress?: number
   errorMessage?: string
   description?: string
+  descriptionTone?: 'muted' | 'success'
 }
 
 export type FileAttachmentMode = 'readonly' | 'upload' | 'manage'
