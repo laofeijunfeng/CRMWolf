@@ -31,6 +31,7 @@ from app.services.agent.ui.schemas import (
     RetryAction,
     TextBlock,
 )
+from app.services.assistant.activity_channel import CANONICAL_KINDS, kind_choice_candidates
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
     QUALITY_GATE_FAILURE_MESSAGE,
@@ -40,6 +41,7 @@ from app.services.assistant.failure_contract import (
     root_failure_code,
     root_failure_presentation,
 )
+from app.services.customer_activity_kinds import ACTIVITY_KIND_META
 
 if TYPE_CHECKING:
     from app.schemas.assistant import AssistantTaskView
@@ -81,13 +83,7 @@ _ERROR_TITLES: dict[str, str] = {
 }
 _KIND_LABELS: dict[str, str] = {
     "FOLLOW_UP": "跟进",
-    "PHONE_FOLLOW_UP": "电话跟进",
-    "WECHAT_FOLLOW_UP": "微信跟进",
-    "EMAIL_FOLLOW_UP": "邮件跟进",
-    "VISIT_FOLLOW_UP": "拜访跟进",
-    "OTHER_FOLLOW_UP": "其他跟进",
-    "ONLINE_MEETING": "线上会议",
-    "OFFLINE_MEETING": "线下会议",
+    **{kind: str(meta["label"]) for kind, meta in ACTIVITY_KIND_META.items()},
 }
 _FIELD_LABELS: dict[str, str] = {
     "customer": "客户名称",
@@ -96,11 +92,6 @@ _FIELD_LABELS: dict[str, str] = {
     "next_follow_time": "下次跟进时间",
     "temporal_choice": "下次跟进时间",
 }
-_ACTIVITY_KIND_OPTIONS: tuple[tuple[str, str, str], ...] = (
-    ("ONLINE_MEETING", "线上会议", "远程沟通"),
-    ("OFFLINE_MEETING", "线下会议", "面谈拜访"),
-    ("FOLLOW_UP", "普通跟进", "电话/微信"),
-)
 _PROPOSAL_LABELS: dict[str, str] = {
     "opportunity_create": "创建商机",
     "opportunity_stage": "推进商机",
@@ -120,6 +111,7 @@ def finalize_assistant_ui(
 
     _ensure_current_waiting(messages, focused_task)
     live_id = _live_waiting_message_id(messages, focused_task)
+    submitted_kind = _resolved_activity_kind(focused_task)
     for message in messages:
         if message.role != "assistant":
             message.ui = None
@@ -130,14 +122,34 @@ def finalize_assistant_ui(
             and pending_choice is not None
             and message.boundary.entry_id == pending_choice.entry_id
         )
+        same_task = (
+            focused_task is not None
+            and message.task is not None
+            and message.task.public_id == focused_task.public_id
+        )
         try:
             message.ui = project_assistant_message(
                 message,
                 active_waiting=active_waiting,
                 active_boundary=active_boundary,
+                submitted_kind=submitted_kind if same_task else None,
             )
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
+
+
+def _resolved_activity_kind(focused_task: AssistantTaskView | None) -> str | None:
+    """The concrete kind the user already fixed on the focused task, if any."""
+
+    if focused_task is None:
+        return None
+    waiting = focused_task.waiting
+    payload = waiting.confirmation_payload if waiting is not None else None
+    preview = payload.preview if payload is not None and payload.kind == "activity_write" else None
+    for kind in (preview.activity_kind if preview is not None else None, focused_task.draft.channel_kind):
+        if kind in CANONICAL_KINDS:
+            return kind
+    return None
 
 
 
@@ -166,6 +178,7 @@ def project_assistant_message(
     *,
     active_waiting: bool,
     active_boundary: bool,
+    submitted_kind: str | None = None,
 ) -> AgentUIEnvelope:
     """Build the only Web-visible blocks for one assistant message."""
 
@@ -184,7 +197,7 @@ def project_assistant_message(
         )
     waiting = message.task.waiting if message.task is not None else None
     if waiting is not None:
-        blocks = _waiting_blocks(message, waiting, active=active_waiting)
+        blocks = _waiting_blocks(message, waiting, active=active_waiting, submitted_kind=submitted_kind)
         return _envelope(message, blocks, route="WORKFLOW")
     text = _plain(message.text) or _UNAVAILABLE
     return _envelope(message, (_text_block(text),), route="WORKFLOW" if message.task else "CHITCHAT")
@@ -357,9 +370,12 @@ def _waiting_blocks(
     waiting: TaskWaiting,
     *,
     active: bool,
+    submitted_kind: str | None = None,
 ) -> tuple[TextBlock | NoticeBlock | InteractionBlock, ...]:
     prompt = _plain(waiting.prompt) or _plain(message.text) or _UNAVAILABLE
-    interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active)
+    interaction = _waiting_interaction(
+        message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind
+    )
     blocks: list[TextBlock | NoticeBlock | InteractionBlock] = []
     prose = _plain(message.text)
     if prose and prose != prompt:
@@ -378,6 +394,7 @@ def _waiting_interaction(
     *,
     prompt: str,
     active: bool,
+    submitted_kind: str | None = None,
 ) -> InteractionBlock:
     action_id = _action_id(waiting)
     if waiting.type == "CONFIRMATION" and waiting.confirmation_payload is not None:
@@ -389,10 +406,9 @@ def _waiting_interaction(
             active=active,
             action_id=action_id,
             business_action="select_activity_kind",
-            options=[
-                InteractionOption(value=value, label=label, description=description)
-                for value, label, description in _ACTIVITY_KIND_OPTIONS
-            ],
+            options=_activity_kind_options(waiting),
+            hint=waiting.hint,
+            submitted=None if active else submitted_kind,
         )
     if waiting.type == "OBJECT_SELECTION" or (waiting.type == "FIELD" and waiting.field == "temporal_choice"):
         options = _candidate_options(waiting.candidates)
@@ -550,22 +566,50 @@ def _choice(
     action_id: str,
     business_action: str,
     options: list[InteractionOption],
+    hint: str | None = None,
+    submitted: str | None = None,
 ) -> InteractionBlock:
+    settled = submitted is not None
     return InteractionBlock(
         id="b_interaction_1",
         type="interaction",
         interaction_id=_interaction_id(message),
         interaction_type="choice",
         business_action=business_action,
-        state="ACTIVE" if active else "READ_ONLY",
+        state="ACTIVE" if active else "SUBMITTED" if settled else "READ_ONLY",
         prompt=prompt,
         options=options,
+        hint=hint,
         selection_mode="single",
         min_selections=1,
         max_selections=1,
         submit_on_select=True,
+        submitted_values={"choice": submitted} if settled and not active else None,
         submit_action_id=action_id if active else None,
     )
+
+
+def _activity_kind_options(waiting: TaskWaiting) -> list[InteractionOption]:
+    """The 7 concrete kinds the server issued with this waiting."""
+
+    source = waiting.candidates or kind_choice_candidates()
+    options: list[InteractionOption] = []
+    for candidate in source:
+        value = candidate.get("id")
+        label = candidate.get("label")
+        if not isinstance(value, str) or not value or not isinstance(label, str) or not label:
+            continue
+        description = candidate.get("description")
+        group = candidate.get("group")
+        options.append(
+            InteractionOption(
+                value=value,
+                label=label,
+                description=description if isinstance(description, str) and description else None,
+                group=group if isinstance(group, str) and group else None,
+            )
+        )
+    return options
 
 
 def _text_input(

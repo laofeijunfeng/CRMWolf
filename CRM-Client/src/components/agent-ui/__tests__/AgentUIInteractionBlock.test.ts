@@ -98,7 +98,7 @@ it('renders submitted text input as immutable text instead of an empty editor', 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   expect(wrapper.text()).toContain(`补充跟进信息：${submittedText}`)
-  expect(wrapper.text()).toContain('已提交')
+  expect(wrapper.text()).toContain('已处理')
   expect(wrapper.find('textarea').exists()).toBe(false)
   expect(wrapper.find('button').exists()).toBe(false)
 })
@@ -185,7 +185,7 @@ it('renders a submitted choice as immutable text and keeps the final choice visi
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：否')
-  expect(wrapper.text()).toContain('已提交')
+  expect(wrapper.text()).toContain('已处理')
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
 
@@ -633,4 +633,222 @@ it('replays a historical activity confirmation without write actions', () => {
   const basis = wrapper.get('details.activity-basis')
   expect(basis.attributes('open')).toBeUndefined()
   expect(basis.text()).toContain('当时的识别来源')
+})
+
+const KIND_OPTIONS = [
+  { value: 'ONLINE_MEETING', label: '线上会议', description: '远程会议', group: '会议' },
+  { value: 'OFFLINE_MEETING', label: '线下会议', description: '当面开会', group: '会议' },
+  { value: 'WECHAT_FOLLOW_UP', label: '微信跟进', description: '微信 / 企业微信', group: '跟进' },
+  { value: 'OTHER_FOLLOW_UP', label: '其他跟进', description: '以上都不是', group: '跟进' }
+]
+
+it('groups the activity kinds and shows the wording that triggered the question', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_choice',
+    type: 'interaction',
+    interaction_id: 'ix_kind_choice',
+    interaction_type: 'choice',
+    business_action: 'select_activity_kind',
+    state: 'ACTIVE',
+    prompt: '这次沟通属于哪种活动？',
+    hint: '原文提到：微信、线上会议',
+    fields: [],
+    facts: [],
+    options: KIND_OPTIONS,
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submit_action_id: 'act_kind'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  const headings = wrapper.findAll('div[role="group"] > p').map(heading => heading.text())
+  expect(headings).toEqual(['会议', '跟进', '原始内容已保存。选一项就定下类型，确认写入前仍可修改。'])
+  expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('原文提到：')
+  expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('微信')
+  expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('请按本次实际发生的沟通来选')
+  expect(wrapper.text()).not.toContain('原文提到：微信、线上会议')
+
+  const options = wrapper.findAll('button')
+  expect(options.map(button => button.text())).toEqual([
+    '线上会议远程会议', '线下会议当面开会', '微信跟进微信 / 企业微信', '其他跟进以上都不是'
+  ])
+  expect(options.every(button => button.attributes('aria-pressed') === 'false')).toBe(true)
+
+  await options[2]?.trigger('click')
+  expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind', { choice: 'WECHAT_FOLLOW_UP' }])
+})
+
+it('keeps a resolved activity kind read-only with its origin', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_history',
+    type: 'interaction',
+    interaction_id: 'ix_kind_history',
+    interaction_type: 'choice',
+    business_action: 'select_activity_kind',
+    state: 'SUBMITTED',
+    prompt: '这次沟通属于哪种活动？',
+    hint: '原文提到：微信',
+    fields: [],
+    facts: [],
+    options: KIND_OPTIONS,
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submitted_values: { choice: 'WECHAT_FOLLOW_UP' },
+    submit_action_id: null
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：微信跟进')
+  expect(wrapper.text()).toContain('历史交互不再提供可再次提交的按钮。')
+  expect(wrapper.text()).toContain('已处理')
+  expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
+  expect(wrapper.findAll('button')).toHaveLength(0)
+})
+
+it('offers a retry with the same choice when the card never reported an outcome', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_failed',
+    type: 'interaction',
+    interaction_id: 'ix_kind_failed',
+    interaction_type: 'choice',
+    business_action: 'select_activity_kind',
+    state: 'ACTIVE',
+    prompt: '这次沟通属于哪种活动？',
+    hint: null,
+    fields: [],
+    facts: [],
+    options: KIND_OPTIONS,
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submit_action_id: 'act_kind_failed'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, {
+    props: { block, notice: { kind: 'failed', choice: 'WECHAT_FOLLOW_UP', clientRequestId: 'req_1' } }
+  })
+
+  expect(wrapper.text()).toContain('提交失败')
+  expect(wrapper.get('[data-agent-ui-card-notice="failed"]').text())
+    .toContain('选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。')
+  expect(wrapper.get('button[aria-pressed="true"]').text()).toContain('微信跟进')
+
+  await wrapper.get('[data-agent-ui-card-notice="failed"] button').trigger('click')
+  expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind_failed', { choice: 'WECHAT_FOLLOW_UP' }])
+})
+
+it('keeps the kind card open when the submitted choice is outside the card', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_invalid',
+    type: 'interaction',
+    interaction_id: 'ix_kind_invalid',
+    interaction_type: 'choice',
+    business_action: 'select_activity_kind',
+    state: 'ACTIVE',
+    prompt: '这次沟通属于哪种活动？',
+    hint: '原文提到：微信',
+    fields: [],
+    facts: [],
+    options: KIND_OPTIONS,
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submit_action_id: 'act_kind_invalid'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block, notice: { kind: 'invalid' } } })
+
+  expect(wrapper.text()).toContain('待处理')
+  expect(wrapper.text()).not.toContain('已过期')
+  expect(wrapper.get('[data-agent-ui-card-notice="invalid"]').text())
+    .toContain('请从卡片给出的活动类型中选择。')
+  expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('微信')
+  expect(wrapper.findAll('button').some((button) => button.text().includes('微信跟进'))).toBe(true)
+})
+
+it('refuses further submissions once the card is stale', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_expired',
+    type: 'interaction',
+    interaction_id: 'ix_kind_expired',
+    interaction_type: 'choice',
+    business_action: 'select_activity_kind',
+    state: 'ACTIVE',
+    prompt: '这次沟通属于哪种活动？',
+    hint: '原文提到：微信',
+    fields: [],
+    facts: [],
+    options: KIND_OPTIONS,
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submit_action_id: 'act_kind_expired'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block, notice: { kind: 'expired' } } })
+
+  expect(wrapper.text()).toContain('已过期')
+  expect(wrapper.get('[data-agent-ui-card-notice="expired"]').text())
+    .toContain('这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。')
+  expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
+  expect(wrapper.findAll('button')).toHaveLength(0)
+})
+
+it('shows the chosen kind with its origin and only same-category revisions', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_kind_confirm',
+    type: 'interaction',
+    interaction_id: 'ix_kind_confirm',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '某科技公司', group: 'write' },
+      { key: 'summary', label: '摘要', value: '微信确认了合同条款。', group: 'write' },
+      {
+        key: 'activity_kind',
+        label: '活动类型',
+        value: '微信跟进',
+        group: 'activity_kind',
+        status_label: '已选择',
+        source: '你选择：微信跟进',
+        options: [
+          { value: 'PHONE_FOLLOW_UP', label: '电话跟进', disabled: false },
+          { value: 'WECHAT_FOLLOW_UP', label: '微信跟进', disabled: false }
+        ]
+      }
+    ],
+    options: [
+      { value: 'cancel', label: '取消', disabled: false },
+      { value: 'confirm', label: '确认写入', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_kind_confirm'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.get('.activity-caption').text()).toBe('你选择：微信跟进')
+  expect(wrapper.find('details.activity-basis').exists()).toBe(false)
+
+  await wrapper.get('button.activity-link').trigger('click')
+  expect(wrapper.get('button.activity-link').text()).toBe('收起类型选项')
+  expect(wrapper.text()).toContain('不会重新生成正文')
+  const revisions = wrapper.findAll('button.activity-kind-option')
+  expect(revisions.map(button => button.text())).toEqual(['电话跟进', '微信跟进'])
+
+  await revisions[0]?.trigger('click')
+  expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind_confirm', { revise_activity_kind: 'PHONE_FOLLOW_UP' }])
 })

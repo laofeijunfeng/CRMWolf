@@ -21,9 +21,11 @@ from app.models.customer_legacy_source_progress import CustomerLegacySourceProgr
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskEvent
 from app.models.team import Team, UserTeam
 from app.models.user import User
+from app.services.assistant.activity_channel import kind_choice_candidates
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.coordinator import AssistantCoordinator, AssistantInput
 from app.services.assistant.real_writer import RealActivityWriter
+from app.services.assistant.task_state import load_draft
 
 
 @compiles(BigInteger, "sqlite")
@@ -428,15 +430,25 @@ async def test_kind_selection_prepares_frozen_confirmation_without_chooser(db):
         TaskUpdate(
             draft=initial,
             waiting=TaskWaiting(
-                type="ACTIVITY_KIND", field="activity_kind", question_id="q_kind", prompt="请选择活动类型"
+                type="ACTIVITY_KIND",
+                field="activity_kind",
+                question_id="q_kind",
+                prompt="这次沟通属于哪种活动？",
+                candidates=kind_choice_candidates(),
             ),
             action_actor="SYSTEM",
             action_name="ask_activity_kind",
         ),
     ).task
 
+    structured: list[str] = []
+
     class Structurer:
+        async def classify(self, db, *, team_id, user_text):
+            raise AssertionError("a chosen kind must not be re-classified")
+
         async def structure(self, db, *, team_id, kind, user_text):
+            structured.append(kind)
             return StructureDraftResult(
                 kind_confirmed=kind,
                 content=initial.content.value or "",
@@ -449,10 +461,20 @@ async def test_kind_selection_prepares_frozen_confirmation_without_chooser(db):
             return QualityGateOutcome(True, 83, "完整", None, None, {})
 
     outcome = await AssistantCoordinator(NoChooser(), structurer=Structurer(), quality_gate=Gate()).handle_task(
-        session, task, AssistantInput(kind="submit_field", choice="FOLLOW_UP")
+        session, task, AssistantInput(kind="submit_field", choice="WECHAT_FOLLOW_UP")
     )
-    assert outcome.reply.waiting and outcome.reply.waiting.type == "CONFIRMATION"
+    waiting = outcome.reply.waiting
+    assert waiting is not None and waiting.type == "CONFIRMATION"
+    # The concrete kind is frozen onto the task so no chooser can reappear.
+    assert outcome.task.activity_kind == "FOLLOW_UP"
+    assert load_draft(outcome.task).channel_kind == "WECHAT_FOLLOW_UP"
+    preview = waiting.confirmation_payload.preview
+    assert preview.activity_kind == "WECHAT_FOLLOW_UP"
+    assert preview.channel_status_label == "已选择"
+    assert preview.channel_source_text == "你选择：微信跟进"
     assert outcome.task.authority_json["frozen_activity_command"]["customer_public_id"] == customer.public_id
+    assert structured == ["FOLLOW_UP"]
+    assert waiting.confirmation_payload.preview.activity_kind == "WECHAT_FOLLOW_UP"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,15 @@ const CONTENT =
   '客户方王总确认POC部署可行预算下季度；李经理要求先交安全测评报告；我方张工承诺周五前交数据出境说明；下周三王总反馈批复'
 const NEXT_ACTION = '下周三王总反馈立项批复结果'
 const VAGUE_TEXT = '记一下今天跟客户的沟通，聊得还行，具体再说'
+const KIND_LABELS: Record<string, string> = {
+  ONLINE_MEETING: '线上会议',
+  OFFLINE_MEETING: '线下会议',
+  PHONE_FOLLOW_UP: '电话跟进',
+  WECHAT_FOLLOW_UP: '微信跟进',
+  EMAIL_FOLLOW_UP: '邮件跟进',
+  VISIT_FOLLOW_UP: '拜访跟进',
+  OTHER_FOLLOW_UP: '其他跟进'
+}
 
 interface Waiting {
   type: 'FIELD' | 'CONFIRMATION' | 'ACTIVITY_KIND' | null
@@ -71,7 +80,7 @@ async function cancelActiveTasks(page: Page): Promise<void> {
         page.request
           .post(`http://localhost:8000/api/v1/assistant/tasks/${t.public_id}/submit`, {
             headers: { ...AUTH, 'Content-Type': 'application/json' },
-            data: { kind: 'cancel' },
+            data: { kind: 'cancel', client_request_id: `cancel-${t.public_id}-${Date.now()}` },
             timeout: 90_000,
             failOnStatusCode: false
           })
@@ -124,7 +133,7 @@ async function apiDrive(
   const textarea = page.locator('textarea').first()
   const create = await page.request.post('http://localhost:8000/api/v1/assistant/tasks', {
     headers: { ...AUTH, 'Content-Type': 'application/json' },
-    data: { goal: opening.slice(0, 2000) },
+    data: { goal: opening.slice(0, 2000), client_request_id: `open-${Date.now()}` },
     timeout: 30_000
   })
   const task = (await create.json()) as { public_id: string }
@@ -135,8 +144,8 @@ async function apiDrive(
     const kind = choice !== null ? 'submit_field' : 'text'
     const payload =
       choice !== null
-        ? { kind, text: null, choice }
-        : { kind, text: sendText, choice: null }
+        ? { kind, text: null, choice, client_request_id: `turn-${task.public_id}-${Date.now()}` }
+        : { kind, text: sendText, choice: null, client_request_id: `turn-${task.public_id}-${Date.now()}` }
     await page.request
       .post(`http://localhost:8000/api/v1/assistant/tasks/${task.public_id}/submit`, {
         headers: { ...AUTH, 'Content-Type': 'application/json' },
@@ -212,7 +221,7 @@ async function driveToCard(
     if (state.waiting.type === 'ACTIVITY_KIND') {
       if (opts.pickKind === '__WAIT__') return
       const target = opts.pickKind ?? 'ONLINE_MEETING'
-      const label = target === 'FOLLOW_UP' ? '普通跟进' : target === 'OFFLINE_MEETING' ? '线下会议' : '线上会议'
+      const label = KIND_LABELS[target] ?? '线上会议'
       const btn = page.getByRole('button', { name: label, exact: false })
       // Cache may be stale: force-refresh state when the live card looks disabled.
       const enabled = await btn.last().isEnabled({ timeout: 5_000 }).catch(() => false)
@@ -301,7 +310,7 @@ async function settleTail(page: Page, mode: 'confirm' | 'reject'): Promise<void>
         await page.request
           .post(`http://localhost:8000/api/v1/assistant/tasks/${body.public_id}/submit`, {
             headers: { ...AUTH, 'Content-Type': 'application/json' },
-            data: { kind: 'cancel' },
+            data: { kind: 'cancel', client_request_id: `cancel-${body.public_id}-${Date.now()}` },
             timeout: 60_000,
             failOnStatusCode: false
           })
@@ -314,8 +323,8 @@ async function settleTail(page: Page, mode: 'confirm' | 'reject'): Promise<void>
     }
     const payload =
       kind === 'submit_field'
-        ? { kind, text: (field || '').includes('customer') ? CUSTOMER : NEXT_ACTION, choice: w?.type === 'ACTIVITY_KIND' ? 'ONLINE_MEETING' : null }
-        : { kind, text: null, choice: kind }
+        ? { kind, text: (field || '').includes('customer') ? CUSTOMER : NEXT_ACTION, choice: w?.type === 'ACTIVITY_KIND' ? 'ONLINE_MEETING' : null, client_request_id: `settle-${body.public_id}-${Date.now()}` }
+        : { kind, text: null, choice: kind, client_request_id: `settle-${body.public_id}-${Date.now()}` }
     await page.request
       .post(`http://localhost:8000/api/v1/assistant/tasks/${body.public_id}/submit`, {
         headers: { ...AUTH, 'Content-Type': 'application/json' },
@@ -363,9 +372,9 @@ test('s1 layout & idle state', async ({ page }) => {
 
 /**
  * 场景 2 · 活动类型不明，只问一次
- * A vague message lands on the ACTIVITY_KIND card with three options.
+ * A vague message lands on the ACTIVITY_KIND card with the seven flat options.
  */
-test('s2 vague text asks activity kind once with three options', async ({ page }) => {
+test('s2 vague text asks activity kind once with seven grouped options', async ({ page }) => {
   test.setTimeout(300_000)
   await cancelActiveTasks(page)
   await page.goto('/assistant')
@@ -374,12 +383,14 @@ test('s2 vague text asks activity kind once with three options', async ({ page }
   // Vague text usually triggers the kind card; if the model instead asks a
   // field, that is also acceptable — assert whichever card appeared.
   await apiDrive(page, VAGUE_TEXT, { kind: '__STOP__' })
-  const kindBtn = page.getByRole('button', { name: '线上会议', exact: false })
   const state = await taskState(page)
   if (state.waiting.type === 'ACTIVITY_KIND') {
-    await expect(kindBtn.last()).toBeVisible()
-    await expect(page.getByRole('button', { name: '普通跟进', exact: false }).last()).toBeVisible()
-    await expect(page.getByRole('button', { name: '线下会议', exact: false }).last()).toBeVisible()
+    const card = page.locator('[data-block-type="interaction"]').last()
+    for (const label of ['线上会议', '线下会议', '电话跟进', '微信跟进', '邮件跟进', '拜访跟进', '其他跟进']) {
+      await expect(card.getByRole('button', { name: label, exact: false })).toBeVisible()
+    }
+    await expect(card.getByText('会议', { exact: true })).toBeVisible()
+    await expect(card.getByText('跟进', { exact: true }).first()).toBeVisible()
   } else {
     // The model classified directly; any stable wait is acceptable.
     expect(['FIELD', 'CONFIRMATION', null]).toContain(state.waiting.type)
@@ -396,7 +407,7 @@ test('s3 follow-up confirmation card shows draft, lock, original', async ({ page
   await page.goto('/assistant')
   await awaitResumeSettled(page)
 
-  await apiDrive(page, `今天和${CUSTOMER}的王总电话沟通了POC部署，${CONTENT}`, { kind: 'FOLLOW_UP' })
+  await apiDrive(page, `今天和${CUSTOMER}的王总电话沟通了POC部署，${CONTENT}`, { kind: 'WECHAT_FOLLOW_UP' })
   const confirmBtn = page.getByRole('button', { name: '确认写入' })
   await expect(confirmBtn.last()).toBeVisible({ timeout: 180_000 })
 
@@ -451,13 +462,13 @@ test('s5 gap wait puts composer in controlled mode', async ({ page }) => {
   await page.goto('/assistant')
 
   // Vague content often triggers a quality gap on content/next_action.
-  await apiDrive(page, '今天和客户打了个电话，聊得还行', { kind: 'FOLLOW_UP' })
+  await apiDrive(page, '今天和客户打了个电话，聊得还行', { kind: 'WECHAT_FOLLOW_UP' })
   const state1 = await taskState(page)
   if (state1.waiting.type === 'CONFIRMATION') {
     // No gap appeared; answer a deliberate poor answer path: reject and start over with vaguer text.
     await settleTail(page, 'reject')
     await page.waitForTimeout(1_000)
-    await apiDrive(page, '昨天跟人聊了下，没啥具体内容', { kind: 'FOLLOW_UP' })
+    await apiDrive(page, '昨天跟人聊了下，没啥具体内容', { kind: 'WECHAT_FOLLOW_UP' })
   }
 
   const hint = page.getByText(/正在回答[：:]/)
@@ -489,7 +500,7 @@ test('s6 write receipt then serial proposals', async ({ page }) => {
   await page.goto('/assistant')
   await awaitResumeSettled(page)
 
-  await apiDrive(page, `今天和${CUSTOMER}的王总电话会，${CONTENT}`, { kind: 'FOLLOW_UP' })
+  await apiDrive(page, `今天和${CUSTOMER}的王总电话会，${CONTENT}`, { kind: 'WECHAT_FOLLOW_UP' })
   await settleTail(page, 'confirm')
   // The settle drove the write via API; reload resumes the task so the UI
   // replays the receipt and the live proposal card.
@@ -550,7 +561,7 @@ test('s8 unknown customer fails closed with retry guidance', async ({ page }) =>
   await awaitResumeSettled(page)
 
   await apiDrive(page, '今天和不存在公司XYZ通了个电话聊合作意向', {
-    kind: 'FOLLOW_UP',
+    kind: 'WECHAT_FOLLOW_UP',
     fieldAnswers: { customer: '不存在公司XYZ' }
   })
   // Either the confirm attempt retried customer, or a FIELD customer wait shows the message.

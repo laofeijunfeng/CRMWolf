@@ -1389,6 +1389,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -1746,6 +1759,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -3343,6 +3369,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -3700,6 +3739,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -5424,6 +5476,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -5781,6 +5846,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -7654,6 +7732,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -8011,6 +8102,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -10002,6 +10106,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -10359,6 +10476,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -11994,6 +12124,19 @@
               "title": "Prompt",
               "type": "string"
             },
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 400,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
             "fields": {
               "items": {
                 "$ref": "#/$defs/InteractionField"
@@ -12351,6 +12494,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
             },
             "disabled": {
               "default": false,
@@ -17617,6 +17773,19 @@
               "default": null,
               "title": "Description"
             },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
+            },
             "disabled": {
               "default": false,
               "title": "Disabled",
@@ -17831,6 +18000,19 @@
           "title": "Prompt",
           "type": "string"
         },
+        "hint": {
+          "anyOf": [
+            {
+              "maxLength": 400,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hint"
+        },
         "fields": {
           "items": {
             "$ref": "#/$defs/InteractionField"
@@ -17994,6 +18176,19 @@
               "default": null,
               "title": "Description"
             },
+            "group": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Group"
+            },
             "disabled": {
               "default": false,
               "title": "Disabled",
@@ -18156,6 +18351,19 @@
           ],
           "default": null,
           "title": "Description"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
         },
         "disabled": {
           "default": false,

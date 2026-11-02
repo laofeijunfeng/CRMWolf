@@ -217,7 +217,7 @@ def test_waiting_workflow_composes_server_owned_action_with_exact_continuation()
         "business_action": "select_customer",
         "submit_label": "提交",
         "submit_on_select": False,
-        "choices": [option.model_dump(mode="json") for option in interaction.options],
+        "choices": [option.model_dump(mode="json", exclude={"group"}) for option in interaction.options],
         "selection_mode": "single",
         "min_selections": 1,
         "max_selections": 1,
@@ -315,8 +315,9 @@ def test_confirmation_preserves_canonical_workflow_options() -> None:
     assert interaction.submit_on_select is True
     assert interaction.submit_label == "提交"
     assert [option.label for option in interaction.options] == ["确认创建", "取消"]
+    # Grouping is rendering metadata; the signed target keeps the four canonical keys.
     assert composition.action_drafts[0].target["choices"] == [
-        option.model_dump(mode="json") for option in interaction.options
+        option.model_dump(mode="json", exclude={"group"}) for option in interaction.options
     ]
 
 
@@ -496,6 +497,7 @@ def test_choice_keeps_authoritative_metadata_only_in_signed_action_target() -> N
         "value": "9",
         "label": "张三",
         "description": None,
+        "group": None,
         "disabled": False,
     }
     assert composition.action_drafts[0].target["choices"] == [

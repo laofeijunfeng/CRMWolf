@@ -5,6 +5,10 @@ from __future__ import annotations
 
 from app.schemas.assistant import AssistantTaskView
 from app.schemas.assistant_conversation import ConversationBoundary, ConversationMessage
+from app.services.assistant.activity_channel import (
+    FOLLOW_UP_KINDS,
+    kind_choice_candidates,
+)
 from app.services.assistant.contracts import (
     ActivityPreview,
     ActivityWriteConfirmation,
@@ -592,3 +596,86 @@ def test_confirmation_card_labels_a_full_month_without_a_default_day() -> None:
     assert "11月1日" not in values["customer_commitment"]
     assert "11月30" not in values["customer_commitment"]
     assert "00:00" not in values["next_follow_time"]
+
+
+def test_activity_kind_card_offers_the_seven_kinds_and_the_trigger_wording() -> None:
+    waiting = TaskWaiting(
+        type="ACTIVITY_KIND",
+        field="activity_kind",
+        question_id="q_kind",
+        prompt="这次沟通属于哪种活动？",
+        action_id="act_kind",
+        expected_version=1,
+        candidates=kind_choice_candidates(),
+        hint="原文提到：微信、线上会议",
+    )
+    message = _message("m_kind", waiting.prompt, _task(activity_kind=None, waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    assert interaction.state == "ACTIVE"
+    assert interaction.interaction_type == "choice"
+    assert interaction.business_action == "select_activity_kind"
+    assert interaction.submit_action_id == "act_kind"
+    assert interaction.submit_on_select is True
+    assert interaction.hint == "原文提到：微信、线上会议"
+    assert [option.value for option in interaction.options] == [
+        candidate["id"] for candidate in kind_choice_candidates()
+    ]
+    assert [option.group for option in interaction.options] == ["会议", "会议", "跟进", "跟进", "跟进", "跟进", "跟进"]
+    assert [option.label for option in interaction.options] == [
+        "线上会议",
+        "线下会议",
+        "电话跟进",
+        "微信跟进",
+        "邮件跟进",
+        "拜访跟进",
+        "其他跟进",
+    ]
+    assert interaction.options[3].description == "微信 / 企业微信"
+
+
+def test_history_keeps_the_chosen_kind_submitted_and_read_only() -> None:
+    kind_waiting = TaskWaiting(
+        type="ACTIVITY_KIND",
+        field="activity_kind",
+        question_id="q_kind",
+        prompt="这次沟通属于哪种活动？",
+        action_id="act_kind",
+        expected_version=1,
+        candidates=kind_choice_candidates(),
+        hint="原文提到：微信",
+    )
+    history = _message("m_kind", kind_waiting.prompt, _task(activity_kind=None, waiting=kind_waiting))
+    focused = _task(
+        activity_kind="FOLLOW_UP",
+        draft=TaskDraft(channel_kind="WECHAT_FOLLOW_UP"),
+        waiting=_confirmation(_preview(activity_kind="WECHAT_FOLLOW_UP")),
+    )
+
+    finalize_assistant_ui([history], focused_task=focused, pending_choice=None)
+
+    assert history.ui is not None
+    interaction = next(block for block in history.ui.blocks if block.type == "interaction")
+    assert interaction.state == "SUBMITTED"
+    assert interaction.submitted_values == {"choice": "WECHAT_FOLLOW_UP"}
+    assert interaction.submit_action_id is None
+
+
+def test_confirmation_names_the_chosen_kind_and_keeps_its_siblings_editable() -> None:
+    preview = _preview(
+        activity_kind="WECHAT_FOLLOW_UP",
+        channel_status="recognized",
+        channel_status_label="已选择",
+        channel_source_text="你选择：微信跟进",
+        channel_options=list(FOLLOW_UP_KINDS),
+    )
+    message = _message("m_confirm", "确认后写入这条客户活动？", _task(activity_kind="FOLLOW_UP", waiting=_confirmation(preview)))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    fact = next(item for item in interaction.facts if item.key == "activity_kind")
+    assert fact.value == "微信跟进"
+    assert fact.status_label == "已选择"
+    assert fact.source == "你选择：微信跟进"
+    assert [option.value for option in fact.options] == list(FOLLOW_UP_KINDS)

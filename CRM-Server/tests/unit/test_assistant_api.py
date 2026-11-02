@@ -726,12 +726,16 @@ def test_waiting_kind_field_and_confirmation_are_closed_choices(client, db_sessi
     ).json()["public_id"]
     task = db_session.query(AssistantTask).filter_by(public_id=task_id).one()
     url = f"/api/v1/assistant/tasks/{task_id}/submit"
-    for type, field, invalid in [
-        ("ACTIVITY_KIND", None, {"choice": "VIDEO_CALL"}),
-        ("FIELD", "content", {"choice": "EXPLICITLY_NONE", "text": "这条没有"}),
-        ("FIELD", "next_action", {"choice": "EXPLICITLY_NONE"}),
-        ("CONFIRMATION", "activity_write", {"choice": "maybe"}),
-    ]:
+    for index, (type, field, invalid) in enumerate(
+        [
+            ("ACTIVITY_KIND", None, {"choice": "VIDEO_CALL"}),
+            # The coarse family is gone; only the seven concrete kinds are valid.
+            ("ACTIVITY_KIND", None, {"choice": "FOLLOW_UP"}),
+            ("FIELD", "content", {"choice": "EXPLICITLY_NONE", "text": "这条没有"}),
+            ("FIELD", "next_action", {"choice": "EXPLICITLY_NONE"}),
+            ("CONFIRMATION", "activity_write", {"choice": "maybe"}),
+        ]
+    ):
         waiting = _issue_waiting(db_session, task, type=type, field=field)
         response = client.post(
             url,
@@ -739,7 +743,7 @@ def test_waiting_kind_field_and_confirmation_are_closed_choices(client, db_sessi
                 "kind": "confirm" if type == "CONFIRMATION" else "submit_field",
                 "action_id": waiting.action_id,
                 "expected_version": waiting.expected_version,
-                "client_request_id": f"invalid-{type}-{field}",
+                "client_request_id": f"invalid-{type}-{field}-{index}",
                 **invalid,
             },
         )

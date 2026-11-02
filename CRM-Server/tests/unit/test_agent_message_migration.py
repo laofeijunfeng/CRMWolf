@@ -728,6 +728,7 @@ def test_message_migration_projects_historical_choice_interaction_as_read_only(m
             "value": "cus_1",
             "label": "上海睿狐",
             "description": "上海客户",
+            "group": None,
             "disabled": False,
         }
         assert envelope.suggested_actions == []

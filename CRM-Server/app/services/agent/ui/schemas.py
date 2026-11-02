@@ -288,6 +288,7 @@ class InteractionOption(AgentUIContractModel):
     value: str = Field(min_length=1, max_length=500)
     label: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=1000)
+    group: str | None = Field(default=None, max_length=40)
     disabled: bool = False
 
 
@@ -355,6 +356,7 @@ class InteractionBlock(AgentUIBlockBase):
     disposition_items: list[OpenFollowUpDispositionCardItem] = Field(default_factory=list, max_length=100)
     state: Literal["ACTIVE", "SUBMITTED", "EXPIRED", "CANCELLED", "READ_ONLY"]
     prompt: str = Field(min_length=1, max_length=10000)
+    hint: str | None = Field(default=None, max_length=400)
     fields: list[InteractionField] = Field(default_factory=list, max_length=20)
     facts: list[InteractionConfirmationFact] = Field(default_factory=list, max_length=20)
     options: list[InteractionOption] = Field(default_factory=list, max_length=50)

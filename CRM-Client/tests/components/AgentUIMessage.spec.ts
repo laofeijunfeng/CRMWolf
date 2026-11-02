@@ -370,7 +370,7 @@ describe('AgentUIMessage', () => {
         expect(wrapper.text()).toContain('历史消息 · 已回放')
         expect(wrapper.text()).toContain('历史交互不再提供可再次提交的确认按钮。')
       } else {
-        expect(wrapper.text()).toContain('已提交')
+        expect(wrapper.text()).toContain('已处理')
       }
       expect(wrapper.emitted('interaction')).toBeUndefined()
     },

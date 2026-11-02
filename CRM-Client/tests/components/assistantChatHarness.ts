@@ -42,6 +42,17 @@ export const message = (id: string, text: string, task: AssistantTaskView | null
   id, role, text, at: '2026-10-23T14:00:00', task, boundary: null, outcome: null, ui: null
 })
 
+// Mirrors the server's kind_choice_candidates(): grouped, described, no default.
+const KIND_OPTIONS = [
+  { value: 'ONLINE_MEETING', label: '线上会议', description: '远程会议', group: '会议' },
+  { value: 'OFFLINE_MEETING', label: '线下会议', description: '当面开会', group: '会议' },
+  { value: 'PHONE_FOLLOW_UP', label: '电话跟进', description: '电话沟通', group: '跟进' },
+  { value: 'WECHAT_FOLLOW_UP', label: '微信跟进', description: '微信 / 企业微信', group: '跟进' },
+  { value: 'EMAIL_FOLLOW_UP', label: '邮件跟进', description: '邮件往来', group: '跟进' },
+  { value: 'VISIT_FOLLOW_UP', label: '拜访跟进', description: '上门拜访、面谈', group: '跟进' },
+  { value: 'OTHER_FOLLOW_UP', label: '其他跟进', description: '以上都不是', group: '跟进' }
+]
+
 const fixtureEnvelope = (
   item: ConversationView['messages'][number],
   active: boolean,
@@ -112,11 +123,14 @@ const fixtureEnvelope = (
     }
   }
   if (waiting?.type === 'OBJECT_SELECTION' || waiting?.type === 'ACTIVITY_KIND' || waiting?.field === 'temporal_choice') {
-    const options = waiting.type === 'ACTIVITY_KIND'
-      ? [{ value: 'ONLINE_MEETING', label: '线上会议' }, { value: 'OFFLINE_MEETING', label: '线下会议' }, { value: 'FOLLOW_UP', label: '普通跟进' }]
+    const isKind = waiting.type === 'ACTIVITY_KIND'
+    const options = isKind
+      ? KIND_OPTIONS.map((option) => ({ ...option, disabled: false }))
       : (waiting.candidates ?? []).map((candidate) => ({
           value: candidate.id,
-          label: 'account_name' in candidate ? candidate.account_name : candidate.label
+          label: 'account_name' in candidate ? candidate.account_name : candidate.label,
+          description: null,
+          disabled: false
         }))
     const choiceBlocks = item.text !== waiting.prompt
       ? [{ id: 'b_text_1', type: 'text' as const, format: 'plain' as const, text: item.text }]
@@ -125,10 +139,13 @@ const fixtureEnvelope = (
       ...base,
       blocks: [...choiceBlocks, {
         id: 'b_interaction_1', type: 'interaction', interaction_id: `ix-${item.id}`, interaction_type: 'choice',
-        business_action: waiting.field === 'temporal_choice' ? 'resolve_temporal_choice' : 'select_customer',
+        business_action: isKind
+          ? 'select_activity_kind'
+          : (waiting.field === 'temporal_choice' ? 'resolve_temporal_choice' : 'select_customer'),
         state: active ? 'ACTIVE' : 'READ_ONLY', prompt: waiting.prompt, fields: [], facts: [],
-        options: options.map((option) => ({ ...option, description: null, disabled: false })),
-        selection_mode: 'single', min_selections: 1, max_selections: 1, submit_on_select: true, submit_label: '提交',
+        hint: isKind ? (waiting.hint ?? null) : null,
+        options,
+        selection_mode: 'single' as const, min_selections: 1, max_selections: 1, submit_on_select: true, submit_label: '提交',
         allow_cancel: false, submit_action_id: active ? (waiting.action_id ?? 'act') : null
       }]
     }

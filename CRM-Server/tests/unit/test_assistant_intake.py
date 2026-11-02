@@ -149,7 +149,17 @@ async def test_unclear_kind_pauses_with_kind_question(db_session):
     assert waiting is not None
     assert waiting.type == AssistantWaitingType.ACTIVITY_KIND
     assert updated.activity_kind is None
-    assert "会议" in message
+    assert message == "这次沟通属于哪种活动？"
+    assert [candidate["id"] for candidate in waiting.candidates] == [
+        "ONLINE_MEETING",
+        "OFFLINE_MEETING",
+        "PHONE_FOLLOW_UP",
+        "WECHAT_FOLLOW_UP",
+        "EMAIL_FOLLOW_UP",
+        "VISIT_FOLLOW_UP",
+        "OTHER_FOLLOW_UP",
+    ]
+    assert waiting.hint is None
     assert structurer.calls == ["classify"]
 
 

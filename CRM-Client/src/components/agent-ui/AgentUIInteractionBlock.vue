@@ -16,6 +16,8 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import type { AgentUIBlock, JsonObject, JsonValue } from '@/schemas/agent-contracts'
 
+import type { InteractionNotice } from './interactionNotice'
+
 type InteractionBlock = Extract<AgentUIBlock, { type: 'interaction' }>
 type InteractionField = InteractionBlock['fields'][number]
 
@@ -24,6 +26,7 @@ const props = defineProps<{
   disabled?: boolean
   locked?: boolean
   grouped?: boolean
+  notice?: InteractionNotice | null
 }>()
 
 const emit = defineEmits<{
@@ -57,7 +60,9 @@ const submittedChoiceOption = computed(() => {
 })
 
 const resetValues = (): void => {
-  selectedValues.value = submittedChoiceValue.value === null ? [] : [submittedChoiceValue.value]
+  const failedChoice = props.notice?.kind === 'failed' ? props.notice.choice : null
+  const submitted = submittedChoiceValue.value
+  selectedValues.value = failedChoice !== null ? [failedChoice] : submitted === null ? [] : [submitted]
   fieldValues.value = Object.fromEntries(
     props.block.fields.map(field => [field.key, field.default_value])
   )
@@ -72,6 +77,7 @@ watch(
     props.block.state,
     props.block.submit_action_id,
     submittedChoiceValue.value,
+    props.notice?.kind ?? null,
   ] as const,
   resetValues,
   { immediate: true }
@@ -128,14 +134,22 @@ const compactStateLabel = computed(() => {
 })
 
 const stateLabel = computed(() => {
+  if (props.notice?.kind === 'expired') return '已过期'
+  if (props.notice?.kind === 'failed') return '提交失败'
   if (submitting.value) return '处理中'
   return ({
     ACTIVE: '待处理',
-    SUBMITTED: '已提交',
+    SUBMITTED: '已处理',
     EXPIRED: '已过期',
     CANCELLED: '已取消',
     READ_ONLY: '历史记录'
   })[props.block.state]
+})
+
+const stateLabelClass = computed(() => {
+  if (props.notice?.kind === 'failed') return 'border-[#fecaca] bg-[#fef2f2] text-[#b91c1c]'
+  if (props.notice?.kind === 'expired') return 'border-border bg-muted text-muted-foreground'
+  return 'border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]'
 })
 
 const controlsDisabled = computed(() => (
@@ -143,6 +157,7 @@ const controlsDisabled = computed(() => (
   || props.disabled === true
   || props.locked === true
   || submitting.value
+  || props.notice?.kind === 'expired'
 ))
 
 const submittedTextField = computed(() => {
@@ -208,7 +223,8 @@ const activityEvidenceLines = computed(() => (activityEvidence.value?.value ?? '
 const activityNotices = computed(() => props.block.facts.filter(fact => fact.key.startsWith('context_notice_')))
 const activitySourceFolded = computed(() => {
   const fact = activityKindFact.value
-  if (fact === undefined || fact.source === null || fact.source === undefined || fact.source === '' || fact.status_label === '未识别 · 需要确认') return ''
+  if (fact === undefined || fact.source === null || fact.source === undefined || fact.source === '') return ''
+  if (fact.status_label === '未识别 · 需要确认' || fact.status_label === '已选择') return ''
   return fact.source
 })
 const showActivityBasis = computed(() => activitySourceFolded.value !== '' || activityEvidenceLines.value.length > 0)
@@ -233,6 +249,48 @@ const activityKindPillClass = computed(() => {
   if (label.includes('高置信度') || label.includes('词表兜底')) return 'is-success'
   return 'is-info'
 })
+
+const isActivityKindChoice = computed(() => props.block.business_action === 'select_activity_kind')
+const KIND_HINT_PREFIX = '原文提到：'
+const kindHintChannels = computed((): string[] => {
+  const hint = props.block.hint ?? ''
+  if (!hint.startsWith(KIND_HINT_PREFIX)) return []
+  return hint.slice(KIND_HINT_PREFIX.length).split('、').map(part => part.trim()).filter(part => part !== '')
+})
+
+interface ChoiceEntry { option: InteractionBlock['options'][number]; index: number }
+interface ChoiceGroup { name: string | null; entries: ChoiceEntry[] }
+const choiceOptions = computed(() => (
+  isActivityConfirmation.value ? activityActionOptions.value : props.block.options
+))
+const choiceGroups = computed((): ChoiceGroup[] => {
+  const groups: ChoiceGroup[] = []
+  choiceOptions.value.forEach((option, index) => {
+    const name = typeof option.group === 'string' && option.group !== '' ? option.group : null
+    const current = groups[groups.length - 1]
+    if (current !== undefined && current.name === name) {
+      current.entries.push({ option, index })
+      return
+    }
+    groups.push({ name, entries: [{ option, index }] })
+  })
+  return groups
+})
+const showsChoiceOptions = computed(() => (
+  isActive.value
+  && (props.block.interaction_type === 'choice' || props.block.interaction_type === 'confirmation')
+  && props.notice?.kind !== 'expired'
+))
+
+const retryNoticeChoice = (): void => {
+  const notice = props.notice
+  const actionId = props.block.submit_action_id
+  if (notice === null || notice === undefined || notice.kind !== 'failed' || actionId === null) return
+  if (props.disabled === true || props.locked === true || submitting.value) return
+  selectedValues.value = [notice.choice]
+  submitting.value = true
+  emit('submit', actionId, { choice: notice.choice })
+}
 
 const kindOptionsVisible = (fact: InteractionBlock['facts'][number]): boolean => {
   if ((fact.options?.length ?? 0) === 0 || !isActive.value) return false
@@ -581,9 +639,10 @@ const submit = async (): Promise<void> => {
                 <div class="activity-kind">
                   <span class="activity-kind-name">{{ activityKindFact.value }}</span>
                   <span v-if="activityKindFact.status_label" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
-                  <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改类型' }}</button>
+                  <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}</button>
                 </div>
                 <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption"><span>为什么需要选择：</span>{{ activityKindFact.source }}</p>
+                <p v-else-if="activityKindFact.source && activityKindFact.status_label === '已选择'" class="activity-caption">{{ activityKindFact.source }}</p>
               </dd>
             </div>
           </dl>
@@ -636,7 +695,7 @@ const submit = async (): Promise<void> => {
         <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]" aria-hidden="true">?</span>
         <p :id="`${block.id}-prompt`" class="m-0 text-[13px] font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
       </div>
-      <span class="shrink-0 rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ stateLabel }}</span>
+      <span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium" :class="stateLabelClass">{{ stateLabel }}</span>
     </header>
 
     <div v-if="!isActivityConfirmation && block.facts.length > 0" class="grid gap-3" data-agent-ui-confirmation-facts>
@@ -661,7 +720,7 @@ const submit = async (): Promise<void> => {
                   class="w-fit text-xs text-primary underline-offset-2 hover:underline"
                   @click="kindEditorOpen = !kindEditorOpen"
                 >
-                  {{ kindEditorOpen ? '收起类型选项' : '修改类型' }}
+                  {{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}
                 </button>
                 <div v-if="kindOptionsVisible(fact)" class="flex flex-wrap gap-2">
                   <button
@@ -684,14 +743,47 @@ const submit = async (): Promise<void> => {
     </div>
 
     <div
+      v-if="notice?.kind === 'failed'"
+      class="rounded-wolf border border-[#fecaca] bg-[#fef2f2] px-3 py-2"
+      data-agent-ui-card-notice="failed"
+    >
+      <p class="m-0 text-xs leading-5 text-[#b91c1c]">选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        class="mt-2 min-h-9 border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fef2f2]"
+        :disabled="disabled === true || locked === true || submitting"
+        @click="retryNoticeChoice"
+      >
+        重新提交
+      </Button>
+    </div>
+    <p
+      v-else-if="notice?.kind === 'invalid'"
+      class="m-0 rounded-wolf border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs leading-5 text-[#b91c1c]"
+      data-agent-ui-card-notice="invalid"
+    >
+      请从卡片给出的活动类型中选择。
+    </p>
+    <p
+      v-else-if="notice?.kind === 'expired'"
+      class="m-0 rounded-wolf border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground"
+      data-agent-ui-card-notice="expired"
+    >
+      这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。
+    </p>
+
+    <div
       v-if="submittedChoiceValue !== null"
       class="rounded-wolf border border-border bg-background px-3 py-2 text-sm text-foreground"
       data-agent-ui-submitted-choice
     >
       <span class="font-medium">已选择：</span>{{ submittedChoiceOption?.label ?? submittedChoiceValue }}
+      <p v-if="isActivityKindChoice" class="m-0 mt-1 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的按钮。</p>
     </div>
 
-    <template v-else-if="isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')">
+    <template v-else-if="showsChoiceOptions">
       <div
         class="gap-2"
         :class="block.interaction_type === 'confirmation' ? (isActivityConfirmation ? 'activity-actions' : 'flex flex-wrap') : 'grid grid-cols-1 sm:grid-cols-2'"
@@ -705,27 +797,48 @@ const submit = async (): Promise<void> => {
       >
         {{ block.options.find(option => option.disabled && option.description)?.description }}
       </p>
-      <Button
-        v-for="(option, index) in (isActivityConfirmation ? activityActionOptions : block.options)"
-        :key="option.value"
-        type="button"
-        :variant="block.interaction_type === 'confirmation' && option.value === 'confirm' ? 'default' : 'outline'"
-        class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
-        :class="[
-          block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
-          optionSelected(option.value) ? 'border-primary bg-accent text-accent-foreground' : '',
-          isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && option.disabled ? 'border-[#cbd5e1] bg-[#e2e8f0] text-[#94a3b8] opacity-100' : ''
-        ]"
-        :aria-pressed="optionSelected(option.value)"
-        :disabled="controlsDisabled || option.disabled"
-        :data-agent-ui-error-focus="selectionError !== null && index === 0 ? 'true' : undefined"
-        @click="handleOptionClick(option.value)"
+      <div
+        v-if="block.hint"
+        class="col-span-full rounded-wolf border border-[#e2e8f0] bg-white px-3 py-2"
+        data-agent-ui-kind-hint
       >
-        <span>{{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}</span>
-        <small v-if="option.description && block.interaction_type !== 'confirmation'" class="text-xs text-muted-foreground">
-          {{ option.description }}
-        </small>
-      </Button>
+        <p class="m-0 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span>原文提到：</span>
+          <span
+            v-for="channel in kindHintChannels"
+            :key="channel"
+            class="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] text-foreground"
+          >{{ channel }}</span>
+          <span v-if="kindHintChannels.length === 0">{{ block.hint }}</span>
+        </p>
+        <p class="m-0 mt-1 text-xs leading-5 text-foreground">
+          <b class="font-semibold">请按本次实际发生的沟通来选</b>；之后计划的会议不算本次活动。
+        </p>
+      </div>
+      <template v-for="(group, groupIndex) in choiceGroups" :key="`${group.name ?? ''}#${groupIndex}`">
+        <p v-if="group.name" class="col-span-full m-0 mt-1 text-[11px] font-medium text-muted-foreground">{{ group.name }}</p>
+        <Button
+          v-for="entry in group.entries"
+          :key="entry.option.value"
+          type="button"
+          :variant="block.interaction_type === 'confirmation' && entry.option.value === 'confirm' ? 'default' : 'outline'"
+          class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
+          :class="[
+            block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
+            optionSelected(entry.option.value) ? 'border-primary bg-accent text-accent-foreground' : '',
+            isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && entry.option.disabled ? 'border-[#cbd5e1] bg-[#e2e8f0] text-[#94a3b8] opacity-100' : ''
+          ]"
+          :aria-pressed="optionSelected(entry.option.value)"
+          :disabled="controlsDisabled || entry.option.disabled"
+          :data-agent-ui-error-focus="selectionError !== null && entry.index === 0 ? 'true' : undefined"
+          @click="handleOptionClick(entry.option.value)"
+        >
+          <span>{{ submitting && optionSelected(entry.option.value) ? `${entry.option.label}处理中…` : entry.option.label }}</span>
+          <small v-if="entry.option.description && block.interaction_type !== 'confirmation'" class="text-xs text-muted-foreground">
+            {{ entry.option.description }}
+          </small>
+        </Button>
+      </template>
         <p
           v-if="!isActivityConfirmation && block.interaction_type === 'confirmation' && block.options.some(option => option.disabled && option.description)"
           class="m-0 basis-full text-xs text-muted-foreground"
@@ -739,6 +852,9 @@ const submit = async (): Promise<void> => {
           role="alert"
         >
           {{ selectionError }}
+        </p>
+        <p v-if="isActivityKindChoice" class="col-span-full m-0 text-[11px] text-muted-foreground">
+          原始内容已保存。选一项就定下类型，确认写入前仍可修改。
         </p>
       </div>
       <div v-if="block.business_action === 'resolve_temporal_choice'" class="grid gap-1.5">
@@ -756,7 +872,7 @@ const submit = async (): Promise<void> => {
       </div>
     </template>
     <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" :class="isActivityConfirmation ? 'activity-history-note' : 'm-0 text-[11px] text-muted-foreground'">{{ isActivityConfirmation ? '历史交互只读，不可再次提交。' : '历史交互不再提供可再次提交的确认按钮。' }}</p>
-    <div v-else-if="!isActive && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" class="hidden"></div>
+    <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
 
     <div
       v-else-if="submittedTextField !== null"

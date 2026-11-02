@@ -808,55 +808,74 @@ class AssistantCoordinator:
         user_input: AssistantInput,
         reporter: ProgressReporter | None = None,
     ) -> CoordinatorOutcome:
+        from app.services.assistant.activity_channel import (
+            CANONICAL_KINDS,
+            FOLLOW_UP_KINDS,
+            apply_channel_resolution,
+            selected_kind,
+        )
+
         if reporter is None:
             reporter = NullProgressReporter()
         kind = user_input.choice or ""
-        allowed = {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}
-        if kind not in allowed:
+        if kind not in CANONICAL_KINDS:
+            # A card issued before the flat choice existed still offers the old
+            # labels. Re-issue the question so the tab heals on the next render.
+            draft = load_draft(task)
+            source_text = "\n".join(record.text for record in draft.source_records)
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    waiting=kind_waiting(task, source_text=source_text),
+                    action_actor="SYSTEM",
+                    action_name="reissue_activity_kind",
+                    action_result={"rejected_choice": user_input.choice},
+                ),
+            )
+            db.commit()
+            db.refresh(result.task)
             return CoordinatorOutcome(
                 reply=CoordinatorReply(
-                    task_public_id=task.public_id,
-                    status=task.status,
-                    message="请选择线上会议、线下会议或普通跟进。",
-                    waiting=load_waiting(task),
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message="请从卡片给出的活动类型中选择。",
+                    waiting=load_waiting(result.task),
                 ),
-                task=task,
+                task=result.task,
             )
         result = apply_task_update(
             db,
             task,
             TaskUpdate(
                 clear_waiting=True,
-                activity_kind=kind,
+                activity_kind="FOLLOW_UP" if kind in FOLLOW_UP_KINDS else kind,
                 action_actor="USER",
                 action_name="select_activity_kind",
                 action_input={"kind": kind},
                 action_result={"accepted": True, "choice": kind},
             ),
         )
-        updated = result.task
+        # The concrete kind is final: freeze it before any structuring so the
+        # follow-up path never re-classifies and no second type card appears.
+        updated = apply_task_update(
+            db,
+            result.task,
+            TaskUpdate(
+                draft=apply_channel_resolution(load_draft(result.task), selected_kind(kind)),
+                action_actor="SYSTEM",
+                action_name="remember_activity_kind",
+                action_result={"kind": kind, "source": "user"},
+            ),
+        ).task
 
-        # Kind is now known: continue structuring from the original goal text
-        # instead of letting the chooser end an unstructured task.
-        if self._follow_up is not None and kind == "FOLLOW_UP":
+        # Continue structuring from the original goal text instead of letting
+        # the chooser end an unstructured task.
+        if self._follow_up is not None and kind in FOLLOW_UP_KINDS:
             begun = await self._begin_follow_up(db, updated, updated.goal, reporter, accept_source=False)
             if isinstance(begun, CoordinatorOutcome):
                 return begun
             return await self._prepare_confirmation(db, begun)
-        if kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
-            from app.services.assistant.activity_channel import apply_channel_resolution, selected_kind
-
-            drafted = apply_channel_resolution(load_draft(updated), selected_kind(kind))
-            updated = apply_task_update(
-                db,
-                updated,
-                TaskUpdate(
-                    draft=drafted,
-                    action_actor="SYSTEM",
-                    action_name="remember_activity_kind",
-                    action_result={"kind": kind, "source": "user"},
-                ),
-            ).task
         if self._structurer is not None:
             original_text = updated.goal
             updated, message, paused_waiting, failed = await intake_step(
@@ -1107,7 +1126,7 @@ class AssistantCoordinator:
         if resolution.status == "family_unclear":
             if accept_source:
                 append_source(db, task, draft, user_text)
-            waiting = kind_waiting(task)
+            waiting = kind_waiting(task, source_text=user_text)
             result = apply_task_update(
                 db,
                 task,

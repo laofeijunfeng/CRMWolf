@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import SessionLocal
 from app.models.assistant import AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
+from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.coordinator import AssistantInput
 from app.services.assistant.events import ProgressReporter, TurnStage
 from app.services.assistant.failure_contract import (
@@ -178,13 +179,14 @@ def accept_submit(
         if kind != allowed[waiting.type] and not revising:
             raise AssistantStateConflict("当前输入不符合等待动作")
         if waiting.type == "ACTIVITY_KIND":
-            options = {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}
-            if (
-                choice not in options
-                or (waiting.candidates and choice not in {candidate.get("id") for candidate in waiting.candidates})
-                or text is not None
-            ):
-                raise AssistantStateConflict("请选择当前签发的活动类型")
+            offered_ids: set[str] = set()
+            for candidate in waiting.candidates:
+                candidate_id = candidate.get("id")
+                if isinstance(candidate_id, str):
+                    offered_ids.add(candidate_id)
+            offered_ids = offered_ids or set(CANONICAL_KINDS)
+            if not isinstance(choice, str) or choice not in offered_ids or text is not None:
+                raise AssistantStateConflict("请从卡片给出的活动类型中选择。")
         elif waiting.type == "OBJECT_SELECTION":
             if (
                 not isinstance(choice, str)

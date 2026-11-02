@@ -10,7 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from app.services.customer_activity_kinds import CustomerActivityKind, infer_activity_kind
+from app.services.customer_activity_kinds import (
+    CustomerActivityKind,
+    get_activity_kind_meta,
+    infer_activity_kind,
+)
 
 if TYPE_CHECKING:
     from app.services.assistant.llm_contracts import KindDecision
@@ -57,6 +61,67 @@ class ChannelResolution:
     status_label: str
     source_text: str
     options: tuple[str, ...]
+
+
+_HINT_LABELS: dict[str, str] = {
+    CustomerActivityKind.PHONE_FOLLOW_UP: "电话",
+    CustomerActivityKind.WECHAT_FOLLOW_UP: "微信",
+    CustomerActivityKind.EMAIL_FOLLOW_UP: "邮件",
+    CustomerActivityKind.VISIT_FOLLOW_UP: "拜访",
+}
+
+
+@dataclass(frozen=True)
+class KindChoice:
+    """One concrete activity kind offered when the family is unclear."""
+
+    kind: str
+    group: str
+    description: str
+
+
+ACTIVITY_KIND_CHOICES: tuple[KindChoice, ...] = (
+    KindChoice(CustomerActivityKind.ONLINE_MEETING, "会议", "远程会议"),
+    KindChoice(CustomerActivityKind.OFFLINE_MEETING, "会议", "当面开会"),
+    KindChoice(CustomerActivityKind.PHONE_FOLLOW_UP, "跟进", "电话沟通"),
+    KindChoice(CustomerActivityKind.WECHAT_FOLLOW_UP, "跟进", "微信 / 企业微信"),
+    KindChoice(CustomerActivityKind.EMAIL_FOLLOW_UP, "跟进", "邮件往来"),
+    KindChoice(CustomerActivityKind.VISIT_FOLLOW_UP, "跟进", "上门拜访、面谈"),
+    KindChoice(CustomerActivityKind.OTHER_FOLLOW_UP, "跟进", "以上都不是"),
+)
+
+
+def kind_label(kind: str) -> str:
+    return str(get_activity_kind_meta(kind)["label"])
+
+
+def kind_choice_candidates() -> list[dict[str, object]]:
+    """The single card the Web renders when the activity family is unclear."""
+
+    return [
+        {
+            "id": choice.kind,
+            "label": kind_label(choice.kind),
+            "description": choice.description,
+            "group": choice.group,
+        }
+        for choice in ACTIVITY_KIND_CHOICES
+    ]
+
+
+def kind_hint(text: str) -> str | None:
+    """Name the channels the original sentence actually mentioned."""
+
+    kinds = detect_follow_up_channels(text or "")
+    meeting = _keyword_meeting(text or "")
+    if meeting is not None:
+        kinds.append(meeting)
+    labels: list[str] = []
+    for kind in kinds:
+        label = _HINT_LABELS.get(kind) or kind_label(kind)
+        if label not in labels:
+            labels.append(label)
+    return f"原文提到：{'、'.join(labels)}" if labels else None
 
 
 def structuring_kind(activity_kind: str | None) -> str:
@@ -274,11 +339,7 @@ def _meeting_quote(text: str, kind: str) -> str | None:
 def apply_channel_resolution(draft: object, resolution: ChannelResolution) -> object:
     """Copy a follow-up or meeting resolution onto the task draft."""
 
-    from app.services.customer_activity_kinds import get_activity_kind_meta
-
-    origin = None
-    if resolution.kind is not None:
-        origin = str(get_activity_kind_meta(resolution.kind)["label"])
+    origin = kind_label(resolution.kind) if resolution.kind is not None else None
     return draft.model_copy(
         update={
             "channel_status": None if resolution.status == "family_unclear" else resolution.status,
@@ -296,13 +357,11 @@ def apply_channel_resolution(draft: object, resolution: ChannelResolution) -> ob
 
 
 def selected_kind(kind: str) -> ChannelResolution:
-    """A coarse family the user already picked. Meetings stay switchable."""
+    """A concrete kind the user picked on the type card; same-family edits stay open."""
 
-    from app.services.customer_activity_kinds import get_activity_kind_meta
-
-    if kind not in MEETING_KINDS and kind not in FOLLOW_UP_KINDS:
+    if kind not in CANONICAL_KINDS:
         raise ValueError("unknown activity kind")
-    label = str(get_activity_kind_meta(kind)["label"])
+    label = kind_label(kind)
     family: ActivityFamily = kind if kind in MEETING_KINDS else "FOLLOW_UP"
     options = MEETING_KINDS if kind in MEETING_KINDS else FOLLOW_UP_KINDS
     return ChannelResolution(

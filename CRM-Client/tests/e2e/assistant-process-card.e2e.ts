@@ -239,7 +239,7 @@ for (const viewport of viewports) {
     await openAssistant(page, viewport.width, viewport.height)
     await expect(page.getByText('整理未完成')).toBeVisible()
     await expect(page.getByText('执行过程')).toBeVisible()
-    await expect(page.getByText('正在整理跟进内容')).toBeVisible()
+    await expect(page.getByText('正在整理活动内容')).toBeVisible()
     await expect(page.getByText('已更新')).toHaveCount(0)
     await expect(page.getByText('活动已写入')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '重新写入' })).toHaveCount(0)

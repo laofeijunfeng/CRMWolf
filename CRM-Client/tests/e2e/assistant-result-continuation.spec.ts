@@ -158,7 +158,7 @@ test('normal send shows every stage and the written result', async ({ page }) =>
     await page.getByRole('textbox', { name: '客户沟通内容' }).fill(userText)
     await page.getByRole('button', { name: '发送', exact: true }).click()
     await expect(page.getByText('正在判断活动类型')).toBeVisible()
-    await expect(page.getByText('正在整理跟进内容')).toBeVisible()
+    await expect(page.getByText('正在整理活动内容')).toBeVisible()
     await expect(page.getByText('评估记录质量')).toBeVisible()
     await expect(page.getByText('写入客户活动')).toBeVisible()
     await expect(page.getByText('86 分')).toBeVisible()

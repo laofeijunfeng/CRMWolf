@@ -14,16 +14,19 @@ import AgentUIProcessBlock from './AgentUIProcessBlock.vue'
 import AgentUITableBlock from './AgentUITableBlock.vue'
 import AgentUITextBlock from './AgentUITextBlock.vue'
 import AgentUITimelineBlock from './AgentUITimelineBlock.vue'
+import type { InteractionNotice } from './interactionNotice'
 import type { AgentUIBlock, AgentUIEnvelope, EntityRef, JsonObject } from '@/schemas/agent-contracts'
 
 type InteractionBlock = Extract<AgentUIBlock, { type: 'interaction' }>
 
 const EMPTY_ACTION_IDS: ReadonlySet<string> = new Set()
+const EMPTY_NOTICES: Readonly<Record<string, InteractionNotice>> = {}
 
 const props = defineProps<{
   message: AgentUIEnvelope
   disabled?: boolean
   lockedActionIds?: ReadonlySet<string>
+  notices?: Readonly<Record<string, InteractionNotice>>
 }>()
 
 const emit = defineEmits<{
@@ -87,6 +90,7 @@ const isCompactTaskMessage = computed(() => (
         :block="block"
         :disabled="disabled === true"
         :locked="isInteractionLocked(block.submit_action_id)"
+        :notice="(notices ?? EMPTY_NOTICES)[block.submit_action_id ?? block.interaction_id] ?? null"
         @submit="forwardInteraction"
       />
       <AgentUIActionResultBlock

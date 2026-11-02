@@ -15,6 +15,7 @@ from app.services.assistant.action_evidence import (
     is_action_deadline_correction,
     reconcile_action_evidence,
 )
+from app.services.assistant.activity_channel import kind_choice_candidates, kind_hint
 from app.services.assistant.contracts import DraftField, TaskDraft, TaskWaiting
 from app.services.assistant.events import (
     NullProgressReporter,
@@ -39,13 +40,6 @@ from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingCo
 _S_CLASSIFY = mk_stage("classify")
 
 
-def _has_pending_kind_question(task: AssistantTask) -> bool:
-    from app.services.assistant.task_state import load_waiting
-
-    waiting = load_waiting(task)
-    return waiting is not None and waiting.type == "ACTIVITY_KIND"
-
-
 _S_STRUCTURE = mk_stage("structure")
 _S_GATE = mk_stage("quality_gate")
 
@@ -56,15 +50,17 @@ if TYPE_CHECKING:
     from app.services.assistant.quality_gate import QualityGate as QualityGateProtocol
 
 
-_KIND_PROMPT = "这条记录属于线上会议、线下会议还是普通跟进？"
+_KIND_PROMPT = "这次沟通属于哪种活动？"
 
 
-def kind_waiting(task: AssistantTask) -> TaskWaiting:
+def kind_waiting(task: AssistantTask, *, source_text: str | None = None) -> TaskWaiting:
     return TaskWaiting(
         type=AssistantWaitingType.ACTIVITY_KIND,
         field="activity_kind",
         question_id=f"q_kind_{task.public_id}_{task.version}",
         prompt=_KIND_PROMPT,
+        candidates=kind_choice_candidates(),
+        hint=kind_hint(source_text or ""),
     )
 
 
@@ -469,17 +465,9 @@ async def intake_step(
         ).task
         db.commit()
         db.refresh(task)
-    kind_hinted = task.activity_kind is not None and user_text.strip() != "" and not _has_pending_kind_question(task)
     if from_waiting:
         if task.activity_kind is None:
             raise ValueError("field answer requires a selected activity kind")
-    elif kind_hinted:
-        # Explicitly chosen kinds do not need another model classification.
-        from app.services.assistant.llm_contracts import KindDecision
-
-        decision = KindDecision(kind=task.activity_kind, reason="用户指定类型")
-        reporter.stage_start(_S_CLASSIFY)
-        reporter.stage_done(_S_CLASSIFY, ms=0)
     elif task.activity_kind is None:
         draft = TaskDraft.model_validate(task.draft_json or {})
         if _budget_exhausted():
@@ -492,7 +480,7 @@ async def intake_step(
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(_S_CLASSIFY, ms=int((time.monotonic() - _t0) * 1000))
         if decision.kind == "UNCLEAR":
-            waiting = kind_waiting(task)
+            waiting = kind_waiting(task, source_text=user_text)
             original_draft = TaskDraft.model_validate(task.draft_json or {})
             result = apply_task_update(
                 db,

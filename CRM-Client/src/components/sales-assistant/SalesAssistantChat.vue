@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ZodError } from 'zod'
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
 import { type AssistantTaskView, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
@@ -62,18 +63,33 @@ const routing = ref(false)
 const olderCursor = ref<number | null>(null)
 const pendingConversation = shallowRef<(() => Promise<ConversationReply>) | null>(null)
 const unacceptedText = ref('')
-
-const KIND_LABELS: Record<string, string> = {
-  FOLLOW_UP: '普通跟进',
-  ONLINE_MEETING: '线上会议',
-  OFFLINE_MEETING: '线下会议'
-}
+/** Submission outcome per card (submit_action_id) that the server card cannot express. */
+const interactionNotices = ref<Record<string, InteractionNotice>>({})
 
 const SESSION_UPDATED_MESSAGE = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
 const LOGIN_EXPIRED_MESSAGE = '登录状态已失效，请重新登录后重试；不会自动开始新的记录。'
 const REJECTED_SUBMIT_MESSAGE = '这次提交没有被接受，请按当前提示修改后再提交。'
+const PENDING_RESULT_PREFIX = '发送状态待确认：'
 type CommandFailure = 'conflict' | 'auth' | 'rejected'
-type CommandOutcome = 'accepted' | 'explicit' | 'unknown'
+type CommandOutcome = 'accepted' | 'explicit' | 'unknown' | 'conflict'
+interface CommandDispatch {
+  outcome: CommandOutcome
+  detail: string
+}
+
+const OUT_OF_RANGE_KIND = '请从卡片给出的活动类型中选择'
+
+const conflictDetail = (error: unknown): string => {
+  if (!isAxiosError(error)) return ''
+  const data = error.response?.data as { detail?: unknown } | undefined
+  const detail = data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail !== null && typeof detail === 'object' && 'message' in detail) {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === 'string') return message
+  }
+  return ''
+}
 
 const explicitCommandFailure = (error: unknown): CommandFailure | null => {
   if (!isAxiosError(error)) return null
@@ -136,7 +152,7 @@ interface LiveStage {
 
 const STAGE_LABELS: Record<StageName, string> = {
   classify: '正在判断活动类型',
-  structure: '正在整理跟进内容',
+  structure: '正在整理活动内容',
   quality_gate: '正在评估记录质量',
   write: '写入客户活动'
 }
@@ -580,16 +596,53 @@ const submitText = async (): Promise<void> => {
   await dispatchConversation(() => assistantApi.conversationText(request), text)
 }
 
-const submit = async (input: SubmitAssistantInput, displayText: string, source: TaskWaiting | null = null): Promise<boolean> => {
+const clearCardNotice = (key: string): void => {
+  if (interactionNotices.value[key] === undefined) return
+  const next: Record<string, InteractionNotice> = {}
+  for (const [entryKey, notice] of Object.entries(interactionNotices.value)) {
+    if (entryKey !== key) next[entryKey] = notice
+  }
+  interactionNotices.value = next
+}
+
+const cardNoticeKey = (source: TaskWaiting | null): string | null => (
+  source?.type === 'ACTIVITY_KIND' && typeof source.action_id === 'string' ? source.action_id : null
+)
+
+const submit = async (
+  input: SubmitAssistantInput,
+  displayText: string,
+  source: TaskWaiting | null = null,
+  reuseClientRequestId: string | null = null
+): Promise<boolean> => {
   if (submitting.value || resultPending.value || task.value === null || conversation.value === null) return false
   if (source !== null && (task.value.waiting?.action_id !== source.action_id || task.value.waiting?.expected_version !== source.expected_version)) return false
-  const payload: SubmitAssistantInput = { ...input, client_request_id: crypto.randomUUID(),
+  const clientRequestId = reuseClientRequestId ?? crypto.randomUUID()
+  const choice = typeof input.choice === 'string' ? input.choice : null
+  const noticeKey = choice === null ? null : cardNoticeKey(source)
+  const payload: SubmitAssistantInput = { ...input, client_request_id: clientRequestId,
     action_id: source?.action_id ?? undefined, expected_version: source?.expected_version ?? undefined }
   const request = { task_public_id: task.value.public_id, input: payload, expected_version: conversation.value.version }
+  if (noticeKey !== null) clearCardNotice(noticeKey)
   pushEntry('user', displayText)
   inputText.value = ''
-  const outcome = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+  const dispatched = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+  const outcome = dispatched.outcome
   if (outcome !== 'unknown') releaseAction(source?.action_id ?? null)
+  if (noticeKey !== null && choice !== null) {
+    // The card cannot show these itself: the choice never left the browser, or the
+    // card was already handled elsewhere. An out-of-range choice is not stale.
+    if (outcome === 'unknown') {
+      resultPending.value = false
+      if (historyError.value.startsWith(PENDING_RESULT_PREFIX)) historyError.value = ''
+      interactionNotices.value[noticeKey] = { kind: 'failed', choice, clientRequestId }
+    } else if (outcome === 'conflict') {
+      if (historyError.value === SESSION_UPDATED_MESSAGE) historyError.value = ''
+      interactionNotices.value[noticeKey] = dispatched.detail.includes(OUT_OF_RANGE_KIND)
+        ? { kind: 'invalid' }
+        : { kind: 'expired' }
+    }
+  }
   return true
 }
 
@@ -633,24 +686,24 @@ const restoreUnacceptedText = (): void => {
   unacceptedText.value = ''
 }
 
-const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<CommandOutcome> => {
-  if (disposed) return 'explicit'
+const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<CommandDispatch> => {
+  if (disposed) return { outcome: 'explicit', detail: '' }
   const requestOrder = ++viewRequestSequence
   submitting.value = true
   routing.value = true
   pendingConversation.value = send
   try {
     const response = await send()
-    if (disposed) return 'accepted'
+    if (disposed) return { outcome: 'accepted', detail: '' }
     pendingConversation.value = null
     unacceptedText.value = ''
     applyConversation(response.conversation, false, requestOrder)
     routing.value = false
     if (response.submission !== null) await runPrepared(response.submission, displayText)
     else resultPending.value = false
-    return resultPending.value ? 'unknown' : 'accepted'
+    return { outcome: resultPending.value ? 'unknown' : 'accepted', detail: '' }
   } catch (error) {
-    if (disposed) return 'explicit'
+    if (disposed) return { outcome: 'explicit', detail: '' }
     const failure = explicitCommandFailure(error)
     if (failure !== null) {
       // A rejected command must not stay replayable or look still in progress.
@@ -663,11 +716,11 @@ const dispatchConversation = async (send: () => Promise<ConversationReply>, disp
         restoreUnacceptedText()
         historyError.value = failure === 'auth' ? LOGIN_EXPIRED_MESSAGE : REJECTED_SUBMIT_MESSAGE
       }
-      return 'explicit'
+      return { outcome: failure === 'conflict' ? 'conflict' : 'explicit', detail: conflictDetail(error) }
     }
     resultPending.value = true
-    historyError.value = `发送状态待确认：${error instanceof Error ? error.message : '网络请求失败'}`
-    return 'unknown'
+    historyError.value = `${PENDING_RESULT_PREFIX}${error instanceof Error ? error.message : '网络请求失败'}`
+    return { outcome: 'unknown', detail: '' }
   } finally {
     if (!disposed) { routing.value = false; submitting.value = false }
   }
@@ -682,12 +735,12 @@ const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Pro
 
 const choiceLabel = (choice: string, source: TaskWaiting | null): string => {
   const candidate = source?.candidates?.find((item) => item.id === choice)
-  if (candidate === undefined) return KIND_LABELS[choice] ?? '选择'
+  if (candidate === undefined) return ACTIVITY_BADGES[choice] ?? '选择'
   return 'account_name' in candidate ? candidate.account_name : candidate.label
 }
 
-const pickKind = (choice: string, source: TaskWaiting | null): Promise<boolean> =>
-  submit({ kind: 'submit_field', choice }, choiceLabel(choice, source), source)
+const pickKind = (choice: string, source: TaskWaiting | null, reuseClientRequestId: string | null = null): Promise<boolean> =>
+  submit({ kind: 'submit_field', choice }, choiceLabel(choice, source), source, reuseClientRequestId)
 
 const confirmWrite = (source: TaskWaiting | null): Promise<boolean> =>
   submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
@@ -891,7 +944,9 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
   }
   if (block.interaction_type === 'choice') {
     if (choice !== '') {
-      void pickKind(choice, entry.waiting)
+      const notice = interactionNotices.value[block.submit_action_id ?? block.interaction_id]
+      const reuse = notice?.kind === 'failed' && notice.choice === choice ? notice.clientRequestId : null
+      void pickKind(choice, entry.waiting, reuse)
       return
     }
     const typed = typeof values['text'] === 'string' ? values['text'].trim() : ''
@@ -1069,6 +1124,7 @@ void loadConversation()
               :message="entry.ui"
               :disabled="busy"
               :locked-action-ids="heldActionIds"
+              :notices="interactionNotices"
               @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
               @action="(actionId) => { void retryRootFailure(entry, actionId) }"
             />

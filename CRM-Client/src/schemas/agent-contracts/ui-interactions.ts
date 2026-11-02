@@ -6,6 +6,7 @@ export const InteractionOptionSchema = z.object({
   value: z.string().min(1).max(500),
   label: z.string().min(1).max(200),
   description: z.string().max(1000).nullable().optional(),
+  group: z.string().max(40).nullable().optional(),
   disabled: z.boolean().default(false)
 }).strict()
 
@@ -78,6 +79,7 @@ export const InteractionBlockObjectSchema = z.object({
   disposition_items: z.array(OpenFollowUpDispositionCardItemSchema).max(100).default([]),
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
+  hint: z.string().max(400).nullable().optional(),
   fields: z.array(InteractionFieldSchema).max(20).default([]),
   facts: z.array(InteractionConfirmationFactSchema).max(20).default([]),
   options: z.array(InteractionOptionSchema).max(50).default([]),

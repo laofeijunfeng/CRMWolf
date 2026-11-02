@@ -209,6 +209,7 @@ class TaskWaiting(BaseModel):
     expected_version: int | None = None
     fingerprint: str | None = Field(default=None, max_length=64)
     candidates: list[dict[str, object]] = Field(default_factory=list)
+    hint: str | None = Field(default=None, max_length=400)
     confirmation_payload: ConfirmationPayload | None = None
 
     @model_validator(mode="after")

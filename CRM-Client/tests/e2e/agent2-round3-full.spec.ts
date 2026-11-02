@@ -25,6 +25,15 @@ const CUSTOMER = '广州睿狐科技有限公司'
 const CONTENT =
   '客户方王总确认POC部署可行，预算进入下季度采购清单；李经理要求先交安全测评报告；我方张工承诺周五前交数据出境说明；下周三王总反馈立项批复'
 const NEXT_ACTION = '下周三王总反馈立项批复结果'
+const KIND_LABELS: Record<string, string> = {
+  ONLINE_MEETING: '线上会议',
+  OFFLINE_MEETING: '线下会议',
+  PHONE_FOLLOW_UP: '电话跟进',
+  WECHAT_FOLLOW_UP: '微信跟进',
+  EMAIL_FOLLOW_UP: '邮件跟进',
+  VISIT_FOLLOW_UP: '拜访跟进',
+  OTHER_FOLLOW_UP: '其他跟进'
+}
 
 interface Waiting {
   type: 'FIELD' | 'CONFIRMATION' | 'ACTIVITY_KIND' | 'OBJECT_SELECTION' | null
@@ -211,7 +220,7 @@ async function driveUntil(
 
     if (onlineVisible && stop['ACTIVITY_KIND'] !== true) {
       const target = opts.pickKind ?? 'ONLINE_MEETING'
-      const label = target === 'FOLLOW_UP' ? '普通跟进' : target === 'OFFLINE_MEETING' ? '线下会议' : '线上会议'
+      const label = KIND_LABELS[target] ?? '线上会议'
       if (await clickIf(page.getByRole('button', { name: label }), 1_000)) {
         await page.waitForTimeout(1_500)
         continue
@@ -334,12 +343,14 @@ test('s9 processing and s2 kind card', async ({ page }) => {
   const snap = await driveUntil(page, null, { stopOn: ['ACTIVITY_KIND'], timeoutMs: 420_000 })
   await appShot(page, snap?.waiting?.type === 'ACTIVITY_KIND' ? 'actual-s2-kind.png' : 'actual-s2-other.png')
   const checks = {
-    online: await page.getByRole('button', { name: '线上会议' }).last().isVisible({ timeout: 3_000 }).catch(() => false),
+    meeting: await page.getByRole('button', { name: '线上会议' }).last().isVisible({ timeout: 3_000 }).catch(() => false),
     offline: await page.getByRole('button', { name: '线下会议' }).last().isVisible().catch(() => false),
-    follow: await page.getByRole('button', { name: '普通跟进' }).last().isVisible().catch(() => false),
-    remote: await page.getByText('远程沟通').last().isVisible().catch(() => false),
-    visit: await page.getByText('面谈拜访').last().isVisible().catch(() => false),
-    phone: await page.getByText('电话/微信').last().isVisible().catch(() => false),
+    follow: await page.getByRole('button', { name: '微信跟进' }).last().isVisible().catch(() => false),
+    other: await page.getByRole('button', { name: '其他跟进' }).last().isVisible().catch(() => false),
+    groups: await page.getByText('会议', { exact: true }).last().isVisible().catch(() => false),
+    remote: await page.getByText('远程会议').last().isVisible().catch(() => false),
+    visit: await page.getByText('上门拜访、面谈').last().isVisible().catch(() => false),
+    phone: await page.getByText('微信 / 企业微信').last().isVisible().catch(() => false),
     giveUp: await page.getByRole('button', { name: '算了，不记了' }).last().isVisible().catch(() => false),
     noGapWrap: !(await page.getByText(/还差「activity_kind」/).first().isVisible().catch(() => false)),
     label: await page.getByText('正在回答：活动类型').first().isVisible().catch(() => false)
@@ -357,11 +368,11 @@ test('s9 processing and s2 kind card', async ({ page }) => {
   record({
     id: 's2',
     scene: '类型不明，只问一次（类型选择卡）',
-    expected: '独立类型卡：一句提问 + 三选一（含副文案）+「算了，不记了」；不出现「还差「activity_kind」」缺口包装；顶栏「正在回答：活动类型」。',
+    expected: '独立类型卡：一句提问 + 会议/跟进分组 + 七个具体活动类型（含副文案）+ 原文提到行 +「算了，不记了」；不出现「还差「activity_kind」」缺口包装；顶栏「正在回答：活动类型」。',
     actual: isKindCard
-      ? `类型卡=${isKindCard} 三选一=${checks.online}/${checks.offline}/${checks.follow} 副文案=${checks.remote}/${checks.visit}/${checks.phone} 卡内算了=${checks.giveUp} 无缺口包装=${checks.noGapWrap} 顶栏活动类型=${checks.label}`
+      ? `类型卡=${isKindCard} 会议=${checks.meeting}/${checks.offline} 跟进=${checks.follow}/${checks.other} 分组标题=${checks.groups} 副文案=${checks.remote}/${checks.visit}/${checks.phone} 卡内算了=${checks.giveUp} 无缺口包装=${checks.noGapWrap} 顶栏活动类型=${checks.label}`
       : `未到类型卡，停在 ${snap?.status ?? 'none'}/${snap?.waiting?.type ?? 'none'}/${snap?.waiting?.field ?? ''}`,
-    verdict: isKindCard && checks.online && checks.offline && checks.follow && checks.noGapWrap
+    verdict: isKindCard && checks.meeting && checks.offline && checks.follow && checks.other && checks.groups && checks.noGapWrap
       ? 'pass' : isKindCard ? 'gap' : 'blocked',
     expectedShot: 'screenshots/expected-s2.png',
     actualShot: isKindCard ? 'screenshots/actual-s2-kind.png' : 'screenshots/actual-s2-other.png'
@@ -376,7 +387,7 @@ test('s3 follow-up confirmation card', async ({ page }) => {
   const snap = await driveUntil(
     page,
     `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`,
-    { stopOn: ['CONFIRMATION'], pickKind: 'FOLLOW_UP', timeoutMs: 300_000 }
+    { stopOn: ['CONFIRMATION'], pickKind: 'WECHAT_FOLLOW_UP', timeoutMs: 300_000 }
   )
   await appShot(page, 'actual-s3-confirm.png')
   const card = page.locator('.sales-assistant-page').getByText('确认后写入', { exact: false }).first()
@@ -412,7 +423,7 @@ test('s5 gap composer and none button', async ({ page }) => {
   await openAssistant(page)
   const snap = await driveUntil(page, `今天和${CUSTOMER}打了个电话，聊得还行`, {
     stopOn: ['FIELD'],
-    pickKind: 'FOLLOW_UP',
+    pickKind: 'WECHAT_FOLLOW_UP',
     answerFields: false,
     timeoutMs: 240_000
   })
@@ -625,7 +636,7 @@ test('o2 idempotent double confirm', async ({ page }) => {
   const snap = await driveUntil(
     page,
     `今天和${CUSTOMER}的王总电话沟通了 POC 部署。${CONTENT}。下一步：${NEXT_ACTION}。`,
-    { stopOn: ['CONFIRMATION'], pickKind: 'FOLLOW_UP', timeoutMs: 280_000 }
+    { stopOn: ['CONFIRMATION'], pickKind: 'WECHAT_FOLLOW_UP', timeoutMs: 280_000 }
   )
   if (snap?.waiting?.type !== 'CONFIRMATION' || snap.waiting.field !== 'activity_write') {
     record({

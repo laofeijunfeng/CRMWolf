@@ -180,10 +180,31 @@ async def test_activity_kind_accepts_only_closed_enum(db_session):
         AssistantInput(kind="submit_field", choice="VIDEO_CALL"),
     )
     assert outcome.task.activity_kind is None  # rejected, still waiting
+    assert outcome.reply.waiting is not None
+    assert outcome.reply.waiting.type == AssistantWaitingType.ACTIVITY_KIND
+    # The coarse family is not selectable any more.
+    assert outcome.reply.waiting.candidates
 
     outcome = await coordinator.handle_task(
         db_session,
-        task,
+        outcome.task,
+        AssistantInput(kind="submit_field", choice="FOLLOW_UP"),
+    )
+    assert outcome.task.activity_kind is None
+    assert outcome.reply.waiting is not None
+    assert [candidate["id"] for candidate in outcome.reply.waiting.candidates] == [
+        "ONLINE_MEETING",
+        "OFFLINE_MEETING",
+        "PHONE_FOLLOW_UP",
+        "WECHAT_FOLLOW_UP",
+        "EMAIL_FOLLOW_UP",
+        "VISIT_FOLLOW_UP",
+        "OTHER_FOLLOW_UP",
+    ]
+
+    outcome = await coordinator.handle_task(
+        db_session,
+        outcome.task,
         AssistantInput(kind="submit_field", choice="ONLINE_MEETING"),
     )
     assert outcome.task.activity_kind == "ONLINE_MEETING"

@@ -170,8 +170,9 @@ describe('conversation load failures', () => {
 })
 
 
-function rejectedCommand(status: number, message = 'rejected'): Error {
-  return Object.assign(new Error(message), { isAxiosError: true, response: { status, data: {} } })
+function rejectedCommand(status: number, message = 'rejected', detail: unknown = undefined): Error {
+  const data = detail === undefined ? {} : { detail }
+  return Object.assign(new Error(message), { isAxiosError: true, response: { status, data } })
 }
 
 async function submitCardText(wrapper: ReturnType<typeof mount>, value: string): Promise<void> {
@@ -293,5 +294,63 @@ describe('customer name text input', () => {
     await flushPromises()
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('button').some((button) => button.text() === '重试同步')).toBe(true)
+  })
+})
+
+describe('activity kind card outcomes', () => {
+  const prompt = '这次沟通属于哪种活动？'
+  const kindWaiting = () => makeTask({ waiting: field({ type: 'ACTIVITY_KIND', field: 'activity_kind', prompt, hint: '原文提到：微信' }) })
+
+  it('keeps the kind card recoverable and retries it with the same request id', async () => {
+    const current = kindWaiting()
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { isAxiosError: true, response: undefined }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text().includes('微信跟进'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('提交失败')
+    expect(wrapper.text()).toContain('选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。')
+    const first = mocks.command.mock.calls[0]?.[0] as { input: { client_request_id: string } }
+
+    mocks.command.mockResolvedValueOnce(reply(view({ version: 1, focused_task: { ...current, waiting: confirmation() }, messages: [message('one', prompt, current)] })))
+    await wrapper.findAll('button').find((button) => button.text() === '重新提交')?.trigger('click')
+    await flushPromises()
+
+    const second = mocks.command.mock.calls[1]?.[0] as { input: { client_request_id: string, choice: string | null } }
+    expect(second.input.client_request_id).toBe(first.input.client_request_id)
+    expect(second.input.choice).toBe('WECHAT_FOLLOW_UP')
+    expect(wrapper.text()).not.toContain('提交失败')
+  })
+
+  it('marks the kind card stale when the conversation moved on elsewhere', async () => {
+    const current = kindWaiting()
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValueOnce(rejectedCommand(409, 'conflict'))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text().includes('线上会议'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已过期')
+    expect(wrapper.text()).toContain('这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。')
+    expect(wrapper.text()).not.toContain('会话已更新')
+    expect(wrapper.findAll('button').filter((button) => button.text().includes('线上会议'))).toHaveLength(0)
+  })
+
+  it('keeps the kind card waiting when the choice is outside the issued options', async () => {
+    const current = kindWaiting()
+    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    mocks.command.mockRejectedValueOnce(rejectedCommand(409, 'out of range', '请从卡片给出的活动类型中选择。'))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text().includes('微信跟进'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('请从卡片给出的活动类型中选择。')
+    expect(wrapper.text()).not.toContain('已过期')
+    expect(wrapper.text()).not.toContain('会话已更新')
+    expect(wrapper.findAll('button').some((button) => button.text().includes('微信跟进'))).toBe(true)
   })
 })

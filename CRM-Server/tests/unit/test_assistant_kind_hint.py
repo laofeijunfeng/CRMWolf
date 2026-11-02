@@ -99,11 +99,8 @@ async def test_no_hint_still_classifies(db_session):
     assert structurer.classify_calls == 1
 
 
-async def test_open_kind_question_still_classifies_on_answer_flow(db_session):
-    """A pending ACTIVITY_KIND wait must not be treated as a hint; the kind
-    question flow routes through _answer_activity_kind, and intake only sees
-    the task after the wait cleared — but guard: hinted intake must not fire
-    while the wait exists."""
+async def test_pending_kind_wait_does_not_suppress_classification(db_session):
+    """A stored kind is the only thing that skips classify; a stale wait is not."""
 
     task = _task(
         db_session,
@@ -121,3 +118,4 @@ async def test_open_kind_question_still_classifies_on_answer_flow(db_session):
     # With no stored kind, classification runs even if a stray kind wait
     # remains; the structuring proceeds on the classified kind.
     assert structurer.classify_calls == 1
+    assert structurer.structured_kinds == ["FOLLOW_UP"]
