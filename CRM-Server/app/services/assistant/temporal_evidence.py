@@ -66,9 +66,10 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
     ("RELATIVE_WEEKDAY", re.compile(r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
     ("RELATIVE_WEEK", re.compile(r"(?:下个?|本|这)(?:周|星期|礼拜)(?![一二三四五六日天期])")),
-    ("RELATIVE_DAY", re.compile(r"大后天|后天|明天|今天|今日")),
+    ("RELATIVE_DAY", re.compile(r"大后天|后天|明天|今天|今日|刚刚|刚才|方才")),
     ("DAY_OF_MONTH", re.compile(r"([0-9]{1,2})\s*[号日]")),
 )
+_JUST_NOW = ("刚刚", "刚才", "方才")
 _WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 
@@ -243,11 +244,8 @@ def attach_model_evidence(
     quoted_actions: dict[str, QuotedAction] = {}
     for item in actions:
         action = _read_action(item)
-        quote = _exact_slice(segment_text, action.quote_start, action.quote_end, action.evidence_quote)
-        start, end = action.quote_start, action.quote_end
-        if segment_text[start:end] != quote:
-            start = segment_text.index(quote)
-            end = start + len(quote)
+        quote = action.evidence_quote
+        start, end = _action_span(segment_text, action)
         identity = f"{segment_id}:{action.owner_role}:{action.action_text}:{start}:{end}"
         action_id = "act_" + sha256(identity.encode()).hexdigest()[:16]
         if action.action_ref in action_ids:
@@ -393,11 +391,7 @@ def apply_temporal_answer(
     quoted_actions: dict[str, QuotedAction] = {}
     for item in actions:
         action = _read_action(item)
-        _exact_slice(source_text, action.quote_start, action.quote_end, action.evidence_quote)
-        start, end = action.quote_start, action.quote_end
-        if source_text[start:end] != action.evidence_quote:
-            start = source_text.index(action.evidence_quote)
-            end = start + len(action.evidence_quote)
+        start, end = _action_span(source_text, action, ranges)
         index = source_index(start, end)
         if action.action_ref in quoted_actions:
             raise ActionContractError("duplicate action reference")
@@ -413,7 +407,7 @@ def apply_temporal_answer(
     quotes: dict[str, list[ModelTemporalMention]] = {record.segment_id: [] for record in records}
     for item in mentions:
         mention = _read_mention(item)
-        start, end = _snap_span(source_text, mention)
+        start, end = _snap_span(source_text, mention, ranges)
         index = source_index(start, end)
         if mention.action_ref and mention.action_ref not in quoted_actions:
             raise TemporalContractError("temporal mention points at an unknown action")
@@ -494,15 +488,17 @@ def apply_temporal_answer(
         ]
         item.correction_of = target_id
         replacements.append(item)
-    if len(replacements) == 1 and replacements[0].role == "SALES_FOLLOW_UP":
-        replacement = replacements[0]
+    # A just-now aside in the answer ("周四 刚才忘说了") is not a competing date.
+    dated = [item for item in replacements if not _is_just_now(item)]
+    if len(dated) == 1 and dated[0].role == "SALES_FOLLOW_UP":
+        replacement = dated[0]
         if replacement.resolution_status == "RESOLVED" and replacement.resolved_at is not None:
             for item in stored:
                 if item.state == "ACTIVE" and item.action_id == target_action.action_id:
                     item.state = "SUPERSEDED"
             target_action.temporal_mention_id = replacement.mention_id
-    elif len(replacements) > 1:
-        for item in replacements:
+    elif len(dated) > 1:
+        for item in dated:
             item.resolution_status = "AMBIGUOUS"
             item.ambiguity_reason = "DATE"
             item.resolved_at = None
@@ -892,7 +888,8 @@ def _resolve_span(
         kind=found.kind,
         role=role,
         owner=owner,
-        action_id=action_id,
+        # The event moment is audit evidence; it never owns or reclassifies an action.
+        action_id=None if _is_just_now(found) else action_id,
         confidence=confidence,
         anchor_at=anchor,
         ambiguity_reason=reason,
@@ -1062,7 +1059,7 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
             "candidates": [],
         }
     if kind == "RELATIVE_DAY":
-        offsets = {"今天": 0, "今日": 0, "明天": 1, "后天": 2, "大后天": 3}
+        offsets = {"今天": 0, "今日": 0, "刚刚": 0, "刚才": 0, "方才": 0, "明天": 1, "后天": 2, "大后天": 3}
         key = next(name for name in offsets if found.raw_text.startswith(name))
         target = anchor.date() + timedelta(days=offsets[key])
         return _dated(target.year, target.month, target.day, hour_minute, anchor)
@@ -1134,8 +1131,16 @@ def _shift_month(year: int, month: int, shift: int) -> tuple[int, int]:
     return year + index // 12, index % 12 + 1
 
 
+def _is_just_now(span: FoundSpan | StoredMention) -> bool:
+    # Scanner-owned only: a model quote merged across 刚刚 and a date stays a date.
+    return span.kind == "RELATIVE_DAY" and span.raw_text.startswith(_JUST_NOW)
+
+
 def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeRole, ActionStatus, str | None]:
     clause = _clause(text, found.start)
+    if _is_just_now(found):
+        # The moment the reported event happened, never a time to follow up.
+        return "OTHER", "COMPLETED", None
     if (
         found.raw_text.startswith(("今天", "今日"))
         and re.search(r"找|联系|确认|电话跟进", clause)
@@ -1348,24 +1353,63 @@ def _mention_span(text: str, item: object) -> tuple[int, int]:
     return start, end
 
 
-def _snap_span(text: str, mention: ModelTemporalMention) -> tuple[int, int]:
-    within = 0 <= mention.quote_start < mention.quote_end <= len(text)
-    quoted = text[mention.quote_start : mention.quote_end] if within else ""
-    if quoted == mention.raw_text:
-        return mention.quote_start, mention.quote_end
-    start = text.find(mention.raw_text)
-    if start < 0 or text.find(mention.raw_text, start + 1) >= 0:
-        raise TemporalContractError("temporal span is not in the source")
-    return start, start + len(mention.raw_text)
+def _snap_span(
+    text: str, mention: ModelTemporalMention, segments: list[tuple[int, int]] | None = None
+) -> tuple[int, int]:
+    return _locate_quote(
+        text,
+        mention.quote_start,
+        mention.quote_end,
+        mention.raw_text,
+        segments,
+        TemporalContractError,
+        "temporal span is not in the source",
+    )
 
 
-def _exact_slice(text: str, start: int, end: int, raw: str) -> str:
+def _action_span(text: str, action: ModelDraftAction, segments: list[tuple[int, int]] | None = None) -> tuple[int, int]:
+    return _locate_quote(
+        text,
+        action.quote_start,
+        action.quote_end,
+        action.evidence_quote,
+        segments,
+        ActionContractError,
+        "action quote is not in the source",
+    )
+
+
+def _locate_quote(
+    text: str,
+    start: int,
+    end: int,
+    raw: str,
+    segments: list[tuple[int, int]] | None,
+    error: type[TemporalContractError],
+    message: str,
+) -> tuple[int, int]:
+    """Bind a verbatim quote to source offsets; the model's offset is only a locality hint.
+
+    An exact slice wins. Otherwise the quote binds to the nearest occurrence that
+    lies inside one source segment; absence or an equidistant tie is fabricated.
+    """
+
+    if not raw:
+        raise error(message)
     if 0 <= start < end <= len(text) and text[start:end] == raw:
-        return raw
+        return start, end
+    bounds = segments if segments is not None else [(0, len(text))]
+    distances: list[tuple[int, int]] = []
     found = text.find(raw)
-    if found < 0 or text.find(raw, found + 1) >= 0:
-        raise ActionContractError("action quote is not in the source")
-    return raw
+    while found >= 0:
+        if any(left <= found and found + len(raw) <= right for left, right in bounds):
+            distances.append((abs(found - start), found))
+        found = text.find(raw, found + 1)
+    distances.sort()
+    if not distances or (len(distances) > 1 and distances[0][0] == distances[1][0]):
+        raise error(message)
+    nearest = distances[0][1]
+    return nearest, nearest + len(raw)
 
 
 def _extend_clock(text: str, end: int) -> int:

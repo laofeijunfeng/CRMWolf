@@ -386,3 +386,120 @@ def test_background_negation_earlier_in_clause_cannot_swallow_the_sales_time():
     assert temporal_waiting(draft)["reason"] == "DATE"
     assert temporal_waiting(draft)["prompt"].startswith("“明年”")
     assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+
+
+def shifted(item, start):
+    """Model quote with a wrong offset; raw text still names the source words."""
+    width = item["quote_end"] - item["quote_start"]
+    return {**item, "quote_start": start, "quote_end": start + width}
+
+
+def repeated_word_answer_draft(answer):
+    from app.services.assistant.action_evidence import SourceSegment
+    from app.services.assistant.temporal_evidence import temporal_answer_target
+
+    text = "陈老师反馈周四会完成测试，我大概明年联系陈老师"
+    draft = attach(
+        text,
+        [quoted(text, "周四", role="CUSTOMER_COMMITMENT", ref=""), quoted(text, "明年")],
+        [action(text, quote="我大概明年联系陈老师")],
+    )
+    draft.source_records = [
+        SourceSegment(segment_id="seg_original", text=text, recorded_at=ANCHOR),
+        SourceSegment(segment_id="seg_answer", text=answer, recorded_at=datetime(2026, 11, 2, 13, 25)),
+    ]
+    draft.source_segments.append(answer)
+    return draft, temporal_answer_target(draft), text + "\n" + answer
+
+
+@pytest.mark.parametrize("offsets", ["answer_off_by_one", "answer_segment_local", "original_off_by_two"])
+def test_answer_repeating_an_original_word_resolves_from_the_nearest_occurrence(offsets):
+    from app.services.assistant.temporal_evidence import apply_temporal_answer
+
+    draft, target, source = repeated_word_answer_draft("周四")
+    answer_start = source.rindex("周四")
+    original = quoted(source, "周四", role="CUSTOMER_COMMITMENT", ref="")
+    answer = shifted(original, answer_start)
+    mentions = {
+        "answer_off_by_one": [shifted(answer, answer_start - 1)],
+        "answer_segment_local": [shifted(answer, 0)],
+        "original_off_by_two": [shifted(original, original["quote_start"] + 2), answer],
+    }[offsets]
+    apply_temporal_answer(
+        draft, target_id=target, source_text=source, answer_segment_id="seg_answer", mentions=mentions, actions=[]
+    )
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+    stored = draft.content_json["temporal_evidence"]["mentions"]
+    customer = next(item for item in stored if item["role"] == "CUSTOMER_COMMITMENT")
+    assert (customer["source_segment_id"], customer["quote_start"], customer["state"]) == ("seg_original", 5, "ACTIVE")
+
+
+def test_quote_equally_near_two_occurrences_is_still_rejected():
+    text = "周四开会周四再联系"
+    tie = shifted(quoted(text, "周四"), 2)  # occurrences at 0 and 4: distance 2 to both
+    with pytest.raises(TemporalContractError, match="temporal span is not in the source"):
+        validate_temporal_quotes(text, [tie])
+
+
+def test_repeated_action_quote_binds_to_the_nearest_occurrence_not_the_first():
+    text = "我找陈老师确认需求，周四再找陈老师对齐"
+    second = text.rindex("找陈老师")
+    nominated = shifted(action(text, quote="找陈老师"), second + 1)
+    draft = attach(text, [quoted(text, "周四")], [nominated])
+    stored = draft.content_json["temporal_evidence"]["actions"][0]
+    assert stored["quote_start"] == second
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+
+
+@pytest.mark.parametrize("moment", ["刚刚", "刚才", "方才"])
+def test_just_now_is_the_event_moment_not_a_date_question_or_next_follow_up(moment):
+    text = f"{moment}微信联系了陈老师，周四再找陈老师对齐"
+    draft = attach(
+        text,
+        [quoted(text, moment), quoted(text, "周四")],
+        [action(text, quote="周四再找陈老师对齐")],
+    )
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+    stored = draft.content_json["temporal_evidence"]["mentions"]
+    just_now = next(item for item in stored if item["raw_text"] == moment)
+    assert just_now["role"] == "OTHER" and just_now["resolution_status"] == "RESOLVED"
+
+
+def test_just_now_alone_does_not_ask_for_a_follow_up_date():
+    text = "刚刚微信联系了陈老师"
+    draft = attach(text, [quoted(text, "刚刚")])
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+
+
+@pytest.mark.parametrize("text", ["刚刚说再联系陈老师", "刚才客户说让我再联系他"])
+def test_just_now_never_takes_over_the_sales_next_action(text):
+    quote = text[text.index("再") :]
+    draft = attach(text, [], [action(text, quote=quote)])
+    assert draft.next_action.value
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+
+
+def test_quote_crossing_just_now_into_a_date_is_still_a_date_question():
+    text = "刚刚周四再找陈老师"
+    draft = attach(text, [quoted(text, "刚刚周四")], [action(text, quote="周四再找陈老师")])
+    assert temporal_waiting(draft) is not None
+
+
+@pytest.mark.parametrize("answer", ["刚才问过了，周四", "周四，刚才忘说了"])
+def test_date_answer_with_a_just_now_aside_still_resolves_the_wait(answer):
+    from app.services.assistant.temporal_evidence import apply_temporal_answer
+
+    draft, target, source = repeated_word_answer_draft(answer)
+    apply_temporal_answer(
+        draft,
+        target_id=target,
+        source_text=source,
+        answer_segment_id="seg_answer",
+        mentions=[quoted(source, "周四", role="CUSTOMER_COMMITMENT", ref="")],
+        actions=[],
+    )
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
