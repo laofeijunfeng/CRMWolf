@@ -350,6 +350,7 @@ def temporal_answer_target(draft: TaskDraft) -> str | None:
             item.mention_id == spec.get("mention_id")
             and item.role == "SALES_FOLLOW_UP"
             and item.ambiguity_reason != "ROLE"
+            and _date_answer_action(item, [_stored_action(raw) for raw in bundle[1]]) is not None
         ):
             return item.mention_id
     return None
@@ -423,8 +424,8 @@ def apply_temporal_answer(
     stored = [_stored_mention(item) for item in old_mentions]
     bound = [_stored_action(item) for item in old_actions]
     target = next(item for item in stored if item.mention_id == target_id)
-    target_action = _action_for(target, bound)
-    if target_action is None or target_action.owner_role != "SALES" or target_action.action_status != "PLANNED":
+    target_action = _date_answer_action(target, bound)
+    if target_action is None:
         raise TemporalContractError("temporal answer has no current sales action")
     answer = next((record for record in records if record.segment_id == answer_segment_id), None)
     if answer is None:
@@ -653,7 +654,9 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
         (
             item
             for item in action_times
-            if item.resolution_status in {"AMBIGUOUS", "UNRESOLVED"} and not item.candidates
+            if item.resolution_status in {"AMBIGUOUS", "UNRESOLVED"}
+            and not item.candidates
+            and (item.ambiguity_reason == "ROLE" or _date_answer_action(item, actions) is not None)
         ),
         None,
     )
@@ -1146,9 +1149,12 @@ def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeR
         and "再" not in clause
     ):
         return "OTHER", "COMPLETED", None
-    if re.search(r"反馈|预计|承诺|会完成", clause) and re.search(r"老师|总|经理|客户", clause):
-        return "CUSTOMER_COMMITMENT", "COMMITTED", None
     before = clause[: max(0, found.start - _clause_start(text, found.start))]
+    # Customer speech names its subject or verb before the time; "周四找陈老师对齐内部反馈"
+    # is a sales step whose object merely contains 反馈.
+    commitment = r"反馈|预计|承诺|会完成"
+    if re.search(commitment, clause) and (re.search(r"老师|总|经理|客户", before) or re.search(commitment, before)):
+        return "CUSTOMER_COMMITMENT", "COMMITTED", None
     action_after = text[found.end :]
     customer = r"(?:客户|[\u4e00-\u9fff]{1,8}(?:老师|总|经理|工))"
     verb = r"(?:会|将|再)?(?:找|联系|回复|反馈|发送|给|完成|发|交|确认|采购|支付)"
@@ -1223,8 +1229,19 @@ def _guard_conflicting_dates(mentions: list[StoredMention], actions: list[Stored
         ]
         if len(active) < 2:
             continue
-        dates = {(item.resolution_status, item.resolved_at, item.granularity) for item in active}
-        if len(dates) == 1 and active[0].resolution_status == "RESOLVED":
+        resolved = [item for item in active if item.resolution_status == "RESOLVED"]
+        conditions = [
+            item
+            for item in active
+            if item.kind == "UNKNOWN" and item.resolution_status == "UNRESOLVED" and not item.candidates
+        ]
+        dates = {(item.resolved_at, item.granularity) for item in resolved}
+        if len(dates) == 1 and len(resolved) + len(conditions) == len(active):
+            # "等会议结束后, 周四找陈老师": the vague phrase is a condition of the dated
+            # step, not a competing date. Keep it for audit; the date owns the action.
+            for item in conditions:
+                item.role = "OTHER"
+            action.temporal_mention_id = resolved[0].mention_id
             continue
         for item in active:
             item.resolution_status = "AMBIGUOUS"
@@ -1479,6 +1496,15 @@ def _clause_end(text: str, index: int) -> int:
 
 def _action_for(mention: StoredMention, actions: list[StoredAction]) -> StoredAction | None:
     return next((item for item in actions if item.action_id == mention.action_id), None)
+
+
+def _date_answer_action(mention: StoredMention, actions: list[StoredAction]) -> StoredAction | None:
+    """The planned sales step a date answer would replace; asking and accepting share it."""
+
+    action = _action_for(mention, actions)
+    if action is None or action.owner_role != "SALES" or action.action_status != "PLANNED":
+        return None
+    return action
 
 
 def _sentence(text: str) -> str:

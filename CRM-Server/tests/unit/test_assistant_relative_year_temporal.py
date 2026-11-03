@@ -12,6 +12,7 @@ from app.services.assistant.llm_contracts import StructuredFollowUp
 from app.services.assistant.temporal_evidence import (
     TemporalContractError,
     attach_model_evidence,
+    confirmation_time_labels,
     find_time_spans,
     resolved_sales_follow_up,
     temporal_waiting,
@@ -503,3 +504,64 @@ def test_date_answer_with_a_just_now_aside_still_resolves_the_wait(answer):
     )
     assert temporal_waiting(draft) is None
     assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+
+
+CRM75_SOURCE = (
+    "微信联系了南京汇川技术有限公司的技术经理陈老师，主要沟通项目的推进情况，"
+    "陈老师反馈周三下午可以做个线上会议交流，一方面想了解各个版本的差异，另一方面也希望听听最佳实践。"
+    "等会议结束后，周四找陈老师对齐下内部反馈的情况。"
+)
+CRM75_DONE = "微信联系了南京汇川技术有限公司的技术经理陈老师，主要沟通项目的推进情况"
+CRM75_MEETING = "陈老师反馈周三下午可以做个线上会议交流"
+CRM75_NEXT = "等会议结束后，周四找陈老师对齐下内部反馈的情况"
+
+
+def crm75_draft(mentions):
+    text = CRM75_SOURCE
+    # Owner/action texts as returned by the model in the reproduced run.
+    actions = [
+        {**action(text, ref="done", quote=CRM75_DONE), "owner_text": "销售", "action_status": "COMPLETED"},
+        {
+            **action(text, ref="meeting", role="CUSTOMER", quote=CRM75_MEETING),
+            "owner_text": "陈老师",
+            "action_text": "周三下午做线上会议交流，了解各个版本差异，并听取最佳实践",
+            "action_status": "COMMITTED",
+        },
+        {
+            **action(text, ref="next", role="CUSTOMER", quote=CRM75_NEXT),
+            "owner_text": "销售",
+            "action_text": "等会议结束后，周四找陈老师对齐内部反馈的情况",
+            "action_status": "COMMITTED",
+        },
+    ]
+    return attach(text, mentions, actions)
+
+
+@pytest.mark.parametrize("ask_condition", [True, False], ids=["condition_quoted", "condition_omitted"])
+def test_crm75_sales_thursday_after_meeting_is_the_follow_up_even_if_model_labels_it_customer(ask_condition):
+    # Real model labels from the reproduced run: the sales step was tagged as a customer commitment.
+    text = CRM75_SOURCE
+    mentions = [quoted(text, "周三下午", role="CUSTOMER_COMMITMENT", ref="meeting")]
+    if ask_condition:
+        mentions.append(quoted(text, "会议结束后", ref="next"))
+    mentions.append(quoted(text, "周四", role="CUSTOMER_COMMITMENT", ref="next"))
+    draft = crm75_draft(mentions)
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+    assert "找陈老师对齐" in draft.next_action.value
+    customer_line, sales_line = confirmation_time_labels(draft.content_json)
+    assert customer_line == "陈老师周三下午做线上会议交流，了解各个版本差异，并听取最佳实践。"
+    assert sales_line == "周四"
+
+
+def test_date_question_is_only_issued_when_its_answer_can_be_accepted():
+    from app.services.assistant.temporal_evidence import temporal_answer_target
+
+    text = "我大概明年联系陈老师"
+    draft = attach(text, [quoted(text, "明年")], [action(text)])
+    assert temporal_waiting(draft)["reason"] == "DATE"
+    # The waiting sales date is bound to an action that is no longer a planned sales step.
+    for stored in draft.content_json["temporal_evidence"]["actions"]:
+        stored["owner_role"], stored["action_status"] = "CUSTOMER", "COMMITTED"
+    assert temporal_waiting(draft) is None
+    assert temporal_answer_target(draft) is None
