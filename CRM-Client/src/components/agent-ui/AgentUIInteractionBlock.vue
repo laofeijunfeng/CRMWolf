@@ -631,7 +631,13 @@ const submit = async (): Promise<void> => {
             </div>
             <div v-if="activityFact('next_follow_time')" class="activity-meta-row">
               <dt>跟进时间</dt>
-              <dd>{{ activityFact('next_follow_time')?.value }}</dd>
+              <dd>
+                <div class="activity-time">
+                  <span class="activity-time-value">{{ activityFact('next_follow_time')?.value }}</span>
+                  <span v-if="activityFact('next_follow_time')?.status_label" class="activity-pill is-muted">{{ activityFact('next_follow_time')?.status_label }}</span>
+                </div>
+                <p v-if="activityFact('next_follow_time')?.source" class="activity-caption">{{ activityFact('next_follow_time')?.source }}</p>
+              </dd>
             </div>
             <div v-if="activityKindFact" class="activity-meta-row">
               <dt>活动类型</dt>
@@ -1108,6 +1114,7 @@ const submit = async (): Promise<void> => {
 
 .activity-section-head,
 .activity-kind,
+.activity-time,
 .activity-kind-editor-head,
 .activity-customer,
 .activity-inline,
@@ -1153,7 +1160,8 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-customer b,
-.activity-kind-name {
+.activity-kind-name,
+.activity-time-value {
   color: #020817;
   font-size: 14px;
   font-weight: 600;

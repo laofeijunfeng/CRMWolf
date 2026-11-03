@@ -2,25 +2,39 @@ import { expect, test, type Page } from '@playwright/test'
 import type { AssistantTaskView, ConversationView } from '../../src/schemas/assistant-contracts'
 
 /**
- * Real /assistant page for the CRM-62 confirmation card.
+ * Real /assistant page for the CRM-62/CRM-76 confirmation card.
  * The conversation is intercepted; the card itself is the worktree Vue component.
  */
+
+interface FollowTimeFact {
+  value: string
+  status_label?: string
+  source?: string
+}
+
+interface CardCase {
+  state: 'ACTIVE' | 'READ_ONLY'
+  /** What the rep said about follow-up time; the user message and card evidence both come from it. */
+  said: string
+  followTime: FollowTimeFact
+}
 
 const at = '2026-10-30T09:00:00'
 const prompt = '确认后写入这条客户活动？'
 
-function task(): AssistantTaskView {
+function task(said: string): AssistantTaskView {
+  const utterance = `客户说下个月初付款，${said}跟进下付款进展`
   return {
     public_id: 'ast_temporal',
     status: 'ACTIVE',
-    goal: '客户说下个月初付款，11 月 5 号跟进下付款进展',
+    goal: utterance,
     activity_kind: 'FOLLOW_UP',
     version: 4,
     draft: {
       customer: { status: 'ACCEPTED', value: '通力电梯' },
-      content: { status: 'CANDIDATE', value: '客户说下个月初付款，11 月 5 号跟进下付款进展' },
+      content: { status: 'CANDIDATE', value: utterance },
       next_action: { status: 'CANDIDATE', value: '跟进付款进展' },
-      next_follow_time: { status: 'CANDIDATE', value: '11 月 5 号' }
+      next_follow_time: { status: 'CANDIDATE', value: said }
     },
     waiting: {
       type: 'CONFIRMATION',
@@ -38,13 +52,13 @@ function task(): AssistantTaskView {
           channel_status: 'recognized',
           channel_status_label: '已识别',
           title: '电话跟进',
-          summary: '客户说下个月初付款，11 月 5 号跟进下付款进展。',
+          summary: `${utterance}。`,
           content_json: {},
-          source_content: '客户说下个月初付款，11 月 5 号跟进下付款进展',
+          source_content: utterance,
           score: 80,
           score_reason: '客户承诺和跟进时间已分开',
           next_action: '跟进付款进展',
-          next_follow_time_text: '11 月 5 号',
+          next_follow_time_text: said,
           next_follow_time_granularity: 'DATE'
         }
       }
@@ -55,7 +69,7 @@ function task(): AssistantTaskView {
   }
 }
 
-function envelope() {
+function envelope(card: CardCase) {
   return {
     schema_version: 'crm.agent.ui.v1',
     message_id: 1,
@@ -70,15 +84,15 @@ function envelope() {
       interaction_id: 'ix-card',
       interaction_type: 'confirmation',
       business_action: 'confirm_activity_write',
-      state: 'ACTIVE',
+      state: card.state,
       prompt,
       fields: [],
       facts: [
         { key: 'customer', label: '客户', value: '通力电梯', group: 'write', options: [] },
-        { key: 'summary', label: '摘要', value: '客户说下个月初付款，11 月 5 号跟进下付款进展。', group: 'write', options: [] },
+        { key: 'summary', label: '摘要', value: `客户说下个月初付款，${card.said}跟进下付款进展。`, group: 'write', options: [] },
         { key: 'next_action', label: '下一步', value: '跟进付款进展', group: 'write', options: [] },
         { key: 'customer_commitment', label: '客户承诺', value: '下个月初付款（模糊时间，未确定具体日期）', group: 'write', options: [] },
-        { key: 'next_follow_time', label: '跟进时间', value: '11 月 5 号（日期，未指定具体时刻）', group: 'write', options: [] },
+        { key: 'next_follow_time', label: '跟进时间', group: 'write', options: [], ...card.followTime },
         { key: 'activity_kind', label: '活动类型', value: '电话跟进', group: 'activity_kind', status_label: '已识别', options: [] }
       ],
       options: [
@@ -89,13 +103,13 @@ function envelope() {
       submit_on_select: true,
       submit_label: '提交',
       allow_cancel: false,
-      submit_action_id: 'act_confirm'
+      submit_action_id: card.state === 'ACTIVE' ? 'act_confirm' : null
     }]
   }
 }
 
-function conversation(): ConversationView {
-  const current = task()
+function conversation(card: CardCase): ConversationView {
+  const current = task(card.said)
   return {
     public_id: 'asc_temporal',
     version: 4,
@@ -122,14 +136,14 @@ function conversation(): ConversationView {
         task: current,
         boundary: null,
         outcome: null,
-        ui: envelope()
+        ui: envelope(card)
       }
     ]
   }
 }
 
-async function installStubs(page: Page): Promise<void> {
-  const state = conversation()
+async function installStubs(page: Page, card: CardCase): Promise<void> {
+  const state = conversation(card)
   await page.addInitScript(() => {
     localStorage.setItem('token', 'ui.fixture.not-a-credential')
   })
@@ -154,18 +168,44 @@ async function installStubs(page: Page): Promise<void> {
   })
 }
 
-test('confirmation card separates the customer month segment from the sales date', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
-  await installStubs(page)
-  await page.goto('/assistant')
-  await expect(page.getByText('客户承诺', { exact: true })).toBeVisible()
-  await expect(page.getByText('下个月初付款（模糊时间，未确定具体日期）', { exact: true })).toBeVisible()
-  await expect(page.getByText('跟进时间', { exact: true })).toBeVisible()
-  await expect(page.getByText('11 月 5 号（日期，未指定具体时刻）', { exact: true })).toBeVisible()
-  await expect(page.getByText('跟进付款进展', { exact: true })).toBeVisible()
-  await expect(page.getByText('00:00')).toHaveCount(0)
-  await page.screenshot({
-    path: '/Users/eddie/Code/CRMWolf/.worktrees/crm-62-temporal-attribution/.xwing-task/crmwolf/evidence/crm62-confirmation-card.png',
-    fullPage: true
+const cases: Array<CardCase & { name: string, shot: string }> = [
+  {
+    name: 'date without a spoken time shows the 09:00 default tag',
+    shot: 'crm76-date-default-time.png',
+    state: 'ACTIVE',
+    said: '11 月 5 号',
+    followTime: { value: '2026-11-05（周四）09:00', status_label: '未说时刻，默认 09:00 提醒', source: '原话：“11 月 5 号”' }
+  },
+  {
+    name: 'spoken time shows no default tag',
+    shot: 'crm76-datetime-spoken.png',
+    state: 'ACTIVE',
+    said: '11 月 5 号下午 3 点',
+    followTime: { value: '2026-11-05（周四）15:00', source: '原话：“11 月 5 号下午 3 点”' }
+  },
+  {
+    name: 'history card keeps the frozen year',
+    shot: 'crm76-history-frozen-year.png',
+    state: 'READ_ONLY',
+    said: '明年 1 月 15 号',
+    followTime: { value: '2027-01-15（周五）09:00', status_label: '未说时刻，默认 09:00 提醒', source: '原话：“明年 1 月 15 号”' }
+  }
+]
+
+for (const card of cases) {
+  test(`confirmation card follow time: ${card.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await installStubs(page, card)
+    await page.goto('/assistant')
+    await expect(page.getByText('客户承诺', { exact: true })).toBeVisible()
+    await expect(page.getByText('下个月初付款（模糊时间，未确定具体日期）', { exact: true })).toBeVisible()
+    await expect(page.getByText('跟进时间', { exact: true })).toBeVisible()
+    const time = page.locator('.activity-time')
+    await expect(time.locator('.activity-time-value')).toHaveText(card.followTime.value)
+    const tag = time.locator('.activity-pill')
+    if (card.followTime.status_label) await expect(tag).toHaveText(card.followTime.status_label)
+    else await expect(tag).toHaveCount(0)
+    await expect(page.locator('.activity-time + .activity-caption')).toHaveText(card.followTime.source ?? '')
+    await page.screenshot({ path: testInfo.outputPath(card.shot), fullPage: true })
   })
-})
+}

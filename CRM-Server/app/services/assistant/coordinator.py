@@ -498,6 +498,9 @@ class AssistantCoordinator:
                 result.task,
             )
         resolved, granularity = resolved_sales_follow_up(draft)
+        if resolved is not None and granularity == "DATE":
+            # Same unspoken-time default as the legacy path: remind at 09:00.
+            resolved = resolved.replace(hour=9)
         result = apply_task_update(
             db,
             task,

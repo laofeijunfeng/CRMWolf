@@ -490,7 +490,7 @@ def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
         _preview(
             activity_kind="PHONE_FOLLOW_UP",
             next_action="跟进付款进展",
-            next_follow_time="2026-11-05T00:00:00",
+            next_follow_time="2026-11-05T09:00:00",
             next_follow_time_text="11 月 5 号",
             next_follow_time_granularity="DATE",
             content_json=content_json,
@@ -499,12 +499,14 @@ def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
     message = _message("m1", "确认后写入这条客户活动？", _task(waiting=waiting))
     envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
     interaction = next(block for block in envelope.blocks if block.type == "interaction")
-    values = {fact.key: fact.value for fact in interaction.facts}
-    labels = {fact.key: fact.label for fact in interaction.facts}
+    facts = {fact.key: fact for fact in interaction.facts}
+    values = {key: fact.value for key, fact in facts.items()}
+    labels = {key: fact.label for key, fact in facts.items()}
     assert labels["customer_commitment"] == "客户承诺"
     assert values["customer_commitment"] == "下个月初付款（模糊时间，未确定具体日期）"
-    assert values["next_follow_time"] == "11 月 5 号（日期，未指定具体时刻）"
-    assert "00:00" not in values["next_follow_time"]
+    assert values["next_follow_time"] == "2026-11-05（周四）09:00"
+    assert facts["next_follow_time"].status_label == "未说时刻，默认 09:00 提醒"
+    assert facts["next_follow_time"].source == "原话：“11 月 5 号”"
     assert values["next_action"] == "跟进付款进展"
 
 
@@ -580,7 +582,7 @@ def test_confirmation_card_labels_a_full_month_without_a_default_day() -> None:
             title="微信跟进",
             summary="预计11月份可以完成付款，11月15号跟进。",
             next_action="11月15号跟进付款方面的情况",
-            next_follow_time="2026-11-15T00:00:00",
+            next_follow_time="2026-11-15T09:00:00",
             next_follow_time_text="11月15号",
             next_follow_time_granularity="DATE",
             content_json=content_json,
@@ -591,11 +593,54 @@ def test_confirmation_card_labels_a_full_month_without_a_default_day() -> None:
     interaction = next(block for block in envelope.blocks if block.type == "interaction")
     values = {fact.key: fact.value for fact in interaction.facts}
     assert values["customer_commitment"] == "预计11月份可以完成付款（整月，未确定具体日期）"
-    assert values["next_follow_time"] == "11月15号（日期，未指定具体时刻）"
+    assert values["next_follow_time"] == "2026-11-15（周日）09:00"
     assert values["next_action"] == "11月15号跟进付款方面的情况"
     assert "11月1日" not in values["customer_commitment"]
     assert "11月30" not in values["customer_commitment"]
-    assert "00:00" not in values["next_follow_time"]
+
+
+def _follow_time_fact(**preview: object):
+    waiting = _confirmation(_preview(**preview))
+    message = _message("m_time", "确认后写入这条客户活动？", _task(waiting=waiting))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    return next(fact for fact in interaction.facts if fact.key == "next_follow_time")
+
+
+def test_follow_time_shows_the_frozen_year_and_default_reminder_hour() -> None:
+    fact = _follow_time_fact(
+        next_follow_time="2027-01-15T09:00:00",
+        next_follow_time_text="明年 1 月 15 号",
+        next_follow_time_granularity="DATE",
+    )
+    assert (fact.value, fact.status_label, fact.source) == (
+        "2027-01-15（周五）09:00",
+        "未说时刻，默认 09:00 提醒",
+        "原话：“明年 1 月 15 号”",
+    )
+
+
+def test_follow_time_with_a_spoken_clock_has_no_default_tag() -> None:
+    fact = _follow_time_fact(
+        next_follow_time="2026-11-11T15:00:00",
+        next_follow_time_text="下周三下午 3 点",
+        next_follow_time_granularity="DATETIME",
+    )
+    assert (fact.value, fact.status_label, fact.source) == ("2026-11-11（周三）15:00", None, "原话：“下周三下午 3 点”")
+
+
+def test_follow_time_frozen_at_midnight_shows_what_is_written_without_the_default_tag() -> None:
+    fact = _follow_time_fact(
+        next_follow_time="2026-11-05T00:00:00",
+        next_follow_time_text="11 月 5 号",
+        next_follow_time_granularity="DATE",
+    )
+    assert (fact.value, fact.status_label) == ("2026-11-05（周四）00:00", None)
+
+
+def test_follow_time_without_a_resolved_instant_keeps_the_spoken_phrase() -> None:
+    fact = _follow_time_fact(next_follow_time=None, next_follow_time_text="下周找时间", next_follow_time_granularity="UNKNOWN")
+    assert (fact.value, fact.status_label, fact.source) == ("下周找时间", None, None)
 
 
 def test_activity_kind_card_offers_the_seven_kinds_and_the_trigger_wording() -> None:

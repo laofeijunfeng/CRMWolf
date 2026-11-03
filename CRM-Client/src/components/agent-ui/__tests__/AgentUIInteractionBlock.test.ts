@@ -436,7 +436,7 @@ it('splits a customer month segment from a dated sales follow-up', () => {
       { key: 'summary', label: '摘要', value: '客户说下个月初付款，11 月 5 号跟进下付款进展。', group: 'write' },
       { key: 'next_action', label: '下一步', value: '跟进付款进展', group: 'write' },
       { key: 'customer_commitment', label: '客户承诺', value: '下个月初付款（模糊时间，未确定具体日期）', group: 'write' },
-      { key: 'next_follow_time', label: '跟进时间', value: '11 月 5 号（日期，未指定具体时刻）', group: 'write' },
+      { key: 'next_follow_time', label: '跟进时间', value: '2026-11-05（周四）09:00', group: 'write', status_label: '未说时刻，默认 09:00 提醒', source: '原话：“11 月 5 号”' },
       { key: 'activity_kind', label: '活动类型', value: '电话跟进', group: 'activity_kind', status_label: '已识别' }
     ],
     options: [
@@ -456,8 +456,9 @@ it('splits a customer month segment from a dated sales follow-up', () => {
 
   expect(rows['下一步']).toBe('跟进付款进展')
   expect(rows['客户承诺']).toBe('下个月初付款（模糊时间，未确定具体日期）')
-  expect(rows['跟进时间']).toBe('11 月 5 号（日期，未指定具体时刻）')
-  expect(wrapper.text()).not.toContain('00:00')
+  expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-05（周四）09:00')
+  expect(wrapper.get('.activity-time .activity-pill').text()).toBe('未说时刻，默认 09:00 提醒')
+  expect(wrapper.get('.activity-time + .activity-caption').text()).toBe('原话：“11 月 5 号”')
   expect(wrapper.text()).not.toContain('2026-11-01')
 })
 
@@ -476,7 +477,7 @@ it('shows a full month commitment separately from a sales date', () => {
       { key: 'summary', label: '摘要', value: '预计11月份可以完成付款，11月15号跟进付款方面的情况。', group: 'write' },
       { key: 'next_action', label: '下一步', value: '11月15号跟进付款方面的情况', group: 'write' },
       { key: 'customer_commitment', label: '客户承诺', value: '预计11月份可以完成付款（整月，未确定具体日期）', group: 'write' },
-      { key: 'next_follow_time', label: '跟进时间', value: '11月15号（日期，未指定具体时刻）', group: 'write' },
+      { key: 'next_follow_time', label: '跟进时间', value: '2026-11-15（周日）15:00', group: 'write', source: '原话：“11月15号下午3点”' },
       { key: 'activity_kind', label: '活动类型', value: '微信跟进', group: 'activity_kind', status_label: '已识别' }
     ],
     options: [
@@ -495,10 +496,12 @@ it('shows a full month commitment separately from a sales date', () => {
   ]))
 
   expect(rows['客户承诺']).toBe('预计11月份可以完成付款（整月，未确定具体日期）')
-  expect(rows['跟进时间']).toBe('11月15号（日期，未指定具体时刻）')
+  expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-15（周日）15:00')
+  expect(wrapper.find('.activity-time .activity-pill').exists()).toBe(false)
+  expect(wrapper.get('.activity-time + .activity-caption').text()).toBe('原话：“11月15号下午3点”')
   expect(rows['下一步']).toBe('11月15号跟进付款方面的情况')
   expect(wrapper.text()).not.toContain('11月1日')
-  expect(wrapper.text()).not.toContain('00:00')
+  expect(wrapper.text()).not.toContain('11月30')
 })
 
 it('keeps activity facts visible and folds recognition source and evidence', () => {

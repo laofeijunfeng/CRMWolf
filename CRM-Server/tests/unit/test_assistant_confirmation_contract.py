@@ -944,7 +944,7 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
         session, outcome.task, AssistantInput(kind="submit_field", choice=choice)
     )
     frozen = chosen.task.authority_json["frozen_activity_command"]
-    assert frozen["next_follow_time"] == "2026-10-30T00:00:00"
+    assert frozen["next_follow_time"] == "2026-10-30T09:00:00"
     assert frozen["next_follow_time_granularity"] == "DATE"
     assert "2026-10-31" not in (frozen["next_follow_time"] or "")
     assert frozen["content_json"]["customer_commitments"][0]["text"] == "叶老师预计本月底完成准备。"
@@ -955,7 +955,7 @@ async def test_temporal_month_choice_does_not_use_the_generic_time_prompt(db):
     session.commit()
     with factory() as independent:
         activity = independent.query(CustomerActivity).one()
-        assert activity.next_follow_time == datetime(2026, 10, 30, 0, 0)
+        assert activity.next_follow_time == datetime(2026, 10, 30, 9, 0)
         assert json.loads(activity.content_json)["customer_commitments"][0]["resolved_on"] is None
 
 
@@ -1003,16 +1003,39 @@ async def test_relative_year_real_response_reaches_confirmation_without_writing_
     outcome = await coordinator.handle_task(session, task, AssistantInput(kind="text", text=fixture["source"]))
     assert outcome.reply.waiting.type == "CONFIRMATION"
     command = outcome.task.authority_json["frozen_activity_command"]
-    assert command["next_follow_time"] == "2027-01-15T00:00:00"
+    assert command["next_follow_time"] == "2027-01-15T09:00:00"
     assert command["next_follow_time_granularity"] == "DATE"
     assert command["customer_name"] == raw.customer_name
     assert session.query(CustomerActivity).count() == 0 and outcome.task.committed_json == []
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import project_assistant_message
+
+    message = ConversationMessage.model_validate(
+        {
+            "id": "m1",
+            "role": "assistant",
+            "text": "确认后写入？",
+            "at": "2026-11-02T13:20:00",
+            "task": task_view(outcome.task, session),
+            "boundary": None,
+            "outcome": None,
+        }
+    )
+    card = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    block = next(b for b in card.blocks if b.type == "interaction")
+    fact = next(f for f in block.facts if f.key == "next_follow_time")
+    assert (fact.value, fact.status_label, fact.source) == (
+        "2027-01-15（周五）09:00",
+        "未说时刻，默认 09:00 提醒",
+        f"原话：“{raw.next_follow_time_text}”",
+    )
     session.commit()
     await coordinator.handle_task(session, outcome.task, AssistantInput(kind="confirm", choice="confirm"))
     session.commit()
     with factory() as independent:
         activity = independent.query(CustomerActivity).one()
-        assert activity.next_follow_time == datetime(2027, 1, 15)
+        assert activity.next_follow_time == datetime(2027, 1, 15, 9, 0)
         assert activity.effectiveness_score == 85
     assert gate.calls == 1
 
@@ -1108,7 +1131,7 @@ async def test_vague_year_wait_is_single_and_date_reply_restructures_and_rescore
     assert recovered.task.public_id == task.public_id
     assert recovered.reply.waiting.type == "CONFIRMATION"
     command = recovered.task.authority_json["frozen_activity_command"]
-    assert command["next_follow_time"] == "2027-01-15T00:00:00"
+    assert command["next_follow_time"] == "2027-01-15T09:00:00"
     assert command["next_action"] == "联系杨老师"
     assert command["customer_name"] == "睿狐科技"
     assert gate.inputs[-1]["user_text"] == original + "\n" + answer

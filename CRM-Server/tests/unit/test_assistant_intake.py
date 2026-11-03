@@ -1021,7 +1021,7 @@ async def test_month_only_commitment_survives_structuring(db_session, month_kind
 
     customer, follow = confirmation_time_labels(draft.content_json)
     assert customer is not None and "预计11月份可以完成付款（整月，未确定具体日期）" in customer
-    assert follow == "11月15号（日期，未指定具体时刻）"
+    assert follow == "11月15号"
     dated = [item for item in draft.content_json["action_evidence"] if item.get("due_at")]
     assert dated
     assert {item["due_at"][:10] for item in dated} == {"2026-11-15"}

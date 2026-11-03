@@ -420,7 +420,7 @@ def test_legacy_unknown_month_kind_normalizes_to_full_month() -> None:
 
     customer, follow = confirmation_time_labels(draft.content_json)
     assert customer is not None and "预计11月份可以完成付款（整月，未确定具体日期）" in customer
-    assert follow == "11月15号（日期，未指定具体时刻）"
+    assert follow == "11月15号"
     assert "11月1号" not in (customer or "")
     assert "11月30" not in (customer or "")
     assert "00:00" not in (follow or "")
@@ -822,7 +822,7 @@ def test_target_sentence_splits_customer_segment_and_sales_date() -> None:
     assert "2026-11-01" not in dumped
     assert confirmation_time_labels(draft.content_json) == (
         "下个月初付款（模糊时间，未确定具体日期）",
-        "11 月 5 号（日期，未指定具体时刻）",
+        "11 月 5 号",
     )
 
 

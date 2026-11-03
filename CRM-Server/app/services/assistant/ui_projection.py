@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import ValidationError
@@ -492,8 +493,9 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
 
     commitment_line, follow_override = confirmation_time_labels(preview.content_json)
     _add_fact(facts, "customer_commitment", "客户承诺", commitment_line, group="write")
-    follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
-    _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
+    if not _add_follow_time_fact(facts, preview):
+        follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
+        _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
     status_label = "历史冻结" if not editable and preview.activity_kind else preview.channel_status_label
     options = [
         InteractionOption(value=kind, label=_KIND_LABELS[kind])
@@ -534,6 +536,36 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     _add_fact(facts, "score", "内容质量", f"{preview.score} / 100", group="score")
     _add_fact(facts, "score_reason", "评分依据", preview.score_reason, group="score")
     return facts[:20]
+
+
+_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+_DEFAULT_FOLLOW_UP_HOUR = 9
+
+
+def _add_follow_time_fact(facts: list[InteractionConfirmationFact], preview: ActivityPreview) -> bool:
+    """Show the frozen write instant itself; the spoken phrase is only its evidence."""
+
+    if preview.next_follow_time is None or preview.next_follow_time_granularity not in {"DATE", "DATETIME"}:
+        return False
+    try:
+        at = datetime.fromisoformat(preview.next_follow_time)
+    except ValueError:
+        return False
+    defaulted = (
+        preview.next_follow_time_granularity == "DATE"
+        and (at.hour, at.minute, at.second) == (_DEFAULT_FOLLOW_UP_HOUR, 0, 0)
+    )
+    raw = _plain(preview.next_follow_time_text or "")
+    _add_fact(
+        facts,
+        "next_follow_time",
+        "跟进时间",
+        f"{at:%Y-%m-%d}（{_WEEKDAYS[at.weekday()]}）{at:%H:%M}",
+        group="write",
+        status_label="未说时刻，默认 09:00 提醒" if defaulted else None,
+        source=f"原话：“{raw}”" if raw else None,
+    )
+    return True
 
 
 def _proposal_facts(kind: str, evidence: str) -> list[InteractionConfirmationFact]:

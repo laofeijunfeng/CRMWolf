@@ -678,7 +678,6 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
 
 _FUZZY_TIME_LABEL = "（模糊时间，未确定具体日期）"
 _FULL_MONTH_LABEL = "（整月，未确定具体日期）"
-_DATE_TIME_LABEL = "（日期，未指定具体时刻）"
 
 
 def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | None, str | None]:
@@ -721,7 +720,7 @@ def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | Non
     if not isinstance(sales_mention, StoredMention) or sales_mention.resolution_status != "RESOLVED":
         return customer_line, None
     if sales_mention.granularity == "DATE":
-        return customer_line, f"{sales_mention.raw_text}{_DATE_TIME_LABEL}"
+        return customer_line, sales_mention.raw_text
     if _full_month_mention(sales_mention):
         return customer_line, f"{sales_mention.raw_text}{_FULL_MONTH_LABEL}"
     if sales_mention.granularity == "MONTH_SEGMENT":
