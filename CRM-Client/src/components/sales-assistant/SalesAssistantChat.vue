@@ -1128,7 +1128,7 @@ void loadConversation()
               @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
               @action="(actionId) => { void retryRootFailure(entry, actionId) }"
             />
-            <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示，原记录仍保留。</div>
+            <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
             <button
               v-if="showExplicitNone(entry)"
               type="button"

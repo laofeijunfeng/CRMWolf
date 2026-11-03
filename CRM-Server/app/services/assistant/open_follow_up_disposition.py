@@ -36,6 +36,8 @@ GENERIC_FRAGMENTS = frozenset({
     "继续跟进",
     "客户沟通",
 })
+_STALE = ("关联已失效", "跟进内容已变化，任务未改动", "RELATION_STALE")
+_HANDLED = ("已被处理", "任务已不是未完成状态", "ALREADY_HANDLED")
 
 @dataclass(frozen=True)
 class DispositionOutcome:
@@ -134,7 +136,7 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
                 "activity_kind_label": "",
                 "items": [],
             },
-            "历史任务暂时无法核对，本次没有改动这些任务。已写入的跟进仍然保留。",
+            "历史任务暂时查不到，任务未改动",
             start_followup=False,
         )
     if built is None:
@@ -150,7 +152,7 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
                 "activity_kind_label": _kind_label(activity.activity_kind),
                 "items": [],
             },
-            "未完成的历史任务超过 100 条，无法安全逐条展示，本次没有列出部分清单。已写入的跟进仍然保留。",
+            "未完成任务超过 100 条，请到任务列表处理",
             start_followup=True,
         )
     if not built["items"]:
@@ -175,13 +177,13 @@ async def settle_open_follow_up(db: Session, task: AssistantTask, choice: str) -
         raise ValueError("请选择当前这一条历史任务的处理")
     failure = _revalidate(db, task, batch, current)
     if failure is not None:
-        _observe(current, "failed", failure[0], failure[1])
+        _observe(current, "failed", *failure)
     elif action == "complete":
         _apply_complete(db, task, batch, current)
     elif action == "hold":
-        _observe(current, "hold", "先放着", "任务保持未完成，日期不变。本轮继续处理下一条。")
+        _observe(current, "hold", "先放着", "日期不变")
     else:
-        _observe(current, "skip", "本次已跳过", "你选择了“不管了”。任务保持未完成，未来仍可能提示，不记录为无关。")
+        _observe(current, "skip", "不管了", "下次可能还会提示")
     batch["items"] = items
     receipts = _receipt_for(current)
     pending = next((item for item in items if item.get("disposition") is None), None)
@@ -196,7 +198,7 @@ async def settle_open_follow_up(db: Session, task: AssistantTask, choice: str) -
             action_input={"choice": choice, "item_id": item_id},
             append_committed=receipts,
         )
-        return DispositionOutcome(result, str(current.get("result_message") or waiting.prompt), False)
+        return DispositionOutcome(result, str(current.get("result_message") or current.get("result_title")), False)
     batch["status"] = "DONE"
     message = _summary(items)
     result = _save_batch(
@@ -214,8 +216,7 @@ async def settle_open_follow_up(db: Session, task: AssistantTask, choice: str) -
 def _apply_complete(db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object]) -> None:
     failure = _revalidate(db, task, batch, item)
     if failure is not None:
-        title, message = failure
-        _observe(item, "failed", title, message)
+        _observe(item, "failed", *failure)
         return
     from app.services.follow_up_task_reconciliation_evaluation_service import (
         FollowUpTaskReconciliationDecision,
@@ -266,25 +267,20 @@ def _apply_complete(db: Session, task: AssistantTask, batch: dict[str, object], 
         and row is not None
         and row.status == FollowUpTaskStatus.COMPLETED
     ):
-        _observe(item, "complete", "已完成", "任务已标记完成，不再重复提交。")
+        _observe(item, "complete", "已完成", None)
         return
     if result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED or row is None:
-        _observe(
-            item,
-            "unknown",
-            "结果待核对",
-            "如果提交后无法确认结果，只显示“结果待核对”，不再次提供“已完成”按钮，避免重复执行。",
-        )
+        _observe(item, "unknown", "结果待核对", "请稍后在任务列表确认是否已完成", code="UNKNOWN_RESULT")
         return
     if result.skip_reason == "TASK_NOT_OPEN":
-        _observe(item, "failed", "任务已由其他流程处理", "最新状态已不是未完成。本次未重复执行，请以任务最新状态为准。")
+        _observe(item, "failed", "已被处理", "任务已不是未完成状态", code="ALREADY_HANDLED")
         return
-    _observe(item, "failed", "任务更新失败", "任务服务未接受本次更新，任务未完成。已写入的跟进与其他成功结果保持不变。")
+    _observe(item, "failed", "未能完成", "请到任务列表处理", code="SERVICE_REJECTED")
 
 
 def _revalidate(
     db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object],
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     activity = source_activity(db, task)
     if (
         activity is None
@@ -292,22 +288,22 @@ def _revalidate(
         or activity.activity_revision != batch.get("activity_revision")
         or _source_hash(activity.source_content or "") != batch.get("source_sha256")
     ):
-        return ("关联依据已失效", "原关联徽标已撤下，本次未修改任务。失效依据不能继续授权本次动作。")
+        return _STALE
     fresh = relate_title(str(item.get("title") or ""), activity.source_content or "")
     related_now = fresh is not None
     if related_now != bool(item.get("related")):
-        return ("关联依据已失效", "原关联徽标已撤下，本次未修改任务。失效依据不能继续授权本次动作。")
+        return _STALE
     if related_now and fresh is not None and fresh[1] != item.get("evidence_quote"):
-        return ("关联依据已失效", "原关联徽标已撤下，本次未修改任务。失效依据不能继续授权本次动作。")
+        return _STALE
     row = _task_row(db, task, str(item.get("task_public_id") or ""))
     if row is None or row.customer_id != activity.customer_id:
-        return ("任务已由其他流程处理", "最新状态已不是未完成。本次未重复执行，请以任务最新状态为准。")
+        return _HANDLED
     if not _can_operate(db, task, row):
-        return ("你已没有此任务的操作权限", "本次未修改任务。其他可操作任务不受影响，不尝试绕过权限。")
+        return ("无权限", "任务未改动", "NO_PERMISSION")
     if row.status != FollowUpTaskStatus.OPEN or _stamp(row.updated_time) != item.get("updated_time"):
-        return ("任务已由其他流程处理", "最新状态已不是未完成。本次未重复执行，请以任务最新状态为准。")
+        return _HANDLED
     if row.owner_id != item.get("owner_id"):
-        return ("任务已由其他流程处理", "最新状态已不是未完成。本次未重复执行，请以任务最新状态为准。")
+        return _HANDLED
     return None
 
 
@@ -412,8 +408,7 @@ def _waiting_for(task: AssistantTask, batch: dict[str, object]) -> TaskWaiting:
     items = [item for item in batch.get("items", []) if isinstance(item, dict)]
     current = next(item for item in items if item.get("disposition") is None)
     item_id = str(current["item_id"])
-    total = len(items)
-    prompt = f"还发现 {total} 条未完成的历史任务，请逐条处理。"
+    prompt = "历史跟进任务"
     return TaskWaiting(
         type=AssistantWaitingType.FOLLOW_UP_DISPOSITION,
         field="follow_up_disposition",
@@ -484,11 +479,10 @@ def _kind_label(kind: str) -> str:
 def _owner_line(db: Session, task: AssistantTask, row: FollowUpTask) -> str:
     due = f"计划 {row.due_at.month} 月 {row.due_at.day} 日" if row.due_at is not None else ""
     if row.owner_id == str(task.user_id):
-        who = "负责人：我"
-    else:
-        who = _other_owner(db, row.owner_id)
-        if not who:
-            return due
+        return due
+    who = _other_owner(db, row.owner_id)
+    if not who:
+        return due
     return f"{who} · {due}" if due else who
 
 
@@ -505,27 +499,29 @@ def _other_owner(db: Session, owner_id: str) -> str:
         return ""
     if user is None or not getattr(user, "name", None):
         return ""
-    return f"负责人：{user.name}"
+    return str(user.name)
 
 
-def _observe(item: dict[str, object], disposition: str, title: str, message: str) -> None:
+def _observe(
+    item: dict[str, object], disposition: str, title: str, message: str | None, code: str | None = None,
+) -> None:
     item["disposition"] = disposition
     item["result_title"] = title
     item["result_message"] = message
-    if disposition == "failed":
-        item["related"] = False if title == "关联依据已失效" else item.get("related")
+    if code is not None:
+        item["failure_code"] = code
+    if code == "RELATION_STALE":
+        item["related"] = False
 
 
 def _summary(items: list[dict[str, object]]) -> str:
-    counts = {name: sum(item.get("disposition") == name for item in items) for name in ("complete", "hold", "skip")}
-    failed = sum(item.get("disposition") in {"failed", "unknown"} for item in items)
-    text = (
-        f"本轮历史任务已逐条处理。{counts['complete']} 条已完成，{counts['hold']} 条先放着，"
-        f"{counts['skip']} 条本次跳过。未完成的任务保持原状；本次跟进已成功保留。"
+    counts = (
+        ("已完成", sum(item.get("disposition") == "complete" for item in items)),
+        ("先放着", sum(item.get("disposition") == "hold" for item in items)),
+        ("不管了", sum(item.get("disposition") == "skip" for item in items)),
+        ("未能处理", sum(item.get("disposition") in {"failed", "unknown"} for item in items)),
     )
-    if failed:
-        text += f"另有 {failed} 条未能处理。"
-    return text
+    return "已处理完：" + "，".join(f"{count} 条{label}" for label, count in counts if count)
 
 
 def _receipt_for(item: dict[str, object]) -> list[dict[str, object]] | None:

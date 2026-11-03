@@ -110,11 +110,7 @@ const dispositionCurrentIndex = computed(() => {
   const index = dispositionItems.value.findIndex(item => item.state === 'current')
   return index === -1 ? null : index + 1
 })
-const dispositionProgress = computed(() => (
-  dispositionCurrentIndex.value === null
-    ? `已处理 ${dispositionTotal.value} / ${dispositionTotal.value}`
-    : `待确认 ${dispositionCurrentIndex.value} / ${dispositionTotal.value}`
-))
+const dispositionProgress = computed(() => `${dispositionCurrentIndex.value ?? dispositionTotal.value} / ${dispositionTotal.value}`)
 const evidenceOpenId = ref<string | null>(null)
 const toggleEvidence = (itemId: string): void => {
   evidenceOpenId.value = evidenceOpenId.value === itemId ? null : itemId
@@ -142,7 +138,7 @@ const stateLabel = computed(() => {
     SUBMITTED: '已处理',
     EXPIRED: '已过期',
     CANCELLED: '已取消',
-    READ_ONLY: '历史记录'
+    READ_ONLY: '历史'
   })[props.block.state]
 })
 
@@ -235,7 +231,7 @@ const activityPassed = computed(() => {
 })
 const activityHistory = computed(() => props.block.state === 'READ_ONLY')
 const activityWaitingLabel = computed(() => {
-  if (activityHistory.value) return '历史只读'
+  if (activityHistory.value) return '历史'
   return activityKindFact.value?.status_label === '未识别 · 需要确认' ? '等待选择类型' : '待确认'
 })
 const activityActionOptions = computed(() => {
@@ -246,11 +242,10 @@ const activityActionOptions = computed(() => {
 const activityKindPillClass = computed(() => {
   const label = activityKindFact.value?.status_label ?? ''
   if (label.includes('未识别')) return 'is-warning'
-  if (label.includes('高置信度') || label.includes('词表兜底')) return 'is-success'
+  if (label === '已识别') return 'is-success'
   return 'is-info'
 })
 
-const isActivityKindChoice = computed(() => props.block.business_action === 'select_activity_kind')
 const KIND_HINT_PREFIX = '原文提到：'
 const kindHintChannels = computed((): string[] => {
   const hint = props.block.hint ?? ''
@@ -519,75 +514,72 @@ const submit = async (): Promise<void> => {
   <section
     v-else-if="isOpenFollowUpDisposition"
     ref="interactionRef"
-    class="agent-ui-interaction grid gap-3 rounded-wolf-surface border border-[#bfdbfe] bg-white p-3"
+    class="agent-ui-interaction grid gap-0 rounded-wolf-surface border border-[#bfdbfe] bg-[#f8fbff] px-4 py-3.5"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
-    <header class="flex items-start justify-between gap-3 border-b border-[#bfdbfe] bg-[#eff6ff] -m-3 mb-0 rounded-t-wolf-surface px-3 py-3">
-      <div>
-        <h4 class="m-0 text-[13px] font-semibold text-foreground">历史跟进任务</h4>
-        <p class="m-0 mt-0.5 text-xs text-muted-foreground">该客户 · 你当前可操作的未完成任务</p>
-      </div>
-      <span class="shrink-0 text-xs font-semibold text-[#1d4ed8]">{{ dispositionProgress }}</span>
+    <header class="flex items-start justify-between gap-3">
+      <h4 :id="`${block.id}-prompt`" class="m-0 text-sm font-semibold text-foreground">历史跟进任务</h4>
+      <span class="shrink-0 rounded-wolf-full border border-[#bfdbfe] bg-[#eff6ff] px-2 text-xs font-semibold leading-5 text-[#1d4ed8]" :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`">{{ dispositionProgress }}</span>
     </header>
-    <p :id="`${block.id}-prompt`" class="m-0 text-[13px] text-[#334155]">{{ block.prompt }}</p>
-    <ol class="m-0 grid list-none gap-0 p-0">
+    <p v-if="block.hint" class="m-0 mt-2 text-[13px] leading-5 text-[#334155]" data-agent-ui-disposition-summary>{{ block.hint }}</p>
+    <ol class="m-0 mt-2.5 grid list-none gap-0 border-t border-[#e5eaf0] p-0">
       <li
         v-for="(item, index) in dispositionItems"
         :key="item.item_id"
-        class="grid gap-2 border-t border-border py-3"
-        :class="item.state === 'current' ? 'border-l-2 border-l-[#2563eb] pl-3' : ''"
+        class="grid gap-1.5 border-b border-[#eef1f4] py-2.5 last:border-b-0"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="m-0 text-sm font-semibold text-foreground">{{ index + 1 }} {{ item.title }}</p>
-            <p v-if="item.owner_line" class="m-0 mt-0.5 text-xs text-muted-foreground">{{ item.owner_line }}</p>
-          </div>
-          <span class="shrink-0 text-xs text-[#1d4ed8]">{{ item.state === 'current' ? '当前待确认' : item.state === 'waiting' ? '待逐条确认' : item.result_title }}</span>
+        <div class="flex items-start justify-between gap-2.5">
+          <p class="m-0 min-w-0 text-sm text-foreground"><span class="mr-1.5 text-muted-foreground">{{ index + 1 }}</span>{{ item.title }}</p>
+          <span
+            class="shrink-0 rounded-wolf-full border px-2 text-xs leading-5"
+            :class="item.state === 'current'
+              ? 'border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]'
+              : item.state === 'complete'
+                ? 'border-[#d1fae5] bg-[#ecfdf5] text-[#22745e]'
+                : item.state === 'unknown'
+                  ? 'border-[#fed7aa] bg-[#fff7ed] text-[#b45309]'
+                  : item.state === 'failed'
+                    ? 'border-[#fecaca] bg-[#fef2f2] text-[#b91c1c]'
+                    : 'border-[#e2e6eb] bg-[#f3f6f8] text-[#667180]'"
+          >{{ item.state === 'current' ? '当前' : item.state === 'waiting' ? '待处理' : item.result_title }}</span>
         </div>
-        <div v-if="item.related" class="flex flex-wrap items-center gap-2" @mouseenter="evidenceOpenId = item.item_id" @mouseleave="evidenceOpenId = null">
-          <span class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-xs text-[#1d4ed8]">与本次跟进相关</span>
+        <p v-if="item.owner_line" class="m-0 text-xs text-muted-foreground">{{ item.owner_line }}</p>
+        <div v-if="item.related && item.evidence_quote" class="grid gap-1">
           <button
             type="button"
-            class="min-h-11 px-1 text-xs text-[#1d4ed8] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2563eb]"
+            class="inline-flex w-fit items-center text-xs text-[#1d4ed8] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2563eb]"
             :aria-expanded="evidenceOpenId === item.item_id"
-            :aria-describedby="`${block.id}-evidence-${item.item_id}`"
+            :aria-controls="`${block.id}-evidence-${item.item_id}`"
+            data-agent-ui-related-toggle
             @click="toggleEvidence(item.item_id)"
-            @focus="evidenceOpenId = item.item_id"
           >
-            {{ evidenceOpenId === item.item_id ? '依据已聚焦' : '查看依据' }}
+            查看关联信息
           </button>
-          <div
+          <p
             v-if="evidenceOpenId === item.item_id"
             :id="`${block.id}-evidence-${item.item_id}`"
-            role="tooltip"
-            class="basis-full rounded-wolf border border-border bg-white p-3 text-xs leading-5"
+            class="m-0 rounded-wolf border border-[#e2e6eb] bg-white px-2.5 py-2 text-xs leading-5 text-[#334155]"
+            data-agent-ui-related-line
           >
-            <strong>关联依据</strong>
-            <p v-if="item.evidence_quote" class="m-0 mt-1">本次跟进：“{{ item.evidence_quote }}”</p>
-            <p v-if="item.evidence_reason" class="m-0 mt-1">{{ item.evidence_reason }}</p>
-            <p class="m-0 mt-2 text-muted-foreground">关联仅用于提示，不代表任务已完成；仍由你逐条决定。</p>
-          </div>
+            本次跟进：“{{ item.evidence_quote }}”
+          </p>
         </div>
-        <div v-if="item.state === 'current' && isActive" class="grid gap-2 sm:grid-cols-3">
+        <div v-if="item.state === 'current' && isActive" class="grid grid-cols-3 gap-2">
           <button
             v-for="option in block.options"
             :key="option.value"
             type="button"
-            class="grid min-h-[52px] rounded-wolf border px-3 py-2 text-left"
-            :class="option.value.endsWith(':complete') ? 'border-[#1d4ed8] bg-[#2563eb] text-white' : 'border-border bg-white'"
+            class="rounded-wolf border border-[#cbd5e1] bg-white px-2.5 py-1.5 text-center text-[13px] text-foreground disabled:bg-[#f3f4f6] disabled:text-[#a0a7b0]"
             :disabled="controlsDisabled || option.disabled"
             @click="handleOptionClick(option.value)"
           >
-            <span class="text-sm font-semibold">{{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}</span>
-            <small v-if="option.description" class="text-xs opacity-80">{{ option.description }}</small>
+            {{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}
           </button>
         </div>
-        <p v-if="item.state === 'current' && isActive" class="m-0 text-xs text-muted-foreground">只处理这一条，提交后继续下一条。</p>
-        <p v-else-if="item.result_message" class="m-0 text-xs" :class="item.state === 'failed' ? 'text-[#b91c1c]' : item.state === 'unknown' ? 'text-[#92400e]' : item.state === 'complete' ? 'text-[#047857]' : 'text-muted-foreground'">{{ item.result_message }}</p>
+        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-xs" :class="item.state === 'failed' ? 'text-[#b91c1c]' : item.state === 'unknown' ? 'text-[#b45309]' : item.state === 'complete' ? 'text-[#22745e]' : 'text-muted-foreground'">{{ item.result_message }}</p>
       </li>
     </ol>
-    <p class="m-0 text-xs text-muted-foreground">只有选择“已完成”才会更新这一条任务。“不管了”仅跳过本次，不代表与本次跟进无关。</p>
   </section>
 
   <section
@@ -606,10 +598,9 @@ const submit = async (): Promise<void> => {
         <span class="activity-pill" :class="activityHistory ? 'is-muted' : 'is-info'">{{ activityWaitingLabel }}</span>
       </header>
       <div class="activity-main">
-        <p v-if="activityHistory" class="activity-note">仅回看当时冻结的内容，不代表当前客户状态。</p>
         <section class="activity-section">
           <div v-if="activityScoreFact" class="activity-section-head">
-            <span class="activity-pill is-success">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : activityScoreFact.value }}</span>
+            <span class="activity-pill" :class="activityPassed ? 'is-success' : 'is-warning'">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : `质量未通过 · ${activityScoreNumber} 分` }}</span>
           </div>
           <p v-if="activityFact('customer')" class="activity-customer">
             <b>{{ activityFact('customer')?.value }}</b>
@@ -644,23 +635,21 @@ const submit = async (): Promise<void> => {
               <dd>
                 <div class="activity-kind">
                   <span class="activity-kind-name">{{ activityKindFact.value }}</span>
-                  <span v-if="activityKindFact.status_label" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
+                  <span v-if="activityKindFact.status_label && !activityHistory" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
                   <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}</button>
                 </div>
-                <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption"><span>为什么需要选择：</span>{{ activityKindFact.source }}</p>
+                <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption" data-agent-ui-kind-evidence>{{ activityKindFact.source }}</p>
                 <p v-else-if="activityKindFact.source && activityKindFact.status_label === '已选择'" class="activity-caption">{{ activityKindFact.source }}</p>
               </dd>
             </div>
           </dl>
           <div v-if="activityKindFact && kindOptionsVisible(activityKindFact)" class="activity-kind-editor">
             <div class="activity-kind-editor-head">
-              <span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '选择活动类型' : '修改活动类型' }}</span>
-              <span>{{ activityKindFact.status_label === '未识别 · 需要确认' ? '选择后才可确认' : '不会重新生成正文' }}</span>
+              <span>选择活动类型</span>
             </div>
             <div class="activity-kind-options">
               <button v-for="option in activityKindFact.options ?? []" :key="option.value" type="button" class="activity-kind-option" :class="option.label === activityKindFact.value ? 'is-selected' : ''" :disabled="controlsDisabled || option.disabled" @click="reviseActivityKind(option.value)">{{ option.label }}</button>
             </div>
-            <p>只修改“活动类型”字段，不改写活动标题、摘要或下一步。</p>
           </div>
         </section>
         <section v-if="activityContext" class="activity-context">
@@ -673,7 +662,6 @@ const submit = async (): Promise<void> => {
           </div>
           <p v-if="activityContext.source" class="activity-body">{{ activityContext.source }}</p>
           <p v-if="activityOpportunity" class="activity-inline"><span>关联商机</span><b>{{ activityOpportunity.value }}</b></p>
-          <p class="activity-caption">不写入活动正文，不自动修改商机阶段。</p>
         </section>
         <ul v-if="activityNotices.length > 0" class="activity-notices">
           <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
@@ -688,14 +676,12 @@ const submit = async (): Promise<void> => {
         <details v-if="activityScoreReason" class="activity-details activity-score">
           <summary>查看评分依据 · 内容质量</summary>
           <div class="activity-score-body">
-            <strong>{{ activityScoreFact?.value }} · {{ activityPassed ? '通过写入质量门禁' : '未通过写入质量门禁' }}</strong>
+            <strong>{{ activityScoreFact?.value }} · {{ activityPassed ? '质量通过' : '质量未通过' }}</strong>
             <p>{{ activityScoreReason.value }}</p>
-            <p class="activity-caption">质量通过不表示客户进展良好，也不替代上下文判断。</p>
           </div>
         </details>
       </div>
     </template>
-    <p v-if="!isActivityConfirmation && block.state === 'READ_ONLY'" class="m-0 inline-flex w-fit items-center rounded-full border border-border bg-muted px-2 py-1 text-[11px] text-muted-foreground">历史消息 · 已回放</p>
     <header v-if="!isActivityConfirmation" class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-2">
         <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]" aria-hidden="true">?</span>
@@ -753,7 +739,7 @@ const submit = async (): Promise<void> => {
       class="rounded-wolf border border-[#fecaca] bg-[#fef2f2] px-3 py-2"
       data-agent-ui-card-notice="failed"
     >
-      <p class="m-0 text-xs leading-5 text-[#b91c1c]">选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。</p>
+      <p class="m-0 text-xs leading-5 text-[#b91c1c]">选择没有提交成功，请重新选择</p>
       <Button
         type="button"
         variant="outline"
@@ -777,7 +763,7 @@ const submit = async (): Promise<void> => {
       class="m-0 rounded-wolf border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground"
       data-agent-ui-card-notice="expired"
     >
-      这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。
+      已在别处处理，已刷新
     </p>
 
     <div
@@ -786,7 +772,6 @@ const submit = async (): Promise<void> => {
       data-agent-ui-submitted-choice
     >
       <span class="font-medium">已选择：</span>{{ submittedChoiceOption?.label ?? submittedChoiceValue }}
-      <p v-if="isActivityKindChoice" class="m-0 mt-1 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的按钮。</p>
     </div>
 
     <template v-else-if="showsChoiceOptions">
@@ -859,9 +844,6 @@ const submit = async (): Promise<void> => {
         >
           {{ selectionError }}
         </p>
-        <p v-if="isActivityKindChoice" class="col-span-full m-0 text-[11px] text-muted-foreground">
-          原始内容已保存。选一项就定下类型，确认写入前仍可修改。
-        </p>
       </div>
       <div v-if="block.business_action === 'resolve_temporal_choice'" class="grid gap-1.5">
         <label class="text-[13px] font-semibold text-foreground" :for="`${block.id}-manual-date`">手动输入其他日期</label>
@@ -877,7 +859,6 @@ const submit = async (): Promise<void> => {
         <p class="m-0 text-[11px] text-muted-foreground">选择候选或输入完整日期后继续。</p>
       </div>
     </template>
-    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'choice' || block.interaction_type === 'confirmation')" :class="isActivityConfirmation ? 'activity-history-note' : 'm-0 text-[11px] text-muted-foreground'">{{ isActivityConfirmation ? '历史交互只读，不可再次提交。' : '历史交互不再提供可再次提交的确认按钮。' }}</p>
     <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
 
     <div
@@ -888,7 +869,7 @@ const submit = async (): Promise<void> => {
       <span class="font-medium">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
     </div>
 
-    <p v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'text_input' || block.interaction_type === 'form')" class="m-0 text-[11px] text-muted-foreground">历史交互不再提供可再次提交的确认按钮。</p>
+    <div v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'text_input' || block.interaction_type === 'form')" class="hidden"></div>
     <form v-else class="grid gap-3" novalidate @submit.prevent="submit">
       <div v-for="field in block.fields" :key="field.key" class="grid gap-1.5">
         <Label :for="`${block.id}-${field.key}`" class="text-sm font-medium text-foreground">
@@ -1083,26 +1064,6 @@ const submit = async (): Promise<void> => {
   display: grid;
   gap: 16px;
   padding: 16px;
-}
-
-.activity-note,
-.activity-history-note {
-  margin: 0;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.activity-note {
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 8px 12px;
-}
-
-.activity-history-note {
-  border-top: 1px solid #edf2f7;
-  padding: 12px 16px;
 }
 
 .activity-section,
@@ -1306,7 +1267,6 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-kind-option {
-  min-height: 44px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #fff;

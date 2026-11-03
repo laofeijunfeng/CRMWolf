@@ -406,14 +406,17 @@ it('shows every open follow-up and submits only the current three-way choice', a
   })
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.text()).toContain('历史跟进任务')
-  expect(wrapper.text()).toContain('与本次跟进相关')
-  expect(wrapper.text()).toContain('查看依据')
+  expect(wrapper.text()).toContain('联系客户确认采购安排')
   expect(wrapper.text()).toContain('补充安全测评报告')
-  expect(wrapper.text()).not.toContain('全部完成')
-  await wrapper.get('button[aria-describedby]').trigger('focus')
-  expect(wrapper.text()).toContain('已和林女士核对采购安排')
-  await wrapper.get('button.bg-\\[\\#2563eb\\], button').trigger('click')
+  expect(wrapper.text()).not.toContain('标记此任务完成')
+  expect(wrapper.text()).not.toContain('本次跟进与任务均明确提到')
+  const toggles = wrapper.findAll('[data-agent-ui-related-toggle]')
+  expect(toggles).toHaveLength(1)
+  expect(wrapper.find('[data-agent-ui-related-line]').exists()).toBe(false)
+  await toggles[0]?.trigger('click')
+  expect(toggles[0]?.attributes('aria-expanded')).toBe('true')
+  expect(wrapper.findAll('[data-agent-ui-related-line]')).toHaveLength(1)
+  expect(wrapper.get('[data-agent-ui-related-line]').text()).toContain('已和林女士核对采购安排')
   const complete = wrapper.findAll('button').find(button => button.text().includes('已完成'))
   await complete?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([
@@ -591,7 +594,7 @@ it('keeps an unrecognized activity type and its reason outside the fold', () => 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   expect(wrapper.text()).toContain('等待选择类型')
-  expect(wrapper.get('.activity-caption').text()).toBe('为什么需要选择：原文没有写明渠道')
+  expect(wrapper.get('[data-agent-ui-kind-evidence]').text()).toBe('原文没有写明渠道')
   expect(wrapper.find('details.activity-basis').exists()).toBe(false)
   expect(wrapper.get('button.activity-action.is-disabled, button[disabled].activity-action').text()).toContain('确认写入')
 })
@@ -625,8 +628,8 @@ it('replays a historical activity confirmation without write actions', () => {
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   expect(wrapper.get('.activity-title').text()).toBe('客户活动')
-  expect(wrapper.text()).toContain('历史只读')
-  expect(wrapper.text()).toContain('仅回看当时冻结的内容，不代表当前客户状态。')
+  expect(wrapper.findAll('span').filter(span => span.text() === '历史')).toHaveLength(1)
+  expect(wrapper.text()).not.toContain('历史冻结')
   expect(wrapper.text()).toContain('当时冻结的活动正文。')
   expect(wrapper.find('button').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('确认写入')
@@ -668,7 +671,7 @@ it('groups the activity kinds and shows the wording that triggered the question'
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   const headings = wrapper.findAll('div[role="group"] > p').map(heading => heading.text())
-  expect(headings).toEqual(['会议', '跟进', '原始内容已保存。选一项就定下类型，确认写入前仍可修改。'])
+  expect(headings).toEqual(['会议', '跟进'])
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('原文提到：')
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('微信')
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('请按本次实际发生的沟通来选')
@@ -708,7 +711,6 @@ it('keeps a resolved activity kind read-only with its origin', () => {
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
   expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：微信跟进')
-  expect(wrapper.text()).toContain('历史交互不再提供可再次提交的按钮。')
   expect(wrapper.text()).toContain('已处理')
   expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
   expect(wrapper.findAll('button')).toHaveLength(0)
@@ -739,8 +741,7 @@ it('offers a retry with the same choice when the card never reported an outcome'
   })
 
   expect(wrapper.text()).toContain('提交失败')
-  expect(wrapper.get('[data-agent-ui-card-notice="failed"]').text())
-    .toContain('选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。')
+  expect(wrapper.find('[data-agent-ui-card-notice="failed"] button').exists()).toBe(true)
   expect(wrapper.get('button[aria-pressed="true"]').text()).toContain('微信跟进')
 
   await wrapper.get('[data-agent-ui-card-notice="failed"] button').trigger('click')
@@ -800,8 +801,7 @@ it('refuses further submissions once the card is stale', () => {
   const wrapper = mount(AgentUIInteractionBlock, { props: { block, notice: { kind: 'expired' } } })
 
   expect(wrapper.text()).toContain('已过期')
-  expect(wrapper.get('[data-agent-ui-card-notice="expired"]').text())
-    .toContain('这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。')
+  expect(wrapper.find('[data-agent-ui-card-notice="expired"]').exists()).toBe(true)
   expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
@@ -848,7 +848,6 @@ it('shows the chosen kind with its origin and only same-category revisions', asy
 
   await wrapper.get('button.activity-link').trigger('click')
   expect(wrapper.get('button.activity-link').text()).toBe('收起类型选项')
-  expect(wrapper.text()).toContain('不会重新生成正文')
   const revisions = wrapper.findAll('button.activity-kind-option')
   expect(revisions.map(button => button.text())).toEqual(['电话跟进', '微信跟进'])
 

@@ -125,7 +125,6 @@ async def test_cancel_closes_task_and_clears_waiting(db_session):
 
     assert outcome.task.status == AssistantTaskStatus.CANCELLED
     assert outcome.task.waiting_type is None
-    assert "当前这件已停下" in outcome.reply.message
     action = (
         db_session.query(AssistantAction)
         .filter_by(task_id=outcome.task.id, action="cancel_task")

@@ -566,7 +566,8 @@ def test_legacy_cards_require_real_frozen_payload_and_receipts_require_evidence(
     assert len(cards) == 1
     assert cards[0].waiting.confirmation_payload.preview.title == "原会议标题"
     assert any(m.outcome == "activity_written" for m in state.messages)
-    assert any("暂时无法显示" in m.text for m in state.messages)
+    legacy = [m for m in state.messages if ":legacy:" in m.id and m.role == "assistant"]
+    assert [m.outcome for m in legacy if m.task is None] == ["activity_written", None]
 
 
 async def test_command_labels_never_expose_customer_or_kind_ids(db):
@@ -1000,11 +1001,8 @@ def test_single_broken_history_projection_keeps_other_entries_readable(db, monke
 
     monkeypatch.setattr(ConversationService, "_messages", project)
     page = service.read(db, team_id=1, user_id=2)
-    assert [message.text for message in page.messages] == [
-        "正常历史",
-        "无法投影的原句",
-        "这条历史结果暂时无法显示，原记录仍保留。",
-    ]
+    assert [message.text for message in page.messages][:2] == ["正常历史", "无法投影的原句"]
+    assert len(page.messages) == 3
     assert page.messages[1].role == "user"
     assert page.messages[2].outcome == "failure"
 

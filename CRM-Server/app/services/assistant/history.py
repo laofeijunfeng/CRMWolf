@@ -89,7 +89,7 @@ def legacy_messages(task: AssistantTask, actions: list[AssistantAction], prefix:
                 )
                 text = waiting.prompt
             except (ValidationError, ValueError):
-                text = "这条历史结果暂时无法显示，原记录仍保留。"
+                text = "这条历史结果暂时无法显示"
         elif action.event_type == "receipt" and isinstance(data.get("activity_public_id"), str):
             text = data.get("label")
         elif action.actor == "USER":

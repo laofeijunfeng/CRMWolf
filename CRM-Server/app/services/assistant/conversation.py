@@ -203,7 +203,7 @@ class ConversationService:
                         ConversationMessage(
                             id=f"{row.public_id}:{turn.public_id}:{event.seq}:invalid",
                             role="assistant",
-                            text="这条历史结果暂时无法显示，原记录仍保留。",
+                            text="这条历史结果暂时无法显示",
                             at=event.created_time.isoformat(),
                             outcome="failure",
                             error_code="INTERNAL_ERROR",
@@ -220,7 +220,7 @@ class ConversationService:
             ConversationMessage(
                 id=f"{row.public_id}:unavailable",
                 role="assistant",
-                text="这条历史结果暂时无法显示，原记录仍保留。",
+                text="这条历史结果暂时无法显示",
                 at=at,
                 outcome="failure",
                 error_code="INTERNAL_ERROR",

@@ -18,7 +18,7 @@ from app.services.assistant.contracts import (
     TaskDraft,
     TaskWaiting,
 )
-from app.services.assistant.ui_projection import finalize_assistant_ui, project_assistant_message
+from app.services.assistant.ui_projection import _KIND_LABELS, finalize_assistant_ui, project_assistant_message
 
 
 def _task(**overrides: object) -> AssistantTaskView:
@@ -724,3 +724,20 @@ def test_confirmation_names_the_chosen_kind_and_keeps_its_siblings_editable() ->
     assert fact.status_label == "已选择"
     assert fact.source == "你选择：微信跟进"
     assert [option.value for option in fact.options] == list(FOLLOW_UP_KINDS)
+
+
+def test_required_kind_keeps_the_reason_when_the_text_names_no_channel() -> None:
+    preview = _preview(
+        activity_kind=None,
+        channel_status="required",
+        channel_status_label="请选择类型",
+        channel_source_text="原文没有写明渠道",
+        channel_options=list(FOLLOW_UP_KINDS),
+    )
+    message = _message("m_required", "确认后写入这条客户活动？", _task(activity_kind=None, waiting=_confirmation(preview)))
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    fact = next(item for item in interaction.facts if item.key == "activity_kind")
+    assert fact.source == "原文没有写明渠道"
+    assert [option.label for option in fact.options] == [_KIND_LABELS[kind] for kind in FOLLOW_UP_KINDS]

@@ -206,7 +206,6 @@ def test_submit_cancel_closes_task_via_sse(client):
     assert names[-1] == "waiting"
     final = events[-1][1]
     assert final["task"]["status"] == "CANCELLED"
-    assert "当前这件已停下" in final["message"]
 
 
 def test_submit_replay_returns_original_turn_after_task_changes(client, db_session):

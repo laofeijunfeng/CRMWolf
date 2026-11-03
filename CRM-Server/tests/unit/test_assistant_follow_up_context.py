@@ -425,7 +425,6 @@ async def test_high_confidence_phone_is_frozen_without_rewriting_follow_up_conte
     preview = waiting.confirmation_payload.preview
     assert preview.activity_kind == "PHONE_FOLLOW_UP"
     assert preview.channel_status == "recognized"
-    assert preview.channel_status_label == "AI 已识别 · 高置信度"
     assert preview.title == "电话跟进"
     assert preview.summary == "客户说再考虑。"
     assert "change_signal" not in preview.content_json

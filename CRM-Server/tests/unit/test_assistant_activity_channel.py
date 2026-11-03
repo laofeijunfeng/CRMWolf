@@ -17,8 +17,7 @@ def test_high_confidence_phone_quote_is_accepted() -> None:
     assert resolved.status == "recognized"
     assert resolved.kind == "PHONE_FOLLOW_UP"
     assert resolved.source == "model"
-    assert resolved.status_label == "AI 已识别 · 高置信度"
-    assert resolved.source_text == "从“电话联系”中识别"
+    assert "电话联系" in resolved.source_text
     assert resolved.family == "FOLLOW_UP"
     assert "ONLINE_MEETING" not in resolved.options
 
@@ -38,7 +37,6 @@ def test_quote_missing_from_source_uses_keyword_fallback() -> None:
     assert resolved.status == "recognized"
     assert resolved.kind == "PHONE_FOLLOW_UP"
     assert resolved.source == "keyword"
-    assert resolved.status_label == "已识别 · 词表兜底"
 
 
 def test_model_failure_uses_one_keyword_and_refuses_many() -> None:

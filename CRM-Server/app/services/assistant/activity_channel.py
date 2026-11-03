@@ -173,7 +173,7 @@ def _from_model(text: str, decision: KindDecision, quote: str) -> ChannelResolut
         source="model",
         confidence=decision.confidence,
         quote=quote,
-        status_label="AI 已识别 · 高置信度",
+        status_label="已识别",
     )
 
 
@@ -189,7 +189,7 @@ def _from_keywords(text: str, *, reason: str) -> ChannelResolution:
             source="keyword",
             confidence=None,
             quote=quote,
-            status_label="已识别 · 词表兜底",
+            status_label="已识别",
         )
     if len(follow_channels) == 1:
         quote = _follow_quote(text, follow_channels[0])
@@ -198,7 +198,7 @@ def _from_keywords(text: str, *, reason: str) -> ChannelResolution:
             source="keyword",
             confidence=None,
             quote=quote,
-            status_label="已识别 · 词表兜底",
+            status_label="已识别",
         )
     if len(follow_channels) >= 2:
         return _required(text, "原文同时出现多个渠道")
@@ -261,7 +261,8 @@ def _recognized(
     status_label: str,
 ) -> ChannelResolution:
     family: ActivityFamily = kind if kind in MEETING_KINDS else "FOLLOW_UP"
-    source_text = f"从“{quote}”中识别" if quote else "从原文中识别"
+    origin = "AI" if source == "model" else "词表"
+    source_text = f"{origin} · 从“{quote}”中识别" if quote else f"{origin} · 从原文中识别"
     return ChannelResolution(
         status="recognized",
         family=family,

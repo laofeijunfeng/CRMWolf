@@ -12,6 +12,7 @@ from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.customer_activity import CustomerActivity
 from app.services.assistant.proposals import offer_next_proposal, settle_proposal
+from app.services.assistant.turns import AssistantUnknownCommitResultError
 
 
 @compiles(BigInteger, "sqlite")
@@ -383,7 +384,7 @@ async def test_ambiguous_opportunity_command_never_runs_twice(db_session, monkey
     assert offered.version == 2
     assert offered.committed_json == [{"kind": "customer_activity", "public_id": "1"}]
     assert offered.waiting_field == "proposal:opportunity_stage"
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=committed_then_failed)
     assert len(executions) == 1
     claims = db_session.query(AssistantAction).filter(AssistantAction.action == "proposal_command_claim").all()
@@ -462,7 +463,7 @@ async def test_unresolved_claim_is_queryable_for_operations(db_session, monkeypa
     db_session.refresh(offered)
 
     # Retry hits the claim guard: readback cannot prove the outcome -> UNKNOWN.
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=commit_then_lose_response)
     db_session.rollback()
 
@@ -545,7 +546,7 @@ async def test_success_response_without_exact_effect_stays_unknown(db_session, m
         return {"kind": kind, "public_id": "opp_a"}
 
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+        with pytest.raises(AssistantUnknownCommitResultError):
             await settle_proposal(db_session, offered, accepted=True, executor=unproven_success)
     assert len(executions) == 1
     assert offered.waiting_field == f"proposal:{kind}"
@@ -595,7 +596,7 @@ async def test_unrelated_same_name_or_snapshot_change_cannot_settle_claim(db_ses
         )
     )
     db_session.commit()
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=lose_response)
     assert len(executions) == 1
     assert offered.committed_json == [{"kind": "customer_activity", "public_id": "1"}]
@@ -631,7 +632,7 @@ async def test_success_response_target_must_match_exact_effect(db_session, monke
         db.commit()
         return {"kind": "opportunity_create", "public_id": "opp_unrelated"}
 
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=mismatched_receipt)
     assert offered.committed_json == [{"kind": "customer_activity", "public_id": "1"}]
 
@@ -695,7 +696,7 @@ async def test_claim_recovery_conflicts_fail_closed(db_session, monkeypatch, con
             result["command_id" if conflict == "claim_id" else "fingerprint"] = "wrong"
         claim.result_json = result
         db_session.commit()
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=commit_then_lose_response)
     assert len(executions) == 1
     assert offered.committed_json == [{"kind": "customer_activity", "public_id": "1"}]
@@ -757,7 +758,7 @@ async def test_stage_unresolvable_readback_stays_unknown_without_reexecution(db_
     db_session.rollback()
     db_session.refresh(offered)
     monkeypatch.setattr(proposals, "readback_outcome", readback)
-    with pytest.raises(RuntimeError, match="UNKNOWN_COMMIT_RESULT"):
+    with pytest.raises(AssistantUnknownCommitResultError):
         await settle_proposal(db_session, offered, accepted=True, executor=commit_then_lose_response)
     assert len(executions) == 1
     assert offered.committed_json == [{"kind": "customer_activity", "public_id": "1"}]

@@ -99,7 +99,6 @@ describe('continuous conversation public interactions', () => {
     expect(mocks.choice).toHaveBeenCalledWith(expect.objectContaining({ entry_id: 'acm_one', choice: 'NEW', expected_version: 3 }))
     expect(mocks.text).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('下面开始记这一件')
-    expect(wrapper.text()).toContain('历史交互不再提供可再次提交的确认按钮。')
     expect(wrapper.findAll('button').filter((b) => b.text() === '另记一件' && b.attributes('disabled') === undefined)).toHaveLength(0)
   })
 
@@ -311,7 +310,7 @@ describe('activity kind card outcomes', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('提交失败')
-    expect(wrapper.text()).toContain('选择没有提交成功，类型还没定下来。原始内容已保存，可以重新选择。')
+    expect(wrapper.find('[data-agent-ui-card-notice="failed"]').exists()).toBe(true)
     const first = mocks.command.mock.calls[0]?.[0] as { input: { client_request_id: string } }
 
     mocks.command.mockResolvedValueOnce(reply(view({ version: 1, focused_task: { ...current, waiting: confirmation() }, messages: [message('one', prompt, current)] })))
@@ -334,7 +333,7 @@ describe('activity kind card outcomes', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('已过期')
-    expect(wrapper.text()).toContain('这张卡已经处理过（可能在其他出口），已刷新为最新状态，不会重复提交。')
+    expect(wrapper.find('[data-agent-ui-card-notice="expired"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('会话已更新')
     expect(wrapper.findAll('button').filter((button) => button.text().includes('线上会议'))).toHaveLength(0)
   })

@@ -190,7 +190,7 @@ class AssistantCoordinator:
             reply=CoordinatorReply(
                 task_public_id=result.task.public_id,
                 status=result.task.status,
-                message="当前这件已停下，之前的对话和已写入的记录仍保留。",
+                message="已停下这件事",
             ),
             task=result.task,
         )

@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 _RAW_HTML_RE = re.compile(r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>")
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-_UNAVAILABLE = "这条结果暂时无法显示，原记录仍保留。"
+_UNAVAILABLE = "这条结果暂时无法显示"
 _UNKNOWN_TEXT = "客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。"
 
 _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
@@ -113,9 +113,14 @@ def finalize_assistant_ui(
     _ensure_current_waiting(messages, focused_task)
     live_id = _live_waiting_message_id(messages, focused_task)
     submitted_kind = _resolved_activity_kind(focused_task)
+    receipts = _disposition_receipts(messages, live_id)
     for message in messages:
         if message.role != "assistant":
             message.ui = None
+            continue
+        receipt = receipts.get(message.id)
+        if receipt is not None:
+            message.ui = _envelope(message, (receipt,), route="WORKFLOW")
             continue
         active_waiting = message.id == live_id
         active_boundary = (
@@ -137,6 +142,74 @@ def finalize_assistant_ui(
             )
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
+
+
+_SETTLED_LABELS = {
+    "complete": "已完成", "hold": "先放着", "skip": "不管了", "unknown": "结果待核对", "failed": "未能完成",
+}
+
+
+def _disposition_items(message: ConversationMessage) -> list[dict[str, object]] | None:
+    """Items of a message `_project_disposition` would render as a card; None otherwise."""
+
+    task = message.task
+    if message.role != "assistant" or message.outcome == "failure" or task is None:
+        return None
+    payload = task.follow_up_disposition
+    if not isinstance(payload, dict):
+        return None
+    waiting = task.waiting
+    if message.outcome != "follow_up_disposition" and (waiting is None or waiting.type != "FOLLOW_UP_DISPOSITION"):
+        return None
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return None
+    cards = [item for item in items if isinstance(item, dict)]
+    return cards or None
+
+
+def _disposition_receipts(messages: list[ConversationMessage], live_id: str | None) -> dict[str, NoticeBlock]:
+    """One disposition round shows one full card; every earlier message in it becomes a one-line receipt."""
+
+    groups: list[list[tuple[ConversationMessage, list[dict[str, object]]]]] = []
+    open_groups: dict[tuple[object, ...], int] = {}
+    for message in messages:
+        items = _disposition_items(message)
+        if items is None or message.task is None:
+            continue
+        key = (message.task.public_id, *((item.get("item_id"), item.get("title")) for item in items))
+        offer = all(item.get("state") in {"current", "waiting"} for item in items)
+        if offer or key not in open_groups:
+            open_groups[key] = len(groups)
+            groups.append([])
+        groups[open_groups[key]].append((message, items))
+    receipts: dict[str, NoticeBlock] = {}
+    for group in groups:
+        full = next((index for index, (message, _) in enumerate(group) if message.id == live_id), len(group) - 1)
+        latest = {item.get("item_id"): item for item in group[full][1]}
+        for index, (message, items) in enumerate(group):
+            if index == full:
+                continue
+            own = next((item for item in items if item.get("state") == "current"), None)
+            if own is None:
+                continue
+            title = str(own.get("title") or "跟进任务")
+            label = _receipt_label(latest.get(own.get("item_id"))) or _receipt_label(own) or "已处理"
+            short = title if len(title) <= 24 else f"{title[:24]}…"
+            receipts[message.id] = NoticeBlock(
+                id="b_notice_receipt", type="notice", tone="info", text=f"{label} · {short}",
+            )
+    return receipts
+
+
+def _receipt_label(item: dict[str, object] | None) -> str | None:
+    if item is None:
+        return None
+    state = item.get("state")
+    if not isinstance(state, str) or state not in _SETTLED_LABELS:
+        return None
+    title = item.get("result_title")
+    return title if isinstance(title, str) and title else _SETTLED_LABELS[state]
 
 
 def _resolved_activity_kind(focused_task: AssistantTaskView | None) -> str | None:
@@ -291,27 +364,12 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         return _envelope(message, (notice,), route="WORKFLOW")
     active = active_waiting and waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION"
     current = next((item for item in items if isinstance(item, dict) and item.get("state") == "current"), None)
-    options = []
-    if active and current is not None:
-        item_id = str(current.get("item_id") or "")
-        options = [
-            InteractionOption(value=f"{item_id}:complete", label="已完成", description="标记此任务完成"),
-            InteractionOption(value=f"{item_id}:hold", label="先放着", description="保持未完成"),
-            InteractionOption(value=f"{item_id}:skip", label="不管了", description="仅跳过本次"),
-        ]
-    elif not active:
-        options = [
-            InteractionOption(value="complete", label="已完成", disabled=True),
-            InteractionOption(value="hold", label="先放着", disabled=True),
-            InteractionOption(value="skip", label="不管了", disabled=True),
-        ]
-    if not options:
-        options = [
-            InteractionOption(value="complete", label="已完成", disabled=True),
-            InteractionOption(value="hold", label="先放着", disabled=True),
-            InteractionOption(value="skip", label="不管了", disabled=True),
-        ]
-        active = False
+    active = active and current is not None
+    item_id = str(current.get("item_id") or "") if active and current is not None else ""
+    options = [
+        InteractionOption(value=f"{item_id}:{value}" if active else value, label=label, disabled=not active)
+        for value, label in (("complete", "已完成"), ("hold", "先放着"), ("skip", "不管了"))
+    ]
     cards = []
     for item in items:
         if not isinstance(item, dict):
@@ -319,17 +377,16 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         cards.append(OpenFollowUpDispositionCardItem(
             item_id=str(item.get("item_id") or ""),
             title=str(item.get("title") or "跟进任务"),
-            owner_line=item.get("owner_line") if isinstance(item.get("owner_line"), str) else None,
+            owner_line=_owner_line(item.get("owner_line")),
             related=bool(item.get("related")),
             evidence_quote=item.get("evidence_quote") if isinstance(item.get("evidence_quote"), str) else None,
-            evidence_reason=item.get("evidence_reason") if isinstance(item.get("evidence_reason"), str) else None,
+            evidence_reason=None,
             state=item.get("state") if item.get("state") in {
                 "current", "waiting", "complete", "hold", "skip", "failed", "unknown",
             } else "waiting",
             result_title=item.get("result_title") if isinstance(item.get("result_title"), str) else None,
             result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
         ))
-    total = payload.get("total") if isinstance(payload.get("total"), int) else len(cards)
     customer = payload.get("customer_name") or ""
     kind = payload.get("activity_kind_label") or ""
     detail = " · ".join(part for part in (str(customer), str(kind)) if part)
@@ -338,11 +395,9 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         type="notice",
         tone="success",
         title="本次跟进已写入",
-        text=detail or "本次跟进已写入",
+        text=detail or "已写入",
     )
-    prompt = _plain(waiting.prompt) if waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION" else (
-        _plain(message.text) or f"还发现 {total} 条未完成的历史任务，请逐条处理。"
-    )
+    summary = _plain(message.text) if not active and payload.get("status") == "DONE" else ""
     interaction = InteractionBlock(
         id="b_interaction_1",
         type="interaction",
@@ -351,7 +406,8 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         business_action="settle_follow_up_disposition",
         presentation="OPEN_FOLLOW_UP_DISPOSITION",
         state="ACTIVE" if active else "READ_ONLY",
-        prompt=prompt,
+        prompt="历史跟进任务",
+        hint=summary[:400] or None,
         options=options,
         disposition_items=cards,
         selection_mode="single",
@@ -360,10 +416,18 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         submit_on_select=active,
         submit_action_id=_action_id(waiting) if active and waiting is not None else None,
     )
-    blocks: list[TextBlock | NoticeBlock | InteractionBlock] = [notice, interaction]
-    if not active and _plain(message.text) and _plain(message.text) != prompt:
-        blocks.append(_text_block(_plain(message.text)))
-    return _envelope(message, tuple(blocks), route="WORKFLOW")
+    return _envelope(message, (notice, interaction), route="WORKFLOW")
+
+
+def _owner_line(raw: object) -> str | None:
+    """Drop the owner when it is the viewer; old rows stored a 负责人 prefix."""
+
+    if not isinstance(raw, str):
+        return None
+    text = raw.removeprefix("负责人：我 · ")
+    if text == "负责人：我":
+        return None
+    return text.removeprefix("负责人：") or None
 
 
 def _waiting_blocks(
@@ -496,7 +560,10 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     if not _add_follow_time_fact(facts, preview):
         follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
         _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
-    status_label = "历史冻结" if not editable and preview.activity_kind else preview.channel_status_label
+    legacy_label = preview.channel_status_label or ""
+    status_label = "历史" if not editable and preview.activity_kind else (
+        "已识别" if legacy_label in _LEGACY_ORIGINS else preview.channel_status_label
+    )
     options = [
         InteractionOption(value=kind, label=_KIND_LABELS[kind])
         for kind in preview.channel_options
@@ -504,7 +571,7 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     ]
     _add_fact(
         facts, "activity_kind", "活动类型", kind_label, group="activity_kind",
-        status_label=status_label, source=preview.channel_source_text, options=options,
+        status_label=status_label, source=_kind_source(preview, legacy_label), options=options,
     )
     if preview.change_signal:
         _add_fact(
@@ -536,6 +603,24 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     _add_fact(facts, "score", "内容质量", f"{preview.score} / 100", group="score")
     _add_fact(facts, "score_reason", "评分依据", preview.score_reason, group="score")
     return facts[:20]
+
+
+# Persisted previews carry the pre-CRM-78 recognition labels, which named the origin.
+_LEGACY_ORIGINS = {"AI 已识别 · 高置信度": "AI", "已识别 · 词表兜底": "词表"}
+
+
+def _kind_source(preview: ActivityPreview, legacy_label: str) -> str | None:
+    """Required kinds quote the original text; recognised kinds keep their origin."""
+
+    if preview.channel_status == "required":
+        from app.services.assistant.activity_channel import kind_hint
+
+        return kind_hint(preview.source_content) or preview.channel_source_text
+    text = preview.channel_source_text
+    origin = _LEGACY_ORIGINS.get(legacy_label)
+    if text and origin and not text.startswith(origin):
+        return f"{origin} · {text}"
+    return text
 
 
 _WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")

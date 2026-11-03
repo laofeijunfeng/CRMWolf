@@ -254,11 +254,12 @@ async def test_skip_does_not_record_unrelated_and_failure_stays_on_one_item(db_s
 
     first_item = failed.task.authority_json["open_follow_up_batch"]["items"][0]
     assert first_item["disposition"] == "failed"
-    assert first_item["result_title"] == "任务已由其他流程处理"
+    assert first_item["failure_code"] == "ALREADY_HANDLED"
+    assert first_item["related"] is True
     second = skipped.task.authority_json["open_follow_up_batch"]["items"][1]
     assert second["disposition"] == "skip"
     assert "unrelated" not in second
-    assert "不记录为无关" in (second.get("result_message") or "")
+    assert "failure_code" not in second
     assert db_session.query(FollowUpTask).filter_by(public_id="fut_plain").one().status == FollowUpTaskStatus.OPEN
     assert db_session.query(CustomerActivity).one().id == activity.id
 
@@ -278,7 +279,9 @@ async def test_stale_evidence_and_overflow_do_not_offer_a_partial_list(db_sessio
     db_session.commit()
 
     failed = await settle_open_follow_up(db_session, offered.task, "i1:complete")
-    assert failed.task.authority_json["open_follow_up_batch"]["items"][0]["result_title"] == "关联依据已失效"
+    stale = failed.task.authority_json["open_follow_up_batch"]["items"][0]
+    assert stale["failure_code"] == "RELATION_STALE"
+    assert stale["related"] is False
     assert db_session.query(FollowUpTask).one().status == FollowUpTaskStatus.OPEN
 
     for index in range(101):
@@ -297,4 +300,3 @@ async def test_stale_evidence_and_overflow_do_not_offer_a_partial_list(db_sessio
     assert overflow is not None and overflow.start_followup is True
     assert overflow.task.authority_json["open_follow_up_batch"]["status"] == "OVERFLOW"
     assert overflow.task.authority_json["open_follow_up_batch"]["items"] == []
-    assert "部分清单" in overflow.message

@@ -270,7 +270,7 @@ async def settle_proposal(
                 from app.services.assistant.turns import AssistantUnknownCommitResultError
 
                 raise AssistantUnknownCommitResultError(
-                    "CRM 命令结果待核对（UNKNOWN_COMMIT_RESULT）；请人工对账后再确认下一笔"
+                    "结果待核对，请先在客户活动里确认是否已写入，再继续下一笔"
                 )
             _mark_claim_status(db, claimed, "RECONCILED", public_id=proven["public_id"])
             result = apply_task_update(
@@ -334,7 +334,7 @@ async def settle_proposal(
                 from app.services.assistant.turns import AssistantUnknownCommitResultError
 
                 raise AssistantUnknownCommitResultError(
-                    "CRM 命令结果待核对（UNKNOWN_COMMIT_RESULT）；请人工对账后再确认下一笔"
+                    "结果待核对，请先在客户活动里确认是否已写入，再继续下一笔"
                 )
             _mark_claim_status(db, claim_row, "SUCCEEDED", public_id=proven["public_id"])
         committed = {"kind": proposal["kind"], "public_id": outcome["public_id"], "proposal_key": proposal["key"]}

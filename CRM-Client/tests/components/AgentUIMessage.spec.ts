@@ -366,12 +366,8 @@ describe('AgentUIMessage', () => {
       const buttons = wrapper.findAll('button')
 
       expect(buttons).toHaveLength(0)
-      if (state === 'READ_ONLY') {
-        expect(wrapper.text()).toContain('历史消息 · 已回放')
-        expect(wrapper.text()).toContain('历史交互不再提供可再次提交的确认按钮。')
-      } else {
-        expect(wrapper.text()).toContain('已处理')
-      }
+      const historyTags = wrapper.findAll('span').filter(span => span.text() === '历史')
+      expect(historyTags).toHaveLength(state === 'READ_ONLY' ? 1 : 0)
       expect(wrapper.emitted('interaction')).toBeUndefined()
     },
   )
