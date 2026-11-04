@@ -222,11 +222,24 @@ class CustomerBase(BaseModel):
 
 CustomerLifecycleStatus = Literal[0, 1]
 CustomerLicenseType = Literal["TRIAL", "OFFICIAL"]
+_AUTHORIZED_USERS_MESSAGE = "请输入大于 0 的整数"
+_AUTHORIZED_USERS_MAX = 2_147_483_647
+
+
+def _validate_license_authorized_users(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(_AUTHORIZED_USERS_MESSAGE)
+    if value < 1 or value > _AUTHORIZED_USERS_MAX:
+        raise ValueError(_AUTHORIZED_USERS_MESSAGE)
+    return value
 
 class CustomerCreate(CustomerBase):
     status: CustomerLifecycleStatus = Field(0, description="客户快捷状态：0跟进中，1已成交")
     license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
     primary_contact: Optional[ContactCreate] = Field(None, description="创建客户时同步创建的主联系人")
@@ -249,6 +262,11 @@ class CustomerCreate(CustomerBase):
         if not v or not str(v).strip():
             raise ValueError("缺少产品")
         return v.strip()
+
+    @field_validator("license_authorized_users", mode="before")
+    @classmethod
+    def license_authorized_users_must_be_positive_integer(cls, value: object) -> int | None:
+        return _validate_license_authorized_users(value)
 
     @model_validator(mode="after")
     def normalize_license_pair(self) -> "CustomerCreate":
@@ -276,6 +294,7 @@ class CustomerUpdate(BaseModel):
     status: Optional[CustomerLifecycleStatus] = Field(None, description="客户快捷状态：0跟进中，1已成交")
     license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
 
     @field_validator('account_name')
@@ -291,6 +310,11 @@ class CustomerUpdate(BaseModel):
         if v is not None and (not v or not v.strip()):
             raise ValueError('所在城市不能为空')
         return v.strip() if v else v
+
+    @field_validator("license_authorized_users", mode="before")
+    @classmethod
+    def license_authorized_users_must_be_positive_integer(cls, value: object) -> int | None:
+        return _validate_license_authorized_users(value)
 
 
 class CustomerStatusUpdate(BaseModel):

@@ -51,6 +51,7 @@ import {
   customerEditSchema,
   customerCreateSchema,
   companyScaleOptions,
+  parseAuthorizedUsers,
   type CustomerForm,
   type CustomerEditForm,
   type CustomerCreateForm,
@@ -130,6 +131,8 @@ const licenseTypeValue = ref<'TRIAL' | 'OFFICIAL' | null>(null)
 const licenseExpiryDateValue = ref<string | null>(null)
 const licenseTypeBaseline = ref<'TRIAL' | 'OFFICIAL' | null>(null)
 const licenseExpiryDateBaseline = ref<string | null>(null)
+const licenseAuthorizedUsersValue = ref('')
+const licenseAuthorizedUsersBaseline = ref('')
 const isDirty = ref(false)
 const applyingFormValues = ref(false)
 const writeSubmitting = computed(() => submitting.value)
@@ -143,6 +146,7 @@ const closeGuard = useDialogCloseGuard({
     || industryValue.value !== industryBaseline.value
     || licenseTypeValue.value !== licenseTypeBaseline.value
     || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
+    || trimmedAuthorizedUsers(licenseAuthorizedUsersValue.value) !== trimmedAuthorizedUsers(licenseAuthorizedUsersBaseline.value)
   )),
   submitting: writeSubmitting,
   emitOpen: (open) => {
@@ -166,9 +170,10 @@ const fieldLabels: Record<string, string> = {
   industry: '行业',
   license_type: '授权类型',
   license_expiry_date: '授权到期日',
+  license_authorized_users: '授权人数',
 }
 const contactFields = new Set(['contact_name', 'contact_mobile', 'contact_position', 'contact_gender'])
-const progressiveFields = new Set(['industry', 'license_type', 'license_expiry_date'])
+const progressiveFields = new Set(['industry', 'license_type', 'license_expiry_date', 'license_authorized_users'])
 const errorSummary = computed(() => Object.entries(errors.value).flatMap(([field, message]) => {
   if (props.mode === 'edit' && contactFields.has(field)) return []
   if (typeof message !== 'string' || message === '') return []
@@ -179,7 +184,12 @@ const moreInfoCount = computed(() => {
   if (industryValue.value !== '') count += 1
   if (licenseTypeValue.value !== null) count += 1
   if (licenseExpiryDateValue.value !== null) count += 1
+  if (trimmedAuthorizedUsers(licenseAuthorizedUsersValue.value) !== '') count += 1
   return count
+})
+const authorizedUsersErrorMessage = computed(() => {
+  const message = errors.value.license_authorized_users
+  return typeof message === 'string' ? message : ''
 })
 const focusFirstError = async (): Promise<void> => {
   const firstError = errorSummary.value[0]
@@ -244,6 +254,16 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
 function normalizeDateValue(value: string | null | undefined): string | null {
   return normalizeOptionalText(value)
 }
+function trimmedAuthorizedUsers(value: string | null | undefined): string {
+  return value?.trim() ?? ''
+}
+function formatAuthorizedUsers(value: number | null | undefined): string {
+  return typeof value === 'number' ? String(value) : ''
+}
+function currentAuthorizedUsers(): number | null {
+  const parsed = parseAuthorizedUsers(licenseAuthorizedUsersValue.value)
+  return typeof parsed === 'number' ? parsed : null
+}
 function normalizeCompanyScale(value: string | null): CustomerEditForm['company_scale'] | undefined {
   const normalized = value?.trim() ?? ''
   return normalized === '' ? undefined : normalized
@@ -260,6 +280,7 @@ function emptyEditableSnapshot(): CustomerEditableSnapshot {
     industry: null,
     license_type: null,
     license_expiry_date: null,
+    license_authorized_users: null,
   }
 }
 function editableLicenseType(value: string | null): 'TRIAL' | 'OFFICIAL' | null {
@@ -312,6 +333,7 @@ function buildEditableSnapshot(customer: {
   industry: string | null
   license_type: string | null
   license_expiry_date: string | null
+  license_authorized_users?: number | null
 }): CustomerEditableSnapshot {
   return {
     account_name: customer.account_name,
@@ -324,6 +346,7 @@ function buildEditableSnapshot(customer: {
     industry: customer.industry,
     license_type: editableLicenseType(customer.license_type),
     license_expiry_date: customer.license_expiry_date,
+    license_authorized_users: customer.license_authorized_users ?? null,
   }
 }
 function buildCurrentSnapshot(editData: CustomerEditForm): CustomerEditableSnapshot {
@@ -338,6 +361,7 @@ function buildCurrentSnapshot(editData: CustomerEditForm): CustomerEditableSnaps
     industry: normalizeIndustryValue(industryValue.value),
     license_type: licenseTypeValue.value,
     license_expiry_date: licenseExpiryDateValue.value,
+    license_authorized_users: currentAuthorizedUsers(),
   }
 }
 function mergeCustomerProfileValues(latest: CustomerDetailResponse): CustomerEditFormValues {
@@ -371,6 +395,7 @@ function applyMoreInformationFromCustomer(customer: {
   industry_info?: CustomerDetailResponse['industry_info']
   license_type: string | null
   license_expiry_date: string | null
+  license_authorized_users?: number | null
 }): void {
   industryValue.value = customer.industry ?? ''
   industryBaseline.value = customer.industry ?? ''
@@ -379,6 +404,8 @@ function applyMoreInformationFromCustomer(customer: {
   licenseExpiryDateValue.value = customer.license_expiry_date
   licenseTypeBaseline.value = licenseTypeValue.value
   licenseExpiryDateBaseline.value = licenseExpiryDateValue.value
+  licenseAuthorizedUsersValue.value = formatAuthorizedUsers(customer.license_authorized_users)
+  licenseAuthorizedUsersBaseline.value = licenseAuthorizedUsersValue.value
 }
 function resetCreateMoreInformation(): void {
   industryValue.value = ''
@@ -388,6 +415,8 @@ function resetCreateMoreInformation(): void {
   licenseExpiryDateValue.value = null
   licenseTypeBaseline.value = null
   licenseExpiryDateBaseline.value = null
+  licenseAuthorizedUsersValue.value = ''
+  licenseAuthorizedUsersBaseline.value = ''
   profileBaseline.value = emptyEditableSnapshot()
   loadedVersion.value = null
 }
@@ -403,7 +432,7 @@ async function applyCustomerDetail(customer: CustomerDetailResponse): Promise<vo
   setValues(formValues as unknown as CustomerForm | CustomerCreateForm, false)
   resetForm({ values: formValues as unknown as CustomerForm | CustomerCreateForm, errors: {} }, { force: true })
   await nextTick()
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'license_authorized_users', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
   applyingFormValues.value = false
@@ -473,7 +502,7 @@ watch(
 )
 function clearFieldErrors(): void {
   setErrors({})
-  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
+  for (const field of ['account_name', 'city', 'address', 'company_scale', 'source_public_id', 'product_public_id', 'default_procurement_method_id', 'industry', 'license_type', 'license_expiry_date', 'license_authorized_users', 'contact_name', 'contact_mobile', 'contact_position', 'contact_gender'] as const) {
     setFieldError(field, undefined)
   }
 }
@@ -492,8 +521,10 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
 
     const preservedIndustry = normalizeIndustryValue(industryValue.value) !== normalizeIndustryValue(industryBaseline.value)
     const preservedLicenseSnapshot = licenseTypeValue.value !== licenseTypeBaseline.value || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
+    const preservedAuthorizedUsers = trimmedAuthorizedUsers(licenseAuthorizedUsersValue.value) !== trimmedAuthorizedUsers(licenseAuthorizedUsersBaseline.value)
     const previousLicenseType = licenseTypeValue.value
     const previousLicenseExpiryDate = licenseExpiryDateValue.value
+    const previousAuthorizedUsers = licenseAuthorizedUsersValue.value
     const mergedValues = mergeCustomerProfileValues(latest)
     const latestBaseline = buildEditableSnapshot(latest)
     const latestLicenseType = editableLicenseType(latest.license_type)
@@ -507,6 +538,8 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     licenseExpiryDateBaseline.value = latest.license_expiry_date
     licenseTypeValue.value = preservedLicenseSnapshot ? previousLicenseType : latestLicenseType
     licenseExpiryDateValue.value = preservedLicenseSnapshot ? previousLicenseExpiryDate : latest.license_expiry_date
+    licenseAuthorizedUsersBaseline.value = formatAuthorizedUsers(latest.license_authorized_users)
+    licenseAuthorizedUsersValue.value = preservedAuthorizedUsers ? previousAuthorizedUsers : licenseAuthorizedUsersBaseline.value
 
     applyingFormValues.value = true
     setValues(mergedValues as unknown as CustomerForm | CustomerCreateForm, false)
@@ -517,7 +550,8 @@ async function refreshConflict(preserveInput: boolean): Promise<void> {
     const mergedProfileDirty = customerProfileFields.some((field) => hasProfileInputChanged(field, mergedValues, latestBaseline))
     const mergedIndustryDirty = normalizeIndustryValue(industryValue.value) !== normalizeIndustryValue(latestBaseline.industry)
     const mergedLicenseDirty = licenseTypeValue.value !== licenseTypeBaseline.value || licenseExpiryDateValue.value !== licenseExpiryDateBaseline.value
-    isDirty.value = mergedProfileDirty || mergedIndustryDirty || mergedLicenseDirty
+    const mergedAuthorizedUsersDirty = trimmedAuthorizedUsers(licenseAuthorizedUsersValue.value) !== trimmedAuthorizedUsers(licenseAuthorizedUsersBaseline.value)
+    isDirty.value = mergedProfileDirty || mergedIndustryDirty || mergedLicenseDirty || mergedAuthorizedUsersDirty
   } catch (error) {
     submitError.value = toFeedbackError(error, '客户最新版本')
     handleApiError(error, '获取客户最新版本')
@@ -582,12 +616,15 @@ function applySuccessfulWriteBaselines(customer: CustomerResponse): void {
   licenseExpiryDateValue.value = customer.license_expiry_date
   licenseTypeBaseline.value = licenseTypeValue.value
   licenseExpiryDateBaseline.value = licenseExpiryDateValue.value
+  licenseAuthorizedUsersValue.value = formatAuthorizedUsers(customer.license_authorized_users)
+  licenseAuthorizedUsersBaseline.value = licenseAuthorizedUsersValue.value
   isDirty.value = false
 }
 function syncMoreInfoFormValues(): void {
   setFieldValue('industry', industryValue.value)
   setFieldValue('license_type', licenseTypeValue.value ?? '')
   setFieldValue('license_expiry_date', licenseExpiryDateValue.value ?? '')
+  setFieldValue('license_authorized_users', licenseAuthorizedUsersValue.value)
 }
 function emitSuccessfulClose(entityId: string, operation: 'create' | 'update'): void {
   isDirty.value = false
@@ -623,6 +660,8 @@ const submitForm = handleSubmit(async (formValues): Promise<void> => {
         createPayload.license_type = licenseTypeValue.value
         createPayload.license_expiry_date = createExpiry
       }
+      const createAuthorizedUsers = parseAuthorizedUsers(licenseAuthorizedUsersValue.value)
+      if (typeof createAuthorizedUsers === 'number') createPayload.license_authorized_users = createAuthorizedUsers
       const createdCustomer = await customerApi.createCustomer(createPayload)
       toast.success('客户创建成功')
       emitSuccessfulClose(createdCustomer.id, 'create')
@@ -985,6 +1024,17 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 :model-value="licenseExpiryDateValue === null ? null : new Date(`${licenseExpiryDateValue}T00:00:00`)"
                 :disabled="writeSubmitting"
                 @update:model-value="licenseExpiryDateValue = $event === null ? null : formatLocalDate($event)"
+              />
+              <InputField
+                id="customer-license-authorized-users"
+                name="license_authorized_users"
+                :model-value="licenseAuthorizedUsersValue"
+                label="授权人数"
+                inputmode="numeric"
+                autocomplete="off"
+                :disabled="writeSubmitting"
+                :error="authorizedUsersErrorMessage"
+                @update:model-value="licenseAuthorizedUsersValue = String($event ?? '')"
               />
             </div>
             <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>

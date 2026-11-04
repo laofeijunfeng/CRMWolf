@@ -87,3 +87,37 @@ def test_customer_update_rejects_status_two_and_three() -> None:
         CustomerUpdate(status=2)
     with pytest.raises(ValidationError):
         CustomerUpdate(status=3)
+
+
+def test_customer_create_accepts_authorized_users_without_license_pair() -> None:
+    payload = CustomerCreate(
+        account_name="客户 A",
+        city="上海",
+        license_authorized_users=50,
+        product_public_id="prd_test",
+    )
+    assert payload.license_authorized_users == 50
+    assert payload.license_type is None
+    assert payload.license_expiry_date is None
+
+
+def test_customer_update_accepts_null_authorized_users_only_when_sent() -> None:
+    payload = CustomerUpdate(expected_version=4, license_authorized_users=None)
+    assert payload.license_authorized_users is None
+    assert "license_authorized_users" in payload.model_fields_set
+
+    omitted = CustomerUpdate(expected_version=4, license_type="TRIAL")
+    assert "license_authorized_users" not in omitted.model_fields_set
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, 2_147_483_648])
+def test_customer_write_rejects_invalid_authorized_users(value: object) -> None:
+    with pytest.raises(ValidationError, match="请输入大于 0 的整数"):
+        CustomerCreate(
+            account_name="客户 A",
+            city="上海",
+            license_authorized_users=value,
+            product_public_id="prd_test",
+        )
+    with pytest.raises(ValidationError, match="请输入大于 0 的整数"):
+        CustomerUpdate(license_authorized_users=value)

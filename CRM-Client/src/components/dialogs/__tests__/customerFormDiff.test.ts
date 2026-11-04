@@ -13,21 +13,14 @@ const baselineSnapshot: CustomerEditableSnapshot = {
   industry: 'internet_saas',
   license_type: 'TRIAL',
   license_expiry_date: '2026-12-31',
+  license_authorized_users: null,
 }
 
 describe('buildCustomerUpdatePayload', () => {
   it('sends one changed ordinary field and expected version', () => {
     const current: CustomerEditableSnapshot = {
-      account_name: '客户 A',
+      ...baselineSnapshot,
       city: '深圳',
-      address: '浦东',
-      company_scale: '51-200人',
-      source_public_id: 'acq_source',
-      product_public_id: 'prd_crm',
-      default_procurement_method_id: 8,
-      industry: 'internet_saas',
-      license_type: 'TRIAL',
-      license_expiry_date: '2026-12-31',
     }
     expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
       expected_version: 12,
@@ -35,19 +28,10 @@ describe('buildCustomerUpdatePayload', () => {
     })
   })
 
-
   it('sends the complete license pair when only the type changes', () => {
     const current: CustomerEditableSnapshot = {
-      account_name: '客户 A',
-      city: '上海',
-      address: '浦东',
-      company_scale: '51-200人',
-      source_public_id: 'acq_source',
-      product_public_id: 'prd_crm',
-      default_procurement_method_id: 8,
-      industry: 'internet_saas',
+      ...baselineSnapshot,
       license_type: 'OFFICIAL',
-      license_expiry_date: '2026-12-31',
     }
     expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
       expected_version: 12,
@@ -58,14 +42,7 @@ describe('buildCustomerUpdatePayload', () => {
 
   it('normalizes an empty license date to an empty pair', () => {
     const current: CustomerEditableSnapshot = {
-      account_name: '客户 A',
-      city: '上海',
-      address: '浦东',
-      company_scale: '51-200人',
-      source_public_id: 'acq_source',
-      product_public_id: 'prd_crm',
-      default_procurement_method_id: 8,
-      industry: 'internet_saas',
+      ...baselineSnapshot,
       license_type: 'OFFICIAL',
       license_expiry_date: '',
     }
@@ -88,6 +65,44 @@ describe('buildCustomerUpdatePayload', () => {
     expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
       expected_version: 12,
       address: null,
+    })
+  })
+
+  it('sends only authorized users when the count changes', () => {
+    const current: CustomerEditableSnapshot = {
+      ...baselineSnapshot,
+      license_authorized_users: 80,
+    }
+    expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
+      expected_version: 12,
+      license_authorized_users: 80,
+    })
+  })
+
+  it('sends null when an existing authorized user count is cleared', () => {
+    const baseline: CustomerEditableSnapshot = {
+      ...baselineSnapshot,
+      license_authorized_users: 50,
+    }
+    expect(buildCustomerUpdatePayload(baselineSnapshot, baseline, 12)).toEqual({
+      expected_version: 12,
+      license_authorized_users: null,
+    })
+  })
+
+  it('leaves authorized users out when only the license type changes', () => {
+    const baseline: CustomerEditableSnapshot = {
+      ...baselineSnapshot,
+      license_authorized_users: 50,
+    }
+    const current: CustomerEditableSnapshot = {
+      ...baseline,
+      license_type: 'OFFICIAL',
+    }
+    expect(buildCustomerUpdatePayload(current, baseline, 12)).toEqual({
+      expected_version: 12,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2026-12-31',
     })
   })
 })

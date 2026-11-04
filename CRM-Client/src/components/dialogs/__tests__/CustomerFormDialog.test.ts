@@ -80,17 +80,24 @@ const InputFieldStub = defineComponent({
   inheritAttrs: false,
   props: {
     id: { type: String, required: true },
-    modelValue: { type: String, default: '' },
+    modelValue: { type: [String, Number], default: '' },
+    label: { type: String, default: '' },
     disabled: { type: Boolean, default: false },
+    error: { type: String, default: '' },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }): () => VNode {
-    return () => h('input', {
-      id: props.id,
-      value: props.modelValue,
-      disabled: props.disabled,
-      onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
-    })
+    return () => h('div', [
+      props.label === '' ? null : h('span', props.label),
+      h('input', {
+        id: props.id,
+        value: String(props.modelValue ?? ''),
+        disabled: props.disabled,
+        'aria-invalid': props.error !== '' ? 'true' : 'false',
+        onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
+      }),
+      props.error === '' ? null : h('p', { id: `${props.id}-error` }, props.error),
+    ])
   },
 })
 
@@ -293,6 +300,30 @@ describe('CustomerFormDialog product schema', () => {
       city: '上海',
     }).success).toBe(false)
     expect(customerCreateSchema.safeParse({ ...missing, product_public_id: 'prd_crm' }).success).toBe(true)
+  })
+
+  it('accepts an empty authorized user count and rejects zero, decimals, and padded integers', () => {
+    const base = {
+      account_name: '新客户',
+      city: '上海',
+      company_scale: '1-50人' as const,
+      source_public_id: 'source-1',
+      product_public_id: 'prd_crm',
+      default_procurement_method_id: 1,
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男' as const,
+    }
+    expect(customerCreateSchema.safeParse({ ...base, license_authorized_users: '50' }).success).toBe(true)
+    expect(customerCreateSchema.safeParse({ ...base, license_authorized_users: '' }).success).toBe(true)
+    for (const value of ['0', '1.5', '-1', '50.0', '050', '+50', '1e2']) {
+      const result = customerCreateSchema.safeParse({ ...base, license_authorized_users: value })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.some((issue) => issue.message === '请输入大于 0 的整数')).toBe(true)
+      }
+    }
   })
 })
 describe('CustomerFormDialog mode transitions', () => {
@@ -746,6 +777,153 @@ describe('CustomerFormDialog progressive edit sections', () => {
     expect(updateCustomer).not.toHaveBeenCalled()
     expect(vm.errors['license_expiry_date']).toBe('授权到期日期不为空时必须选择授权类型')
     expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('counts authorized users in the more-information total', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      industryValue: string
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      licenseAuthorizedUsersValue: string
+    }
+    vm.industryValue = 'internet'
+    vm.licenseTypeValue = 'OFFICIAL'
+    vm.licenseExpiryDateValue = '2027-09-01'
+    vm.licenseAuthorizedUsersValue = '50'
+    await nextTick()
+    expect(wrapper.text()).toContain('已填写 4 项')
+    expect(wrapper.text()).toContain('授权人数')
+    wrapper.unmount()
+  })
+
+  it('saves a changed authorized user count without resending the license pair', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({
+      ...customerDetail,
+      company_scale: '1-50人',
+      license_authorized_users: 80,
+      version: 4,
+    })
+    const wrapper = mountEdit({
+      ...customerDetail,
+      company_scale: '1-50人',
+      source_info: { public_id: 'source-1', name: '来源', is_active: true },
+      license_authorized_users: 50,
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseAuthorizedUsersValue: string
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseAuthorizedUsersValue = '80'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      license_authorized_users: 80,
+    })
+    wrapper.unmount()
+  })
+
+  it('clears an authorized user count without changing the license pair', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({
+      ...customerDetail,
+      company_scale: '1-50人',
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+      license_authorized_users: null,
+      version: 4,
+    })
+    const wrapper = mountEdit({
+      ...customerDetail,
+      company_scale: '1-50人',
+      source_info: { public_id: 'source-1', name: '来源', is_active: true },
+      license_type: 'TRIAL',
+      license_expiry_date: '2026-12-31',
+      license_authorized_users: 50,
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseAuthorizedUsersValue: string
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseAuthorizedUsersValue = ''
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      license_authorized_users: null,
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['0', '1.5', '-1'])('keeps the dialog open when authorized users is %s', async (value) => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseAuthorizedUsersValue: string
+      onSubmit: (event: Event) => Promise<void>
+      errors: Record<string, string | undefined>
+    }
+    vm.licenseAuthorizedUsersValue = value
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).not.toHaveBeenCalled()
+    expect(vm.errors['license_authorized_users']).toBe('请输入大于 0 的整数')
+    expect(wrapper.get('#customer-license-authorized-users-error').text()).toBe('请输入大于 0 的整数')
+    expect(vm.licenseAuthorizedUsersValue).toBe(value)
+    expect(wrapper.emitted('update:open')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('creates a customer with only an authorized user count', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const createCustomer = vi.spyOn(customerApi, 'createCustomer').mockResolvedValue({
+      ...customerDetail,
+      id: 'customer-new',
+      license_authorized_users: 50,
+    })
+    const wrapper = mountCreate()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      setValues: (values: Record<string, unknown>) => void
+      licenseAuthorizedUsersValue: string
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.setValues({
+      account_name: '新客户',
+      city: '瑞安',
+      company_scale: '1-50人',
+      source_public_id: 'source-1',
+      product_public_id: 'prd_crm',
+      default_procurement_method_id: 1,
+      contact_name: '张三',
+      contact_mobile: '13800138000',
+      contact_position: '经理',
+      contact_gender: '男',
+    })
+    vm.licenseAuthorizedUsersValue = '50'
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(createCustomer).toHaveBeenCalledWith(expect.objectContaining({
+      account_name: '新客户',
+      license_authorized_users: 50,
+    }))
+    const payload = createCustomer.mock.calls[0]?.[0]
+    expect(payload?.license_type).toBeUndefined()
+    expect(payload?.license_expiry_date).toBeUndefined()
     wrapper.unmount()
   })
 

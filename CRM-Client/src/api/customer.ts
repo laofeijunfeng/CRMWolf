@@ -150,6 +150,7 @@ export interface CustomerCreate {
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
   license_expiry_date?: string | null
+  license_authorized_users?: number | null
   primary_contact?: ContactCreate | null
 }
 
@@ -165,6 +166,7 @@ export interface CustomerUpdate {
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
   license_expiry_date?: string | null
+  license_authorized_users?: number | null
   product_public_id?: string | null
 }
 

@@ -479,6 +479,9 @@ class CustomerCRUD:
             proposed["license_type"] = license_type
             proposed["license_expiry_date"] = license_expiry_date
 
+        if "license_authorized_users" in fields_set:
+            proposed["license_authorized_users"] = obj_in.license_authorized_users
+
         current_source_row = None
         next_source_row = None
         if "source_public_id" in fields_set or "source" in fields_set:
@@ -521,6 +524,7 @@ class CustomerCRUD:
             "status",
             "license_type",
             "license_expiry_date",
+            "license_authorized_users",
             "product_public_id",
         )
 

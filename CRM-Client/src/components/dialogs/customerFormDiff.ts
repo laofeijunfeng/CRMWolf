@@ -11,6 +11,7 @@ export interface CustomerEditableSnapshot {
   industry: string | null
   license_type: 'TRIAL' | 'OFFICIAL' | null
   license_expiry_date: string | null
+  license_authorized_users: number | null
 }
 
 type CustomerDiffField =
@@ -23,6 +24,7 @@ type CustomerDiffField =
   | 'default_procurement_method_id'
   | 'industry'
   | 'license'
+  | 'license_authorized_users'
 
 const customerDiffFields: readonly CustomerDiffField[] = [
   'account_name',
@@ -34,6 +36,7 @@ const customerDiffFields: readonly CustomerDiffField[] = [
   'default_procurement_method_id',
   'industry',
   'license',
+  'license_authorized_users',
 ]
 
 function normalizeText(value: string | null): string | null {
@@ -154,6 +157,13 @@ export function buildCustomerUpdatePayload(
         ) {
           payload.license_type = currentLicense.license_type
           payload.license_expiry_date = currentLicense.license_expiry_date
+          hasChanges = true
+        }
+        break
+      }
+      case 'license_authorized_users': {
+        if (current.license_authorized_users !== baseline.license_authorized_users) {
+          payload.license_authorized_users = current.license_authorized_users
           hasChanges = true
         }
         break
