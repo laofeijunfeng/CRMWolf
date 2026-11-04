@@ -169,6 +169,17 @@ def _status_failure(status_code: int, error_prefix: str) -> AssistantLLMError | 
     return AssistantLLMError(f"{error_prefix}：AI 配置无效", code=AssistantFailureCode.CONFIGURATION_ERROR)
 
 
+def _unwrap_json_fence(content: str) -> str:
+    """Remove one exact outer JSON fence; leave all other validation to Pydantic."""
+    candidate = content.strip()
+    if not candidate.startswith("```") or not candidate.endswith("\n```"):
+        return content
+    opening_end = candidate.find("\n")
+    if candidate[:opening_end] not in {"```", "```json", "```\r", "```json\r"}:
+        return content
+    return candidate[opening_end + 1 : -4]
+
+
 def _parse_structured(response: httpx.Response, response_model: type[ResultT], error_prefix: str) -> ResultT:
     try:
         data = response.json()
@@ -192,7 +203,7 @@ def _parse_structured(response: httpx.Response, response_model: type[ResultT], e
             code=AssistantFailureCode.MODEL_OUTPUT_INVALID,
         )
     try:
-        return response_model.model_validate_json(content)
+        return response_model.model_validate_json(_unwrap_json_fence(content))
     except ValidationError as exc:
         raise AssistantLLMError(
             f"{error_prefix}：结构化输出无效",
@@ -310,7 +321,7 @@ async def _invoke_stream(
             code=AssistantFailureCode.MODEL_OUTPUT_INVALID,
         )
     try:
-        return response_model.model_validate_json(content)
+        return response_model.model_validate_json(_unwrap_json_fence(content))
     except ValidationError as exc:
         raise AssistantLLMError(
             f"{error_prefix}：结构化输出无效",

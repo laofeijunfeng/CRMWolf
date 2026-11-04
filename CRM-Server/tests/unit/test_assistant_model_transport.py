@@ -662,3 +662,131 @@ async def test_streaming_invalid_output_is_not_retried(monkeypatch):
             stream=True, retry_timeouts=True,
         )
     assert calls["n"] == 1
+
+
+async def _invoke_transport_content(monkeypatch, content, *, stream, response_model=KindDecision):
+    original_client = httpx.AsyncClient
+    calls = 0
+
+    def respond(request):
+        nonlocal calls
+        calls += 1
+        assert json.loads(request.content).get("stream", False) is stream
+        if not stream:
+            return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+        # Split fence markers, JSON strings, and closing markers across SSE deltas.
+        frames = "".join(
+            "data: " + json.dumps({"choices": [{"delta": {"content": content[index:index + 2]}}]}) + "\n\n"
+            for index in range(0, len(content), 2)
+        )
+        return httpx.Response(200, content=(frames + "data: [DONE]\n\n").encode())
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            model_transport.httpx,
+            "AsyncClient",
+            lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+        )
+        try:
+            return await AssistantModelTransport().ainvoke_structured(
+                api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+                system_prompt="整理", user_prompt="客户沟通", response_model=response_model, error_prefix="整理",
+                stream=stream, retry_timeouts=True,
+            )
+        finally:
+            assert calls == 1
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("newline", "outer"),
+    [("\n", ""), ("\r\n", " \t\r\n")],
+    ids=["lf", "crlf-outer-whitespace"],
+)
+async def test_transport_fences_preserve_typed_response(monkeypatch, stream, newline, outer):
+    payload = {
+        "kind": "FOLLOW_UP",
+        "reason": "保留 `字段`、```json 和 ```\n换行与字面量 \\n 均不改变",
+        "confidence": 0.75,
+        "evidence_quote": "客户电话沟通",
+        "channels": ["PHONE_FOLLOW_UP"],
+    }
+    body = json.dumps(payload, ensure_ascii=False)
+    expected = KindDecision(**payload)
+    results = []
+    for marker in (None, "json", ""):
+        content = body if marker is None else f"```{marker}{newline}{body}{newline}```"
+        results.append(await _invoke_transport_content(monkeypatch, outer + content + outer, stream=stream))
+    assert results == [expected, expected, expected]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "template",
+    [
+        pytest.param("说明\n```json\n{body}\n```", id="leading-prose"),
+        pytest.param("```json\n{body}\n```\n说明", id="trailing-prose"),
+        pytest.param("```json\n{body}\n```\n```\n{body}\n```", id="multiple-blocks"),
+        pytest.param("```json\n```json\n{body}\n```\n```", id="nested-blocks"),
+        pytest.param("```json\n{body}", id="unclosed"),
+        pytest.param("```python\n{body}\n```", id="wrong-language"),
+        pytest.param("```JSON\n{body}\n```", id="uppercase-language"),
+        pytest.param("````json\n{body}\n````", id="four-ticks"),
+        pytest.param("~~~json\n{body}\n~~~", id="wrong-marker"),
+        pytest.param("```json{body}\n```", id="same-line-json-opener"),
+        pytest.param("```\n{body}```", id="same-line-json-closer"),
+        pytest.param("```json\n{body}\n  ```", id="indented-closing"),
+    ],
+)
+async def test_transport_rejects_non_exact_fences_without_retry(monkeypatch, stream, template):
+    from pydantic import ValidationError
+
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    body = json.dumps({"kind": "FOLLOW_UP", "reason": "客户电话沟通"}, ensure_ascii=False)
+    with pytest.raises(AssistantLLMError) as caught:
+        await _invoke_transport_content(monkeypatch, template.format(body=body), stream=stream)
+    assert caught.value.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
+    assert isinstance(caught.value.cause, ValidationError)
+    assert caught.value.retryable is True
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("failure", "error_type", "location"),
+    [
+        ("invalid-json", "json_invalid", ()),
+        ("required", "missing", ("action_ref",)),
+        ("extra", "extra_forbidden", ("unexpected",)),
+        ("length", "string_too_long", ("action_text",)),
+    ],
+)
+async def test_transport_fences_keep_json_and_schema_validation(monkeypatch, stream, failure, error_type, location):
+    from pydantic import ValidationError
+
+    from app.services.assistant.failure_contract import AssistantFailureCode
+
+    payload = {
+        "action_ref": "action-1",
+        "owner_role": "SALES",
+        "action_text": "发送方案",
+        "action_status": "PLANNED",
+        "evidence_quote": "我会发送方案",
+        "quote_start": 0,
+        "quote_end": 6,
+    }
+    if failure == "required":
+        payload.pop("action_ref")
+    elif failure == "extra":
+        payload["unexpected"] = "value"
+    elif failure == "length":
+        payload["action_text"] = "长" * 501
+    body = '{"action_ref":' if failure == "invalid-json" else json.dumps(payload, ensure_ascii=False)
+    with pytest.raises(AssistantLLMError) as caught:
+        await _invoke_transport_content(
+            monkeypatch, f"```json\n{body}\n```", stream=stream, response_model=ModelDraftAction,
+        )
+    assert caught.value.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
+    assert isinstance(caught.value.cause, ValidationError)
+    assert caught.value.retryable is True
+    assert [(error["type"], error["loc"]) for error in caught.value.cause.errors()] == [(error_type, location)]
