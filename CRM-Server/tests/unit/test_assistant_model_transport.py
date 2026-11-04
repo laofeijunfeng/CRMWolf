@@ -572,3 +572,93 @@ async def test_http_200_fabricated_time_is_still_rejected(monkeypatch):
     _mock_completion(monkeypatch, payload)
     with pytest.raises(TemporalContractError, match="not in the source"):
         await AssistantLLM().structure_draft(object(), team_id=1, kind="FOLLOW_UP", user_text=text)
+
+
+def _sse(payload: dict) -> bytes:
+    body = json.dumps(payload, ensure_ascii=False)
+    frame = json.dumps({"choices": [{"delta": {"content": body}}]}, ensure_ascii=False)
+    return f"data: {frame}\n\ndata: [DONE]\n".encode()
+
+
+async def test_streaming_timeout_retries_once_inside_the_attempt(monkeypatch):
+    calls = {"n": 0}
+    original_client = httpx.AsyncClient
+
+    def respond(request):
+        calls["n"] += 1
+        assert json.loads(request.content)["stream"] is True
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("idle", request=request)
+        return httpx.Response(
+            200,
+            content=_sse({"kind": "ONLINE_MEETING", "reason": "会议", "confidence": 1, "evidence_quote": "会议"}),
+        )
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    decision = await AssistantModelTransport().ainvoke_structured(
+        api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+        system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
+        stream=True, retry_timeouts=True,
+    )
+    assert calls["n"] == 2
+    assert decision.kind == "ONLINE_MEETING"
+async def test_streaming_timeout_retries_even_when_the_attempt_budget_is_gone(monkeypatch):
+    from datetime import timedelta
+
+    from app.services.assistant.failure_contract import bind_attempt_deadline, reset_attempt_deadline
+    from app.utils.time import business_now
+
+    calls = {"n": 0}
+    original_client = httpx.AsyncClient
+
+    def respond(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadTimeout("idle", request=request)
+        return httpx.Response(
+            200,
+            content=_sse({"kind": "ONLINE_MEETING", "reason": "会议", "confidence": 1, "evidence_quote": "会议"}),
+        )
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    token = bind_attempt_deadline(business_now() - timedelta(seconds=180))
+    try:
+        decision = await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
+            stream=True, retry_timeouts=True,
+        )
+    finally:
+        reset_attempt_deadline(token)
+    assert calls["n"] == 2
+    assert decision.kind == "ONLINE_MEETING"
+
+async def test_streaming_invalid_output_is_not_retried(monkeypatch):
+    calls = {"n": 0}
+    original_client = httpx.AsyncClient
+
+    def respond(request):
+        calls["n"] += 1
+        frame = json.dumps({"choices": [{"delta": {"content": "not-json"}}]})
+        return httpx.Response(200, content=f"data: {frame}\n\n".encode())
+
+    monkeypatch.setattr(
+        model_transport.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    with pytest.raises(AssistantLLMError):
+        await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
+            stream=True, retry_timeouts=True,
+        )
+    assert calls["n"] == 1

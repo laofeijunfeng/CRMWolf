@@ -211,11 +211,8 @@ const beginProcessing = (input: SubmitAssistantInput, hasWaiting: boolean): void
   processing.value.startedAt = Date.now()
   elapsedSeconds.value = 0
   if (elapsedTimer !== null) clearInterval(elapsedTimer)
-  elapsedTimer = setInterval(() => {
-    elapsedSeconds.value = Math.floor((Date.now() - processing.value.startedAt) / 1000)
-  }, 1000)
+  elapsedTimer = window.setInterval(() => { elapsedSeconds.value += 1 }, 1000)
 }
-
 const applyStageEvent = (event: { stage: StageName; phase: 'start' | 'done'; ms?: number | undefined; score?: number | undefined }): void => {
   const stages = processing.value.stages
   let target = stages.find((item) => item.name === event.stage)
@@ -240,7 +237,8 @@ const endProcessing = (): void => {
   // Keep stages. This also runs while recovery is still reading the turn.
   processing.value.active = false
 }
-
+const longOrganize = computed(() => elapsedSeconds.value >= 30
+  && processing.value.stages.some((item) => (item.name === 'structure' || item.name === 'quality_gate') && item.status === 'running'))
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
   return '内容已保存，处理仍在后台继续；关闭或刷新不会取消'
@@ -1140,9 +1138,9 @@ void loadConversation()
         </div>
       </template>
     </div>
-
     <div v-if="showProcessCard" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
       <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
+      <p v-if="longOrganize" class="mb-2 text-sm text-foreground">正在整理，内容较长，预计需要约 1 分钟</p>
       <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
         <span>执行过程</span>
         <span v-if="processChip" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processChip }}</span>

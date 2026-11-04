@@ -296,7 +296,11 @@ def attach_model_evidence(
         stored.source_actions = [
             quoted_actions[ref] for ref in dict.fromkeys(item.action_ref for item in sources if item.action_ref)
         ]
-        if _background_year(segment_text, found):
+        if _meeting_context_time(segment_text, found):
+            stored.role = "OTHER"
+            stored.ambiguity_reason = None
+            stored.action_id = None
+        elif _background_year(segment_text, found):
             stored.role = "CUSTOMER_ACTION" if linked and linked.owner_role == "CUSTOMER" else "OTHER"
             stored.ambiguity_reason = None
         if len(nominated) > 1:
@@ -383,19 +387,25 @@ def apply_temporal_answer(
         ranges.append((offset, offset + len(record.text)))
         offset += len(record.text) + 1
 
-    def source_index(start: int, end: int) -> int:
+    def source_index(start: int, end: int) -> int | None:
         for index, (left, right) in enumerate(ranges):
             if left <= start < end <= right:
                 return index
-        raise TemporalContractError("temporal quote crosses source segments")
+        return None
 
     quoted_actions: dict[str, QuotedAction] = {}
+    dropped_quotes = False
     for item in actions:
-        action = _read_action(item)
-        start, end = _action_span(source_text, action, ranges)
-        index = source_index(start, end)
-        if action.action_ref in quoted_actions:
-            raise ActionContractError("duplicate action reference")
+        try:
+            action = _read_action(item)
+            start, end = _action_span(source_text, action, ranges)
+            index = source_index(start, end)
+        except (TemporalContractError, ActionContractError):
+            dropped_quotes = True
+            continue
+        if index is None or action.action_ref in quoted_actions:
+            dropped_quotes = True
+            continue
         quoted_actions[action.action_ref] = QuotedAction(
             source_segment_id=records[index].segment_id,
             action=action.model_copy(
@@ -405,13 +415,33 @@ def apply_temporal_answer(
                 }
             ),
         )
+    def mention_text_in_answer(item: object, answer_text: str) -> bool:
+        raw = getattr(item, "raw_text", None)
+        if not isinstance(raw, str) and isinstance(item, dict):
+            raw = item.get("raw_text")
+        return isinstance(raw, str) and raw in answer_text
+
     quotes: dict[str, list[ModelTemporalMention]] = {record.segment_id: [] for record in records}
+
+    answer_record = next((record for record in records if record.segment_id == answer_segment_id), None)
+    answer_index = next((index for index, record in enumerate(records) if record.segment_id == answer_segment_id), None)
     for item in mentions:
-        mention = _read_mention(item)
-        start, end = _snap_span(source_text, mention, ranges)
-        index = source_index(start, end)
-        if mention.action_ref and mention.action_ref not in quoted_actions:
-            raise TemporalContractError("temporal mention points at an unknown action")
+        try:
+            mention = _read_mention(item)
+            start, end = _snap_span(source_text, mention, ranges)
+            index = source_index(start, end)
+        except (TemporalContractError, ActionContractError, ValueError) as exc:
+            if answer_record is not None and mention_text_in_answer(item, answer_record.text):
+                raise TemporalContractError("temporal answer evidence is invalid") from exc
+            dropped_quotes = True
+            continue
+        in_answer = answer_index is not None and index == answer_index
+        if index is None or (mention.action_ref and mention.action_ref not in quoted_actions):
+            answered_here = answer_record is not None and mention.raw_text in answer_record.text
+            if in_answer or answered_here:
+                raise TemporalContractError("temporal answer evidence is invalid")
+            dropped_quotes = True
+            continue
         quotes[records[index].segment_id].append(
             mention.model_copy(
                 update={
@@ -491,13 +521,21 @@ def apply_temporal_answer(
         replacements.append(item)
     # A just-now aside in the answer ("周四 刚才忘说了") is not a competing date.
     dated = [item for item in replacements if not _is_just_now(item)]
-    if len(dated) == 1 and dated[0].role == "SALES_FOLLOW_UP":
+    pinned = (
+        len(dated) == 1
+        and dated[0].role == "SALES_FOLLOW_UP"
+        and dated[0].resolution_status == "RESOLVED"
+        and dated[0].resolved_at is not None
+    )
+    if dropped_quotes and not pinned:
+        raise TemporalContractError("temporal answer evidence is invalid")
+    if pinned:
         replacement = dated[0]
-        if replacement.resolution_status == "RESOLVED" and replacement.resolved_at is not None:
-            for item in stored:
-                if item.state == "ACTIVE" and item.action_id == target_action.action_id:
-                    item.state = "SUPERSEDED"
-            target_action.temporal_mention_id = replacement.mention_id
+        for item in stored:
+            if item.state == "ACTIVE" and item.action_id == target_action.action_id:
+                item.state = "SUPERSEDED"
+        target_action.temporal_mention_id = replacement.mention_id
+        replacement.role = "SALES_FOLLOW_UP"
     elif len(dated) > 1:
         for item in dated:
             item.resolution_status = "AMBIGUOUS"
@@ -506,6 +544,9 @@ def apply_temporal_answer(
     stored.extend(replacements)
     _write_bundle(draft, stored, bound)
     project_draft(draft)
+    if pinned and draft.next_follow_time.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
+        draft.next_follow_time = DraftField(status="ACCEPTED", value=dated[0].raw_text)
+        draft.content_json["next_follow_time_text"] = dated[0].raw_text
 
 
 def _source_action_text(quote: str) -> str:
@@ -525,6 +566,16 @@ def _same_action_clause(text: str, found: FoundSpan, action: StoredAction) -> bo
         return True
     between = text[found.end : action.quote_start]
     return found.end <= action.quote_start and re.fullmatch(r"[\s，,、]*", between) is not None
+
+
+def _meeting_context_time(text: str, found: FoundSpan) -> bool:
+    """A leading title line that is only a clock is not a follow-up date."""
+
+    if text[: found.start].strip():
+        return False
+    line_end = text.find("\n", found.end)
+    line = text[found.start: line_end if line_end >= 0 else len(text)].strip()
+    return line == found.raw_text
 
 
 def _background_year(text: str, found: FoundSpan) -> bool:
@@ -625,18 +676,23 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     unresolved_roles = [item for item in action_times if item.ambiguity_reason == "ROLE"]
     if len(unresolved_roles) >= 2:
         left, right = unresolved_roles[0], unresolved_roles[1]
+        same_phrase = left.raw_text.replace(" ", "") == right.raw_text.replace(" ", "")
+        if same_phrase:
+            phrase = left.raw_text
+            prompt = f"“{phrase}”是客户完成时间，还是你下次联系时间？"
+            labels = ("客户完成时间", "我下次联系时间")
+        else:
+            prompt = _role_prompt(left.raw_text, right.raw_text)
+            labels = (
+                f"{left.raw_text}是客户完成，{right.raw_text}是我下次联系",
+                f"{left.raw_text}是我下次联系，{right.raw_text}是客户完成",
+            )
         return {
             "reason": "ROLE",
-            "prompt": _role_prompt(left.raw_text, right.raw_text),
+            "prompt": prompt,
             "candidates": [
-                {
-                    "id": f"role:{left.mention_id}:customer",
-                    "label": f"{left.raw_text}是客户完成，{right.raw_text}是我下次联系",
-                },
-                {
-                    "id": f"role:{left.mention_id}:sales",
-                    "label": f"{left.raw_text}是我下次联系，{right.raw_text}是客户完成",
-                },
+                {"id": f"role:{left.mention_id}:customer", "label": labels[0]},
+                {"id": f"role:{left.mention_id}:sales", "label": labels[1]},
             ],
         }
     ambiguous = next((item for item in action_times if item.resolution_status == "AMBIGUOUS" and item.candidates), None)

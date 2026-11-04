@@ -55,13 +55,17 @@ function envelope(blocks: ReadonlyArray<Record<string, unknown>>, state: 'final'
   }
 }
 
-function conversation(messages: ReadonlyArray<Record<string, unknown>>, version = 4) {
+function conversation(
+  messages: ReadonlyArray<Record<string, unknown>>,
+  version = 4,
+  running = false
+) {
   return {
     public_id: 'asc_fixture',
     version,
-    focused_task: task(),
+    focused_task: task(running ? { processing_turn_id: 'atn_ok', processing_turn_status: 'RUNNING' } : {}),
     pending_choice: null,
-    has_pending_request: false,
+    has_pending_request: running,
     older_cursor: null,
     messages
   }
@@ -101,14 +105,20 @@ function frame(event: string, data: Record<string, unknown>): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 }
 
-async function listen(): Promise<{ url: string; close: () => Promise<void>; release: () => void }> {
+function heldStream(): string {
+  return frame('accepted', { turn_id: 'atn_ok', seq: 1 }) + frame('stage', { stage: 'structure', phase: 'start', seq: 2 })
+}
+
+async function listen(running: 'classify' | 'structure' = 'classify'): Promise<{ url: string; close: () => Promise<void>; release: () => void }> {
   let release = (): void => undefined
   const gate = new Promise<void>((resolve) => { release = resolve })
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
     res.write(frame('accepted', { turn_id: 'atn_ok', seq: 1 }))
-    res.write(frame('stage', { stage: 'classify', phase: 'start', seq: 2 }))
+    res.write(frame('stage', { stage: running, phase: 'start', seq: 2 }))
+    const beat = setInterval(() => { res.write(': keep\n\n') }, 1000)
     void gate.then(() => {
+      clearInterval(beat)
       res.write(frame('stage', { stage: 'classify', phase: 'done', ms: 10, seq: 3 }))
       res.write(frame('waiting', { task: task({ version: 5, committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] }), message: '活动已写入', seq: 4 }))
       res.end()
@@ -164,6 +174,44 @@ for (const viewport of viewports) {
       await sse.close()
     }
   })
+
+  test(`long organize hint appears after thirty seconds on ${viewport.name}`, async ({ page }) => {
+    test.setTimeout(90_000)
+    const sse = await listen('structure')
+    let submitted = false
+    try {
+      await install(page, async (route, pathname) => {
+        if (pathname.endsWith('/assistant/conversation/open') || (pathname.endsWith('/assistant/conversation') && route.request().method() === 'GET')) {
+          return fulfill(route, 200, conversation(submitted ? [userMessage] : [], submitted ? 2 : 1, submitted))
+        }
+        if (pathname.endsWith('/assistant/conversation/messages')) {
+          submitted = true
+          return fulfill(route, 200, {
+            conversation: conversation([userMessage], 2, true),
+            submission: {
+              task_public_id: 'ast_fixture', turn_id: 'atn_ok',
+              input: { kind: 'text', text: userText, choice: null, client_request_id: 'conv-turn-long', action_id: null, expected_version: null }
+            }
+          })
+        }
+        if (pathname.endsWith('/submit')) return route.continue({ url: sse.url })
+        return fulfill(route, 404, { detail: pathname })
+      })
+      await openAssistant(page, viewport.width, viewport.height)
+      await expect(page.getByText('正在整理活动内容')).toBeVisible()
+      await expect(page.getByText('处理中')).toBeVisible()
+      await expect(page.getByText('正在整理，内容较长，预计需要约 1 分钟')).toHaveCount(0)
+      await page.screenshot({ path: path.join(evidence, `process-card-organizing-${viewport.name}.png`), fullPage: true })
+      await page.waitForTimeout(32_000)
+      await expect(page.getByText('正在整理，内容较长，预计需要约 1 分钟')).toBeVisible()
+      await expect(page.getByText('正在整理活动内容')).toBeVisible()
+      await page.screenshot({ path: path.join(evidence, `process-card-long-organize-${viewport.name}.png`), fullPage: true })
+    } finally {
+      sse.release()
+      await sse.close()
+    }
+  })
+
 
   test(`success hides the process card on ${viewport.name}`, async ({ page }) => {
     const sse = await listen()

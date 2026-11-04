@@ -1008,3 +1008,41 @@ def test_role_choice_restores_a_month_segment_without_asking_for_a_day() -> None
     assert mentions["下个月初"]["resolved_at"] is None
     resolved, granularity = resolved_sales_follow_up(draft)
     assert (resolved, granularity) == (datetime(2026, 11, 5), "DATE")
+
+def test_meeting_title_date_is_not_a_follow_up_question() -> None:
+    text = "2026年7月7日\n培训纪要\n线上会议讨论了版本差异。"
+    draft = _attach(text, datetime(2026, 7, 8, 9, 0))
+    mentions = draft.content_json["temporal_evidence"]["mentions"]
+    assert mentions[0]["raw_text"] == "2026年7月7日"
+    assert mentions[0]["role"] == "OTHER"
+    assert temporal_waiting(draft) is None
+    assert draft.content_json["next_follow_time_text"] == ""
+
+
+def test_same_phrase_role_question_does_not_repeat_the_phrase() -> None:
+    from app.services.assistant.temporal_evidence import StoredMention
+
+    draft = _draft("下周三")
+    mentions = []
+    for index in (1, 2):
+        mentions.append(
+            StoredMention(
+                mention_id=f"tm_{index}",
+                raw_text="下周三",
+                source_segment_id="seg_test",
+                quote_start=0,
+                quote_end=3,
+                kind="RELATIVE_WEEKDAY",
+                role="OTHER",
+                ambiguity_reason="ROLE",
+                resolution_status="AMBIGUOUS",
+                anchor_at=ANCHOR,
+            ).model_dump(mode="json")
+        )
+    draft.content_json["temporal_evidence"] = {"version": "temporal-evidence-v1", "mentions": mentions, "actions": []}
+    waiting = temporal_waiting(draft)
+    assert waiting is not None
+    assert waiting["prompt"] == "“下周三”是客户完成时间，还是你下次联系时间？"
+    assert [item["label"] for item in waiting["candidates"]] == ["客户完成时间", "我下次联系时间"]
+    assert "下周三”和“下周三" not in waiting["prompt"]
+

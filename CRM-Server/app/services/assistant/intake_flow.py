@@ -507,58 +507,72 @@ async def intake_step(
         task = result.task
 
     draft = TaskDraft.model_validate(task.draft_json or {})
-    if _budget_exhausted():
-        fail_model_stage(db, task, TimeoutError(), stage="structure", draft=draft)
-
-    reporter.stage_start(_S_STRUCTURE)
-    _t0 = time.monotonic()
-    try:
-        structure_text = "\n".join(record.text for record in draft.source_records) if temporal_answer_id else user_text
-        structured = await structurer.structure(
-            db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=structure_text
-        )
-        reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
-    except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
-        # Technical failure keeps the task ACTIVE but must not look like success.
-        _record_structuring_failure(db, task, draft, exc, stage="structure")
-
-    try:
-        draft = apply_structured_draft(
-            task,
-            structured,
-            correction_text=user_text,
-            temporal_answer_id=temporal_answer_id,
-            model_source_text=structure_text,
-        )
-    except (ValueError, TypeError, ValidationError) as exc:
-        draft = TaskDraft.model_validate(task.draft_json or {})
-        _record_structuring_failure(db, task, draft, exc, stage="apply")
-    try:
-        reconcile_action_evidence(draft, task.activity_kind or "FOLLOW_UP")
-    except (ValueError, TypeError, ValidationError) as exc:
-        draft = TaskDraft.model_validate(task.draft_json or {})
-        _record_structuring_failure(db, task, draft, exc, stage="reconcile")
-    draft.quality_score = DraftField(status="MISSING")
-    draft.score_reason = None
-    draft.score_detail = {}
-    result = apply_task_update(
-        db,
-        task,
-        TaskUpdate(
-            draft=draft,
-            action_actor="SYSTEM",
-            action_name="structure_draft",
-            action_result={"accepted": True, "kind_confirmed": getattr(structured, "kind_confirmed", None)},
-        ),
+    # A saved draft from this same input is scored again, not organized again.
+    # Kind changes pass accept_source=False and still organize.
+    reuse_structure = (
+        accept_source
+        and not accepted
+        and task.activity_kind is not None
+        and draft.content.status == "CANDIDATE"
+        and bool((draft.content.value or "").strip())
     )
-    task = result.task
+    structured_model = ""
+    if not reuse_structure:
+        if _budget_exhausted():
+            fail_model_stage(db, task, TimeoutError(), stage="structure", draft=draft)
+
+        reporter.stage_start(_S_STRUCTURE)
+        _t0 = time.monotonic()
+        try:
+            structure_text = (
+                "\n".join(record.text for record in draft.source_records) if temporal_answer_id else user_text
+            )
+            structured = await structurer.structure(
+                db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=structure_text
+            )
+            reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
+            # Technical failure keeps the task ACTIVE but must not look like success.
+            _record_structuring_failure(db, task, draft, exc, stage="structure")
+        structured_model = getattr(structured, "structuring_model", "") or ""
+
+        try:
+            draft = apply_structured_draft(
+                task,
+                structured,
+                correction_text=user_text,
+                temporal_answer_id=temporal_answer_id,
+                model_source_text=structure_text,
+            )
+        except (ValueError, TypeError, ValidationError) as exc:
+            draft = TaskDraft.model_validate(task.draft_json or {})
+            _record_structuring_failure(db, task, draft, exc, stage="apply")
+        try:
+            reconcile_action_evidence(draft, task.activity_kind or "FOLLOW_UP")
+        except (ValueError, TypeError, ValidationError) as exc:
+            draft = TaskDraft.model_validate(task.draft_json or {})
+            _record_structuring_failure(db, task, draft, exc, stage="reconcile")
+        draft.quality_score = DraftField(status="MISSING")
+        draft.score_reason = None
+        draft.score_detail = {}
+        result = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                draft=draft,
+                action_actor="SYSTEM",
+                action_name="structure_draft",
+                action_result={"accepted": True, "kind_confirmed": getattr(structured, "kind_confirmed", None)},
+            ),
+        )
+        task = result.task
 
     if gate is None:
         return task, "已整理完成。", None, False
 
     draft = TaskDraft.model_validate(task.draft_json or {})
-    if _budget_exhausted():
-        fail_model_stage(db, task, TimeoutError(), stage="quality_gate", draft=draft)
+    # Quality keeps its own stream clock. The 180s attempt deadline must not
+    # skip a score after organizing already saved a draft.
     reporter.stage_start(_S_GATE)
     _t0 = time.monotonic()
     try:
@@ -589,7 +603,7 @@ async def intake_step(
     draft.score_reason = gate_outcome.reason
     draft.score_detail = {
         **(gate_outcome.detail or {}),
-        "structuring_model_name": getattr(structured, "structuring_model", "") or None,
+        "structuring_model_name": structured_model or None,
     }
     # Scoring and next-action presence are independent prerequisites.
     from app.services.assistant.temporal_evidence import commitment_only

@@ -117,3 +117,89 @@ async def test_passed_gate_scores_draft_without_freezing_confirmation(db_session
     assert updated.committed_json == []
 
 
+
+
+class CountingStructurer(GoodStructurer):
+    def __init__(self):
+        self.calls = 0
+
+    async def structure(self, db, *, team_id, kind, user_text):
+        self.calls += 1
+        return await super().structure(db, team_id=team_id, kind=kind, user_text=user_text)
+
+
+class CountingGate(PassGate):
+    def __init__(self):
+        self.calls = 0
+
+    async def evaluate(self, db, *, team_id, user_text, content, next_action, kind="FOLLOW_UP", content_json=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise TimeoutError("score idle")
+        return await super().evaluate(
+            db, team_id=team_id, user_text=user_text, content=content, next_action=next_action,
+            kind=kind, content_json=content_json,
+        )
+
+
+async def test_expired_attempt_budget_still_scores_a_saved_draft(db_session):
+    """Score a saved draft after the 180s attempt clock has already expired."""
+    from datetime import timedelta
+
+    from app.services.assistant.failure_contract import bind_attempt_deadline, reset_attempt_deadline
+    from app.utils.time import business_now
+
+    class ExpireDuringStructure(GoodStructurer):
+        def __init__(self):
+            self.token = None
+
+        async def structure(self, db, *, team_id, kind, user_text):
+            self.token = bind_attempt_deadline(business_now() - timedelta(seconds=1))
+            return await super().structure(db, team_id=team_id, kind=kind, user_text=user_text)
+
+    structurer = ExpireDuringStructure()
+
+    class Once(PassGate):
+        def __init__(self):
+            self.calls = 0
+
+        async def evaluate(self, db, *, team_id, user_text, content, next_action, kind="FOLLOW_UP", content_json=None):
+            self.calls += 1
+            return await super().evaluate(
+                db, team_id=team_id, user_text=user_text, content=content, next_action=next_action,
+                kind=kind, content_json=content_json,
+            )
+
+    gate = Once()
+    task = _make_task(db_session)
+    try:
+        updated, _message, waiting, failed = await intake_step(db_session, task, "聊得很好", structurer, gate)
+    finally:
+        if structurer.token is not None:
+            reset_attempt_deadline(structurer.token)
+
+    assert failed is False
+    assert waiting is None
+    assert gate.calls == 1
+    assert TaskDraft.model_validate(updated.draft_json).quality_score.value == "82"
+
+
+async def test_same_input_rescores_without_organizing_again(db_session):
+    from app.services.assistant.failure_contract import AssistantStageFailure
+
+    structurer = CountingStructurer()
+    gate = CountingGate()
+    task = _make_task(db_session)
+    with pytest.raises(AssistantStageFailure) as caught:
+        await intake_step(db_session, task, "聊得很好", structurer, gate)
+    assert caught.value.stage == "quality_gate"
+    assert structurer.calls == 1
+    assert TaskDraft.model_validate(task.draft_json).content.status == "CANDIDATE"
+
+    updated, _message, waiting, failed = await intake_step(db_session, task, "聊得很好", structurer, gate)
+
+    assert failed is False
+    assert waiting is None
+    assert structurer.calls == 1
+    assert gate.calls == 2
+    assert TaskDraft.model_validate(updated.draft_json).quality_score.value == "82"

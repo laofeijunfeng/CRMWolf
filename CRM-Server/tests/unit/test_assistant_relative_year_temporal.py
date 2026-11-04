@@ -266,21 +266,13 @@ def test_invalid_or_non_unique_date_reply_stays_in_single_wait(answer):
     assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
 
 
-@pytest.mark.parametrize("bad_evidence", ["fabricated_time", "fabricated_action", "cross_segment", "dangling_action"])
+@pytest.mark.parametrize("bad_evidence", ["dangling_action"])
 def test_date_answer_rejects_invalid_evidence_without_mutating_original_draft(bad_evidence):
     from app.services.assistant.temporal_evidence import apply_temporal_answer
 
     draft, target, source = temporal_answer_draft("2027年1月15号")
     before = draft.model_dump(mode="json")
-    mentions, actions = [], []
-    if bad_evidence == "fabricated_time":
-        mentions = [quoted("2028年1月15号", "2028年1月15号", ref="")]
-    elif bad_evidence == "fabricated_action":
-        actions = [action("我明天采购了十台设备")]
-    elif bad_evidence == "cross_segment":
-        mentions = [quoted(source, source, ref="")]
-    else:
-        mentions = [quoted(source, "2027年1月15号")]
+    mentions = [quoted(source, "2027年1月15号")]
     with pytest.raises(TemporalContractError):
         apply_temporal_answer(
             draft,
@@ -288,9 +280,34 @@ def test_date_answer_rejects_invalid_evidence_without_mutating_original_draft(ba
             source_text=source,
             answer_segment_id="seg_answer",
             mentions=mentions,
-            actions=actions,
+            actions=[],
         )
     assert draft.model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize("bad_evidence", ["fabricated_time", "fabricated_action", "cross_segment"])
+def test_valid_answer_drops_side_quotes_and_keeps_the_answered_date(bad_evidence):
+    from app.services.assistant.temporal_evidence import apply_temporal_answer
+
+    draft, target, source = temporal_answer_draft("2027年1月15号")
+    mentions, actions = [], []
+    if bad_evidence == "fabricated_time":
+        mentions = [quoted("2028年1月15号", "2028年1月15号", ref="")]
+    elif bad_evidence == "fabricated_action":
+        actions = [action("我明天采购了十台设备")]
+    else:
+        mentions = [quoted(source, source, ref="")]
+    apply_temporal_answer(
+        draft,
+        target_id=target,
+        source_text=source,
+        answer_segment_id="seg_answer",
+        mentions=mentions,
+        actions=actions,
+    )
+    assert draft.next_follow_time.status == "ACCEPTED"
+    assert draft.next_follow_time.value == "2027年1月15号"
+    assert resolved_sales_follow_up(draft) == (datetime(2027, 1, 15), "DATE")
 
 
 def test_date_answer_keeps_action_and_date_provenance_valid_for_existing_proposals():
@@ -565,3 +582,22 @@ def test_date_question_is_only_issued_when_its_answer_can_be_accepted():
         stored["owner_role"], stored["action_status"] = "CUSTOMER", "COMMITTED"
     assert temporal_waiting(draft) is None
     assert temporal_answer_target(draft) is None
+
+def test_valid_date_answer_survives_a_cross_segment_requote():
+    from app.services.assistant.temporal_evidence import apply_temporal_answer
+
+    answer = "周四"
+    draft, target, source = repeated_word_answer_draft(answer)
+    before_action = draft.next_action.value
+    apply_temporal_answer(
+        draft,
+        target_id=target,
+        source_text=source,
+        answer_segment_id="seg_answer",
+        mentions=[quoted(source, source, ref="")],
+        actions=[],
+    )
+    assert draft.next_follow_time.status == "ACCEPTED"
+    assert draft.next_follow_time.value == "周四"
+    assert resolved_sales_follow_up(draft)[1] == "DATE"
+    assert draft.next_action.value == before_action

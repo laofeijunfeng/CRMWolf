@@ -44,6 +44,29 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(wrapper.text()).not.toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
   })
 
+  it('shows the long organize hint only after thirty seconds of structuring', async () => {
+    vi.useFakeTimers()
+    const running = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ focused_task: running, version: 1 }), prepared(running)))
+    let finish: (() => void) | undefined
+    drive(async (handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'structure', phase: 'start' })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.text()).not.toContain('正在整理，内容较长，预计需要约 1 分钟')
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('正在整理，内容较长，预计需要约 1 分钟')
+    expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+    finish?.()
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('gets a completed result if the accepted stream ended without a waiting frame', async () => {
     const current = makeTask()
     mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))

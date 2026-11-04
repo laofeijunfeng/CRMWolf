@@ -96,6 +96,8 @@ class QualityGate:
                 ),
                 response_model=AssistantActivityScore,
                 error_prefix="客户活动评分",
+                stream=True,
+                retry_timeouts=True,
             )
             if result is None:
                 raise AssistantLLMError("客户活动评分：结构化输出不可用")

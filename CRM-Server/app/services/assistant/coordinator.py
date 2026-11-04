@@ -871,7 +871,8 @@ class AssistantCoordinator:
                 action_result={"kind": kind, "source": "user"},
             ),
         ).task
-
+        db.commit()
+        db.refresh(updated)
         # Continue structuring from the original goal text instead of letting
         # the chooser end an unstructured task.
         if self._follow_up is not None and kind in FOLLOW_UP_KINDS:

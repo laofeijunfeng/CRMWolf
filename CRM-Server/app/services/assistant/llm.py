@@ -101,7 +101,19 @@ class AssistantLLM:
     def __init__(self, runtime: object | None = None) -> None:
         self.runtime = runtime or AssistantModelTransport()
 
-    async def _invoke(self, db: Session, team_id: int, prompt: str, text: str, model: type, label: str, timeout_seconds: float = 120):
+    async def _invoke(
+        self,
+        db: Session,
+        team_id: int,
+        prompt: str,
+        text: str,
+        model: type,
+        label: str,
+        timeout_seconds: float = 120,
+        *,
+        stream: bool = False,
+        retry_timeouts: bool = False,
+    ) -> object:
         host, key, name = team_model_credentials(db, team_id)
         try:
             result = await self.runtime.ainvoke_structured(
@@ -114,6 +126,8 @@ class AssistantLLM:
                 response_model=model,
                 error_prefix=label,
                 timeout_seconds=timeout_seconds,
+                stream=stream,
+                retry_timeouts=retry_timeouts,
             )
             if result is None:
                 raise AssistantLLMError(f"{label}：结构化输出不可用")
@@ -151,6 +165,8 @@ class AssistantLLM:
             user_text,
             StructuredMeeting if meeting else StructuredFollowUp,
             "会议纪要整理" if meeting else "跟进整理",
+            stream=True,
+            retry_timeouts=True,
         )
         _require_complete_content(response.content_json)
         from app.services.assistant.temporal_evidence import validate_temporal_quotes
