@@ -922,7 +922,7 @@ const activityBadge = computed((): string => {
     ? waiting.confirmation_payload.preview
     : null
   if (preview?.channel_status === 'required') return '待确认类型'
-  const kind = preview?.activity_kind || task.value?.activity_kind || ''
+  const kind = preview?.activity_kind || (task.value?.activity_kind ?? '')
   return ACTIVITY_BADGES[kind] ?? ''
 })
 

@@ -377,10 +377,10 @@ watch(active, (isActive) => {
                   </FormItem>
                 </FormField>
 
-                <FormField v-slot="{ componentField }" name="structured_output_mode">
+                <FormField v-slot="{ value, handleChange }" name="structured_output_mode">
                   <FormItem>
                     <FormLabel>结构化输出协议</FormLabel>
-                    <Select v-bind="componentField">
+                    <Select :model-value="value" @update:model-value="handleChange">
                       <FormControl>
                         <SelectTrigger class="min-h-11"><SelectValue /></SelectTrigger>
                       </FormControl>
