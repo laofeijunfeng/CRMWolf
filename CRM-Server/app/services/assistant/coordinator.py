@@ -147,6 +147,13 @@ class AssistantCoordinator:
         if waiting is not None:
             return await self._answer_waiting(db, task, waiting, user_input, reporter=reporter)
 
+        if user_input.text:
+            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+
+            target_id = temporal_supplement_target(load_draft(task))
+            if target_id is not None and is_temporal_supplement(user_input.text):
+                return await self._apply_temporal_text(db, task, user_input.text, target_id, reporter)
+
         if self._structurer is not None and user_input.text:
             if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
                 begun = await self._begin_follow_up(db, task, user_input.text, reporter, accept_source=True)
@@ -221,6 +228,12 @@ class AssistantCoordinator:
 
     async def _prepare_confirmation(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
         draft = load_draft(task)
+        from app.services.assistant.temporal_evidence import temporal_waiting
+
+        if temporal_waiting(draft) is not None:
+            gated = await self._gate_temporal_evidence(db, task, draft)
+            if isinstance(gated, CoordinatorOutcome):
+                return gated
         if draft.quality_score.status != "CANDIDATE":
             return await self._advance(db, task)
         if task.authority_json.get("frozen_activity_command"):
@@ -456,7 +469,6 @@ class AssistantCoordinator:
         )
         return await self._continue_after_customer(db, result.task, reporter=reporter)
 
-
     async def _gate_temporal_evidence(
         self, db: Session, task: AssistantTask, draft: TaskDraft
     ) -> CoordinatorOutcome | tuple[AssistantTask, object, str]:
@@ -476,6 +488,11 @@ class AssistantCoordinator:
                 question_id=f"q_time_{task.public_id}_{task.version}",
                 prompt=str(spec["prompt"]),
                 candidates=candidates,
+                temporal_target={
+                    "mention_id": spec.get("mention_id"),
+                    "business_action_id": spec.get("business_action_id"),
+                    "reason": spec["reason"],
+                },
             )
             result = apply_task_update(
                 db,
@@ -524,11 +541,19 @@ class AssistantCoordinator:
 
         if reporter is None:
             reporter = NullProgressReporter()
+        if not self._temporal_wait_matches(task, waiting):
+            return await self._refresh_temporal_wait(db, task)
         choice = (user_input.choice or "").strip()
         if not choice:
             choice = match_temporal_choice_id(waiting.candidates, user_input.text or "") or ""
         offered = {str(item.get("id")) for item in waiting.candidates if isinstance(item, dict)}
         if not choice or choice not in offered:
+            if user_input.text and user_input.text.strip():
+                target = waiting.temporal_target
+                if target is not None and target.mention_id is not None:
+                    return await self._apply_temporal_text(
+                        db, task, user_input.text.strip(), target.mention_id, reporter
+                    )
             return CoordinatorOutcome(
                 CoordinatorReply(
                     task_public_id=task.public_id, status=task.status, message=waiting.prompt, waiting=waiting
@@ -558,6 +583,142 @@ class AssistantCoordinator:
             ),
         )
         updated = result.task
+        from app.services.assistant.temporal_evidence import temporal_waiting
+
+        if temporal_waiting(load_draft(updated)) is not None:
+            gated = await self._gate_temporal_evidence(db, updated, load_draft(updated))
+            if isinstance(gated, CoordinatorOutcome):
+                return gated
+        if self._quality_gate is not None:
+            scored = await self._rescore_temporal_choice(db, updated, reporter)
+            if isinstance(scored, CoordinatorOutcome):
+                return scored
+            updated = scored
+        return await self._prepare_confirmation(db, updated)
+
+    @staticmethod
+    def _temporal_wait_matches(task: AssistantTask, waiting: TaskWaiting) -> bool:
+        from app.services.assistant.temporal_evidence import temporal_waiting
+
+        spec = temporal_waiting(load_draft(task))
+        target = waiting.temporal_target
+        return bool(
+            spec is not None
+            and target is not None
+            and target.mention_id == spec.get("mention_id")
+            and target.business_action_id == spec.get("business_action_id")
+            and target.reason == spec.get("reason")
+        )
+
+    async def _refresh_temporal_wait(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
+        """Reissue legacy/stale evidence questions; never accept an unbound scalar."""
+        from app.services.assistant.temporal_evidence import temporal_waiting
+
+        if temporal_waiting(load_draft(task)) is None:
+            waiting = TaskWaiting(
+                type="FIELD",
+                field="content",
+                question_id=f"q_context_{task.public_id}_{task.version}",
+                prompt="已保留原有信息；还无法确定这个日期对应哪个动作，请补充是谁要做什么。",
+            )
+            updated = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    waiting=waiting,
+                    clear_frozen_activity_command=True,
+                    action_actor="SYSTEM",
+                    action_name="clarify_temporal_context",
+                ),
+            ).task
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=updated.public_id,
+                    status=updated.status,
+                    message=waiting.prompt,
+                    waiting=load_waiting(updated),
+                ),
+                updated,
+            )
+        updated = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_waiting=True,
+                clear_frozen_activity_command=True,
+                action_actor="SYSTEM",
+                action_name="refresh_temporal_target",
+            ),
+        ).task
+        return await self._prepare_confirmation(db, updated)
+
+    async def _apply_temporal_text(
+        self, db: Session, task: AssistantTask, text: str, target_id: str, reporter: ProgressReporter
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.temporal_evidence import (
+            apply_temporal_answer,
+            is_temporal_choice_answer,
+            is_temporal_supplement,
+            temporal_waiting,
+        )
+
+        scoped_answer = is_temporal_supplement(text) or is_temporal_choice_answer(load_draft(task), text)
+        if not scoped_answer and self._structurer is not None and self._quality_gate is not None:
+            updated = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    clear_waiting=True,
+                    clear_frozen_activity_command=True,
+                    action_actor="USER",
+                    action_name="accept_temporal_supplement",
+                ),
+            ).task
+            updated, message, paused, failed = await intake_step(
+                db,
+                updated,
+                text,
+                self._structurer,
+                gate=self._quality_gate,
+                reporter=reporter,
+                from_waiting=True,
+            )
+            if failed or paused is not None:
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
+                    ),
+                    updated,
+                )
+            return await self._prepare_confirmation(db, updated)
+
+        draft = load_draft(task)
+        append_source(db, task, draft, text)
+        record = next(record for record in reversed(draft.source_records) if record.text == text)
+        apply_temporal_answer(
+            draft,
+            target_id=target_id,
+            source_text="\n".join(record.text for record in draft.source_records),
+            answer_segment_id=record.segment_id,
+            mentions=[],
+            actions=[],
+        )
+        updated = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                draft=draft,
+                clear_waiting=True,
+                clear_frozen_activity_command=True,
+                action_actor="USER",
+                action_name="answer_temporal_evidence",
+                action_input={"target_id": target_id, "segment_id": record.segment_id},
+            ),
+        ).task
+        if temporal_waiting(draft) is not None:
+            gated = await self._gate_temporal_evidence(db, updated, draft)
+            if isinstance(gated, CoordinatorOutcome):
+                return gated
         if self._quality_gate is not None:
             scored = await self._rescore_temporal_choice(db, updated, reporter)
             if isinstance(scored, CoordinatorOutcome):
@@ -648,9 +809,13 @@ class AssistantCoordinator:
             return await self._answer_follow_up_customer(db, task, text, reporter)
 
         draft = load_draft(task)
-        from app.services.assistant.temporal_evidence import temporal_answer_target
-
-        temporal_answer_id = temporal_answer_target(draft) if field_name == "next_follow_time" else None
+        if field_name == "next_follow_time" and "temporal_evidence" in draft.content_json:
+            if not self._temporal_wait_matches(task, waiting):
+                return await self._refresh_temporal_wait(db, task)
+            target = waiting.temporal_target
+            if target is None or target.mention_id is None:
+                return await self._refresh_temporal_wait(db, task)
+            return await self._apply_temporal_text(db, task, text, target.mention_id, reporter)
         slot: DraftField | None = getattr(draft, field_name, None)
         if slot is None or field_name == "quality_score":
             raise ValueError(f"waiting field {field_name!r} is not a user-editable draft slot")
@@ -716,7 +881,7 @@ class AssistantCoordinator:
                 gate=self._quality_gate,
                 reporter=reporter,
                 from_waiting=True,
-                temporal_answer_id=temporal_answer_id,
+                temporal_answer_id=None,
             )
             if failed or paused is not None:
                 return CoordinatorOutcome(
@@ -751,6 +916,23 @@ class AssistantCoordinator:
                 reply=CoordinatorReply(task_public_id=updated.public_id, status=updated.status, message=message),
                 task=updated,
                 start_followup=start_followup,
+            )
+
+        if user_input.kind == "text" and user_input.text:
+            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+
+            target_id = temporal_supplement_target(load_draft(task))
+            if target_id is not None and is_temporal_supplement(user_input.text):
+                return await self._apply_temporal_text(db, task, user_input.text.strip(), target_id, reporter)
+            waiting = load_waiting(task)
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=task.public_id,
+                    status=task.status,
+                    message=waiting.prompt if waiting else "请按当前提示继续。",
+                    waiting=waiting,
+                ),
+                task,
             )
 
         if self._writer is None:
@@ -923,7 +1105,10 @@ class AssistantCoordinator:
         )
 
     async def _answer_open_follow_up(
-        self, db: Session, task: AssistantTask, user_input: AssistantInput,
+        self,
+        db: Session,
+        task: AssistantTask,
+        user_input: AssistantInput,
     ) -> CoordinatorOutcome:
         from app.services.assistant.open_follow_up_disposition import settle_open_follow_up
 
@@ -1086,7 +1271,6 @@ class AssistantCoordinator:
             task=result.task,
         )
 
-
     async def _classify_channel(
         self,
         db: Session,
@@ -1222,7 +1406,12 @@ class AssistantCoordinator:
             kind = task.activity_kind
         if kind != "FOLLOW_UP":
             updated, message, paused, failed = await intake_step(
-                db, task, user_text, self._structurer, gate=self._quality_gate, reporter=reporter,
+                db,
+                task,
+                user_text,
+                self._structurer,
+                gate=self._quality_gate,
+                reporter=reporter,
                 accept_source=accept_source,
             )
             if failed or paused is not None:
@@ -1360,24 +1549,24 @@ class AssistantCoordinator:
             and draft.quality_score.status != "CANDIDATE"
         )
         if needs_structure:
-                text = "\n".join(draft.source_segments) or task.goal
-                updated, message, paused, failed = await intake_step(
-                    db,
-                    task,
-                    text,
-                    self._structurer,
-                    gate=self._quality_gate,
-                    reporter=reporter,
-                    accept_source=False,
+            text = "\n".join(draft.source_segments) or task.goal
+            updated, message, paused, failed = await intake_step(
+                db,
+                task,
+                text,
+                self._structurer,
+                gate=self._quality_gate,
+                reporter=reporter,
+                accept_source=False,
+            )
+            if failed or paused is not None:
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
+                    ),
+                    updated,
                 )
-                if failed or paused is not None:
-                    return CoordinatorOutcome(
-                        CoordinatorReply(
-                            task_public_id=updated.public_id, status=updated.status, message=message, waiting=paused
-                        ),
-                        updated,
-                    )
-                task = updated
+            task = updated
         return await self._prepare_confirmation(db, task)
 
     async def _answer_follow_up_customer(
@@ -1564,9 +1753,7 @@ class AssistantCoordinator:
                 ),
             )
             task = result.task
-        card = await self._follow_up.judge(
-            db, team_id=task.team_id, user_text=user_text, pack=pack, choice=choice
-        )
+        card = await self._follow_up.judge(db, team_id=task.team_id, user_text=user_text, pack=pack, choice=choice)
         return task, card.as_command()
 
     def _ask_field(self, db: Session, task: AssistantTask, parameters: dict[str, object]) -> CoordinatorOutcome:

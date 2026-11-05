@@ -105,9 +105,7 @@ class ConversationService:
         )
         focused_view = task_view(focused, db) if focused else None
         pending_choice = (
-            ConversationBoundary(
-                entry_id=pending.public_id, prompt=pending.reply_text or "是接着刚才，还是另记一件？"
-            )
+            ConversationBoundary(entry_id=pending.public_id, prompt=pending.reply_text or "是接着刚才，还是另记一件？")
             if pending
             else None
         )
@@ -410,9 +408,7 @@ class ConversationService:
         tasks: list[AssistantTask],
         recent_messages: list[dict[str, str]],
     ) -> ConversationDecision:
-        crud.renew_model_lease(
-            db, conversation, entry, lease_version=lease_version, seconds=ROOT_MODEL_LEASE_SECONDS
-        )
+        crud.renew_model_lease(db, conversation, entry, lease_version=lease_version, seconds=ROOT_MODEL_LEASE_SECONDS)
         try:
             return await self.classifier.classify(
                 db,
@@ -679,7 +675,40 @@ class ConversationService:
                 db, conversation, entry, "这次沟通仍在处理中，请同步后继续。", target, lease_version=lease_version
             )
         decision = ConversationDecision.model_validate(entry.decision_json)
-        if waiting is not None and not (waiting.type == "FIELD" and decision.field_answer):
+        from app.services.assistant.temporal_evidence import (
+            is_temporal_choice_answer,
+            is_temporal_supplement,
+            temporal_supplement_target,
+        )
+
+        temporal_field_answer = (
+            waiting is not None
+            and (
+                decision.field_answer
+                or is_temporal_supplement(text)
+                or is_temporal_choice_answer(load_draft(target), text)
+            )
+            and waiting.type == "FIELD"
+            and (
+                waiting.temporal_target is not None
+                or waiting.field == "temporal_choice"
+                or (waiting.field == "next_follow_time" and "temporal_evidence" in load_draft(target).content_json)
+            )
+        )
+        temporal_correction = bool(
+            waiting is not None
+            and waiting.type == "CONFIRMATION"
+            and waiting.field == "activity_write"
+            and decision.semantic_plan.speech_act == "PROVIDE_SUPPLEMENT"
+            and is_temporal_supplement(text)
+            and temporal_supplement_target(load_draft(target)) is not None
+        )
+        if (
+            waiting is not None
+            and not temporal_correction
+            and not temporal_field_answer
+            and not (waiting.type == "FIELD" and decision.field_answer)
+        ):
             if decision.semantic_plan.speech_act == "PROVIDE_SUPPLEMENT" and (
                 waiting.type in {"FIELD", "OBJECT_SELECTION", "ACTIVITY_KIND"}
                 or (waiting.type == "CONFIRMATION" and waiting.field == "activity_write")
@@ -702,7 +731,7 @@ class ConversationService:
                     db, conversation, entry, waiting.prompt, target, lease_version=lease_version
                 )
         payload = SubmitInputRequest(
-            kind="submit_field" if waiting else "text",
+            kind="text" if temporal_correction else "submit_field" if waiting else "text",
             text=text,
             client_request_id=f"conv-turn-{entry.public_id}",
             action_id=waiting.action_id if waiting else None,

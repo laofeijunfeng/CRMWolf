@@ -41,6 +41,11 @@ class AssistantTaskView(BaseModel):
             raise ValueError("processing turn ID and status must appear together")
         return self
 
+    @field_serializer("waiting")
+    def serialize_waiting(self, waiting: TaskWaiting | None) -> dict[str, object] | None:
+        # Business evidence IDs are not submission authority or a public UI contract.
+        return waiting.model_dump(mode="json", exclude={"temporal_target"}) if waiting is not None else None
+
     @field_serializer("committed")
     def serialize_receipts(self, receipts: list[CommittedReceipt]) -> list[dict[str, object]]:
         return [receipt.model_dump(mode="json", exclude_unset=True) for receipt in receipts]

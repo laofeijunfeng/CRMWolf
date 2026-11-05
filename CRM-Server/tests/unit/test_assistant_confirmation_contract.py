@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
+from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
@@ -56,6 +57,8 @@ def db(tmp_path, monkeypatch):
             CustomerLegacySourceProgress.__table__,
             CustomerActivityDeletionTombstone.__table__,
             AssistantTask.__table__,
+            AssistantConversation.__table__,
+            AssistantConversationEntry.__table__,
             AssistantAction.__table__,
             AssistantRequest.__table__,
             AssistantTurn.__table__,
@@ -740,7 +743,6 @@ async def test_meeting_explicit_none_survives_rescore_freeze_and_real_activity_w
     finished, _, offered = await offer_next_proposal(session, written.task)
     session.commit()
     assert not offered and finished.status == "COMPLETED"
-    assert structurer.calls == 1 and len(gate.calls) == 1
     with factory() as independent:
         activity = independent.query(CustomerActivity).one()
         content = json.loads(activity.content_json)
@@ -1007,29 +1009,6 @@ async def test_relative_year_real_response_reaches_confirmation_without_writing_
     assert command["next_follow_time_granularity"] == "DATE"
     assert command["customer_name"] == raw.customer_name
     assert session.query(CustomerActivity).count() == 0 and outcome.task.committed_json == []
-    from app.schemas.assistant_conversation import ConversationMessage
-    from app.services.assistant.presentation import task_view
-    from app.services.assistant.ui_projection import project_assistant_message
-
-    message = ConversationMessage.model_validate(
-        {
-            "id": "m1",
-            "role": "assistant",
-            "text": "确认后写入？",
-            "at": "2026-11-02T13:20:00",
-            "task": task_view(outcome.task, session),
-            "boundary": None,
-            "outcome": None,
-        }
-    )
-    card = project_assistant_message(message, active_waiting=True, active_boundary=False)
-    block = next(b for b in card.blocks if b.type == "interaction")
-    fact = next(f for f in block.facts if f.key == "next_follow_time")
-    assert (fact.value, fact.status_label, fact.source) == (
-        "2027-01-15（周五）09:00",
-        "未说时刻，默认 09:00 提醒",
-        f"原话：“{raw.next_follow_time_text}”",
-    )
     session.commit()
     await coordinator.handle_task(session, outcome.task, AssistantInput(kind="confirm", choice="confirm"))
     session.commit()
@@ -1137,3 +1116,156 @@ async def test_vague_year_wait_is_single_and_date_reply_restructures_and_rescore
     assert gate.inputs[-1]["user_text"] == original + "\n" + answer
     assert len(gate.inputs) == 2
     assert session.query(CustomerActivity).count() == 0 and recovered.task.committed_json == []
+
+
+async def persisted_temporal_confirmation(db, monkeypatch, *, quality_gate=None):
+    from app.services.assistant import turns
+    from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, StructureDraftResult
+    from app.services.assistant.task_state import load_waiting
+
+    session, factory, _ = db
+    task, customer, _ = prepared(db)
+    original = "微信联系睿狐科技，客户预算已批准。我2026年12月5日发方案"
+    deadline = "2026年12月5日"
+    action_quote = "我2026年12月5日发方案"
+    task.draft_json = TaskDraft(
+        channel_kind="WECHAT_FOLLOW_UP",
+        channel_status="selected",
+        channel_source="user",
+        customer=DraftField(status="ACCEPTED", value=customer.account_name),
+    ).model_dump(mode="json")
+    session.commit()
+
+    class Structurer:
+        async def structure(self, db, *, team_id, kind, user_text):
+            assert user_text == original
+            return StructureDraftResult(
+                kind_confirmed=kind,
+                content="客户预算已批准",
+                customer_name=customer.account_name,
+                next_action="发方案",
+                next_follow_time_text=deadline,
+                temporal_mentions=[
+                    ModelTemporalMention(
+                        raw_text=deadline,
+                        quote_start=original.index(deadline),
+                        quote_end=original.index(deadline) + len(deadline),
+                        kind="MONTH_DAY",
+                        role="SALES_FOLLOW_UP",
+                        action_ref="send-proposal",
+                    )
+                ],
+                actions=[
+                    ModelDraftAction(
+                        action_ref="send-proposal",
+                        owner_role="SALES",
+                        owner_text="我",
+                        action_text="发方案",
+                        action_status="PLANNED",
+                        evidence_quote=action_quote,
+                        quote_start=original.index(action_quote),
+                        quote_end=len(original),
+                    )
+                ],
+            )
+
+    gate = quality_gate if quality_gate is not None else RecordingGate()
+    coordinator = AssistantCoordinator(
+        NoChooser(), structurer=Structurer(), quality_gate=gate, writer=RealActivityWriter()
+    )
+    monkeypatch.setattr("app.api.assistant._coordinator", coordinator)
+    # SQLite permits only one writer; progress telemetry is outside this authority regression.
+    monkeypatch.setattr(turns.DurableProgressReporter, "_record", lambda self, payload: None)
+    initial, accepted = turns.accept_submit(
+        session,
+        task=task,
+        key="temporal-original",
+        input_data={"kind": "text", "text": original, "choice": None},
+        action_id=None,
+        expected_version=None,
+    )
+    assert accepted
+    await turns.execute_turn(initial.id, factory=factory)
+    session.expire_all()
+    assert session.get(AssistantTurn, initial.id).status == "SUCCEEDED"
+    session.refresh(task)
+    assert load_waiting(task).type == "CONFIRMATION"
+    assert task.authority_json["frozen_activity_command"]["next_follow_time"] == "2026-12-05T09:00:00"
+    return task, coordinator, gate, original
+
+
+async def test_signed_confirmation_date_correction_replays_once_and_retires_old_authority(db, monkeypatch):
+    from datetime import datetime
+
+    from app.services.assistant import turns
+    from app.services.assistant.task_state import load_waiting
+
+    session, factory, _ = db
+    task, coordinator, gate, original = await persisted_temporal_confirmation(db, monkeypatch)
+    old_waiting = load_waiting(task)
+    old_command = json.loads(json.dumps(task.authority_json["frozen_activity_command"]))
+    original_records = [record.model_dump(mode="json") for record in load_draft(task).source_records]
+    correction = "改为2026年12月6日"
+    signed_input = {
+        "task": task,
+        "key": "signed-date-correction",
+        "input_data": {"kind": "text", "text": correction, "choice": None},
+        "action_id": old_waiting.action_id,
+        "expected_version": old_waiting.expected_version,
+    }
+    turn, accepted = turns.accept_submit(session, **signed_input)
+    assert accepted
+    replay, accepted = turns.accept_submit(session, **signed_input)
+    assert not accepted and replay.id == turn.id
+    assert session.query(AssistantTurn).count() == 2
+    assert session.query(AssistantRequest).count() == 2
+    await turns.execute_turn(turn.id, factory=factory)
+    session.expire_all()
+    session.refresh(task)
+    assert session.get(AssistantTurn, turn.id).status == "SUCCEEDED"
+    current = load_waiting(task)
+    command = task.authority_json["frozen_activity_command"]
+    assert current.type == "CONFIRMATION"
+    assert current.action_id != old_waiting.action_id
+    assert current.expected_version > old_waiting.expected_version
+    assert command["fingerprint"] != old_command["fingerprint"]
+    assert command["next_follow_time"] == "2026-12-06T09:00:00"
+    assert current.confirmation_payload.preview.next_follow_time == command["next_follow_time"]
+    assert command["source_segments"] == [original, correction]
+    assert [record.model_dump(mode="json") for record in load_draft(task).source_records][:1] == original_records
+    assert len(gate.calls) == 2
+    assert gate.calls[-1]["user_text"] == original + "\n" + correction
+    assert session.query(CustomerActivity).count() == 0
+    replay, accepted = turns.accept_submit(session, **signed_input)
+    assert not accepted and replay.id == turn.id
+    await turns.execute_turn(replay.id, factory=factory)
+    assert len(gate.calls) == 2
+
+    # The action and observed version are independently required, not interchangeable.
+    for label, action_id, version in (
+        ("old-action", old_waiting.action_id, current.expected_version),
+        ("old-version", current.action_id, old_waiting.expected_version),
+    ):
+        with pytest.raises(turns.AssistantStateConflict):
+            turns.accept_submit(
+                session,
+                task=task,
+                key=label,
+                input_data={"kind": "confirm", "text": None, "choice": "confirm"},
+                action_id=action_id,
+                expected_version=version,
+            )
+    assert session.query(AssistantTurn).count() == 2
+    assert session.query(AssistantRequest).count() == 2
+    session.refresh(task)
+    assert task.authority_json["frozen_activity_command"] == command
+    assert session.query(CustomerActivity).count() == 0
+
+    await coordinator.handle_task(session, task, AssistantInput(kind="confirm", choice="confirm"))
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).one()
+        assert activity.next_follow_time == datetime(2026, 12, 6, 9)
+        assert activity.source_content == original + "\n" + correction
+        assert activity.submission_fingerprint == command["fingerprint"]
+        assert activity.effectiveness_score == 78

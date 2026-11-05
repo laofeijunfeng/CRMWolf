@@ -293,7 +293,6 @@ def apply_quality_score(draft: TaskDraft, score: int) -> TaskDraft:
     return draft
 
 
-
 _FAILURE_CAUSE_LIMIT = 500
 
 
@@ -443,7 +442,12 @@ async def intake_step(
 
     accepted_draft = TaskDraft.model_validate(task.draft_json or {})
     accepted = append_source(db, task, accepted_draft, user_text) if accept_source else False
-    if accept_source and not accepted and accepted_draft.quality_score.status == "CANDIDATE":
+    if (
+        temporal_answer_id is None
+        and accept_source
+        and not accepted
+        and accepted_draft.quality_score.status == "CANDIDATE"
+    ):
         return task, "整理稿已就绪。", None, False
     accepted_draft.quality_score = DraftField(status="MISSING")
     accepted_draft.score_reason = None
@@ -511,6 +515,8 @@ async def intake_step(
     # Kind changes pass accept_source=False and still organize.
     reuse_structure = (
         accept_source
+        and not from_waiting
+        and temporal_answer_id is None
         and not accepted
         and task.activity_kind is not None
         and draft.content.status == "CANDIDATE"
@@ -627,6 +633,10 @@ async def intake_step(
         ),
     )
     task = result.task
+    from app.services.assistant.temporal_evidence import temporal_waiting
+
+    if temporal_waiting(draft) is not None:
+        return task, "仍需确认当前动作的时间信息。", None, False
     if passed:
         return task, "已整理完成。", None, False
 

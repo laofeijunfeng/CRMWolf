@@ -55,6 +55,7 @@ def freeze_confirmation(
 ) -> tuple[AssistantTask, TaskWaiting]:
     from app.crud.customer_activity import customer_activity_crud
     from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
+
     draft = TaskDraft.model_validate(task.draft_json or {})
     if draft.quality_score.status != "CANDIDATE" or not draft.score_reason:
         raise ValueError("activity cannot be confirmed without a final quality score")
@@ -134,6 +135,7 @@ def freeze_confirmation(
     waiting = TaskWaiting(
         type=AssistantWaitingType.CONFIRMATION,
         field="activity_write",
+        action_id=generate_public_id("awa"),
         question_id=f"q_confirm_{task.public_id}_{task.version}",
         prompt=CONFIRM_PROMPT,
         fingerprint=command["fingerprint"],
@@ -165,7 +167,7 @@ def freeze_confirmation(
             event_type="meeting_card"
             if task.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}
             else "follow_up_card",
-            event_key=f"card:{waiting.action_id or 'pending'}",
+            event_key=f"card:{waiting.action_id}",
             correlation_id=waiting.action_id,
         ),
     )
@@ -260,10 +262,7 @@ async def execute_confirmation(
     return result.task, "活动已写入"
 
 
-
-def revise_frozen_activity_kind(
-    db: Session, task: AssistantTask, kind: str
-) -> tuple[AssistantTask, TaskWaiting]:
+def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> tuple[AssistantTask, TaskWaiting]:
     """Replace only the frozen activity kind. Content, score and context stay put."""
 
     from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
@@ -300,10 +299,22 @@ def revise_frozen_activity_kind(
     updated.pop("fingerprint", None)
     updated["fingerprint"] = command_fingerprint(updated)
     preview_keys = [
-        "customer_name", "activity_kind", "title", "summary", "content_json", "source_content",
-        "score", "score_reason", "next_action", "next_follow_time", "next_follow_time_text",
-        "next_follow_time_granularity", "channel_status", "channel_status_label",
-        "channel_source_text", "channel_options",
+        "customer_name",
+        "activity_kind",
+        "title",
+        "summary",
+        "content_json",
+        "source_content",
+        "score",
+        "score_reason",
+        "next_action",
+        "next_follow_time",
+        "next_follow_time_text",
+        "next_follow_time_granularity",
+        "channel_status",
+        "channel_status_label",
+        "channel_source_text",
+        "channel_options",
     ]
     from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
 

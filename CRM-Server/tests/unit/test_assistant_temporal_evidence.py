@@ -87,14 +87,16 @@ def test_example_keeps_month_end_out_of_sales_follow_up_and_asks_which_month() -
     assert "2026-10-31" not in (draft.next_follow_time.value or "")
     waiting = temporal_waiting(draft)
     assert waiting is not None
-    assert waiting["prompt"] == "“30号”是指本月30号还是下月30号？"
-    assert [item["label"] for item in waiting["candidates"]] == ["本月30号", "下月30号"]
+    assert waiting["reason"] == "STATUS"
+    apply_temporal_choice(
+        draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(":completed"))
+    )
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "MONTH"
     apply_temporal_choice(draft, waiting["candidates"][0]["id"])
     resolved, granularity = resolved_sales_follow_up(draft)
     assert (resolved, granularity) == (datetime(2026, 10, 30), "DATE")
     assert resolved.hour == 0
-    assert draft.content_json["sales_follow_up_text"] == "你将在10月30号联系叶老师，确认部署服务器的准备情况。"
-    assert draft.content_json["temporal_notices"] == ["已识别下次跟进日期为2026-10-30，未指定具体时刻。"]
 
 
 def test_month_end_alone_keeps_an_empty_sales_time() -> None:
@@ -126,8 +128,10 @@ def test_explicit_month_and_relative_month_do_not_ask_again() -> None:
 def test_vague_month_end_stays_ambiguous() -> None:
     draft = _attach("月底左右联系叶老师")
     waiting = temporal_waiting(draft)
-    assert waiting is not None and waiting["candidates"] == []
-    assert waiting["prompt"] == "“月底”无法确定为唯一日期，请补充具体日期。"
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    apply_temporal_choice(draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(":sales")))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "DATE" and waiting["candidates"] == []
     assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
 
 
@@ -272,7 +276,6 @@ def test_action_quote_miss_is_an_action_contract_error() -> None:
         )
 
 
-
 FUTURES = (
     "今天微信联系了上海期货信息技术有限公司的代理商商务左总对齐合同和发票方面的情况，"
     "目前合同已经走完盖章流程，左总反馈发票今天可以开具，预计11月份可以完成付款；"
@@ -375,26 +378,30 @@ def test_past_digit_month_uses_next_year() -> None:
         segment_id="seg_past",
         segment_text=text,
         anchor=datetime(2026, 12, 2, 9, 0),
-        mentions=[{
-            "raw_text": "11月份",
-            "quote_start": 2,
-            "quote_end": 6,
-            "kind": "UNKNOWN",
-            "role": "CUSTOMER_COMMITMENT",
-            "owner": "左总",
-            "action_ref": "a1",
-            "confidence": 0.9,
-        }],
-        actions=[{
-            "action_ref": "a1",
-            "owner_role": "CUSTOMER",
-            "owner_text": "左总",
-            "action_text": "预计11月份可以完成付款",
-            "action_status": "COMMITTED",
-            "evidence_quote": text,
-            "quote_start": 0,
-            "quote_end": len(text),
-        }],
+        mentions=[
+            {
+                "raw_text": "11月份",
+                "quote_start": 2,
+                "quote_end": 6,
+                "kind": "UNKNOWN",
+                "role": "CUSTOMER_COMMITMENT",
+                "owner": "左总",
+                "action_ref": "a1",
+                "confidence": 0.9,
+            }
+        ],
+        actions=[
+            {
+                "action_ref": "a1",
+                "owner_role": "CUSTOMER",
+                "owner_text": "左总",
+                "action_text": "预计11月份可以完成付款",
+                "action_status": "COMMITTED",
+                "evidence_quote": text,
+                "quote_start": 0,
+                "quote_end": len(text),
+            }
+        ],
     )
     mention = draft.content_json["temporal_evidence"]["mentions"][0]
     assert mention["kind"] == "FULL_MONTH"
@@ -446,26 +453,30 @@ def test_explicit_year_and_bare_month_stay_month_level() -> None:
             segment_id="seg_month_case",
             segment_text=text,
             anchor=anchor,
-            mentions=[{
-                "raw_text": span.raw_text,
-                "quote_start": span.start,
-                "quote_end": span.end,
-                "kind": "UNKNOWN" if span.kind == "FULL_MONTH" else span.kind,
-                "role": "CUSTOMER_COMMITMENT",
-                "owner": "左总",
-                "action_ref": "a1",
-                "confidence": 0.9,
-            }],
-            actions=[{
-                "action_ref": "a1",
-                "owner_role": "CUSTOMER",
-                "owner_text": "左总",
-                "action_text": text,
-                "action_status": "COMMITTED",
-                "evidence_quote": text,
-                "quote_start": 0,
-                "quote_end": len(text),
-            }],
+            mentions=[
+                {
+                    "raw_text": span.raw_text,
+                    "quote_start": span.start,
+                    "quote_end": span.end,
+                    "kind": "UNKNOWN" if span.kind == "FULL_MONTH" else span.kind,
+                    "role": "CUSTOMER_COMMITMENT",
+                    "owner": "左总",
+                    "action_ref": "a1",
+                    "confidence": 0.9,
+                }
+            ],
+            actions=[
+                {
+                    "action_ref": "a1",
+                    "owner_role": "CUSTOMER",
+                    "owner_text": "左总",
+                    "action_text": text,
+                    "action_status": "COMMITTED",
+                    "evidence_quote": text,
+                    "quote_start": 0,
+                    "quote_end": len(text),
+                }
+            ],
         )
         mention = draft.content_json["temporal_evidence"]["mentions"][0]
         assert mention["raw_text"] == raw
@@ -523,24 +534,28 @@ def test_sales_full_month_does_not_become_a_dated_follow_up() -> None:
         segment_id="seg_sales_month",
         segment_text=text,
         anchor=datetime(2026, 10, 29, 19, 0),
-        mentions=[{
-            "raw_text": span.raw_text,
-            "quote_start": span.start,
-            "quote_end": span.end,
-            "kind": "FULL_MONTH",
-            "role": "SALES_FOLLOW_UP",
-            "action_ref": "a1",
-            "confidence": 1,
-        }],
-        actions=[{
-            "action_ref": "a1",
-            "owner_role": "SALES",
-            "action_text": "再联系",
-            "action_status": "PLANNED",
-            "evidence_quote": text,
-            "quote_start": 0,
-            "quote_end": len(text),
-        }],
+        mentions=[
+            {
+                "raw_text": span.raw_text,
+                "quote_start": span.start,
+                "quote_end": span.end,
+                "kind": "FULL_MONTH",
+                "role": "SALES_FOLLOW_UP",
+                "action_ref": "a1",
+                "confidence": 1,
+            }
+        ],
+        actions=[
+            {
+                "action_ref": "a1",
+                "owner_role": "SALES",
+                "action_text": "再联系",
+                "action_status": "PLANNED",
+                "evidence_quote": text,
+                "quote_start": 0,
+                "quote_end": len(text),
+            }
+        ],
     )
     assert temporal_waiting(draft) is None
     assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
@@ -553,8 +568,10 @@ def test_sales_full_month_does_not_become_a_dated_follow_up() -> None:
 def test_month_segment_with_clock_still_asks_for_a_date() -> None:
     draft = _attach("下个月初下午三点跟进", datetime(2026, 10, 29, 19, 0))
     waiting = temporal_waiting(draft)
-    assert waiting is not None and waiting["candidates"] == []
-    assert "无法确定为唯一日期" in waiting["prompt"]
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    apply_temporal_choice(draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(":sales")))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "DATE" and waiting["candidates"] == []
     mention = draft.content_json["temporal_evidence"]["mentions"][0]
     assert mention["resolved_at"] is None
     assert mention["day"] is None
@@ -567,34 +584,38 @@ def test_stored_unknown_month_still_displays_as_full_month() -> None:
         "customer_commitments": [{"mention_id": "tm_old", "text": "左总预计11月份可以完成付款。"}],
         "temporal_evidence": {
             "version": "temporal-evidence-v1",
-            "mentions": [{
-                "mention_id": "tm_old",
-                "raw_text": "11月份",
-                "source_segment_id": "seg",
-                "quote_start": 2,
-                "quote_end": 6,
-                "kind": "UNKNOWN",
-                "role": "CUSTOMER_COMMITMENT",
-                "action_id": "act_old",
-                "year": 2026,
-                "month": 11,
-                "day": None,
-                "granularity": "UNKNOWN",
-                "anchor_at": "2026-10-29T19:00:00",
-                "resolution_status": "RESOLVED",
-                "resolved_at": None,
-            }],
-            "actions": [{
-                "action_id": "act_old",
-                "owner_role": "CUSTOMER",
-                "action_text": "预计11月份可以完成付款",
-                "action_status": "COMMITTED",
-                "source_segment_id": "seg",
-                "evidence_quote": "预计11月份可以完成付款",
-                "quote_start": 0,
-                "quote_end": 12,
-                "temporal_mention_id": "tm_old",
-            }],
+            "mentions": [
+                {
+                    "mention_id": "tm_old",
+                    "raw_text": "11月份",
+                    "source_segment_id": "seg",
+                    "quote_start": 2,
+                    "quote_end": 6,
+                    "kind": "UNKNOWN",
+                    "role": "CUSTOMER_COMMITMENT",
+                    "action_id": "act_old",
+                    "year": 2026,
+                    "month": 11,
+                    "day": None,
+                    "granularity": "UNKNOWN",
+                    "anchor_at": "2026-10-29T19:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": None,
+                }
+            ],
+            "actions": [
+                {
+                    "action_id": "act_old",
+                    "owner_role": "CUSTOMER",
+                    "action_text": "预计11月份可以完成付款",
+                    "action_status": "COMMITTED",
+                    "source_segment_id": "seg",
+                    "evidence_quote": "预计11月份可以完成付款",
+                    "quote_start": 0,
+                    "quote_end": 12,
+                    "temporal_mention_id": "tm_old",
+                }
+            ],
         },
     }
     assert confirmation_time_labels(content)[0] == "预计11月份可以完成付款（整月，未确定具体日期）"
@@ -627,9 +648,7 @@ def test_afternoon_without_clock_and_bare_week_are_source_spans() -> None:
         ("RELATIVE_WEEKDAY", "下周三"),
         ("RELATIVE_WEEK", "下周"),
     ]
-    assert [(item.kind, item.raw_text) for item in find_time_spans("下周三")] == [
-        ("RELATIVE_WEEKDAY", "下周三")
-    ]
+    assert [(item.kind, item.raw_text) for item in find_time_spans("下周三")] == [("RELATIVE_WEEKDAY", "下周三")]
     assert find_time_spans("我下周三下午三点发方案")[0].raw_text == "下周三下午三点"
 
 
@@ -689,6 +708,11 @@ def test_model_quotes_of_afternoon_and_bare_week_cover_the_source() -> None:
     assert stored["下周"]["resolution_status"] == "RESOLVED"
     assert stored["下周"]["granularity"] == "UNKNOWN"
     assert stored["下周"]["resolved_at"] is None
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "STATUS"
+    apply_temporal_choice(
+        draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(":completed"))
+    )
     assert temporal_waiting(draft) is None
     resolved, granularity = resolved_sales_follow_up(draft)
     assert (resolved, granularity) == (datetime(2026, 11, 4), "DATE")
@@ -850,8 +874,10 @@ def test_month_segment_with_clock_asks_for_a_date() -> None:
 def test_uncertain_month_segment_asks_for_a_date() -> None:
     draft = _attach("下个月初左右联系")
     waiting = temporal_waiting(draft)
-    assert waiting is not None and waiting["candidates"] == []
-    assert "无法确定为唯一日期" in waiting["prompt"]
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    apply_temporal_choice(draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(":sales")))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "DATE" and waiting["candidates"] == []
 
 
 def test_kind_difference_normalizes_but_fabricated_extra_time_is_rejected() -> None:
@@ -976,7 +1002,6 @@ def test_legacy_month_end_evidence_is_not_rescanned() -> None:
     assert draft.content_json["customer_commitments"][0]["resolved_on"] == "2026-10-31"
 
 
-
 def test_role_choice_restores_a_full_month_without_asking_for_a_day() -> None:
     text = "11月份付款，11月15号跟进"
     draft = _attach(text, datetime(2026, 10, 29, 19, 0))
@@ -1008,6 +1033,7 @@ def test_role_choice_restores_a_month_segment_without_asking_for_a_day() -> None
     assert mentions["下个月初"]["resolved_at"] is None
     resolved, granularity = resolved_sales_follow_up(draft)
     assert (resolved, granularity) == (datetime(2026, 11, 5), "DATE")
+
 
 def test_meeting_title_date_is_not_a_follow_up_question() -> None:
     text = "2026年7月7日\n培训纪要\n线上会议讨论了版本差异。"
@@ -1046,3 +1072,303 @@ def test_same_phrase_role_question_does_not_repeat_the_phrase() -> None:
     assert [item["label"] for item in waiting["candidates"]] == ["客户完成时间", "我下次联系时间"]
     assert "下周三”和“下周三" not in waiting["prompt"]
 
+
+def _temporal_reply(draft: TaskDraft, answer: str, *, anchor: datetime = datetime(2026, 11, 5, 10)) -> None:
+    from app.services.assistant.action_evidence import SourceSegment
+    from app.services.assistant.temporal_evidence import (
+        apply_temporal_answer,
+        temporal_answer_target,
+        temporal_supplement_target,
+    )
+
+    target = temporal_answer_target(draft) or temporal_supplement_target(draft)
+    if not draft.source_records:
+        evidence = draft.content_json["temporal_evidence"]["mentions"][0]
+        draft.source_records = [
+            SourceSegment(
+                segment_id=evidence["source_segment_id"],
+                text=draft.source_segments[0],
+                recorded_at=datetime.fromisoformat(evidence["anchor_at"]),
+            )
+        ]
+    segment_id = f"seg_reply_{len(draft.source_records)}"
+    draft.source_records.append(SourceSegment(segment_id=segment_id, text=answer, recorded_at=anchor))
+    draft.source_segments.append(answer)
+    apply_temporal_answer(
+        draft,
+        target_id=target,
+        source_text="\n".join(record.text for record in draft.source_records),
+        answer_segment_id=segment_id,
+        mentions=[],
+        actions=[],
+    )
+
+
+def test_online_meeting_today_is_communication_not_a_date_gap() -> None:
+    draft = _attach("今天线上会议讨论了采购计划", datetime(2026, 11, 5, 9))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+    mention = draft.content_json["temporal_evidence"]["mentions"][0]
+    assert mention["role"] == "OTHER" and mention["resolved_at"] == "2026-11-05T00:00:00"
+
+
+def test_today_contact_waits_for_status_and_planned_reuses_date() -> None:
+    draft = _attach("今天联系客户", datetime(2026, 11, 5, 9))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "STATUS"
+    apply_temporal_choice(draft, next(c["id"] for c in waiting["candidates"] if c["id"].endswith(":planned")))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 5), "DATE")
+
+
+def test_single_role_choice_reuses_already_resolved_date() -> None:
+    draft = _attach("12月5号付款", datetime(2026, 11, 5, 9))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    apply_temporal_choice(draft, next(c["id"] for c in waiting["candidates"] if c["id"].endswith(":sales")))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 5), "DATE")
+
+
+def test_date_supplement_during_role_wait_does_not_decide_ownership() -> None:
+    draft = _attach("月底付款", datetime(2026, 11, 5, 9))
+    action_id = draft.content_json["temporal_evidence"]["actions"][0]["action_id"]
+    _temporal_reply(draft, "12月5号")
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "ROLE"
+    assert waiting["business_action_id"] == action_id
+    apply_temporal_choice(draft, next(c["id"] for c in waiting["candidates"] if c["id"].endswith(":sales")))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 5), "DATE")
+
+
+def test_month_wait_accepts_full_date_and_equivalent_answer_is_one_fact() -> None:
+    draft = _attach("我15号联系客户", datetime(2026, 11, 5, 9))
+    assert temporal_waiting(draft)["reason"] == "MONTH"
+    _temporal_reply(draft, "12月5号，也就是下个月5号")
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 5), "DATE")
+    active = [m for m in draft.content_json["temporal_evidence"]["mentions"] if m["state"] == "ACTIVE"]
+    assert len(active) == 1
+    assert {q["raw_text"] for q in active[0]["source_quotes"]} == {"12月5号", "下个月5号"}
+
+
+def test_accepted_date_equivalent_keeps_original_source_anchor() -> None:
+    draft = _attach("我12月5号联系客户", datetime(2026, 11, 5, 9))
+    original = draft.content_json["temporal_evidence"]["mentions"][0]
+    _temporal_reply(draft, "下个月5号")
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 5), "DATE")
+    active = [m for m in draft.content_json["temporal_evidence"]["mentions"] if m["state"] == "ACTIVE"]
+    assert len(active) == 1
+    assert active[0]["mention_id"] == original["mention_id"]
+    assert active[0]["anchor_at"] == original["anchor_at"]
+
+
+def test_bare_day_correction_inherits_only_the_matched_accepted_month() -> None:
+    draft = _attach("我12月5号联系客户", datetime(2026, 11, 5, 9))
+    bundle = draft.content_json["temporal_evidence"]
+    bundle["actions"].append(
+        {**bundle["actions"][0], "action_id": "act_other", "action_status": "COMMITTED", "temporal_mention_id": None}
+    )
+    original = draft.content_json["temporal_evidence"]["mentions"][0]
+    _temporal_reply(draft, "不是5号，改成6号", anchor=datetime(2027, 1, 2, 10))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 6), "DATE")
+    evidence = draft.content_json["temporal_evidence"]["mentions"]
+    assert next(m for m in evidence if m["mention_id"] == original["mention_id"])["state"] == "SUPERSEDED"
+    replacement = next(m for m in evidence if m["state"] == "ACTIVE")
+    assert replacement["correction_of"] == original["mention_id"]
+    assert replacement["anchor_at"] == "2027-01-02T10:00:00"
+    assert replacement["raw_text"] == "6号"
+
+
+def test_primary_selection_keeps_other_actions_active_after_reload() -> None:
+    draft = _attach_roles(
+        "我12月5号联系客户，我12月6号发送方案",
+        [
+            ("SALES_FOLLOW_UP", "SALES", "我", "联系客户", "PLANNED"),
+            ("SALES_FOLLOW_UP", "SALES", "我", "发送方案", "PLANNED"),
+        ],
+        datetime(2026, 11, 5, 9),
+    )
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "PRIMARY"
+    selected = waiting["candidates"][1]["id"]
+    apply_temporal_choice(draft, selected)
+    restored = TaskDraft.model_validate(draft.model_dump(mode="json"))
+    assert temporal_waiting(restored) is None
+    assert resolved_sales_follow_up(restored) == (datetime(2026, 12, 6), "DATE")
+    evidence = restored.content_json["temporal_evidence"]
+    assert all(a["state"] == "ACTIVE" for a in evidence["actions"])
+    assert all(m["state"] == "ACTIVE" for m in evidence["mentions"])
+    assert evidence["primary_action_id"] == selected.removeprefix("primary:")
+
+
+def test_invalid_date_answer_retains_facts_and_specific_gap() -> None:
+    draft = _attach("我大概明年联系客户", datetime(2026, 11, 5, 9))
+    _temporal_reply(draft, "2027年2月30号")
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "DATE"
+    assert waiting["gap"] == "INVALID_DATE"
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+    assert {m["raw_text"] for m in draft.content_json["temporal_evidence"]["mentions"]} == {"明年", "2027年2月30号"}
+
+
+@pytest.mark.parametrize(
+    "original,answer,reason,side",
+    [
+        ("12月5号付款", "12月6号", "ROLE", "sales"),
+        ("今天联系客户", "12月6号", "STATUS", "planned"),
+    ],
+)
+def test_pending_ownership_keeps_distinct_dates_until_date_choice(
+    original: str, answer: str, reason: str, side: str
+) -> None:
+    draft = _attach(original, datetime(2026, 11, 5, 9))
+    original_id = draft.content_json["temporal_evidence"]["mentions"][0]["mention_id"]
+    _temporal_reply(draft, answer)
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == reason
+    evidence = draft.content_json["temporal_evidence"]["mentions"]
+    assert next(item for item in evidence if item["mention_id"] == original_id)["state"] == "ACTIVE"
+    apply_temporal_choice(draft, next(item["id"] for item in waiting["candidates"] if item["id"].endswith(f":{side}")))
+    waiting = temporal_waiting(draft)
+    assert waiting is not None and waiting["reason"] == "DATE"
+    assert waiting["gap"] == "DATE_CONFLICT"
+    _temporal_reply(draft, answer)
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 6), "DATE")
+
+
+def test_natural_status_reply_resolves_only_current_question() -> None:
+    from app.services.assistant.temporal_evidence import is_temporal_choice_answer
+
+    draft = _attach("今天联系客户", datetime(2026, 11, 5, 9))
+    assert is_temporal_choice_answer(draft, "已经联系了")
+    assert not is_temporal_choice_answer(draft, "明天联系另一位客户")
+    _temporal_reply(draft, "已经联系了")
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+    assert draft.content_json["temporal_evidence"]["actions"][0]["action_status"] == "COMPLETED"
+
+
+def test_natural_role_reply_combines_date_without_reassigning_other_actions() -> None:
+    from app.services.assistant.temporal_evidence import is_temporal_choice_answer
+
+    draft = _attach("月底付款", datetime(2026, 11, 5, 9))
+    assert is_temporal_choice_answer(draft, "12月5号，这是客户完成时间")
+    assert not is_temporal_choice_answer(draft, "12月5号，我要发送新的方案")
+    _temporal_reply(draft, "12月5号，这是客户完成时间")
+    assert temporal_waiting(draft) is None
+    active = [item for item in draft.content_json["temporal_evidence"]["mentions"] if item["state"] == "ACTIVE"]
+    assert [(item["role"], item["resolved_at"]) for item in active] == [("CUSTOMER_COMMITMENT", "2026-12-05T00:00:00")]
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+
+
+def test_unknown_role_prose_does_not_answer_ownership_question() -> None:
+    draft = _attach("12月5号付款", datetime(2026, 11, 5, 9))
+    _temporal_reply(draft, "还要再看")
+    assert temporal_waiting(draft)["reason"] == "ROLE"
+
+
+def test_factual_meeting_preparation_content_stays_communication_time() -> None:
+    draft = _attach("今天线上会议讨论部署服务器的准备情况", datetime(2026, 11, 5, 9))
+    assert temporal_waiting(draft) is None
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
+    assert draft.content_json["temporal_evidence"]["mentions"][0]["communication_time"]
+    planned = _attach("今天计划召开线上会议讨论部署情况", datetime(2026, 11, 5, 9))
+    assert not planned.content_json["temporal_evidence"]["mentions"][0]["communication_time"]
+
+
+def test_scoped_date_answer_replaces_stale_canonical_meeting_deadline() -> None:
+    from app.services.assistant.action_evidence import SourceSegment
+    from app.services.assistant.temporal_evidence import apply_temporal_answer, temporal_answer_target
+
+    text = "我大概明年联系叶老师确认试用结果"
+    action = "大概明年联系叶老师确认试用结果"
+    draft = _attach(text, datetime(2026, 11, 5), action_text=action)
+    other = {"item_id": "other", "owner": "客户", "action": "明年采购", "due_date": "明年"}
+    draft.next_action = DraftField(status="CANDIDATE", value=action)
+    draft.content_json.update(
+        {
+            "next_action": action,
+            "next_step_summary": f"我方{action}",
+            "action_items": [{"item_id": "meeting-action", "owner": "我", "action": action, "due_date": "明年"}, other],
+        }
+    )
+    answer = "12月5号，也就是下个月5号"
+    draft.source_records = [
+        SourceSegment(segment_id="seg_test", recorded_at=datetime(2026, 11, 5), text=text),
+        SourceSegment(segment_id="answer", recorded_at=datetime(2026, 11, 5), text=answer),
+    ]
+    apply_temporal_answer(
+        draft,
+        target_id=temporal_answer_target(draft),
+        source_text=f"{text}\n{answer}",
+        answer_segment_id="answer",
+        mentions=[],
+        actions=[],
+    )
+    assert temporal_waiting(draft) is None
+    assert draft.content_json["action_items"][0]["due_date"] == "2026年12月5日"
+    assert "明年" not in draft.next_action.value
+    assert "明年" not in draft.content_json["next_step_summary"]
+    assert draft.content_json["action_items"][1] == other
+    assert draft.source_records[0].text == text
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+def test_answered_deadline_changes_only_matching_owner(embedded: bool) -> None:
+    from app.services.assistant.action_evidence import SourceSegment
+    from app.services.assistant.temporal_evidence import apply_temporal_answer, temporal_answer_target
+
+    text = "我大概明年联系叶老师确认试用结果"
+    action = "明年联系叶老师确认试用结果" if embedded else "联系叶老师确认试用结果"
+    draft = _attach(text, datetime(2026, 11, 5), action_text=action)
+    other = {"item_id": "customer", "owner": "客户", "action": action, "due_date": "明年"}
+    draft.content_json.update(
+        {
+            "action_items": [{"item_id": "sales", "owner": "我", "action": action, "due_date": "明年"}, other.copy()],
+            "next_step_summary": f"我方明年{action.removeprefix('明年')}",
+        }
+    )
+    draft.source_records = [
+        SourceSegment(segment_id="seg_test", text=text, recorded_at=datetime(2026, 11, 5)),
+        SourceSegment(segment_id="answer", text="12月5号", recorded_at=datetime(2026, 11, 5)),
+    ]
+    apply_temporal_answer(
+        draft,
+        target_id=temporal_answer_target(draft),
+        source_text=text + "\n12月5号",
+        answer_segment_id="answer",
+        mentions=[],
+        actions=[],
+    )
+    assert draft.content_json["action_items"][0]["due_date"] == "2026年12月5日"
+    assert draft.content_json["action_items"][1] == other
+    assert "明年" not in draft.content_json["next_step_summary"]
+    assert "明年" not in draft.content_json["sales_follow_up_text"]
+
+
+@pytest.mark.parametrize(
+    "action,scalar", [("明年联系客户", "我方明年联系客户"), ("联系客户，时间明年", "联系客户，时间明年")]
+)
+def test_sequential_corrections_update_owner_qualified_and_nonprefix_canonical_dates(action: str, scalar: str) -> None:
+    draft = _attach("我明年联系客户", datetime(2026, 11, 5), action_text=action)
+    draft.next_action = DraftField(status="CANDIDATE", value=scalar)
+    draft.content_json.update(
+        {
+            "action_items": [{"owner": "我", "action": action, "due_date": "明年"}],
+            "next_action": scalar,
+            "next_step_summary": "我方" + action,
+        }
+    )
+    _temporal_reply(draft, "12月5号")
+    _temporal_reply(draft, "不是5号，改成6号")
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 6), "DATE")
+    for value in (draft.next_action.value, draft.content_json["next_action"], draft.content_json["next_step_summary"]):
+        assert "2026年12月6日" in value
+        assert "明年" not in value and "12月5日" not in value
+    assert draft.content_json["action_items"][0]["due_date"] == "2026年12月6日"
+    assert draft.source_records[0].text == "我明年联系客户"

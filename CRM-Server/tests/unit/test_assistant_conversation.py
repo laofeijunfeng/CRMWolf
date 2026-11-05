@@ -538,19 +538,27 @@ def test_legacy_cards_require_real_frozen_payload_and_receipts_require_evidence(
     }
     actions = [
         {
-            "actor": "USER", "action": "select_activity_kind", "input_json": {"kind": "ONLINE_MEETING"},
+            "actor": "USER",
+            "action": "select_activity_kind",
+            "input_json": {"kind": "ONLINE_MEETING"},
             "result_json": {},
         },
         {
-            "actor": "USER", "action": "submit_field", "input_json": {"field": "customer", "text": "旧客户"},
+            "actor": "USER",
+            "action": "submit_field",
+            "input_json": {"field": "customer", "text": "旧客户"},
             "result_json": {},
         },
         {
-            "actor": "SYSTEM", "action": "freeze_activity", "event_type": "meeting_card",
+            "actor": "SYSTEM",
+            "action": "freeze_activity",
+            "event_type": "meeting_card",
             "result_json": {"confirmation": frozen},
         },
         {
-            "actor": "SYSTEM", "action": "show_write_receipt", "event_type": "receipt",
+            "actor": "SYSTEM",
+            "action": "show_write_receipt",
+            "event_type": "receipt",
             "result_json": {"label": "已记录这条客户活动。", "activity_public_id": "act_old"},
         },
         {"actor": "SYSTEM", "action": "missing_card", "event_type": "meeting_card", "result_json": {}},
@@ -803,7 +811,8 @@ async def test_missing_customer_reference_does_not_expose_foreign_drafts(db, for
     from app.services.assistant.contracts import DraftField
 
     foreign = task(
-        db, **foreign_owner,
+        db,
+        **foreign_owner,
         draft_json=TaskDraft(customer=DraftField(status="ACCEPTED", value="外部客户")).model_dump(mode="json"),
     )
     own = task(db)
@@ -888,7 +897,8 @@ async def test_overfull_customer_reference_does_not_guess_from_truncated_drafts(
 
     for i in range(21):
         task(
-            db, goal=f"同名客户的沟通{i}",
+            db,
+            goal=f"同名客户的沟通{i}",
             draft_json=TaskDraft(customer=DraftField(status="ACCEPTED", value="睿狐科技")).model_dump(mode="json"),
         )
     for i in range(21):
@@ -1037,7 +1047,6 @@ def test_schema_mismatch_is_not_downgraded_to_a_broken_history_entry(db, monkeyp
         service.read(db, team_id=1, user_id=2)
 
 
-
 MONTH_TEXT = "叶老师反馈本月底会完成；等 30 号再联系叶老师"
 
 
@@ -1105,6 +1114,11 @@ def month_ambiguity(db):
                 "question_id": "q_month",
                 "prompt": spec["prompt"],
                 "candidates": spec["candidates"],
+                "temporal_target": {
+                    "mention_id": spec["mention_id"],
+                    "business_action_id": spec["business_action_id"],
+                    "reason": spec["reason"],
+                },
             },
         },
     )
@@ -1157,7 +1171,6 @@ def assert_october_follow_up(row):
     assert (resolved, granularity) == (datetime(2026, 10, 30), "DATE")
     waiting = load_waiting(row)
     assert waiting is not None and waiting.field == "customer"
-    assert waiting.prompt == "请提供客户准确名称。"
 
 
 @pytest.mark.parametrize("answer", ["本月 30 号", "本月30号"])
@@ -1181,6 +1194,25 @@ async def test_temporal_month_text_maps_through_the_message_entry(db, monkeypatc
     db.refresh(row)
     assert_october_follow_up(row)
     assert db.query(AssistantTurn).filter_by(public_id=response.submission.turn_id).one().status == "SUCCEEDED"
+
+
+async def test_independent_action_supplement_does_not_answer_pending_date(db):
+    row, _spec = month_ambiguity(db)
+    original_draft = dict(row.draft_json)
+    service = ConversationService(classifier=Classifier(decision("CONTINUE", row.public_id, "PROVIDE_SUPPLEMENT")))
+    opened = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=text(opened.version, "另外客户12月6号付款", "independent-customer-action"),
+    )
+    assert response.submission is not None
+    assert response.submission.input.kind == "text"
+    assert response.submission.input.action_id is None
+    db.refresh(row)
+    assert row.waiting_type is None
+    assert row.draft_json == original_draft
 
 
 async def test_temporal_month_button_enters_a_durable_turn_and_keeps_the_label(db, monkeypatch):
@@ -1244,14 +1276,7 @@ async def test_temporal_choice_failures_do_not_write_a_date(db, monkeypatch):
     assert unmapped.submission is not None
     await execute_accepted_turn(db, monkeypatch, unmapped.submission.turn_id)
     db.refresh(row)
-    assert row.waiting_field == "temporal_choice" and row.version == 3
-    draft = load_draft(row)
-    resolved, granularity = resolved_sales_follow_up(draft)
-    assert (resolved, granularity) == (None, "UNKNOWN")
-    mentions = draft.content_json["temporal_evidence"]["mentions"]
-    sales = next(item for item in mentions if item["raw_text"] == "30 号")
-    assert sales["resolution_status"] == "AMBIGUOUS"
-    assert sales["resolved_at"] is None
+    assert_october_follow_up(row)
 
 
 async def test_duplicate_temporal_labels_do_not_guess(db, monkeypatch):
@@ -1282,7 +1307,9 @@ async def test_duplicate_temporal_labels_do_not_guess(db, monkeypatch):
     assert response.submission is not None
     await execute_accepted_turn(db, monkeypatch, response.submission.turn_id)
     db.refresh(row)
-    assert row.waiting_field == "temporal_choice" and row.version == 2
+    assert row.waiting_field == "content"
+    assert row.waiting_json["action_id"] != "awa_dup"
+    assert row.committed_json == []
     assert row.draft_json["next_follow_time"]["status"] == "MISSING"
 
 

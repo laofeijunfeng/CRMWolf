@@ -1,4 +1,4 @@
-# ruff: noqa: RUF001, E501
+# ruff: noqa: RUF001
 """Assistant conversation messages project to one crm.agent.ui.v1 carrier."""
 
 from __future__ import annotations
@@ -38,7 +38,9 @@ def _task(**overrides: object) -> AssistantTaskView:
     return AssistantTaskView.model_validate(payload)
 
 
-def _message(message_id: str, text: str, task: AssistantTaskView | None = None, **overrides: object) -> ConversationMessage:
+def _message(
+    message_id: str, text: str, task: AssistantTaskView | None = None, **overrides: object
+) -> ConversationMessage:
     payload = {
         "id": message_id,
         "role": "assistant",
@@ -91,7 +93,9 @@ def test_plain_reply_is_only_a_text_block() -> None:
 
 
 def test_field_gap_does_not_repeat_the_prompt_as_text() -> None:
-    waiting = TaskWaiting(type="FIELD", field="customer", question_id="q1", prompt="请补充客户名称", action_id="act_1", expected_version=1)
+    waiting = TaskWaiting(
+        type="FIELD", field="customer", question_id="q1", prompt="请补充客户名称", action_id="act_1", expected_version=1
+    )
     draft = TaskDraft(customer=DraftField(status="ACCEPTED", value="旧客户"))
     task = _task(draft=draft, waiting=waiting)
     message = _message("m1", "请补充客户名称", task)
@@ -123,6 +127,62 @@ def test_temporal_choice_uses_signed_candidate_ids() -> None:
     assert interaction.business_action == "resolve_temporal_choice"
     assert [option.value for option in interaction.options] == ["month_this", "month_next"]
     assert not any(block.type == "text" for block in envelope.blocks)
+
+
+def test_temporal_role_waiting_uses_role_label_and_non_date_placeholder() -> None:
+    for reason in ("ROLE", "STATUS"):
+        waiting = TaskWaiting.model_validate(
+            {
+                "type": "FIELD",
+                "field": "temporal_choice",
+                "question_id": f"q_{reason}",
+                "prompt": "请补充当前动作的角色或完成状态",
+                "action_id": f"wait_{reason}",
+                "expected_version": 2,
+                "temporal_target": {
+                    "mention_id": "tm_current",
+                    "business_action_id": "business_current",
+                    "reason": reason,
+                },
+            }
+        )
+        message = _message(f"m_{reason}", waiting.prompt, _task(waiting=waiting))
+        envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+        interaction = next(block for block in envelope.blocks if block.type == "interaction")
+        field = interaction.fields[0]
+        assert ("归属" in field.label) if reason == "ROLE" else ("状态" in field.label)
+        assert "跟进时间" not in field.label
+        assert field.placeholder is not None and "2026-" not in field.placeholder
+        assert interaction.state == "ACTIVE" and interaction.submit_action_id == f"wait_{reason}"
+
+
+def test_historical_temporal_waiting_is_read_only_without_submit_action_id() -> None:
+    old_waiting = TaskWaiting(
+        type="FIELD",
+        field="next_follow_time",
+        question_id="q_old_date",
+        prompt="请补充日期",
+        action_id="wait_old_date",
+        expected_version=1,
+    )
+    current_waiting = _confirmation(
+        _preview(
+            next_follow_time="2026-12-05T09:00:00",
+            next_follow_time_text="12 月 5 号",
+            next_follow_time_granularity="DATE",
+        ),
+        action_id="wait_confirm",
+        expected_version=2,
+    )
+    current = _task(waiting=current_waiting, version=2)
+    messages = [_message("old_temporal", old_waiting.prompt, _task(waiting=old_waiting))]
+    finalize_assistant_ui(messages, focused_task=current, pending_choice=None)
+    interactions = [block for message in messages for block in message.ui.blocks if block.type == "interaction"]
+    assert [(block.state, block.submit_action_id) for block in interactions] == [
+        ("READ_ONLY", None),
+        ("ACTIVE", "wait_confirm"),
+    ]
+    assert interactions[1].interaction_type == "confirmation"
 
 
 def test_confirmation_uses_frozen_preview_not_the_later_draft() -> None:
@@ -180,7 +240,9 @@ def test_only_the_latest_matching_wait_stays_active() -> None:
 
 
 def test_failure_uses_the_event_code_instead_of_the_sentence() -> None:
-    message = _message("m1", "没有找到客户「拒绝」", outcome="failure", error_code="CUSTOMER_NOT_FOUND", retryable=False)
+    message = _message(
+        "m1", "没有找到客户「拒绝」", outcome="failure", error_code="CUSTOMER_NOT_FOUND", retryable=False
+    )
     envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
     error = envelope.blocks[0]
     assert error.type == "error"
@@ -321,7 +383,9 @@ def test_proposal_confirmation_is_its_own_interaction() -> None:
 
 
 def test_different_prose_stays_beside_the_field_prompt() -> None:
-    waiting = TaskWaiting(type="FIELD", field="customer", question_id="q1", prompt="请补充客户名称", action_id="act_1", expected_version=1)
+    waiting = TaskWaiting(
+        type="FIELD", field="customer", question_id="q1", prompt="请补充客户名称", action_id="act_1", expected_version=1
+    )
     message = _message("m1", "整理暂时没有完成，请稍后重试。", _task(waiting=waiting))
     envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
     assert [block.type for block in envelope.blocks] == ["text", "interaction"]
@@ -504,7 +568,7 @@ def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
     labels = {key: fact.label for key, fact in facts.items()}
     assert labels["customer_commitment"] == "客户承诺"
     assert values["customer_commitment"] == "下个月初付款（模糊时间，未确定具体日期）"
-    assert values["next_follow_time"] == "2026-11-05（周四）09:00"
+    assert values["next_follow_time"] == "2026年11月5日（周四）09:00"
     assert facts["next_follow_time"].status_label == "未说时刻，默认 09:00 提醒"
     assert facts["next_follow_time"].source == "原话：“11 月 5 号”"
     assert values["next_action"] == "跟进付款进展"
@@ -593,7 +657,7 @@ def test_confirmation_card_labels_a_full_month_without_a_default_day() -> None:
     interaction = next(block for block in envelope.blocks if block.type == "interaction")
     values = {fact.key: fact.value for fact in interaction.facts}
     assert values["customer_commitment"] == "预计11月份可以完成付款（整月，未确定具体日期）"
-    assert values["next_follow_time"] == "2026-11-15（周日）09:00"
+    assert values["next_follow_time"] == "2026年11月15日（周日）09:00"
     assert values["next_action"] == "11月15号跟进付款方面的情况"
     assert "11月1日" not in values["customer_commitment"]
     assert "11月30" not in values["customer_commitment"]
@@ -607,6 +671,122 @@ def _follow_time_fact(**preview: object):
     return next(fact for fact in interaction.facts if fact.key == "next_follow_time")
 
 
+def test_temporal_confirmation_uses_full_chinese_date_and_source_quote() -> None:
+    waiting = _confirmation(
+        _preview(
+            next_follow_time="2026-12-05T09:00:00",
+            next_follow_time_text="12 月 5 号",
+            next_follow_time_granularity="DATE",
+        )
+    )
+    envelope = project_assistant_message(
+        _message("normalized_date", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    assert [block.type for block in envelope.blocks] == ["interaction"]
+    facts = [fact for fact in envelope.blocks[0].facts if fact.key == "next_follow_time"]
+    assert len(facts) == 1
+    assert facts[0].value == "2026年12月5日（周六）09:00"
+    assert facts[0].source == "原话：“12 月 5 号”"
+
+
+def test_temporal_correction_stays_in_existing_date_fact_source() -> None:
+    waiting = _confirmation(
+        _preview(
+            next_follow_time="2026-12-06T09:00:00",
+            next_follow_time_text="改成 6 号",
+            next_follow_time_granularity="DATE",
+            content_json={
+                "temporal_evidence": {
+                    "version": "temporal-evidence-v1",
+                    "primary_action_id": "business_current",
+                    "actions": [],
+                    "mentions": [
+                        {
+                            "mention_id": "tm_old",
+                            "raw_text": "12 月 5 号",
+                            "source_segment_id": "seg_old",
+                            "quote_start": 0,
+                            "quote_end": 8,
+                            "kind": "MONTH_DAY",
+                            "role": "SALES_FOLLOW_UP",
+                            "action_id": "business_current",
+                            "granularity": "DATE",
+                            "anchor_at": "2026-11-05T10:00:00",
+                            "resolution_status": "RESOLVED",
+                            "resolved_at": "2026-12-05T09:00:00",
+                            "state": "SUPERSEDED",
+                        },
+                        {
+                            "mention_id": "tm_new",
+                            "raw_text": "6 号",
+                            "source_segment_id": "seg_new",
+                            "quote_start": 3,
+                            "quote_end": 6,
+                            "kind": "DAY_OF_MONTH",
+                            "role": "SALES_FOLLOW_UP",
+                            "action_id": "business_current",
+                            "granularity": "DATE",
+                            "anchor_at": "2026-11-05T10:01:00",
+                            "resolution_status": "RESOLVED",
+                            "resolved_at": "2026-12-06T09:00:00",
+                            "correction_of": "tm_old",
+                        },
+                    ],
+                }
+            },
+        )
+    )
+    envelope = project_assistant_message(
+        _message("corrected_date", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    interaction = envelope.blocks[0]
+    fact = next(fact for fact in interaction.facts if fact.key == "next_follow_time")
+    assert fact.value == "2026年12月6日（周日）09:00"
+
+
+def test_communication_time_is_read_only_fact_without_followup_prompt() -> None:
+    content_json = {
+        "temporal_evidence": {
+            "version": "temporal-evidence-v1",
+            "mentions": [
+                {
+                    "mention_id": "tm_meeting",
+                    "raw_text": "今天",
+                    "source_segment_id": "seg_meeting",
+                    "quote_start": 0,
+                    "quote_end": 2,
+                    "kind": "RELATIVE_DAY",
+                    "role": "OTHER",
+                    "granularity": "DATE",
+                    "anchor_at": "2026-11-05T10:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": "2026-11-05T00:00:00",
+                    "communication_time": True,
+                }
+            ],
+            "actions": [],
+        }
+    }
+    waiting = _confirmation(_preview(content_json=content_json, next_action=None))
+    envelope = project_assistant_message(
+        _message("meeting_time", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    assert [block.type for block in envelope.blocks] == ["interaction"]
+    interaction = envelope.blocks[0]
+    facts = {fact.key: fact for fact in interaction.facts}
+    assert facts["communication_time"].value == "2026年11月5日（周四）"
+    assert facts["communication_time"].source == "原话：“今天”"
+    assert facts["communication_time"].options == []
+    assert "next_follow_time" not in facts
+    assert interaction.interaction_type == "confirmation"
+
+
 def test_follow_time_shows_the_frozen_year_and_default_reminder_hour() -> None:
     fact = _follow_time_fact(
         next_follow_time="2027-01-15T09:00:00",
@@ -614,7 +794,7 @@ def test_follow_time_shows_the_frozen_year_and_default_reminder_hour() -> None:
         next_follow_time_granularity="DATE",
     )
     assert (fact.value, fact.status_label, fact.source) == (
-        "2027-01-15（周五）09:00",
+        "2027年1月15日（周五）09:00",
         "未说时刻，默认 09:00 提醒",
         "原话：“明年 1 月 15 号”",
     )
@@ -626,7 +806,11 @@ def test_follow_time_with_a_spoken_clock_has_no_default_tag() -> None:
         next_follow_time_text="下周三下午 3 点",
         next_follow_time_granularity="DATETIME",
     )
-    assert (fact.value, fact.status_label, fact.source) == ("2026-11-11（周三）15:00", None, "原话：“下周三下午 3 点”")
+    assert (fact.value, fact.status_label, fact.source) == (
+        "2026年11月11日（周三）15:00",
+        None,
+        "原话：“下周三下午 3 点”",
+    )
 
 
 def test_follow_time_frozen_at_midnight_shows_what_is_written_without_the_default_tag() -> None:
@@ -635,11 +819,13 @@ def test_follow_time_frozen_at_midnight_shows_what_is_written_without_the_defaul
         next_follow_time_text="11 月 5 号",
         next_follow_time_granularity="DATE",
     )
-    assert (fact.value, fact.status_label) == ("2026-11-05（周四）00:00", None)
+    assert (fact.value, fact.status_label) == ("2026年11月5日（周四）00:00", None)
 
 
 def test_follow_time_without_a_resolved_instant_keeps_the_spoken_phrase() -> None:
-    fact = _follow_time_fact(next_follow_time=None, next_follow_time_text="下周找时间", next_follow_time_granularity="UNKNOWN")
+    fact = _follow_time_fact(
+        next_follow_time=None, next_follow_time_text="下周找时间", next_follow_time_granularity="UNKNOWN"
+    )
     assert (fact.value, fact.status_label, fact.source) == ("下周找时间", None, None)
 
 
@@ -715,7 +901,9 @@ def test_confirmation_names_the_chosen_kind_and_keeps_its_siblings_editable() ->
         channel_source_text="你选择：微信跟进",
         channel_options=list(FOLLOW_UP_KINDS),
     )
-    message = _message("m_confirm", "确认后写入这条客户活动？", _task(activity_kind="FOLLOW_UP", waiting=_confirmation(preview)))
+    message = _message(
+        "m_confirm", "确认后写入这条客户活动？", _task(activity_kind="FOLLOW_UP", waiting=_confirmation(preview))
+    )
     envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
 
     interaction = next(block for block in envelope.blocks if block.type == "interaction")
@@ -734,7 +922,9 @@ def test_required_kind_keeps_the_reason_when_the_text_names_no_channel() -> None
         channel_source_text="原文没有写明渠道",
         channel_options=list(FOLLOW_UP_KINDS),
     )
-    message = _message("m_required", "确认后写入这条客户活动？", _task(activity_kind=None, waiting=_confirmation(preview)))
+    message = _message(
+        "m_required", "确认后写入这条客户活动？", _task(activity_kind=None, waiting=_confirmation(preview))
+    )
     envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
 
     interaction = next(block for block in envelope.blocks if block.type == "interaction")

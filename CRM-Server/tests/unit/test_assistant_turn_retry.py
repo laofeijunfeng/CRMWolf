@@ -1,4 +1,5 @@
 """Explicit retry of one durable accepted turn, without replaying user input."""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,10 +19,16 @@ from app.utils.time import business_now
 from tests.unit.test_assistant_api import client as client
 from tests.unit.test_assistant_api import db_session as db_session
 from tests.unit.test_assistant_api import override_auth as override_auth
+from tests.unit.test_assistant_confirmation_contract import (
+    RecordingGate,
+    persisted_temporal_confirmation,
+)
+from tests.unit.test_assistant_confirmation_contract import db as confirmation_db  # noqa: F401 -- shared fixture
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
     from sqlalchemy.orm import Session
+
 
 @pytest.fixture
 def retryable_turn(client: TestClient, db_session: Session) -> tuple[AssistantTask, AssistantTurn]:
@@ -44,8 +51,11 @@ def retryable_turn(client: TestClient, db_session: Session) -> tuple[AssistantTa
 
 @pytest.mark.parametrize("initial_status", ["PENDING", "RUNNING", "EXPIRED"])
 def test_retry_restarts_only_an_expired_turn(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
-    retryable_turn: tuple[AssistantTask, AssistantTurn], initial_status: str,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    initial_status: str,
 ) -> None:
     task, turn = retryable_turn
     if initial_status != "PENDING":
@@ -88,7 +98,9 @@ def test_retry_restarts_only_an_expired_turn(
 
 
 def test_retry_with_stale_observed_version_cannot_reclaim_the_new_worker(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     task, turn = retryable_turn
@@ -114,8 +126,11 @@ def test_retry_with_stale_observed_version_cannot_reclaim_the_new_worker(
 
 @pytest.mark.parametrize("terminal_status", ["SUCCEEDED", "FAILED"])
 def test_retry_never_replays_a_terminal_turn(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
-    retryable_turn: tuple[AssistantTask, AssistantTurn], terminal_status: str,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    terminal_status: str,
 ) -> None:
 
     task, turn = retryable_turn
@@ -136,8 +151,11 @@ def test_retry_never_replays_a_terminal_turn(
 
 @pytest.mark.parametrize("other_team,other_user", [(1, 99), (99, 2)])
 def test_retry_turn_is_owner_and_team_scoped(
-    client: TestClient, db_session: Session, retryable_turn: tuple[AssistantTask, AssistantTurn],
-    other_team: int, other_user: int,
+    client: TestClient,
+    db_session: Session,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    other_team: int,
+    other_user: int,
 ) -> None:
     from app.core import deps
 
@@ -154,22 +172,27 @@ def test_retry_turn_is_owner_and_team_scoped(
 
 
 def test_live_retry_does_not_cancel_the_running_worker(
-    db_session: Session, retryable_turn: tuple[AssistantTask, AssistantTurn], monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     task, turn = retryable_turn
     started = asyncio.Event()
     old_released = asyncio.Event()
     calls = []
 
-    async def handle_task(
-        _db: Session, task: AssistantTask, _user_input: object, reporter: object
-    ) -> SimpleNamespace:
+    async def handle_task(_db: Session, task: AssistantTask, _user_input: object, reporter: object) -> SimpleNamespace:
         del reporter
         calls.append("started")
         started.set()
         await old_released.wait()
         calls.append("old-side-effect")
-        return SimpleNamespace(task=task, reply=SimpleNamespace(message="原来的下一步"))
+        from app.services.assistant.coordinator import CoordinatorOutcome, CoordinatorReply
+
+        return CoordinatorOutcome(
+            task=task,
+            reply=CoordinatorReply(task_public_id=task.public_id, status=task.status, message="原来的下一步"),
+        )
 
     monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=handle_task))
     factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
@@ -182,8 +205,12 @@ def test_live_retry_does_not_cancel_the_running_worker(
             version = observed.lease_version
             attempts = observed.attempts
             result = turns.retry_owned_turn(
-                db, team_id=1, user_id=2, task_public_id=task.public_id,
-                turn_public_id=turn.public_id, expected_lease_version=version,
+                db,
+                team_id=1,
+                user_id=2,
+                task_public_id=task.public_id,
+                turn_public_id=turn.public_id,
+                expected_lease_version=version,
             )
             assert result is not None and result[2] is False
             assert result[1].lease_version == version
@@ -201,7 +228,9 @@ def test_live_retry_does_not_cancel_the_running_worker(
 
 
 def test_failed_retryable_turn_restarts_without_a_second_request(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     task, turn = retryable_turn
@@ -227,8 +256,44 @@ def test_failed_retryable_turn_restarts_without_a_second_request(
     assert db_session.query(AssistantTurn).count() == 1
 
 
+def test_retry_cannot_replay_input_after_a_newer_accepted_turn(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, old = retryable_turn
+    old.status = "FAILED"
+    task.active_turn_id = None
+    turns.add_event(db_session, old, "error", {"retryable": True})
+    db_session.commit()
+    newer, _ = turns.accept_submit(
+        db_session,
+        task=task,
+        key="newer-date-correction",
+        input_data={"kind": "text", "text": "改为2026年12月6日", "choice": None},
+        action_id=None,
+        expected_version=None,
+    )
+    newer.status = "SUCCEEDED"
+    task.active_turn_id = None
+    db_session.commit()
+    scheduled = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{old.public_id}/retry",
+        json={"expected_lease_version": old.lease_version},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "FAILED"
+    assert response.json()["reprocess_allowed"] is False
+    assert scheduled == []
+
+
 def test_activity_receipt_blocks_reprocess(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     task, turn = retryable_turn
@@ -255,7 +320,9 @@ def test_activity_receipt_blocks_reprocess(
 
 
 def test_organize_stage_failure_is_failed_and_reprocessed_without_a_new_request(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     from app.models.assistant_conversation import AssistantConversationEntry
@@ -328,7 +395,9 @@ def test_organize_stage_failure_is_failed_and_reprocessed_without_a_new_request(
 
 
 def test_unexpected_turn_exception_rolls_back_uncommitted_task_edits(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     task, turn = retryable_turn
@@ -352,7 +421,9 @@ def test_unexpected_turn_exception_rolls_back_uncommitted_task_edits(
 
 
 def test_recover_pending_turn_does_not_create_entry_or_request(
-    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
 ) -> None:
     from app.models.assistant_conversation import AssistantConversationEntry
@@ -393,11 +464,107 @@ def test_overdue_attempt_fails_closed_without_a_live_worker(
     assert turn.status == "FAILED"
     assert turn.last_error_code == "UPSTREAM_TIMEOUT"
     assert task.active_turn_id is None
-    error = (
-        db_session.query(AssistantTurnEvent)
-        .filter_by(turn_id=turn.id, event="error")
-        .one()
-    )
+    error = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").one()
     assert error.data_json["retryable"] is True
     assert error.data_json["activity_written"] is False
     assert "尚未写入客户活动" in error.data_json["message"]
+
+
+@pytest.mark.asyncio
+async def test_failed_date_correction_retry_cannot_replace_newer_frozen_confirmation(confirmation_db, monkeypatch):  # noqa: F811
+    from datetime import datetime
+
+    from app.models.customer_activity import CustomerActivity
+    from app.services.assistant.coordinator import AssistantInput
+    from app.services.assistant.task_state import load_draft, load_waiting
+
+    class FailFirstCorrectionGate(RecordingGate):
+        attempts = 0
+
+        async def evaluate(self, db, **kwargs):
+            self.attempts += 1
+            if self.attempts == 2:
+                raise TimeoutError("quality provider unavailable for the first correction")
+            return await super().evaluate(db, **kwargs)
+
+    session, factory, _ = confirmation_db
+    gate = FailFirstCorrectionGate()
+    task, coordinator, _, original = await persisted_temporal_confirmation(
+        confirmation_db, monkeypatch, quality_gate=gate
+    )
+    original_waiting = load_waiting(task)
+    old, accepted = turns.accept_submit(
+        session,
+        task=task,
+        key="failed-signed-correction",
+        input_data={"kind": "text", "text": "改为2026年12月6日", "choice": None},
+        action_id=original_waiting.action_id,
+        expected_version=original_waiting.expected_version,
+    )
+    assert accepted
+    await turns.execute_turn(old.id, factory=factory)
+    session.expire_all()
+    session.refresh(task)
+    session.refresh(old)
+    assert old.status == "FAILED" and old.attempts == 1
+    assert task.active_turn_id is None and load_waiting(task) is None
+    assert task.authority_json.get("frozen_activity_command") is None
+    assert turns.latest_error_retryable(session, old)
+    assert turns.reprocess_allowed(session, task, old)
+    saved_sources = [record.model_dump(mode="json") for record in load_draft(task).source_records]
+    assert [record["text"] for record in saved_sources] == [original, "改为2026年12月6日"]
+    assert session.query(CustomerActivity).count() == 0
+
+    newer, accepted = turns.accept_submit(
+        session,
+        task=task,
+        key="newer-date-after-gate-failure",
+        input_data={"kind": "text", "text": "改为2026年12月7日", "choice": None},
+        action_id=None,
+        expected_version=None,
+    )
+    assert accepted
+    await turns.execute_turn(newer.id, factory=factory)
+    session.expire_all()
+    session.refresh(task)
+    session.refresh(newer)
+    assert newer.status == "SUCCEEDED"
+    waiting = load_waiting(task)
+    command = task.authority_json["frozen_activity_command"]
+    assert waiting.type == "CONFIRMATION"
+    assert waiting.action_id != original_waiting.action_id
+    assert command["next_follow_time"] == "2026-12-07T09:00:00"
+    assert waiting.confirmation_payload.preview.next_follow_time == "2026-12-07T09:00:00"
+    assert command["source_segments"] == [original, "改为2026年12月6日", "改为2026年12月7日"]
+    assert [record.model_dump(mode="json") for record in load_draft(task).source_records][:2] == saved_sources
+    assert gate.attempts == 3 and session.query(CustomerActivity).count() == 0
+    frozen_version, failed_lease = task.version, old.lease_version
+
+    result = turns.retry_owned_turn(
+        session,
+        team_id=task.team_id,
+        user_id=task.user_id,
+        task_public_id=task.public_id,
+        turn_public_id=old.public_id,
+        expected_lease_version=failed_lease,
+    )
+    assert result is not None and result[2] is False
+    session.expire_all()
+    session.refresh(task)
+    session.refresh(old)
+    assert old.status == "FAILED" and old.lease_version == failed_lease and old.attempts == 1
+    assert task.active_turn_id is None and task.version == frozen_version
+    assert load_waiting(task) == waiting
+    assert task.authority_json["frozen_activity_command"] == command
+    assert session.query(AssistantTurn).count() == 3
+    assert session.query(AssistantRequest).count() == 3
+    assert gate.attempts == 3
+
+    # A valid confirmation after the denied retry still writes the latest date only.
+    await coordinator.handle_task(session, task, AssistantInput(kind="confirm", choice="confirm"))
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).one()
+        assert activity.next_follow_time == datetime(2026, 12, 7, 9)
+        assert activity.source_content == "\n".join(command["source_segments"])
+        assert activity.submission_fingerprint == command["fingerprint"]

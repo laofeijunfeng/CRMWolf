@@ -91,7 +91,14 @@ _FIELD_LABELS: dict[str, str] = {
     "content": "沟通内容",
     "next_action": "下一步行动",
     "next_follow_time": "下次跟进时间",
-    "temporal_choice": "下次跟进时间",
+    "temporal_choice": "补充内容",
+}
+_TEMPORAL_LABELS: dict[str, str] = {
+    "DATE": "下次跟进日期",
+    "MONTH": "日期月份",
+    "ROLE": "时间归属",
+    "STATUS": "完成状态",
+    "PRIMARY": "主跟进行动",
 }
 _PROPOSAL_LABELS: dict[str, str] = {
     "opportunity_create": "创建商机",
@@ -129,9 +136,7 @@ def finalize_assistant_ui(
             and message.boundary.entry_id == pending_choice.entry_id
         )
         same_task = (
-            focused_task is not None
-            and message.task is not None
-            and message.task.public_id == focused_task.public_id
+            focused_task is not None and message.task is not None and message.task.public_id == focused_task.public_id
         )
         try:
             message.ui = project_assistant_message(
@@ -145,7 +150,11 @@ def finalize_assistant_ui(
 
 
 _SETTLED_LABELS = {
-    "complete": "已完成", "hold": "先放着", "skip": "不管了", "unknown": "结果待核对", "failed": "未能完成",
+    "complete": "已完成",
+    "hold": "先放着",
+    "skip": "不管了",
+    "unknown": "结果待核对",
+    "failed": "未能完成",
 }
 
 
@@ -197,7 +206,10 @@ def _disposition_receipts(messages: list[ConversationMessage], live_id: str | No
             label = _receipt_label(latest.get(own.get("item_id"))) or _receipt_label(own) or "已处理"
             short = title if len(title) <= 24 else f"{title[:24]}…"
             receipts[message.id] = NoticeBlock(
-                id="b_notice_receipt", type="notice", tone="info", text=f"{label} · {short}",
+                id="b_notice_receipt",
+                type="notice",
+                tone="info",
+                text=f"{label} · {short}",
             )
     return receipts
 
@@ -224,7 +236,6 @@ def _resolved_activity_kind(focused_task: AssistantTaskView | None) -> str | Non
         if kind in CANONICAL_KINDS:
             return kind
     return None
-
 
 
 def _ensure_current_waiting(messages: list[ConversationMessage], focused_task: AssistantTaskView | None) -> None:
@@ -340,7 +351,6 @@ def _reply_entry_id(message_id: str) -> str | None:
     return entry_id
 
 
-
 def _project_disposition(message: ConversationMessage, *, active_waiting: bool) -> AgentUIEnvelope | None:
     task = message.task
     if task is None or not isinstance(task.follow_up_disposition, dict):
@@ -374,19 +384,30 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
     for item in items:
         if not isinstance(item, dict):
             continue
-        cards.append(OpenFollowUpDispositionCardItem(
-            item_id=str(item.get("item_id") or ""),
-            title=str(item.get("title") or "跟进任务"),
-            owner_line=_owner_line(item.get("owner_line")),
-            related=bool(item.get("related")),
-            evidence_quote=item.get("evidence_quote") if isinstance(item.get("evidence_quote"), str) else None,
-            evidence_reason=None,
-            state=item.get("state") if item.get("state") in {
-                "current", "waiting", "complete", "hold", "skip", "failed", "unknown",
-            } else "waiting",
-            result_title=item.get("result_title") if isinstance(item.get("result_title"), str) else None,
-            result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
-        ))
+        cards.append(
+            OpenFollowUpDispositionCardItem(
+                item_id=str(item.get("item_id") or ""),
+                title=str(item.get("title") or "跟进任务"),
+                owner_line=_owner_line(item.get("owner_line")),
+                related=bool(item.get("related")),
+                evidence_quote=item.get("evidence_quote") if isinstance(item.get("evidence_quote"), str) else None,
+                evidence_reason=None,
+                state=item.get("state")
+                if item.get("state")
+                in {
+                    "current",
+                    "waiting",
+                    "complete",
+                    "hold",
+                    "skip",
+                    "failed",
+                    "unknown",
+                }
+                else "waiting",
+                result_title=item.get("result_title") if isinstance(item.get("result_title"), str) else None,
+                result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
+            )
+        )
     customer = payload.get("customer_name") or ""
     kind = payload.get("activity_kind_label") or ""
     detail = " · ".join(part for part in (str(customer), str(kind)) if part)
@@ -438,9 +459,7 @@ def _waiting_blocks(
     submitted_kind: str | None = None,
 ) -> tuple[TextBlock | NoticeBlock | InteractionBlock, ...]:
     prompt = _plain(waiting.prompt) or _plain(message.text) or _UNAVAILABLE
-    interaction = _waiting_interaction(
-        message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind
-    )
+    interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind)
     blocks: list[TextBlock | NoticeBlock | InteractionBlock] = []
     prose = _plain(message.text)
     if prose and prose != prompt:
@@ -549,6 +568,7 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     _add_fact(facts, "summary", "摘要", preview.summary, group="write")
     participants = _participants(preview.content_json)
     _add_fact(facts, "participants", "参会角色", participants, group="write")
+    _add_communication_time_fact(facts, preview.content_json)
     if preview.next_action:
         _add_fact(facts, "next_action", "下一步", preview.next_action, group="write")
     elif preview.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
@@ -561,8 +581,10 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
         _add_fact(facts, "next_follow_time", "跟进时间", follow_time, group="write")
     legacy_label = preview.channel_status_label or ""
-    status_label = "历史" if not editable and preview.activity_kind else (
-        "已识别" if legacy_label in _LEGACY_ORIGINS else preview.channel_status_label
+    status_label = (
+        "历史"
+        if not editable and preview.activity_kind
+        else ("已识别" if legacy_label in _LEGACY_ORIGINS else preview.channel_status_label)
     )
     options = [
         InteractionOption(value=kind, label=_KIND_LABELS[kind])
@@ -570,20 +592,29 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         if editable and kind in _KIND_LABELS
     ]
     _add_fact(
-        facts, "activity_kind", "活动类型", kind_label, group="activity_kind",
-        status_label=status_label, source=_kind_source(preview, legacy_label), options=options,
+        facts,
+        "activity_kind",
+        "活动类型",
+        kind_label,
+        group="activity_kind",
+        status_label=status_label,
+        source=_kind_source(preview, legacy_label),
+        options=options,
     )
     if preview.change_signal:
         _add_fact(
-            facts, "change_signal", "客户上下文判断", preview.change_signal, group="context",
+            facts,
+            "change_signal",
+            "客户上下文判断",
+            preview.change_signal,
+            group="context",
             source=preview.change_summary,
         )
         if preview.opportunity_name:
             stage = f" · {preview.opportunity_stage}" if preview.opportunity_stage else ""
             _add_fact(facts, "opportunity", "关联商机", f"{preview.opportunity_name}{stage}", group="context")
         evidence = [
-            " ".join(part for part in (item.occurred_at, item.summary) if part)
-            for item in preview.context_evidence[:3]
+            " ".join(part for part in (item.occurred_at, item.summary) if part) for item in preview.context_evidence[:3]
         ]
         if evidence:
             _add_fact(facts, "context_evidence", "依据", "；".join(evidence), group="context")
@@ -627,6 +658,66 @@ _WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日
 _DEFAULT_FOLLOW_UP_HOUR = 9
 
 
+def _format_temporal_date(at: datetime, *, include_time: bool) -> str:
+    label = f"{at.year}年{at.month}月{at.day}日（{_WEEKDAYS[at.weekday()]}）"
+    return f"{label}{at:%H:%M}" if include_time else label
+
+
+def _add_communication_time_fact(facts: list[InteractionConfirmationFact], content_json: dict[str, object]) -> None:
+    bundle = content_json.get("temporal_evidence")
+    if not isinstance(bundle, dict) or bundle.get("version") != "temporal-evidence-v1":
+        return
+    raw_mentions = bundle.get("mentions")
+    if not isinstance(raw_mentions, list):
+        return
+    from app.services.assistant.temporal_evidence import StoredMention
+
+    for raw in raw_mentions:
+        mention = StoredMention.model_validate(raw)
+        if not mention.communication_time or mention.state != "ACTIVE" or mention.resolved_at is None:
+            continue
+        _add_fact(
+            facts,
+            "communication_time",
+            "沟通时间",
+            _format_temporal_date(mention.resolved_at, include_time=mention.granularity == "DATETIME"),
+            group="write",
+            source=f"原话：“{_plain(mention.raw_text)}”",
+        )
+        return
+
+
+def _follow_time_source(preview: ActivityPreview, raw: str) -> str | None:
+    parts = [f"原话：“{raw}”"] if raw else []
+    bundle = preview.content_json.get("temporal_evidence")
+    if isinstance(bundle, dict) and isinstance(bundle.get("mentions"), list):
+        from app.services.assistant.temporal_evidence import StoredMention
+
+        mentions = [StoredMention.model_validate(item) for item in bundle["mentions"]]
+        primary_id = bundle.get("primary_action_id")
+        candidates = [
+            item
+            for item in mentions
+            if item.state == "ACTIVE"
+            and item.role == "SALES_FOLLOW_UP"
+            and item.correction_of
+            and item.resolved_at is not None
+            and preview.next_follow_time is not None
+            and item.resolved_at.date().isoformat() == preview.next_follow_time[:10]
+            and (primary_id is None or item.action_id == primary_id)
+        ]
+        if len(candidates) == 1:
+            current = candidates[0]
+            previous = next((item for item in mentions if item.mention_id == current.correction_of), None)
+            if previous is not None and previous.resolved_at is not None:
+                parts.append(
+                    f"已将当前动作日期从 {previous.resolved_at.year}年{previous.resolved_at.month}月"
+                    f"{previous.resolved_at.day}日"
+                    f"改为 {current.resolved_at.year}年{current.resolved_at.month}月{current.resolved_at.day}日。"
+                )
+    return "；".join(parts) or None
+
+
 def _add_follow_time_fact(facts: list[InteractionConfirmationFact], preview: ActivityPreview) -> bool:
     """Show the frozen write instant itself; the spoken phrase is only its evidence."""
 
@@ -636,19 +727,20 @@ def _add_follow_time_fact(facts: list[InteractionConfirmationFact], preview: Act
         at = datetime.fromisoformat(preview.next_follow_time)
     except ValueError:
         return False
-    defaulted = (
-        preview.next_follow_time_granularity == "DATE"
-        and (at.hour, at.minute, at.second) == (_DEFAULT_FOLLOW_UP_HOUR, 0, 0)
+    defaulted = preview.next_follow_time_granularity == "DATE" and (at.hour, at.minute, at.second) == (
+        _DEFAULT_FOLLOW_UP_HOUR,
+        0,
+        0,
     )
     raw = _plain(preview.next_follow_time_text or "")
     _add_fact(
         facts,
         "next_follow_time",
         "跟进时间",
-        f"{at:%Y-%m-%d}（{_WEEKDAYS[at.weekday()]}）{at:%H:%M}",
+        _format_temporal_date(at, include_time=True),
         group="write",
         status_label="未说时刻，默认 09:00 提醒" if defaulted else None,
-        source=f"原话：“{raw}”" if raw else None,
+        source=_follow_time_source(preview, raw),
     )
     return True
 
@@ -739,8 +831,23 @@ def _text_input(
 ) -> InteractionBlock:
     field_name = waiting.field or "answer"
     key = field_name if _FIELD_KEY_RE.fullmatch(field_name) else "answer"
-    label = _FIELD_LABELS.get(field_name, "补充内容")
-    placeholder = "例如 2026-10-30" if field_name == "temporal_choice" else None
+    target = waiting.temporal_target
+    label = (
+        _TEMPORAL_LABELS.get(target.reason, "补充内容")
+        if target is not None
+        else _FIELD_LABELS.get(field_name, "补充内容")
+    )
+    placeholder = None
+    if target is not None:
+        placeholder = {
+            "DATE": "例如 2026-10-30",
+            "MONTH": "例如 2026 年 12 月",
+            "ROLE": "例如 客户完成时间，或我下次联系时间",
+            "STATUS": "例如 已经完成，或计划联系",
+            "PRIMARY": "请从当前行动中选择主跟进行动",
+        }.get(target.reason)
+    elif field_name == "temporal_choice":
+        placeholder = "请按当前问题补充信息"
     return InteractionBlock(
         id="b_interaction_1",
         type="interaction",

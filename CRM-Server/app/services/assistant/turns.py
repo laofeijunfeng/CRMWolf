@@ -176,7 +176,18 @@ def accept_submit(
             "FOLLOW_UP_DISPOSITION": "submit_field",
         }
         revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
-        if kind != allowed[waiting.type] and not revising:
+        temporal_supplement = False
+        if waiting.type == "CONFIRMATION" and waiting.field == "activity_write" and kind == "text":
+            from app.services.assistant.task_state import load_draft
+            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+
+            temporal_supplement = (
+                choice is None
+                and isinstance(text, str)
+                and is_temporal_supplement(text)
+                and temporal_supplement_target(load_draft(task)) is not None
+            )
+        if kind != allowed[waiting.type] and not revising and not temporal_supplement:
             raise AssistantStateConflict("当前输入不符合等待动作")
         if waiting.type == "ACTIVITY_KIND":
             offered_ids: set[str] = set()
@@ -223,7 +234,7 @@ def accept_submit(
             offered = set(preview.channel_options) if preview is not None else set()
             if not isinstance(choice, str) or choice not in offered or text is not None:
                 raise AssistantStateConflict("请选择当前签发的活动类型")
-        elif choice not in {"confirm", "reject"} or text is not None:
+        elif not temporal_supplement and (choice not in {"confirm", "reject"} or text is not None):
             raise AssistantStateConflict("请选择确认或拒绝当前动作")
     elif waiting is None and (
         action_id is not None
@@ -319,7 +330,6 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     db.commit()
     turn = db.get(AssistantTurn, turn_id)
     return turn.lease_version if turn is not None else None
-
 
 
 def _error_payload(
@@ -484,13 +494,15 @@ def reprocess_allowed(db: Session, task: AssistantTask, turn: AssistantTurn) -> 
         return False
     if task.active_turn_id not in (None, turn.id):
         return False
+    # Recovery belongs to this accepted input, not a later user correction.
+    if (
+        db.query(AssistantTurn.id).filter(AssistantTurn.task_id == task.id, AssistantTurn.id > turn.id).first()
+        is not None
+    ):
+        return False
     if turn.status == "FAILED":
         return latest_error_retryable(db, turn)
-    expired = (
-        turn.status == "RUNNING"
-        and turn.lease_expires_at is not None
-        and turn.lease_expires_at < business_now()
-    )
+    expired = turn.status == "RUNNING" and turn.lease_expires_at is not None and turn.lease_expires_at < business_now()
     return expired and not live_worker(turn.id, turn.lease_version)
 
 
@@ -591,6 +603,7 @@ def retry_owned_turn(
             AssistantTask.team_id == team_id,
             AssistantTask.user_id == user_id,
             AssistantTask.status == AssistantTaskStatus.ACTIVE,
+            AssistantTask.version == task.version,
             or_(AssistantTask.active_turn_id.is_(None), AssistantTask.active_turn_id == turn.id),
         )
         .values(active_turn_id=turn.id)
@@ -773,6 +786,11 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             task = db.get(AssistantTask, turn.task_id)
             if task is None or task.team_id != turn.team_id or task.user_id != turn.user_id:
                 raise AssistantStateConflict("任务已失效")
+            if (
+                db.query(AssistantTurn.id).filter(AssistantTurn.task_id == task.id, AssistantTurn.id > turn.id).first()
+                is not None
+            ):
+                raise AssistantStateConflict("该轮输入已被后续补充替代，请读取最新任务")
             heartbeat = asyncio.create_task(
                 _keep_lease(factory, turn_id=turn_id, owner=owner, version=version, worker=asyncio.current_task())
             )
@@ -1027,7 +1045,6 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
         db.close()
         if followup_turn_id is not None:
             schedule_turn(followup_turn_id, factory=factory)
-
 
 
 def _close_unknown_activity(

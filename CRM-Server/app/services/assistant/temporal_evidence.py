@@ -43,7 +43,7 @@ POLICY_VERSION: Literal["bare-day-v1"] = "bare-day-v1"
 Resolution = Literal["RESOLVED", "AMBIGUOUS", "UNRESOLVED", "EXPLICITLY_NONE"]
 EvidenceState = Literal["ACTIVE", "SUPERSEDED", "EXPLICITLY_NONE"]
 ActionStatus = Literal["PLANNED", "COMPLETED", "COMMITTED", "UNKNOWN"]
-_REPLACEMENT = re.compile(r"改为|改到|应为|而是")
+_REPLACEMENT = re.compile(r"改成|改为|改到|应为|而是")
 _LABEL_WHITESPACE = re.compile(r"\s+")
 _CLOCK = re.compile(
     r"(?:[的\s]*)(?:(上午|下午|晚上|中午|早上)?(?:(\d{1,2})[:：](\d{2})(?::(\d{2}))?"
@@ -139,6 +139,8 @@ class StoredMention(BaseModel):
     candidates: list[str] = Field(default_factory=list)
     source_quotes: list[ModelTemporalMention] = Field(default_factory=list)
     source_actions: list[QuotedAction] = Field(default_factory=list)
+    communication_time: bool = False
+    answer_gap: str | None = None
 
 
 class StoredAction(BaseModel):
@@ -300,13 +302,14 @@ def attach_model_evidence(
             stored.role = "OTHER"
             stored.ambiguity_reason = None
             stored.action_id = None
+            stored.communication_time = True
         elif _background_year(segment_text, found):
             stored.role = "CUSTOMER_ACTION" if linked and linked.owner_role == "CUSTOMER" else "OTHER"
             stored.ambiguity_reason = None
         if len(nominated) > 1:
             stored.ambiguity_reason = "ROLE"
             stored.resolution_status = "AMBIGUOUS"
-        if stored.role == "SALES_FOLLOW_UP" and linked is None:
+        if (stored.role == "SALES_FOLLOW_UP" or stored.ambiguity_reason in {"ROLE", "STATUS"}) and linked is None:
             # Source-derived action, not model-invented text. Missing model evidence
             # must not make an explicit source action/date disappear from the gate.
             start, end = _clause_start(segment_text, found.start), _clause_end(segment_text, found.end)
@@ -340,24 +343,114 @@ def attach_model_evidence(
 
 
 def temporal_answer_target(draft: TaskDraft) -> str | None:
-    """Only an unresolved sales date authorizes a full-context date answer."""
+    """Return only the server's current action-scoped temporal question."""
 
     spec = temporal_waiting(draft)
-    if spec is None or spec.get("reason") != "DATE":
+    if spec is None or spec.get("reason") not in {"DATE", "MONTH", "ROLE", "STATUS"}:
+        return None
+    mention_id = spec.get("mention_id")
+    if not isinstance(mention_id, str) or not isinstance(spec.get("business_action_id"), str):
+        return None
+    return mention_id
+
+
+def temporal_supplement_target(draft: TaskDraft) -> str | None:
+    """Authorize a confirmation supplement only for its unique primary date."""
+
+    if temporal_waiting(draft) is not None:
         return None
     bundle = _bundle(draft)
     if bundle is None:
         return None
-    for raw in bundle[0]:
-        item = _stored_mention(raw)
-        if (
-            item.mention_id == spec.get("mention_id")
-            and item.role == "SALES_FOLLOW_UP"
-            and item.ambiguity_reason != "ROLE"
-            and _date_answer_action(item, [_stored_action(raw) for raw in bundle[1]]) is not None
+    sales = _primary_sales(
+        [_stored_mention(item) for item in bundle[0]],
+        [_stored_action(item) for item in bundle[1]],
+        _primary_action_id(draft.content_json),
+    )
+    if sales is None or isinstance(sales, list):
+        return None
+    mention, _action = sales
+    return mention.mention_id if mention and mention.resolution_status == "RESOLVED" and mention.resolved_at else None
+
+
+def is_temporal_supplement(text: str) -> bool:
+    """Accept dates/equivalents/corrections, never a newly described action."""
+
+    value = re.sub(r"\s+", "", text)
+    spans = find_time_spans(value)
+    if not spans or any(_is_just_now(span) for span in spans):
+        return False
+    remainder = value
+    for span in reversed(spans):
+        remainder = remainder[: span.start] + remainder[span.end :]
+    remainder = re.sub(r"也就是|也即|就是|改成|改为|改到|应为|而是|不是|日期|时间|补充|更正|调整为", "", remainder)
+    return not remainder.strip("，,。；;：:、（）()‘’“”\"'！？!?的为是")
+
+
+def is_temporal_choice_answer(draft: TaskDraft, text: str) -> bool:
+    """Recognize an explicit answer only to the current role/status question."""
+
+    target_id = temporal_answer_target(draft)
+    bundle = _bundle(draft)
+    if target_id is None or bundle is None:
+        return False
+    target = next((_stored_mention(item) for item in bundle[0] if item.get("mention_id") == target_id), None)
+    return target is not None and _temporal_prose_choice(text, target, find_time_spans(text)) is not None
+
+
+def _temporal_prose_choice(text: str, target: StoredMention, spans: list[FoundSpan]) -> str | None:
+    residual = text
+    for span in reversed(spans):
+        residual = residual[: span.start] + residual[span.end :]
+    value = re.sub(r"[\s，,。；;：:、！？!?]", "", residual)
+    if target.ambiguity_reason == "ROLE":
+        if re.fullmatch(r"(?:这|这个|那|那个)?(?:是|指的是|指)?客户(?:的)?(?:完成|付款|承诺)(?:时间|日期)?", value):
+            return f"role:{target.mention_id}:customer"
+        if re.fullmatch(
+            r"(?:这|这个|那|那个)?(?:是|指的是|指)?(?:我|我们|销售)(?:的)?(?:下次)?(?:联系|跟进)(?:时间|日期)?", value
         ):
-            return item.mention_id
+            return f"role:{target.mention_id}:sales"
+    if target.ambiguity_reason == "STATUS":
+        if re.fullmatch(
+            r"(?:我|我们)?(?:已经|已)(?:联系|找|跟进|确认)?(?:过|完成)?(?:了)?(?:客户)?|(?:我|我们)?(?:联系|找|跟进|确认)(?:过|了)(?:客户)?",
+            value,
+        ):
+            return f"status:{target.mention_id}:completed"
+        if re.fullmatch(r"(?:我|我们)?(?:计划|准备|打算|将|要)(?:今天)?(?:再)?(?:联系|找|跟进|确认)(?:客户)?", value):
+            return f"status:{target.mention_id}:planned"
     return None
+
+
+def _apply_status_choice(choice_id: str, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
+    parts = choice_id.split(":")
+    if len(parts) != 3 or parts[2] not in {"completed", "planned"}:
+        raise TemporalContractError("unknown temporal choice")
+    _, mention_id, status = parts
+    mention = next(
+        (
+            item
+            for item in mentions
+            if item.mention_id == mention_id and item.state == "ACTIVE" and item.ambiguity_reason == "STATUS"
+        ),
+        None,
+    )
+    action = _action_for(mention, actions) if mention is not None else None
+    if mention is None or action is None:
+        raise TemporalContractError("unknown temporal choice")
+    for item in mentions:
+        if item.state != "ACTIVE" or item.action_id != action.action_id or item.ambiguity_reason != "STATUS":
+            continue
+        item.role = "SALES_FOLLOW_UP" if status == "planned" else "OTHER"
+        item.ambiguity_reason = "DATE" if item.answer_gap == "DATE_CONFLICT" else None
+        item.resolution_status = (
+            "AMBIGUOUS"
+            if item.answer_gap == "DATE_CONFLICT"
+            else "RESOLVED"
+            if item.resolved_at is not None
+            else "UNRESOLVED"
+        )
+    action.owner_role = "SALES"
+    action.action_status = "PLANNED" if status == "planned" else "COMPLETED"
 
 
 def apply_temporal_answer(
@@ -376,7 +469,11 @@ def apply_temporal_answer(
     """
 
     previous = _bundle(draft)
-    if previous is None or temporal_answer_target(draft) != target_id:
+    if (
+        previous is None
+        or not target_id
+        or target_id not in {temporal_answer_target(draft), temporal_supplement_target(draft)}
+    ):
         raise TemporalContractError("temporal answer does not match the current wait")
     records = draft.source_records
     if source_text != "\n".join(record.text for record in records):
@@ -415,6 +512,7 @@ def apply_temporal_answer(
                 }
             ),
         )
+
     def mention_text_in_answer(item: object, answer_text: str) -> bool:
         raw = getattr(item, "raw_text", None)
         if not isinstance(raw, str) and isinstance(item, dict):
@@ -453,10 +551,12 @@ def apply_temporal_answer(
     old_mentions, old_actions = previous
     stored = [_stored_mention(item) for item in old_mentions]
     bound = [_stored_action(item) for item in old_actions]
-    target = next(item for item in stored if item.mention_id == target_id)
-    target_action = _date_answer_action(target, bound)
-    if target_action is None:
-        raise TemporalContractError("temporal answer has no current sales action")
+    target = next((item for item in stored if item.mention_id == target_id and item.state == "ACTIVE"), None)
+    if target is None:
+        raise TemporalContractError("temporal answer target is no longer active")
+    target_action = _action_for(target, bound)
+    if target_action is None or target_action.state != "ACTIVE":
+        raise TemporalContractError("temporal answer has no current action")
     answer = next((record for record in records if record.segment_id == answer_segment_id), None)
     if answer is None:
         raise TemporalContractError("temporal answer has no source segment")
@@ -498,55 +598,188 @@ def apply_temporal_answer(
                     matched.source_actions.append(source_action)
 
     spans = _canonical_spans(answer.text, quotes[answer_segment_id])
+    pending_reason = target.ambiguity_reason if target.ambiguity_reason in {"ROLE", "STATUS"} else None
+    prose_choice = _temporal_prose_choice(answer.text, target, spans)
+    if prose_choice is not None:
+        if pending_reason == "ROLE":
+            _apply_role_choice(prose_choice, stored)
+            _link_actions(stored, bound)
+        elif pending_reason == "STATUS":
+            _apply_status_choice(prose_choice, stored, bound)
+        pending_reason = None
+        if not spans:
+            _write_bundle(draft, stored, bound)
+            project_draft(draft)
+            return
+    marker = _REPLACEMENT.search(answer.text)
+    before_correction = [span for span in spans if marker and span.end <= marker.start()]
+    correction_spans = [span for span in spans if marker and span.start >= marker.end()]
+    explicit_correction = marker is not None and len(correction_spans) == 1
+    candidates = correction_spans if explicit_correction else spans
     replacements: list[StoredMention] = []
-    for span in spans:
+    for span in candidates:
         item = _resolve_span(
             span,
             segment_text=answer.text,
             segment_id=answer.segment_id,
             anchor=answer.recorded_at,
             action_id=target_action.action_id,
-            model_role="SALES_FOLLOW_UP",
-            model_owner="我",
+            model_role=target.role,
+            model_owner=target.owner,
             confidence=0,
         )
+        if not _is_just_now(item):
+            item.role = target.role
+            # A date answer does not let model ownership override the current question.
+            if item.ambiguity_reason in {"ROLE", "STATUS"}:
+                item.ambiguity_reason = None
+                if item.resolved_at is not None:
+                    item.resolution_status = "RESOLVED"
         item.source_quotes = [
             q for q in quotes[answer_segment_id] if span.start <= q.quote_start and q.quote_end <= span.end
         ]
+        if not item.source_quotes:
+            item.source_quotes = [
+                ModelTemporalMention(
+                    raw_text=span.raw_text,
+                    quote_start=span.start,
+                    quote_end=span.end,
+                    kind=span.kind,
+                    role=target.role,
+                    confidence=0,
+                )
+            ]
         item.source_actions = [
-            quoted_actions[ref]
-            for ref in dict.fromkeys(quote.action_ref for quote in item.source_quotes if quote.action_ref)
+            quoted_actions[ref] for ref in dict.fromkeys(q.action_ref for q in item.source_quotes if q.action_ref)
         ]
-        item.correction_of = target_id
+        if explicit_correction and span.kind == "DAY_OF_MONTH" and target.resolved_at is not None:
+            referenced = len(before_correction) == 1 and before_correction[0].kind == "DAY_OF_MONTH"
+            old_day = int(before_correction[0].groups[0] or 0) if referenced else None
+            # An omitted month inherits only when the rejected day identifies this date.
+            primary = _primary_sales(stored, bound, _primary_action_id(draft.content_json))
+            safe = (
+                old_day == target.resolved_at.day
+                and primary is not None
+                and not isinstance(primary, list)
+                and primary[1].action_id == target_action.action_id
+            )
+            if safe:
+                new_day = int(span.groups[0] or 0)
+                try:
+                    item = item.model_copy(
+                        update=_dated(
+                            target.resolved_at.year,
+                            target.resolved_at.month,
+                            new_day,
+                            _clock_in_text(span.raw_text),
+                            answer.recorded_at,
+                        )
+                    )
+                except ValueError:
+                    item.answer_gap = "INVALID_DATE"
+                    item.resolved_at = None
+                    item.resolution_status = "UNRESOLVED"
+            else:
+                item.resolved_at = None
+                item.candidates = []
+                item.resolution_status = "UNRESOLVED"
+                item.answer_gap = "MONTH"
         replacements.append(item)
-    # A just-now aside in the answer ("周四 刚才忘说了") is not a competing date.
     dated = [item for item in replacements if not _is_just_now(item)]
-    pinned = (
-        len(dated) == 1
-        and dated[0].role == "SALES_FOLLOW_UP"
-        and dated[0].resolution_status == "RESOLVED"
-        and dated[0].resolved_at is not None
-    )
+    unique: dict[tuple[datetime, str], StoredMention] = {}
+    for item in dated:
+        if item.resolved_at is not None and item.resolution_status == "RESOLVED":
+            key = (item.resolved_at, item.granularity)
+            equivalent = unique.get(key)
+            if equivalent is not None:
+                equivalent.source_quotes.extend(q for q in item.source_quotes if q not in equivalent.source_quotes)
+                equivalent.source_actions.extend(q for q in item.source_actions if q not in equivalent.source_actions)
+                replacements.remove(item)
+            else:
+                unique[key] = item
+    dated = [item for item in replacements if not _is_just_now(item)]
+    pinned = len(dated) == 1 and dated[0].resolution_status == "RESOLVED" and dated[0].resolved_at is not None
     if dropped_quotes and not pinned:
         raise TemporalContractError("temporal answer evidence is invalid")
     if pinned:
         replacement = dated[0]
-        for item in stored:
-            if item.state == "ACTIVE" and item.action_id == target_action.action_id:
-                item.state = "SUPERSEDED"
-        target_action.temporal_mention_id = replacement.mention_id
-        replacement.role = "SALES_FOLLOW_UP"
-    elif len(dated) > 1:
+        if target.ambiguity_reason == "DATE":
+            selected = next(
+                (
+                    item
+                    for item in stored
+                    if item.state == "ACTIVE"
+                    and item.action_id == target_action.action_id
+                    and item.resolved_at == replacement.resolved_at
+                    and item.granularity == replacement.granularity
+                ),
+                None,
+            )
+            if selected is not None:
+                target = selected
+                target_id = selected.mention_id
+                target_action.temporal_mention_id = selected.mention_id
+        equivalent = target.resolved_at == replacement.resolved_at and target.granularity == replacement.granularity
+        if equivalent:
+            stored.extend(replacements)
+            replacement.state = "SUPERSEDED"
+            replacement.correction_of = None
+            if target.ambiguity_reason == "DATE":
+                target.resolution_status = "RESOLVED"
+                target.ambiguity_reason = None
+                target.answer_gap = None
+                target.candidates = []
+                for item in stored:
+                    if (
+                        item.mention_id != target_id
+                        and item.state == "ACTIVE"
+                        and item.action_id == target_action.action_id
+                        and item.ambiguity_reason == "DATE"
+                    ):
+                        item.state = "SUPERSEDED"
+                draft.next_follow_time = DraftField(status="ACCEPTED", value=target.raw_text)
+        elif target.resolved_at is not None and not explicit_correction:
+            # Two distinct dates are facts, not an implicit correction.
+            target.resolution_status = "AMBIGUOUS"
+            target.ambiguity_reason = pending_reason or "DATE"
+            target.answer_gap = "DATE_CONFLICT"
+            replacement.resolution_status = "AMBIGUOUS"
+            replacement.ambiguity_reason = pending_reason or "DATE"
+            replacement.answer_gap = "DATE_CONFLICT"
+            stored.extend(replacements)
+        else:
+            for item in stored:
+                if item.state == "ACTIVE" and item.action_id == target_action.action_id:
+                    item.state = "SUPERSEDED"
+            replacement.correction_of = target_id
+            replacement.role = target.role
+            if pending_reason:
+                replacement.ambiguity_reason = pending_reason
+                replacement.resolution_status = "AMBIGUOUS"
+            target_action.temporal_mention_id = replacement.mention_id
+            target_action.revision += 1
+            stored.extend(replacements)
+            if not pending_reason:
+                draft.next_follow_time = DraftField(status="ACCEPTED", value=replacement.raw_text)
+    else:
+        gap = "UNRECOGNIZED"
+        if dated:
+            last = dated[-1]
+            gap = last.answer_gap or (
+                "INVALID_DATE"
+                if last.day is not None and last.kind != "DAY_OF_MONTH"
+                else "MONTH"
+                if last.kind == "DAY_OF_MONTH"
+                else "DATE"
+            )
+        target.answer_gap = gap
         for item in dated:
-            item.resolution_status = "AMBIGUOUS"
-            item.ambiguity_reason = "DATE"
-            item.resolved_at = None
-    stored.extend(replacements)
+            item.role = target.role
+            item.ambiguity_reason = pending_reason or "DATE"
+            item.resolution_status = "AMBIGUOUS" if len(dated) > 1 else "UNRESOLVED"
+        stored.extend(replacements)
     _write_bundle(draft, stored, bound)
     project_draft(draft)
-    if pinned and draft.next_follow_time.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
-        draft.next_follow_time = DraftField(status="ACCEPTED", value=dated[0].raw_text)
-        draft.content_json["next_follow_time_text"] = dated[0].raw_text
 
 
 def _source_action_text(quote: str) -> str:
@@ -569,12 +802,18 @@ def _same_action_clause(text: str, found: FoundSpan, action: StoredAction) -> bo
 
 
 def _meeting_context_time(text: str, found: FoundSpan) -> bool:
-    """A leading title line that is only a clock is not a follow-up date."""
+    """Source-derived communication context is not an actionable due date."""
 
+    clause = _clause(text, found.start)
+    if found.raw_text.startswith(("今天", "今日")) and re.search(r"线上会议|线下会议|会议|培训|纪要|讨论", clause):
+        return not re.search(
+            r"(?:计划|准备|将|打算|要)(?:今天|今日|下午|上午|晚上)?(?:召开|开|参加|进行|安排|线上|线下|会议|培训|讨论)|再联系|跟进",
+            clause,
+        )
     if text[: found.start].strip():
         return False
     line_end = text.find("\n", found.end)
-    line = text[found.start: line_end if line_end >= 0 else len(text)].strip()
+    line = text[found.start : line_end if line_end >= 0 else len(text)].strip()
     return line == found.raw_text
 
 
@@ -595,6 +834,92 @@ def _background_year(text: str, found: FoundSpan) -> bool:
     return False
 
 
+def _project_answered_actions(draft: TaskDraft, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
+    """Project accepted dates into uniquely matched canonical actions, never source evidence."""
+    for action in actions:
+        current = next((item for item in mentions if item.mention_id == action.temporal_mention_id), None)
+        if (
+            action.state != "ACTIVE"
+            or current is None
+            or current.state != "ACTIVE"
+            or current.correction_of is None
+            or current.resolution_status != "RESOLVED"
+            or current.resolved_at is None
+        ):
+            continue
+        at = current.resolved_at
+        label = f"{at.year}年{at.month}月{at.day}日"
+        if current.granularity == "DATETIME":
+            label += f" {at:%H:%M}"
+        history = [item for item in mentions if item.action_id == action.action_id]
+        dates = {item.raw_text for item in history}
+        for item in history:
+            if item.resolved_at is not None:
+                old = item.resolved_at
+                dates.add(
+                    f"{old.year}年{old.month}月{old.day}日"
+                    + (f" {old:%H:%M}" if item.granularity == "DATETIME" else "")
+                )
+
+        def replace_date(text: str, dates: set[str] = dates, label: str = label) -> str:
+            for span in reversed(find_time_spans(text)):
+                if span.raw_text in dates:
+                    text = text[: span.start] + label + text[span.end :]
+            return re.sub(r"(?:大概|大约|可能|也许|暂定)\s*(?=" + re.escape(label) + r")", "", text)
+
+        def identity(text: str) -> str:
+            text = re.sub(r"^(?:我方|我们|本人|销售|我)(?:将|会|负责|计划|要|在)?", "", text.strip())
+            return re.sub(r"大概|大约|可能|也许|暂定|\s", "", _source_action_text(text))
+
+        owners = {action.owner_text} - {""}
+        if action.owner_role == "SALES":
+            owners.update({"我", "我们", "本人", "我方", "销售"})
+        items = [item for item in draft.content_json.get("action_items", []) if isinstance(item, dict)]
+        matching = [item for item in items if item.get("item_id") == action.action_id]
+        if not matching:
+            matching = [
+                item
+                for item in items
+                if item.get("owner") in owners
+                and identity(str(item.get("action") or "")) == identity(action.action_text)
+            ]
+        if len(matching) == 1:
+            item = matching[0]
+            item["action"] = replace_date(str(item["action"]))
+            item["due_date"] = label
+        elif matching:
+            continue
+        if identity(draft.next_action.value or "") == identity(action.action_text):
+            draft.next_action = draft.next_action.model_copy(
+                update={"value": replace_date(draft.next_action.value or "")}
+            )
+        # A summary can mention several owners; never replace an unqualified shared action.
+        shared = any(
+            item.get("owner") not in owners and identity(str(item.get("action") or "")) == identity(action.action_text)
+            for item in items
+        )
+        base = _source_action_text(action.action_text)
+        variants = {action.action_text, *(date + base for date in dates)}
+        for date in dates:
+            variant = action.action_text
+            for span in reversed(find_time_spans(variant)):
+                if span.raw_text in dates:
+                    variant = variant[: span.start] + date + variant[span.end :]
+            variants.add(variant)
+            variants.add(re.sub(r"(?:大概|大约|可能|也许|暂定)\s*(?=" + re.escape(date) + r")", "", variant))
+        for key in ("next_action", "next_step_summary"):
+            text = draft.content_json.get(key)
+            if not isinstance(text, str):
+                continue
+            for variant in sorted(variants, key=len, reverse=True):
+                if shared:
+                    for owner in owners:
+                        text = text.replace(owner + variant, owner + replace_date(variant))
+                else:
+                    text = text.replace(variant, replace_date(variant))
+            draft.content_json[key] = text
+
+
 def project_draft(draft: TaskDraft) -> None:
     """Refresh slots and card strings from ACTIVE evidence. Does not parse again."""
 
@@ -604,6 +929,7 @@ def project_draft(draft: TaskDraft) -> None:
     raw_mentions, raw_actions = bundle
     mentions = [_stored_mention(item) for item in raw_mentions]
     actions = [_stored_action(item) for item in raw_actions]
+    _project_answered_actions(draft, mentions, actions)
     commitments = []
     for mention in mentions:
         if mention.state != "ACTIVE" or mention.role != "CUSTOMER_COMMITMENT":
@@ -625,12 +951,28 @@ def project_draft(draft: TaskDraft) -> None:
             }
         )
     draft.content_json["customer_commitments"] = commitments
-    sales = _primary_sales(mentions, actions)
+    sales = _primary_sales(mentions, actions, _primary_action_id(draft.content_json))
     notices: list[str] = []
     sales_text = ""
+    corrections = [item for item in mentions if item.state == "ACTIVE" and item.correction_of]
+    for item in corrections:
+        previous = next((old for old in mentions if old.mention_id == item.correction_of), None)
+        if previous is not None and previous.resolved_at is not None and item.resolved_at is not None:
+            notices.append(
+                f"已将当前动作日期从 {previous.resolved_at.year}年{previous.resolved_at.month}月"
+                f"{previous.resolved_at.day}日"
+                f"改为 {item.resolved_at.year}年{item.resolved_at.month}月{item.resolved_at.day}日。"
+            )
+    for mention in mentions:
+        if mention.state != "ACTIVE" or not mention.communication_time:
+            continue
+        if mention.resolved_at is not None:
+            notices.append(f'沟通时间：{mention.resolved_at.date().isoformat()}（原话："{mention.raw_text}"）。')
     if sales is not None and not isinstance(sales, list):
         sales_mention, sales_action = sales
-        if draft.next_action.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
+        if draft.next_action.status not in {"ACCEPTED", "EXPLICITLY_NONE"} and (
+            not sales_mention or not sales_mention.correction_of
+        ):
             draft.next_action = DraftField(status="CANDIDATE", value=sales_action.action_text)
             draft.content_json["next_action"] = sales_action.action_text
         if sales_mention is None:
@@ -644,7 +986,7 @@ def project_draft(draft: TaskDraft) -> None:
                 draft.next_follow_time = DraftField(status="CANDIDATE", value=sales_mention.raw_text)
             draft.content_json["next_follow_time_text"] = sales_mention.raw_text
             label = f"{sales_mention.resolved_at.month}月{sales_mention.resolved_at.day}号"
-            sales_text = _sentence(f"你将在{label}{sales_action.action_text}")
+            sales_text = _sentence(f"下一步：{draft.next_action.value or sales_action.action_text}（{label}）")
             if sales_mention.granularity == "DATE":
                 day = sales_mention.resolved_at.date().isoformat()
                 notices.append(f"已识别下次跟进日期为{day}，未指定具体时刻。")
@@ -664,7 +1006,7 @@ def project_draft(draft: TaskDraft) -> None:
 
 
 def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
-    """Return the single blocking choice, or None when confirmation may proceed."""
+    """Return the single blocking, action-scoped temporal interaction."""
 
     bundle = _bundle(draft)
     if bundle is None:
@@ -672,34 +1014,69 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
     raw_mentions, raw_actions = bundle
     mentions = [item for item in (_stored_mention(raw) for raw in raw_mentions) if item.state == "ACTIVE"]
     actions = [item for item in (_stored_action(raw) for raw in raw_actions) if item.state == "ACTIVE"]
-    action_times = [item for item in mentions if item.role == "SALES_FOLLOW_UP" or item.ambiguity_reason == "ROLE"]
+    action_by_id = {item.action_id: item for item in actions}
+    action_times = [
+        item
+        for item in mentions
+        if item.role == "SALES_FOLLOW_UP"
+        or item.ambiguity_reason in {"ROLE", "STATUS"}
+        or item.answer_gap == "DATE_CONFLICT"
+    ]
     unresolved_roles = [item for item in action_times if item.ambiguity_reason == "ROLE"]
-    if len(unresolved_roles) >= 2:
-        left, right = unresolved_roles[0], unresolved_roles[1]
-        same_phrase = left.raw_text.replace(" ", "") == right.raw_text.replace(" ", "")
-        if same_phrase:
-            phrase = left.raw_text
-            prompt = f"“{phrase}”是客户完成时间，还是你下次联系时间？"
-            labels = ("客户完成时间", "我下次联系时间")
-        else:
-            prompt = _role_prompt(left.raw_text, right.raw_text)
-            labels = (
-                f"{left.raw_text}是客户完成，{right.raw_text}是我下次联系",
-                f"{left.raw_text}是我下次联系，{right.raw_text}是客户完成",
-            )
-        return {
-            "reason": "ROLE",
-            "prompt": prompt,
-            "candidates": [
+    if unresolved_roles:
+        mention = unresolved_roles[0]
+        action = action_by_id.get(mention.action_id or "")
+        if len(unresolved_roles) >= 2 and unresolved_roles[0].action_id != unresolved_roles[1].action_id:
+            left, right = unresolved_roles[:2]
+            same_phrase = left.raw_text.replace(" ", "") == right.raw_text.replace(" ", "")
+            if same_phrase:
+                phrase = left.raw_text
+                prompt = f"“{phrase}”是客户完成时间，还是你下次联系时间？"
+                labels = ("客户完成时间", "我下次联系时间")
+            else:
+                prompt = _role_prompt(left.raw_text, right.raw_text)
+                labels = (
+                    f"{left.raw_text}是客户完成，{right.raw_text}是我下次联系",
+                    f"{left.raw_text}是我下次联系，{right.raw_text}是客户完成",
+                )
+            candidates = [
                 {"id": f"role:{left.mention_id}:customer", "label": labels[0]},
                 {"id": f"role:{left.mention_id}:sales", "label": labels[1]},
+            ]
+        else:
+            prompt = f"“{mention.raw_text}”是客户完成时间，还是你下次联系时间？"
+            candidates = [
+                {"id": f"role:{mention.mention_id}:customer", "label": "客户完成时间"},
+                {"id": f"role:{mention.mention_id}:sales", "label": "我下次联系时间"},
+            ]
+        return {
+            "reason": "ROLE",
+            "mention_id": mention.mention_id,
+            "business_action_id": action.action_id if action else None,
+            "prompt": prompt,
+            "candidates": candidates,
+        }
+    unresolved_status = next((item for item in action_times if item.ambiguity_reason == "STATUS"), None)
+    if unresolved_status is not None:
+        action = action_by_id.get(unresolved_status.action_id or "")
+        return {
+            "reason": "STATUS",
+            "mention_id": unresolved_status.mention_id,
+            "business_action_id": action.action_id if action else None,
+            "prompt": f"“{unresolved_status.raw_text}联系客户”是已经完成，还是计划今天联系？",
+            "candidates": [
+                {"id": f"status:{unresolved_status.mention_id}:completed", "label": "已经完成"},
+                {"id": f"status:{unresolved_status.mention_id}:planned", "label": "计划今天联系"},
             ],
         }
     ambiguous = next((item for item in action_times if item.resolution_status == "AMBIGUOUS" and item.candidates), None)
     if ambiguous is not None:
         day = ambiguous.day or 0
+        action = action_by_id.get(ambiguous.action_id or "")
         return {
             "reason": "MONTH",
+            "mention_id": ambiguous.mention_id,
+            "business_action_id": action.action_id if action else None,
             "prompt": _month_prompt(ambiguous.raw_text, day),
             "candidates": [
                 {"id": f"{ambiguous.mention_id}:{index}", "label": _month_label(index, day)}
@@ -712,18 +1089,38 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
             for item in action_times
             if item.resolution_status in {"AMBIGUOUS", "UNRESOLVED"}
             and not item.candidates
-            and (item.ambiguity_reason == "ROLE" or _date_answer_action(item, actions) is not None)
+            and (_date_answer_action(item, actions) is not None or item.answer_gap == "DATE_CONFLICT")
         ),
         None,
     )
     if vague is not None:
+        action = action_by_id.get(vague.action_id or "")
+        scoped = [item for item in mentions if item.action_id == vague.action_id]
+        latest = scoped[-1] if scoped else vague
+        gap = vague.answer_gap or "DATE"
+        if gap == "INVALID_DATE":
+            prompt = f"已保留原有信息，但“{latest.raw_text}”不是有效日期，请补充这个动作的有效日期。"
+        elif gap == "MONTH":
+            prompt = f"已保留“{latest.raw_text}”，还缺少月份，请补充这个动作的完整年月日。"
+        elif gap == "UNRECOGNIZED":
+            prompt = f"已保留“{vague.raw_text}”及原有动作信息，但未识别到具体日期，请补充这个动作的日期。"
+        elif gap == "DATE_CONFLICT":
+            dates = list(
+                dict.fromkeys(item.resolved_at.date().isoformat() for item in scoped if item.resolved_at is not None)
+            )
+            labels = "、".join(dates)
+            prompt = f"已保留这个动作的日期{labels}，请确认采用哪一个日期；如需更正，请明确说明。"
+        else:
+            prompt = f"“{vague.raw_text}”无法确定为唯一日期，请补充具体日期。"
         return {
             "reason": "DATE",
             "mention_id": vague.mention_id,
-            "prompt": f"“{vague.raw_text}”无法确定为唯一日期，请补充具体日期。",
+            "business_action_id": action.action_id if action else None,
+            "prompt": prompt,
             "candidates": [],
+            "gap": gap,
         }
-    sales = _primary_sales(mentions, actions)
+    sales = _primary_sales(mentions, actions, _primary_action_id(draft.content_json))
     if isinstance(sales, list):
         return {
             "reason": "PRIMARY",
@@ -772,7 +1169,7 @@ def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | Non
         fallback = stored_texts.get(mention.mention_id)
         lines.append(fallback or phrase)
     customer_line = "；".join(line for line in lines if line) or None
-    sales = _primary_sales(mentions, actions)
+    sales = _primary_sales(mentions, actions, _primary_action_id(content_json))
     if sales is None or isinstance(sales, list):
         return customer_line, None
     sales_mention, _sales_action = sales
@@ -829,9 +1226,12 @@ def apply_temporal_choice(draft: TaskDraft, choice_id: str) -> None:
         action_id = choice_id.removeprefix("primary:")
         if not any(item.action_id == action_id and item.state == "ACTIVE" for item in actions):
             raise TemporalContractError("unknown temporal choice")
-        for item in actions:
-            if item.owner_role == "SALES" and item.action_id != action_id and item.state == "ACTIVE":
-                item.state = "SUPERSEDED"
+        _write_bundle(draft, mentions, actions)
+        draft.content_json["temporal_evidence"]["primary_action_id"] = action_id
+        project_draft(draft)
+        return
+    if choice_id.startswith("status:"):
+        _apply_status_choice(choice_id, mentions, actions)
         _write_bundle(draft, mentions, actions)
         project_draft(draft)
         return
@@ -877,7 +1277,7 @@ def resolved_sales_follow_up(draft: TaskDraft) -> tuple[datetime | None, str]:
     raw_mentions, raw_actions = bundle
     mentions = [_stored_mention(item) for item in raw_mentions]
     actions = [_stored_action(item) for item in raw_actions]
-    sales = _primary_sales(mentions, actions)
+    sales = _primary_sales(mentions, actions, _primary_action_id(draft.content_json))
     if sales is None or isinstance(sales, list):
         return None, "UNKNOWN"
     mention, _action = sales
@@ -895,7 +1295,7 @@ def sales_evidence_overlay(draft: TaskDraft) -> dict[str, object] | None:
     raw_mentions, raw_actions = bundle
     mentions = [_stored_mention(item) for item in raw_mentions]
     actions = [_stored_action(item) for item in raw_actions]
-    sales = _primary_sales(mentions, actions)
+    sales = _primary_sales(mentions, actions, _primary_action_id(draft.content_json))
     if sales is None or isinstance(sales, list):
         return None
     mention, action = sales
@@ -951,6 +1351,7 @@ def _resolve_span(
         confidence=confidence,
         anchor_at=anchor,
         ambiguity_reason=reason,
+        communication_time=_is_just_now(found) or _meeting_context_time(segment_text, found),
     )
     before, after = segment_text[: found.start], segment_text[found.end :]
     uncertain = re.search(r"(?:大概|大约|差不多|可能|也许)\s*$", before) or re.match(
@@ -965,8 +1366,8 @@ def _resolve_span(
             }
         )
     resolved = _resolve_kind(found, anchor, segment_text)
-    if reason == "ROLE":
-        resolved["ambiguity_reason"] = "ROLE"
+    if reason in {"ROLE", "STATUS"}:
+        resolved["ambiguity_reason"] = reason
         if resolved.get("resolution_status") == "RESOLVED":
             resolved["resolution_status"] = "AMBIGUOUS"
     return base.model_copy(update=resolved)
@@ -1145,9 +1546,7 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
     return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN", "kind": "UNKNOWN"}
 
 
-def _dated(
-    year: int, month: int, day: int, clock: tuple[int, int] | None, anchor: datetime
-) -> dict[str, object]:
+def _dated(year: int, month: int, day: int, clock: tuple[int, int] | None, anchor: datetime) -> dict[str, object]:
     del anchor
     if clock is None:
         resolved = datetime(year, month, day)
@@ -1199,12 +1598,20 @@ def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeR
     if _is_just_now(found):
         # The moment the reported event happened, never a time to follow up.
         return "OTHER", "COMPLETED", None
+    if _meeting_context_time(text, found):
+        return "OTHER", "COMPLETED", None
     if (
         found.raw_text.startswith(("今天", "今日"))
         and re.search(r"找|联系|确认|电话跟进", clause)
         and "再" not in clause
     ):
-        return "OTHER", "COMPLETED", None
+        if re.search(r"已|已经|完成了|联系了|确认了|找了", clause):
+            return "OTHER", "COMPLETED", None
+        if re.search(
+            r"(?:计划|准备|将|打算|要|会)(?:今天|今日|稍后|下午|上午|晚上)?(?:再)?(?:找|联系|确认|电话跟进)", clause
+        ):
+            return "SALES_FOLLOW_UP", "PLANNED", None
+        return "SALES_FOLLOW_UP", "UNKNOWN", "STATUS"
     before = clause[: max(0, found.start - _clause_start(text, found.start))]
     # Customer speech names its subject or verb before the time; "周四找陈老师对齐内部反馈"
     # is a sales step whose object merely contains 反馈.
@@ -1264,7 +1671,9 @@ def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) ->
             action.action_status = "COMMITTED"
         elif mention.role == "SALES_FOLLOW_UP":
             action.owner_role = "SALES"
-            if action.action_status != "COMPLETED":
+            if mention.ambiguity_reason == "STATUS":
+                action.action_status = "UNKNOWN"
+            elif action.action_status != "COMPLETED":
                 action.action_status = "PLANNED"
         elif mention.role == "INTERNAL_ACTION":
             action.owner_role = "INTERNAL"
@@ -1275,7 +1684,7 @@ def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) ->
 
 
 def _guard_conflicting_dates(mentions: list[StoredMention], actions: list[StoredAction]) -> None:
-    """One action cannot silently choose the last of multiple distinct dates."""
+    """Distinct dates conflict only within one action; equivalents retain provenance."""
 
     for action in actions:
         active = [
@@ -1293,16 +1702,13 @@ def _guard_conflicting_dates(mentions: list[StoredMention], actions: list[Stored
         ]
         dates = {(item.resolved_at, item.granularity) for item in resolved}
         if len(dates) == 1 and len(resolved) + len(conditions) == len(active):
-            # "等会议结束后, 周四找陈老师": the vague phrase is a condition of the dated
-            # step, not a competing date. Keep it for audit; the date owns the action.
             for item in conditions:
                 item.role = "OTHER"
             action.temporal_mention_id = resolved[0].mention_id
             continue
         for item in active:
             item.resolution_status = "AMBIGUOUS"
-            item.ambiguity_reason = item.ambiguity_reason if item.ambiguity_reason == "ROLE" else "DATE"
-            item.resolved_at = None
+            item.ambiguity_reason = item.ambiguity_reason if item.ambiguity_reason in {"ROLE", "STATUS"} else "DATE"
             item.candidates = []
 
 
@@ -1310,17 +1716,22 @@ def _supersede_replacements(text: str, mentions: list[StoredMention], actions: l
     marker = _REPLACEMENT.search(text)
     if marker is None:
         return
-    cut = marker.start()
-    previous = [item for item in mentions if item.quote_end <= cut and item.role == "SALES_FOLLOW_UP"]
-    current = [item for item in mentions if item.quote_start >= cut and item.role == "SALES_FOLLOW_UP"]
-    if not previous or not current:
+    previous = [item for item in mentions if item.quote_end <= marker.start() and item.role == "SALES_FOLLOW_UP"]
+    current = [item for item in mentions if item.quote_start >= marker.end() and item.role == "SALES_FOLLOW_UP"]
+    if not previous or len(current) != 1:
         return
+    replacement = current[0]
+    target = previous[-1]
+    replacement.correction_of = target.mention_id
     for item in previous:
-        item.state = "SUPERSEDED"
-    current[0].correction_of = previous[-1].mention_id
-    for action in actions:
-        if action.temporal_mention_id in {item.mention_id for item in previous}:
-            action.state = "SUPERSEDED"
+        if item.action_id == target.action_id:
+            item.state = "SUPERSEDED"
+    old_action = _action_for(target, actions)
+    new_action = _action_for(replacement, actions)
+    if old_action is not None and new_action is not None and old_action.action_id != new_action.action_id:
+        old_action.state = "SUPERSEDED"
+    elif old_action is not None:
+        old_action.temporal_mention_id = replacement.mention_id
 
 
 def _merge_history(
@@ -1345,8 +1756,17 @@ def _merge_history(
     return [*kept, *mentions], [*kept_actions, *actions]
 
 
+def _primary_action_id(content_json: dict[str, object]) -> str | None:
+    raw = content_json.get("temporal_evidence")
+    return (
+        raw.get("primary_action_id")
+        if isinstance(raw, dict) and isinstance(raw.get("primary_action_id"), str)
+        else None
+    )
+
+
 def _primary_sales(
-    mentions: list[StoredMention], actions: list[StoredAction]
+    mentions: list[StoredMention], actions: list[StoredAction], primary_action_id: str | None = None
 ) -> tuple[StoredMention | None, StoredAction] | list[tuple[StoredMention | None, StoredAction]] | None:
     sales = [
         item
@@ -1355,17 +1775,20 @@ def _primary_sales(
     ]
     if not sales:
         return None
-    paired = []
-    for action in sales:
-        mention = next(
-            (
-                item
-                for item in mentions
-                if item.state == "ACTIVE" and item.mention_id == action.temporal_mention_id
+    paired = [
+        (
+            next(
+                (item for item in mentions if item.state == "ACTIVE" and item.mention_id == action.temporal_mention_id),
+                None,
             ),
-            None,
+            action,
         )
-        paired.append((mention, action))
+        for action in sales
+    ]
+    if primary_action_id:
+        selected = next((item for item in paired if item[1].action_id == primary_action_id), None)
+        if selected is not None:
+            return selected
     if len(paired) == 1:
         return paired[0]
     return paired
@@ -1390,10 +1813,12 @@ def _bundle(draft: TaskDraft) -> tuple[list[object], list[object]] | None:
 
 
 def _write_bundle(draft: TaskDraft, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
+    primary_action_id = _primary_action_id(draft.content_json)
     draft.content_json["temporal_evidence"] = {
         "version": PROTOCOL_VERSION,
         "mentions": [item.model_dump(mode="json") for item in mentions],
         "actions": [item.model_dump(mode="json") for item in actions],
+        "primary_action_id": primary_action_id,
     }
 
 
@@ -1595,15 +2020,25 @@ def _apply_role_choice(choice_id: str, mentions: list[StoredMention]) -> None:
         raise TemporalContractError("unknown temporal choice")
     _, mention_id, side = parts
     ordered = [item for item in mentions if item.state == "ACTIVE" and item.ambiguity_reason == "ROLE"]
-    if len(ordered) < 2 or ordered[0].mention_id != mention_id or side not in {"customer", "sales"}:
+    if not ordered or ordered[0].mention_id != mention_id or side not in {"customer", "sales"}:
         raise TemporalContractError("unknown temporal choice")
-    first, second = ordered[0], ordered[1]
-    if side == "customer":
-        first.role, second.role = "CUSTOMER_COMMITMENT", "SALES_FOLLOW_UP"
-    else:
-        first.role, second.role = "SALES_FOLLOW_UP", "CUSTOMER_COMMITMENT"
-    for item in (first, second):
-        if item.candidates:
+    first = ordered[0]
+    first.role = "CUSTOMER_COMMITMENT" if side == "customer" else "SALES_FOLLOW_UP"
+    chosen = [first]
+    same_action = [item for item in ordered[1:] if item.action_id == first.action_id]
+    if same_action:
+        for item in same_action:
+            item.role = first.role
+        chosen.extend(same_action)
+    elif len(ordered) >= 2:
+        second = ordered[1]
+        second.role = "SALES_FOLLOW_UP" if side == "customer" else "CUSTOMER_COMMITMENT"
+        chosen.append(second)
+    for item in chosen:
+        if item.answer_gap == "DATE_CONFLICT":
+            item.ambiguity_reason = "DATE"
+            item.resolution_status = "AMBIGUOUS"
+        elif item.candidates:
             item.ambiguity_reason = "MONTH"
             item.resolution_status = "AMBIGUOUS"
         elif item.resolved_at is not None:
@@ -1613,5 +2048,3 @@ def _apply_role_choice(choice_id: str, mentions: list[StoredMention]) -> None:
             item.ambiguity_reason = None
             if item.granularity in {"MONTH_SEGMENT", "FULL_MONTH"}:
                 item.resolution_status = "RESOLVED"
-
-

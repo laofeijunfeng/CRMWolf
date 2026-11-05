@@ -11,6 +11,7 @@ from app.services.assistant.action_evidence import (
 )
 
 WaitingType = Literal["FIELD", "CONFIRMATION", "ACTIVITY_KIND", "OBJECT_SELECTION", "FOLLOW_UP_DISPOSITION"]
+TemporalWaitingReason = Literal["DATE", "MONTH", "ROLE", "STATUS", "PRIMARY"]
 Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
@@ -37,15 +38,18 @@ class ActivityPreview(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     customer_name: str
-    activity_kind: Literal[
-        "PHONE_FOLLOW_UP",
-        "WECHAT_FOLLOW_UP",
-        "EMAIL_FOLLOW_UP",
-        "VISIT_FOLLOW_UP",
-        "OTHER_FOLLOW_UP",
-        "ONLINE_MEETING",
-        "OFFLINE_MEETING",
-    ] | None = None
+    activity_kind: (
+        Literal[
+            "PHONE_FOLLOW_UP",
+            "WECHAT_FOLLOW_UP",
+            "EMAIL_FOLLOW_UP",
+            "VISIT_FOLLOW_UP",
+            "OTHER_FOLLOW_UP",
+            "ONLINE_MEETING",
+            "OFFLINE_MEETING",
+        ]
+        | None
+    ) = None
     channel_status: Literal["recognized", "required", "selected", "revised"] = "recognized"
     channel_status_label: str | None = Field(default=None, max_length=40)
     channel_source_text: str | None = Field(default=None, max_length=400)
@@ -196,6 +200,16 @@ class TaskDraft(BaseModel):
     channel_origin_label: str | None = Field(default=None, max_length=40)
 
 
+class TemporalWaitingTarget(BaseModel):
+    """Server-derived evidence target for one temporal clarification."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mention_id: str | None = Field(default=None, max_length=128)
+    business_action_id: str | None = Field(default=None, max_length=128)
+    reason: TemporalWaitingReason
+
+
 class TaskWaiting(BaseModel):
     """Current pause point; types are a closed enum."""
 
@@ -210,6 +224,7 @@ class TaskWaiting(BaseModel):
     fingerprint: str | None = Field(default=None, max_length=64)
     candidates: list[dict[str, object]] = Field(default_factory=list)
     hint: str | None = Field(default=None, max_length=400)
+    temporal_target: TemporalWaitingTarget | None = None
     confirmation_payload: ConfirmationPayload | None = None
 
     @model_validator(mode="after")

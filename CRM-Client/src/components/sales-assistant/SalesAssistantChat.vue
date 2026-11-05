@@ -25,7 +25,7 @@ interface ChatEntry {
   at?: Date | undefined
   /** Historical messages never hold authoritative task state or interactive cards. */
   replayed: boolean
-  outcome?: 'activity_written' | 'failure' | undefined
+  outcome?: NonNullable<ConversationView['messages'][number]['outcome']> | undefined
   ui?: AgentUIEnvelope | null | undefined
 }
 
@@ -120,7 +120,13 @@ const isTerminal = computed(() => task.value != null && task.value.status !== 'A
 
 
 const inputPlaceholder = computed(() => {
-  if (waiting.value?.type === 'FIELD' && waiting.value.field === 'temporal_choice') return '或输入完整日期，例如 2026-10-30'
+  if (waiting.value?.type === 'FIELD' && waiting.value.field === 'temporal_choice') {
+    const active = entries.value.flatMap((entry) => entry.ui?.blocks ?? []).find((block) =>
+      block.type === 'interaction' && block.state === 'ACTIVE' && block.submit_action_id === waiting.value?.action_id)
+    return active?.type === 'interaction' && active.interaction_type === 'text_input'
+      ? active.fields[0]?.placeholder ?? '请按当前问题补充信息'
+      : '请按当前问题补充信息'
+  }
   return '描述一次客户沟通，我来整理成跟进或会议纪要…'
 })
 
@@ -195,7 +201,7 @@ const noteEpisodeFailure = (code: string | undefined): void => {
   processing.value.settlement = code === 'UNKNOWN_COMMIT_RESULT' ? 'unknown' : 'failed'
 }
 const elapsedSeconds = ref(0)
-let elapsedTimer: ReturnType<typeof setInterval> | null = null
+let elapsedTimer: number | null = null
 
 const presetStages = (input: SubmitAssistantInput, hasWaiting: boolean): StageName[] => {
   if (input.kind === 'text' && !hasWaiting) return ['classify', 'structure', 'quality_gate']
