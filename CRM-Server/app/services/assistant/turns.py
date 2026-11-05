@@ -29,6 +29,7 @@ from app.services.assistant.failure_contract import (
     AssistantStageFailure,
     bind_attempt_deadline,
     reset_attempt_deadline,
+    root_failure_presentation,
     stage_user_message,
 )
 from app.services.assistant.llm import AssistantLLMError
@@ -76,6 +77,8 @@ def classify_turn_error(exc: Exception) -> str:
     """Map one exception to the TRD §8 closed error-code taxonomy."""
 
     if isinstance(exc, AssistantLLMError):
+        if exc.code in {AssistantFailureCode.REQUEST_PROTOCOL_ERROR, AssistantFailureCode.AUTHENTICATION_ERROR}:
+            return exc.code.value
         return "AI_UNAVAILABLE"
     if isinstance(exc, (AssistantStateConflict, TaskStateConflictError, InvalidTaskTransitionError)):
         return "STATE_CONFLICT"
@@ -1004,17 +1007,24 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                     .values(active_turn_id=None)
                     .execution_options(synchronize_session=False)
                 )
+                retryable = code == "RETRYABLE_DEPENDENCY_FAILURE"
+                message = (
+                    root_failure_presentation(AssistantFailureCode(code)).message
+                    if code in {
+                        AssistantFailureCode.REQUEST_PROTOCOL_ERROR.value,
+                        AssistantFailureCode.AUTHENTICATION_ERROR.value,
+                    }
+                    else (
+                        "处理未完成，请查看最新任务状态后重试"
+                        if retryable
+                        else "处理未完成，结果待核对，请查看最新任务状态。"
+                    )
+                )
                 add_event(
                     db,
                     turn,
                     "error",
-                    {
-                        "code": code,
-                        "retryable": code == "RETRYABLE_DEPENDENCY_FAILURE",
-                        "message": "处理未完成，请查看最新任务状态后重试"
-                        if code == "RETRYABLE_DEPENDENCY_FAILURE"
-                        else "处理未完成，结果待核对，请查看最新任务状态。",
-                    },
+                    {"code": code, "retryable": retryable, "message": message},
                 )
                 db.commit()
                 failed_task = db.get(AssistantTask, turn.task_id)

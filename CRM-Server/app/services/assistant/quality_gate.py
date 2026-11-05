@@ -6,11 +6,21 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from app.services.assistant.model_transport import AssistantLLMError, AssistantModelTransport, team_model_credentials
+from app.services.assistant.model_transport import (
+    AssistantLLMError,
+    AssistantModelTransport,
+    team_model_credentials,
+    team_output_mode,
+)
 from app.services.customer_activity_ai.rules import get_activity_evaluation_rubric
-from app.services.customer_activity_ai.schemas import ActivityEvaluationResult, FollowUpContent, MeetingContent, PrincipleScore
+from app.services.customer_activity_ai.schemas import (
+    ActivityEvaluationResult,
+    FollowUpContent,
+    MeetingContent,
+    PrincipleScore,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -30,6 +40,37 @@ class AssistantActivityScore(ActivityEvaluationResult):
     reason: str = Field(..., min_length=1)
     principle_scores: dict[str, PrincipleScore] = Field(..., min_length=1)
 
+
+class NamedPrincipleScore(PrincipleScore):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1)
+
+
+class AssistantQualityResponse(BaseModel):
+    """Closed wire shape; named dimensions normalize to the existing public score map."""
+    model_config = ConfigDict(extra="forbid")
+    score: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=1)
+    principle_scores: list[NamedPrincipleScore] = Field(min_length=1)
+    supplement_question: str | None
+
+    def to_activity_score(self) -> AssistantActivityScore:
+        if len({item.name for item in self.principle_scores}) != len(self.principle_scores):
+            raise ValueError("duplicate quality dimension")
+        return AssistantActivityScore.model_validate({
+            **self.model_dump(exclude={"principle_scores"}),
+            "principle_scores": {item.name: item.model_dump(exclude={"name"}) for item in self.principle_scores},
+        })
+
+
+def quality_system_prompt(kind: str) -> str:
+    rubric = get_activity_evaluation_rubric("meeting" if kind != "FOLLOW_UP" else "follow_up")
+    return (
+        f"你是 CRM 客户活动质检员。按{rubric.title}评分。\n"
+        f"{rubric.principles}\n重点：{rubric.emphasis}\n"
+        "只根据用户原文与最终稿事实评分，不得编造。score 为 0-100 整数；"
+        "principle_scores 数组逐维列出 name、score、max_score、comment；低分只提一个最重要的补充问题。"
+    )
 
 @dataclass(frozen=True)
 class QualityGateOutcome:
@@ -61,7 +102,6 @@ class QualityGate:
         if kind not in {"FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"}:
             raise AssistantLLMError("未知活动类型")
         meeting = kind != "FOLLOW_UP"
-        rubric = get_activity_evaluation_rubric("meeting" if meeting else "follow_up")
         if content_json is None:
             payload = (
                 MeetingContent(key_minutes=[content] if content else [], next_step_summary=next_action)
@@ -78,13 +118,9 @@ class QualityGate:
                 api_host=host,
                 api_key=key,
                 model=name,
+                output_mode=team_output_mode(db, team_id),
                 temperature=0.0,
-                system_prompt=(
-                    f"你是 CRM 客户活动质检员。按{rubric.title}评分。\n"
-                    f"{rubric.principles}\n重点：{rubric.emphasis}\n"
-                    "只根据用户原文与最终稿事实评分，不得编造。score 为 0-100 整数；"
-                    "principle_scores 各维度给分与理由；低分只提一个最重要的补充问题。"
-                ),
+                system_prompt=quality_system_prompt(kind),
                 user_prompt=json.dumps(
                     {
                         "activity_kind": kind,
@@ -94,14 +130,14 @@ class QualityGate:
                     },
                     ensure_ascii=False,
                 ),
-                response_model=AssistantActivityScore,
+                response_model=AssistantQualityResponse,
                 error_prefix="客户活动评分",
                 stream=True,
                 retry_timeouts=True,
             )
             if result is None:
                 raise AssistantLLMError("客户活动评分：结构化输出不可用")
-            result = AssistantActivityScore.model_validate(result)
+            result = AssistantQualityResponse.model_validate(result).to_activity_score()
         except AssistantLLMError:
             raise
         except (RuntimeError, TimeoutError, ValueError, TypeError) as exc:
@@ -109,7 +145,7 @@ class QualityGate:
         detail = {
             **result.model_dump(mode="json"),
             "model_name": name,
-            "structured_output": "json_object",
+            "structured_output": team_output_mode(db, team_id),
         }
         if result.is_valid:
             return QualityGateOutcome(True, result.score, result.reason, None, None, detail)

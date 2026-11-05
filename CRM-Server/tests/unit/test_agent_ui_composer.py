@@ -449,6 +449,22 @@ def test_root_failure_is_composed_as_structured_error_block() -> None:
     assert error.retryable is True
 
 
+@pytest.mark.parametrize("code", ["REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"])
+def test_provider_rejection_uses_canonical_error_and_never_enables_retry(code: str) -> None:
+    composition = AgentUIComposer().compose(
+        FailureDispatchResult(
+            error=AgentExecutionError(code=code, message="https://secret.example sk-live", retryable=True)
+        )
+    )
+    error = composition.body.blocks[0]
+    assert error.type == "error"
+    assert error.code == code
+    assert error.retryable is False
+    assert "secret.example" not in error.message and "sk-live" not in error.message
+    assert composition.content == error.message
+    assert composition.body.metadata.accessibility_label == error.message
+
+
 @pytest.mark.parametrize("content", ["=", "-", "before\n\n=\nafter", "金额条件：1 < 2 > 0"])  # noqa: RUF001
 def test_text_projection_preserves_non_markdown_business_symbols(content: str) -> None:
     composition = AgentUIComposer().compose(

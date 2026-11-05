@@ -44,6 +44,7 @@ from app.services.agent.ui.schemas import (
     ProcessItem,
     TextBlock,
 )
+from app.services.assistant.failure_contract import root_failure_code, root_failure_presentation
 from app.utils.public_id import generate_public_id
 
 AgentUIRoute = Literal["QUERY", "WORKFLOW", "CLARIFY"]
@@ -125,6 +126,8 @@ _ALLOWED_ERROR_CODES = {
     "UNKNOWN_ACTION_NOMINATED",
     "UNKNOWN_COMMIT_RESULT",
     "CONFIGURATION_ERROR",
+    "REQUEST_PROTOCOL_ERROR",
+    "AUTHENTICATION_ERROR",
     "STATE_CONFLICT",
     "RETRYABLE_DEPENDENCY_FAILURE",
     "STRUCTURING_UNAVAILABLE",
@@ -423,6 +426,8 @@ class AgentUIComposer:
         block: ErrorBlock,
         blocks: tuple[AgentUIBlock, ...] = (),
     ) -> AgentUIComposition:
+        if block.code in {"REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"}:
+            text = block.message
         projected_content = project_agent_markdown_to_plain_text(text)
         return AgentUIComposition(
             content=projected_content,
@@ -712,6 +717,11 @@ class AgentUIComposer:
             "AgentErrorCode",
             normalized_code if normalized_code in _ALLOWED_ERROR_CODES else "INTERNAL_ERROR",
         )
+        if normalized in {"REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"}:
+            presentation = root_failure_presentation(root_failure_code(normalized))
+            title = presentation.title
+            message = presentation.message
+            retryable = False
         return ErrorBlock(
             id="b_error_1",
             type="error",

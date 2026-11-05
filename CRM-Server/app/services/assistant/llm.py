@@ -19,6 +19,7 @@ from app.services.assistant.model_transport import (
     AssistantLLMError,
     AssistantModelTransport,
     team_model_credentials,
+    team_output_mode,
 )
 from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingActionItem, MeetingContent
 
@@ -120,6 +121,7 @@ class AssistantLLM:
                 api_host=host,
                 api_key=key,
                 model=name,
+                output_mode=team_output_mode(db, team_id),
                 temperature=0.0,
                 system_prompt=prompt,
                 user_prompt=text,

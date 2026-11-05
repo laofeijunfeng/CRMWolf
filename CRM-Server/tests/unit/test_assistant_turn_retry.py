@@ -394,6 +394,43 @@ def test_organize_stage_failure_is_failed_and_reprocessed_without_a_new_request(
     assert db_session.query(AssistantConversationEntry).count() == entries_before
 
 
+@pytest.mark.parametrize("code", ["REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"])
+def test_provider_rejection_keeps_durable_code_without_authorizing_reprocess(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    code: str,
+) -> None:
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    task, turn = retryable_turn
+
+    async def handle_task(db: Session, current: AssistantTask, _user_input: object, reporter: object = None) -> None:
+        raise AssistantLLMError("provider request rejected", code=AssistantFailureCode(code))
+
+    monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=handle_task))
+    factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
+    asyncio.run(turns.execute_turn(turn.id, factory=factory))
+    db_session.expire_all()
+    latest = db_session.get(AssistantTurn, turn.id)
+    assert latest is not None and latest.status == "FAILED" and latest.last_error_code == code
+    event = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").one()
+    assert event.data_json["code"] == code and event.data_json["retryable"] is False
+    assert "结果待核对" not in event.data_json["message"]
+    assert "provider request rejected" not in event.data_json["message"]
+    scheduled: list[int] = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry",
+        json={"expected_lease_version": latest.lease_version, "after_seq": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "FAILED" and response.json()["reprocess_allowed"] is False
+    assert scheduled == []
+
+
 def test_unexpected_turn_exception_rolls_back_uncommitted_task_edits(
     client: TestClient,
     db_session: Session,

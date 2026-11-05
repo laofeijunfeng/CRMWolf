@@ -7,6 +7,8 @@ from app.core.database import Base
 from cryptography.fernet import Fernet
 import base64
 import os
+import hashlib
+import json
 
 
 # 生成有效的 Fernet key（从固定种子生成）
@@ -37,6 +39,9 @@ class AIConfig(Base):
     model_name = Column(String(100), nullable=False, comment="模型名称（如 deepseek-chat）")
     temperature = Column(Float, nullable=False, default=0.1, comment="温度参数（固定0.1）")
     max_tokens = Column(Integer, nullable=False, default=1024, comment="最大tokens（固定1024）")
+    structured_output_mode = Column(String(16), nullable=False, default="json_object", server_default="json_object")
+    assistant_verified_fingerprint = Column(String(64), nullable=True)
+    assistant_verified_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     updated_by = Column(Integer, comment="更新人ID")
 
@@ -59,6 +64,12 @@ class AIConfig(Base):
         """解密 API Key"""
         fernet = Fernet(ENCRYPTION_KEY)
         return fernet.decrypt(encrypted_key.encode()).decode()
+
+    @staticmethod
+    def capability_fingerprint(api_host: str, api_key: str, model: str, output_mode: str) -> str:
+        """Bind assistant verification to the exact credentials and protocol, never expose it."""
+        value = json.dumps([api_host, api_key, model, output_mode], ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
     @staticmethod
     def mask_api_key(api_key: str) -> str:

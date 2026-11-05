@@ -13,6 +13,8 @@ from app.utils.time import business_now
 
 class AssistantFailureCode(StrEnum):
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
+    REQUEST_PROTOCOL_ERROR = "REQUEST_PROTOCOL_ERROR"
+    AUTHENTICATION_ERROR = "AUTHENTICATION_ERROR"
     UPSTREAM_UNAVAILABLE = "UPSTREAM_UNAVAILABLE"
     UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"
     MODEL_OUTPUT_INVALID = "MODEL_OUTPUT_INVALID"
@@ -24,6 +26,8 @@ class AssistantFailureCode(StrEnum):
 _ROOT_FAILURE_CODES = frozenset(
     {
         AssistantFailureCode.CONFIGURATION_ERROR,
+        AssistantFailureCode.REQUEST_PROTOCOL_ERROR,
+        AssistantFailureCode.AUTHENTICATION_ERROR,
         AssistantFailureCode.UPSTREAM_UNAVAILABLE,
         AssistantFailureCode.UPSTREAM_TIMEOUT,
         AssistantFailureCode.MODEL_OUTPUT_INVALID,
@@ -53,6 +57,14 @@ _PRESENTATIONS: dict[AssistantFailureCode, RootFailurePresentation] = {
     AssistantFailureCode.CONFIGURATION_ERROR: RootFailurePresentation(
         "模型配置不可用",
         "模型配置暂不可用，本次没有写入客户活动，请联系管理员。",
+    ),
+    AssistantFailureCode.REQUEST_PROTOCOL_ERROR: RootFailurePresentation(
+        "模型请求协议不兼容",
+        "模型服务提供方不兼容当前请求或结构化输出协议，本次没有写入客户活动，请联系管理员。",
+    ),
+    AssistantFailureCode.AUTHENTICATION_ERROR: RootFailurePresentation(
+        "模型服务认证或权限异常",
+        "模型服务认证失败或访问权限不足，本次没有写入客户活动，请联系管理员。",
     ),
     AssistantFailureCode.UPSTREAM_UNAVAILABLE: RootFailurePresentation(
         "模型服务不可达",
@@ -132,6 +144,8 @@ REPROCESS_HINT = "使用同一条任务重新处理，不会重复写入。"
 _EXPLICIT_ORGANIZE_CODES = frozenset(
     {
         AssistantFailureCode.CONFIGURATION_ERROR,
+        AssistantFailureCode.REQUEST_PROTOCOL_ERROR,
+        AssistantFailureCode.AUTHENTICATION_ERROR,
         AssistantFailureCode.UPSTREAM_UNAVAILABLE,
         AssistantFailureCode.UPSTREAM_TIMEOUT,
         AssistantFailureCode.MODEL_OUTPUT_INVALID,
@@ -283,7 +297,11 @@ def stage_user_message(
         return f"{_stage_label(stage, activity_kind)}模型服务暂时不可达，本次没有写入客户活动。"
     if code is AssistantFailureCode.MODEL_OUTPUT_INVALID:
         return f"{_stage_label(stage, activity_kind)}模型返回结果格式异常，本次没有写入客户活动。"
-    if code is AssistantFailureCode.CONFIGURATION_ERROR:
+    if code in {
+        AssistantFailureCode.CONFIGURATION_ERROR,
+        AssistantFailureCode.REQUEST_PROTOCOL_ERROR,
+        AssistantFailureCode.AUTHENTICATION_ERROR,
+    }:
         return _PRESENTATIONS[code].message
     return _PRESENTATIONS[AssistantFailureCode.INTERNAL_ERROR].message
 

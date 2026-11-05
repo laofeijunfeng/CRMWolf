@@ -957,6 +957,7 @@ def test_root_understanding_waits_150_seconds(monkeypatch):
         "team_model_credentials",
         lambda db, team_id: ("https://model.example", "not-a-real-key", "test-model"),
     )
+    monkeypatch.setattr(router_module, "team_output_mode", lambda db, team_id: "json_object")
     classifier = ConversationRootClassifier()
     classifier.transport = Transport()
     result = asyncio.run(
@@ -1420,6 +1421,34 @@ async def test_root_configuration_failure_has_no_retry_and_hides_provider_text(d
     assert message.ui.suggested_actions == []
     assert "secret.example" not in message.text
     assert "sk-live" not in caplog.text
+    assert db.query(AssistantTask).count() == 0
+
+
+@pytest.mark.parametrize("code", ["REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"])
+async def test_root_provider_rejection_keeps_code_and_denies_retry(db, code):
+    from app.crud.assistant_conversation import ConversationConflict
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class Broken:
+        async def classify(self, *args, **kwargs):
+            raise AssistantLLMError("https://secret.example sk-live", code=AssistantFailureCode(code))
+
+    service = ConversationService(classifier=Broken())
+    state = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    message = response.conversation.messages[-1]
+    entry = db.query(AssistantConversationEntry).one()
+    assert entry.error_code == message.error_code == code
+    assert message.ui is not None
+    error = message.ui.blocks[0]
+    assert error.type == "error" and error.code == code and error.retryable is False
+    assert message.ui.suggested_actions == []
+    assert "secret.example" not in message.text and "sk-live" not in message.text
+    with pytest.raises(ConversationConflict):
+        await service.retry_entry(
+            db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=response.conversation.version
+        )
     assert db.query(AssistantTask).count() == 0
 
 

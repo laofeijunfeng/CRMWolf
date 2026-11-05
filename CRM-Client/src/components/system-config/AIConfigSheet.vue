@@ -45,7 +45,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { handleApiError } from '@/utils/errorHandler'
-import { aiConfigApi, type AIConfigResponse, type SSEEvent } from '@/api/aiConfig'
+import { aiConfigApi, type AIConfigResponse, type SSEEvent, type AssistantCapabilityResult, type AssistantVerificationStage } from '@/api/aiConfig'
 import { useUserStore } from '@/stores/user'
 
 // ==================== Props & Emits ====================
@@ -75,6 +75,18 @@ const configInfo = ref<AIConfigResponse | null>(null)
 const streamingContent = ref('')
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const selectedProvider = ref('custom')
+const verifyingAssistant = ref(false)
+const assistantResult = ref<AssistantCapabilityResult | null>(null)
+let configurationRevision = 0
+const savedForm = ref('')
+const formSnapshot = (): string => JSON.stringify([values.api_host, values.api_key, values.model_name, values.structured_output_mode])
+const hasUnsavedChanges = computed(() => formSnapshot() !== savedForm.value)
+const assistantStageLabels: Record<AssistantVerificationStage, string> = {
+  CONFIGURATION: '配置检查', ROOT_DECISION: '根决策', MEETING_STREAM: '会议流式结构化',
+  QUALITY_STREAM: '质量流式评估',
+  SAVE_VERIFICATION: '保存验证结果', COMPLETE: '全部完成',
+}
+const assistantReady = computed(() => !hasUnsavedChanges.value && configInfo.value?.assistant_verification_state === 'VERIFIED')
 
 // ==================== Zod Schema ====================
 const aiConfigSchema = toTypedSchema(
@@ -82,10 +94,10 @@ const aiConfigSchema = toTypedSchema(
     api_host: z.string()
       .min(1, '请输入接口地址')
       .url('请输入有效的 URL 地址'),
-    api_key: z.string()
-      .min(8, 'API Key 长度至少 8 位'),
+    api_key: z.union([z.literal(''), z.string().min(8, 'API Key 长度至少 8 位')]),
     model_name: z.string()
-      .min(1, '请输入模型名称')
+      .min(1, '请输入模型名称'),
+    structured_output_mode: z.enum(['json_object', 'json_schema'])
   })
 )
 
@@ -95,7 +107,8 @@ const { handleSubmit, resetForm, values } = useForm({
   initialValues: {
     api_host: '',
     api_key: '',
-    model_name: ''
+    model_name: '',
+    structured_output_mode: 'json_object' as const
   }
 })
 
@@ -122,7 +135,8 @@ const handleProviderChange = (provider: unknown): void => {
       values: {
         api_host: defaults.api_host,
         api_key: values.api_key ?? '',
-        model_name: defaults.model_name
+        model_name: defaults.model_name,
+        structured_output_mode: values.structured_output_mode ?? 'json_object'
       }
     })
   }
@@ -139,10 +153,12 @@ const fetchConfig = async (): Promise<void> => {
         values: {
           api_host: response.data.api_host,
           api_key: '',
-          model_name: response.data.model_name
+          model_name: response.data.model_name,
+          structured_output_mode: response.data.structured_output_mode
         }
       })
     }
+    savedForm.value = formSnapshot()
   } catch (error) {
     handleApiError(error, '获取 AI 配置')
   } finally {
@@ -153,13 +169,18 @@ const fetchConfig = async (): Promise<void> => {
 const onSubmit = handleSubmit(async (formValues) => {
   saving.value = true
   try {
+    if (!configInfo.value && !formValues.api_key) {
+      toast.warning('首次配置必须提供 API Key')
+      return
+    }
     await aiConfigApi.saveConfig({
       api_host: formValues.api_host,
       api_key: formValues.api_key,
-      model_name: formValues.model_name
+      model_name: formValues.model_name,
+      structured_output_mode: formValues.structured_output_mode
     })
     toast.success('AI 配置保存成功')
-    fetchConfig()
+    await fetchConfig()
   } catch (error) {
     handleApiError(error, '保存 AI 配置')
   } finally {
@@ -173,6 +194,11 @@ const handleTest = async (): Promise<void> => {
     return
   }
 
+  if (hasUnsavedChanges.value) {
+    toast.warning('请先保存配置后再测试')
+    return
+  }
+  const revision = configurationRevision
   testing.value = true
   testResult.value = null
   streamingContent.value = ''
@@ -188,6 +214,7 @@ const handleTest = async (): Promise<void> => {
     await aiConfigApi.testConnectionSSE(
       { test_message: testData.test_message },
       (event: SSEEvent) => {
+        if (revision !== configurationRevision) return
         if (event.event === 'start') {
           toast.info('正在连接 AI 服务...')
         } else if (event.event === 'content') {
@@ -211,16 +238,51 @@ const handleTest = async (): Promise<void> => {
       token
     )
   } catch (error) {
-    testResult.value = {
-      success: false,
-      message: '连接测试失败'
+    if (revision === configurationRevision) {
+      testResult.value = { success: false, message: '连接测试失败' }
+      handleApiError(error, 'AI 连接测试')
     }
-    handleApiError(error, 'AI 连接测试')
+  } finally {
     testing.value = false
   }
 }
 
 // ==================== Lifecycle ====================
+watch(() => [values.api_host, values.api_key, values.model_name, values.structured_output_mode], () => {
+  configurationRevision += 1
+  testResult.value = null
+  streamingContent.value = ''
+  assistantResult.value = null
+}, { flush: 'sync' })
+
+const handleAssistantVerification = async (): Promise<void> => {
+  if (!configInfo.value || hasUnsavedChanges.value) return
+  const revision = configurationRevision
+  verifyingAssistant.value = true
+  assistantResult.value = null
+  configInfo.value = { ...configInfo.value, assistant_verification_state: 'UNVERIFIED', assistant_verified_at: null }
+  try {
+    const result = await aiConfigApi.testAssistantCapability()
+    if (revision !== configurationRevision) return
+    // Reload persisted protocol and readiness only while the user's form is unchanged.
+    const config = await aiConfigApi.getConfig()
+    if (revision !== configurationRevision) return
+    configInfo.value = config.data
+    if (config.data) {
+      resetForm({ values: {
+        api_host: config.data.api_host, api_key: '', model_name: config.data.model_name,
+        structured_output_mode: config.data.structured_output_mode,
+      } })
+      savedForm.value = formSnapshot()
+    }
+    assistantResult.value = result
+    if (result.success) toast.success('销售助手能力验证通过')
+  } catch (error) {
+    if (revision === configurationRevision) handleApiError(error, '销售助手能力验证')
+  } finally {
+    verifyingAssistant.value = false
+  }
+}
 watch(active, (isActive) => {
   if (isActive) {
     fetchConfig()
@@ -315,8 +377,24 @@ watch(active, (isActive) => {
                   </FormItem>
                 </FormField>
 
+                <FormField v-slot="{ componentField }" name="structured_output_mode">
+                  <FormItem>
+                    <FormLabel>结构化输出协议</FormLabel>
+                    <Select v-bind="componentField">
+                      <FormControl>
+                        <SelectTrigger class="min-h-11"><SelectValue /></SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="json_object">JSON 对象（本地完整校验）</SelectItem>
+                        <SelectItem value="json_schema">JSON Schema（严格协议）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p class="text-xs text-muted-foreground">能力验证优先检查严格协议，仅在服务明确不支持时检查 JSON 对象协议。</p>
+                    <FormMessage />
+                  </FormItem>
+                </FormField>
                 <div class="flex justify-end pt-4">
-                  <Button type="submit" :loading="saving">
+                  <Button type="submit" class="min-h-11" :loading="saving" :disabled="verifyingAssistant || testing">
                     <Save class="w-4 h-4 mr-2" />
                     保存配置
                   </Button>
@@ -325,11 +403,43 @@ watch(active, (isActive) => {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle class="text-base">销售助手能力验证</CardTitle>
+              <CardDescription>使用固定无害样例验证根决策、完整会议流式输出与质量评估；不会写入 CRM。</CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-4">
+              <div class="text-sm" aria-live="polite">
+                <p>{{ assistantReady ? '当前已保存配置：销售助手能力已验证' : '当前配置尚未通过销售助手能力验证' }}</p>
+                <p v-if="configInfo" class="mt-1 text-xs text-muted-foreground">
+                  当前协议：{{ configInfo.structured_output_mode }}
+                  <span v-if="assistantReady && configInfo.assistant_verified_at"> · 验证时间：{{ configInfo.assistant_verified_at }}</span>
+                </p>
+                <p v-if="hasUnsavedChanges" class="mt-1 text-xs text-muted-foreground">配置已修改，请先保存，再验证已保存配置。</p>
+              </div>
+              <div class="flex justify-end">
+                <Button class="min-h-11" :loading="verifyingAssistant" :disabled="!configInfo || hasUnsavedChanges || saving || testing" @click="handleAssistantVerification">
+                  <Play class="mr-2 size-4" />
+                  {{ verifyingAssistant ? '验证中…' : '验证销售助手能力' }}
+                </Button>
+              </div>
+              <div v-if="assistantResult" role="status" aria-live="polite">
+                <Alert :variant="assistantResult.success ? 'default' : 'destructive'">
+                  <Check v-if="assistantResult.success" class="size-4" />
+                  <AlertCircle v-else class="size-4" />
+                  <AlertDescription>
+                    <p>{{ assistantResult.message }}</p>
+                    <p class="mt-1 text-xs">阶段：{{ assistantStageLabels[assistantResult.stage] }}<span v-if="assistantResult.code"> · {{ assistantResult.code }}</span><span v-if="assistantResult.output_mode"> · {{ assistantResult.output_mode }}</span></p>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            </CardContent>
+          </Card>
           <!-- 测试卡片 -->
           <Card>
             <CardHeader>
               <CardTitle class="text-base">连接测试</CardTitle>
-              <CardDescription>验证 AI 服务是否正常连接</CardDescription>
+              <CardDescription>普通连接成功只代表服务可连接，不代表销售助手已就绪。</CardDescription>
             </CardHeader>
             <CardContent class="space-y-4">
               <div class="space-y-2">
@@ -341,7 +451,7 @@ watch(active, (isActive) => {
               </div>
 
               <div class="flex justify-end">
-                <Button :loading="testing" @click="handleTest">
+                <Button class="min-h-11" :loading="testing" :disabled="hasUnsavedChanges || saving || verifyingAssistant" @click="handleTest">
                   <Play class="w-4 h-4 mr-2" />
                   {{ testing ? '测试中...' : '测试连接' }}
                 </Button>
@@ -354,7 +464,7 @@ watch(active, (isActive) => {
                     <Check v-if="testResult.success" class="h-4 w-4" />
                     <AlertCircle v-else class="h-4 w-4" />
                     <AlertDescription>
-                      {{ testResult.success ? '测试成功' : testResult.message }}
+                      {{ testResult.success ? '普通连接成功；请另行验证销售助手能力' : testResult.message }}
                     </AlertDescription>
                   </Alert>
                 </div>
@@ -447,13 +557,11 @@ watch(active, (isActive) => {
   </component>
 </template>
 
-<style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
+<style scoped>
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

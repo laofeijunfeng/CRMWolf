@@ -448,6 +448,38 @@ async def test_accepted_slots_keep_canonical_values_through_model_supplement(db_
     assert draft.content_json["risks"] == ["预算延迟"]
 
 
+@pytest.mark.parametrize("code", ["REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"])
+@pytest.mark.parametrize("stage", ["structure", "quality_gate"])
+async def test_provider_rejection_is_persisted_as_non_retryable_stage_failure(db_session, code, stage):
+    failure_code = AssistantFailureCode(code)
+    rejected = AssistantLLMError("https://secret.example sk-live", code=failure_code)
+    rejected.__cause__ = ValueError("provider response detail")
+
+    class RejectedStructurer(FakeStructurer):
+        async def structure(self, *args, **kwargs):
+            raise rejected
+
+    task = _make_task(db_session)
+    structurer = (
+        RejectedStructurer(KindDecision(kind="FOLLOW_UP"))
+        if stage == "structure"
+        else FakeStructurer(
+            KindDecision(kind="FOLLOW_UP"),
+            StructureDraftResult(kind_confirmed="FOLLOW_UP", content="客户确认验收", next_action="周三回访"),
+        )
+    )
+    gate = RecordingGate(rejected if stage == "quality_gate" else _score())
+    updated, failure = await _stage_failure(db_session, task, "客户确认验收", structurer, gate)
+    assert failure.code is failure_code and failure.retryable is False
+    assert failure.stage == stage
+    assert updated.last_error_code == code and updated.waiting_type is None
+    assert updated.committed_json == []
+    assert "secret.example" not in failure.user_message and "sk-live" not in failure.user_message
+    if stage == "structure":
+        logged = _structure_failure(db_session, updated.id)
+        assert logged["code"] == code and logged["retryable"] is False
+
+
 async def test_invalid_gate_output_is_technical_failure(db_session):
     task = _make_task(db_session)
     structurer = FakeStructurer(

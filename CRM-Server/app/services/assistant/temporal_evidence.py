@@ -630,6 +630,8 @@ def apply_temporal_answer(
         )
         if not _is_just_now(item):
             item.role = target.role
+            # A bound answer is the action's date, never the communication moment.
+            item.communication_time = False
             # A date answer does not let model ownership override the current question.
             if item.ambiguity_reason in {"ROLE", "STATUS"}:
                 item.ambiguity_reason = None
@@ -836,6 +838,8 @@ def _background_year(text: str, found: FoundSpan) -> bool:
 
 def _project_answered_actions(draft: TaskDraft, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
     """Project accepted dates into uniquely matched canonical actions, never source evidence."""
+    primary = _primary_sales(mentions, actions, _primary_action_id(draft.content_json))
+    primary_id = primary[1].action_id if isinstance(primary, tuple) else None
     for action in actions:
         current = next((item for item in mentions if item.mention_id == action.temporal_mention_id), None)
         if (
@@ -889,7 +893,8 @@ def _project_answered_actions(draft: TaskDraft, mentions: list[StoredMention], a
             item["due_date"] = label
         elif matching:
             continue
-        if identity(draft.next_action.value or "") == identity(action.action_text):
+        # The scalar next action describes the primary sales action even when paraphrased.
+        if action.action_id == primary_id or identity(draft.next_action.value or "") == identity(action.action_text):
             draft.next_action = draft.next_action.model_copy(
                 update={"value": replace_date(draft.next_action.value or "")}
             )
@@ -917,6 +922,15 @@ def _project_answered_actions(draft: TaskDraft, mentions: list[StoredMention], a
                         text = text.replace(owner + variant, owner + replace_date(variant))
                 else:
                     text = text.replace(variant, replace_date(variant))
+            if action.action_id == primary_id:
+                # Paraphrased summaries: replace only owner-qualified stale dates of this action.
+                for owner in owners:
+                    for date in dates:
+                        text = re.sub(
+                            re.escape(owner) + r"(?:大概|大约|可能|也许|暂定)?\s*" + re.escape(date),
+                            lambda _m, owner=owner, label=label: owner + label,
+                            text,
+                        )
             draft.content_json[key] = text
 
 

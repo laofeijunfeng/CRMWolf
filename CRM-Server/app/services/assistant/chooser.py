@@ -8,7 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.assistant.contracts import TaskDraft
 from app.services.assistant.coordinator import NextActionDecision
-from app.services.assistant.model_transport import AssistantLLMError, AssistantModelTransport, team_model_credentials
+from app.services.assistant.model_transport import (
+    AssistantLLMError,
+    AssistantModelTransport,
+    team_model_credentials,
+    team_output_mode,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -91,6 +96,7 @@ class AgentLLMChooser:
                 api_host=host,
                 api_key=key,
                 model=name,
+                output_mode=team_output_mode(db, task.team_id),
                 temperature=0.0,
                 system_prompt=CHOOSER_SYSTEM_PROMPT,
                 user_prompt=self._snapshot_prompt(task),

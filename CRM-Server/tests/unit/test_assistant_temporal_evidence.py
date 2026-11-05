@@ -1372,3 +1372,18 @@ def test_sequential_corrections_update_owner_qualified_and_nonprefix_canonical_d
         assert "明年" not in value and "12月5日" not in value
     assert draft.content_json["action_items"][0]["due_date"] == "2026年12月6日"
     assert draft.source_records[0].text == "我明年联系客户"
+
+
+def test_date_answer_line_updates_paraphrased_primary_action_and_is_not_communication_time() -> None:
+    action = "联系叶老师确认试用结果，核对部署成功率"
+    draft = _attach("我大概明年联系叶老师确认试用结果，核对部署成功率", datetime(2026, 11, 5), action_text=action)
+    paraphrase = "我方明年联系叶老师确认试用结果，并核对部署成功率。"
+    draft.next_action = DraftField(status="CANDIDATE", value=paraphrase)
+    draft.content_json.update({"next_action": paraphrase, "next_step_summary": paraphrase})
+    _temporal_reply(draft, "12月6号")
+    assert resolved_sales_follow_up(draft) == (datetime(2026, 12, 6), "DATE")
+    for value in (draft.next_action.value, draft.content_json["next_action"], draft.content_json["next_step_summary"]):
+        assert "明年" not in value and "2026年12月6日" in value
+    answer = next(m for m in draft.content_json["temporal_evidence"]["mentions"] if m["raw_text"] == "12月6号")
+    assert answer["communication_time"] is False
+    assert not any(n.startswith("沟通时间：2026-12-06") for n in draft.content_json["temporal_notices"])

@@ -424,6 +424,32 @@ def test_root_model_failures_use_fixed_copy_and_retry_only_three_codes() -> None
             assert envelope.suggested_actions == []
 
 
+def test_protocol_and_auth_failures_never_gain_retry_from_message_flags() -> None:
+    for code in ("REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"):
+        for message_id in ("acm_123:reply", "acm_123:atn_1:4"):
+            message = _message(
+                message_id,
+                "供应商原文 https://secret.example sk-live",
+                outcome="failure",
+                error_code=code,
+                retryable=True,
+            )
+            envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+            error = envelope.blocks[0]
+            assert error.type == "error"
+            assert error.code == code
+            assert error.retryable is False
+            assert envelope.suggested_actions == []
+            assert "secret.example" not in error.message
+            assert "sk-live" not in error.message
+            assert "配置" not in error.title
+            assert "本次没有写入客户活动" in error.message
+            if code == "REQUEST_PROTOCOL_ERROR":
+                assert "协议" in error.message and "兼容" in error.message
+            else:
+                assert "认证" in error.message and "权限" in error.message
+
+
 def test_organize_failure_keeps_saved_content_sentence_and_skips_root_retry() -> None:
     from app.services.assistant.failure_contract import ORGANIZE_FAILURE_MESSAGE
 

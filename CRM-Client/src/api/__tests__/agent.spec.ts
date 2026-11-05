@@ -79,6 +79,21 @@ describe('agentApi', () => {
     expect(events.map(event => event.event)).toEqual(['transport_error'])
   })
 
+  it.each(['REQUEST_PROTOCOL_ERROR', 'AUTHENTICATION_ERROR'])(
+    'preserves %s through validated error-block and transport events', async code => {
+      const error = { id: 'b_error_1', type: 'error', code, title: '模型服务拒绝请求', message: '请联系管理员。', retryable: false }
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+        { event: 'session', session_id: 7, session_key: 'session_7' },
+        { event: 'agent_ui', phase: 'delta', turn_id: 'turn_12', sequence: 1, operations: [{ op: 'upsert_block', block: error }] },
+        { event: 'transport_error', code, message: error.message, retryable: false, session_id: 7 }
+      ])))
+      const events: AgentStreamEvent[] = []
+      await agentApi.chatStream(request, event => events.push(event), 'token')
+      expect(events[1]).toMatchObject({ operations: [{ block: { code, retryable: false } }] })
+      expect(events[2]).toMatchObject({ event: 'transport_error', code, retryable: false })
+    }
+  )
+
   it('fails closed when the stream ends without done', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([{ event: 'session', session_id: 7, session_key: 'session_7' }])))
     await expect(agentApi.chatStream(request, () => undefined, 'token')).rejects.toThrow('Agent stream ended before done')

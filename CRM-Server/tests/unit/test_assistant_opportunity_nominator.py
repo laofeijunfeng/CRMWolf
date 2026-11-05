@@ -58,6 +58,7 @@ def _patch(monkeypatch):
     from app.services.assistant import opportunity_nominator as mod
 
     monkeypatch.setattr(mod, "team_model_credentials", lambda db, team_id: ("host", "key", "m1"))
+    monkeypatch.setattr(mod, "team_output_mode", lambda db, team_id: "json_object")
     monkeypatch.setattr(task_state, "load_draft", lambda task: SimpleNamespace(source_segments=["x"]))
 
 

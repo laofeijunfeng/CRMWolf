@@ -14,6 +14,7 @@ vi.mock('@/api/aiConfig', () => ({
     getConfig: vi.fn(),
     saveConfig: vi.fn(),
     testConnectionSSE: vi.fn(),
+    testAssistantCapability: vi.fn(),
   },
 }))
 
@@ -55,6 +56,9 @@ const existingConfig = {
   temperature: 0.1,
   max_tokens: 1024,
   updated_at: '2026-01-01T00:00:00Z',
+  structured_output_mode: 'json_object' as const,
+  assistant_verification_state: 'UNVERIFIED' as const,
+  assistant_verified_at: null,
 }
 
 const setupOwner = (): Pinia => {
@@ -178,6 +182,7 @@ describe('SettingsAIPage', () => {
         api_host: 'https://api.deepseek.com/v1',
         api_key: '',
         model_name: 'deepseek-chat',
+        structured_output_mode: 'json_object',
       })
     })
 

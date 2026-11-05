@@ -72,7 +72,7 @@ async def test_meeting_quality_uses_meeting_rubric_and_preserves_score_detail(mo
             return {
                 "score": 52,
                 "reason": "参会角色不清楚",
-                "principle_scores": {"会议主题与背景": {"score": 11, "max_score": 15, "comment": "主题明确"}},
+                "principle_scores": [{"name": "会议主题与背景", "score": 11, "max_score": 15, "comment": "主题明确"}],
                 "supplement_question": "请问客户方是谁参会？",
             }
 
@@ -84,6 +84,8 @@ async def test_meeting_quality_uses_meeting_rubric_and_preserves_score_detail(mo
     assert result.score == 52
     assert result.question == "请问客户方是谁参会？"
     assert result.detail["principle_scores"]["会议主题与背景"]["max_score"] == 15
+
+
 
 
 async def test_http_timeout_is_typed_model_failure(monkeypatch):
@@ -195,7 +197,8 @@ async def test_http_transport_validates_structured_classification(monkeypatch):
     def respond(request):
         data = request.read().decode()
         assert '"response_format": {"type": "json_object"}' in data
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"kind":"FOLLOW_UP","reason":"电话沟通"}'}}]})
+        content = '{"kind":"FOLLOW_UP","reason":"电话沟通"}'
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
 
     monkeypatch.setattr(
         model_transport.httpx,
@@ -443,10 +446,10 @@ async def test_illegal_action_model_is_not_a_temporal_mention_error():
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [
-        (401, "CONFIGURATION_ERROR"),
-        (403, "CONFIGURATION_ERROR"),
+        (401, "AUTHENTICATION_ERROR"),
+        (403, "AUTHENTICATION_ERROR"),
         (404, "CONFIGURATION_ERROR"),
-        (422, "CONFIGURATION_ERROR"),
+        (422, "REQUEST_PROTOCOL_ERROR"),
         (408, "UPSTREAM_TIMEOUT"),
         (429, "UPSTREAM_UNAVAILABLE"),
         (500, "UPSTREAM_UNAVAILABLE"),
@@ -606,40 +609,31 @@ async def test_streaming_timeout_retries_once_inside_the_attempt(monkeypatch):
     )
     assert calls["n"] == 2
     assert decision.kind == "ONLINE_MEETING"
-async def test_streaming_timeout_retries_even_when_the_attempt_budget_is_gone(monkeypatch):
+async def test_streaming_does_not_call_provider_when_attempt_budget_is_gone(monkeypatch):
     from datetime import timedelta
 
-    from app.services.assistant.failure_contract import bind_attempt_deadline, reset_attempt_deadline
+    from app.services.assistant.failure_contract import (
+        AssistantFailureCode,
+        bind_attempt_deadline,
+        reset_attempt_deadline,
+    )
     from app.utils.time import business_now
 
-    calls = {"n": 0}
-    original_client = httpx.AsyncClient
+    def forbidden(**kwargs):
+        raise AssertionError("expired turn must not start inference")
 
-    def respond(request):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise httpx.ReadTimeout("idle", request=request)
-        return httpx.Response(
-            200,
-            content=_sse({"kind": "ONLINE_MEETING", "reason": "会议", "confidence": 1, "evidence_quote": "会议"}),
-        )
-
-    monkeypatch.setattr(
-        model_transport.httpx,
-        "AsyncClient",
-        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
-    )
-    token = bind_attempt_deadline(business_now() - timedelta(seconds=180))
+    monkeypatch.setattr(model_transport.httpx, "AsyncClient", forbidden)
+    token = bind_attempt_deadline(business_now() - timedelta(seconds=181))
     try:
-        decision = await AssistantModelTransport().ainvoke_structured(
-            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
-            system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
-            stream=True, retry_timeouts=True,
-        )
+        with pytest.raises(AssistantLLMError) as caught:
+            await AssistantModelTransport().ainvoke_structured(
+                api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+                system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
+                stream=True, retry_timeouts=True,
+            )
+        assert caught.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
     finally:
         reset_attempt_deadline(token)
-    assert calls["n"] == 2
-    assert decision.kind == "ONLINE_MEETING"
 
 async def test_streaming_invalid_output_is_not_retried(monkeypatch):
     calls = {"n": 0}
@@ -664,7 +658,7 @@ async def test_streaming_invalid_output_is_not_retried(monkeypatch):
     assert calls["n"] == 1
 
 
-async def _invoke_transport_content(monkeypatch, content, *, stream, response_model=KindDecision):
+async def _invoke_transport_content(monkeypatch, content, *, stream, response_model=KindDecision, expected_calls=1):
     original_client = httpx.AsyncClient
     calls = 0
 
@@ -694,7 +688,7 @@ async def _invoke_transport_content(monkeypatch, content, *, stream, response_mo
                 stream=stream, retry_timeouts=True,
             )
         finally:
-            assert calls == 1
+            assert calls == expected_calls
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -785,6 +779,7 @@ async def test_transport_fences_keep_json_and_schema_validation(monkeypatch, str
     with pytest.raises(AssistantLLMError) as caught:
         await _invoke_transport_content(
             monkeypatch, f"```json\n{body}\n```", stream=stream, response_model=ModelDraftAction,
+            expected_calls=1 if failure == "invalid-json" else 2,
         )
     assert caught.value.code is AssistantFailureCode.MODEL_OUTPUT_INVALID
     assert isinstance(caught.value.cause, ValidationError)

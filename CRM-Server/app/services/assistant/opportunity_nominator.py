@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.services.assistant.model_transport import AssistantLLMError, AssistantModelTransport, team_model_credentials
+from app.services.assistant.model_transport import (
+    AssistantLLMError,
+    AssistantModelTransport,
+    team_model_credentials,
+    team_output_mode,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -105,6 +110,7 @@ class OpportunityNominator:
                 api_host=host,
                 api_key=key,
                 model=name,
+                output_mode=team_output_mode(db, task.team_id),
                 temperature=0.0,
                 system_prompt=_SYSTEM_PROMPT,
                 user_prompt=json.dumps(
@@ -133,7 +139,10 @@ class OpportunityNominator:
                 "evidence_quote": item.evidence_quote,
                 "segment_id": item.segment_id,
                 **(
-                    {"target_public_id": item.target_public_id, "payload": {"stage_template_id": item.stage_template_id}}
+                    {
+                        "target_public_id": item.target_public_id,
+                        "payload": {"stage_template_id": item.stage_template_id},
+                    }
                     if item.kind == "opportunity_stage"
                     else {"payload": {}}
                 ),

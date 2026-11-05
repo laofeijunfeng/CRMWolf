@@ -7,7 +7,7 @@ import json
 from typing import TYPE_CHECKING
 
 from app.schemas.assistant_conversation import ConversationDecision
-from app.services.assistant.model_transport import AssistantModelTransport, team_model_credentials
+from app.services.assistant.model_transport import AssistantModelTransport, team_model_credentials, team_output_mode
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -61,6 +61,7 @@ class ConversationRootClassifier:
             api_host=host,
             api_key=key,
             model=model,
+            output_mode=team_output_mode(db, team_id),
             temperature=0.0,
             system_prompt=ROOT_SYSTEM_PROMPT,
             user_prompt=json.dumps(

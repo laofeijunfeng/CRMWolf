@@ -62,6 +62,8 @@ _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
         "UNKNOWN_ACTION_NOMINATED",
         "UNKNOWN_COMMIT_RESULT",
         "CONFIGURATION_ERROR",
+        "REQUEST_PROTOCOL_ERROR",
+        "AUTHENTICATION_ERROR",
         "STATE_CONFLICT",
         "RETRYABLE_DEPENDENCY_FAILURE",
         "INTERNAL_ERROR",
@@ -320,7 +322,11 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
         # Turn-event organize/quality failures reuse the root codes but must not
         # offer the root entry retry or replace the saved-content sentence.
         failure = root_failure_code(code)
-        if "质量评估" in text or text == QUALITY_GATE_FAILURE_MESSAGE:
+        if code in {"REQUEST_PROTOCOL_ERROR", "AUTHENTICATION_ERROR"}:
+            presentation = root_failure_presentation(failure)
+            title = presentation.title
+            text = presentation.message
+        elif "质量评估" in text or text == QUALITY_GATE_FAILURE_MESSAGE:
             title = QUALITY_GATE_FAILURE_TITLE
         elif "活动类型判断" in text:
             title = "活动类型判断未完成"
