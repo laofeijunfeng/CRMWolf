@@ -19,30 +19,23 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import ErrorState from '@/components/ErrorState.vue'
 import { ContextTabs } from '@/components/crmwolf'
-import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
 
 // Panels
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
 import ContactsPanel from '@/components/panels/ContactsPanel.vue'
-import ContractsPanel from '@/components/panels/ContractsPanel.vue'
 import DealJourneysPanel from '@/components/panels/DealJourneysPanel.vue'
 import InvoicesPanel from '@/components/panels/InvoicesPanel.vue'
 import LicensePanel from '@/components/panels/LicensePanel.vue'
 import CustomerMembersPanel from '@/components/panels/CustomerMembersPanel.vue'
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
-import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
-import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
-import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
 
 // Dialogs
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
-import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceTitleFormDialog from '@/components/dialogs/InvoiceTitleFormDialog.vue'
 import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
-import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 
 import { Plus, Pencil } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -52,19 +45,13 @@ import customerApi, { type CustomerDetailResponse, type ContactResponse, type Cu
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
-import contractApi, { type ContractListResponse, type ContractResponse } from '@/api/contract'
-import type { PaymentPlanResponse, PaymentRecordInfo, ApprovalInfo, ApprovalInfoLite, PaymentRecordUpdate } from '@/api/payment'
-import paymentApi from '@/api/payment'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
-import { useApprovalStore } from '@/stores/approval'
-import approvalGenericApi from '@/api/approvalGeneric'
-import { confirmDelete } from '@/utils/confirmDialog'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
-import type { DetailContextNode, DetailObjectType } from '@/types/detailContext'
+import type { DetailContextNode } from '@/types/detailContext'
 import { useDetailContextStack } from '@/composables/useDetailContextStack'
 
 // ==================== Props & Emits ====================
@@ -89,14 +76,7 @@ const emit = defineEmits<{
 
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
-const approvalStore = useApprovalStore()
 const detailContextStack = useDetailContextStack()
-const detailContextNodes = computed(() => detailContextStack.nodes.value)
-const detailContextCanGoBack = computed(() => detailContextStack.canGoBack.value)
-const hasNestedDetail = computed(() => {
-  const current = detailContextStack.current.value
-  return current !== null && current.type !== 'customer'
-})
 
 // ==================== State ====================
 const loading = ref(false)  // TODO: Task 3 - 加载客户详情数据时使用
@@ -108,26 +88,17 @@ const followUpDialogOpen = ref(false)
 const customerEditDialogOpen = ref(false)
 const contactDialogOpen = ref(false)
 const opportunityDialogOpen = ref(false)
-const contractDialogOpen = ref(false)
 const invoiceTitleDialogOpen = ref(false)
 const deploymentDialogOpen = ref(false)
 
 // ==================== Edit States ====================
 const editingContact = ref<ContactResponse | null>(null)
-const editingContract = ref<ContractResponse | null>(null)
 const editingInvoiceTitle = ref<InvoiceTitleResponse | null>(null)
 
 // ==================== Detail Sheet States (Task 6) ====================
-const selectedContractId = ref<number | null>(null)
-const selectedPlanId = ref<number | null>(null)
-const selectedRecord = ref<{ record: PaymentRecordInfo; stageName: string; approval: ApprovalInfo | ApprovalInfoLite | null; planId: number | null } | null>(null)
-const recordEditDialogOpen = ref(false)
-const recordEditSubmitting = ref(false)
-const isRecordResubmitMode = ref(false)
 const selectedJourneyId = ref<string | null>(null)
 const highlightedJourneyId = ref<string | null>(null)
 const restoreFocusJourneyId = ref<string | null>(null)
-
 
 // ==================== Data Loading State ====================
 const customer = ref<CustomerDetailResponse | null>(null)
@@ -138,46 +109,36 @@ const selectedJourney = computed(() => (
     ? null
     : journeys.value.find(item => item.public_id === selectedJourneyId.value) ?? null
 ))
-const contracts = ref<ContractListResponse[]>([])
-const paymentPlans = ref<PaymentPlanResponse[]>([])
 const invoiceTitles = ref<InvoiceTitleResponse[]>([])
 const deployments = ref<DeploymentInfoResponse[]>([])
 const customerMembers = ref<CustomerMemberResponse[]>([])
 type CustomerDetailPanelKey =
   | 'followUps'
   | 'journeys'
-  | 'contracts'
   | 'invoiceTitles'
   | 'deployments'
   | 'customerMembers'
-  | 'paymentPlans'
 const panelErrors = ref<Partial<Record<CustomerDetailPanelKey, FeedbackError | undefined>>>({})
 const panelLoading = ref<Record<CustomerDetailPanelKey, boolean>>({
   followUps: false,
   journeys: false,
-  contracts: false,
   invoiceTitles: false,
   deployments: false,
   customerMembers: false,
-  paymentPlans: false,
 })
 const CUSTOMER_DETAIL_PANELS: CustomerDetailPanelKey[] = [
   'followUps',
   'journeys',
-  'contracts',
   'invoiceTitles',
   'deployments',
   'customerMembers',
-  'paymentPlans',
 ]
 const panelRequestIds: Record<CustomerDetailPanelKey, number> = {
   followUps: 0,
   journeys: 0,
-  contracts: 0,
   invoiceTitles: 0,
   deployments: 0,
   customerMembers: 0,
-  paymentPlans: 0,
 }
 let latestLoadRequestId = 0
 
@@ -192,16 +153,6 @@ const navTabs: NavTabItem[] = [
   { key: 'followup', label: '客户活动' },
   { key: 'journeys', label: '业务旅程' }
 ]
-
-// ==================== Methods ====================
-const handleCreateContractForCustomer = (): void => {
-  if (!canCreateContractForCustomer.value) {
-    toast.error('你没有在该客户下新建合同的权限')
-    return
-  }
-  editingContract.value = null
-  contractDialogOpen.value = true
-}
 
 const handleCreateOpportunity = (): void => {
   if (!canCreateOpportunityForCustomer.value) {
@@ -267,47 +218,6 @@ const createJourneyContextNode = (journeyId: string): DetailContextNode => {
   return node
 }
 
-const createContractContextNode = (contractId: number): DetailContextNode => {
-  const contract = contracts.value.find(item => item.id === contractId)
-  const contractName = contract?.contract_name?.trim()
-  const node: DetailContextNode = {
-    type: 'contract',
-    id: String(contractId),
-    label: contractName !== undefined && contractName.length > 0 ? contractName : '合同详情',
-    parentType: 'customer',
-    source: 'related-object'
-  }
-  if (props.customerId !== null) node.parentId = props.customerId
-  return node
-}
-
-const createPaymentPlanContextNode = (
-  planId: number,
-  parentType: DetailContextNode['type'] = 'customer',
-  parentId?: string
-): DetailContextNode => {
-  const plan = paymentPlans.value.find(item => item.id === planId)
-  const planLabel = plan?.plan_number?.trim() ?? plan?.stage_name?.trim()
-  const node: DetailContextNode = {
-    type: 'payment-plan',
-    id: String(planId),
-    label: planLabel !== undefined && planLabel.length > 0 ? planLabel : '回款计划详情',
-    parentType,
-    source: 'related-object'
-  }
-  if (parentId !== undefined) node.parentId = parentId
-  return node
-}
-
-const createPaymentRecordContextNode = (record: PaymentRecordInfo, planId: number): DetailContextNode => ({
-  type: 'payment-record',
-  id: String(record.id),
-  label: `回款记录 #${record.id}`,
-  parentType: 'payment-plan',
-  parentId: String(planId),
-  source: 'related-object'
-})
-
 const resetDetailContext = (): void => {
   if (props.customerId === null) {
     detailContextStack.closeRoot()
@@ -319,9 +229,6 @@ const resetDetailContext = (): void => {
 const resetLocalNavigation = (): void => {
   activePanel.value = 'customer-info'
   selectedJourneyId.value = null
-  selectedContractId.value = null
-  selectedPlanId.value = null
-  selectedRecord.value = null
   highlightedJourneyId.value = null
   restoreFocusJourneyId.value = null
   resetDetailContext()
@@ -330,9 +237,6 @@ const resetLocalNavigation = (): void => {
 const setActivePanel = (panel: string): void => {
   activePanel.value = panel
   selectedJourneyId.value = null
-  selectedContractId.value = null
-  selectedPlanId.value = null
-  selectedRecord.value = null
   highlightedJourneyId.value = null
   restoreFocusJourneyId.value = null
   resetDetailContext()
@@ -423,33 +327,6 @@ const canCreateOpportunityForCustomer = computed(() => (
   permissionStore.hasPermission('opportunity:create') && canEditCurrentCustomer.value
 ))
 
-const canCreateContractForCustomer = computed(() => (
-  permissionStore.hasPermission('contract:create') && canEditCurrentCustomer.value
-))
-
-const canEditCustomerContractRow = (contract: ContractListResponse): boolean => {
-  if (contract.status !== 'DRAFT') return false
-  if (permissionStore.hasPermission('contract:edit:all')) return true
-  return permissionStore.hasPermission('contract:edit:own')
-    && contract.owner_id === String(userStore.userInfo?.id ?? '')
-}
-
-const canSubmitCustomerContractApprovalRow = (contract: ContractListResponse): boolean => (
-  contract.status === 'DRAFT'
-)
-
-const canWithdrawCustomerContractApprovalRow = (contract: ContractListResponse): boolean => (
-  contract.approval_phase === 'pending_review'
-)
-
-const canDeleteCustomerContractRow = (contract: ContractListResponse): boolean => {
-  if (contract.approval_phase === 'pending_review' || contract.approval_phase === 'approved') return false
-  if (contract.status !== 'DRAFT') return false
-  if (permissionStore.hasPermission('contract:delete:all')) return true
-  return permissionStore.hasPermission('contract:delete:own')
-    && contract.owner_id === String(userStore.userInfo?.id ?? '')
-}
-
 // ==================== Data Loading ====================
 const setPanelError = (panel: CustomerDetailPanelKey, error: FeedbackError | null): void => {
   const nextErrors = { ...panelErrors.value }
@@ -492,33 +369,6 @@ const runPanelRequest = async <T>(
   }
 }
 
-const loadPaymentPlansForContracts = async (
-  contractList: ContractListResponse[],
-): Promise<boolean> => {
-  if (contractList.length === 0) {
-    paymentPlans.value = []
-    setPanelError('paymentPlans', null)
-    setPanelLoading('paymentPlans', false)
-    return true
-  }
-
-  return runPanelRequest(
-    'paymentPlans',
-    '回款计划',
-    async () => {
-      const results = await Promise.allSettled(
-        contractList.map((contract) => paymentApi.getPaymentPlans(contract.id))
-      )
-      const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
-      if (failedResult !== undefined) throw failedResult.reason
-      return results.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
-    },
-    (plans) => {
-      paymentPlans.value = plans
-    },
-  )
-}
-
 const loadAllData = async (customerId: string): Promise<boolean> => {
   const loadRequestId = latestLoadRequestId + 1
   latestLoadRequestId = loadRequestId
@@ -551,7 +401,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       customerDetailResult,
       followUpsResult,
       journeysResult,
-      contractsResult,
       invoiceTitlesResult,
       deploymentsResult,
       customerMembersResult
@@ -559,7 +408,6 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       customerApi.getCustomerDetail(customerId),
       customerActivityApi.getActivities(customerId),
       dealJourneyApi.listByCustomer(customerId),
-      contractApi.getCustomerContracts(customerId),
       invoiceApi.getInvoiceTitles(customerId),
       deploymentApi.list(customerId),
       customerApi.getCustomerMembers(customerId),
@@ -576,15 +424,12 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
     const panelLoadSucceeded: Record<CustomerDetailPanelKey, boolean> = {
       followUps: followUpsResult.status === 'fulfilled' && isCurrentPanelLoad('followUps'),
       journeys: journeysResult.status === 'fulfilled' && isCurrentPanelLoad('journeys'),
-      contracts: contractsResult.status === 'fulfilled' && isCurrentPanelLoad('contracts'),
       invoiceTitles: invoiceTitlesResult.status === 'fulfilled' && isCurrentPanelLoad('invoiceTitles'),
       deployments: deploymentsResult.status === 'fulfilled' && isCurrentPanelLoad('deployments'),
       customerMembers: customerMembersResult.status === 'fulfilled' && isCurrentPanelLoad('customerMembers'),
-      paymentPlans: false,
     }
     const followUpsData = readPanel(followUpsResult, 'followUps', '客户活动', followUps.value)
     const journeysData = readPanel(journeysResult, 'journeys', '业务旅程', journeys.value)
-    const contractsData = readPanel(contractsResult, 'contracts', '合同', contracts.value)
     const invoiceTitlesData = readPanel(invoiceTitlesResult, 'invoiceTitles', '发票抬头', { invoice_titles: invoiceTitles.value })
     const deploymentsData = readPanel(deploymentsResult, 'deployments', '部署信息', deployments.value)
     const customerMembersData = readPanel(customerMembersResult, 'customerMembers', '客户团队', customerMembers.value)
@@ -593,23 +438,13 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       journeys.value = journeysData
       if (navigationTargetPending && journeysResult.status === 'fulfilled') applyNavigationTarget(true)
     }
-    if (isCurrentPanelLoad('contracts')) contracts.value = contractsData
     if (isCurrentPanelLoad('invoiceTitles')) invoiceTitles.value = invoiceTitlesData.invoice_titles ?? []
     if (isCurrentPanelLoad('deployments')) deployments.value = deploymentsData
     if (isCurrentPanelLoad('customerMembers')) customerMembers.value = customerMembersData
 
     CUSTOMER_DETAIL_PANELS.forEach((panel) => {
-      if (panel !== 'paymentPlans' && isCurrentPanelLoad(panel)) setPanelLoading(panel, false)
+      if (isCurrentPanelLoad(panel)) setPanelLoading(panel, false)
     })
-
-    if (contractsResult.status === 'fulfilled' && isCurrentPanelLoad('contracts')) {
-      panelLoadSucceeded.paymentPlans = await loadPaymentPlansForContracts(contractsData)
-    } else if (contractsResult.status === 'rejected' && isCurrentPanelLoad('contracts')) {
-      // 合同请求失败时，回款计划无法可靠读取，避免把旧数据误显示成当前客户数据。
-      paymentPlans.value = []
-      setPanelError('paymentPlans', toFeedbackError(contractsResult.reason, '回款计划'))
-      setPanelLoading('paymentPlans', false)
-    }
 
     return Object.values(panelLoadSucceeded).every(Boolean)
   } catch (error) {
@@ -639,11 +474,9 @@ defineExpose({
 
 const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
   if (props.customerId === null) return false
-  if (!hasNestedDetail.value) {
-    activePanel.value = panel === 'followUps' ? 'followup'
-      : panel === 'journeys' ? 'journeys'
-        : 'customer-info'
-  }
+  activePanel.value = panel === 'followUps' ? 'followup'
+    : panel === 'journeys' ? 'journeys'
+      : 'customer-info'
   const customerId = props.customerId
   switch (panel) {
     case 'followUps':
@@ -652,19 +485,12 @@ const retryPanel = async (panel: CustomerDetailPanelKey): Promise<boolean> => {
       return runPanelRequest(panel, '业务旅程', () => dealJourneyApi.listByCustomer(customerId), (data) => {
         journeys.value = data
       })
-    case 'contracts': {
-      const contractsLoaded = await runPanelRequest(panel, '合同', () => contractApi.getCustomerContracts(customerId), (data) => { contracts.value = data })
-      if (!contractsLoaded) return false
-      return loadPaymentPlansForContracts(contracts.value)
-    }
     case 'invoiceTitles':
       return runPanelRequest(panel, '发票抬头', () => invoiceApi.getInvoiceTitles(customerId), (data) => { invoiceTitles.value = data.invoice_titles ?? [] })
     case 'deployments':
       return runPanelRequest(panel, '部署信息', () => deploymentApi.list(customerId), (data) => { deployments.value = data })
     case 'customerMembers':
       return runPanelRequest(panel, '客户团队', () => customerApi.getCustomerMembers(customerId), (data) => { customerMembers.value = data })
-    case 'paymentPlans':
-      return loadPaymentPlansForContracts(contracts.value)
   }
 }
 
@@ -798,9 +624,6 @@ const handleViewJourney = (journeyId: string): void => {
     detailContextStack.reset([createCustomerContextNode(props.customerId)])
     detailContextStack.push(createJourneyContextNode(journeyId))
   }
-  selectedContractId.value = null
-  selectedPlanId.value = null
-  selectedRecord.value = null
   selectedJourneyId.value = journeyId
   highlightedJourneyId.value = null
   restoreFocusJourneyId.value = null
@@ -846,72 +669,9 @@ const applyNavigationTarget = (fromJourneysLoad = false): void => {
   navigationTargetPending = false
 }
 
-const syncNavigationFromContext = (): void => {
-  const current = detailContextStack.current.value
-  selectedJourneyId.value = current?.type === 'journey' ? current.id : null
-  selectedContractId.value = current?.type === 'contract' ? Number(current.id) : null
-  selectedPlanId.value = current?.type === 'payment-plan'
-    ? Number(current.id)
-    : current?.type === 'payment-record'
-      ? Number(current.parentId)
-      : null
-
-  if (current?.type === 'payment-record') {
-    const recordId = Number(current.id)
-    const planId = Number(current.parentId)
-    const plan = paymentPlans.value.find(item => item.id === planId)
-    const record = plan?.payment_records.find(item => item.id === recordId)
-    if (record !== undefined && plan !== undefined) {
-      selectedRecord.value = {
-        record,
-        stageName: plan.stage_name,
-        approval: record.approval ?? (plan.latest_record_id === record.id ? plan.latest_approval : null) ?? null,
-        planId
-      }
-    }
-  } else {
-    selectedRecord.value = null
-  }
-}
-
-const handleBackFromJourney = (): void => {
-  const previousJourneyId = selectedJourneyId.value
-  detailContextStack.pop()
-  syncNavigationFromContext()
-  if (previousJourneyId !== null && detailContextStack.current.value?.type === 'customer') {
-    highlightedJourneyId.value = previousJourneyId
-    restoreFocusJourneyId.value = previousJourneyId
-  }
-}
-
-const handleBackFromContract = (): void => {
-  detailContextStack.pop()
-  syncNavigationFromContext()
-}
-
-const handleContextBack = (): void => {
-  const currentType = detailContextStack.current.value?.type
-  if (currentType === 'journey') {
-    handleBackFromJourney()
-    return
-  }
-  detailContextStack.pop()
-  syncNavigationFromContext()
-}
-
-const handleContextNavigate = (index: number): void => {
-  while (detailContextStack.depth.value > index + 1 && detailContextStack.canGoBack.value) {
-    detailContextStack.pop()
-  }
-  syncNavigationFromContext()
-}
-
 const handleContextClose = (): void => {
   detailContextStack.closeRoot()
   selectedJourneyId.value = null
-  selectedContractId.value = null
-  selectedPlanId.value = null
-  selectedRecord.value = null
   emit('update:visible', false)
 }
 
@@ -930,73 +690,6 @@ const handleJourneyDetailRefresh = async (): Promise<void> => {
     warnIfCustomerDetailRefreshFailed(refreshed, '业务旅程操作')
   }
   emit('refresh')
-}
-
-
-
-const handleCustomerContractDialogClose = (open: boolean): void => {
-  contractDialogOpen.value = open
-  if (!open) editingContract.value = null
-}
-
-const handleCustomerContractSuccess = async (): Promise<void> => {
-  contractDialogOpen.value = false
-  editingContract.value = null
-  const refreshed = await retryPanel('contracts')
-  warnIfCustomerDetailRefreshFailed(refreshed, '合同更新')
-  emit('refresh')
-}
-
-const refreshCustomerContractRelations = async (): Promise<void> => {
-  const refreshed = await retryPanel('contracts')
-  warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
-  emit('refresh')
-}
-
-const handleEditCustomerContract = async (contract: ContractListResponse): Promise<void> => {
-  try {
-    editingContract.value = await contractApi.getContract(contract.id)
-    contractDialogOpen.value = true
-  } catch (error) {
-    handleApiError(error, '获取合同详情')
-  }
-}
-
-const handleDeleteCustomerContract = async (contract: ContractListResponse): Promise<void> => {
-  const confirmed = await confirmDelete(`合同 "${contract.contract_name}"`)
-  if (!confirmed) return
-
-  try {
-    await contractApi.deleteContract(contract.id)
-    if (detailContextStack.current.value?.type === 'contract' && detailContextStack.current.value.id === String(contract.id)) {
-      detailContextStack.pop()
-      syncNavigationFromContext()
-    }
-    toast.success('合同删除成功')
-    await refreshCustomerContractRelations()
-  } catch (error) {
-    handleApiError(error, '删除合同')
-  }
-}
-
-const handleSubmitCustomerContractApproval = async (contract: ContractListResponse): Promise<void> => {
-  try {
-    await approvalGenericApi.submitApproval('CONTRACT', contract.id)
-    toast.success('合同已提交审批')
-    await refreshCustomerContractRelations()
-  } catch (error) {
-    handleApiError(error, '提交审批')
-  }
-}
-
-const handleWithdrawCustomerContractApproval = async (contract: ContractListResponse): Promise<void> => {
-  try {
-    await approvalGenericApi.cancelApproval('CONTRACT', contract.id)
-    toast.success('合同审批已撤回')
-    await refreshCustomerContractRelations()
-  } catch (error) {
-    handleApiError(error, '撤回审批')
-  }
 }
 
 // Invoice Title handlers
@@ -1088,223 +781,6 @@ const handleDeleteDeployment = async (deploymentId: number): Promise<void> => {
   }
 }
 
-// Contract and payment-plan detail navigation.
-const handleViewContract = (contractId: number): void => {
-  if (props.customerId !== null) {
-    const currentRoot = detailContextStack.nodes.value[0]
-    if (currentRoot?.type !== 'customer' || currentRoot.id !== props.customerId) {
-      detailContextStack.reset([createCustomerContextNode(props.customerId)])
-    }
-    detailContextStack.push(createContractContextNode(contractId))
-  }
-  selectedJourneyId.value = null
-  selectedContractId.value = contractId
-  selectedPlanId.value = null
-  selectedRecord.value = null
-}
-
-
-const handleViewPaymentPlan = (planId: number, plan?: PaymentPlanResponse): void => {
-  if (props.customerId === null) return
-  const root = detailContextStack.nodes.value[0]
-  if (root?.type !== 'customer' || root.id !== props.customerId) {
-    detailContextStack.reset([createCustomerContextNode(props.customerId)])
-  }
-  const parent = detailContextStack.current.value
-  const parentType = parent?.type === 'journey' || parent?.type === 'opportunity' || parent?.type === 'contract'
-    ? parent.type
-    : 'customer'
-  const parentId = parentType === 'customer' ? props.customerId : parent?.id
-  detailContextStack.push(createPaymentPlanContextNode(planId, parentType, parentId))
-  selectedJourneyId.value = null
-  selectedContractId.value = null
-  selectedPlanId.value = planId
-  selectedRecord.value = null
-  if (plan !== undefined) {
-    // Keep the list response available for immediate record navigation; the content
-    // component still reloads server-authoritative detail by ID.
-    paymentPlans.value = paymentPlans.value.some(item => item.id === plan.id)
-      ? paymentPlans.value
-      : [...paymentPlans.value, plan]
-  }
-}
-
-
-const handleViewPaymentPlanFromContract = (plan: PaymentPlanResponse): void => {
-  handleViewPaymentPlan(plan.id, plan)
-}
-
-const handleContractSheetRefresh = async (): Promise<void> => {
-  const refreshed = await retryPanel('contracts')
-  warnIfCustomerDetailRefreshFailed(refreshed, '合同操作')
-  emit('refresh')
-}
-
-const handlePlanDetailRefresh = async (): Promise<void> => {
-  const refreshed = await retryPanel('paymentPlans')
-  if (refreshed) {
-    syncSelectedPaymentRecord()
-    closeMissingPaymentPlanContext()
-  }
-  warnIfCustomerDetailRefreshFailed(refreshed, '回款计划操作')
-  emit('refresh')
-}
-
-// Payment record detail navigation.
-const handleRecordClick = (record: PaymentRecordInfo): void => {
-  const selectedPlanIdValue = selectedPlanId.value
-  const plan = paymentPlans.value.find(item =>
-    item.payment_records?.some(itemRecord => itemRecord.id === record.id)
-  )
-  const planId = plan?.id ?? selectedPlanIdValue
-  if (planId === null) return
-
-  const current = detailContextStack.current.value
-  if (current?.type !== 'payment-plan' || current.id !== String(planId)) {
-    handleViewPaymentPlan(planId, plan)
-  }
-
-  const activePlan = paymentPlans.value.find(item => item.id === planId) ?? plan
-  const approval = record.approval ?? (activePlan?.latest_record_id === record.id ? activePlan.latest_approval : null) ?? null
-  selectedRecord.value = {
-    record,
-    stageName: activePlan?.stage_name ?? '',
-    approval,
-    planId
-  }
-  detailContextStack.push(createPaymentRecordContextNode(record, planId))
-}
-
-const syncSelectedPaymentRecord = (): void => {
-  const selected = selectedRecord.value
-  if (selected === null) return
-  const plan = paymentPlans.value.find(item =>
-    item.payment_records?.some(record => record.id === selected.record.id)
-  )
-  const updatedRecord = plan?.payment_records?.find(record => record.id === selected.record.id)
-  if (updatedRecord === undefined) {
-    // The record may have been removed or is no longer visible after a state
-    // transition. Do not leave the detail host showing a stale record.
-    selectedRecord.value = null
-    if (detailContextStack.current.value?.type === 'payment-record') {
-      detailContextStack.pop()
-      syncNavigationFromContext()
-    }
-    return
-  }
-  selectedRecord.value = {
-    record: updatedRecord,
-    stageName: plan?.stage_name ?? selected.stageName,
-    approval: updatedRecord.approval ?? (plan?.latest_record_id === updatedRecord.id ? plan.latest_approval : null) ?? null,
-    planId: plan?.id ?? selected.planId
-  }
-}
-
-const closeMissingPaymentPlanContext = (): void => {
-  const planId = selectedPlanId.value
-  if (planId === null || paymentPlans.value.some(plan => plan.id === planId)) return
-
-  selectedRecord.value = null
-  while (detailContextStack.current.value?.type === 'payment-record' || detailContextStack.current.value?.type === 'payment-plan') {
-    detailContextStack.pop()
-  }
-  syncNavigationFromContext()
-  toast.info('该回款计划已不存在，已返回上一层详情。')
-}
-
-const handleRecordResubmit = (): void => {
-  if (selectedRecord.value === null) return
-  isRecordResubmitMode.value = true
-  recordEditDialogOpen.value = true
-}
-
-const handleRecordEdit = (): void => {
-  if (selectedRecord.value === null) return
-  isRecordResubmitMode.value = false
-  recordEditDialogOpen.value = true
-}
-
-const handleRecordEditDialogOpenChange = (open: boolean): void => {
-  recordEditDialogOpen.value = open
-  if (!open) isRecordResubmitMode.value = false
-}
-
-const handleRecordEditSubmit = async (recordId: number, payload: PaymentRecordUpdate): Promise<void> => {
-  recordEditSubmitting.value = true
-  try {
-    await paymentApi.updatePaymentRecord(recordId, payload)
-    if (isRecordResubmitMode.value) {
-      const response = await approvalStore.submitEntity('PAYMENT', recordId)
-      toast.success(response.approval_id === 0 ? '未配置审批流，已转为财务确认' : '已重新提交审批')
-    } else {
-      toast.success('回款记录更新成功')
-    }
-    recordEditDialogOpen.value = false
-    isRecordResubmitMode.value = false
-    await handlePlanDetailRefresh()
-  } catch (error) {
-    handleApiError(error, isRecordResubmitMode.value ? '重新提交审批' : '更新回款记录')
-  } finally {
-    recordEditSubmitting.value = false
-  }
-}
-
-
-// Contract detail approval handlers (Task 6 fix)
-const handleContractApprove = async (): Promise<void> => {
-  // ContractDetailContent handles the action internally, just refresh parent data
-  await handleContractSheetRefresh()
-}
-
-const handleContractReject = async (): Promise<void> => {
-  // ContractDetailContent handles the action internally, just refresh parent data
-  await handleContractSheetRefresh()
-}
-
-// Payment-plan actions that keep the same detail host.
-const handlePaymentPlanDetailViewContract = (contractId: number): void => {
-  const current = detailContextStack.current.value
-  if (current?.type === 'payment-plan') {
-    const parent = detailContextStack.nodes.value[detailContextStack.nodes.value.length - 2]
-    const parentType: DetailObjectType =
-      parent?.type === 'journey' || parent?.type === 'opportunity' || parent?.type === 'contract'
-        ? parent.type
-        : 'customer'
-    const contractNode: DetailContextNode = {
-      ...createContractContextNode(contractId),
-      parentType
-    }
-    if (parentType === 'customer') {
-      if (props.customerId !== null) contractNode.parentId = props.customerId
-    } else if (parent !== undefined) {
-      contractNode.parentId = parent.id
-    }
-    detailContextStack.replace(contractNode)
-  } else {
-    handleViewContract(contractId)
-  }
-  selectedPlanId.value = null
-  selectedRecord.value = null
-  selectedJourneyId.value = null
-  selectedContractId.value = contractId
-}
-
-const handlePaymentPlanDetailViewCustomer = (customerId: string, _plan: PaymentPlanResponse): void => {
-  if (customerId === props.customerId) {
-    detailContextStack.reset(props.customerId === null ? [] : [createCustomerContextNode(props.customerId)])
-    selectedJourneyId.value = null
-    selectedContractId.value = null
-    selectedPlanId.value = null
-    selectedRecord.value = null
-    return
-  }
-  emit('view-customer', customerId)
-}
-
-const handlePaymentPlanDetailViewApproval = (record: PaymentRecordInfo): void => {
-  handleRecordClick(record)
-}
-
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
@@ -1318,12 +794,9 @@ watch(() => props.visible, (visible): void => {
     customer.value = null
     followUps.value = []
     journeys.value = []
-    contracts.value = []
-    paymentPlans.value = []
     invoiceTitles.value = []
     deployments.value = []
     // Clear nested sheet states
-    selectedContractId.value = null
     customerEditDialogOpen.value = false
     deploymentDialogOpen.value = false
   }
@@ -1337,7 +810,6 @@ watch(() => props.customerId, (customerId, previousCustomerId): void => {
   resetLocalNavigation()
   markNavigationTargetPending()
   applyNavigationTarget()
-  selectedContractId.value = null
   loadAllData(customerId)
 })
 
@@ -1374,56 +846,9 @@ watch(() => props.targetPanel, (panel): void => {
           @refresh="handleJourneyDetailRefresh"
           @view-customer="handleJourneyHostViewCustomer"
         />
-
-        <DetailContextHost
-          v-else-if="hasNestedDetail"
-          :nodes="detailContextNodes"
-          :can-go-back="detailContextCanGoBack"
-          @back="handleContextBack"
-          @close="handleContextClose"
-          @navigate="handleContextNavigate"
-        >
-          <ContractDetailContent v-bind="elevated ? { elevated: true } : {}"
-            v-if="selectedContractId !== null"
-            :contract-id="selectedContractId"
-            embedded
-            @back="handleBackFromContract"
-            @close="handleContextClose"
-            @refresh="handleContractSheetRefresh"
-            @approve="handleContractApprove"
-            @reject="handleContractReject"
-            @view-payment-plan="handleViewPaymentPlanFromContract"
-            :show-breadcrumb="false"
-          />
-
-          <PaymentRecordDetailContent v-bind="elevated ? { elevated: true } : {}"
-            v-else-if="selectedRecord !== null"
-            :record-id="selectedRecord.record.id"
-            :record="selectedRecord.record"
-            :stage-name="selectedRecord.stageName"
-            :approval="selectedRecord.approval"
-            embedded
-            @refresh="handlePlanDetailRefresh"
-            @edit="handleRecordEdit"
-            @resubmit="handleRecordResubmit"
-            @close="handleContextClose"
-          />
-
-          <PaymentPlanDetailContent v-bind="elevated ? { elevated: true } : {}"
-            v-else-if="selectedPlanId !== null"
-            :plan-id="selectedPlanId"
-            embedded
-            @refresh="handlePlanDetailRefresh"
-            @record-click="handleRecordClick"
-            @view-approval="handlePaymentPlanDetailViewApproval"
-            @view-contract="handlePaymentPlanDetailViewContract"
-            @view-customer="handlePaymentPlanDetailViewCustomer"
-            @close="handleContextClose"
-          />
-        </DetailContextHost>
       </Transition>
 
-      <template v-if="!hasNestedDetail">
+      <template v-if="selectedJourneyId === null">
         <!-- Header -->
         <SheetHeader class="customer-detail-sheet__header p-6 border-b border-wolf-border-default-v2">
           <!-- ContextTabs 导航 -->
@@ -1526,39 +951,6 @@ watch(() => props.targetPanel, (panel): void => {
                   </div>
                 </CardContent>
               </Card>
-
-              <div v-if="panelLoading.contracts" class="customer-detail-panel-loading" aria-busy="true" aria-live="polite">
-                <div class="loading-spinner loading-spinner--small" />
-                <span>正在加载合同…</span>
-              </div>
-              <ErrorState
-                v-else-if="panelErrors.contracts"
-                :variant="panelErrors.contracts.variant ?? 'error'"
-                :title="panelErrors.contracts.title"
-                :description="panelErrors.contracts.description"
-              >
-                <template #action>
-                  <Button v-if="panelErrors.contracts.retryable !== false" type="button" :loading="panelLoading.contracts" @click="retryPanel('contracts')">
-                    重试加载合同
-                  </Button>
-                </template>
-              </ErrorState>
-              <ContractsPanel
-                v-else
-                :customer-id="customerId ?? ''"
-                :contracts="contracts"
-                :show-add="canCreateContractForCustomer"
-                :can-edit="canEditCustomerContractRow"
-                :can-submit-approval="canSubmitCustomerContractApprovalRow"
-                :can-withdraw-approval="canWithdrawCustomerContractApprovalRow"
-                :can-delete="canDeleteCustomerContractRow"
-                @add="handleCreateContractForCustomer"
-                @view="handleViewContract"
-                @edit="handleEditCustomerContract"
-                @submit-approval="handleSubmitCustomerContractApproval"
-                @withdraw-approval="handleWithdrawCustomerContractApproval"
-                @delete="handleDeleteCustomerContract"
-              />
 
               <ContactsPanel
                 :customer-id="customerId ?? ''"
@@ -1797,17 +1189,6 @@ watch(() => props.targetPanel, (panel): void => {
     @success="handleOpportunitySuccess"
   />
 
-  <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
-    v-if="customerId !== null"
-    :customer-id="customerId"
-    :customer-name="customer?.account_name"
-    :customer-locked="true"
-    :open="contractDialogOpen"
-    :contract="editingContract"
-    @update:open="handleCustomerContractDialogClose"
-    @success="handleCustomerContractSuccess"
-  />
-
   <InvoiceTitleFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="customerId !== null"
     :customer-id="customerId"
@@ -1823,14 +1204,6 @@ watch(() => props.targetPanel, (panel): void => {
     :open="deploymentDialogOpen"
     @update:open="deploymentDialogOpen = $event"
     @success="handleDeploymentSuccess"
-  />
-
-  <EditRecordDialog v-bind="elevated ? { elevated: true } : {}"
-    :open="recordEditDialogOpen"
-    :record="selectedRecord?.record ?? null"
-    :submitting="recordEditSubmitting"
-    @update:open="handleRecordEditDialogOpenChange"
-    @submit="handleRecordEditSubmit"
   />
 </template>
 
