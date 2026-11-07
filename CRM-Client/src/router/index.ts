@@ -266,12 +266,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: '提醒规则', settingsKey: 'reminder-rules' },
       },
       {
-        path: 'settings/approval-flows-new',
-        name: 'SettingsApprovalFlowsNew',
-        component: () => import('@/views/ApprovalFlowsNew.vue'),
-        meta: { requiresAuth: true, title: '审批流程管理（新）', settingsKey: 'approval-flows-new' },
-      },
-      {
         path: 'settings/members',
         name: 'SettingsMembers',
         component: () => import('@/views/settings/SettingsMembersPage.vue'),

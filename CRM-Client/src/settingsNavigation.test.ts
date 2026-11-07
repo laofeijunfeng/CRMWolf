@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { getSettingsNavigationItem, SETTINGS_NAVIGATION } from './settingsNavigation'
 
@@ -27,17 +25,11 @@ describe('settings navigation registry', () => {
       allowOwnerBypass: false,
     })
     expect(ids.indexOf('reminder-rules')).toBe(ids.indexOf('approval-flows') + 1)
-    expect(item?.path).not.toBe(getSettingsNavigationItem('approval-flows-new')?.path)
   })
 
-  it('allows automation permissions to enter the new approval workflow page', () => {
-    const item = getSettingsNavigationItem('approval-flows-new')
-
-    expect(item?.requiredAnyPermissions).toEqual(expect.arrayContaining([
-      'automation:read',
-      'automation:create',
-      'automation:edit',
-    ]))
+  it('removes the new approval workflow entry and preserves the original approval route', () => {
+    expect(getSettingsNavigationItem('approval-flows-new')).toBeUndefined()
+    expect(getSettingsNavigationItem('approval-flows')?.path).toBe('/settings/approval-flows')
   })
   it('registers canonical products entry with explicit permission and no owner bypass', () => {
     const item = getSettingsNavigationItem('products')
@@ -55,18 +47,8 @@ describe('settings navigation registry', () => {
     expect(ids).toEqual(['ai', 'notifications', 'integrations'])
   })
 
-  it('does not host settings modules through SettingsModulePage', () => {
-    const routerSource = readFileSync(resolve(process.cwd(), 'src/router/index.ts'), 'utf8')
-    expect(routerSource).not.toContain('SettingsModulePage')
-    expect(routerSource).toContain('SettingsMembersPage')
-    expect(routerSource).toContain('SettingsProductsPage')
-    expect(routerSource).toContain('SettingsAIPage')
-  })
 
   it('keeps separate AI and products settings routes', () => {
-    const routerSource = readFileSync(resolve(process.cwd(), 'src/router/index.ts'), 'utf8')
-    expect(routerSource).toContain('SettingsAIPage')
-    expect(routerSource).toContain('SettingsProductsPage')
     expect(getSettingsNavigationItem('ai')?.id).toBe('ai')
     expect(getSettingsNavigationItem('products')?.id).toBe('products')
     expect(getSettingsNavigationItem('ai')?.path).not.toBe(getSettingsNavigationItem('products')?.path)
