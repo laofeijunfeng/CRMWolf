@@ -93,6 +93,7 @@ def test_exact_name_precedes_alias_and_exposes_only_identity(db_session, monkeyp
 def test_duplicate_exact_names_are_ambiguous_when_legacy_data_lacks_unique_constraint(db_session):
     session, _ = db_session
     session.connection().exec_driver_sql("DROP INDEX uq_customer_team_account_name")
+    session.connection().exec_driver_sql("DROP INDEX uq_customer_team_name_dedupe_key")
     first = _customer(session, "睿狐科技", "cus_duplicate_a")
     second = _customer(session, "睿狐科技", "cus_duplicate_b")
 
