@@ -439,40 +439,13 @@
       @issued="handleLicenseIssued"
     />
 
-    <Dialog :open="attachmentPreviewVisible" @update:open="handleAttachmentPreviewOpenChange">
-      <DialogContent class="max-w-[92vw] sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{{ attachmentPreviewTitle }}</DialogTitle>
-          <DialogDescription>审批附件预览</DialogDescription>
-        </DialogHeader>
-
-        <div class="approval-attachment-preview">
-          <div v-if="attachmentPreviewPendingId != null" class="approval-attachment-preview__loading">
-            加载中...
-          </div>
-          <img
-            v-else-if="attachmentPreviewIsImage && attachmentPreviewUrl"
-            :src="attachmentPreviewUrl"
-            :alt="attachmentPreviewTitle"
-            class="approval-attachment-preview__image"
-          >
-          <iframe
-            v-else-if="attachmentPreviewIsPdf && attachmentPreviewUrl"
-            :src="attachmentPreviewUrl"
-            :title="attachmentPreviewTitle"
-            class="approval-attachment-preview__frame"
-          />
-          <div v-else class="approval-attachment-preview__fallback">
-            当前文件格式不支持直接预览，请下载后查看。
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" @click="closeAttachmentPreview">关闭</Button>
-          <Button @click="handleDownloadAttachment">下载</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <FilePreviewDialog
+      :open="attachmentPreviewVisible"
+      :file="attachmentPreviewFile"
+      :loading="attachmentPreviewPendingId != null"
+      @update:open="handleAttachmentPreviewOpenChange"
+      @download="handleDownloadAttachment"
+    />
 
     <!-- 移动端快速驳回弹窗 -->
     <Dialog :open="quickRejectVisible" @update:open="handleQuickRejectOpenChange">
@@ -549,7 +522,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -588,6 +561,7 @@ import { type ListExportPayload } from '@/api/listExport'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery, ApprovalTab } from '@/schemas/approvalGeneric'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
@@ -975,17 +949,11 @@ const hasAttachment = (row: ApprovalListItem): boolean =>
   (row.business_type === 'CONTRACT' && row.contract_file_path != null && row.contract_file_path.length > 0) ||
   (row.business_type === 'INVOICE' && row.invoice_file_path != null && row.invoice_file_path.length > 0)
 
-const attachmentPreviewExtension = computed<string>(() =>
-  getFileExtension(getAttachmentFileName(attachmentPreviewRow.value))
-)
-
-const attachmentPreviewIsImage = computed<boolean>(() =>
-  ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(attachmentPreviewExtension.value)
-)
-
-const attachmentPreviewIsPdf = computed<boolean>(() => attachmentPreviewExtension.value === 'pdf')
-
-const attachmentPreviewTitle = computed<string>(() => getAttachmentFileName(attachmentPreviewRow.value))
+const attachmentPreviewFile = computed<FileAttachmentItem | null>(() => {
+  const row = attachmentPreviewRow.value
+  if (!row) return null
+  return { id: row.id, name: getAttachmentFileName(row), url: attachmentPreviewUrl.value }
+})
 
 const revokeAttachmentPreviewUrl = (): void => {
   if (attachmentPreviewUrl.value.length > 0) {
@@ -1047,7 +1015,7 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
         {
           key: 'remark',
           label: '备注',
-          value: entityDetailValue('remark')?.toString().trim() ? entityDetailValue('remark') : '无',
+          value: (entityDetailValue('remark')?.toString().trim() ?? '') !== '' ? entityDetailValue('remark') : '无',
           wide: true,
         },
         { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
@@ -1928,39 +1896,6 @@ watch(rows, async () => {
   flex-basis: 100%;
 }
 
-.approval-attachment-preview {
-  min-height: 55vh;
-  max-height: 70vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-page-v2;
-}
-
-.approval-attachment-preview__loading,
-.approval-attachment-preview__fallback {
-  padding: $wolf-space-xl-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  text-align: center;
-}
-
-.approval-attachment-preview__image {
-  display: block;
-  max-width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-}
-
-.approval-attachment-preview__frame {
-  width: 100%;
-  height: 70vh;
-  border: 0;
-  background: $wolf-bg-card-v2;
-}
 
 // 移动端卡片警告边框样式
 @media (max-width: 768px) {
