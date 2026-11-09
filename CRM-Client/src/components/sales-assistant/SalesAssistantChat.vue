@@ -142,9 +142,20 @@ const pushEntry = (
 }
 
 const scrollId = ref<HTMLElement | null>(null)
-const scrollToBottom = (): void => {
+let scrollSchedule = 0
+const scrollToBottom = (waitForLayout = false): void => {
+  const schedule = ++scrollSchedule
   void nextTick(() => {
-    scrollId.value?.scrollTo?.({ top: scrollId.value.scrollHeight })
+    const scroller = scrollId.value
+    if (scroller === null || schedule !== scrollSchedule) return
+    const scroll = (): void => {
+      if (schedule === scrollSchedule && !disposed && scrollId.value === scroller) scroller.scrollTo?.({ top: scroller.scrollHeight })
+    }
+    if (!waitForLayout) {
+      scroll()
+      return
+    }
+    requestAnimationFrame(() => requestAnimationFrame(scroll))
   })
 }
 
@@ -1060,7 +1071,7 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   if (!older && current !== null) adoptProcessingTurn(current)
   if (!older && view.has_pending_request) resultPending.value = true
   if (!older) noteEpisodeMessages()
-  if (!older) scrollToBottom()
+  if (!older) scrollToBottom(true)
 }
 
 const refreshConversation = async (): Promise<void> => {
@@ -1071,6 +1082,7 @@ const refreshConversation = async (): Promise<void> => {
 
 const loadOlder = async (): Promise<void> => {
   if (olderCursor.value === null || submitting.value) return
+  scrollSchedule += 1
   submitting.value = true
   const cursor = olderCursor.value
   const scroller = scrollId.value
