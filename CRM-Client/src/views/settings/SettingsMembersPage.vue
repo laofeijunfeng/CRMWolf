@@ -115,7 +115,7 @@ const { handleSubmit: handleResetPasswordSubmit, resetForm: resetPasswordResetFo
   }
 })
 
-const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
+const currentUserId = computed<number | null>(() => userStore.userInfo?.id ?? null)
 const teamId = computed(() => teamStore.currentTeam?.id)
 
 const hasAccess = computed(() => membersSettings !== undefined && canAccess(membersSettings))
@@ -331,7 +331,7 @@ const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => 
   if (!confirmed || id === null) return
 
   try {
-    await teamApi.removeMember(id, member.id.toString())
+    await teamApi.removeMember(id, member.id)
     toast.success('成员已移除')
     void loadMembers()
   } catch (error) {
@@ -342,7 +342,7 @@ const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => 
 const isTeamMember = (row: unknown): row is TeamMemberResponse => {
   if (typeof row !== 'object' || row === null) return false
   const record = row as Record<string, unknown>
-  return typeof record['id'] === 'string' &&
+  return typeof record['id'] === 'number' &&
     typeof record['name'] === 'string' &&
     typeof record['email'] === 'string' &&
     typeof record['joined_at'] === 'string' &&

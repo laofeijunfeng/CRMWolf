@@ -27,6 +27,11 @@
  */
 
 import request from '@/utils/request'
+import {
+  FrontendLogEntrySchema,
+  FrontendLogBatchResponseSchema,
+  type FrontendLogEntry as LogEntry,
+} from '@/schemas/frontendLog'
 import { DEFAULT_LOGGER_CONFIG, type LoggerConfig } from './logger.config'
 import { useUserStore } from '@/stores/user'
 import { teamApi } from '@/api/team'
@@ -35,19 +40,7 @@ import type { Store as PiniaStore } from 'pinia'
 
 // ========== Types ==========
 
-type LogLevel = 'debug' | 'info' | 'warn' | 'error'
-
-interface LogEntry {
-  level: LogLevel
-  context: string
-  action: string
-  data: unknown
-  timestamp: number
-  traceId?: string
-  // 新增：用户关联
-  userId?: number
-  teamId?: number
-}
+type LogLevel = LogEntry['level']
 
 interface TraceStep {
   step: string
@@ -71,10 +64,9 @@ async function getCurrentUserInfo(): Promise<{ userId?: number; teamId?: number 
     let teamId: number | undefined
     try {
       const teamsResponse = await teamApi.getUserTeams()
-      teamId = teamsResponse.current_team_id
+      teamId = teamsResponse.current_team_id ?? undefined
     } catch {
       // 获取团队失败时静默忽略
-      console.warn('[Logger] Failed to get team info')
     }
 
     // 返回时显式处理 undefined
@@ -98,7 +90,7 @@ const USER_INFO_CACHE_DURATION = 60000 // 1 分钟缓存
 
 async function getCachedUserInfo(): Promise<{ userId?: number; teamId?: number }> {
   const now = Date.now()
-  if (cachedUserInfo && now - userInfoCacheTime < USER_INFO_CACHE_DURATION) {
+  if (cachedUserInfo !== null && now - userInfoCacheTime < USER_INFO_CACHE_DURATION) {
     return cachedUserInfo
   }
 
@@ -234,36 +226,12 @@ class FrontendLogger {
       ...(userInfo.teamId !== undefined && { teamId: userInfo.teamId })
     }
 
-    // Console 输出（开发环境）
-    if (this.config.consoleOutput) {
-      this.outputToConsole(entry)
-    }
-
     // 加入缓冲
     this.buffer.push(entry)
 
     // 达到缓冲大小立即发送
     if (this.buffer.length >= this.config.bufferSize) {
       this.flush()
-    }
-  }
-
-  private outputToConsole(entry: LogEntry): void {
-    const prefix = `${entry.context} ${entry.action}`
-
-    switch (entry.level) {
-      case 'debug':
-        console.debug(prefix, entry.data)
-        break
-      case 'info':
-        console.info(prefix, entry.data)
-        break
-      case 'warn':
-        console.warn(prefix, entry.data)
-        break
-      case 'error':
-        console.error(prefix, entry.data)
-        break
     }
   }
 
@@ -275,12 +243,12 @@ class FrontendLogger {
     this.buffer = []
 
     try {
-      await request.post(this.config.endpoint, {
+      FrontendLogBatchResponseSchema.parse(await request.post(this.config.endpoint, {
         logs: logsToSend,
         sessionId: this.sessionId,
         userAgent: navigator.userAgent,
         url: window.location.href
-      })
+      }))
 
       // 发送成功，重置重试计数
       this.retryCount = 0
@@ -288,7 +256,7 @@ class FrontendLogger {
       // 清理 localStorage 暂存
       this.clearStorage()
 
-    } catch (error) {
+    } catch {
       // 发送失败，日志重新加回缓冲
       this.buffer.unshift(...logsToSend)
 
@@ -307,7 +275,7 @@ class FrontendLogger {
   }
 
   private startFlushTimer(): void {
-    if (!this.config.enabled || this.flushTimer) return
+    if (!this.config.enabled || this.flushTimer !== null) return
 
     this.flushTimer = window.setInterval(() => {
       this.flush()
@@ -315,7 +283,7 @@ class FrontendLogger {
   }
 
   private stopFlushTimer(): void {
-    if (this.flushTimer) {
+    if (this.flushTimer !== null) {
       clearInterval(this.flushTimer)
       this.flushTimer = null
     }
@@ -345,7 +313,9 @@ class FrontendLogger {
   private getStoredLogs(): LogEntry[] {
     try {
       const stored = localStorage.getItem(this.config.storageKey)
-      return stored ? JSON.parse(stored) : []
+      if (stored === null || stored === '') return []
+      const parsed: unknown = JSON.parse(stored)
+      return FrontendLogEntrySchema.array().parse(parsed)
     } catch {
       return []
     }
@@ -355,7 +325,6 @@ class FrontendLogger {
     const stored = this.getStoredLogs()
     if (stored.length > 0) {
       this.buffer.unshift(...stored)
-      console.info('[Logger] Restored logs from localStorage:', stored.length)
     }
   }
 
@@ -399,8 +368,9 @@ class FrontendLogger {
   private setupErrorHandler(): void {
     // 捕获未处理的 Promise 错误
     window.addEventListener('unhandledrejection', (event) => {
+      const reason: unknown = event.reason
       this.error('[GLOBAL]', 'unhandledrejection', {
-        reason: event.reason,
+        reason,
         promise: String(event.promise)
       })
     })
@@ -441,10 +411,11 @@ export const LoggerPlugin = {
     app.config.globalProperties['$logger'] = logger
 
     // Vue 错误捕获
-    app.config.errorHandler = (err: unknown, instance: unknown, info: string) => {
+    app.config.errorHandler = (err: unknown, instance: unknown, info: string): void => {
+      const componentName = (instance as { $options?: { name?: string } })?.$options?.name
       logger.error('[Vue]', 'errorHandler', {
         error: String(err),
-        component: (instance as { $options?: { name?: string } })?.$options?.name || 'unknown',
+        component: componentName !== undefined && componentName !== '' ? componentName : 'unknown',
         info
       })
     }

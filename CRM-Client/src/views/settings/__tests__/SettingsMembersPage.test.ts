@@ -9,19 +9,22 @@ import { usePermissionStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getTeamMembers: vi.fn(),
+  assignMemberRoles: vi.fn(),
+  getRoles: vi.fn(),
 }))
 
-const { getTeamMembers } = mocks
+const { getTeamMembers, assignMemberRoles, getRoles } = mocks
 
 vi.mock('@/api/team', () => ({
   teamApi: {
     getTeamMembers: mocks.getTeamMembers,
+    assignMemberRoles: mocks.assignMemberRoles,
   },
 }))
 
 vi.mock('@/api/role', () => ({
   default: {
-    getRoles: vi.fn().mockResolvedValue([]),
+    getRoles: mocks.getRoles,
   },
 }))
 
@@ -70,13 +73,25 @@ describe('SettingsMembersPage', () => {
 
   const pageStubs = {
     DataTable: {
-      props: ['data', 'fields'],
-      template: '<div data-testid="members-table"><slot name="cell-member" v-for="row in data" :row="row" :index="0" /></div>',
+      props: ['data', 'fields', 'getRowActions'],
+      template: `<div data-testid="members-table">
+        <div v-for="row in data" :key="row.id">
+          <slot name="cell-member" :row="row" :index="0" />
+          <template v-for="action in (getRowActions(row, 0)?.primaryActions ?? [])" :key="action.id ?? action.label">
+            <button
+              v-if="action.visible !== false"
+              :data-testid="'assign-role-' + row.id"
+              @click="action.handler(row)"
+            >{{ action.label }}</button>
+          </template>
+        </div>
+      </div>`,
     },
     TableRowActions: true,
-    Dialog: { template: '<div><slot /></div>' },
+    Dialog: { props: ['open'], template: '<div v-if="open" data-testid="open-dialog"><slot /></div>' },
     DialogContent: { template: '<div><slot /></div>' },
-    DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
+    DialogHeader: true, DialogTitle: true, DialogDescription: true,
+    DialogFooter: { template: '<footer><slot /></footer>' },
     FormField: { template: '<div><slot :componentField="{}" /></div>' },
     SettingsContent: { template: '<main><slot /></main>' },
     ErrorState: {
@@ -89,7 +104,7 @@ describe('SettingsMembersPage', () => {
   it('loads members into a DataTable and keeps invite code off this page', async () => {
     seedTeamUser()
     getTeamMembers.mockResolvedValue([{
-      id: 'member-1',
+      id: 8,
       name: '成员一',
       email: 'member@example.com',
       joined_at: '2026-01-01T00:00:00Z',
@@ -147,7 +162,7 @@ describe('SettingsMembersPage', () => {
     permissionStore.loadState = 'loading'
     permissionStore.permissions = []
     getTeamMembers.mockResolvedValue([{
-      id: 'member-1',
+      id: 7,
       name: '成员一',
       email: 'member@example.com',
       joined_at: '2026-01-01T00:00:00Z',
@@ -170,6 +185,39 @@ describe('SettingsMembersPage', () => {
     permissionStore.loadState = 'ready'
     await vi.waitFor(() => expect(getTeamMembers).toHaveBeenCalledWith(7))
     expect(wrapper.text()).toContain('成员一')
+    wrapper.unmount()
+  })
+
+  it('opens role assignment for a numeric member id and keeps the current role selected', async () => {
+    seedTeamUser()
+    getRoles.mockResolvedValue([{ id: 3, name: '销售成员', code: 'SALES_MEMBER' }])
+    getTeamMembers.mockResolvedValue([{
+      id: 8,
+      name: '成员一',
+      email: 'member@example.com',
+      joined_at: '2026-01-01T00:00:00Z',
+      roles: [{ id: 3, name: '销售成员', code: 'SALES_MEMBER' }],
+    }])
+
+    const wrapper = mount(SettingsMembersPage, {
+      global: { stubs: pageStubs },
+    })
+    await vi.waitFor(() => expect(getTeamMembers).toHaveBeenCalledWith(7))
+
+    await wrapper.get('[data-testid="assign-role-8"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="open-dialog"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('销售成员')
+    expect(wrapper.find('[role="checkbox"]').attributes('aria-checked')).toBe('true')
+
+    assignMemberRoles.mockResolvedValue({ message: '角色已分配' })
+    const saveButton = wrapper.findAll('button').find(button => button.text() === '保存')
+    if (saveButton === undefined) throw new Error('保存按钮未渲染')
+    await saveButton.trigger('click')
+    await vi.waitFor(() => expect(assignMemberRoles).toHaveBeenCalledWith(7, 8, [3]))
+    await vi.waitFor(() => expect(getTeamMembers).toHaveBeenCalledTimes(2))
+    expect(wrapper.find('[data-testid="open-dialog"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

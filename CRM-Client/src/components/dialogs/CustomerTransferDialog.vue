@@ -89,11 +89,11 @@ const visible = computed({
 
 const availableMembers = computed(() => {
   const currentOwnerId = props.customer?.owner_id ?? ''
-  return members.value.filter(member => member.id !== currentOwnerId)
+  return members.value.filter(member => String(member.id) !== currentOwnerId)
 })
 const memberOptions = computed(() =>
   availableMembers.value.map((member) => ({
-    value: member.id,
+    value: String(member.id),
     label: member.name,
   }))
 )
@@ -107,7 +107,7 @@ const currentOwnerName = computed(() => {
   return ownerId !== undefined && ownerId.length > 0 ? `用户 ${ownerId}` : '未分配'
 })
 const selectedOwnerName = computed(() => {
-  const selectedMember = members.value.find(member => member.id === form.ownerId)
+  const selectedMember = members.value.find(member => String(member.id) === form.ownerId)
   const selectedMemberName = selectedMember?.name?.trim()
   return selectedMemberName !== undefined && selectedMemberName.length > 0
     ? selectedMemberName

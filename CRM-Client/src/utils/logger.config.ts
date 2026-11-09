@@ -19,8 +19,6 @@ export interface LoggerConfig {
   maxRetries: number
   /** localStorage 键名（用于暂存失败日志） */
   storageKey: string
-  /** 是否在 console 显示 */
-  consoleOutput: boolean
 }
 
 export const DEFAULT_LOGGER_CONFIG: LoggerConfig = {
@@ -30,6 +28,5 @@ export const DEFAULT_LOGGER_CONFIG: LoggerConfig = {
   bufferSize: 20,
   flushInterval: 5000,
   maxRetries: 3,
-  storageKey: 'crm_frontend_logs',
-  consoleOutput: import.meta.env.DEV
+  storageKey: 'crm_frontend_logs'
 }
