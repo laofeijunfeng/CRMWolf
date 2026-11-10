@@ -55,6 +55,7 @@ def freeze_confirmation(
 ) -> tuple[AssistantTask, TaskWaiting]:
     from app.crud.customer_activity import customer_activity_crud
     from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
+    from app.services.assistant.noise import ignored_noise_summary
 
     draft = TaskDraft.model_validate(task.draft_json or {})
     if draft.quality_score.status != "CANDIDATE" or not draft.score_reason:
@@ -101,6 +102,7 @@ def freeze_confirmation(
             "structured_output": draft.score_detail.get("structured_output"),
             "structuring_model_name": draft.score_detail.get("structuring_model_name"),
         },
+        "ignored_noise_summary": ignored_noise_summary(draft),
         "rubric_version": "customer_activity_ai.rules",
         "draft_version": task.version,
         "submission_id": generate_public_id("asub"),
@@ -122,6 +124,7 @@ def freeze_confirmation(
         "channel_status_label",
         "channel_source_text",
         "channel_options",
+        "ignored_noise_summary",
     ]
     if context_card:
         from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
@@ -315,6 +318,7 @@ def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> 
         "channel_status_label",
         "channel_source_text",
         "channel_options",
+        "ignored_noise_summary",
     ]
     from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
 

@@ -217,6 +217,7 @@ const activityOpportunity = computed(() => activityFact('opportunity'))
 const activityEvidence = computed(() => activityFact('context_evidence'))
 const activityEvidenceLines = computed(() => (activityEvidence.value?.value ?? '').split('；').map(line => line.trim()).filter(line => line !== ''))
 const activityNotices = computed(() => props.block.facts.filter(fact => fact.key.startsWith('context_notice_')))
+const activityIgnoredNoise = computed(() => activityFact('ignored_noise'))
 const activitySourceFolded = computed(() => {
   const fact = activityKindFact.value
   if (fact === undefined || fact.source === null || fact.source === undefined || fact.source === '') return ''
@@ -666,6 +667,7 @@ const submit = async (): Promise<void> => {
         <ul v-if="activityNotices.length > 0" class="activity-notices">
           <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
         </ul>
+        <p v-if="activityIgnoredNoise" class="activity-caption" data-activity-ignored-noise>{{ activityIgnoredNoise.value }}</p>
         <details v-if="showActivityBasis" class="activity-details activity-basis">
           <summary>查看依据</summary>
           <div>

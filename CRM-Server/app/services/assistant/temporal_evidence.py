@@ -196,6 +196,22 @@ def validate_temporal_quotes(text: str, mentions: list[object]) -> None:
         _mention_span(text, item)
 
 
+def _noise_bounds(draft: TaskDraft, segment_id: str, segment_text: str) -> list[tuple[int, int]]:
+    """Server-verified speaker timestamps of one segment that still match its text."""
+
+    return [
+        (item.start, item.end)
+        for item in draft.input_noise
+        if item.kind == "SPEAKER_TIMESTAMP"
+        and item.segment_id == segment_id
+        and segment_text[item.start : item.end] == item.raw_text
+    ]
+
+
+def _inside_noise(start: int, end: int, noise: list[tuple[int, int]]) -> bool:
+    return any(left <= start and end <= right for left, right in noise)
+
+
 def _canonical_spans(text: str, mentions: list[ModelTemporalMention]) -> list[FoundSpan]:
     """Union source grammar and quotes; normalize a whole overlapping expression once."""
 
@@ -237,17 +253,24 @@ def attach_model_evidence(
         mention = _read_mention(item)
         start, end = _snap_span(segment_text, mention)
         quoted.append(mention.model_copy(update={"quote_start": start, "quote_end": end}))
-    spans = _canonical_spans(segment_text, quoted)
+    # Verified recording noise (speaker timestamps) creates no mention and no action.
+    noise = _noise_bounds(draft, segment_id, segment_text)
+    quoted = [item for item in quoted if not _inside_noise(item.quote_start, item.quote_end, noise)]
+    spans = [item for item in _canonical_spans(segment_text, quoted) if not _inside_noise(item.start, item.end, noise)]
     if not spans and not actions:
         return
     built_mentions: list[StoredMention] = []
     built_actions: list[StoredAction] = []
     action_ids: dict[str, str] = {}
     quoted_actions: dict[str, QuotedAction] = {}
+    noise_refs: set[str] = set()
     for item in actions:
         action = _read_action(item)
         quote = action.evidence_quote
         start, end = _action_span(segment_text, action)
+        if _inside_noise(start, end, noise):
+            noise_refs.add(action.action_ref)
+            continue
         identity = f"{segment_id}:{action.owner_role}:{action.action_text}:{start}:{end}"
         action_id = "act_" + sha256(identity.encode()).hexdigest()[:16]
         if action.action_ref in action_ids:
@@ -270,6 +293,10 @@ def attach_model_evidence(
                 action_status=action.action_status,
             )
         )
+    quoted = [
+        item.model_copy(update={"action_ref": ""}) if item.action_ref in noise_refs - action_ids.keys() else item
+        for item in quoted
+    ]
     for mention in quoted:
         if mention.action_ref and mention.action_ref not in action_ids:
             raise TemporalContractError("temporal mention points at an unknown action")
@@ -1642,7 +1669,8 @@ def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeR
         return "CUSTOMER_COMMITMENT", "COMMITTED", None
     if re.search(r"再找|再联系|等\s*$", before) or re.match(r"[\s，,、]*(再)?(找|联系)", action_after):
         return "SALES_FOLLOW_UP", "PLANNED", None
-    if re.search(r"(我|我们|本人)\s*$", before) or clause.startswith(("我", "我们", "本人")):
+    first_person = re.search(r"(我|我们|本人)\s*$", before) or clause.startswith(("我", "我们", "本人"))
+    if first_person and not _other_speaker(text, found.start):
         return "SALES_FOLLOW_UP", "PLANNED", None
     marker = _REPLACEMENT.search(text)
     if marker is not None and found.start >= marker.start():
@@ -1656,6 +1684,17 @@ def _bind_role(text: str, found: FoundSpan, model_role: TimeRole) -> tuple[TimeR
     else:
         status = "UNKNOWN"
     return model_role, status, None
+
+
+_SPEAKER_LINE = re.compile(r"[ \t]*(?:[\[(（]?\d{1,2}(?::\d{2}){1,2}[\])）]?[ \t]*)?([^\s：:，,。]{1,12})[ \t]*[：:]")
+
+
+def _other_speaker(text: str, position: int) -> bool:
+    """In a pasted transcript line, "我/我们" belongs to that line's speaker, not the sales user."""
+
+    line_start = text.rfind("\n", 0, position) + 1
+    match = _SPEAKER_LINE.match(text, line_start)
+    return match is not None and match.end() <= position and match.group(1) not in {"我", "我们", "本人", "销售"}
 
 
 def _owner_from_clause(text: str, found: FoundSpan, role: TimeRole) -> str:
@@ -1867,7 +1906,7 @@ def _mention_span(text: str, item: object) -> tuple[int, int]:
 def _snap_span(
     text: str, mention: ModelTemporalMention, segments: list[tuple[int, int]] | None = None
 ) -> tuple[int, int]:
-    return _locate_quote(
+    return locate_quote(
         text,
         mention.quote_start,
         mention.quote_end,
@@ -1879,7 +1918,7 @@ def _snap_span(
 
 
 def _action_span(text: str, action: ModelDraftAction, segments: list[tuple[int, int]] | None = None) -> tuple[int, int]:
-    return _locate_quote(
+    return locate_quote(
         text,
         action.quote_start,
         action.quote_end,
@@ -1890,7 +1929,7 @@ def _action_span(text: str, action: ModelDraftAction, segments: list[tuple[int, 
     )
 
 
-def _locate_quote(
+def locate_quote(
     text: str,
     start: int,
     end: int,

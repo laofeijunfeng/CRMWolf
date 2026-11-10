@@ -483,15 +483,18 @@ async def intake_step(
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(_S_CLASSIFY, ms=int((time.monotonic() - _t0) * 1000))
+        from app.services.assistant.noise import record_noise
+
+        noted_draft = TaskDraft.model_validate(task.draft_json or {})
+        channel_text = record_noise(noted_draft, user_text, decision)
         if decision.kind == "UNCLEAR":
-            waiting = kind_waiting(task, source_text=user_text)
-            original_draft = TaskDraft.model_validate(task.draft_json or {})
+            waiting = kind_waiting(task, source_text=channel_text)
             result = apply_task_update(
                 db,
                 task,
                 TaskUpdate(
                     waiting=waiting,
-                    draft=original_draft,
+                    draft=noted_draft,
                     action_actor="SYSTEM",
                     action_name="ask_activity_kind",
                     action_result={"reason": decision.reason},
@@ -503,6 +506,7 @@ async def intake_step(
             task,
             TaskUpdate(
                 activity_kind=decision.kind,
+                draft=noted_draft,
                 action_actor="SYSTEM",
                 action_name="set_activity_kind",
                 action_result={"kind": decision.kind, "source": "classifier"},

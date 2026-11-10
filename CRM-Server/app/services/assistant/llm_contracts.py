@@ -21,6 +21,20 @@ CanonicalActivityKind = Literal[
 ]
 
 
+NoiseKind = Literal["SPEAKER_TIMESTAMP", "CHANNEL_MENTION"]
+
+
+class ModelNoiseSpan(BaseModel):
+    """One quoted span the model calls recording noise. The server verifies it before use."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: NoiseKind
+    raw_text: str = Field(min_length=1, max_length=40)
+    quote_start: int = Field(ge=0)
+    quote_end: int = Field(ge=0)
+
+
 class KindDecision(BaseModel):
     """Model nomination of one activity channel. The server decides whether it can be frozen."""
 
@@ -31,6 +45,7 @@ class KindDecision(BaseModel):
     confidence: float = Field(default=0, ge=0, le=1)
     evidence_quote: str = Field(default="", max_length=200)
     channels: list[CanonicalActivityKind] = Field(default_factory=list, max_length=7)
+    noise_spans: list[ModelNoiseSpan] = Field(default_factory=list, max_length=50)
 
 
 

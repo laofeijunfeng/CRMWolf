@@ -559,6 +559,40 @@ it('keeps activity facts visible and folds recognition source and evidence', () 
   expect(wrapper.findAll('button').map(button => button.text())).toEqual(['取消', '确认写入'])
 })
 
+it('shows ignored input noise once as a muted caption and omits it when absent', () => {
+  const confirmation = (extra: Record<string, string>[]): ReturnType<typeof InteractionBlockSchema.parse> => InteractionBlockSchema.parse({
+    id: 'b_interaction_noise',
+    type: 'interaction',
+    interaction_id: 'ix_noise',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '广州睿狐科技有限公司', group: 'write' },
+      { key: 'summary', label: '摘要', value: '张总预算已批。', group: 'write' },
+      ...extra
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_1'
+  })
+
+  const shown = mount(AgentUIInteractionBlock, {
+    props: { block: confirmation([{ key: 'ignored_noise', label: '已忽略', value: '已忽略 3 处发言时间', group: 'context' }]) }
+  })
+  expect(shown.findAll('[data-activity-ignored-noise]').map(node => node.text())).toEqual(['已忽略 3 处发言时间'])
+  expect(shown.text().split('已忽略 3 处发言时间')).toHaveLength(2)
+
+  const absent = mount(AgentUIInteractionBlock, { props: { block: confirmation([]) } })
+  expect(absent.find('[data-activity-ignored-noise]').exists()).toBe(false)
+})
+
 it('keeps an unrecognized activity type and its reason outside the fold', () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_unknown_kind',
