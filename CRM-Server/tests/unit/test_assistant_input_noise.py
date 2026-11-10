@@ -57,23 +57,33 @@ def _sourced(text: str) -> TaskDraft:
 def _mention(text: str, raw: str, role: str, ref: str = "", kind: str = "UNKNOWN") -> dict[str, object]:
     start, end = _span(text, raw)
     return {
-        "raw_text": raw, "quote_start": start, "quote_end": end, "kind": kind,
-        "role": role, "owner": "", "action_ref": ref, "confidence": 0.9,
+        "raw_text": raw,
+        "quote_start": start,
+        "quote_end": end,
+        "kind": kind,
+        "role": role,
+        "owner": "",
+        "action_ref": ref,
+        "confidence": 0.9,
     }
 
 
 def _action(text: str, ref: str, owner: str, quote: str, action_text: str) -> dict[str, object]:
     start, end = _span(text, quote)
     return {
-        "action_ref": ref, "owner_role": owner, "owner_text": "", "action_text": action_text,
-        "action_status": "PLANNED", "evidence_quote": quote, "quote_start": start, "quote_end": end,
+        "action_ref": ref,
+        "owner_role": owner,
+        "owner_text": "",
+        "action_text": action_text,
+        "action_status": "PLANNED",
+        "evidence_quote": quote,
+        "quote_start": start,
+        "quote_end": end,
     }
 
 
 def _attach(text: str, draft: TaskDraft, mentions: list[dict], actions: list[dict]) -> TaskDraft:
-    attach_model_evidence(
-        draft, segment_id="seg", segment_text=text, anchor=ANCHOR, mentions=mentions, actions=actions
-    )
+    attach_model_evidence(draft, segment_id="seg", segment_text=text, anchor=ANCHOR, mentions=mentions, actions=actions)
     return draft
 
 
@@ -104,9 +114,7 @@ def test_speaker_timestamps_never_become_questions_and_business_times_keep_their
 def test_label_touching_a_business_time_is_dropped() -> None:
     text = "13:47 我：明天下午 2 点再电话确认"
     verified = _sourced(text)
-    record_noise(
-        verified, text, _decision(text, ("SPEAKER_TIMESTAMP", "13:47"), ("SPEAKER_TIMESTAMP", "2 点"))
-    )
+    record_noise(verified, text, _decision(text, ("SPEAKER_TIMESTAMP", "13:47"), ("SPEAKER_TIMESTAMP", "2 点")))
     assert [item.raw_text for item in verified.input_noise] == ["13:47"]
     meeting = "今天下午 13:45 和张总开会"
     draft = _sourced(meeting)
@@ -127,7 +135,9 @@ def test_transcript_timestamp_forms_are_not_asked(text: str, raw: str) -> None:
     record_noise(draft, text, _decision(text, ("SPEAKER_TIMESTAMP", raw)))
     mentions = [_mention(text, raw, "SALES_FOLLOW_UP", "s")]
     _attach(text, draft, mentions, [_action(text, "s", "SALES", raw, "跟进")])
-    assert draft.content_json["temporal_evidence"]["mentions"] == []
+    from app.services.assistant.temporal_evidence import resolved_sales_follow_up
+
+    assert resolved_sales_follow_up(draft) == (None, "UNKNOWN")
     assert temporal_waiting(draft) is None
 
 
@@ -157,7 +167,10 @@ def test_mentioned_only_channels_do_not_block_the_meeting_kind() -> None:
         text,
         ("CHANNEL_MENTION", "邮件"),
         ("CHANNEL_MENTION", "电话"),
-        kind="ONLINE_MEETING", confidence=0.92, evidence_quote="线上会议", channels=["ONLINE_MEETING"],
+        kind="ONLINE_MEETING",
+        confidence=0.92,
+        evidence_quote="线上会议",
+        channels=["ONLINE_MEETING"],
     )
     assert resolve_channel(text, decision, model_failed=False).status == "family_unclear"
     draft = _sourced(text)
@@ -197,8 +210,11 @@ def test_unlocatable_or_unmatched_labels_have_no_effect() -> None:
 
 def test_malformed_noise_label_fails_the_whole_classification() -> None:
     with pytest.raises(ValidationError):
-        KindDecision(noise_spans=[{"kind": "SPEAKER_TIMESTAMP", "raw_text": "13:45", "quote_start": 0,
-                                   "quote_end": 5, "role": "OTHER"}])
+        KindDecision(
+            noise_spans=[
+                {"kind": "SPEAKER_TIMESTAMP", "raw_text": "13:45", "quote_start": 0, "quote_end": 5, "role": "OTHER"}
+            ]
+        )
     with pytest.raises(ValidationError):
         KindDecision(noise_spans=[{"kind": "SPEAKER_NAME", "raw_text": "张总", "quote_start": 0, "quote_end": 2}])
 
@@ -211,9 +227,7 @@ async def test_sample_note_reaches_confirmation_with_ignored_timestamps(db_sessi
     class Structurer:
         async def classify(self, db, *, team_id, user_text):
             assert user_text == text
-            return _decision(
-                text, *labels, kind="OTHER_FOLLOW_UP", confidence=0.95, evidence_quote="联系"
-            )
+            return _decision(text, *labels, kind="OTHER_FOLLOW_UP", confidence=0.95, evidence_quote="联系")
 
         async def structure(self, db, *, team_id, kind, user_text):
             return StructureDraftResult(

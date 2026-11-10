@@ -15,6 +15,8 @@ from app.services.assistant.coordinator import AssistantCoordinator, AssistantIn
 from app.services.assistant.task_state import load_draft, load_waiting
 from app.services.assistant.temporal_evidence import attach_model_evidence, resolved_sales_follow_up
 
+# ruff: noqa: RUF001
+
 
 @compiles(BigInteger, "sqlite")
 def _bigint_sqlite(element, compiler, **kwargs):
@@ -135,3 +137,22 @@ async def test_legacy_wait_without_target_reissues_before_accepting_answer(facto
         assert load_waiting(task).temporal_target.reason == "DATE"
         assert resolved_sales_follow_up(load_draft(task)) == (None, "UNKNOWN")
         assert [record.text for record in load_draft(task).source_records] == ["我大概明年联系客户"]
+
+
+async def test_natural_role_correction_survives_reload_without_replanning(factory):
+    task_id, initial = await _start(factory, "12月5号付款")
+    assert initial.temporal_target.reason == "ROLE"
+    with factory() as db:
+        task = db.get(AssistantTask, task_id)
+        await AssistantCoordinator(NoChooser()).handle_task(
+            db, task, AssistantInput(kind="text", text="都不是，下次联系时间是下周五")
+        )
+        db.commit()
+    with factory() as db:
+        task = db.get(AssistantTask, task_id)
+        draft = load_draft(task)
+        assert resolved_sales_follow_up(draft) == (datetime(2026, 11, 13), "DATE")
+        assert load_waiting(task).field == "customer"
+        assert load_waiting(task).action_id != initial.action_id
+        assert draft.source_records[-1].text == "都不是，下次联系时间是下周五"
+        assert task.committed_json == []

@@ -305,7 +305,8 @@ async def test_follow_up_supplement_merges_canonical_facts_and_rescores_complete
     assert draft.content_json["current_progress"] == "POC验收"
     assert draft.content_json["risks"] == ["预算延迟", "集成延期"]
     assert "预算待批" in draft.content_json["content"] and "集成延期" in draft.content_json["content"]
-    assert draft.content_json["next_action"] == "周五回访"
+    assert draft.content_json["next_action"] == "回访"
+    assert draft.content_json["next_follow_time_text"] == "周五"
     assert second.calls == ["structure"]
     assert gate.calls[-1]["user_text"] == f"{initial}\n{supplement}"
     assert gate.calls[-1]["content_json"] == draft.content_json
