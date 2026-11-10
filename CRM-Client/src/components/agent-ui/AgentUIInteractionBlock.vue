@@ -818,6 +818,7 @@ const submit = async (): Promise<void> => {
           class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
           :class="[
             block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
+            block.business_action === 'resolve_temporal_choice' ? 'min-w-0 grid-cols-1 whitespace-normal [overflow-wrap:anywhere]' : '',
             optionSelected(entry.option.value) ? 'border-primary bg-accent text-accent-foreground' : '',
             isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && entry.option.disabled ? 'border-[#cbd5e1] bg-[#e2e8f0] text-[#94a3b8] opacity-100' : ''
           ]"
