@@ -62,7 +62,7 @@ export interface ContractListResponse {
   license_expiry_date?: string | null
   standard_unit_price: string
   status: ContractStatus
-  approval_phase?: ApprovalPhase | null
+  approval_phase?: ApprovalPhase | null | undefined
   signing_date: string | null
   effective_date: string | null
   expiry_date: string | null
@@ -115,6 +115,39 @@ export interface ContactBasicInfo {
   position?: string | null
 }
 
+export interface ContractChangeCreate {
+  new_amount: string
+  reason: string
+}
+
+export const ContractChangeResponseSchema = z.object({
+  id: z.number().int().positive(),
+  contract_id: z.number().int().positive(),
+  creator_id: z.string(),
+  change_items: z.array(z.object({
+    key: z.literal('contract_amount'),
+    old_value: z.string(),
+    new_value: z.string()
+  })).min(1),
+  reason: z.string(),
+  approval_phase: z.enum(['draft', 'pending_review', 'approved', 'rejected']),
+  attachment_name: z.string().nullable(),
+  attachment_size: z.number().int().nonnegative().nullable(),
+  attachment_mime_type: z.string().nullable(),
+  created_time: z.string(),
+  updated_time: z.string()
+})
+
+export const ContractFinancialSnapshotSchema = z.object({
+  paid_amount: z.string(),
+  invoiced_amount: z.string(),
+  planned_amount: z.string(),
+  floor_amount: z.string()
+})
+
+export type ContractChangeResponse = z.infer<typeof ContractChangeResponseSchema>
+export type ContractFinancialSnapshot = z.infer<typeof ContractFinancialSnapshotSchema>
+
 export interface ContractResponse {
   id: number
   contract_number: string
@@ -128,6 +161,7 @@ export interface ContractResponse {
   subscription_years: number | null
   standard_unit_price: string
   status: ContractStatus
+  approval_phase?: ApprovalPhase | null | undefined
   signing_date: string | null
   effective_date: string | null
   expiry_date: string | null
@@ -149,6 +183,11 @@ export interface ContractResponse {
     name: string
     mobile: string
   }[]
+  can_request_change?: boolean
+  change_disabled_reason?: string | null
+  pending_change?: ContractChangeResponse | null
+  change_history?: ContractChangeResponse[]
+  financial_snapshot?: ContractFinancialSnapshot
 }
 
 export interface ContractQueryParams {
@@ -242,6 +281,7 @@ const ContractListItemSchema = z.object({
   license_expiry_date: z.string().nullable().optional(),
   standard_unit_price: AmountStringSchema,
   status: ContractStatusSchema,
+  approval_phase: z.enum(['draft', 'pending_review', 'approved', 'rejected']).nullable().optional(),
   signing_date: z.string().nullable(),
   effective_date: z.string().nullable(),
   expiry_date: z.string().nullable(),
@@ -261,12 +301,25 @@ const ContractListItemSchema = z.object({
 })
 
 const ContractResponseSchema = ContractListItemSchema.extend({
+  can_request_change: z.boolean().optional(),
+  change_disabled_reason: z.string().nullable().optional(),
+  pending_change: ContractChangeResponseSchema.nullable().optional(),
+  change_history: z.array(ContractChangeResponseSchema).optional(),
+  financial_snapshot: ContractFinancialSnapshotSchema.optional(),
   contact_info: ContactBasicInfoSchema.optional(),
   contacts: z.array(z.object({
     id: z.number(),
     name: z.string(),
     mobile: z.string()
   })).optional()
+})
+
+const ContractDetailResponseSchema = ContractResponseSchema.extend({
+  can_request_change: z.boolean(),
+  change_disabled_reason: z.string().nullable(),
+  pending_change: ContractChangeResponseSchema.nullable(),
+  change_history: z.array(ContractChangeResponseSchema),
+  financial_snapshot: ContractFinancialSnapshotSchema
 })
 
 const PaginatedContractListResponseSchema = z.object({
@@ -387,7 +440,28 @@ export const contractApi = {
   getContract: async (contractId: number): Promise<ContractResponse> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get(`/v1/contracts/${contractId}`)
-    return ContractResponseSchema.parse(response) as ContractResponse
+    return ContractDetailResponseSchema.parse(response) as ContractResponse
+  },
+
+  createContractChange: async (contractId: number, data: ContractChangeCreate, file?: File): Promise<ContractChangeResponse> => {
+    const formData = new FormData()
+    formData.append('change_payload', JSON.stringify(data))
+    if (file !== undefined) formData.append('file', file)
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.post(`/v1/contracts/${contractId}/changes`, formData)
+    return ContractChangeResponseSchema.parse(response)
+  },
+
+  getContractChanges: async (contractId: number): Promise<ContractChangeResponse[]> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get(`/v1/contracts/${contractId}/changes`)
+    return z.array(ContractChangeResponseSchema).parse(response)
+  },
+
+  getPendingContractChange: async (contractId: number): Promise<ContractChangeResponse | null> => {
+    // eslint-disable-next-line crmwolf/require-zod-schema
+    const response: unknown = await request.get(`/v1/contracts/${contractId}/changes/pending`)
+    return ContractChangeResponseSchema.nullable().parse(response)
   },
 
   updateContract: async (contractId: number, data: ContractUpdate): Promise<ContractResponse> => {

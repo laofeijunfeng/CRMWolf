@@ -8,6 +8,7 @@ import logging
 
 from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus, ApprovalAction
 from app.models.contract import Contract
+from app.models.contract_change import ContractChangeRequest
 from app.constants.business_types import BusinessType
 from app.schemas.approval import (
     ApprovalFlowCreate, ApprovalFlowUpdate,
@@ -248,9 +249,11 @@ class ApprovalFlowCRUD:
         Returns:
             Tuple[Optional[ApprovalFlow], Optional[str]]: (匹配的审批流程, 错误信息)
         """
+        # 合同变更复用团队已配置的合同审批流程，不新增可配置流程类型。
+        flow_business_type = BusinessType.CONTRACT if business_type == BusinessType.CONTRACT_CHANGE else business_type
         query = db.query(ApprovalFlow).filter(
             ApprovalFlow.is_active == 1,
-            ApprovalFlow.business_type == business_type,
+            ApprovalFlow.business_type == flow_business_type,
         )
 
         if team_id is not None:
@@ -270,6 +273,7 @@ class ApprovalFlowCRUD:
                     return None, "合同金额为空，无法匹配审批流程，请补充金额或让管理员创建默认流程"
             display_names = {
                 BusinessType.CONTRACT: "合同",
+                BusinessType.CONTRACT_CHANGE: "合同",
                 BusinessType.PAYMENT: "回款",
                 BusinessType.INVOICE: "发票",
                 BusinessType.INVOICE_REISSUE: "发票重开申请",
@@ -899,6 +903,9 @@ class ApprovalCRUD:
         from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
         from app.constants.approval_phase import ApprovalPhase
 
+        if approval.business_type == BusinessType.CONTRACT_CHANGE:
+            raise ValueError("合同变更审批不支持撤回")
+
         adapter = get_adapter(approval.business_type)
         with db.no_autoflush:
             entity = adapter.get_entity(db, approval.business_id, approval.team_id)
@@ -1134,6 +1141,7 @@ class ApprovalCRUD:
                 overdue_hours = int((now - ap.created_time).total_seconds() // 3600)
             contract_file_path = summary.get("contract_file_path") if summary else None
             invoice_file_path = summary.get("invoice_file_path") if summary else None
+            change_file_path = summary.get("attachment_path") if summary else None
             items.append({
                 "id": ap.id,
                 "business_type": ap.business_type,
@@ -1146,7 +1154,7 @@ class ApprovalCRUD:
                 "actual_payer_name": summary.get("actual_payer_name") if summary else None,
                 "license_status": summary.get("license_status") if summary else None,
                 "customer_info": summary["customer_info"] if summary else None,
-                "has_attachment": bool(contract_file_path or invoice_file_path),
+                "has_attachment": bool(contract_file_path or invoice_file_path or change_file_path),
                 "contract_file_path": contract_file_path,
                 "contract_file_name": summary.get("contract_file_name") if summary else None,
                 "contract_file_size": summary.get("contract_file_size") if summary else None,
@@ -1154,6 +1162,11 @@ class ApprovalCRUD:
                 "invoice_file_path": invoice_file_path,
                 "invoice_number": summary.get("invoice_number") if summary else None,
                 "issued_time": _serialize_optional_datetime(summary.get("issued_time")) if summary else None,
+                "change_items": summary.get("change_items") if summary else None,
+                "reason": summary.get("reason") if summary else None,
+                "attachment_name": summary.get("attachment_name") if summary else None,
+                "attachment_size": summary.get("attachment_size") if summary else None,
+                "attachment_mime_type": summary.get("attachment_mime_type") if summary else None,
                 "submitter_id": ap.submitter_id,
                 "submitter_name": ap.submitter_name,
                 "status": ap.status,
@@ -1373,6 +1386,7 @@ class ApprovalCRUD:
 
         ids_by_type: Dict[str, List[int]] = {
             BusinessType.CONTRACT: [],
+            BusinessType.CONTRACT_CHANGE: [],
             BusinessType.INVOICE: [],
             BusinessType.INVOICE_REISSUE: [],
             BusinessType.PAYMENT: [],
@@ -1417,6 +1431,41 @@ class ApprovalCRUD:
                 Customer.team_id == team_id,
             ))
             return {c.id: serialize_customer(c) for c in customers}
+
+        # CONTRACT_CHANGE: both change and original contract remain team scoped.
+        if ids_by_type[BusinessType.CONTRACT_CHANGE]:
+            from app.services.contract_change import amount_change_values
+
+            changes = safe_all(db.query(ContractChangeRequest).filter(
+                ContractChangeRequest.id.in_(ids_by_type[BusinessType.CONTRACT_CHANGE]),
+                ContractChangeRequest.team_id == team_id,
+                ContractChangeRequest.deleted_at.is_(None),
+            ))
+            contract_ids = list({item.contract_id for item in changes if item.contract_id})
+            contracts = safe_all(db.query(Contract).filter(
+                Contract.id.in_(contract_ids),
+                Contract.team_id == team_id,
+                Contract.deleted_at.is_(None),
+            )) if contract_ids else []
+            contracts_by_id = {item.id: item for item in contracts}
+            customers_by_id = fetch_customers([item.customer_id for item in contracts])
+            for change in changes:
+                contract = contracts_by_id.get(change.contract_id)
+                if not contract:
+                    continue
+                _old_amount, new_amount = amount_change_values(change)
+                summaries[(BusinessType.CONTRACT_CHANGE, change.id)] = {
+                    "application_number": contract.contract_number or f"CONTRACT-{contract.id}",
+                    "entity_name": contract.contract_name,
+                    "entity_amount": float(new_amount),
+                    "customer_info": customers_by_id.get(contract.customer_id),
+                    "change_items": change.change_items_json,
+                    "reason": change.reason,
+                    "attachment_path": change.attachment_path,
+                    "attachment_name": change.attachment_name,
+                    "attachment_size": change.attachment_size,
+                    "attachment_mime_type": change.attachment_mime_type,
+                }
 
         # CONTRACT
         if ids_by_type["CONTRACT"]:

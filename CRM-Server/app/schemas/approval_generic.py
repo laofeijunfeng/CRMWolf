@@ -10,9 +10,13 @@
 - submit 仅需 comment（可选）
 - approve 复用 schemas.approval.ApprovalActionRequest（ApprovalActionEnum + 乐观锁 updated_time）
 """
+from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.approval import ApprovalRecordResponse
+from app.schemas.contract import ContractChangeItem, ContractFinancialSnapshotResponse
 
 
 class ApprovalSubmitRequest(BaseModel):
@@ -76,13 +80,47 @@ class ApprovalListItemResponse(BaseModel):
     contract_file_mime_type: Optional[str] = Field(None, description="合同附件 MIME 类型，仅 CONTRACT 审批返回")
     invoice_file_path: Optional[str] = Field(None, description="发票文件路径，仅 INVOICE 审批返回")
     invoice_number: Optional[str] = Field(None, description="发票号码，仅 INVOICE 审批返回")
-    issued_time: Optional[str] = Field(None, description="发票开具时间，仅 INVOICE 审批返回")
+    issued_time: Optional[datetime] = Field(None, description="发票开具时间，仅 INVOICE 审批返回")
+    change_items: Optional[List[ContractChangeItem]] = None
+    reason: Optional[str] = None
+    attachment_name: Optional[str] = None
+    attachment_size: Optional[int] = None
+    attachment_mime_type: Optional[str] = None
     submitter_id: str = Field(..., description="提交人系统用户ID")
     submitter_name: Optional[str] = Field(None, description="提交人姓名")
     status: str = Field(..., description="审批状态：PENDING / APPROVED / REJECTED / CANCELLED")
     created_time: str = Field(..., description="提交时间 ISO8601")
     updated_time: str = Field(..., description="最后更新时间 ISO8601")
     overdue_hours: Optional[int] = Field(None, description="超时小时数（now - created_time），仅 PENDING 行有意义")
+
+
+class ApprovalEntityDetailResponse(BaseModel):
+    """Typed change fields while preserving existing business detail fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    contract_id: Optional[int] = None
+    contract_name: Optional[str] = None
+    change_items: Optional[List[ContractChangeItem]] = None
+    reason: Optional[str] = None
+    attachment_name: Optional[str] = None
+    attachment_size: Optional[int] = None
+    attachment_mime_type: Optional[str] = None
+    financial_snapshot: Optional[ContractFinancialSnapshotResponse] = None
+
+
+class GenericApprovalDetailResponse(ApprovalListItemResponse):
+    contract_id: Optional[int] = None
+    flow_id: int
+    flow_name: Optional[str] = None
+    current_node_id: Optional[int] = None
+    current_node_name: Optional[str] = None
+    created_time: datetime
+    updated_time: datetime
+    flow_is_active: Optional[bool] = None
+    flow_disabled_warning: Optional[str] = None
+    entity_detail: ApprovalEntityDetailResponse
+    records: List[ApprovalRecordResponse]
 
 
 class ApprovalGenericListResponse(BaseModel):

@@ -54,6 +54,10 @@ from app.schemas.contract import (
     ContractResponse,
     ContractStatusEnum,
     ContractUpdate,
+    ContractChangeCreate,
+    ContractChangeResponse,
+    ContractFinancialSnapshotResponse,
+    contract_change_response,
     MessageResponse,
 )
 from app.schemas.contract_board import ContractBoardResponse
@@ -65,6 +69,12 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
+from app.services.contract_change import (
+    ContractChangeAttachment,
+    ContractChangeError,
+    ContractNotFoundError,
+    contract_change_service,
+)
 from app.utils.public_id import is_opportunity_public_id
 
 logger = logging.getLogger(__name__)
@@ -233,6 +243,7 @@ def _contract_response_base(
         "subscription_years": contract.subscription_years,
         "standard_unit_price": float(contract.standard_unit_price),
         "status": contract.status,
+        "approval_phase": contract.approval_phase,
         "signing_date": contract.signing_date,
         "effective_date": contract.effective_date,
         "expiry_date": contract.expiry_date,
@@ -1327,6 +1338,65 @@ def get_contract_chart_bucket_contracts(
     return ContractChartBucketContracts(chart=chart, bucket=bucket, total=total, contracts=contracts)
 
 
+@router.post("/{contract_id}/changes", response_model=ContractChangeResponse, status_code=status.HTTP_201_CREATED, summary="申请变更合同")
+async def create_contract_change(
+    contract_id: int,
+    change_payload: str = Form(...),
+    file: Optional[UploadFile] = File(None),
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ContractChangeResponse:
+    try:
+        payload = ContractChangeCreate.model_validate_json(change_payload)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    attachment = None
+    if file is not None:
+        content = await file.read()
+        attachment = ContractChangeAttachment(file.filename or "", content, file.content_type)
+    user_name = str(getattr(current_user, "name", None) or getattr(current_user, "username", None) or current_user.id)
+    try:
+        change = contract_change_service.create_request(
+            db,
+            team_id=team_id,
+            contract_id=contract_id,
+            actor_id=str(current_user.id),
+            actor_name=user_name,
+            new_amount=payload.new_amount,
+            reason=payload.reason,
+            attachment=attachment,
+        )
+    except ContractNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ContractChangeError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    return contract_change_response(change)
+
+
+@router.get("/{contract_id}/changes", response_model=List[ContractChangeResponse], summary="查询合同变更记录")
+def list_contract_changes(
+    contract_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> List[ContractChangeResponse]:
+    check_contract_view_permission(contract_id, team_id, current_user, db)
+    return [contract_change_response(item) for item in contract_change_service.list_history(db, team_id, contract_id)]
+
+
+@router.get("/{contract_id}/changes/pending", response_model=Optional[ContractChangeResponse], summary="查询审批中的合同变更")
+def get_pending_contract_change(
+    contract_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Optional[ContractChangeResponse]:
+    check_contract_view_permission(contract_id, team_id, current_user, db)
+    change = contract_change_service.get_pending(db, team_id, contract_id)
+    return contract_change_response(change) if change else None
+
+
 @router.get("/{contract_id}", response_model=ContractDetailResponse, summary="获取合同详情", description="""
 获取指定合同的完整详情，包括关联的客户、商机、联系人等信息。
 
@@ -1380,12 +1450,31 @@ def get_contract(
             }
     
     contract_dict = _contract_response_base(db, contract)
+    pending_change = contract_change_service.get_pending(db, team_id, contract.id)
+    change_history = contract_change_service.list_history(db, team_id, contract.id)
+    snapshot = contract_change_service.get_financial_snapshot(db, team_id, contract.id)
+    can_request_change = contract_change_service.can_request(contract, str(current_user.id)) and pending_change is None
+    disabled_reason = None
+    if pending_change is not None:
+        disabled_reason = "已有一条变更在审批中，审批结束前不能再次发起"
+    elif not contract_change_service.can_request(contract, str(current_user.id)):
+        disabled_reason = "只有合同创建人可以申请变更合同"
     contract_dict.update({
         "customer_info": customer_info,
         "opportunity_info": opportunity_info,
         "contact_info": contact_info,
         "owner_info": _get_user_basic_info(db, contract.owner_id),
-        "creator_info": _get_user_basic_info(db, contract.creator_id)
+        "creator_info": _get_user_basic_info(db, contract.creator_id),
+        "can_request_change": can_request_change,
+        "change_disabled_reason": disabled_reason,
+        "pending_change": contract_change_response(pending_change) if pending_change else None,
+        "change_history": [contract_change_response(item) for item in change_history],
+        "financial_snapshot": ContractFinancialSnapshotResponse(
+            paid_amount=snapshot.paid_amount,
+            invoiced_amount=snapshot.invoiced_amount,
+            planned_amount=snapshot.planned_amount,
+            floor_amount=snapshot.floor_amount,
+        ),
     })
     
     return ContractDetailResponse(**contract_dict)

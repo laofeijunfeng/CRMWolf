@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional, Tuple, Callable
 from sqlalchemy.orm import Session
 import logging
 
+from app.constants.business_types import BusinessType
 from app.constants.approval_phase import ApprovalPhase
 from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
 from app.crud.approval import approval_crud, approval_flow_crud
@@ -254,6 +255,9 @@ class ApprovalTransactionManager:
             - approval: 创建的审批实例（如果成功）
             - error_message: 错误消息（如果失败）
         """
+        if business_type == BusinessType.CONTRACT_CHANGE:
+            return (None, "合同变更不支持重新提交，请在合同详情重新发起变更")
+
         try:
             # 1. 获取业务单据
             adapter = get_adapter(business_type)

@@ -148,6 +148,57 @@ class ContractUpdate(BaseModel):
     effective_date: Optional[date] = Field(None, description="生效日期")
 
 
+class ContractChangeItem(BaseModel):
+    key: str = Field(..., description="变更字段")
+    old_value: str = Field(..., description="变更前值")
+    new_value: str = Field(..., description="变更后值")
+
+
+class ContractChangeCreate(BaseModel):
+    new_amount: Decimal = Field(..., gt=0, description="变更后合同金额")
+    reason: str = Field(..., min_length=1, max_length=2000, description="变更原因")
+
+
+class ContractFinancialSnapshotResponse(BaseModel):
+    paid_amount: Decimal
+    invoiced_amount: Decimal
+    planned_amount: Decimal
+    floor_amount: Decimal
+
+
+class ContractChangeResponse(BaseModel):
+    id: int
+    contract_id: int
+    creator_id: str
+    change_items: List[ContractChangeItem]
+    reason: str
+    approval_phase: str
+    attachment_name: Optional[str] = None
+    attachment_size: Optional[int] = None
+    attachment_mime_type: Optional[str] = None
+    created_time: datetime
+    updated_time: datetime
+
+    class Config:
+        from_attributes = True
+
+
+def contract_change_response(change) -> ContractChangeResponse:
+    return ContractChangeResponse(
+        id=change.id,
+        contract_id=change.contract_id,
+        creator_id=change.creator_id,
+        change_items=change.change_items_json,
+        reason=change.reason,
+        approval_phase=change.approval_phase,
+        attachment_name=change.attachment_name,
+        attachment_size=change.attachment_size,
+        attachment_mime_type=change.attachment_mime_type,
+        created_time=change.created_time,
+        updated_time=change.updated_time,
+    )
+
+
 class ContractResponse(BaseModel):
     id: int = Field(..., description="合同ID")
     contract_number: str = Field(..., description="合同编号")
@@ -197,6 +248,11 @@ class ContractDetailResponse(ContractResponse):
     contact_info: Optional[ContactBasicInfo] = Field(None, description="签约人信息")
     owner_info: Optional[OwnerBasicInfo] = Field(None, description="负责人信息")
     creator_info: Optional[CreatorBasicInfo] = Field(None, description="创建人信息")
+    can_request_change: bool = Field(False, description="当前用户是否可发起合同变更")
+    change_disabled_reason: Optional[str] = Field(None, description="不能发起合同变更的原因")
+    pending_change: Optional[ContractChangeResponse] = None
+    change_history: List[ContractChangeResponse] = Field(default_factory=list)
+    financial_snapshot: Optional[ContractFinancialSnapshotResponse] = None
 
 
 class MessageResponse(BaseModel):

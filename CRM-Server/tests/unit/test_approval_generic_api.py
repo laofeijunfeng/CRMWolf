@@ -17,6 +17,7 @@ M-3\uFF1Apayment/invoice 的 :approve:own 自审校验真正生效。
 - bulk-approve 自审 403 → failed 条目 reason=detail 文案
 """
 from datetime import date, timedelta
+from app.utils.time import business_now
 from decimal import Decimal
 
 import pytest
@@ -548,6 +549,23 @@ def test_detail_returns_approval(
     assert body["id"] == approval_id
     assert body["status"] == "PENDING"
 
+
+def test_issued_invoice_detail_serializes_issue_timestamp(
+    db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+):
+    response = client.post(
+        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
+        json={"comment": "请审批"},
+    )
+    assert response.status_code == 200, response.text
+    issued_time = business_now().replace(microsecond=0)
+    seed_invoice_draft.issued_time = issued_time
+    db_session.commit()
+
+    response = client.get(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/detail")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["issued_time"] == issued_time.isoformat()
 
 def test_entity_detail_exposes_subject_drilldown_ids(db_session, seed_payment_record_self):
     """审批详情需返回主体下钻所需的关联合同/商机标识，前端据此打开只读主体详情。"""

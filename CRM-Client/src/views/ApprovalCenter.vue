@@ -208,7 +208,7 @@
               查看详情
             </Button>
           </div>
-          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED'">
+          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED' && row.business_type !== 'CONTRACT_CHANGE'">
             <Button
               variant="default"
               size="lg"
@@ -329,7 +329,7 @@
                         {{ displayFieldValue(field.value) }}
                       </button>
                       <div v-else-if="field.type === 'amount'" class="attribute-value">
-                        <AmountText :value="typeof field.value === 'number' ? field.value : null" tone="warning" />
+                        <AmountText :value="field.value" tone="warning" />
                       </div>
                       <div v-else-if="field.type === 'status'" class="attribute-value">
                         <Badge variant="outline">{{ displayFieldValue(field.value) }}</Badge>
@@ -338,6 +338,22 @@
                       <div v-else class="attribute-value">{{ displayFieldValue(field.value) }}</div>
                     </div>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card v-if="selectedApproval?.business_type === 'CONTRACT_CHANGE' && contractChangeFiles.length > 0" class="info-card">
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">变更附件</h3>
+                </div>
+                <div class="p-4">
+                  <FileAttachment
+                    mode="readonly"
+                    :files="contractChangeFiles"
+                    :preview-in-dialog="false"
+                    @preview="handleSelectedAttachmentPreview"
+                    @download="handleSelectedAttachmentDownload"
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -543,7 +559,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge, FileAttachment, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -834,6 +850,7 @@ const approvalSubjectTitle = computed<string>(() => {
   const type = selectedApproval.value?.business_type
   const map: Partial<Record<EntityType, string>> = {
     CONTRACT: '合同信息',
+    CONTRACT_CHANGE: '合同变更审批',
     PAYMENT: '回款信息',
     INVOICE: '发票申请信息',
     INVOICE_REISSUE: '发票重开申请信息',
@@ -952,6 +969,10 @@ const getFileExtension = (fileNameOrPath?: string | null): string => {
 
 const getAttachmentFileName = (row: ApprovalListItem | null): string => {
   if (!row) return '审批附件'
+  if (row.business_type === 'CONTRACT_CHANGE') {
+    const name = row.attachment_name?.trim() ?? ''
+    return name.length > 0 ? name : '合同变更附件'
+  }
   if (row.business_type === 'CONTRACT') {
     const configured = row.contract_file_name?.trim()
     if (configured != null && configured.length > 0) return configured
@@ -969,8 +990,33 @@ const getAttachmentFileName = (row: ApprovalListItem | null): string => {
 
 const hasAttachment = (row: ApprovalListItem): boolean =>
   row.has_attachment === true ||
+  (row.business_type === 'CONTRACT_CHANGE' && (row.attachment_name?.trim() ?? '').length > 0) ||
   (row.business_type === 'CONTRACT' && row.contract_file_path != null && row.contract_file_path.length > 0) ||
   (row.business_type === 'INVOICE' && row.invoice_file_path != null && row.invoice_file_path.length > 0)
+
+const selectedAttachmentRow = computed<ApprovalListItem | null>(() => {
+  const row = selectedApproval.value
+  if (row?.business_type !== 'CONTRACT_CHANGE') return null
+  const detail = activeApprovalDetail.value
+  return {
+    ...row,
+    attachment_name: detail?.attachment_name ?? detail?.entity_detail?.attachment_name ?? row.attachment_name,
+    attachment_size: detail?.attachment_size ?? detail?.entity_detail?.attachment_size ?? row.attachment_size,
+    attachment_mime_type: detail?.attachment_mime_type ?? detail?.entity_detail?.attachment_mime_type ?? row.attachment_mime_type
+  }
+})
+
+const contractChangeFiles = computed<FileAttachmentItem[]>(() => {
+  const row = selectedAttachmentRow.value
+  if (row === null || !hasAttachment(row)) return []
+  const file: FileAttachmentItem = {
+    id: row.business_id,
+    name: getAttachmentFileName(row)
+  }
+  if (row.attachment_size != null) file.size = row.attachment_size
+  if (row.attachment_mime_type != null) file.mimeType = row.attachment_mime_type
+  return [file]
+})
 
 const attachmentPreviewFile = computed<FileAttachmentItem | null>(() => {
   const row = attachmentPreviewRow.value
@@ -1005,7 +1051,17 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
   const customer = approvalCustomerInfo.value
   const customerField: ApprovalSubjectField = { key: 'customer_name', label: '关联客户', value: customer?.account_name, type: 'link', linkTarget: 'customer', linkId: customer?.id ?? null }
   const detail = (key: string): string | number | null => entityDetailValue(key) ?? null
+  const entityDetail = activeApprovalDetail.value?.entity_detail
   switch (selected.business_type) {
+    case 'CONTRACT_CHANGE': {
+      const item = (entityDetail?.change_items ?? activeApprovalDetail.value?.change_items ?? selected.change_items)?.[0]
+      return [
+        { key: 'contract', label: '关联合同', value: entityDetail?.contract_name ?? subjectName.value, type: 'link', linkTarget: 'contract', linkId: entityDetail?.contract_id ?? null },
+        { key: 'old_amount', label: '原合同金额', value: item?.old_value ?? null, type: 'amount' },
+        { key: 'new_amount', label: '变更后金额', value: item?.new_value ?? selected.entity_amount ?? null, type: 'amount' },
+        { key: 'reason', label: '变更原因', value: entityDetail?.reason ?? activeApprovalDetail.value?.reason ?? selected.reason ?? null, wide: true }
+      ]
+    }
     case 'CONTRACT': return [
       { key: 'number', label: '合同编号', value: detail('contract_number') ?? subjectNumber.value, type: 'copy' },
       { key: 'name', label: '合同名称', value: detail('contract_name') ?? subjectName.value }, customerField,
@@ -1082,6 +1138,7 @@ const approvalBusinessTypeOptions = [
   { value: 'INVOICE', label: '发票' },
   { value: 'INVOICE_REISSUE', label: '发票重开' },
   { value: 'CONTRACT', label: '合同' },
+  { value: 'CONTRACT_CHANGE', label: '合同变更' },
   { value: 'LICENSE', label: 'License' },
   { value: 'OPPORTUNITY', label: '商机' }
 ]
@@ -1148,6 +1205,7 @@ const businessTypeLabel = (t: EntityType): string => {
     INVOICE: '发票',
     INVOICE_REISSUE: '发票重开',
     CONTRACT: '合同',
+    CONTRACT_CHANGE: '合同变更',
     LICENSE: 'License',
     OPPORTUNITY: '商机'
   }
@@ -1388,6 +1446,7 @@ const handleLicenseIssued = async (): Promise<void> => {
 // 条4：REJECTED 行修改并重新提交。
 // 合同、发票在审批中心内打开既有编辑弹窗；其他业务仍进入对应业务页面处理。
 const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
+  if (row.business_type === 'CONTRACT_CHANGE') return
   resubmitPendingId.value = row.id
   try {
     if (row.business_type === 'CONTRACT') {
@@ -1434,7 +1493,7 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
     })
     if (!confirmed) return
     // 跳转到对应实体编辑页
-    const route: Record<Exclude<EntityType, 'CONTRACT' | 'INVOICE' | 'INVOICE_REISSUE'>, string | ReturnType<typeof customerDetailRoute>> = {
+    const route: Record<Exclude<EntityType, 'CONTRACT' | 'CONTRACT_CHANGE' | 'INVOICE' | 'INVOICE_REISSUE'>, string | ReturnType<typeof customerDetailRoute>> = {
       // 回款无独立编辑页（/payments 为列表页）：跳列表页 + info 提示，
       // 保证不白屏/不断旅程；用户在列表内修改后重新提交审批。
       PAYMENT: `/payments`,
@@ -1446,7 +1505,7 @@ const handleResubmit = async (row: ApprovalListItem): Promise<void> => {
         ? `/opportunities?opportunityId=${row.business_public_id}`
         : '/opportunities'
     }
-    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT' | 'INVOICE' | 'INVOICE_REISSUE'>]
+    const target = route[row.business_type as Exclude<EntityType, 'CONTRACT' | 'CONTRACT_CHANGE' | 'INVOICE' | 'INVOICE_REISSUE'>]
     await router.push(target)
     // PAYMENT 目标是列表页，无法直接进入驳回回款的编辑入口——补 info 引导，
     // 旅程不断（比原 window.location.assign hash bug 强）。
@@ -1531,6 +1590,19 @@ const handleRemind = async (row: ApprovalListItem): Promise<void> => {
   }
 }
 
+const handleSelectedAttachmentPreview = (file: FileAttachmentItem): void => {
+  const row = selectedAttachmentRow.value
+  if (row === null || file.id !== row.business_id) return
+  void handlePreviewAttachment(row)
+}
+
+const handleSelectedAttachmentDownload = (file: FileAttachmentItem): void => {
+  const row = selectedAttachmentRow.value
+  if (row === null || file.id !== row.business_id) return
+  attachmentPreviewRow.value = row
+  void handleDownloadAttachment()
+}
+
 const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => {
   if (!hasAttachment(row)) return
   const entityId = requireApprovalEntityRouteId(row)
@@ -1574,7 +1646,7 @@ const getRowActions = (row: ApprovalListItem): TableRowActionSet => {
       resultType: 'none'
     })
   }
-  if (activeTab.value === 'submitted' && row.status === 'REJECTED') {
+  if (activeTab.value === 'submitted' && row.status === 'REJECTED' && row.business_type !== 'CONTRACT_CHANGE') {
     primaryActions.push({
       id: 'resubmit',
       label: '修改并重新提交',

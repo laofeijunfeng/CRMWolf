@@ -2,10 +2,10 @@
  * ApprovalProcessGeneric — 通用审批操作组件
  *
  * 嵌入业务详情页的审批区。Props：
- *   entityType : 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'INVOICE_REISSUE' | 'LICENSE' | 'OPPORTUNITY'
+ *   entityType : 'CONTRACT' | 'CONTRACT_CHANGE' | 'PAYMENT' | 'INVOICE' | 'INVOICE_REISSUE' | 'LICENSE' | 'OPPORTUNITY'
  *   entityId   : number | string（OPPORTUNITY 使用 opp_ public_id）
  *   canApprove : 是否对当前节点具备审批权（控制同意/驳回按钮显隐）
- *   isSubmitter: 是否为提交人（控制撤回 + 草稿态"提交审批"CTA 显隐）
+ *   isSubmitter: 是否为提交人（控制撤回；CONTRACT_CHANGE 不支持撤回或重新提交）
  *
  * 只承载审批状态、审批记录和审批动作。业务附件、开票、重开发票完成、
  * License 发放等动作由对应业务页面或审批中心 footer 承载。
@@ -62,6 +62,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 const SUBMIT_PERMISSIONS: Record<EntityType, string[]> = {
   CONTRACT: ['contract:submit'],
+  CONTRACT_CHANGE: ['contract:submit'],
   PAYMENT: ['payment:submit'],
   INVOICE: ['invoice:submit'],
   INVOICE_REISSUE: ['invoice_reissue:submit'],
@@ -127,7 +128,8 @@ const isPending = computed<boolean>(() => status.value === 'PENDING')
 // C-DSG-7 条4：REJECTED/CANCELLED 态提交人可见重新提交 CTA（抽屉侧入口）
 const isRejected = computed<boolean>(() => status.value === 'REJECTED')
 const isCancelled = computed<boolean>(() => status.value === 'CANCELLED')
-const canResubmit = computed<boolean>(() => isRejected.value || isCancelled.value)
+const isContractChange = computed<boolean>(() => props.entityType === 'CONTRACT_CHANGE')
+const canResubmit = computed<boolean>(() => !isContractChange.value && (isRejected.value || isCancelled.value))
 // 冲突重载后启用提交
 const isLocked = computed<boolean>(() => conflictNotice.value.length > 0)
 
@@ -202,7 +204,7 @@ const loadDetail = async (): Promise<void> => {
 }
 
 const handleSubmit = async (): Promise<void> => {
-  if (actionPending.value || isLocked.value) return
+  if (isContractChange.value || actionPending.value || isLocked.value) return
   actionError.value = null
   actionPending.value = true
   try {
@@ -301,11 +303,12 @@ const confirmReject = async (): Promise<void> => {
 }
 
 const openWithdrawDialog = (): void => {
+  if (isContractChange.value) return
   withdrawDialogVisible.value = true
 }
 
 const confirmWithdraw = async (): Promise<void> => {
-  if (actionPending.value || isLocked.value || !isPending.value) return
+  if (isContractChange.value || actionPending.value || isLocked.value || !isPending.value) return
   actionError.value = null
   actionPending.value = true
   try {
@@ -336,13 +339,13 @@ const confirmWithdraw = async (): Promise<void> => {
 // 组件本身不导航（COMPONENTS.md「组件禁直接调 API/禁导航」），仅 emit resubmit
 // 由父视图（FinanceApprovalCenter）据 currentRow 走 router.push 跳对应编辑页。
 const handleResubmit = (): void => {
-  if (actionPending.value || isLocked.value || !isRejected.value) return
+  if (isContractChange.value || actionPending.value || isLocked.value || !isRejected.value) return
   if (!props.isSubmitter) return
   emit('resubmit')
 }
 
 const handleResubmitAction = (): void => {
-  if (!props.isSubmitter || actionPending.value || isLocked.value || !canResubmit.value) return
+  if (isContractChange.value || !props.isSubmitter || actionPending.value || isLocked.value || !canResubmit.value) return
   if (isCancelled.value) {
     void handleSubmit()
     return
@@ -407,7 +410,7 @@ watch(
         <EmptyTitle>尚未提交审批</EmptyTitle>
         <EmptyDescription>提交后审批人将收到待办通知</EmptyDescription>
       </EmptyHeader>
-      <EmptyContent v-if="isSubmitter">
+      <EmptyContent v-if="isSubmitter && !isContractChange">
         <Button
           v-any-permission="submitPermissionCodes"
           size="sm"
@@ -455,11 +458,10 @@ watch(
         :is-pending="isPending"
         :current-node-name="detail.current_node_name ?? ''"
       />
-
       <!-- 操作区 -->
       <div class="approval-process-generic__actions">
         <Button
-          v-if="isSubmitter && isPending"
+          v-if="isSubmitter && isPending && !isContractChange"
           variant="outline"
           size="sm"
           data-testid="withdraw-btn"
