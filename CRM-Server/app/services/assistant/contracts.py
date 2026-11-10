@@ -71,6 +71,7 @@ class ActivityPreview(BaseModel):
     context_as_of: str | None = None
     context_notices: list[str] = Field(default_factory=list)
     context_evidence: list[ContextEvidence] = Field(default_factory=list)
+    ignored_noise_summary: str | None = Field(default=None, max_length=40)
 
 
 class ActivityWriteConfirmation(BaseModel):
@@ -168,6 +169,18 @@ class DraftField(BaseModel):
     value: str | None = Field(default=None, max_length=20000)
 
 
+class VerifiedNoiseSpan(BaseModel):
+    """A model noise label the server located in one source segment; it only removes questions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    segment_id: str = Field(min_length=1, max_length=64)
+    kind: Literal["SPEAKER_TIMESTAMP", "CHANNEL_MENTION"]
+    start: int = Field(ge=0)
+    end: int = Field(ge=1)
+    raw_text: str = Field(min_length=1, max_length=40)
+
+
 class TaskDraft(BaseModel):
     """Canonical activity draft, original user segments and gate result."""
 
@@ -198,6 +211,7 @@ class TaskDraft(BaseModel):
     channel_source_text: str | None = Field(default=None, max_length=400)
     channel_options: list[str] = Field(default_factory=list, max_length=7)
     channel_origin_label: str | None = Field(default=None, max_length=40)
+    input_noise: list[VerifiedNoiseSpan] = Field(default_factory=list, max_length=200)
 
 
 class TemporalWaitingTarget(BaseModel):

@@ -624,6 +624,7 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         ]
         if evidence:
             _add_fact(facts, "context_evidence", "依据", "；".join(evidence), group="context")
+    _add_fact(facts, "ignored_noise", "已忽略", preview.ignored_noise_summary, group="context")
     summary = _plain(preview.change_summary) if preview.change_signal else ""
     seen_notices: set[str] = set()
     notice_index = 0

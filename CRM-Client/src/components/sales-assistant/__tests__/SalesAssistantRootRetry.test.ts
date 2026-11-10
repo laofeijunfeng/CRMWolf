@@ -16,8 +16,10 @@ vi.mock('@/api/assistant', () => ({
 }))
 
 import SalesAssistantChat from '../SalesAssistantChat.vue'
+import type { ConversationView } from '@/schemas/assistant-contracts'
+import type { AgentUIEnvelope } from '@/schemas/agent-contracts'
 
-const envelope = (retry: boolean) => ({
+const envelope = (retry: boolean): AgentUIEnvelope => ({
   schema_version: 'crm.agent.ui.v1',
   message_id: 1,
   turn_id: 'acm_1:reply',
@@ -38,7 +40,7 @@ const envelope = (retry: boolean) => ({
   metadata: { display: 'MESSAGE', route: 'WORKFLOW', accessibility_label: '失败' },
 })
 
-const view = (retry: boolean) => ({
+const view = (retry: boolean): ConversationView => ({
   public_id: 'asc_1',
   version: 7,
   focused_task: null,
@@ -63,6 +65,7 @@ describe('SalesAssistant root retry', () => {
     retryConversationEntry.mockReset()
     getConversation.mockReset()
   })
+
 
   it('calls the entry retry API without another user bubble', async () => {
     openConversation.mockResolvedValue(view(true))

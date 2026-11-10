@@ -315,6 +315,16 @@ def test_confirmation_keeps_distinct_risk_notices_and_drops_the_repeated_summary
     assert interaction.submit_action_id == "act_1"
 
 
+def test_confirmation_shows_ignored_noise_once_and_hides_it_when_absent() -> None:
+    def ignored(preview):
+        message = _message("m1", "确认后写入这条客户活动？", _task(waiting=_confirmation(preview)))
+        interaction = project_assistant_message(message, active_waiting=True, active_boundary=False).blocks[0]
+        return [fact.value for fact in interaction.facts if fact.key == "ignored_noise"]
+
+    assert ignored(_preview(ignored_noise_summary="已忽略 3 处发言时间")) == ["已忽略 3 处发言时间"]
+    assert ignored(_preview()) == []
+
+
 def test_historical_activity_confirmation_cannot_be_submitted() -> None:
     waiting = _confirmation(_preview())
     message = _message("m1", "确认后写入这条客户活动？", _task(waiting=waiting))

@@ -36,7 +36,14 @@ export const TaskDraftSchema = z.object({
   channel_status_label: z.string().nullable().optional(),
   channel_source_text: z.string().nullable().optional(),
   channel_options: z.array(z.string()).optional(),
-  channel_origin_label: z.string().nullable().optional()
+  channel_origin_label: z.string().nullable().optional(),
+  input_noise: z.array(z.object({
+    segment_id: z.string(),
+    kind: z.enum(['SPEAKER_TIMESTAMP', 'CHANNEL_MENTION']),
+    start: z.number().int(),
+    end: z.number().int(),
+    raw_text: z.string()
+  }).strict()).optional()
 }).strict()
 export type TaskDraft = z.infer<typeof TaskDraftSchema>
 export const ActivityPreviewSchema = z.object({
@@ -68,7 +75,8 @@ export const ActivityPreviewSchema = z.object({
     summary: z.string(),
     relation: z.string(),
     key: z.boolean().optional()
-  }).strict()).optional()
+  }).strict()).optional(),
+  ignored_noise_summary: z.string().nullable().optional()
 }).strict()
 
 export const ProposalKindSchema = z.enum([
