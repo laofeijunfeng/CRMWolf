@@ -52,6 +52,7 @@ const invoice = (overrides: Partial<InvoiceApplicationResponse> = {}): InvoiceAp
   red_offsets: [],
   reissue_applications: [],
   ...overrides,
+  remark: overrides.remark ?? null,
 })
 
 describe('resolveInvoiceDownload', () => {

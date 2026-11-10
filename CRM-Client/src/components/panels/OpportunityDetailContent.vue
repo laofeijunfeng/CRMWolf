@@ -31,6 +31,7 @@ import {
   BreadcrumbSeparator
 } from '@/components/ui/breadcrumb'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import ErrorState from '@/components/ErrorState.vue'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'
@@ -41,6 +42,7 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { customerDetailRoute } from '@/utils/customerRoutes'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 interface CustomerContext {
   customerId: string
@@ -53,12 +55,15 @@ interface Props {
   embedded?: boolean
   showBreadcrumb?: boolean
   customerContext?: CustomerContext | null
+  /** 只读查看（审批下钻）：隐藏所有变更、审批与跳转入口 */
+  readonly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
   showBreadcrumb: true,
-  customerContext: null
+  customerContext: null,
+  readonly: false
 })
 
 const emit = defineEmits<{
@@ -74,6 +79,8 @@ const userStore = useUserStore()
 
 const loading = ref(false)
 const loadError = ref(false)
+/** 只读模式下 403/404 的内联错误；其它错误仍走原有提示 */
+const loadFeedbackError = ref<FeedbackError | null>(null)
 const contentRootRef = ref<HTMLElement | null>(null)
 const opportunity = ref<Opportunity | null>(null)
 const approvalAccordionValue = ref('approval')
@@ -156,6 +163,7 @@ function syncStageStateFromOpportunity(opportunityData: Opportunity): void {
 async function fetchOpportunityDetail(): Promise<boolean> {
   loading.value = true
   loadError.value = false
+  loadFeedbackError.value = null
   try {
     const data = await opportunityApi.getOpportunity(props.opportunityId)
     opportunity.value = data
@@ -164,7 +172,12 @@ async function fetchOpportunityDetail(): Promise<boolean> {
   } catch (error) {
     loadError.value = true
     opportunity.value = null
-    handleApiError(error, '获取商机详情')
+    const status = (error as { response?: { status?: number } } | null)?.response?.status
+    if (props.readonly && (status === 403 || status === 404)) {
+      loadFeedbackError.value = toFeedbackError(error, '商机')
+    } else {
+      handleApiError(error, '获取商机详情')
+    }
     return false
   } finally {
     loading.value = false
@@ -296,7 +309,7 @@ function handleStageStatusChange(status: { currentWinProbability: number; isComp
 }
 
 async function focusBackButton(): Promise<void> {
-  if (!props.embedded) return
+  if (!props.embedded || !props.showBreadcrumb) return
   await nextTick()
   const button = contentRootRef.value?.querySelector<HTMLElement>('[data-testid="opportunity-detail-back"]')
   button?.focus()
@@ -458,7 +471,7 @@ watch(approvalPhase, phase => {
         </div>
         <div v-if="opportunity" class="flex items-center gap-3">
           <Button
-            v-if="canViewDealJourney"
+            v-if="canViewDealJourney && !readonly"
             type="button"
             variant="outline"
             size="sm"
@@ -484,6 +497,14 @@ watch(approvalPhase, phase => {
           class="py-8 text-center text-wolf-text-tertiary-v2"
         >
           加载中...
+        </div>
+
+        <div v-else-if="loadError && loadFeedbackError">
+          <ErrorState
+            :variant="loadFeedbackError.variant ?? 'error'"
+            :title="loadFeedbackError.title"
+            :description="loadFeedbackError.description"
+          />
         </div>
 
         <div
@@ -513,7 +534,7 @@ watch(approvalPhase, phase => {
                   <div class="attribute-item">
                     <div class="attribute-label">客户名称</div>
                     <RouterLink
-                      v-if="opportunity.customer_info && !embedded"
+                      v-if="opportunity.customer_info && !embedded && !readonly"
                       :to="customerDetailRoute(opportunity.customer_id)"
                       class="attribute-value link-text"
                       @click="emit('close')"
@@ -619,6 +640,7 @@ watch(approvalPhase, phase => {
           </Card>
 
           <Accordion
+            v-if="!readonly"
             :model-value="approvalAccordionValue"
             type="single"
             collapsible
@@ -671,7 +693,7 @@ watch(approvalPhase, phase => {
                 <OpportunityStageStepper
                   :opportunity-id="opportunity.id"
                   embedded
-                  :can-advance="canAdvanceOpportunityStage"
+                  :can-advance="canAdvanceOpportunityStage && !readonly"
                   @advanced="handleStageAdvanced"
                   @stage-status-change="handleStageStatusChange"
                 />
@@ -682,7 +704,7 @@ watch(approvalPhase, phase => {
       </div>
     </ScrollArea>
 
-    <div class="opportunity-detail-footer p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2">
+    <div v-if="!readonly" class="opportunity-detail-footer p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2">
       <Button
         v-if="isActive && canWin && isApprovalApproved"
         variant="default"
@@ -712,6 +734,7 @@ watch(approvalPhase, phase => {
     </div>
 
     <OpportunityWinDialog v-bind="elevated ? { elevated: true } : {}"
+      v-if="!readonly"
       :opportunity-id="opportunity?.id ?? null"
       :open="winDialogOpen"
       @update:open="winDialogOpen = $event"
@@ -719,6 +742,7 @@ watch(approvalPhase, phase => {
     />
 
     <OpportunityLoseDialog v-bind="elevated ? { elevated: true } : {}"
+      v-if="!readonly"
       :opportunity-id="opportunity?.id ?? null"
       :open="loseDialogOpen"
       @update:open="loseDialogOpen = $event"
@@ -726,7 +750,7 @@ watch(approvalPhase, phase => {
     />
 
     <OpportunityFormDialog v-bind="elevated ? { elevated: true } : {}"
-      v-if="opportunity"
+      v-if="opportunity && !readonly"
       :open="editDialogOpen"
       :opportunity="opportunity"
       :dialog-title="editMode === 'resubmit' ? '修改并重新提交商机' : undefined"

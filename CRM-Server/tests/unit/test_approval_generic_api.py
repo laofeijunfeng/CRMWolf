@@ -549,6 +549,35 @@ def test_detail_returns_approval(
     assert body["status"] == "PENDING"
 
 
+def test_entity_detail_exposes_subject_drilldown_ids(db_session, seed_payment_record_self):
+    """审批详情需返回主体下钻所需的关联合同/商机标识，前端据此打开只读主体详情。"""
+    plan = db_session.get(PaymentPlan, seed_payment_record_self.payment_plan_id)
+    contract = db_session.get(Contract, plan.contract_id)
+    opportunity = db_session.get(Opportunity, contract.opportunity_id)
+
+    payment_detail = approvals_api._build_approval_entity_detail_unsafe(
+        Approval(team_id=1, business_type=BusinessType.PAYMENT, business_id=seed_payment_record_self.id),
+        db_session,
+    )
+    assert payment_detail["contract_id"] == contract.id
+    assert payment_detail["opportunity_public_id"] == opportunity.public_id
+
+    contract_detail = approvals_api._build_approval_entity_detail_unsafe(
+        Approval(team_id=1, business_type=BusinessType.CONTRACT, business_id=contract.id),
+        db_session,
+    )
+    assert contract_detail["opportunity_public_id"] == opportunity.public_id
+
+    opportunity_detail = approvals_api._build_approval_entity_detail_unsafe(
+        Approval(team_id=1, business_type=BusinessType.OPPORTUNITY, business_id=opportunity.id),
+        db_session,
+    )
+    assert opportunity_detail["opportunity_public_id"] == opportunity.public_id
+    assert opportunity_detail["opportunity_number"] == "OPP-PAYMENT"
+    assert opportunity_detail["product_name"] is None
+
+
+
 def test_detail_forbidden_for_unrelated_user(
     app, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
 ):

@@ -35,6 +35,7 @@ import {
   EmptyDescription
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
+import ErrorState from '@/components/ErrorState.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
@@ -47,6 +48,7 @@ import {
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 
 // ==================== Props & Emits ====================
@@ -56,12 +58,15 @@ interface Props {
   embedded?: boolean
   showBreadcrumb?: boolean
   canApprove?: boolean
+  /** 只读查看（审批下钻）：隐藏全部变更/导航动作与审批组件 */
+  readonly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   embedded: false,
   showBreadcrumb: true,
-  canApprove: false
+  canApprove: false,
+  readonly: false
 })
 
 const emit = defineEmits<{
@@ -90,6 +95,8 @@ const { userInfo } = storeToRefs(userStore)
 const loading = ref(false)
 const contractInfo = ref<ContractResponse | null>(null)
 const errorMessage = ref('')
+/** 只读模式下 403/404 的内联错误，替代通用 toast 与通用错误文案 */
+const loadError = ref<FeedbackError | null>(null)
 const activeRequestId = ref(0)
 const editDialogOpen = ref<boolean>(false)
 const contractFilePreviewUrl = ref<string>('')
@@ -230,6 +237,7 @@ const fetchContractDetail = async (contractId: number): Promise<boolean> => {
 
   loading.value = true
   errorMessage.value = ''
+  loadError.value = null
   contractInfo.value = null
 
   try {
@@ -243,6 +251,13 @@ const fetchContractDetail = async (contractId: number): Promise<boolean> => {
     if (requestId !== activeRequestId.value) return false
 
     contractInfo.value = null
+    if (props.readonly) {
+      const feedback = toFeedbackError(error, '合同')
+      if (feedback.status === 403 || feedback.status === 404) {
+        loadError.value = feedback
+        return false
+      }
+    }
     errorMessage.value = '合同信息加载失败，请稍后重试'
     handleApiError(error, '获取合同详情')
     return false
@@ -260,6 +275,7 @@ const resetState = (): void => {
   loading.value = false
   contractInfo.value = null
   errorMessage.value = ''
+  loadError.value = null
 }
 
 // ==================== Event Seams ====================
@@ -443,7 +459,7 @@ onBeforeUnmount((): void => {
 </script>
 
 <template>
-  <div class="contract-detail-content">
+  <div class="contract-detail-content" :class="{ 'flex-1 min-h-0': readonly }">
     <!-- Header -->
     <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
       <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
@@ -504,6 +520,14 @@ onBeforeUnmount((): void => {
               <Skeleton class="h-32 w-full" />
             </div>
           </template>
+
+          <div v-else-if="loadError" data-testid="contract-detail-load-error">
+            <ErrorState
+              :variant="loadError.variant ?? 'error'"
+              :title="loadError.title"
+              :description="loadError.description"
+            />
+          </div>
 
           <template v-else-if="errorMessage">
             <Card class="state-card">
@@ -620,8 +644,9 @@ onBeforeUnmount((): void => {
               </CardContent>
             </Card>
 
-            <!-- 审批进度卡片：复用审批中心同款通用审批组件 -->
+            <!-- 审批进度卡片：复用审批中心同款通用审批组件；只读下钻不挂载，避免覆盖审批中心详情状态 -->
             <ApprovalProcessGeneric
+              v-if="!readonly"
               :entity-type="contractEntityType"
               :entity-id="contractInfo.id"
               :can-approve="canApproveGeneric"
@@ -635,13 +660,26 @@ onBeforeUnmount((): void => {
 
             <!-- 回款计划卡片 -->
             <ContractPaymentPlans
-              v-if="canShowPaymentPlans && paymentContractInfo !== undefined"
+              v-if="!readonly && canShowPaymentPlans && paymentContractInfo !== undefined"
               :contract-id="contractInfo.id"
               :contract-status="contractInfo.status"
               :contract-info="paymentContractInfo"
               @plan-updated="handlePaymentPlanUpdated"
               @view-plan="handleViewPaymentPlan"
             />
+            <Card v-else-if="readonly && canShowPaymentPlans" class="state-card" data-testid="contract-payment-plans-readonly">
+              <CardContent class="payment-placeholder-content">
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <ReceiptText class="w-10 h-10" />
+                    </EmptyMedia>
+                  </EmptyHeader>
+                  <EmptyTitle>此处不展示回款计划</EmptyTitle>
+                  <EmptyDescription>如需查看或登记回款计划，请前往合同管理。</EmptyDescription>
+                </Empty>
+              </CardContent>
+            </Card>
             <Card v-else class="state-card">
               <CardContent class="payment-placeholder-content">
                 <Empty>
@@ -676,7 +714,7 @@ onBeforeUnmount((): void => {
       </ScrollArea>
 
       <!-- Footer -->
-      <SheetFooter class="p-4 border-t border-wolf-border-default-v2 footer-actions">
+      <SheetFooter v-if="!readonly" class="p-4 border-t border-wolf-border-default-v2 footer-actions">
         <Button
           v-if="canEditContract"
           variant="outline"
@@ -693,7 +731,7 @@ onBeforeUnmount((): void => {
   </div>
 
   <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
-    v-if="contractInfo"
+    v-if="contractInfo && !readonly"
     v-model:open="editDialogOpen"
     :customer-id="contractInfo.customer_id"
     :contract="contractInfo"

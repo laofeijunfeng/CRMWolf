@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import ErrorState from '@/components/ErrorState.vue'
 import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
 import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
@@ -64,6 +65,7 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { formatLocalDate } from '@/utils/format'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 /**
  * Local type extending PaymentRecordInfo for detail sheet display.
@@ -94,6 +96,8 @@ interface Props {
   record?: PaymentRecordDetailInfo | null
   stageName?: string
   approval?: ApprovalInfoInput | null
+  /** 只读查看（如从审批详情下钻）：隐藏编辑、审批流程与关闭等操作，403/404 以内联错误呈现。 */
+  readonly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -101,7 +105,8 @@ const props = withDefaults(defineProps<Props>(), {
   embedded: false,
   record: null,
   stageName: '',
-  approval: null
+  approval: null,
+  readonly: false
 })
 
 const emit = defineEmits<{
@@ -121,6 +126,8 @@ const detailRecord = ref<PaymentRecordDetailInfo | null>(props.record)
 const detailApproval = ref<ApprovalInfoInput | null>(props.approval)
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
+// Readonly-only terminal load failure (403/404): replaces the record entirely, never shows stale data.
+const readonlyLoadError = ref<FeedbackError | null>(null)
 let detailRequestSequence = 0
 
 const hasRecord = computed<boolean>(() => detailRecord.value !== null)
@@ -332,6 +339,7 @@ async function loadDetail(): Promise<void> {
   const requestSequence = ++detailRequestSequence
   loading.value = detailRecord.value === null
   errorMessage.value = ''
+  readonlyLoadError.value = null
 
   try {
     const detail: PaymentRecordDetailResponse = await paymentApi.getPaymentRecordDetail(recordId)
@@ -345,6 +353,13 @@ async function loadDetail(): Promise<void> {
     detailApproval.value = detail.approval ?? null
   } catch (error: unknown) {
     if (requestSequence !== detailRequestSequence) return
+    const status = (error as ApiErrorLike).response?.status
+    if (props.readonly && (status === 403 || status === 404)) {
+      detailRecord.value = null
+      detailApproval.value = null
+      readonlyLoadError.value = toFeedbackError(error, '回款记录')
+      return
+    }
     errorMessage.value = getDetailErrorMessage(error)
   } finally {
     if (requestSequence === detailRequestSequence) {
@@ -360,6 +375,8 @@ watch(
   ([record, approval]): void => {
     // Refreshes from the parent may keep the same record ID while replacing its
     // status/approval snapshot. Reflect that update without adding another step.
+    // A readonly 403/404 is terminal for this record: never fall back to the parent snapshot.
+    if (readonlyLoadError.value !== null) return
     if (record !== null) detailRecord.value = record
     detailApproval.value = approval
   }
@@ -372,6 +389,7 @@ watch(
       detailRequestSequence += 1
       loading.value = false
       errorMessage.value = ''
+      readonlyLoadError.value = null
       if (!visible) {
         detailRecord.value = props.record
         detailApproval.value = props.approval
@@ -440,6 +458,14 @@ watch(
               <Skeleton class="h-48 w-full" />
             </div>
           </template>
+
+          <div v-else-if="readonlyLoadError" class="readonly-error-state">
+            <ErrorState
+              :variant="readonlyLoadError.variant ?? 'error'"
+              :title="readonlyLoadError.title"
+              :description="readonlyLoadError.description"
+            />
+          </div>
 
           <template v-else-if="errorMessage && !hasRecord">
             <Card class="state-card">
@@ -644,7 +670,7 @@ watch(
             </Card>
 
             <!-- Approval Process Card -->
-            <Card v-if="recordEntityId !== null" class="approval-card">
+            <Card v-if="!readonly && recordEntityId !== null" class="approval-card">
               <CardHeader class="section-heading">
                 <CardTitle class="section-title">审批流程</CardTitle>
                 <CardDescription>回款记录的审批历史与当前处理状态。</CardDescription>
@@ -683,7 +709,7 @@ watch(
         </div>
       </ScrollArea>
 
-      <SheetFooter class="record-sheet-footer">
+      <SheetFooter v-if="!readonly" class="record-sheet-footer">
         <Button
           v-if="canEditRecord"
           variant="outline"
@@ -729,6 +755,10 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .record-sheet-scroll {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.readonly-error-state {
+  padding: $wolf-space-lg-v2 0;
 }
 
 .record-sheet-header {
