@@ -40,6 +40,8 @@ interface Props {
   customerId: string
   members: CustomerMemberResponse[]
   canManageMembers?: boolean
+  /** 只读查看（如审批下钻）：隐藏添加/编辑/移除成员入口 */
+  readonly?: boolean
 }
 
 const props = defineProps<Props>()
@@ -63,7 +65,7 @@ const form = reactive({
   remark: '',
 })
 
-const canManage = computed(() => props.canManageMembers === true || props.members.some(item => item.can_manage))
+const canManage = computed(() => !props.readonly && (props.canManageMembers === true || props.members.some(item => item.can_manage)))
 const availableCandidates = computed(() => candidates.value.filter(item => !item.already_member || item.id === form.userId))
 
 const getRoleLabel = (value: string): string => roleOptions.find(item => item.value === value)?.label ?? value
@@ -196,10 +198,10 @@ watch(
       </template>
 
       <template #itemActions="{ item }">
-        <Button v-if="item.can_manage" variant="ghost" size="icon" class="h-8 w-8" aria-label="编辑成员" @click="openEditDialog(item)">
+        <Button v-if="!readonly && item.can_manage" variant="ghost" size="icon" class="h-8 w-8" aria-label="编辑成员" @click="openEditDialog(item)">
           <Pencil class="w-4 h-4" />
         </Button>
-        <Button v-if="item.can_manage" variant="ghost" size="icon" class="h-8 w-8 text-wolf-danger-text-v2" aria-label="移除成员" @click="handleRemove(item)">
+        <Button v-if="!readonly && item.can_manage" variant="ghost" size="icon" class="h-8 w-8 text-wolf-danger-text-v2" aria-label="移除成员" @click="handleRemove(item)">
           <Trash2 class="w-4 h-4" />
         </Button>
       </template>

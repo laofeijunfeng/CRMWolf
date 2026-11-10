@@ -5,7 +5,7 @@ from app.core.database import Base
 from app.utils.time import business_now
 import enum
 
-from app.utils.name_normalizer import normalize_corp_name  # R-ST-02
+from app.utils.name_normalizer import build_customer_name_dedupe_key, normalize_corp_name  # R-ST-02
 from app.utils.public_id import generate_public_id
 
 
@@ -69,6 +69,7 @@ class Customer(Base):
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     account_name = Column(String(255), nullable=False, comment="客户公司名称")
     account_name_norm = Column(String(255), nullable=True, comment="归一化客户名称（去后缀/括号）")  # R-ST-02
+    account_name_dedupe_key = Column(String(512), nullable=True, comment="客户名称判重键: NFKC/去格式字符/统一空白")
     industry = Column(String(100), nullable=True, comment="所属行业")
     city = Column(String(100), nullable=False, comment="所在城市")
     address = Column(String(500), nullable=True, comment="公司地址")
@@ -117,6 +118,7 @@ class Customer(Base):
     __table_args__ = (
         Index('idx_account_name', 'account_name'),
         Index('uq_customer_team_account_name', 'team_id', 'account_name', unique=True),
+        Index('uq_customer_team_name_dedupe_key', 'team_id', 'account_name_dedupe_key', unique=True),
         Index('idx_account_name_norm_gin', 'account_name_norm', postgresql_using='gin', postgresql_ops={'account_name_norm': 'gin_trgm_ops'}),  # R-ST-02: pg_trgm GIN 索引
         Index('idx_industry', 'industry'),
         Index('idx_city', 'city'),
@@ -148,15 +150,16 @@ class CustomerProduct(Base):
     )
 
 
-# R-ST-02: ORM hook 自动维护 account_name_norm
+# R-ST-02: ORM hook 自动维护 account_name_norm 与 account_name_dedupe_key
 @event.listens_for(Customer, 'before_insert')
 @event.listens_for(Customer, 'before_update')
 def customer_update_name_norm(mapper, connection, target):
-    """Customer 写入时自动归一化 account_name_norm"""
+    """Customer 写入时自动归一化 account_name_norm 并生成判重键"""
     if target.account_name:
         target.account_name_norm = normalize_corp_name(target.account_name)
     else:
         target.account_name_norm = None
+    target.account_name_dedupe_key = build_customer_name_dedupe_key(target.account_name)
 
 
 class Contact(Base):

@@ -16,7 +16,7 @@ import { computed, ref, watch } from 'vue'
 import {
   AlertCircle,
   Calendar,
-  ExternalLink,
+  Eye,
   FileText,
   Pencil,
   RefreshCw,
@@ -49,7 +49,10 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
-import { AmountText } from '@/components/crmwolf'
+import ErrorState from '@/components/ErrorState.vue'
+import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
+import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 import paymentApi, {
   type ApprovalInfo,
   type ApprovalInfoLite,
@@ -62,6 +65,7 @@ import paymentApi, {
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { formatLocalDate } from '@/utils/format'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 
 /**
  * Local type extending PaymentRecordInfo for detail sheet display.
@@ -92,6 +96,8 @@ interface Props {
   record?: PaymentRecordDetailInfo | null
   stageName?: string
   approval?: ApprovalInfoInput | null
+  /** 只读查看（如从审批详情下钻）：隐藏编辑、审批流程与关闭等操作，403/404 以内联错误呈现。 */
+  readonly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -99,7 +105,8 @@ const props = withDefaults(defineProps<Props>(), {
   embedded: false,
   record: null,
   stageName: '',
-  approval: null
+  approval: null,
+  readonly: false
 })
 
 const emit = defineEmits<{
@@ -119,6 +126,8 @@ const detailRecord = ref<PaymentRecordDetailInfo | null>(props.record)
 const detailApproval = ref<ApprovalInfoInput | null>(props.approval)
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
+// Readonly-only terminal load failure (403/404): replaces the record entirely, never shows stale data.
+const readonlyLoadError = ref<FeedbackError | null>(null)
 let detailRequestSequence = 0
 
 const hasRecord = computed<boolean>(() => detailRecord.value !== null)
@@ -127,20 +136,29 @@ const hasProofAttachment = computed<boolean>(() => {
   return typeof attachment === 'string' && attachment.trim().length > 0
 })
 
-/**
- * Detects if the proof attachment URL points to an image file.
- * Checks for common image extensions in the URL (case-insensitive).
- */
-const isImageAttachment = computed<boolean>(() => {
-  const attachment = detailRecord.value?.proof_attachment
-  if (typeof attachment !== 'string' || attachment.trim() === '') return false
-  const lowerUrl = attachment.toLowerCase()
-  return /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i.test(lowerUrl)
+const proofAttachmentUrl = computed<string>(() => {
+  return detailRecord.value?.proof_attachment?.trim() ?? ''
 })
 
-const proofAttachmentUrl = computed<string>(() => {
-  return detailRecord.value?.proof_attachment ?? ''
+/** The voucher is an external URL; its last path segment is the best available file name. */
+const proofFile = computed<FileAttachmentItem | null>(() => {
+  const url = proofAttachmentUrl.value
+  if (url === '') return null
+  const segment = url.split(/[?#]/)[0]?.split('/').pop() ?? ''
+  let name = segment
+  try {
+    name = decodeURIComponent(segment)
+  } catch {
+    // Keep the raw segment when it is not valid percent-encoding.
+  }
+  return { id: 'proof', name: name !== '' ? name : '凭证附件', url }
 })
+
+const isImageAttachment = computed<boolean>(() =>
+  proofFile.value !== null && getFilePreviewKind(proofFile.value) === 'image'
+)
+
+const proofPreviewOpen = ref<boolean>(false)
 
 const recordEntityId = computed<number | null>(() => detailRecord.value?.id ?? props.recordId)
 
@@ -281,11 +299,8 @@ function closeSheet(): void {
   emit('close')
 }
 
-function handleProofClick(): void {
-  const attachment = detailRecord.value?.proof_attachment
-  if (typeof attachment === 'string' && attachment.trim().length > 0) {
-    window.open(attachment, '_blank', 'noopener,noreferrer')
-  }
+function openProofPreview(): void {
+  if (proofFile.value !== null) proofPreviewOpen.value = true
 }
 
 function handleApprovalChanged(): void {
@@ -324,6 +339,7 @@ async function loadDetail(): Promise<void> {
   const requestSequence = ++detailRequestSequence
   loading.value = detailRecord.value === null
   errorMessage.value = ''
+  readonlyLoadError.value = null
 
   try {
     const detail: PaymentRecordDetailResponse = await paymentApi.getPaymentRecordDetail(recordId)
@@ -337,6 +353,13 @@ async function loadDetail(): Promise<void> {
     detailApproval.value = detail.approval ?? null
   } catch (error: unknown) {
     if (requestSequence !== detailRequestSequence) return
+    const status = (error as ApiErrorLike).response?.status
+    if (props.readonly && (status === 403 || status === 404)) {
+      detailRecord.value = null
+      detailApproval.value = null
+      readonlyLoadError.value = toFeedbackError(error, '回款记录')
+      return
+    }
     errorMessage.value = getDetailErrorMessage(error)
   } finally {
     if (requestSequence === detailRequestSequence) {
@@ -352,6 +375,8 @@ watch(
   ([record, approval]): void => {
     // Refreshes from the parent may keep the same record ID while replacing its
     // status/approval snapshot. Reflect that update without adding another step.
+    // A readonly 403/404 is terminal for this record: never fall back to the parent snapshot.
+    if (readonlyLoadError.value !== null) return
     if (record !== null) detailRecord.value = record
     detailApproval.value = approval
   }
@@ -364,6 +389,7 @@ watch(
       detailRequestSequence += 1
       loading.value = false
       errorMessage.value = ''
+      readonlyLoadError.value = null
       if (!visible) {
         detailRecord.value = props.record
         detailApproval.value = props.approval
@@ -432,6 +458,14 @@ watch(
               <Skeleton class="h-48 w-full" />
             </div>
           </template>
+
+          <div v-else-if="readonlyLoadError" class="readonly-error-state">
+            <ErrorState
+              :variant="readonlyLoadError.variant ?? 'error'"
+              :title="readonlyLoadError.title"
+              :description="readonlyLoadError.description"
+            />
+          </div>
 
           <template v-else-if="errorMessage && !hasRecord">
             <Card class="state-card">
@@ -519,43 +553,35 @@ watch(
                     凭证附件
                   </span>
 
-                  <!-- Inline image preview for image URLs with lazy loading -->
+                  <!-- Inline thumbnail for image URLs with lazy loading -->
                   <div v-if="isImageAttachment" class="voucher-preview">
-                    <img
-                      :src="proofAttachmentUrl"
-                      alt="凭证附件预览"
-                      loading="lazy"
-                      class="voucher-image"
-                      @click="handleProofClick"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
+                    <button
                       type="button"
-                      class="voucher-link"
-                      aria-label="在新标签页打开凭证附件"
-                      @click="handleProofClick"
+                      class="voucher-thumb"
+                      aria-label="放大预览凭证附件"
+                      @click="openProofPreview"
                     >
-                      <ExternalLink aria-hidden="true" />
-                      查看原图
-                    </Button>
+                      <img
+                        :src="proofAttachmentUrl"
+                        alt="凭证附件预览"
+                        loading="lazy"
+                        class="voucher-image"
+                      />
+                    </button>
                   </div>
 
-                  <!-- Non-image attachments: button only -->
-                  <template v-else>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      type="button"
-                      class="voucher-link"
-                      :aria-label="`查看凭证附件，将在新标签页打开`"
-                      @click="handleProofClick"
-                    >
-                      <ExternalLink aria-hidden="true" />
-                      查看凭证
-                    </Button>
-                    <p class="voucher-hint">点击按钮在新标签页打开凭证附件</p>
-                  </template>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    class="voucher-link"
+                    aria-label="预览凭证附件"
+                    @click="openProofPreview"
+                  >
+                    <Eye aria-hidden="true" />
+                    预览凭证
+                  </Button>
+                  <p v-if="!isImageAttachment" class="voucher-hint">支持在线预览图片、PDF 和 DOCX，其他格式可在新标签页打开</p>
                 </div>
               </CardContent>
             </Card>
@@ -644,7 +670,7 @@ watch(
             </Card>
 
             <!-- Approval Process Card -->
-            <Card v-if="recordEntityId !== null" class="approval-card">
+            <Card v-if="!readonly && recordEntityId !== null" class="approval-card">
               <CardHeader class="section-heading">
                 <CardTitle class="section-title">审批流程</CardTitle>
                 <CardDescription>回款记录的审批历史与当前处理状态。</CardDescription>
@@ -683,7 +709,7 @@ watch(
         </div>
       </ScrollArea>
 
-      <SheetFooter class="record-sheet-footer">
+      <SheetFooter v-if="!readonly" class="record-sheet-footer">
         <Button
           v-if="canEditRecord"
           variant="outline"
@@ -698,6 +724,13 @@ watch(
           关闭
         </Button>
       </SheetFooter>
+
+      <FilePreviewDialog
+        v-model:open="proofPreviewOpen"
+        :file="proofFile"
+        :allow-download="false"
+        allow-open-in-new-tab
+      />
   </div>
 
 </template>
@@ -722,6 +755,10 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .record-sheet-scroll {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.readonly-error-state {
+  padding: $wolf-space-lg-v2 0;
 }
 
 .record-sheet-header {
@@ -938,21 +975,31 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   gap: $wolf-space-sm-v2;
 }
 
-.voucher-image {
+.voucher-thumb {
+  align-self: flex-start;
   max-width: 100%;
-  max-height: 240px;
+  padding: 0;
+  border: 0;
   border-radius: $wolf-radius-v2;
-  border: $record-border-width solid $wolf-border-light-v2;
-  cursor: pointer;
-  transition: transform 0.15s ease;
-
-  &:hover {
-    transform: scale(1.02);
-  }
+  background: none;
+  cursor: zoom-in;
 
   &:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
     outline-offset: 2px;
+  }
+}
+
+.voucher-image {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: $wolf-radius-v2;
+  border: $record-border-width solid $wolf-border-light-v2;
+  transition: transform 0.15s ease;
+
+  .voucher-thumb:hover & {
+    transform: scale(1.02);
   }
 }
 

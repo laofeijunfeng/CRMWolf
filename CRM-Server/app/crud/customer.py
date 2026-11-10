@@ -28,6 +28,7 @@ from app.crud.product_intent import (
 from app.crud.product import product_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
+from app.utils.name_normalizer import build_customer_name_dedupe_key
 from app.models.lead import Lead, LeadProduct, LeadStatus
 from app.models.opportunity import Opportunity
 from app.models.product import Product
@@ -105,7 +106,12 @@ class CustomerCRUD:
         return query.first()
 
     def get_by_name(self, db: Session, account_name: str, team_id: Optional[int] = None) -> Optional[Customer]:
-        query = db.query(Customer).filter(Customer.account_name == account_name)
+        dedupe_key = build_customer_name_dedupe_key(account_name)
+        if dedupe_key is None:
+            return None
+        query = db.query(Customer).filter(
+            or_(Customer.account_name_dedupe_key == dedupe_key, Customer.account_name == account_name)
+        )
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
         return query.first()

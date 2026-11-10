@@ -85,6 +85,7 @@ const invoice = (
   red_offsets: [],
   reissue_applications: reissues,
   ...overrides,
+  remark: overrides.remark ?? null,
 })
 
 describe('buildReissueTimeline', () => {

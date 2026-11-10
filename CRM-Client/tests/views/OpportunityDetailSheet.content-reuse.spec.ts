@@ -120,7 +120,15 @@ vi.mock('@/components/ui/date-picker', () => ({
 }))
 
 vi.mock('@/components/OpportunityStageStepper.vue', () => ({
-  default: defineComponent({ name: 'OpportunityStageStepper', setup: () => () => h('div', 'stage stepper') }),
+  default: defineComponent({
+    name: 'OpportunityStageStepper',
+    props: { canAdvance: { type: Boolean, default: true } },
+    setup: (props) => () => h('div', { 'data-can-advance': String(props.canAdvance) }, 'stage stepper'),
+  }),
+}))
+
+vi.mock('@/components/ApprovalProcessGeneric.vue', () => ({
+  default: defineComponent({ name: 'ApprovalProcessGeneric', setup: () => () => h('div', { 'data-testid': 'approval-process' }) }),
 }))
 
 const OPPORTUNITY_PUBLIC_ID = 'opp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -203,5 +211,86 @@ describe('OpportunityDetailSheet content reuse', () => {
       },
     })
     expect(wrapper.emitted('update:visible')).toEqual([[false]])
+  })
+
+  describe('approval source mode', () => {
+    const sourceApproval = { approvalLabel: '商机审批', applicationNumber: 'OPP-20261108-001' }
+
+    it('without sourceApproval keeps approval process, actions and journey entry', async () => {
+      const draft = mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID },
+      })
+      await flushPromises()
+      expect(draft.find('[data-testid="approval-process"]').exists()).toBe(true)
+      draft.unmount()
+
+      opportunityApi.getOpportunity.mockResolvedValue({ ...opportunityFixture(), approval_phase: 'approved' })
+      const wrapper = mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID },
+      })
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="view-deal-journey"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('赢单')
+      expect(wrapper.find('[data-testid="approval-source-banner"]').exists()).toBe(false)
+    })
+
+    it('does not mount the approval process in source mode while approval is open', async () => {
+      const wrapper = mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID, sourceApproval },
+      })
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('CRM 升级项目')
+      expect(wrapper.findComponent({ name: 'ApprovalProcessGeneric' }).exists()).toBe(false)
+    })
+
+    it('renders read-only with banner and back entries, hiding mutating/approval/navigation controls', async () => {
+      opportunityApi.getOpportunity.mockResolvedValue({ ...opportunityFixture(), approval_phase: 'approved' })
+      const wrapper = mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID, elevated: true, sourceApproval },
+      })
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="approval-source-banner"]').text()).toContain('来自商机审批 OPP-20261108-001 · 只读查看')
+      expect(wrapper.text()).toContain('商机详情')
+      expect(wrapper.findComponent({ name: 'ApprovalProcessGeneric' }).exists()).toBe(false)
+      expect(wrapper.find('[data-testid="view-deal-journey"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="opportunity-detail-back"]').exists()).toBe(false)
+      expect(wrapper.findComponent({ name: 'RouterLink' }).exists()).toBe(false)
+      expect(wrapper.get('[data-can-advance]').attributes('data-can-advance')).toBe('false')
+      for (const label of ['赢单', '输单', '编辑']) {
+        expect(wrapper.findAll('button').some(button => button.text().includes(label))).toBe(false)
+      }
+
+      await wrapper.get('[data-testid="approval-source-back-top"]').trigger('click')
+      await wrapper.get('[data-testid="approval-source-back-bottom"]').trigger('click')
+      expect(wrapper.emitted('back')).toHaveLength(2)
+      expect(wrapper.emitted('update:visible')).toBeUndefined()
+      expect(routerPush).not.toHaveBeenCalled()
+    })
+
+    it.each([403, 404])('shows an inline error without toast when subject GET returns %i', async (status) => {
+      opportunityApi.getOpportunity.mockRejectedValue({ response: { status } })
+      const wrapper = mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID, sourceApproval },
+      })
+      await flushPromises()
+
+      expect(handleApiError.mock.calls.filter(call => call[1] === '获取商机详情')).toHaveLength(0)
+      expect(wrapper.text()).toContain(status === 403 ? '你没有商机的访问权限' : '商机不存在')
+      expect(wrapper.find('[data-testid="retry-opportunity-detail"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('CRM 升级项目')
+    })
+
+    it('keeps the generic toast for 403 outside source mode', async () => {
+      opportunityApi.getOpportunity.mockRejectedValue({ response: { status: 403 } })
+      mount(OpportunityDetailSheet, {
+        props: { visible: true, opportunityId: OPPORTUNITY_PUBLIC_ID },
+      })
+      await flushPromises()
+
+      expect(handleApiError.mock.calls.filter(call => call[1] === '获取商机详情')).toHaveLength(1)
+    })
   })
 })

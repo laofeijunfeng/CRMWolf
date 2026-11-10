@@ -1,6 +1,6 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '..'
 
 const getCloseButton = (): HTMLButtonElement => {
@@ -8,6 +8,10 @@ const getCloseButton = (): HTMLButtonElement => {
   if (close === null) throw new Error('Dialog close button not found')
   return close
 }
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
 
 const mountOpenDialog = (): VueWrapper => mount({
   components: { Dialog, DialogContent, DialogDescription, DialogTitle },

@@ -320,6 +320,14 @@
                       >
                         {{ displayFieldValue(field.value) }}
                       </button>
+                      <button
+                        v-else-if="field.type === 'link' && hasFieldDrilldown(field)"
+                        type="button"
+                        class="attribute-value attribute-value-link text-left"
+                        @click="openFieldDrilldown(field)"
+                      >
+                        {{ displayFieldValue(field.value) }}
+                      </button>
                       <div v-else-if="field.type === 'amount'" class="attribute-value">
                         <AmountText :value="typeof field.value === 'number' ? field.value : null" tone="warning" />
                       </div>
@@ -343,7 +351,11 @@
                   <div class="attributes-grid">
                     <div class="attribute-item">
                       <div class="attribute-label">客户名称</div>
-                      <div class="attribute-value">{{ approvalCustomerInfo.account_name }}</div>
+                      <div class="attribute-value"><button type="button" class="attribute-value-link text-left" @click="openDrilldown('customer', approvalCustomerInfo.id)">{{ approvalCustomerInfo.account_name }}</button></div>
+                    </div>
+                    <div class="attribute-item">
+                      <div class="attribute-label">客户详情</div>
+                      <div class="attribute-value"><button type="button" class="attribute-value-link text-left" @click="openDrilldown('customer', approvalCustomerInfo.id)">查看客户详情</button></div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">所在城市</div>
@@ -352,10 +364,6 @@
                     <div class="attribute-item">
                       <div class="attribute-label">所属行业</div>
                       <div class="attribute-value">{{ approvalCustomerInfo.industry || '-' }}</div>
-                    </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">公司规模</div>
-                      <div class="attribute-value">{{ approvalCustomerInfo.company_scale || '-' }}</div>
                     </div>
                     <div class="attribute-item">
                       <div class="attribute-label">客户来源</div>
@@ -370,19 +378,27 @@
               </CardContent>
             </Card>
 
-            <!-- 审批流程组件（内部处理加载/错误/空态） -->
-            <ApprovalProcessGeneric
-              v-if="selectedApproval && selectedApprovalEntityId !== null"
-              :entity-type="selectedApproval.business_type"
-              :entity-id="selectedApprovalEntityId"
-              :can-approve="activeTab === 'pending'"
-              :is-submitter="activeTab === 'submitted'"
-              @approved="onApprovalActionDone"
-              @rejected="onApprovalActionDone"
-              @withdrawn="onApprovalActionDone"
-              @submitted="onApprovalActionDone"
-              @resubmit="onResubmit"
-            />
+            <!-- 审批流程卡片（组件内部处理加载/错误/空态） -->
+            <Card v-if="selectedApproval && selectedApprovalEntityId !== null" class="info-card">
+              <CardContent class="p-0">
+                <div class="p-4 border-b border-wolf-border-light-v2">
+                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">审批流程</h3>
+                </div>
+                <div class="p-4">
+                  <ApprovalProcessGeneric
+                    :entity-type="selectedApproval.business_type"
+                    :entity-id="selectedApprovalEntityId"
+                    :can-approve="activeTab === 'pending'"
+                    :is-submitter="activeTab === 'submitted'"
+                    @approved="onApprovalActionDone"
+                    @rejected="onApprovalActionDone"
+                    @withdrawn="onApprovalActionDone"
+                    @submitted="onApprovalActionDone"
+                    @resubmit="onResubmit"
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </ScrollArea>
 
@@ -431,6 +447,11 @@
       @update:visible="handleInvoiceDetailSheetVisibleChange"
       @refresh="handleInvoiceDetailRefresh"
     />
+    <ContractDetailSheet :contract-id="drillTarget === 'contract' ? Number(drillId) : null" :visible="drillTarget === 'contract'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+    <PaymentRecordDetailSheet :record-id="drillTarget === 'payment' ? Number(drillId) : null" :visible="drillTarget === 'payment'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+    <InvoiceDetailSheet :invoice-id="drillTarget === 'invoice' ? Number(drillId) : null" :visible="drillTarget === 'invoice'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+    <OpportunityDetailSheet :opportunity-id="drillTarget === 'opportunity' ? String(drillId) : null" :visible="drillTarget === 'opportunity'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+    <CustomerDetailSheet :customer-id="drillTarget === 'customer' ? String(drillId) : null" :visible="drillTarget === 'customer'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
 
     <LicenseIssueDialog
       v-if="selectedApproval?.business_type === 'LICENSE'"
@@ -439,40 +460,13 @@
       @issued="handleLicenseIssued"
     />
 
-    <Dialog :open="attachmentPreviewVisible" @update:open="handleAttachmentPreviewOpenChange">
-      <DialogContent class="max-w-[92vw] sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{{ attachmentPreviewTitle }}</DialogTitle>
-          <DialogDescription>审批附件预览</DialogDescription>
-        </DialogHeader>
-
-        <div class="approval-attachment-preview">
-          <div v-if="attachmentPreviewPendingId != null" class="approval-attachment-preview__loading">
-            加载中...
-          </div>
-          <img
-            v-else-if="attachmentPreviewIsImage && attachmentPreviewUrl"
-            :src="attachmentPreviewUrl"
-            :alt="attachmentPreviewTitle"
-            class="approval-attachment-preview__image"
-          >
-          <iframe
-            v-else-if="attachmentPreviewIsPdf && attachmentPreviewUrl"
-            :src="attachmentPreviewUrl"
-            :title="attachmentPreviewTitle"
-            class="approval-attachment-preview__frame"
-          />
-          <div v-else class="approval-attachment-preview__fallback">
-            当前文件格式不支持直接预览，请下载后查看。
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" @click="closeAttachmentPreview">关闭</Button>
-          <Button @click="handleDownloadAttachment">下载</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <FilePreviewDialog
+      :open="attachmentPreviewVisible"
+      :file="attachmentPreviewFile"
+      :loading="attachmentPreviewPendingId != null"
+      @update:open="handleAttachmentPreviewOpenChange"
+      @download="handleDownloadAttachment"
+    />
 
     <!-- 移动端快速驳回弹窗 -->
     <Dialog :open="quickRejectVisible" @update:open="handleQuickRejectOpenChange">
@@ -549,7 +543,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
+import { AmountText, DataTable, Badge, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -570,6 +564,11 @@ import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialo
 import InvoiceReissueCompleteDialog from '@/components/dialogs/InvoiceReissueCompleteDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
+import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
+import OpportunityDetailSheet from '@/views/OpportunityDetailSheet.vue'
+import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import type { ApprovalSourceContext } from '@/types/approvalSource'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
 import { useHeaderStore } from '@/stores/header'
@@ -588,15 +587,19 @@ import { type ListExportPayload } from '@/api/listExport'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
 import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery, ApprovalTab } from '@/schemas/approvalGeneric'
+import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
 type Tab = 'pending' | 'processed' | 'submitted'
+type ApprovalSubjectLinkTarget = 'contract' | 'payment' | 'invoice' | 'opportunity' | 'customer'
 interface ApprovalSubjectField {
   key: string
   label: string
   value: string | number | null | undefined
-  type?: 'text' | 'copy' | 'amount' | 'status' | 'mono'
+  type?: 'text' | 'copy' | 'amount' | 'status' | 'mono' | 'link'
+  linkTarget?: ApprovalSubjectLinkTarget
+  linkId?: number | string | null
   wide?: boolean
 }
 
@@ -670,6 +673,17 @@ const focusedRowEl = ref<HTMLElement | null>(null)
 const resubmitPendingId = ref<number | null>(null)
 const remindPendingId = ref<number | null>(null)
 
+type DrillTarget = Exclude<ApprovalSubjectLinkTarget, 'invoice'> | 'invoice'
+const drillTarget = ref<DrillTarget | null>(null)
+const drillId = ref<number | string | null>(null)
+const approvalSource = computed<ApprovalSourceContext | null>(() => {
+  const approval = selectedApproval.value
+  if (!approval) return null
+  return {
+    approvalLabel: `${businessTypeLabel(approval.business_type)}审批`,
+    applicationNumber: approval.application_number,
+  }
+})
 // 合同编辑弹窗状态
 const contractEditVisible = ref<boolean>(false)
 const editingContract = ref<ContractResponse | null>(null)
@@ -850,14 +864,6 @@ const licenseTypeLabel = (type?: string | null): string => {
   return type == null ? '-' : (map[type] ?? type)
 }
 
-const purchaseTypeLabel = (type?: string | null): string => {
-  const map: Record<string, string> = {
-    NEW: '新购',
-    RENEWAL: '续购',
-    EXPANSION: '增购'
-  }
-  return type == null ? '-' : (map[type] ?? type)
-}
 
 const paymentConfirmStatusLabel = (status?: string | null): string => {
   const map: Record<string, string> = {
@@ -869,15 +875,6 @@ const paymentConfirmStatusLabel = (status?: string | null): string => {
   return status == null ? '-' : (map[status] ?? status)
 }
 
-const paymentStatusLabel = (status?: string | null): string => {
-  const map: Record<string, string> = {
-    UNPAID: '未回款',
-    PARTIAL: '部分回款',
-    COMPLETED: '已完成',
-    OVERDUE: '已逾期'
-  }
-  return status == null ? '-' : (map[status] ?? status)
-}
 
 const contractStatusLabel = (status?: string | null): string => {
   const map: Record<string, string> = {
@@ -975,17 +972,11 @@ const hasAttachment = (row: ApprovalListItem): boolean =>
   (row.business_type === 'CONTRACT' && row.contract_file_path != null && row.contract_file_path.length > 0) ||
   (row.business_type === 'INVOICE' && row.invoice_file_path != null && row.invoice_file_path.length > 0)
 
-const attachmentPreviewExtension = computed<string>(() =>
-  getFileExtension(getAttachmentFileName(attachmentPreviewRow.value))
-)
-
-const attachmentPreviewIsImage = computed<boolean>(() =>
-  ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(attachmentPreviewExtension.value)
-)
-
-const attachmentPreviewIsPdf = computed<boolean>(() => attachmentPreviewExtension.value === 'pdf')
-
-const attachmentPreviewTitle = computed<string>(() => getAttachmentFileName(attachmentPreviewRow.value))
+const attachmentPreviewFile = computed<FileAttachmentItem | null>(() => {
+  const row = attachmentPreviewRow.value
+  if (!row) return null
+  return { id: row.id, name: getAttachmentFileName(row), url: attachmentPreviewUrl.value }
+})
 
 const revokeAttachmentPreviewUrl = (): void => {
   if (attachmentPreviewUrl.value.length > 0) {
@@ -1011,165 +1002,57 @@ const handleAttachmentPreviewOpenChange = (open: boolean): void => {
 const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
   const selected = selectedApproval.value
   if (!selected) return []
-
-  const commonCustomerField: ApprovalSubjectField = {
-    key: 'customer_name',
-    label: '关联客户',
-    value: approvalCustomerInfo.value?.account_name
-  }
-
+  const customer = approvalCustomerInfo.value
+  const customerField: ApprovalSubjectField = { key: 'customer_name', label: '关联客户', value: customer?.account_name, type: 'link', linkTarget: 'customer', linkId: customer?.id ?? null }
+  const detail = (key: string): string | number | null => entityDetailValue(key) ?? null
   switch (selected.business_type) {
-    case 'CONTRACT':
-      return [
-        { key: 'number', label: '合同编号', value: entityDetailValue('contract_number') ?? subjectNumber.value, type: 'copy' },
-        { key: 'name', label: '合同名称', value: entityDetailValue('contract_name') ?? subjectName.value, wide: true },
-        commonCustomerField,
-        { key: 'opportunity', label: '关联商机', value: entityDetailValue('opportunity_name') },
-        { key: 'amount', label: '合同金额', value: entityDetailValue('total_amount') ?? subjectAmount.value, type: 'amount' },
-        { key: 'user_count', label: '用户数', value: entityDetailValue('user_count') },
-        { key: 'license_type', label: '授权模式', value: licenseTypeLabel(entityDetailValue('license_type')?.toString()) },
-        { key: 'subscription_years', label: '订阅年限', value: entityDetailValue('subscription_years') },
-        { key: 'unit_price', label: '标准单价', value: entityDetailValue('standard_unit_price'), type: 'amount' },
-        { key: 'status', label: '合同状态', value: contractStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
-        { key: 'payment_status', label: '回款状态', value: paymentStatusLabel(entityDetailValue('payment_status')?.toString()), type: 'status' },
-        { key: 'signing_date', label: '签署日期', value: formatDateValue(entityDetailValue('signing_date')) },
-        { key: 'effective_date', label: '生效日期', value: formatDateValue(entityDetailValue('effective_date')) },
-        { key: 'expiry_date', label: '到期日期', value: formatDateValue(entityDetailValue('expiry_date')) },
-        { key: 'signing_contact', label: '签约人', value: entityDetailValue('signing_contact_name') },
-        { key: 'contract_file', label: '合同文件', value: activeApprovalDetail.value?.contract_file_name ?? entityDetailValue('contract_file_name'), wide: true }
-      ]
-    case 'INVOICE':
-      return [
-        { key: 'number', label: '申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
-        { key: 'title', label: '发票抬头', value: entityDetailValue('invoice_title_text') ?? subjectName.value, wide: true },
-        commonCustomerField,
-        { key: 'amount', label: '开票金额', value: entityDetailValue('invoice_amount') ?? subjectAmount.value, type: 'amount' },
-        {
-          key: 'remark',
-          label: '备注',
-          value: entityDetailValue('remark')?.toString().trim() ? entityDetailValue('remark') : '无',
-          wide: true,
-        },
-        { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
-        { key: 'status', label: '发票状态', value: invoiceStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
-        { key: 'taxpayer_id', label: '纳税人识别号', value: entityDetailValue('invoice_taxpayer_id'), type: 'mono', wide: true },
-        { key: 'bank', label: '开户行', value: entityDetailValue('invoice_bank_name') },
-        { key: 'bank_account', label: '银行账号', value: entityDetailValue('invoice_bank_account'), type: 'mono' },
-        { key: 'invoice_address', label: '地址', value: entityDetailValue('invoice_address'), wide: true },
-        { key: 'invoice_phone', label: '电话', value: entityDetailValue('invoice_phone') },
-        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name') },
-        { key: 'payment_plan', label: '回款阶段', value: entityDetailValue('payment_plan_stage_name') },
-        { key: 'invoice_number', label: '发票号码', value: activeApprovalDetail.value?.invoice_number ?? entityDetailValue('invoice_number') },
-        {
-          key: 'invoice_file',
-          label: '发票文件',
-          value: activeApprovalDetail.value?.invoice_file_path != null && activeApprovalDetail.value.invoice_file_path.length > 0
-            ? '已上传'
-            : null
-        }
-      ]
-    case 'INVOICE_REISSUE':
-      return [
-        { key: 'number', label: '重开申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
-        { key: 'original_number', label: '原发票申请', value: entityDetailValue('original_invoice_application_number'), type: 'copy' },
-        { key: 'reason', label: '重开原因', value: entityDetailValue('reason'), wide: true },
-        { key: 'title', label: '新开票抬头', value: entityDetailValue('invoice_title_text') ?? subjectName.value, wide: true },
-        commonCustomerField,
-        { key: 'amount', label: '新开票金额', value: entityDetailValue('invoice_amount') ?? subjectAmount.value, type: 'amount' },
-        { key: 'invoice_type', label: '新发票类型', value: invoiceTypeLabel(entityDetailValue('invoice_type')?.toString()) },
-        { key: 'status', label: '重开状态', value: invoiceReissueStatusLabel(entityDetailValue('status')?.toString()), type: 'status' },
-        { key: 'taxpayer_id', label: '新纳税人识别号', value: entityDetailValue('invoice_taxpayer_id'), type: 'mono', wide: true },
-        { key: 'bank', label: '开户行', value: entityDetailValue('invoice_bank_name') },
-        { key: 'bank_account', label: '银行账号', value: entityDetailValue('invoice_bank_account'), type: 'mono' },
-        { key: 'invoice_address', label: '地址', value: entityDetailValue('invoice_address'), wide: true },
-        { key: 'invoice_phone', label: '电话', value: entityDetailValue('invoice_phone') },
-        { key: 'red_invoice_number', label: '红字发票号码', value: entityDetailValue('red_invoice_number'), type: 'mono' },
-        { key: 'red_issued_time', label: '红字发票时间', value: formatDateValue(entityDetailValue('red_issued_time')) },
-        {
-          key: 'red_invoice_file',
-          label: '红字发票文件',
-          value: entityDetailValue('red_invoice_file_path') != null ? '已上传' : null
-        },
-        { key: 'new_invoice_number', label: '新发票号码', value: entityDetailValue('new_invoice_number'), type: 'mono' },
-        { key: 'new_issued_time', label: '新发票时间', value: formatDateValue(entityDetailValue('new_issued_time')) },
-        {
-          key: 'new_invoice_file',
-          label: '新发票文件',
-          value: entityDetailValue('new_invoice_file_path') != null ? '已上传' : null
-        }
-      ]
-    case 'PAYMENT': {
-      const renewalHeadcount = entityDetailValue('renewal_headcount')
-      const compositionFields = renewalHeadcount == null ? [] : [
-        { key: 'renewal_headcount', label: '续购人数', value: renewalHeadcount },
-        { key: 'renewal_amount', label: '续购金额', value: entityDetailValue('renewal_amount'), type: 'amount' as const },
-        { key: 'expansion_headcount', label: '增购人数', value: entityDetailValue('expansion_headcount') },
-        { key: 'expansion_amount', label: '增购金额', value: entityDetailValue('expansion_amount'), type: 'amount' as const },
-      ]
-      return [
-        { key: 'number', label: '回款编号', value: entityDetailValue('record_number') ?? subjectNumber.value, type: 'copy' },
-        { key: 'amount', label: '回款金额', value: entityDetailValue('actual_amount') ?? subjectAmount.value, type: 'amount' },
-        { key: 'payer', label: '实际付款方', value: entityDetailValue('actual_payer_name') ?? subjectActualPayerName.value },
-        { key: 'payment_date', label: '回款日期', value: formatDateValue(entityDetailValue('payment_date')) },
-        { key: 'confirm_status', label: '确认状态', value: paymentConfirmStatusLabel(entityDetailValue('confirmation_status')?.toString()), type: 'status' },
-        commonCustomerField,
-        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name') ?? subjectName.value, wide: true },
-        { key: 'contract_number', label: '合同编号', value: entityDetailValue('contract_number'), type: 'copy' },
-        { key: 'opportunity', label: '关联商机', value: entityDetailValue('opportunity_name') },
-        { key: 'plan_number', label: '计划编号', value: entityDetailValue('plan_number'), type: 'copy' },
-        { key: 'stage_name', label: '回款阶段', value: entityDetailValue('stage_name') },
-        { key: 'planned_amount', label: '计划金额', value: entityDetailValue('planned_amount'), type: 'amount' },
-        { key: 'due_date', label: '计划日期', value: formatDateValue(entityDetailValue('due_date')) },
-        { key: 'proof', label: '回款凭证', value: entityDetailValue('proof_attachment'), wide: true },
-        ...compositionFields,
-        { key: 'notes', label: '备注', value: entityDetailValue('notes'), wide: true }
-      ]
-    }
-    case 'LICENSE':
-      return [
-        { key: 'number', label: '申请编号', value: entityDetailValue('application_number') ?? subjectNumber.value, type: 'copy' },
-        { key: 'type', label: 'License 类型', value: licenseTypeLabel(entityDetailValue('license_type')?.toString() ?? subjectName.value?.toString()) },
-        {
-          key: 'license_status',
-          label: '签发状态',
-          value: licenseStatusLabel(activeApprovalDetail.value?.license_status ?? selected.license_status),
-          type: 'status'
-        },
-        commonCustomerField,
-        { key: 'deployment_name', label: '部署名称', value: entityDetailValue('deployment_name') },
-        { key: 'server_address', label: '服务器地址', value: entityDetailValue('server_address'), type: 'mono', wide: true },
-        { key: 'authorized_users', label: '使用人数', value: entityDetailValue('authorized_users') },
-        { key: 'expiry_date', label: '到期时间', value: formatDateValue(entityDetailValue('expiry_date')) },
-        { key: 'contract', label: '关联合同', value: entityDetailValue('contract_name'), wide: true },
-        { key: 'remark', label: '申请备注', value: entityDetailValue('remark'), wide: true },
-        { key: 'enterprise_id', label: '企业编号', value: entityDetailValue('enterprise_id'), type: 'mono' },
-        { key: 'supported_modules', label: '支持模块', value: entityDetailValue('supported_modules'), wide: true }
-      ]
-    case 'OPPORTUNITY':
-      return [
-        { key: 'number', label: '商机编号', value: subjectNumber.value, type: 'copy' },
-        { key: 'name', label: '商机名称', value: entityDetailValue('opportunity_name') ?? subjectName.value, wide: true },
-        commonCustomerField,
-        { key: 'product', label: '产品', value: entityDetailValue('product_name') },
-        { key: 'amount', label: '预计金额', value: entityDetailValue('total_amount') ?? subjectAmount.value, type: 'amount' },
-        { key: 'user_count', label: '用户数', value: entityDetailValue('user_count') },
-        { key: 'unit_price', label: '标准单价', value: entityDetailValue('unit_price'), type: 'amount' },
-        { key: 'license_type', label: '授权模式', value: licenseTypeLabel(entityDetailValue('license_type')?.toString()) },
-        { key: 'subscription_years', label: '订阅年限', value: entityDetailValue('subscription_years') },
-        { key: 'purchase_type', label: '采购类型', value: purchaseTypeLabel(entityDetailValue('purchase_type')?.toString()) },
-        { key: 'decision_maker_count', label: '决策人数', value: entityDetailValue('decision_maker_count') },
-        { key: 'expected_closing_date', label: '预计成交', value: formatDateValue(entityDetailValue('expected_closing_date')) },
-        { key: 'stage', label: '当前阶段', value: entityDetailValue('current_stage_name') },
-        { key: 'win_probability', label: '赢率', value: entityDetailValue('win_probability') != null ? `${entityDetailValue('win_probability')}%` : null },
-        { key: 'status', label: '商机状态', value: opportunityStatusLabel(entityDetailValue('status')) }
-      ]
-    default:
-      return [
-        { key: 'number', label: '单号', value: subjectNumber.value, type: 'copy' },
-        { key: 'name', label: '申请内容', value: subjectName.value },
-        { key: 'amount', label: '金额', value: subjectAmount.value, type: 'amount' },
-        commonCustomerField
-      ]
+    case 'CONTRACT': return [
+      { key: 'number', label: '合同编号', value: detail('contract_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'name', label: '合同名称', value: detail('contract_name') ?? subjectName.value }, customerField,
+      { key: 'amount', label: '合同金额', value: detail('total_amount') ?? subjectAmount.value, type: 'amount' },
+      { key: 'status', label: '合同状态', value: contractStatusLabel(detail('status')?.toString()), type: 'status' },
+    ]
+    case 'PAYMENT': return [
+      { key: 'number', label: '回款编号', value: detail('record_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'amount', label: '回款金额', value: detail('actual_amount') ?? subjectAmount.value, type: 'amount' },
+      { key: 'payer', label: '实际付款方', value: detail('actual_payer_name') ?? subjectActualPayerName.value },
+      { key: 'payment_date', label: '回款日期', value: formatDateValue(detail('payment_date')) },
+      { key: 'contract', label: '关联合同', value: detail('contract_name') ?? subjectName.value, type: 'link', linkTarget: 'contract', linkId: detail('contract_id') as number | null },
+      { key: 'opportunity', label: '关联商机', value: detail('opportunity_name'), type: 'link', linkTarget: 'opportunity', linkId: detail('opportunity_public_id') },
+      { key: 'confirm_status', label: '确认状态', value: paymentConfirmStatusLabel(detail('confirmation_status')?.toString()), type: 'status' },
+    ]
+    case 'INVOICE': return [
+      { key: 'number', label: '申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'title', label: '发票抬头', value: detail('invoice_title_text') ?? subjectName.value }, customerField,
+      { key: 'amount', label: '开票金额', value: detail('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+      { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(detail('invoice_type')?.toString()) },
+      { key: 'status', label: '发票状态', value: invoiceStatusLabel(detail('status')?.toString()), type: 'status' },
+    ]
+    case 'INVOICE_REISSUE': return [
+      { key: 'number', label: '重开申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'original_number', label: '原发票申请', value: detail('original_invoice_application_number'), type: 'link', linkTarget: 'invoice', linkId: getOriginalInvoiceApplicationId(selected) },
+      { key: 'reason', label: '重开原因', value: detail('reason') },
+      { key: 'title', label: '新开票抬头', value: detail('invoice_title_text') ?? subjectName.value }, customerField,
+      { key: 'amount', label: '新开票金额', value: detail('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+      { key: 'status', label: '重开状态', value: invoiceReissueStatusLabel(detail('status')?.toString()), type: 'status' },
+    ]
+    case 'LICENSE': return [
+      { key: 'number', label: '申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'type', label: 'License 类型', value: licenseTypeLabel(detail('license_type')?.toString() ?? subjectName.value?.toString()) },
+      { key: 'status', label: '签发状态', value: licenseStatusLabel(activeApprovalDetail.value?.license_status ?? selected.license_status), type: 'status' }, customerField,
+      { key: 'deployment', label: '部署名称', value: detail('deployment_name') },
+      { key: 'users', label: '使用人数', value: detail('authorized_users') },
+      { key: 'expiry', label: '到期时间', value: formatDateValue(detail('expiry_date')) },
+    ]
+    case 'OPPORTUNITY': return [
+      { key: 'number', label: '商机编号', value: detail('opportunity_number') ?? subjectNumber.value, type: 'copy' },
+      { key: 'name', label: '商机名称', value: detail('opportunity_name') ?? subjectName.value }, customerField,
+      { key: 'product', label: '产品', value: detail('product_name') },
+      { key: 'amount', label: '预计金额', value: detail('total_amount') ?? subjectAmount.value, type: 'amount' },
+      { key: 'stage', label: '当前阶段', value: detail('stage_name') },
+      { key: 'status', label: '商机状态', value: opportunityStatusLabel(detail('status')?.toString()), type: 'status' },
+    ]
+    default: return []
   }
 })
 
@@ -1409,6 +1292,42 @@ const getDetailTrigger = (index: number): HTMLElement | null => {
   const triggers = getVisibleDetailTriggers()
   return triggers[index] ?? triggers[Math.min(Math.max(index, 0), triggers.length - 1)] ?? null
 }
+let drillTrigger: HTMLElement | null = null
+
+const openDrilldown = (target: ApprovalSubjectLinkTarget, id: string | number): void => {
+  if (!sheetVisible.value || !selectedApproval.value || id === '') return
+  drillTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  drillId.value = id
+  drillTarget.value = target
+}
+
+const hasFieldDrilldown = (field: ApprovalSubjectField): boolean =>
+  field.linkTarget !== undefined && field.linkId !== undefined && field.linkId !== null && field.linkId !== ''
+
+const openFieldDrilldown = (field: ApprovalSubjectField): void => {
+  if (field.linkTarget === undefined || field.linkId === undefined || field.linkId === null) return
+  openDrilldown(field.linkTarget, field.linkId)
+}
+
+const closeDrilldown = (): void => {
+  const trigger = drillTrigger
+  drillTarget.value = null
+  drillId.value = null
+  drillTrigger = null
+  void nextTick(() => {
+    if (sheetVisible.value && trigger?.isConnected === true) trigger.focus({ preventScroll: true })
+  })
+}
+
+const handleDrillVisibleChange = (visible: boolean): void => {
+  if (!visible) closeDrilldown()
+}
+
+watch([sheetVisible, (): number | undefined => selectedApproval.value?.id], (): void => {
+  drillTarget.value = null
+  drillId.value = null
+  drillTrigger = null
+})
 
 const openDetail = (row: ApprovalListItem, index?: number): void => {
   const rowIndex = index ?? rows.value.findIndex(r => r.id === row.id)
@@ -1419,10 +1338,8 @@ const openDetail = (row: ApprovalListItem, index?: number): void => {
 }
 
 const onSheetClosed = (): void => {
-  // Sheet 关闭后回到真实详情按钮，而不是把 table row 变成伪按钮。
-  const target = focusedRowEl.value?.isConnected === true
-    ? focusedRowEl.value
-    : getDetailTrigger(triggerRowIndex.value)
+  closeDrilldown()
+  const target = focusedRowEl.value?.isConnected === true ? focusedRowEl.value : getDetailTrigger(triggerRowIndex.value)
   target?.focus({ preventScroll: true })
   selectedApproval.value = null
   store.clearDetail()
@@ -1928,39 +1845,6 @@ watch(rows, async () => {
   flex-basis: 100%;
 }
 
-.approval-attachment-preview {
-  min-height: 55vh;
-  max-height: 70vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-page-v2;
-}
-
-.approval-attachment-preview__loading,
-.approval-attachment-preview__fallback {
-  padding: $wolf-space-xl-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  text-align: center;
-}
-
-.approval-attachment-preview__image {
-  display: block;
-  max-width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-}
-
-.approval-attachment-preview__frame {
-  width: 100%;
-  height: 70vh;
-  border: 0;
-  background: $wolf-bg-card-v2;
-}
 
 // 移动端卡片警告边框样式
 @media (max-width: 768px) {

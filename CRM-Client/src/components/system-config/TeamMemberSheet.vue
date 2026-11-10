@@ -151,7 +151,7 @@ const { handleSubmit: handleResetPasswordSubmit, resetForm: resetPasswordResetFo
 })
 
 // ==================== Computed ====================
-const currentUserId = computed(() => String(userStore.userInfo?.id ?? ''))
+const currentUserId = computed<number | null>(() => userStore.userInfo?.id ?? null)
 const teamId = computed(() => teamStore.currentTeam?.id)
 
 const canManageMembers = computed(() => {
@@ -370,7 +370,7 @@ const handleRemoveMember = async (member: TeamMemberResponse): Promise<void> => 
   if (!confirmed || id === null) return
 
   try {
-    await teamApi.removeMember(id, member.id.toString())
+    await teamApi.removeMember(id, member.id)
     toast.success('成员已移除')
     fetchMembers()
   } catch (error) {

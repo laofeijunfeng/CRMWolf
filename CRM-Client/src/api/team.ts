@@ -1,19 +1,34 @@
 import request from '@/utils/request'
+import {
+  RoleSimpleResponseSchema,
+  TeamResponseSchema,
+  TeamMemberResponseSchema,
+  TeamSwitchResponseSchema,
+  UserTeamsListResponseSchema,
+  TeamMessageResponseSchema,
+  TeamMemberMutationResponseSchema,
+  TeamInviteCodeResponseSchema,
+  TeamAssignRolesResponseSchema,
+  TeamUpdateMemberNameResponseSchema,
+  type RoleSimpleResponse,
+  type TeamResponse,
+  type TeamMemberResponse,
+  type TeamSwitchResponse,
+  type UserTeamsListResponse,
+  type TeamMessageResponse,
+  type TeamMemberMutationResponse,
+  type TeamInviteCodeResponse,
+  type TeamAssignRolesResponse,
+  type TeamUpdateMemberNameResponse,
+} from '@/schemas/team'
 
-export interface RoleSimpleResponse {
-  id: number
-  name: string
-  code: string
-}
-
-export interface TeamResponse {
-  id: number
-  name: string
-  code: string
-  owner_id: string
-  created_at: string
-  updated_at?: string
-}
+export type {
+  RoleSimpleResponse,
+  TeamResponse,
+  TeamMemberResponse,
+  TeamSwitchResponse,
+  UserTeamsListResponse,
+} from '@/schemas/team'
 
 export interface TeamCreateRequest {
   name: string
@@ -23,28 +38,8 @@ export interface TeamJoinRequest {
   code: string
 }
 
-export interface TeamMemberResponse {
-  id: string
-  name: string
-  email: string
-  avatar_url?: string
-  current_team?: boolean
-  joined_at: string
-  roles: RoleSimpleResponse[]
-}
-
 export interface TeamInviteRequest {
   email: string
-}
-
-export interface TeamSwitchResponse {
-  message: string
-  team_id: number
-}
-
-export interface UserTeamsListResponse {
-  teams: TeamResponse[]
-  current_team_id: number
 }
 
 export interface AssignRolesRequest {
@@ -60,74 +55,76 @@ export interface UpdateMemberNameRequest {
 }
 
 export const teamApi = {
-  createTeam: (data: TeamCreateRequest) => {
-    return request.post<TeamResponse>('/v1/teams/', data)
+  createTeam: async (data: TeamCreateRequest): Promise<TeamResponse> => {
+    return TeamResponseSchema.parse(await request.post('/v1/teams/', data))
   },
 
-  joinTeam: (data: TeamJoinRequest) => {
-    return request.post<TeamResponse>('/v1/teams/join', data)
+  joinTeam: async (data: TeamJoinRequest): Promise<TeamResponse> => {
+    return TeamResponseSchema.parse(await request.post('/v1/teams/join', data))
   },
 
-  getMyTeam: () => {
-    return request.get<TeamResponse>('/v1/teams/me')
+  getMyTeam: async (): Promise<TeamResponse> => {
+    return TeamResponseSchema.parse(await request.get('/v1/teams/me'))
   },
 
-  getUserTeams: () => {
-    return request.get<UserTeamsListResponse>('/v1/teams/user-teams')
+  getUserTeams: async (): Promise<UserTeamsListResponse> => {
+    return UserTeamsListResponseSchema.parse(await request.get('/v1/teams/user-teams'))
   },
 
-  switchTeam: (teamId: number) => {
-    return request.post<TeamSwitchResponse>('/v1/teams/switch', { team_id: teamId })
+  switchTeam: async (teamId: number): Promise<TeamSwitchResponse> => {
+    return TeamSwitchResponseSchema.parse(await request.post('/v1/teams/switch', { team_id: teamId }))
   },
 
-  getTeamDetail: (teamId: number) => {
-    return request.get<TeamResponse>(`/v1/teams/${teamId}`)
+  getTeamDetail: async (teamId: number): Promise<TeamResponse> => {
+    return TeamResponseSchema.parse(await request.get(`/v1/teams/${teamId}`))
   },
 
-  getTeamMembers: (teamId: number) => {
-    return request.get<TeamMemberResponse[]>(`/v1/teams/${teamId}/members`)
+  getTeamMembers: async (teamId: number): Promise<TeamMemberResponse[]> => {
+    return TeamMemberResponseSchema.array().parse(await request.get(`/v1/teams/${teamId}/members`))
   },
 
-  inviteMember: (teamId: number, data: TeamInviteRequest) => {
-    return request.post<{ message: string }>(`/v1/teams/${teamId}/invite`, data)
+  inviteMember: async (teamId: number, data: TeamInviteRequest): Promise<TeamMessageResponse> => {
+    return TeamMessageResponseSchema.parse(await request.post(`/v1/teams/${teamId}/invite`, data))
   },
 
-  addMemberDirect: (teamId: number, userId: number) => {
-    return request.post<{ message: string; user_id: number }>(`/v1/teams/${teamId}/members`, { user_id: userId })
-  },
-
-  removeMember: (teamId: number, userId: string) => {
-    return request.delete<{ message: string }>(`/v1/teams/${teamId}/members/${userId}`)
-  },
-
-  regenerateInviteCode: (teamId: number) => {
-    return request.post<{ code: string }>(`/v1/teams/${teamId}/regenerate-code`)
-  },
-
-  updateTeam: (teamId: number, data: { name?: string }) => {
-    return request.put<TeamResponse>(`/v1/teams/${teamId}`, data)
-  },
-
-  assignMemberRoles: (teamId: number, userId: string, roleIds: number[]) => {
-    return request.post<{ message: string; user_id: number; role_ids: number[] }>(
-      `/v1/teams/${teamId}/members/${userId}/roles`,
-      { role_ids: roleIds }
+  addMemberDirect: async (teamId: number, userId: number): Promise<TeamMemberMutationResponse> => {
+    return TeamMemberMutationResponseSchema.parse(
+      await request.post(`/v1/teams/${teamId}/members`, { user_id: userId })
     )
   },
 
-  getMemberRoles: (teamId: number, userId: string) => {
-    return request.get<RoleSimpleResponse[]>(`/v1/teams/${teamId}/members/${userId}/roles`)
+  removeMember: async (teamId: number, userId: number): Promise<TeamMessageResponse> => {
+    return TeamMessageResponseSchema.parse(await request.delete(`/v1/teams/${teamId}/members/${userId}`))
+  },
+
+  regenerateInviteCode: async (teamId: number): Promise<TeamInviteCodeResponse> => {
+    return TeamInviteCodeResponseSchema.parse(await request.post(`/v1/teams/${teamId}/regenerate-code`))
+  },
+
+  updateTeam: async (teamId: number, data: { name?: string }): Promise<TeamResponse> => {
+    return TeamResponseSchema.parse(await request.put(`/v1/teams/${teamId}`, data))
+  },
+
+  assignMemberRoles: async (teamId: number, userId: number, roleIds: number[]): Promise<TeamAssignRolesResponse> => {
+    return TeamAssignRolesResponseSchema.parse(
+      await request.post(`/v1/teams/${teamId}/members/${userId}/roles`, { role_ids: roleIds })
+    )
+  },
+
+  getMemberRoles: async (teamId: number, userId: number): Promise<RoleSimpleResponse[]> => {
+    return RoleSimpleResponseSchema.array().parse(await request.get(`/v1/teams/${teamId}/members/${userId}/roles`))
   },
 
   // 重置成员密码（新增）
-  resetMemberPassword: (teamId: number, userId: string, data: ResetPasswordRequest) => {
-    return request.post<{ message: string }>(`/v1/teams/${teamId}/members/${userId}/reset-password`, data)
+  resetMemberPassword: async (teamId: number, userId: number, data: ResetPasswordRequest): Promise<TeamMessageResponse> => {
+    return TeamMessageResponseSchema.parse(
+      await request.post(`/v1/teams/${teamId}/members/${userId}/reset-password`, data)
+    )
   },
 
-  updateMemberName: (teamId: number, userId: string, data: UpdateMemberNameRequest) => {
-    return request.put<{ message: string; user_id: number; name: string }>(
-      `/v1/teams/${teamId}/members/${userId}/name`,
-      data
+  updateMemberName: async (teamId: number, userId: number, data: UpdateMemberNameRequest): Promise<TeamUpdateMemberNameResponse> => {
+    return TeamUpdateMemberNameResponseSchema.parse(
+      await request.put(`/v1/teams/${teamId}/members/${userId}/name`, data)
     )
   }
 }

@@ -68,4 +68,22 @@ def normalize_corp_name(name: str) -> str:
     return n
 
 
-__all__ = ["normalize_corp_name"]
+def build_customer_name_dedupe_key(name: str | None) -> str | None:
+    """生成客户名称唯一判重键。
+
+    只合并不改变业务含义的 Unicode 差异: NFKC 兼容等价(康熙部首/全角字符)、
+    零宽等格式字符、各类空白。不去后缀、不做相似字检测; 与 normalize_corp_name 区分。
+
+    Examples:
+        >>> build_customer_name_dedupe_key("中⼼")  # U+2F3C
+        "中心"
+    """
+    if not name:
+        return None
+    n = unicodedata.normalize("NFKC", name)
+    n = "".join(ch for ch in n if unicodedata.category(ch) != "Cf")
+    n = " ".join(n.split())
+    return n or None
+
+
+__all__ = ["build_customer_name_dedupe_key", "normalize_corp_name"]

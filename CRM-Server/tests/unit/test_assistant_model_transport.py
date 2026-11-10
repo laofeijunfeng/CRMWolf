@@ -123,6 +123,36 @@ async def test_classification_uses_thirty_second_budget(monkeypatch):
             error_prefix="活动类型判断", timeout_seconds=30,
         )
     assert seen["timeout"] == 30
+async def test_follow_up_structuring_uses_extended_budget(monkeypatch):
+    _team_config(monkeypatch)
+    seen = {}
+
+    class Runtime:
+        async def ainvoke_structured(self, **kwargs):
+            seen.update(kwargs)
+            return {
+                "customer_name": "中电高研",
+                "content": "已交付三份 Apifox CLI 材料",
+                "next_action": "下周五回访",
+                "content_json": {
+                    "content": "已交付三份 Apifox CLI 材料",
+                    "customer_feedback": "已确认接收",
+                    "current_progress": "完成两轮材料交付",
+                    "risks": [],
+                    "next_action": "下周五回访",
+                    "next_action_absence_reason": "",
+                    "next_follow_time_text": "下周五",
+                },
+                "temporal_mentions": [],
+                "actions": [],
+            }
+
+    result = await AssistantLLM(runtime=Runtime()).structure_draft(
+        object(), team_id=1, kind="FOLLOW_UP", user_text="客户已确认接收三份材料并约下周五回访"
+    )
+    assert result.customer_name == "中电高研"
+    assert seen["timeout_seconds"] == 150
+    assert seen["retry_timeouts"] is True
 
 async def test_meeting_structuring_preserves_all_canonical_action_items(monkeypatch):
     _team_config(monkeypatch)

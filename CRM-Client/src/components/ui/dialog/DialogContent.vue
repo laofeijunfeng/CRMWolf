@@ -28,10 +28,10 @@ import {
 } from "reka-ui"
 import { cn, omitUndefined } from "@/lib/utils"
 
-const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"], elevated?: boolean }>()
+const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"], elevated?: boolean, hideClose?: boolean }>()
 const emits = defineEmits<DialogContentEmits>()
 
-const delegatedProps = reactiveOmit(props, "class", "elevated")
+const delegatedProps = reactiveOmit(props, "class", "elevated", "hideClose")
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
@@ -59,6 +59,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <slot />
 
       <DialogClose
+        v-if="!props.hideClose"
         aria-label="关闭"
         class="absolute right-4 top-4 inline-flex items-center justify-center rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
       >

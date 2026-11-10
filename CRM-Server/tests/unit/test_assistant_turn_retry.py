@@ -456,6 +456,98 @@ def test_unexpected_turn_exception_rolls_back_uncommitted_task_edits(
     assert latest_task.goal == original_goal
     assert latest_task.status == "ACTIVE"
 
+    error = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").one()
+    payload = error.data_json
+    assert payload["stage"] is None
+    assert payload["attempt"] == latest_turn.attempts
+    assert payload["started_at"] is not None
+    assert payload["finished_at"] is not None
+    assert isinstance(payload["elapsed_ms"], int) and payload["elapsed_ms"] >= 0
+    assert payload["failure_origin"] is None
+    assert payload["client_request_id"] == "retry-same-turn-input"
+    assert payload["task_public_id"] == task.public_id
+    assert payload["turn_id"] == turn.public_id
+    assert payload["activity_written"] is False
+    assert "boom" not in payload
+    assert "今天跟客户确认服务器准备情况" not in payload
+    assert "api_key" not in payload
+
+
+def test_unknown_commit_result_retry_stays_failed_even_if_stale_event_claims_retryable(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, turn = retryable_turn
+    requests_before = db_session.query(AssistantRequest).count()
+    task.active_turn_id = None
+    task.last_error_code = "UNKNOWN_COMMIT_RESULT"
+    turn.status = "FAILED"
+    turn.last_error_code = "UNKNOWN_COMMIT_RESULT"
+    turns.add_event(
+        db_session,
+        turn,
+        "error",
+        {
+            "code": "UNKNOWN_COMMIT_RESULT",
+            "retryable": True,
+            "message": "结果待核对",
+            "activity_written": False,
+        },
+    )
+    db_session.commit()
+    scheduled: list[int] = []
+    monkeypatch.setattr(api, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+    response = client.post(
+        f"/api/v1/assistant/tasks/{task.public_id}/turns/{turn.public_id}/retry",
+        json={"expected_lease_version": turn.lease_version, "after_seq": 0},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "FAILED"
+    assert response.json()["reprocess_allowed"] is False
+    assert scheduled == []
+    db_session.expire_all()
+    latest_task = db_session.get(AssistantTask, task.id)
+    latest_turn = db_session.get(AssistantTurn, turn.id)
+    assert latest_task is not None and latest_task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+    assert latest_turn is not None and latest_turn.status == "FAILED"
+    assert db_session.query(AssistantRequest).count() == requests_before
+
+
+def test_recover_expired_attempt_closes_dead_turn_without_scheduling(
+    db_session: Session,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_expires_at = business_now() - timedelta(seconds=1)
+    db_session.commit()
+    turns.add_event(
+        db_session,
+        turn,
+        "attempt",
+        {
+            "started_at": (business_now() - timedelta(seconds=181)).isoformat(),
+            "attempt": 1,
+        },
+    )
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.get_bind(), autoflush=False)
+    monkeypatch.setattr(turns, "SessionLocal", factory)
+    scheduled: list[int] = []
+    monkeypatch.setattr(turns, "schedule_turn", lambda turn_id, **kwargs: scheduled.append(turn_id))
+
+    assert asyncio.run(turns.recover_turns()) == 1
+    assert scheduled == []
+    db_session.expire_all()
+    latest_turn = db_session.get(AssistantTurn, turn.id)
+    latest_task = db_session.get(AssistantTask, task.id)
+    assert latest_turn is not None and latest_turn.status == "FAILED"
+    assert latest_turn.last_error_code == "UPSTREAM_TIMEOUT"
+    assert latest_task is not None and latest_task.active_turn_id is None
 
 def test_recover_pending_turn_does_not_create_entry_or_request(
     client: TestClient,
