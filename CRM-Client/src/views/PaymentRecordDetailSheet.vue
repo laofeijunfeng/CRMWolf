@@ -3,6 +3,9 @@ import { computed } from 'vue'
 import { Sheet } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
+import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
+import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
+import type { ApprovalSourceContext } from '@/types/approvalSource'
 import type {
   ApprovalInfo,
   ApprovalInfoLite,
@@ -27,12 +30,15 @@ interface Props {
   stageName?: string
   approval?: ApprovalInfoInput | null
   elevated?: boolean
+  /** 从审批详情下钻时的来源审批；设置后进入只读查看模式。 */
+  sourceApproval?: ApprovalSourceContext | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   record: null,
   stageName: '',
-  approval: null
+  approval: null,
+  sourceApproval: null
 })
 
 const emit = defineEmits<{
@@ -40,6 +46,7 @@ const emit = defineEmits<{
   refresh: []
   edit: []
   resubmit: []
+  back: []
 }>()
 
 const visibleModel = computed<boolean>({
@@ -55,18 +62,27 @@ const closeSheet = (): void => {
 <template>
   <Sheet v-model:open="visibleModel">
     <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <ApprovalSourceHeader
+        v-if="sourceApproval"
+        :source="sourceApproval"
+        subject-label="回款详情"
+        @back="emit('back')"
+      />
       <PaymentRecordDetailContent v-bind="elevated ? { elevated: true } : {}"
+        :class="sourceApproval ? 'flex-1 min-h-0' : undefined"
         :record-id="recordId"
         :visible="visible"
         :record="record ?? null"
         :stage-name="stageName ?? ''"
         :approval="approval ?? null"
+        :readonly="!!sourceApproval"
         @update:visible="emit('update:visible', $event)"
         @refresh="emit('refresh')"
         @edit="emit('edit')"
         @resubmit="emit('resubmit')"
         @close="closeSheet"
       />
+      <ApprovalSourceFooter v-if="sourceApproval" @back="emit('back')" />
     </DetailSheetContent>
   </Sheet>
 </template>

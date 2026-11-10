@@ -19,6 +19,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import ErrorState from '@/components/ErrorState.vue'
 import { ContextTabs } from '@/components/crmwolf'
+import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
+import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
 
 // Panels
 import FollowUpPanel from '@/components/panels/FollowUpPanel.vue'
@@ -52,6 +54,7 @@ import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { DetailContextNode } from '@/types/detailContext'
+import type { ApprovalSourceContext } from '@/types/approvalSource'
 import { useDetailContextStack } from '@/composables/useDetailContextStack'
 
 // ==================== Props & Emits ====================
@@ -65,14 +68,25 @@ interface Props {
   targetPanel?: CustomerDetailPanelTarget | null
   visible: boolean
   elevated?: boolean
+  /** 从审批详情下钻时传入：只读查看客户信息，并显示来源审批与返回入口 */
+  sourceApproval?: ApprovalSourceContext | null
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  targetOpportunityId: null,
+  targetJourneyId: null,
+  targetPanel: null,
+  sourceApproval: null,
+})
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   'refresh': []
   'view-customer': [customerId: string]
+  'back': []
 }>()
+
+/** 审批来源模式：仅展示客户信息，隐藏所有变更与跳转入口 */
+const isSourceMode = computed(() => props.sourceApproval !== null)
 
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
@@ -278,7 +292,7 @@ const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDat
 }
 
 const canManageCustomerMembers = computed(() => {
-  if (!customer.value) return false
+  if (isSourceMode.value || !customer.value) return false
   if (customer.value.owner_id === String(userStore.userInfo?.id)) return true
   if (userStore.userInfo?.roles?.some(role => role.code === 'TEAM_ADMIN') === true) return true
   return permissionStore.hasAnyPermission(['customer:assign', 'customer:edit:all'])
@@ -291,14 +305,14 @@ const currentCustomerMember = computed(() => {
 })
 
 const canEditCurrentCustomer = computed(() => {
-  if (!customer.value) return false
+  if (isSourceMode.value || !customer.value) return false
   if (permissionStore.hasPermission('customer:edit:all')) return true
   if (currentCustomerMember.value?.access_level === 'EDIT') return true
   return customer.value.owner_id === String(userStore.userInfo?.id) && permissionStore.hasPermission('customer:edit:own')
 })
 
 const canCreateActivity = computed(() => {
-  if (!customer.value) return false
+  if (isSourceMode.value || !customer.value) return false
   if (permissionStore.hasPermission('customer:edit:all')) return true
   if (['FOLLOW_UP', 'EDIT'].includes(currentCustomerMember.value?.access_level ?? '')) return true
   return customer.value.owner_id === String(userStore.userInfo?.id)
@@ -650,6 +664,12 @@ const markNavigationTargetPending = (): void => {
 }
 
 const applyNavigationTarget = (fromJourneysLoad = false): void => {
+  if (isSourceMode.value) {
+    activePanel.value = 'customer-info'
+    selectedJourneyId.value = null
+    navigationTargetPending = false
+    return
+  }
   const journeyId = resolveTargetJourneyId()
   if (journeyId !== null) {
     handleViewJourney(journeyId)
@@ -822,7 +842,7 @@ watch(() => [props.targetJourneyId, props.targetOpportunityId], (): void => {
 watch(() => props.targetPanel, (panel): void => {
   const hasTargetJourney = resolveTargetJourneyId() !== null
   const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
-  if (!props.visible || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
+  if (!props.visible || isSourceMode.value || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
   setActivePanel(resolveTargetPanel(panel))
 })
 
@@ -831,9 +851,15 @@ watch(() => props.targetPanel, (panel): void => {
 <template>
   <Sheet :open="visible" @update:open="emit('update:visible', $event)">
     <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <ApprovalSourceHeader
+        v-if="sourceApproval"
+        :source="sourceApproval"
+        subject-label="客户详情"
+        @back="emit('back')"
+      />
       <Transition name="drilldown-fade" mode="out-in">
         <DealJourneyDetailHost v-bind="elevated ? { elevated: true } : {}"
-          v-if="selectedJourneyId !== null"
+          v-if="selectedJourneyId !== null && !isSourceMode"
           :journey-id="selectedJourneyId"
           :journey-name="selectedJourney?.name ?? ''"
           :customer-id="customerId ?? ''"
@@ -848,9 +874,9 @@ watch(() => props.targetPanel, (panel): void => {
         />
       </Transition>
 
-      <template v-if="selectedJourneyId === null">
-        <!-- Header -->
-        <SheetHeader class="customer-detail-sheet__header p-6 border-b border-wolf-border-default-v2">
+      <template v-if="selectedJourneyId === null || isSourceMode">
+        <!-- Header（审批来源模式只保留客户信息，不显示导航） -->
+        <SheetHeader v-if="!isSourceMode" class="customer-detail-sheet__header p-6 border-b border-wolf-border-default-v2">
           <!-- ContextTabs 导航 -->
           <ContextTabs
             :tabs="navTabs"
@@ -861,7 +887,7 @@ watch(() => props.targetPanel, (panel): void => {
         </SheetHeader>
 
         <!-- Content -->
-        <ScrollArea class="flex-1">
+        <ScrollArea class="flex-1" :class="isSourceMode ? 'min-h-0' : undefined">
           <div v-if="loading && customer === null" class="customer-detail-loading" aria-busy="true" aria-live="polite">
             <div class="loading-spinner" />
             <span>正在加载客户详情…</span>
@@ -955,10 +981,10 @@ watch(() => props.targetPanel, (panel): void => {
               <ContactsPanel
                 :customer-id="customerId ?? ''"
                 :contacts="customer?.contacts ?? []"
-                :show-add="canCreateContact"
-                :can-edit="canEditContact"
-                :can-delete="canDeleteContact"
-                :can-set-primary="canSetPrimaryContact"
+                :show-add="!isSourceMode && canCreateContact"
+                :can-edit="!isSourceMode && canEditContact"
+                :can-delete="!isSourceMode && canDeleteContact"
+                :can-set-primary="!isSourceMode && canSetPrimaryContact"
                 @add="handleCreateContact"
                 @edit="handleEditContact"
                 @delete="handleDeleteContact"
@@ -987,11 +1013,11 @@ watch(() => props.targetPanel, (panel): void => {
                 :invoice-titles="invoiceTitles"
                 :invoice-applications="[]"
                 :show-invoice-applications="false"
-                :show-add-title="canCreateInvoiceTitle"
+                :show-add-title="!isSourceMode && canCreateInvoiceTitle"
                 :show-title-apply-action="false"
-                :can-edit-title="canEditInvoiceTitle"
-                :can-delete-title="canDeleteInvoiceTitle"
-                :can-set-default-title="canSetDefaultInvoiceTitle"
+                :can-edit-title="!isSourceMode && canEditInvoiceTitle"
+                :can-delete-title="!isSourceMode && canDeleteInvoiceTitle"
+                :can-set-default-title="!isSourceMode && canSetDefaultInvoiceTitle"
                 @add="handleCreateInvoiceTitle"
                 @edit="handleEditInvoiceTitle"
                 @delete="handleDeleteInvoiceTitle"
@@ -1021,8 +1047,8 @@ watch(() => props.targetPanel, (panel): void => {
                 :license-applications="[]"
                 :deployments="deployments"
                 :show-license-applications="false"
-                :show-add-deployment="canCreateDeployment"
-                :can-delete-deployment="canDeleteDeployment"
+                :show-add-deployment="!isSourceMode && canCreateDeployment"
+                :can-delete-deployment="!isSourceMode && canDeleteDeployment"
                 @add-deployment="handleCreateDeployment"
                 @delete-deployment="handleDeleteDeployment"
               />
@@ -1048,6 +1074,7 @@ watch(() => props.targetPanel, (panel): void => {
                 :customer-id="customerId ?? ''"
                 :members="customerMembers"
                 :can-manage-members="canManageCustomerMembers"
+                :readonly="isSourceMode"
                 @refresh="refreshCustomerMembers"
               />
             </template>
@@ -1110,6 +1137,7 @@ watch(() => props.targetPanel, (panel): void => {
 
         <!-- Footer -->
         <SheetFooter
+          v-if="!isSourceMode"
           
           class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2"
         >
@@ -1147,6 +1175,7 @@ watch(() => props.targetPanel, (panel): void => {
           </template>
         </SheetFooter>
       </template>
+      <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
     </DetailSheetContent>
   </Sheet>
 

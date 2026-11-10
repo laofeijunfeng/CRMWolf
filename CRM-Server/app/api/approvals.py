@@ -1695,6 +1695,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "status": contract.status,
             "payment_status": contract.payment_status,
             "opportunity_name": contract.opportunity.opportunity_name if contract.opportunity else None,
+            "opportunity_public_id": contract.opportunity.public_id if contract.opportunity else None,
             "signing_contact_name": contact.name if contact else None,
             "signing_contact_mobile": contact.mobile if contact else None,
             "contract_file_name": contract.contract_file_name,
@@ -1733,6 +1734,8 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "contract_name": contract.contract_name if contract else None,
             "contract_number": contract.contract_number if contract else None,
             "opportunity_name": opportunity.opportunity_name if opportunity else None,
+            "contract_id": contract.id if contract else None,
+            "opportunity_public_id": opportunity.public_id if opportunity else None,
         }
 
     if approval.business_type == BusinessType.INVOICE:
@@ -1762,6 +1765,8 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "contract_name": contract.contract_name if contract else None,
             "opportunity_name": opportunity.opportunity_name if opportunity else None,
             "payment_plan_stage_name": plan.stage_name if plan else None,
+            "contract_id": contract.id if contract else None,
+            "opportunity_public_id": opportunity.public_id if opportunity else None,
         }
 
     if approval.business_type == BusinessType.INVOICE_REISSUE:
@@ -1815,6 +1820,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "server_address": deployment.server_address if deployment else None,
             "authorized_users": license_application.authorized_users,
             "contract_name": license_application.contract.contract_name if license_application.contract else None,
+            "contract_id": license_application.contract_id,
             "remark": license_application.remark,
             "enterprise_id": license_application.enterprise_id,
             "supported_modules": license_application.supported_modules,
@@ -1831,6 +1837,9 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             return {}
         return {
             "opportunity_name": opportunity.opportunity_name,
+            "opportunity_public_id": opportunity.public_id,
+            "opportunity_number": opportunity.opportunity_number,
+            "product_name": opportunity.product.name if opportunity.product else None,
             "total_amount": money(opportunity.total_amount),
             "user_count": opportunity.user_count,
             "unit_price": money(opportunity.unit_price),

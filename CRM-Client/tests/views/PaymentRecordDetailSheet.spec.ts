@@ -518,9 +518,9 @@ describe('PaymentRecordDetailSheet', () => {
         },
       })
 
-      const button = wrapper.find('button[aria-label="查看凭证附件，将在新标签页打开"]')
+      const button = wrapper.find('button[aria-label="预览凭证附件"]')
       expect(button.exists()).toBe(true)
-      expect(button.text()).toContain('查看凭证')
+      expect(button.text()).toContain('预览凭证')
     })
 
     it('does not render voucher section when proof_attachment is empty', () => {
@@ -534,7 +534,7 @@ describe('PaymentRecordDetailSheet', () => {
       })
 
       // Should not have voucher section
-      expect(wrapper.find('[aria-label*="查看凭证"]').exists()).toBe(false)
+      expect(wrapper.find('[aria-label*="凭证附件"]').exists()).toBe(false)
     })
 
     it('renders inline image preview for image URLs', () => {
@@ -556,10 +556,11 @@ describe('PaymentRecordDetailSheet', () => {
       expect(img.attributes('alt')).toBe('凭证附件预览')
     })
 
-    it('renders view original button for image attachments', () => {
+    it('opens the shared preview from the voucher thumbnail', async () => {
       const record = paymentRecordFixture({
         proof_attachment: 'https://example.com/voucher.png',
       })
+      paymentApi.getPaymentRecordDetail.mockResolvedValue(record)
       const wrapper = mount(PaymentRecordDetailSheet, {
         props: {
           visible: true,
@@ -571,10 +572,13 @@ describe('PaymentRecordDetailSheet', () => {
       const img = wrapper.find('img.voucher-image')
       expect(img.exists()).toBe(true)
 
-      // Verify there's a button to view original
-      const buttons = wrapper.findAll('button')
-      const viewOriginalButton = buttons.find((b) => b.text().includes('查看原图'))
-      expect(viewOriginalButton).toBeDefined()
+      const preview = wrapper.findComponent({ name: 'FilePreviewDialog' })
+      expect(preview.props('open')).toBe(false)
+      // `window` is stubbed in this suite, so trigger the native click instead of a synthetic event.
+      ;(wrapper.get('button[aria-label="放大预览凭证附件"]').element as HTMLButtonElement).click()
+      await flushPromises()
+      expect(preview.props('open')).toBe(true)
+      expect(preview.props('file')).toMatchObject({ name: 'voucher.png', url: 'https://example.com/voucher.png' })
     })
 
     it('detects various image extensions correctly', () => {

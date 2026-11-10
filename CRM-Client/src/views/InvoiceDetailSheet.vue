@@ -58,6 +58,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { AmountText, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
+import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
+import ErrorState from '@/components/ErrorState.vue'
 import StatusBadge, { type InvoiceStatus as InvoiceBadgeStatus } from '@/components/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
@@ -79,6 +82,8 @@ import {
   downloadInvoiceReissueFile,
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
+import type { ApprovalSourceContext } from '@/types/approvalSource'
+import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
 import { confirmDialog } from '@/utils/confirmDialog'
@@ -100,16 +105,23 @@ interface Props {
   invoiceId: number | null
   visible: boolean
   autoEditReissueId?: number | null
+  elevated?: boolean
+  /** 从审批详情下钻时传入：只读查看，隐藏所有操作与审批组件 */
+  sourceApproval?: ApprovalSourceContext | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   autoEditReissueId: null,
+  sourceApproval: null,
 })
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   refresh: []
+  back: []
 }>()
+
+const isSourceMode = computed<boolean>(() => props.sourceApproval !== null)
 
 const permissionStore = usePermissionStore()
 const userStore = useUserStore()
@@ -117,6 +129,7 @@ const MAX_INVOICE_FILE_SIZE_MB = 10
 
 const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
+const loadError = ref<FeedbackError | null>(null)
 const invoiceInfo = ref<InvoiceApplicationResponse | null>(null)
 const activeRequestId = ref<number>(0)
 const editDialogOpen = ref<boolean>(false)
@@ -443,6 +456,7 @@ const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
   activeRequestId.value = requestId
   loading.value = true
   errorMessage.value = ''
+  loadError.value = null
   invoiceInfo.value = null
 
   try {
@@ -454,6 +468,13 @@ const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
   } catch (error: unknown) {
     if (requestId !== activeRequestId.value) return
     logger.error('[InvoiceDetailSheet]', '获取发票申请详情失败', { error })
+    if (isSourceMode.value) {
+      const feedback = toFeedbackError(error, '发票申请')
+      if (feedback.status === 403 || feedback.status === 404) {
+        loadError.value = feedback
+        return
+      }
+    }
     errorMessage.value = '发票申请加载失败，请稍后重试'
     handleApiError(error, '获取发票申请详情')
   } finally {
@@ -469,6 +490,7 @@ const resetState = (): void => {
   invoiceFilePreviewLoading.value = false
   loading.value = false
   errorMessage.value = ''
+  loadError.value = null
   invoiceInfo.value = null
   editDialogOpen.value = false
   markIssuedDialogOpen.value = false
@@ -559,6 +581,7 @@ const handleEditReissue = (reissue: InvoiceReissueApplicationResponse): void => 
 }
 
 const openAutoEditReissueIfNeeded = (invoice: InvoiceApplicationResponse): void => {
+  if (isSourceMode.value) return
   const reissueId = props.autoEditReissueId
   if (reissueId === null || handledAutoEditReissueId.value === reissueId) return
 
@@ -1030,7 +1053,13 @@ onBeforeUnmount((): void => {
 
 <template>
   <Sheet :open="visible" @update:open="handleOpenChange">
-    <DetailSheetContent>
+    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+      <ApprovalSourceHeader
+        v-if="sourceApproval"
+        :source="sourceApproval"
+        subject-label="发票详情"
+        @back="emit('back')"
+      />
       <SheetHeader class="invoice-sheet-header">
         <div class="invoice-header-summary">
           <div v-if="invoiceInfo" class="title-avatar" aria-hidden="true">
@@ -1073,7 +1102,7 @@ onBeforeUnmount((): void => {
         </div>
       </SheetHeader>
 
-      <ScrollArea class="flex-1">
+      <ScrollArea class="flex-1" :class="{ 'min-h-0': isSourceMode }">
         <div class="sheet-body">
           <template v-if="loading">
             <div class="loading-stack" aria-live="polite" aria-busy="true">
@@ -1081,6 +1110,15 @@ onBeforeUnmount((): void => {
               <Skeleton class="h-56 w-full" />
               <Skeleton class="h-72 w-full" />
             </div>
+          </template>
+
+          <template v-else-if="loadError">
+            <ErrorState
+              data-testid="invoice-source-load-error"
+              :variant="loadError.variant ?? 'error'"
+              :title="loadError.title"
+              :description="loadError.description"
+            />
           </template>
 
           <template v-else-if="errorMessage">
@@ -1188,7 +1226,7 @@ onBeforeUnmount((): void => {
                 </div>
                 <div class="reissue-card-actions">
                   <Button
-                    v-if="canCompleteReissue(card.reissue)"
+                    v-if="!isSourceMode && canCompleteReissue(card.reissue)"
                     type="button"
                     size="sm"
                     @click="handleOpenCompleteReissue(card.reissue)"
@@ -1254,7 +1292,7 @@ onBeforeUnmount((): void => {
                   />
                 </div>
 
-                <div class="invoice-detail-group">
+                <div v-if="!isSourceMode" class="invoice-detail-group">
                   <ApprovalProcessGeneric
                     entity-type="INVOICE_REISSUE"
                     :entity-id="card.reissue.id"
@@ -1387,7 +1425,7 @@ onBeforeUnmount((): void => {
                   />
                 </div>
 
-                <div class="invoice-detail-group">
+                <div v-if="!isSourceMode" class="invoice-detail-group">
                   <ApprovalProcessGeneric
                     entity-type="INVOICE"
                     :entity-id="invoiceInfo.id"
@@ -1423,7 +1461,7 @@ onBeforeUnmount((): void => {
         </div>
       </ScrollArea>
 
-      <SheetFooter class="invoice-sheet-footer">
+      <SheetFooter v-if="!isSourceMode" class="invoice-sheet-footer">
         <Button v-if="canEdit" variant="outline" type="button" @click="handleEdit">
           编辑
         </Button>
@@ -1469,18 +1507,20 @@ onBeforeUnmount((): void => {
           关闭
         </Button>
       </SheetFooter>
+      <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
     </DetailSheetContent>
   </Sheet>
 
   <InvoiceMarkIssuedDialog
-    v-if="invoiceInfo"
+    v-if="!isSourceMode && invoiceInfo"
+    v-bind="elevated ? { elevated: true } : {}"
     v-model:open="markIssuedDialogOpen"
     :application-id="invoiceInfo.id"
     @issued="handleInvoiceIssued"
   />
 
-  <Dialog :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
-    <DialogContent class="sm:max-w-[560px]">
+  <Dialog v-if="!isSourceMode" :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[560px]">
       <DialogHeader>
         <DialogTitle>冲红发票</DialogTitle>
         <DialogDescription>核对原发票信息并上传红字发票。提交成功后，原蓝字发票将标记为已冲红。</DialogDescription>
@@ -1586,8 +1626,8 @@ onBeforeUnmount((): void => {
     </DialogContent>
   </Dialog>
 
-  <Dialog :open="reissueDialogOpen" @update:open="reissueDialogOpen = $event">
-    <DialogContent class="sm:max-w-[720px]">
+  <Dialog v-if="!isSourceMode" :open="reissueDialogOpen" @update:open="reissueDialogOpen = $event">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[720px]">
       <DialogHeader>
         <DialogTitle>{{ reissueDialogTitle }}</DialogTitle>
         <DialogDescription>{{ reissueDialogDescription }}</DialogDescription>
@@ -1690,8 +1730,8 @@ onBeforeUnmount((): void => {
     </DialogContent>
   </Dialog>
 
-  <Dialog :open="completeReissueDialogOpen" @update:open="handleCompleteReissueDialogOpenChange">
-    <DialogContent class="sm:max-w-[560px]">
+  <Dialog v-if="!isSourceMode" :open="completeReissueDialogOpen" @update:open="handleCompleteReissueDialogOpenChange">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[560px]">
       <DialogHeader>
         <DialogTitle>完成发票重开</DialogTitle>
         <DialogDescription>需要同时上传红字发票和新蓝字发票，发票号码可选。</DialogDescription>
@@ -1757,6 +1797,8 @@ onBeforeUnmount((): void => {
   </Dialog>
 
   <InvoiceApplicationFormDialog
+    v-if="!isSourceMode"
+    v-bind="elevated ? { elevated: true } : {}"
     :open="editDialogOpen"
     mode="edit"
     :application="invoiceInfo"
