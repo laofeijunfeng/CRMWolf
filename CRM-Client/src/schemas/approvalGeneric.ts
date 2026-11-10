@@ -4,7 +4,7 @@ import { AcquisitionSourceInfoSchema } from './acquisition-source'
  *
  * @description 映射后端通用审批端点 `app/api/approvals.py` 的
  * `_serialize_generic_approval` 输出与 `app/schemas/approval_generic.py` 的
- * 请求/响应模型。覆盖 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 五类业务单据。
+ * 请求/响应模型。覆盖 CONTRACT / CONTRACT_CHANGE / PAYMENT / INVOICE / INVOICE_REISSUE / LICENSE / OPPORTUNITY 业务单据。
  *
  * 字段命名沿后端 snake_case 约定（与既有 schemas/lead.ts、common.ts 一致）。
  * datetime 字段使用 `z.string().min(1)` 而非 `.datetime()`：后端 SQLAlchemy
@@ -15,8 +15,23 @@ import { AcquisitionSourceInfoSchema } from './acquisition-source'
 import { z } from 'zod'
 
 // ===== 业务单据类型（A1 BusinessType） =====
-export const EntityTypeSchema = z.enum(['CONTRACT', 'PAYMENT', 'INVOICE', 'INVOICE_REISSUE', 'LICENSE', 'OPPORTUNITY'])
+export const EntityTypeSchema = z.enum(['CONTRACT', 'CONTRACT_CHANGE', 'PAYMENT', 'INVOICE', 'INVOICE_REISSUE', 'LICENSE', 'OPPORTUNITY'])
 export type EntityType = z.infer<typeof EntityTypeSchema>
+
+export const ContractChangeItemSchema = z.object({
+  key: z.literal('contract_amount'),
+  old_value: z.string(),
+  new_value: z.string()
+})
+export type ContractChangeItem = z.infer<typeof ContractChangeItemSchema>
+
+export const ContractFinancialSnapshotSchema = z.object({
+  paid_amount: z.string(),
+  invoiced_amount: z.string(),
+  planned_amount: z.string(),
+  floor_amount: z.string()
+})
+export type ContractFinancialSnapshot = z.infer<typeof ContractFinancialSnapshotSchema>
 
 // ===== 审批动作枚举（ApprovalActionEnum） =====
 export const ApprovalActionSchema = z.enum(['APPROVE', 'REJECT', 'ROLLBACK'])
@@ -66,6 +81,18 @@ export const ApprovalRecordSchema = z.object({
 export type ApprovalRecord = z.infer<typeof ApprovalRecordSchema>
 
 // ===== 审批详情响应 =====
+export const ApprovalEntityDetailSchema = z.object({
+  contract_id: z.number().int().nullable().optional(),
+  contract_name: z.string().nullable().optional(),
+  change_items: z.array(ContractChangeItemSchema).nullable().optional(),
+  reason: z.string().nullable().optional(),
+  attachment_name: z.string().nullable().optional(),
+  attachment_size: z.number().int().nullable().optional(),
+  attachment_mime_type: z.string().nullable().optional(),
+  financial_snapshot: ContractFinancialSnapshotSchema.nullable().optional()
+}).catchall(z.unknown())
+export type ApprovalEntityDetail = z.infer<typeof ApprovalEntityDetailSchema>
+
 export const ApprovalDetailSchema = z.object({
   id: z.number().int().positive(),
   business_type: EntityTypeSchema,
@@ -94,13 +121,19 @@ export const ApprovalDetailSchema = z.object({
   contract_file_name: z.string().nullable().optional(),
   contract_file_size: z.number().nullable().optional(),
   contract_file_mime_type: z.string().nullable().optional(),
+  // 合同变更附件字段（仅 CONTRACT_CHANGE 类型）
+  change_items: z.array(ContractChangeItemSchema).nullable().optional(),
+  reason: z.string().nullable().optional(),
+  attachment_name: z.string().nullable().optional(),
+  attachment_size: z.number().int().nullable().optional(),
+  attachment_mime_type: z.string().nullable().optional(),
   // Task 6: 发票文件上传字段（仅 INVOICE 类型）
   invoice_file_path: z.string().nullable().optional(),
   invoice_number: z.string().nullable().optional(),
   issued_time: z.string().nullable().optional(),
   // License 发放状态字段（仅 LICENSE 类型）
   license_status: LicenseApplicationStatusSchema.nullable().optional(),
-  entity_detail: z.record(z.string(), z.unknown()).optional()
+  entity_detail: ApprovalEntityDetailSchema.optional()
 })
 
 export type ApprovalDetail = z.infer<typeof ApprovalDetailSchema>
@@ -162,6 +195,11 @@ export const ApprovalListItemSchema = z.object({
   contract_file_name: z.string().nullable().optional(),
   contract_file_size: z.number().nullable().optional(),
   contract_file_mime_type: z.string().nullable().optional(),
+  change_items: z.array(ContractChangeItemSchema).nullable().optional(),
+  reason: z.string().nullable().optional(),
+  attachment_name: z.string().nullable().optional(),
+  attachment_size: z.number().int().nullable().optional(),
+  attachment_mime_type: z.string().nullable().optional(),
   invoice_file_path: z.string().nullable().optional(),
   invoice_number: z.string().nullable().optional(),
   issued_time: z.string().nullable().optional(),

@@ -1,7 +1,7 @@
 """文件存储服务：本地存储发票文件，支持团队隔离和路径安全校验。"""
 
 import os
-import hashlib
+import uuid
 from typing import Optional
 
 from app.core.config import get_settings
@@ -62,17 +62,10 @@ class FileStorageService:
         return filename
 
     def _generate_safe_filename(self, original_filename: str, entity_id: int) -> str:
-        """生成安全的存储文件名
-
-        格式：{invoice_id}_{timestamp}_{hash}.{ext}
-        """
+        """生成不可碰撞的安全存储文件名。"""
         ext = os.path.splitext(original_filename)[1].lower()
         timestamp = business_now().strftime("%Y%m%d_%H%M%S")
-        # 用实体 ID + timestamp 作为 hash 输入，避免文件名冲突
-        hash_input = f"{entity_id}_{timestamp}_{original_filename}"
-        hash_suffix = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-
-        return f"{entity_id}_{timestamp}_{hash_suffix}{ext}"
+        return f"{entity_id}_{timestamp}_{uuid.uuid4().hex}{ext}"
 
     def save_invoice_file(
         self,
@@ -131,6 +124,26 @@ class FileStorageService:
         content: bytes,
     ) -> str:
         """保存合同附件，仅允许 PDF 和 DOCX。"""
+        return self._save_contract_document("contracts", team_id, contract_id, filename, content)
+
+    def save_contract_change_file(
+        self,
+        team_id: int,
+        contract_id: int,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        """保存合同变更附件，仅允许 PDF 和 DOCX。"""
+        return self._save_contract_document("contract_changes", team_id, contract_id, filename, content)
+
+    def _save_contract_document(
+        self,
+        root: str,
+        team_id: int,
+        contract_id: int,
+        filename: str,
+        content: bytes,
+    ) -> str:
         if len(content) > MAX_FILE_SIZE:
             raise FileStorageError(
                 f"文件过大：{len(content)} 字节，最大允许 {MAX_FILE_SIZE} 字节"
@@ -138,7 +151,7 @@ class FileStorageService:
 
         safe_filename = self._validate_filename(filename, CONTRACT_ALLOWED_EXTENSIONS)
         storage_filename = self._generate_safe_filename(safe_filename, contract_id)
-        dir_path = os.path.join(self.base_dir, "contracts", str(team_id), str(contract_id))
+        dir_path = os.path.join(self.base_dir, root, str(team_id), str(contract_id))
 
         try:
             os.makedirs(dir_path, exist_ok=True)
@@ -148,7 +161,7 @@ class FileStorageService:
         except OSError as e:
             raise FileStorageError(f"文件保存失败：{e}") from e
 
-        return os.path.join("contracts", str(team_id), str(contract_id), storage_filename)
+        return os.path.join(root, str(team_id), str(contract_id), storage_filename)
 
     def get_full_path(self, relative_path: str) -> str:
         """获取文件完整路径

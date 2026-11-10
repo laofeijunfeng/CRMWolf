@@ -41,6 +41,7 @@ from app.models.approval import (
     ApprovalStatus, ApprovalAction,
 )
 from app.models.contract import Contract, ContractStatus
+from app.models.contract_change import ContractChangeRequest
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentRecord, PaymentConfirmationStatus
@@ -64,6 +65,7 @@ def db_session():
         Role.__table__,
         UserRole.__table__,
         Contract.__table__,
+        ContractChangeRequest.__table__,
         InvoiceApplication.__table__,
         PaymentRecord.__table__,
         ApprovalFlow.__table__,

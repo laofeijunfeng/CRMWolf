@@ -28,6 +28,7 @@ from app.utils.time import business_now
 
 _BUSINESS_TYPE_DISPLAY_NAMES = {
     BusinessType.CONTRACT: "合同",
+    BusinessType.CONTRACT_CHANGE: "合同变更",
     BusinessType.PAYMENT: "回款登记",
     BusinessType.INVOICE: "发票申请",
     BusinessType.INVOICE_REISSUE: "发票重开申请",
@@ -100,6 +101,44 @@ class ContractAdapter:
     def get_name(self, entity):
         # Contract 真实字段是 contract_name（非 name），否则 fallback 到 合同#{id}
         return getattr(entity, "contract_name", None) or f"合同#{entity.id}"
+
+
+class ContractChangeAdapter:
+    """合同变更独立审批；只有末节点通过才把新金额写回原合同。"""
+
+    business_type = BusinessType.CONTRACT_CHANGE
+
+    def get_entity(self, db, business_id, team_id):
+        from app.crud.contract_change import contract_change_crud
+        return contract_change_crud.get_by_id(db, business_id, team_id)
+
+    def get_submitter(self, entity):
+        return entity.creator_id, None
+
+    def match_kwargs(self, entity):
+        raise ValueError("合同变更不支持重新提交，请在合同详情重新发起变更")
+
+    def on_submit(self, db, entity):
+        if entity is None: return  # E4 守卫
+
+    def on_approved(self, db, entity):
+        if entity is None: return  # E4 守卫
+        from app.services.contract_change import contract_change_service
+        contract_change_service.apply_approved_change(db, entity)
+
+    def on_rejected(self, db, entity):
+        if entity is None: return  # E4 守卫
+        from app.services.contract_change import contract_change_service
+        contract_change_service.release_pending(entity)
+
+    def on_cancelled(self, db, entity):
+        if entity is None: return  # E4 守卫
+        raise ValueError("合同变更审批不支持撤回")
+
+    def get_name(self, entity):
+        contract = getattr(entity, "contract", None)
+        contract_name = getattr(contract, "contract_name", None) if contract is not None else None
+        return f"{contract_name}·合同变更" if contract_name else f"合同变更#{entity.id}"
 
 
 class PaymentRecordAdapter:
@@ -394,6 +433,7 @@ class OpportunityAdapter:
 
 _REGISTRY: dict[str, ApprovalEntityAdapter] = {
     BusinessType.CONTRACT: ContractAdapter(),
+    BusinessType.CONTRACT_CHANGE: ContractChangeAdapter(),
     BusinessType.PAYMENT: PaymentRecordAdapter(),
     BusinessType.INVOICE: InvoiceApplicationAdapter(),
     BusinessType.INVOICE_REISSUE: InvoiceReissueApplicationAdapter(),
@@ -416,6 +456,7 @@ def get_approval_type_name(business_type: str) -> str:
 def get_approval_action_path(business_type: str) -> str:
     paths = {
         BusinessType.CONTRACT: "/contracts",
+        BusinessType.CONTRACT_CHANGE: "/contracts",
         BusinessType.PAYMENT: "/payments/records",
         BusinessType.INVOICE: "/invoices",
         BusinessType.INVOICE_REISSUE: "/invoices",
@@ -455,6 +496,17 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
             "采购数量": _format_count(getattr(entity, "user_count", None)),
             "授权模式": _license_mode_label(getattr(entity, "license_type", None)),
             "采购类型": _purchase_type_label(getattr(entity, "purchase_type", None)),
+        }
+
+    if business_type == BusinessType.CONTRACT_CHANGE:
+        from app.services.contract_change import amount_change_values
+        contract = _change_contract(db, entity)
+        old_amount, new_amount = amount_change_values(entity)
+        return {
+            "客户名称": _customer_name(db, business_type, entity),
+            "合同名称": getattr(contract, "contract_name", None),
+            "合同金额": f"{_format_currency(old_amount)} → {_format_currency(new_amount)}",
+            "变更原因": getattr(entity, "reason", None),
         }
 
     if business_type == BusinessType.CONTRACT:
@@ -541,6 +593,9 @@ def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Op
     if entity is None:
         return None
 
+    if business_type == BusinessType.CONTRACT_CHANGE:
+        contract = _change_contract(db, entity)
+        return int(contract.customer_id) if contract is not None and contract.customer_id else None
 
     customer_id = getattr(entity, "customer_id", None)
     if customer_id:
@@ -584,9 +639,26 @@ def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Op
     return None
 
 
+def _change_contract(db: Session, entity: Any) -> Optional[Contract]:
+    return db.query(Contract).filter(
+        Contract.id == getattr(entity, "contract_id", None),
+        Contract.team_id == getattr(entity, "team_id", None),
+    ).first()
+
+
 def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> Optional[str]:
     if entity is None:
         return None
+
+    if business_type == BusinessType.CONTRACT_CHANGE:
+        contract = _change_contract(db, entity)
+        if contract is None:
+            return None
+        customer = db.query(Customer).filter(
+            Customer.id == contract.customer_id,
+            Customer.team_id == contract.team_id,
+        ).first()
+        return customer.account_name if customer else None
 
     customer = getattr(entity, "customer", None)
     if customer is not None:

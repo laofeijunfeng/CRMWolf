@@ -13,6 +13,7 @@ from app.core.list_query.types import FilterCondition, ListQueryContext
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer, CustomerMember, CustomerProduct
+from app.models.contract_change import ContractChangeRequest
 from app.models.customer_identity_term import CustomerIdentityTerm, CustomerIdentityTermStatus
 from app.models.product import Product
 from app.models.invoice import (
@@ -398,6 +399,10 @@ def approval_application_number_expression():
     return case(
         (Approval.business_type == BusinessType.CONTRACT, _approval_scalar(Contract, Contract.contract_number)),
         (
+            Approval.business_type == BusinessType.CONTRACT_CHANGE,
+            literal("CHANGE-") + cast(Approval.business_id, String),
+        ),
+        (
             Approval.business_type == BusinessType.INVOICE,
             _approval_scalar(InvoiceApplication, InvoiceApplication.application_number),
         ),
@@ -439,6 +444,17 @@ def approval_entity_name_expression():
     return case(
         (Approval.business_type == BusinessType.CONTRACT, _approval_scalar(Contract, Contract.contract_name)),
         (
+            Approval.business_type == BusinessType.CONTRACT_CHANGE,
+            select(Contract.contract_name).join(
+                ContractChangeRequest,
+                ContractChangeRequest.contract_id == Contract.id,
+            ).where(
+                ContractChangeRequest.id == Approval.business_id,
+                ContractChangeRequest.team_id == Approval.team_id,
+                Contract.team_id == Approval.team_id,
+            ).limit(1).scalar_subquery(),
+        ),
+        (
             Approval.business_type == BusinessType.INVOICE,
             _approval_scalar(InvoiceApplication, InvoiceApplication.invoice_title_text),
         ),
@@ -461,6 +477,13 @@ def approval_entity_name_expression():
 def approval_entity_amount_expression():
     return case(
         (Approval.business_type == BusinessType.CONTRACT, _approval_scalar(Contract, Contract.total_amount)),
+        (
+            Approval.business_type == BusinessType.CONTRACT_CHANGE,
+            select(ContractChangeRequest.change_items_json[0]["new_value"].as_numeric(18, 2)).where(
+                ContractChangeRequest.id == Approval.business_id,
+                ContractChangeRequest.team_id == Approval.team_id,
+            ).limit(1).scalar_subquery(),
+        ),
         (
             Approval.business_type == BusinessType.INVOICE,
             _approval_scalar(InvoiceApplication, InvoiceApplication.invoice_amount),

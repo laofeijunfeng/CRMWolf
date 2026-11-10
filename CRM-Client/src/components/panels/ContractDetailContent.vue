@@ -8,13 +8,21 @@
 import { toast } from 'vue-sonner'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { AlertCircle, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
+import { AlertCircle, Download, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
 import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
   SheetFooter
 } from '@/components/ui/sheet'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,17 +47,25 @@ import ErrorState from '@/components/ErrorState.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { AmountText, FileAttachment } from '@/components/crmwolf'
-import contractApi, { type ContractResponse, type ContractStatus, type LicenseType } from '@/api/contract'
+import { AmountText, FileAttachment, InputField, TextareaField } from '@/components/crmwolf'
+import contractApi, {
+  type ContractChangeResponse,
+  type ContractResponse,
+  type ContractStatus,
+  type LicenseType
+} from '@/api/contract'
 import {
   createContractFileObjectUrl,
   downloadContractFile as downloadContractFileApi
 } from '@/api/fileUpload'
+import approvalGenericApi from '@/api/approvalGeneric'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 import { handleApiError } from '@/utils/errorHandler'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
+import { formatCurrency as formatCurrencyValue } from '@/utils/format'
+import type { PaymentPlanResponse } from '@/api/payment'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -74,7 +90,7 @@ const emit = defineEmits<{
   'close': []
   'approve': [contractId: number]
   'reject': [contractId: number]
-  'view-payment-plan': [plan: import('@/api/payment').PaymentPlanResponse]
+  'view-payment-plan': [plan: PaymentPlanResponse]
   'refresh': []
 }>()
 
@@ -101,6 +117,12 @@ const activeRequestId = ref(0)
 const editDialogOpen = ref<boolean>(false)
 const contractFilePreviewUrl = ref<string>('')
 const contractFilePreviewLoading = ref<boolean>(false)
+const changeDialogOpen = ref<boolean>(false)
+const changeSubmitting = ref<boolean>(false)
+const changeAmount = ref<string>('')
+const changeReason = ref<string>('')
+const changeFile = ref<File | undefined>(undefined)
+const changeFormError = ref<string>('')
 
 const statusesWithPaymentPlans: readonly ContractStatus[] = [
   'SIGNED',
@@ -134,10 +156,109 @@ const canApproveGeneric = computed<boolean>(() => {
     )
 })
 
+
+const canApproveContractChange = computed<boolean>(() => {
+  return props.canApprove || permissionStore.canApproveAll('contract') || permissionStore.canApproveOwn('contract')
+})
 const canShowPaymentPlans = computed<boolean>(() => {
   const status = contractInfo.value?.status
   return status !== undefined && statusesWithPaymentPlans.includes(status)
 })
+
+const pendingContractChange = computed<ContractChangeResponse | null>(() => contractInfo.value?.pending_change ?? null)
+const changeHistory = computed<ContractChangeResponse[]>(() => {
+  const history = contractInfo.value?.change_history ?? []
+  return [...history].sort((left, right) => {
+    const timeDifference = Date.parse(right.created_time) - Date.parse(left.created_time)
+    return timeDifference !== 0 ? timeDifference : right.id - left.id
+  })
+})
+const changeFloorAmount = computed<string>(() => contractInfo.value?.financial_snapshot?.floor_amount ?? '0')
+const pendingNewAmount = computed<string>(() => pendingContractChange.value?.change_items.find(item => item.key === 'contract_amount')?.new_value ?? '')
+const contractChangeEntityType = 'CONTRACT_CHANGE' as const
+
+const showContractChangeEntry = computed<boolean>(() => {
+  const contract = contractInfo.value
+  return !props.readonly && contract !== null && contract.approval_phase === 'approved' &&
+    contract.status !== 'TERMINATED' && contract.creator_id === currentUserId.value
+})
+const canRequestContractChange = computed<boolean>(() => {
+  return showContractChangeEntry.value && pendingContractChange.value === null && contractInfo.value?.can_request_change === true
+})
+
+const changeRequestId = ref<number>(0)
+
+const amountInCents = (amount: string): bigint => {
+  const [whole = '0', fractional = ''] = amount.split('.')
+  return BigInt(whole) * 100n + BigInt(fractional.padEnd(2, '0'))
+}
+
+const approvalPhaseText = (phase: ContractChangeResponse['approval_phase']): string => {
+  const phases: Record<ContractChangeResponse['approval_phase'], string> = {
+    draft: '草稿', pending_review: '审批中', approved: '已通过', rejected: '已驳回'
+  }
+  return phases[phase]
+}
+
+const openContractChangeDialog = (): void => {
+  if (!canRequestContractChange.value) return
+  changeAmount.value = contractInfo.value?.total_amount ?? ''
+  changeReason.value = ''
+  changeFile.value = undefined
+  changeFormError.value = ''
+  changeDialogOpen.value = true
+}
+
+const submitContractChange = async (): Promise<void> => {
+  const contract = contractInfo.value
+  if (changeSubmitting.value || !canRequestContractChange.value || contract === null) return
+  const amount = changeAmount.value.trim()
+  const reason = changeReason.value.trim()
+  if (!/^\d+(?:\.\d{1,2})?$/.test(amount) || amountInCents(amount) <= 0n) {
+    changeFormError.value = '请输入有效的新合同金额，最多保留两位小数'
+    return
+  }
+  if (amountInCents(amount) < amountInCents(changeFloorAmount.value)) {
+    changeFormError.value = `新金额不能低于 ${formatCurrencyValue(changeFloorAmount.value)}`
+    return
+  }
+  if (amountInCents(amount) === amountInCents(contract.total_amount)) {
+    changeFormError.value = '新金额必须与当前合同金额不同'
+    return
+  }
+  if (reason.length === 0) {
+    changeFormError.value = '请输入变更原因'
+    return
+  }
+  const requestId = ++changeRequestId.value
+  const contractId = contract.id
+  changeSubmitting.value = true
+  changeFormError.value = ''
+  try {
+    await contractApi.createContractChange(contractId, { new_amount: amount, reason }, changeFile.value)
+    if (requestId !== changeRequestId.value || props.contractId !== contractId) return
+    changeDialogOpen.value = false
+    const refreshed = await refreshCurrentContractState()
+    if (requestId !== changeRequestId.value || props.contractId !== contractId) return
+    if (!refreshed) toast.warning('变更已提交，但详情刷新失败，请稍后重试。')
+    emit('refresh')
+  } catch (error) {
+    if (requestId !== changeRequestId.value || props.contractId !== contractId) return
+    changeFormError.value = '提交失败，请稍后重试'
+    handleApiError(error, '提交合同变更审批')
+  } finally {
+    if (requestId === changeRequestId.value) changeSubmitting.value = false
+  }
+}
+
+const downloadContractChangeAttachment = async (change: ContractChangeResponse): Promise<void> => {
+  if (change.attachment_name === null) return
+  try {
+    await approvalGenericApi.downloadApprovalAttachment(contractChangeEntityType, change.id, change.attachment_name)
+  } catch (error) {
+    handleApiError(error, '下载合同变更附件')
+  }
+}
 
 const paymentContractInfo = computed<PaymentContractInfo | undefined>(() => {
   const contract = contractInfo.value
@@ -276,6 +397,13 @@ const resetState = (): void => {
   contractInfo.value = null
   errorMessage.value = ''
   loadError.value = null
+  changeRequestId.value += 1
+  changeDialogOpen.value = false
+  changeSubmitting.value = false
+  changeAmount.value = ''
+  changeReason.value = ''
+  changeFile.value = undefined
+  changeFormError.value = ''
 }
 
 // ==================== Event Seams ====================
@@ -454,6 +582,7 @@ watch(
 
 onBeforeUnmount((): void => {
   activeRequestId.value += 1
+  changeRequestId.value += 1
   revokeContractFilePreviewUrl()
 })
 </script>
@@ -506,6 +635,9 @@ onBeforeUnmount((): void => {
         <div v-if="contractInfo" class="amount-summary">
           <div class="amount-label">合同总金额</div>
           <AmountText :value="contractInfo.total_amount" size="lg" />
+          <div v-if="pendingContractChange !== null" class="mt-2 max-w-sm rounded-md border border-wolf-warning/30 bg-wolf-warning/10 px-3 py-2 text-sm text-wolf-warning">
+            合同变更审批中：金额拟改为 {{ formatCurrencyValue(pendingNewAmount) }}
+          </div>
         </div>
       </div>
     </SheetHeader>
@@ -634,7 +766,7 @@ onBeforeUnmount((): void => {
                 </div>
                 <div class="section-content">
                   <FileAttachment
-                    title="合同附件"
+                    :show-header="false"
                     mode="readonly"
                     :files="contractFiles"
                     empty-text="暂无合同附件"
@@ -657,6 +789,47 @@ onBeforeUnmount((): void => {
               @withdrawn="handleApprovalActionDone"
               @resubmit="handleApprovalResubmit"
             />
+            <Card v-if="!readonly && pendingContractChange !== null" class="info-card">
+              <CardContent class="p-0">
+                <div class="px-4 pt-4"><h3 class="section-title">合同变更审批</h3></div>
+                <div class="p-4 space-y-3">
+                  <div class="grid gap-3">
+                    <p class="text-sm text-muted-foreground">当前合同保持 {{ formatCurrencyValue(contractInfo.total_amount) }}，审批通过前不会生效。</p>
+                    <ApprovalProcessGeneric
+                      :entity-type="contractChangeEntityType"
+                      :entity-id="pendingContractChange.id"
+                      title="合同变更审批"
+                      :is-submitter="pendingContractChange.creator_id === currentUserId"
+                      :can-approve="canApproveContractChange"
+                      :allow-resubmit="false"
+                      @approved="handleApprovalActionDone"
+                      @rejected="handleApprovalActionDone"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card v-if="changeHistory.length > 0" class="info-card contract-change-card">
+              <CardContent class="p-0">
+                <div class="px-4 pt-4"><h3 class="section-title">合同变更记录</h3></div>
+                <div class="p-4 divide-y divide-border">
+                  <article v-for="item in changeHistory" :key="item.id" data-testid="contract-change-history-row" class="flex flex-wrap justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                    <div class="min-w-0 grid gap-1 text-sm">
+                      <strong>{{ formatDateTime(item.created_time) }}</strong>
+                      <span>合同金额：{{ formatCurrencyValue(item.change_items[0]?.old_value) }} → {{ formatCurrencyValue(item.change_items[0]?.new_value) }}</span>
+                      <span>{{ item.reason }}</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                      <Badge :class="item.approval_phase === 'rejected' ? 'bg-wolf-danger/10 text-wolf-danger' : item.approval_phase === 'approved' ? 'bg-wolf-success/10 text-wolf-success' : 'bg-wolf-warning/10 text-wolf-warning'">{{ approvalPhaseText(item.approval_phase) }}</Badge>
+                      <Button v-if="item.attachment_name !== null" type="button" variant="ghost" size="sm" :aria-label="`下载${item.attachment_name}`" @click="downloadContractChangeAttachment(item)">
+                        <Download class="w-4 h-4 mr-1" aria-hidden="true" />附件
+                      </Button>
+                    </div>
+                  </article>
+                </div>
+              </CardContent>
+            </Card>
 
             <!-- 回款计划卡片 -->
             <ContractPaymentPlans
@@ -715,6 +888,12 @@ onBeforeUnmount((): void => {
 
       <!-- Footer -->
       <SheetFooter v-if="!readonly" class="p-4 border-t border-wolf-border-default-v2 footer-actions">
+        <div v-if="showContractChangeEntry" class="mr-auto flex flex-col items-start gap-2">
+          <p v-if="!canRequestContractChange" class="text-sm text-muted-foreground">
+            {{ pendingContractChange !== null ? '已有一条变更在审批中，审批结束前不能再次发起' : contractInfo?.change_disabled_reason }}
+          </p>
+          <Button type="button" :disabled="!canRequestContractChange" @click="openContractChangeDialog">申请变更合同</Button>
+        </div>
         <Button
           v-if="canEditContract"
           variant="outline"
@@ -729,6 +908,65 @@ onBeforeUnmount((): void => {
         </Button>
       </SheetFooter>
   </div>
+
+  <Dialog v-if="!readonly && contractInfo" :open="changeDialogOpen" @update:open="value => { if (!changeSubmitting) changeDialogOpen = value }">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="w-[calc(100vw-2rem)] max-w-[640px]">
+      <DialogHeader>
+        <DialogTitle>申请变更合同</DialogTitle>
+        <DialogDescription>审批通过前合同保持原样，审批通过后才会更新合同金额。</DialogDescription>
+      </DialogHeader>
+      <form id="contract-change-form" class="grid gap-4" @submit.prevent="submitContractChange">
+        <div class="rounded-md bg-muted/40 p-3 text-sm">
+          <div class="flex justify-between"><span>当前合同金额</span><strong>{{ formatCurrencyValue(contractInfo?.total_amount) }}</strong></div>
+          <div class="mt-1 flex justify-between"><span>金额下限</span><strong>{{ formatCurrencyValue(changeFloorAmount) }}</strong></div>
+          <div class="mt-2 grid grid-cols-2 gap-2 text-muted-foreground">
+            <span>已回款 {{ formatCurrencyValue(contractInfo.financial_snapshot?.paid_amount) }}</span>
+            <span>已开票 {{ formatCurrencyValue(contractInfo.financial_snapshot?.invoiced_amount) }}</span>
+            <span>回款计划合计 {{ formatCurrencyValue(contractInfo.financial_snapshot?.planned_amount) }}</span>
+            <span>用户数 {{ contractInfo.user_count }}</span>
+          </div>
+          <p class="mt-2 text-muted-foreground">新金额不能低于已回款、已开票和回款计划合计。标准单价按新金额重新计算。</p>
+        </div>
+        <InputField
+          id="contract-change-new-amount"
+          :model-value="changeAmount"
+          @update:model-value="changeAmount = String($event)"
+          label="新合同金额"
+          type="number"
+          min="0.01"
+          step="0.01"
+          required
+          :disabled="changeSubmitting"
+        />
+        <TextareaField
+          id="contract-change-reason"
+          :model-value="changeReason"
+          label="变更原因"
+          required
+          :disabled="changeSubmitting"
+          @update:model-value="changeReason = String($event ?? '')"
+        />
+        <FileAttachment
+          :files="changeFile === undefined ? [] : [{ id: changeFile.name, name: changeFile.name, size: changeFile.size, mimeType: changeFile.type }]"
+          mode="manage"
+          title="补充附件（可选）"
+          accept=".pdf,.docx"
+          :max-size-mb="10"
+          :disabled="changeSubmitting"
+          :allow-preview="false"
+          :allow-download="false"
+          @upload="files => { changeFile = files[0] }"
+          @remove="changeFile = undefined"
+          @error="changeFormError = $event"
+        />
+        <p v-if="changeFormError" class="text-sm text-destructive" role="alert">{{ changeFormError }}</p>
+      </form>
+      <DialogFooter>
+        <Button type="button" variant="outline" :disabled="changeSubmitting" @click="changeDialogOpen = false">取消</Button>
+        <Button type="submit" form="contract-change-form" :loading="changeSubmitting">提交审批</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 
   <ContractFormDialog v-bind="elevated ? { elevated: true } : {}"
     v-if="contractInfo && !readonly"

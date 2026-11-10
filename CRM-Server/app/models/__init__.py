@@ -26,6 +26,7 @@ from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
 from app.models.command_execution import CommandExecution, CommandExecutionStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
+from app.models.contract_change import ContractChangeRequest
 from app.models.conversation_log import ConversationLog
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
@@ -190,6 +191,7 @@ __all__ = [
     "Contract",
     "ContractStatus",
     "ConversationLog",
+    "ContractChangeRequest",
     "Customer",
     "CustomerProduct",
     "CustomerActivity",

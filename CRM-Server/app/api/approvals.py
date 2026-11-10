@@ -53,6 +53,7 @@ from app.schemas.approval import (
 from app.schemas.approval_generic import (
     ApprovalGenericListResponse,
     ApprovalListItemResponse,
+    GenericApprovalDetailResponse,
     GenericApprovalSubmitResponse,
 )
 from app.schemas.approval_generic import (
@@ -84,6 +85,7 @@ APPROVAL_TYPE_LABELS = {
     "INVOICE": "发票",
     "INVOICE_REISSUE": "发票重开",
     "CONTRACT": "合同",
+    "CONTRACT_CHANGE": "合同变更",
     "LICENSE": "License",
     "OPPORTUNITY": "商机",
 }
@@ -1325,6 +1327,7 @@ def _queue_outbound_notification(db: Session, request, *, commit: bool = True) -
 # 按 entity_type 统一分发自审权限提示。
 _SELF_APPROVE_DENY_MSG = {
     BusinessType.CONTRACT: "您没有权限审批自己创建的合同",
+    BusinessType.CONTRACT_CHANGE: "您没有权限审批自己创建的合同",
     BusinessType.PAYMENT: "您没有权限审批自己创建的回款",
     BusinessType.INVOICE: "您没有权限审批自己创建的发票",
     BusinessType.INVOICE_REISSUE: "您没有权限审批自己创建的发票重开申请",
@@ -1363,7 +1366,10 @@ def _check_self_approval_permission(
         db, current_user.id, team_id
     )
     permission_codes = {p.code for p in user_permissions}
-    required_code = f"{entity_type.lower()}:approve:own"
+    permission_resource = (
+        BusinessType.CONTRACT if entity_type == BusinessType.CONTRACT_CHANGE else entity_type
+    )
+    required_code = f"{permission_resource.lower()}:approve:own"
     if required_code not in permission_codes:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1609,6 +1615,11 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "contract_file_mime_type": summary.get("contract_file_mime_type") if summary else None,
         "invoice_file_path": summary.get("invoice_file_path") if summary else None,
         "invoice_number": summary.get("invoice_number") if summary else None,
+        "change_items": summary.get("change_items") if summary else None,
+        "reason": summary.get("reason") if summary else None,
+        "attachment_name": summary.get("attachment_name") if summary else None,
+        "attachment_size": summary.get("attachment_size") if summary else None,
+        "attachment_mime_type": summary.get("attachment_mime_type") if summary else None,
         "issued_time": summary.get("issued_time") if summary else None,
         "license_status": summary.get("license_status") if summary else None,
         "entity_detail": entity_detail,
@@ -1657,6 +1668,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
     not only approval-instance metadata. Keep this payload generic so the
     frontend can render type-specific fields without extra round trips.
     """
+    from app.models.contract_change import ContractChangeRequest
     from app.models.contract import Contract
     from app.models.customer import Contact
     from app.models.deployment import DeploymentInfo
@@ -1670,6 +1682,42 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
 
     team_id = approval.team_id
     business_id = approval.business_id
+    if approval.business_type == BusinessType.CONTRACT_CHANGE:
+        change = db.query(ContractChangeRequest).filter(
+            ContractChangeRequest.id == business_id,
+            ContractChangeRequest.team_id == team_id,
+            ContractChangeRequest.deleted_at.is_(None),
+        ).first()
+        if not change:
+            return {}
+        contract = db.query(Contract).filter(
+            Contract.id == change.contract_id,
+            Contract.team_id == team_id,
+            Contract.deleted_at.is_(None),
+        ).first()
+        if not contract:
+            return {}
+        from app.services.contract_change import amount_change_values, contract_change_service
+        old_amount, new_amount = amount_change_values(change)
+        snapshot = contract_change_service.get_financial_snapshot(db, team_id, contract.id)
+        return {
+            "contract_id": contract.id,
+            "contract_number": contract.contract_number,
+            "contract_name": contract.contract_name,
+            "original_amount": money(old_amount),
+            "new_amount": money(new_amount),
+            "change_items": change.change_items_json or [],
+            "reason": change.reason,
+            "attachment_name": change.attachment_name,
+            "attachment_size": change.attachment_size,
+            "attachment_mime_type": change.attachment_mime_type,
+            "financial_snapshot": {
+                "paid_amount": str(snapshot.paid_amount),
+                "invoiced_amount": str(snapshot.invoiced_amount),
+                "planned_amount": str(snapshot.planned_amount),
+                "floor_amount": str(snapshot.floor_amount),
+            },
+        }
 
     if approval.business_type == BusinessType.CONTRACT:
         contract = db.query(Contract).filter(
@@ -1858,11 +1906,11 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
 
 
 def _validate_entity_type(entity_type: str) -> None:
-    """entity_type 校验：非法 → 400。统一守卫，避免每个端点重复。"""
-    if not is_valid_business_type(entity_type):
+    """entity_type 校验：配置类型或内部合同变更类型。"""
+    if not is_valid_business_type(entity_type) and entity_type != BusinessType.CONTRACT_CHANGE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
+            detail=f"无效的业务单据类型: {entity_type}，仅支持 CONTRACT / CONTRACT_CHANGE / PAYMENT / INVOICE / LICENSE / OPPORTUNITY",
         )
 
 
@@ -2218,6 +2266,11 @@ async def cancel_generic_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在",
         )
+    if entity_type == BusinessType.CONTRACT_CHANGE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="合同变更审批不支持撤回",
+        )
 
     current_node_name = approval.current_node.node_name if approval.current_node else ""
     flow_name = approval.flow.flow_name if approval.flow else ""
@@ -2386,6 +2439,7 @@ async def remind_generic_approval(
 
 @router.get(
     "/{entity_type}/{entity_id}/detail",
+    response_model=GenericApprovalDetailResponse,
     summary="获取审批详情（通用）",
     description="""
 按业务单据类型+ID 查询最新一条审批实例的完整详情，包括所有审批记录和当前状态。
@@ -2465,6 +2519,18 @@ def download_generic_approval_file(
             file_path = invoice.invoice_file_path
             extension = os.path.splitext(invoice.invoice_file_path or "")[1].lower()
             file_name = f"{invoice.invoice_number or invoice.application_number or f'invoice_{resolved_entity_id}'}{extension}"
+    elif entity_type == BusinessType.CONTRACT_CHANGE:
+        from app.models.contract_change import ContractChangeRequest
+
+        change = db.query(ContractChangeRequest).filter(
+            ContractChangeRequest.id == resolved_entity_id,
+            ContractChangeRequest.team_id == team_id,
+            ContractChangeRequest.deleted_at.is_(None),
+        ).first()
+        if change:
+            file_path = change.attachment_path
+            file_name = change.attachment_name
+            mime_type = change.attachment_mime_type
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2587,7 +2653,7 @@ def list_approvals(
         business_types_exclude = [item.strip() for item in business_type_exclude.split(",") if item.strip()] if business_type_exclude else []
         invalid_business_types = [
             item for item in [*business_types, *business_types_exclude]
-            if not is_valid_business_type(item)
+            if item != BusinessType.CONTRACT_CHANGE and not is_valid_business_type(item)
         ]
         if invalid_business_types:
             invalid_value = invalid_business_types[0]

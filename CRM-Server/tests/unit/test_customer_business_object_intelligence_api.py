@@ -101,6 +101,7 @@ def _contract() -> SimpleNamespace:
         contract_name="企业版采购合同",
         contract_number="HT-2026-001",
         status=ContractStatus.DRAFT,
+        approval_phase=ApprovalPhase.DRAFT.value,
         payment_status="UNPAID",
         total_amount=Decimal("120000"),
         standard_unit_price=Decimal("1200"),
