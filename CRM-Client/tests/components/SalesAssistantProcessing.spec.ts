@@ -280,6 +280,83 @@ describe('shared conversation recovery', () => {
     expect(wrapper.text()).not.toContain('迟到的旧提示')
     expect(wrapper.text()).toContain('新的当前记录')
   })
+
+  it('replaces repeated plain completion publications with one task boundary and keeps it after history catches up', async () => {
+    const current = makeTask()
+    const completed = makeTask({ status: 'COMPLETED', version: 2 })
+    mocks.text.mockResolvedValue(reply(view({ version: 1, focused_task: current }), prepared(current)))
+    let publishAgain: (() => void) | undefined
+    let finish: (() => void) | undefined
+    drive(async (handlers) => {
+      handlers.onWaiting({ task: completed, message: '服务端普通收尾正文' })
+      publishAgain = () => handlers.onWaiting({ task: completed, message: '重复收尾正文' })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('这条结果暂时无法显示')
+    publishAgain?.()
+    await flushPromises()
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    mocks.get.mockResolvedValue(view({ version: 2, focused_task: completed, messages: [
+      { ...message(`completion:${completed.public_id}`, '本次任务已完成', completed), outcome: 'task_completed' }
+    ] }))
+    finish?.()
+    await flushPromises()
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    expect(wrapper.text()).not.toContain('服务端普通收尾正文')
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps a newly committed activity result when the same publication completes the task', async () => {
+    const current = makeTask()
+    const completed = makeTask({ status: 'COMPLETED', version: 2, committed: [{ kind: 'customer_activity', public_id: 'act_done' }] })
+    mocks.text.mockResolvedValue(reply(view({ version: 1, focused_task: current }), prepared(current)))
+    mocks.get.mockResolvedValue(view({ version: 2, focused_task: completed, messages: [
+      { ...message('result', '活动写入回执', completed), outcome: 'activity_written' },
+      { ...message(`completion:${completed.public_id}`, '本次任务已完成', completed), outcome: 'task_completed' }
+    ] }))
+    drive((handlers) => handlers.onWaiting({ task: completed, message: '活动写入回执' }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    expect(wrapper.findAllComponents({ name: 'AgentUIMessage' }).some((item) => item.text().includes('活动写入回执'))).toBe(true)
+    expect(wrapper.text().indexOf('活动写入回执')).toBeLessThan(wrapper.text().indexOf('本次任务已完成'))
+    wrapper.unmount()
+  })
+
+  it('does not mark a completed-looking snapshot with an outstanding wait as completed', async () => {
+    const current = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ version: 1, focused_task: current }), prepared(current)))
+    const waitingTask = makeTask({ status: 'COMPLETED', version: 2, waiting: field() })
+    mocks.get.mockResolvedValue(view({ version: 2, focused_task: waitingTask, messages: [message('wait', '仍需补充', waitingTask)] }))
+    drive((handlers) => handlers.onWaiting({ task: waitingTask, message: '仍需补充' }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.find('[role="separator"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not publish completion after a failed stream even when its later snapshot says completed', async () => {
+    const current = makeTask()
+    const completed = makeTask({ status: 'COMPLETED', version: 2 })
+    mocks.text.mockResolvedValue(reply(view({ version: 1, focused_task: current }), prepared(current)))
+    mocks.get.mockRejectedValue(new Error('history unavailable'))
+    drive((handlers) => {
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: '结果待核对' })
+      handlers.onWaiting({ task: completed, message: '不可作为成功依据' })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.find('[role="separator"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
 
 describe('stale-window feedback', () => {

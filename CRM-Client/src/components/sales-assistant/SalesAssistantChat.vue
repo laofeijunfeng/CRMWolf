@@ -385,7 +385,7 @@ const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor
   const seqs = turn.events.map((event) => event.seq)
   if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
   const reply = applyTurnEvents(pending.turnId, turn.events)
-  publishTask(turn.task, reply)
+  publishTask(turn.task, reply, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
   if (turn.reprocess_allowed && processing.value.settlement !== 'unknown') {
     reprocessAllowed.value = true
     reprocessTarget.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
@@ -500,18 +500,35 @@ const recoverProcessingTurn = async (): Promise<void> => {
 }
 
 
-const publishTask = (updated: AssistantTaskView, message?: string): void => {
+const publishTask = (updated: AssistantTaskView, message?: string, allowCompletion = true): void => {
   if (disposed || updated === undefined || (task.value !== null && task.value.public_id !== updated.public_id)) return
   if (task.value !== null && updated.version < task.value.version) return
-  const hadActivity = task.value?.committed.some((receipt) => receipt.kind === 'customer_activity') ?? false
+  const previous = task.value
+  const hadActivity = previous?.committed.some((receipt) => receipt.kind === 'customer_activity') ?? false
+  const activityWritten = !hadActivity && updated.committed.some((receipt) => receipt.kind === 'customer_activity')
+  const dispositionChanged = updated.status === 'COMPLETED' && updated.follow_up_disposition != null
+    && JSON.stringify(updated.follow_up_disposition) !== JSON.stringify(previous?.follow_up_disposition)
+  const completed = allowCompletion && updated.status === 'COMPLETED' && updated.waiting == null
+    && updated.processing_turn_status !== 'FAILED' && conversation.value?.pending_choice == null
   task.value = updated
   adoptProcessingTurn(updated)
   const prompt = updated.waiting?.prompt ?? ''
   const reply = message ?? prompt
-  if (reply !== '') pushEntry('assistant', reply, updated.waiting ?? null)
-  if (reply !== '' && !hadActivity && updated.committed.some((receipt) => receipt.kind === 'customer_activity')) {
+  if (reply !== '' && (!completed || activityWritten || dispositionChanged)) {
+    pushEntry('assistant', reply, updated.waiting ?? null)
     const entry = entries.value[entries.value.length - 1]
-    if (entry !== undefined && entry.role === 'assistant' && entry.waiting === null) entry.outcome = 'activity_written'
+    if (entry !== undefined && entry.waiting === null) {
+      if (dispositionChanged) entry.outcome = 'follow_up_disposition'
+      else if (activityWritten) entry.outcome = 'activity_written'
+    }
+  }
+  if (completed && !entries.value.some((entry) => entry.outcome === 'task_completed' && entry.ownTask?.public_id === updated.public_id)) {
+    pushEntry('assistant', '本次任务已完成')
+    const entry = entries.value[entries.value.length - 1]
+    if (entry !== undefined) {
+      entry.serverId = `current:completion:${updated.public_id}`
+      entry.outcome = 'task_completed'
+    }
   }
   emit('task-updated', updated, reply)
 }
@@ -536,6 +553,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     let cursor = 0
     let delivered = false
     let disconnected = false
+    let failed = false
     let terminalInvalid = false
     await submitInputStream(targetId, request, {
       onAccepted: (id, seq) => {
@@ -556,11 +574,12 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (!active()) return
         delivered = true
         cursor = Math.max(cursor, data.seq ?? 0)
-        publishTask(data.task, data.message)
+        publishTask(data.task, data.message, !failed)
       },
       onError: (event) => {
         if (!active()) return
         delivered = true
+        failed = true
         cursor = Math.max(cursor, event.seq ?? 0)
         markStageFailed(event.stage)
         pushEntry('assistant', event.message)
@@ -579,7 +598,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (!active()) return
         applyTurnEvents(turnId, turn.events)
         if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
-          publishTask(turn.task)
+          publishTask(turn.task, undefined, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
           delivered = true
           disconnected = false
         }
@@ -837,7 +856,7 @@ const reprocessTurn = async (): Promise<void> => {
   try {
     const current = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
     const reply = applyTurnEvents(pending.turnId, current.events)
-    publishTask(current.task, reply)
+    publishTask(current.task, reply, current.status === 'SUCCEEDED' && !current.events.some((event) => event.event === 'error'))
     if (current.reprocess_allowed !== true) {
       reprocessAllowed.value = false
       return
@@ -850,7 +869,7 @@ const reprocessTurn = async (): Promise<void> => {
     const seqs = restarted.events.map((event) => event.seq)
     if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
     applyTurnEvents(pending.turnId, restarted.events.filter((event) => event.seq > priorCursor))
-    publishTask(restarted.task)
+    publishTask(restarted.task, undefined, restarted.status === 'SUCCEEDED' && !restarted.events.some((event) => event.event === 'error'))
     if (restarted.status === 'PENDING' || restarted.status === 'RUNNING') {
       await startAutoRecovery(pending, '已受理，正在确认处理结果')
     }
@@ -886,7 +905,7 @@ const retryPending = async (): Promise<void> => {
       if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
       pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
       applyTurnEvents(pending.turnId, turn.events)
-      publishTask(turn.task)
+      publishTask(turn.task, undefined, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
       if (processingRecovery.value !== null || turn.status === 'PENDING' || turn.status === 'RUNNING') {
         await startAutoRecovery({ targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }, '已受理，正在确认处理结果')
         return
@@ -1086,9 +1105,15 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
     ui: message.role === 'assistant' ? message.ui : null
   }))
-  const incomingIds = new Set(mapped.map((entry) => entry.serverId))
-  entries.value = older ? [...mapped, ...preserved.filter((entry) => !incomingIds.has(entry.serverId))]
+  const incomingIds = new Set(mapped.filter((entry) => !older || entry.outcome !== 'task_completed').map((entry) => entry.serverId))
+  const merged = older ? [...mapped, ...preserved.filter((entry) => !incomingIds.has(entry.serverId))]
     : [...preserved.filter((entry) => !incomingIds.has(entry.serverId)), ...mapped]
+  const completionIds = new Map<string | undefined, number>()
+  for (const entry of merged) {
+    if (entry.outcome === 'task_completed') completionIds.set(entry.ownTask?.public_id ?? entry.serverId, entry.id)
+  }
+  entries.value = merged.filter((entry) => entry.outcome !== 'task_completed'
+    || completionIds.get(entry.ownTask?.public_id ?? entry.serverId) === entry.id)
   const current = task.value
   if (current?.status === 'ACTIVE' && current.waiting != null) {
     const candidate = [...entries.value].reverse().find((entry) => entry.ownTask?.public_id === current.public_id
@@ -1165,6 +1190,11 @@ void loadConversation()
           <div class="max-w-[75%] rounded-wolf-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
             {{ entry.text }}
           </div>
+        </div>
+        <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-3 py-2 text-sm text-muted-foreground">
+          <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
+          <span class="shrink-0 whitespace-nowrap">本次任务已完成</span>
+          <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
         </div>
         <div v-else class="flex gap-2.5">
           <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]">AI</div>

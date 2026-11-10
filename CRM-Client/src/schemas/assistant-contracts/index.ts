@@ -250,7 +250,7 @@ export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
-  outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition']).nullable(),
+  outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed']).nullable(),
   ui: AgentUIEnvelopeSchema.nullable()
 }).strict()
 export const ConversationViewSchema = z.object({

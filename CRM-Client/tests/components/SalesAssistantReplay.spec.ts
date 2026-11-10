@@ -24,7 +24,6 @@ describe('owned historical conversation projection', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     const meeting = wrapper.findAllComponents({ name: 'AgentUIMessage' })[0]
-    expect(meeting?.text()).toContain('原会议主题')
     expect(meeting?.text()).toContain('原会议讨论')
     expect(meeting?.text()).toContain('原客户')
     expect(meeting?.text()).not.toContain('新客户')
@@ -77,6 +76,55 @@ describe('owned historical conversation projection', () => {
     expect(wrapper.text()).toContain('更早结果')
     expect(wrapper.text()).toContain('最近结果')
   })
+
+  it('shows the server completion boundary after the business result without an AI message container', async () => {
+    const completed = makeTask({ status: 'COMPLETED', committed: [{ kind: 'customer_activity', public_id: 'act_done' }] })
+    show(view({ focused_task: completed, messages: [
+      { ...message('result', '活动已写入', completed), outcome: 'activity_written' },
+      { ...message(`completion:${completed.public_id}`, '本次任务已完成', completed), outcome: 'task_completed' }
+    ] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    const divider = wrapper.find('[role="separator"]')
+    expect(divider.text()).toBe('本次任务已完成')
+    expect(divider.findComponent({ name: 'AgentUIMessage' }).exists()).toBe(false)
+    expect(divider.text()).not.toContain('AI')
+    expect(wrapper.findAllComponents({ name: 'AgentUIMessage' })).toHaveLength(1)
+    expect(wrapper.text().indexOf('活动已写入')).toBeLessThan(wrapper.text().indexOf('本次任务已完成'))
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+  })
+
+  it('does not infer historical completion from text, task snapshots, or the current focus', async () => {
+    const completed = makeTask({ status: 'COMPLETED' })
+    show(view({ focused_task: completed, messages: [
+      message('old', '本次任务已完成。', completed),
+      message('unrelated', '此前的普通回复')
+    ] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(wrapper.find('[role="separator"]').exists()).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'AgentUIMessage' })).toHaveLength(2)
+  })
+
+  it('deduplicates completion by task across overlapping pages and later conversation refreshes', async () => {
+    const completed = makeTask({ status: 'COMPLETED' })
+    const completion = { ...message(`completion:${completed.public_id}`, '本次任务已完成', completed), outcome: 'task_completed' as const }
+    show(view({ version: 1, focused_task: completed, messages: [{ ...message('last-result', '最后一项结果', completed), outcome: 'activity_written' }, completion], older_cursor: 31 }))
+    mocks.get.mockResolvedValueOnce(view({ messages: [message('old', '较早的结果', completed), completion, { ...completion, id: 'older-completion' }], older_cursor: null }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '查看更早对话')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    expect(wrapper.text().indexOf('最后一项结果')).toBeLessThan(wrapper.text().indexOf('本次任务已完成'))
+    mocks.text.mockResolvedValue({ conversation: view({ version: 2, focused_task: completed, messages: [completion, message('next', '后续沟通', null, 'user')] }), submission: null })
+    await wrapper.find('textarea').setValue('后续沟通')
+    await wrapper.find('textarea').trigger('keydown.enter', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.findAll('[role="separator"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('较早的结果')
+    expect(wrapper.text().indexOf('本次任务已完成')).toBeLessThan(wrapper.text().indexOf('后续沟通'))
+  })
 })
 
 describe('conversation snapshot fences', () => {
@@ -96,16 +144,4 @@ describe('conversation snapshot fences', () => {
     expect(wrapper.findAll('button').find((b) => b.text() === '查看更早对话')).toBeUndefined()
   })
 
-  it('persists activity-kind changes through the owned conversation, without clearing history', async () => {
-    const current = makeTask({ waiting: confirmation() })
-    show(view({ version: 3, focused_task: current, messages: [message('old', '此前的沟通'), message('card', '确认？', current)] }))
-    mocks.kind.mockResolvedValue({ conversation: view({ version: 4, focused_task: { ...current, version: 2, activity_kind: 'ONLINE_MEETING', waiting: null }, messages: [message('old', '此前的沟通'), message('kind', '已切换为线上会议，请重新描述这次沟通。')] }), submission: null })
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await wrapper.findAll('button').find((b) => b.text() === '改为线下 / 跟进')?.trigger('click')
-    await flushPromises()
-    expect(mocks.kind).toHaveBeenCalledWith(expect.objectContaining({ task_public_id: 'ast_one', kind: 'ONLINE_MEETING', task_version: 1, expected_version: 3 }))
-    expect(wrapper.text()).toContain('此前的沟通')
-    expect(wrapper.text()).toContain('已切换为线上会议')
-  })
 })

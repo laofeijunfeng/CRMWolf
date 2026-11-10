@@ -117,9 +117,10 @@ def finalize_assistant_ui(
     focused_task: AssistantTaskView | None,
     pending_choice: ConversationBoundary | None,
 ) -> None:
-    """Attach one envelope to every assistant message. User bubbles stay text."""
+    """Attach UI envelopes, except for user text and host-only completion boundaries."""
 
     _ensure_current_waiting(messages, focused_task)
+    _normalize_task_completions(messages)
     live_id = _live_waiting_message_id(messages, focused_task)
     submitted_kind = _resolved_activity_kind(focused_task)
     receipts = _disposition_receipts(messages, live_id)
@@ -149,6 +150,62 @@ def finalize_assistant_ui(
             )
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
+
+
+def _is_task_completion(message: ConversationMessage) -> bool:
+    """Only this message's authoritative snapshot can establish normal completion."""
+    return (
+        message.role == "assistant"
+        and message.task is not None
+        and message.task.status == "COMPLETED"
+        and message.task.waiting is None
+        and message.boundary is None
+        and message.outcome in {"task_completed", "activity_written", "follow_up_disposition"}
+        and message.outcome != "failure"
+        and message.error_code is None
+    )
+
+
+def _is_completion_only(message: ConversationMessage) -> bool:
+    return _is_task_completion(message) and message.outcome not in {"activity_written", "follow_up_disposition"}
+
+
+def _normalize_task_completions(messages: list[ConversationMessage]) -> None:
+    """Keep business results, replacing terminal prose with one read-model boundary per task."""
+    last_completed: dict[str, int] = {}
+    for index, message in enumerate(messages):
+        if _is_task_completion(message) and message.task is not None:
+            last_completed[message.task.public_id] = index
+    if not last_completed:
+        return
+    completion_sources = {task_id: messages[index] for task_id, index in last_completed.items()}
+    for index, message in enumerate(messages):
+        task = message.task
+        if (
+            task is not None
+            and task.public_id in last_completed
+            and message.role == "assistant"
+            and message.outcome in {"activity_written", "follow_up_disposition"}
+        ):
+            last_completed[task.public_id] = max(last_completed[task.public_id], index)
+    normalized: list[ConversationMessage] = []
+    for index, message in enumerate(messages):
+        if not _is_completion_only(message):
+            normalized.append(message)
+        task = message.task
+        if task is not None and last_completed.get(task.public_id) == index:
+            source = completion_sources[task.public_id]
+            normalized.append(
+                ConversationMessage(
+                    id=f"completion:{task.public_id}",
+                    role="assistant",
+                    text="本次任务已完成",
+                    at=source.at,
+                    task=source.task,
+                    outcome="task_completed",
+                )
+            )
+    messages[:] = normalized
 
 
 _SETTLED_LABELS = {
@@ -266,11 +323,13 @@ def project_assistant_message(
     active_waiting: bool,
     active_boundary: bool,
     submitted_kind: str | None = None,
-) -> AgentUIEnvelope:
-    """Build the only Web-visible blocks for one assistant message."""
+) -> AgentUIEnvelope | None:
+    """Build Web-visible blocks, or leave a normal completion to the host."""
 
     if message.outcome == "failure":
         return _project_failure(message)
+    if _is_completion_only(message):
+        return None
     disposition = _project_disposition(message, active_waiting=active_waiting)
     if disposition is not None:
         return disposition

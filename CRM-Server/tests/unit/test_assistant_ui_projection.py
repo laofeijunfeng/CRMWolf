@@ -92,6 +92,146 @@ def test_plain_reply_is_only_a_text_block() -> None:
     assert envelope.schema_version == "crm.agent.ui.v1"
 
 
+def test_completed_history_has_one_host_only_marker_without_rewriting_the_source() -> None:
+    task = _task(status="COMPLETED")
+    source = _message("terminal", "服务端收尾原文", task, outcome="task_completed")
+    messages = [source]
+
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+
+    assert [(message.id, message.outcome) for message in messages] == [("completion:ast_one", "task_completed")]
+    marker = messages[0]
+    assert marker.text == "本次任务已完成"
+    assert marker.task == task and marker.at == source.at
+    assert marker.ui is None
+    assert source.text == "服务端收尾原文" and source.outcome == "task_completed"
+    assert project_assistant_message(source, active_waiting=False, active_boundary=False) is None
+    assert project_assistant_message(marker, active_waiting=False, active_boundary=False) is None
+
+
+def test_completed_activity_result_stays_before_the_completion_marker() -> None:
+    task = _task(status="COMPLETED")
+    result = _message("written", "已记录这条客户活动。", task, outcome="activity_written")
+    messages = [result]
+
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+
+    assert [message.id for message in messages] == ["written", "completion:ast_one"]
+    assert result.outcome == "activity_written"
+    assert result.ui.blocks[0].type == "action_result"
+    assert result.ui.blocks[0].status == "SUCCESS"
+    assert messages[1].ui is None
+    assert (
+        project_assistant_message(result, active_waiting=False, active_boundary=False).blocks[0].type == "action_result"
+    )
+
+
+def test_completed_disposition_result_stays_before_the_completion_marker() -> None:
+    task = _task(
+        status="COMPLETED",
+        follow_up_disposition={
+            "status": "DONE",
+            "items": [{"item_id": "i1", "title": "核对采购安排", "state": "complete", "result_title": "已完成"}],
+        },
+    )
+    result = _message("settled", "历史跟进任务已处理", task, outcome="follow_up_disposition")
+    messages = [result, _message("terminal", "收尾", task, outcome="task_completed")]
+
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+
+    assert [message.id for message in messages] == ["settled", "completion:ast_one"]
+    interaction = next(block for block in result.ui.blocks if block.type == "interaction")
+    assert interaction.disposition_items[0].state == "complete"
+    assert interaction.state == "READ_ONLY" and interaction.submit_action_id is None
+    assert messages[1].ui is None
+
+
+def test_completion_boundary_follows_a_later_business_result_without_using_its_active_snapshot() -> None:
+    completed = _task(status="COMPLETED", version=3)
+    result = _message("written", "活动已写入", _task(version=2), outcome="activity_written")
+    failure = _message("failure", "后续请求失败", completed, outcome="failure", error_code="INTERNAL_ERROR")
+    messages = [_message("terminal", "收尾", completed, outcome="task_completed"), result, failure]
+
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+
+    assert [message.id for message in messages] == ["written", "completion:ast_one", "failure"]
+    assert result.ui.blocks[0].type == "action_result"
+    assert messages[1].task.status == "COMPLETED" and messages[1].task.version == 3
+    assert failure.ui.blocks[0].type == "error"
+
+
+def test_repeated_completed_snapshots_and_finalization_keep_one_marker_per_task() -> None:
+    first = _task(status="COMPLETED")
+    second = _task(public_id="ast_two", status="COMPLETED")
+    messages = [
+        _message("first_reply", "不同的终态原文", first, outcome="task_completed"),
+        _message("written", "活动已写入", first, outcome="activity_written"),
+        _message("first_terminal", "再次返回终态", first.model_copy(update={"version": 2}), outcome="task_completed"),
+        _message("second_terminal", "第二项完成", second, outcome="task_completed"),
+    ]
+
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+
+    assert [(message.id, message.outcome) for message in messages] == [
+        ("written", "activity_written"),
+        ("completion:ast_one", "task_completed"),
+        ("completion:ast_two", "task_completed"),
+    ]
+    assert messages[1].task.version == 2
+    assert messages[0].ui.blocks[0].type == "action_result"
+    assert messages[1].ui is None and messages[2].ui is None
+
+
+def test_completed_snapshot_on_a_rejected_command_does_not_move_completion_or_hide_the_warning() -> None:
+    task = _task(status="COMPLETED")
+    warning = _message("rejected:reply", "这张卡片状态已变化；这次没有新增写入。", task)
+    messages = [_message("terminal", "收尾", task, outcome="task_completed"), warning]
+
+    finalize_assistant_ui(messages, focused_task=task, pending_choice=None)
+
+    assert [message.id for message in messages] == ["completion:ast_one", "rejected:reply"]
+    assert warning.ui.blocks[0].text == warning.text
+
+
+def test_noncompletion_snapshots_never_borrow_the_focused_tasks_completion() -> None:
+    completed = _task(status="COMPLETED")
+    waiting = _confirmation()
+    messages = [
+        _message("no_snapshot", "本次任务已完成。"),
+        _message("active", "本次任务已完成。", _task()),
+        _message("cancelled", "本次任务已完成。", _task(status="CANCELLED")),
+        _message("failed", "本次任务已完成。", _task(status="FAILED")),
+        _message("waiting", waiting.prompt, _task(status="COMPLETED", waiting=waiting)),
+        _message(
+            "boundary",
+            "继续吗？",
+            completed,
+            boundary=ConversationBoundary(entry_id="entry_1", prompt="继续吗？"),
+        ),
+        _message("failure", "写入失败", completed, outcome="failure", error_code="INTERNAL_ERROR"),
+        _message(
+            "unknown",
+            "结果待核对",
+            completed,
+            outcome="failure",
+            error_code="UNKNOWN_COMMIT_RESULT",
+        ),
+        _message("coded", "结果待核对", completed, error_code="UNKNOWN_COMMIT_RESULT"),
+        _message("user", "本次任务已完成。", completed, role="user"),
+    ]
+    original_ids = [message.id for message in messages]
+
+    finalize_assistant_ui(messages, focused_task=completed, pending_choice=None)
+
+    assert [message.id for message in messages] == original_ids
+    assert all(message.outcome != "task_completed" for message in messages)
+    assert messages[6].ui.blocks[0].type == "error"
+    assert messages[7].ui.blocks[0].type == "notice"
+    assert messages[7].ui.blocks[0].tone == "warning"
+    assert messages[9].ui is None
+
+
 def test_field_gap_does_not_repeat_the_prompt_as_text() -> None:
     waiting = TaskWaiting(
         type="FIELD", field="customer", question_id="q1", prompt="请补充客户名称", action_id="act_1", expected_version=1

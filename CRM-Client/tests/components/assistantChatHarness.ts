@@ -58,7 +58,7 @@ const fixtureEnvelope = (
   active: boolean,
   pendingEntryId: string | null
 ): ConversationView['messages'][number]['ui'] => {
-  if (item.role !== 'assistant') return null
+  if (item.role !== 'assistant' || item.outcome === 'task_completed') return null
   if (item.boundary !== null) {
     const boundaryActive = pendingEntryId === item.boundary.entry_id
     return {

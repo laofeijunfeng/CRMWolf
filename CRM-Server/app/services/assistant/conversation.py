@@ -189,6 +189,8 @@ class ConversationService:
                             and turn.input_json.get("kind") == "confirm"
                             else "follow_up_disposition"
                             if card == "follow_up_disposition"
+                            else "task_completed"
+                            if snapshot and snapshot.status == "COMPLETED" and snapshot.waiting is None
                             else None,
                             error_code=error_code if isinstance(error_code, str) else None,
                             retryable=retryable if isinstance(retryable, bool) else None,
