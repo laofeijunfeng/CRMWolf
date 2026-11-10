@@ -1284,6 +1284,7 @@ class AssistantCoordinator:
 
         from app.services.assistant.activity_channel import apply_channel_resolution, resolve_channel
         from app.services.assistant.events import stage as mk_stage
+        from app.services.assistant.noise import record_noise
 
         draft = load_draft(task)
         if accept_source and append_source(db, task, draft, user_text):
@@ -1309,12 +1310,13 @@ class AssistantCoordinator:
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))
-        resolution = resolve_channel(user_text, decision, model_failed=False)
         draft = load_draft(task)
+        channel_text = record_noise(draft, user_text, decision)
+        resolution = resolve_channel(channel_text, decision, model_failed=False)
         if resolution.status == "family_unclear":
             if accept_source:
                 append_source(db, task, draft, user_text)
-            waiting = kind_waiting(task, source_text=user_text)
+            waiting = kind_waiting(task, source_text=channel_text)
             result = apply_task_update(
                 db,
                 task,
