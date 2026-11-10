@@ -28,6 +28,7 @@ from app.services.assistant.failure_contract import (
     AssistantFailureCode,
     AssistantStageFailure,
     bind_attempt_deadline,
+    failure_origin_of,
     reset_attempt_deadline,
     root_failure_presentation,
     stage_user_message,
@@ -335,6 +336,21 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     return turn.lease_version if turn is not None else None
 
 
+def _latest_stage(db: Session, turn: AssistantTurn) -> str | None:
+    """Stage still open when the turn stopped; a completed stage did not fail."""
+    event = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="stage")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .first()
+    )
+    data = event.data_json if event is not None else None
+    if not isinstance(data, dict) or data.get("phase") != "start":
+        return None
+    stage = data.get("stage")
+    return stage if stage in {"classify", "structure", "quality_gate", "write"} else None
+
+
 def _error_payload(
     db: Session,
     turn: AssistantTurn,
@@ -490,6 +506,18 @@ def latest_error_retryable(db: Session, turn: AssistantTurn) -> bool:
     return isinstance(data, dict) and data.get("retryable") is True
 
 
+def latest_error_code(db: Session, turn: AssistantTurn) -> str | None:
+    event = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="error")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .first()
+    )
+    data = event.data_json if event is not None else None
+    code = data.get("code") if isinstance(data, dict) else None
+    return code if isinstance(code, str) else None
+
+
 def reprocess_allowed(db: Session, task: AssistantTask, turn: AssistantTurn) -> bool:
     """Server decision for the separate reprocess action. Sync never uses it."""
 
@@ -504,6 +532,12 @@ def reprocess_allowed(db: Session, task: AssistantTask, turn: AssistantTurn) -> 
     ):
         return False
     if turn.status == "FAILED":
+        if (
+            task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+            or turn.last_error_code == "UNKNOWN_COMMIT_RESULT"
+            or latest_error_code(db, turn) == "UNKNOWN_COMMIT_RESULT"
+        ):
+            return False
         return latest_error_retryable(db, turn)
     expired = turn.status == "RUNNING" and turn.lease_expires_at is not None and turn.lease_expires_at < business_now()
     return expired and not live_worker(turn.id, turn.lease_version)
@@ -1020,14 +1054,25 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                         else "处理未完成，结果待核对，请查看最新任务状态。"
                     )
                 )
+                failed_task = db.get(AssistantTask, turn.task_id)
                 add_event(
                     db,
                     turn,
                     "error",
-                    {"code": code, "retryable": retryable, "message": message},
+                    _error_payload(
+                        db,
+                        turn,
+                        failed_task,
+                        code=code,
+                        stage=_latest_stage(db, turn),
+                        retryable=retryable,
+                        message=message,
+                        failure_origin=failure_origin_of(exc),
+                        started_at=attempt_started,
+                        finished_at=now,
+                    ),
                 )
                 db.commit()
-                failed_task = db.get(AssistantTask, turn.task_id)
                 logger.info(
                     "assistant_turn_terminal result=failed task=%s turn=%s lease_version=%s attempts=%s "
                     "last_seq=%s event_name=error code=%s",
@@ -1155,8 +1200,12 @@ async def recover_turns(*, limit: int = 30) -> int:
             .limit(limit)
             .all()
         ]
+        for turn_id in ids:
+            turn = db.get(AssistantTurn, turn_id)
+            task = db.get(AssistantTask, turn.task_id) if turn is not None else None
+            if turn is not None and task is not None and close_overdue_turn(db, task, turn):
+                continue
+            schedule_turn(turn_id)
+        return len(ids)
     finally:
         db.close()
-    for turn_id in ids:
-        schedule_turn(turn_id)
-    return len(ids)

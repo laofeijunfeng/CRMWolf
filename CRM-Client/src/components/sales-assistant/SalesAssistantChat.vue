@@ -151,7 +151,7 @@ const scrollToBottom = (): void => {
 
 interface LiveStage {
   name: StageName
-  status: 'pending' | 'running' | 'done'
+  status: 'pending' | 'running' | 'done' | 'failed' | 'awaiting'
   ms?: number | undefined
   score?: number | undefined
 }
@@ -234,6 +234,18 @@ const applyStageEvent = (event: { stage: StageName; phase: 'start' | 'done'; ms?
     target.score = event.score
   }
 }
+// Without a server-attributed stage, the stage still running is the one that stopped.
+const markStageFailed = (stage: StageName | undefined): void => {
+  for (const item of processing.value.stages) {
+    if (stage === undefined ? item.status === 'running' : item.name === stage && item.status !== 'done') item.status = 'failed'
+  }
+}
+const markRunningStagesAwaiting = (): void => {
+  for (const stage of processing.value.stages) {
+    if (stage.status === 'running') stage.status = 'awaiting'
+  }
+  processing.value.active = false
+}
 
 const endProcessing = (): void => {
   if (elapsedTimer !== null) {
@@ -301,7 +313,7 @@ const adoptProcessingTurn = (updated: AssistantTaskView): void => {
     processingRecovery.value = null
     resultPending.value = false
   }
-  if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '') {
+  if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '' && processing.value.settlement !== 'unknown') {
     reprocessAllowed.value = true
     const current = reprocessTarget.value
     reprocessTarget.value = {
@@ -344,10 +356,13 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): strin
     } else if (event.event === 'waiting' && typeof event.data['message'] === 'string') {
       reply = event.data['message']
     } else if (event.event === 'error') {
+      const stage = event.data['stage']
+      markStageFailed(stage === 'classify' || stage === 'structure' || stage === 'quality_gate' || stage === 'write' ? stage : undefined)
       pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
       const entry = entries.value[entries.value.length - 1]
       if (entry !== undefined) entry.outcome = 'failure'
       noteEpisodeFailure(typeof event.data['code'] === 'string' ? event.data['code'] : undefined)
+      processing.value.active = false
     }
   }
   return reply
@@ -360,9 +375,12 @@ const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor
   if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
   const reply = applyTurnEvents(pending.turnId, turn.events)
   publishTask(turn.task, reply)
-  if (turn.reprocess_allowed) {
+  if (turn.reprocess_allowed && processing.value.settlement !== 'unknown') {
     reprocessAllowed.value = true
     reprocessTarget.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
+  } else if (processing.value.settlement === 'unknown') {
+    reprocessAllowed.value = false
+    reprocessTarget.value = null
   }
   if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
     const successor = processingRecovery.value !== null && processingRecovery.value.turnId !== pending.turnId
@@ -402,7 +420,8 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
         }
         if (pollsLeft <= 1) {
           stopAutoRecovery()
-          recoveryNotice.value = ''
+          recoveryNotice.value = '处理结果待确认，请刷新状态。'
+          markRunningStagesAwaiting()
           resultPending.value = true
           logRecovery('recovery_timeout', { task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'timeout' })
           return
@@ -415,7 +434,8 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
           return
         }
         stopAutoRecovery()
-        recoveryNotice.value = ''
+        recoveryNotice.value = '处理结果待确认，请刷新状态。'
+        markRunningStagesAwaiting()
         resultPending.value = true
         pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
         logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
@@ -531,10 +551,12 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (!active()) return
         delivered = true
         cursor = Math.max(cursor, event.seq ?? 0)
+        markStageFailed(event.stage)
         pushEntry('assistant', event.message)
         const entry = entries.value[entries.value.length - 1]
         if (entry !== undefined) entry.outcome = 'failure'
         noteEpisodeFailure(event.code)
+        processing.value.active = false
       },
       onNetworkLost: () => { if (active()) disconnected = true },
       onTerminalInvalid: () => { if (active()) terminalInvalid = true }
@@ -544,6 +566,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
       try {
         const turn = await assistantApi.getTurn(targetId, turnId, cursor)
         if (!active()) return
+        applyTurnEvents(turnId, turn.events)
         if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
           publishTask(turn.task)
           delivered = true
@@ -802,19 +825,22 @@ const reprocessTurn = async (): Promise<void> => {
   stopAutoRecovery()
   try {
     const current = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
+    const reply = applyTurnEvents(pending.turnId, current.events)
+    publishTask(current.task, reply)
     if (current.reprocess_allowed !== true) {
       reprocessAllowed.value = false
-      publishTask(current.task)
       return
     }
     const restarted = await assistantApi.retryTurn(pending.targetId, pending.turnId, current.lease_version, pending.cursor)
+    const priorCursor = pending.cursor
+    resetProcessingEpisode()
+    beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
     reprocessAllowed.value = restarted.reprocess_allowed === true
     const seqs = restarted.events.map((event) => event.seq)
     if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
-    applyTurnEvents(pending.turnId, restarted.events)
+    applyTurnEvents(pending.turnId, restarted.events.filter((event) => event.seq > priorCursor))
     publishTask(restarted.task)
     if (restarted.status === 'PENDING' || restarted.status === 'RUNNING') {
-      beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
       await startAutoRecovery(pending, '已受理，正在确认处理结果')
     }
   } catch {
@@ -848,6 +874,7 @@ const retryPending = async (): Promise<void> => {
       const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
       if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
       pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
+      applyTurnEvents(pending.turnId, turn.events)
       publishTask(turn.task)
       if (processingRecovery.value !== null || turn.status === 'PENDING' || turn.status === 'RUNNING') {
         await startAutoRecovery({ targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }, '已受理，正在确认处理结果')
@@ -870,9 +897,15 @@ const retryPending = async (): Promise<void> => {
     await submitInputStream(pending.targetId, pending.input, {
       onAccepted: (id, seq) => {
         if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
-        pending.turnId = id; pending.cursor = Math.max(pending.cursor, seq ?? 0)
+        pending.turnId = id
+        pending.cursor = Math.max(pending.cursor, seq ?? 0)
       },
-      onStage: (event) => { if (!disposed && navigation === navigationVersion && pendingRequest.value === pending) { pending.cursor = Math.max(pending.cursor, event.seq ?? 0); applyStageEvent(event) } },
+      onStage: (event) => {
+        if (!disposed && navigation === navigationVersion && pendingRequest.value === pending) {
+          pending.cursor = Math.max(pending.cursor, event.seq ?? 0)
+          applyStageEvent(event)
+        }
+      },
       onWaiting: (data) => {
         if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
         publishTask(data.task, data.message)
@@ -881,6 +914,7 @@ const retryPending = async (): Promise<void> => {
       },
       onError: (event) => {
         if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
+        markStageFailed(event.stage)
         pushEntry('assistant', event.message)
         const entry = entries.value[entries.value.length - 1]
         if (entry !== undefined) entry.outcome = 'failure'
@@ -1151,12 +1185,14 @@ void loadConversation()
         <span>执行过程</span>
         <span v-if="processChip" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processChip }}</span>
       </div>
-      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-emerald-700' : stageItem.status === 'running' ? 'font-medium text-[#1d4ed8]' : 'text-muted-foreground'">
-        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-emerald-600 bg-emerald-600' : stageItem.status === 'running' ? 'border-[#2563eb] bg-white' : 'border-border'"></span>
+      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-success' : stageItem.status === 'running' ? 'font-medium text-[#1d4ed8]' : stageItem.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
+        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-success bg-success' : stageItem.status === 'running' ? 'border-[#2563eb] bg-white' : stageItem.status === 'failed' ? 'border-destructive bg-destructive' : 'border-border'"></span>
         <span>{{ STAGE_LABELS[stageItem.name] }}</span>
         <span v-if="stageItem.status === 'done' && stageItem.ms !== undefined" class="text-xs text-muted-foreground">{{ (stageItem.ms / 1000).toFixed(1) }}s</span>
-        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-wolf-md border bg-muted/50 px-1.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
+        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-wolf-md border bg-muted/50 px-1.5 py-0.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
         <span v-if="stageItem.status === 'running'" class="text-xs font-normal text-muted-foreground">进行中…</span>
+        <span v-else-if="stageItem.status === 'failed'" class="text-xs font-normal text-destructive">失败</span>
+        <span v-else-if="stageItem.status === 'awaiting'" class="text-xs font-normal text-muted-foreground">待确认</span>
       </div>
     </div>
 

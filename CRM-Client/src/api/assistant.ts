@@ -41,6 +41,7 @@ export interface SubmitStreamError {
   code: string
   retryable: boolean
   message: string
+  stage?: StageName | undefined
   seq?: number | undefined
 }
 
@@ -197,6 +198,7 @@ export async function submitInputStream(
     if (parsed.event === 'error') {
       const code = typeof payload['code'] === 'string' ? payload['code'] : ''
       const message = typeof payload['message'] === 'string' ? payload['message'] : ''
+      const stage = StageNameSchema.safeParse(payload['stage'])
       if (code === '' || message === '') {
         logAssistantClient('error', 'terminal_schema_invalid', {
           event_name: 'error', turn_id: streamTurnId, task: publicId, seq: sequence ?? null,
@@ -205,7 +207,10 @@ export async function submitInputStream(
         handlers.onTerminalInvalid?.({ event: 'error', turnId: streamTurnId, seq: sequence, issues: [code === '' ? 'code' : 'message'] })
         return false
       }
-      handlers.onError({ code, retryable: payload['retryable'] === true, message, seq: sequence })
+      handlers.onError({
+        code, retryable: payload['retryable'] === true, message,
+        stage: stage.success ? stage.data : undefined, seq: sequence
+      })
       finish()
       return true
     }

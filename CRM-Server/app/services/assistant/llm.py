@@ -167,6 +167,7 @@ class AssistantLLM:
             user_text,
             StructuredMeeting if meeting else StructuredFollowUp,
             "会议纪要整理" if meeting else "跟进整理",
+            timeout_seconds=150,
             stream=True,
             retry_timeouts=True,
         )

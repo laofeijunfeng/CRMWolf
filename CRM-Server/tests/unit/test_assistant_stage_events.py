@@ -198,6 +198,8 @@ async def test_confirm_turn_writes_frozen_activity_without_model_or_gate(db_sess
             source_segments=["客户确认 POC 可行，下周三确认批复"],
             quality_score=DraftField(status="CANDIDATE", value="88"),
             score_reason="事实与行动明确",
+            channel_kind="PHONE_FOLLOW_UP",
+            channel_status="recognized",
         ).model_dump(mode="json"),
     )
     writer = Writer()

@@ -6,28 +6,60 @@ import { test } from './fixtures'
  * reload; history replays and the current waiting card stays actionable.
  */
 test('reload restores the in-flight task with its waiting card', async ({ page }) => {
-  await page.goto('/assistant')
+  const note = '2026年11月10日和广州睿狐科技有限公司沟通了私有化部署计划，对方认可分两期上线'
+  const stopped = '已停下这件事'
+  // The composer cancel button only renders while a non-terminal task is active.
+  const giveUp = page.getByRole('button', { name: '算了', exact: true })
+  const noteEcho = page.getByText(note, { exact: true })
+  const waiting = page.getByText(/还差|属于哪种活动|确认后写入/)
+  const stoppedNotice = page.getByText(stopped, { exact: true })
+  const restoring = page.getByRole('status').filter({ hasText: '正在恢复对话' })
 
-  // Create a task via the UI and cancel it is terminal; instead start a real
-  // turn then reload mid-processing — server continues, task stays ACTIVE.
+  await page.goto('/assistant')
   const textarea = page.locator('textarea').first()
   await expect(textarea).toBeVisible()
-  await textarea.fill('明天下午和广州睿狐科技有限公司复盘部署计划')
+  await expect(restoring).toHaveCount(0, { timeout: 60_000 })
+
+  // The shared account keeps its transcript: release any leftover active task
+  // (no CRM write) and measure every assertion against this baseline.
+  if (await giveUp.count() > 0) {
+    const before = await stoppedNotice.count()
+    await expect(giveUp).toBeEnabled({ timeout: 180_000 })
+    await giveUp.click()
+    await expect.poll(() => stoppedNotice.count(), { timeout: 30_000 }).toBeGreaterThan(before)
+  }
+  await expect(giveUp).toHaveCount(0)
+  const baseWaiting = await waiting.count()
+
+  await textarea.fill(note)
   await textarea.press('Enter')
 
-  // Wait for the turn to reach any stable waiting (field question likely).
-  await expect(page.getByText(/还差|属于哪种活动|确认后写入/).first()).toBeVisible({ timeout: 150_000 })
+  // Only a waiting card produced by this turn counts; a model failure fails the test.
+  await expect.poll(() => waiting.count(), { timeout: 180_000 }).toBeGreaterThan(baseWaiting)
+  await expect(giveUp).toBeEnabled({ timeout: 30_000 })
 
   await page.reload()
   await expect(page.locator('textarea').first()).toBeVisible({ timeout: 30_000 })
+  await expect(restoring).toHaveCount(0, { timeout: 60_000 })
 
-  // The continuous transcript restores without requiring a task sidebar.
-  await expect(page.getByText('明天下午和广州睿狐科技有限公司复盘部署计划', { exact: true })).toBeVisible()
+  // The transcript is paginated, so counts are not comparable across a reload.
+  // The active task (absent at baseline) must come back, and the latest waiting
+  // card must follow the latest echo of this note.
+  await expect(giveUp).toBeEnabled({ timeout: 30_000 })
+  await expect(noteEcho.last()).toBeVisible({ timeout: 30_000 })
+  await expect(waiting.last()).toBeVisible({ timeout: 30_000 })
+  const latestEcho = await noteEcho.last().elementHandle()
+  expect(
+    await waiting.last().evaluate(
+      (card, echo) => Boolean(echo && echo.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING),
+      latestEcho
+    )
+  ).toBe(true)
   await expect(page.getByRole('button', { name: '新任务', exact: true })).toHaveCount(0)
 
-  // Cancel it from the restored UI to leave a clean state.
-  const giveUp = page.getByRole('button', { name: /算了/ })
-  await expect(giveUp.first()).toBeVisible({ timeout: 30_000 })
-  await giveUp.first().click()
-  await expect(page.getByText('当前这件已停下，之前的对话和已写入的记录仍保留。').first()).toBeVisible({ timeout: 30_000 })
+  // The restored waiting card stays actionable; cancelling writes no CRM activity.
+  const stoppedAfterReload = await stoppedNotice.count()
+  await giveUp.click()
+  await expect.poll(() => stoppedNotice.count(), { timeout: 30_000 }).toBe(stoppedAfterReload + 1)
+  await expect(giveUp).toHaveCount(0)
 })
