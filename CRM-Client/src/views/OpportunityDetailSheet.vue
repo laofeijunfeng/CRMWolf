@@ -8,10 +8,7 @@
  */
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  Sheet
-} from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import OpportunityDetailContent from '@/components/panels/OpportunityDetailContent.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
@@ -31,11 +28,13 @@ interface Props {
   opportunityId: string | null
   visible: boolean
   elevated?: boolean
+  embedded?: boolean
   /** 来源审批：设置后以只读方式查看，并提供返回审批详情入口 */
   sourceApproval?: ApprovalSourceContext | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
   sourceApproval: null
 })
 const emit = defineEmits<{
@@ -79,8 +78,7 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <Sheet v-model:open="visibleModel">
-    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+  <DetailSheetSurface v-model:open="visibleModel" :embedded="embedded" v-bind="elevated ? { elevated: true } : {}">
       <ApprovalSourceHeader
         v-if="sourceApproval"
         :source="sourceApproval"
@@ -100,6 +98,5 @@ defineExpose({ refresh })
         @view-journey="handleViewJourney"
       />
       <ApprovalSourceFooter v-if="sourceApproval" @back="emit('back')" />
-    </DetailSheetContent>
-  </Sheet>
+  </DetailSheetSurface>
 </template>

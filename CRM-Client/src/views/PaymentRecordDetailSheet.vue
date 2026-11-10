@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Sheet } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import PaymentRecordDetailContent from '@/components/panels/PaymentRecordDetailContent.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
@@ -30,6 +29,7 @@ interface Props {
   stageName?: string
   approval?: ApprovalInfoInput | null
   elevated?: boolean
+  embedded?: boolean
   /** 从审批详情下钻时的来源审批；设置后进入只读查看模式。 */
   sourceApproval?: ApprovalSourceContext | null
 }
@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   record: null,
   stageName: '',
   approval: null,
+  embedded: false,
   sourceApproval: null
 })
 
@@ -60,8 +61,7 @@ const closeSheet = (): void => {
 </script>
 
 <template>
-  <Sheet v-model:open="visibleModel">
-    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+  <DetailSheetSurface v-model:open="visibleModel" :embedded="embedded" v-bind="elevated ? { elevated: true } : {}">
       <ApprovalSourceHeader
         v-if="sourceApproval"
         :source="sourceApproval"
@@ -83,8 +83,7 @@ const closeSheet = (): void => {
         @close="closeSheet"
       />
       <ApprovalSourceFooter v-if="sourceApproval" @back="emit('back')" />
-    </DetailSheetContent>
-  </Sheet>
+  </DetailSheetSurface>
 </template>
 
 <style scoped lang="scss">

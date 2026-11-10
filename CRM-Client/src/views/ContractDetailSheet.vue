@@ -7,8 +7,7 @@
  * 传入 sourceApproval 时为审批下钻只读模式：顶部来源提示 + 底部返回审批详情。
  */
 import { computed, ref } from 'vue'
-import { Sheet } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
@@ -20,11 +19,13 @@ interface Props {
   visible: boolean
   canApprove?: boolean
   elevated?: boolean
+  embedded?: boolean
   sourceApproval?: ApprovalSourceContext | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   canApprove: false,
+  embedded: false,
   sourceApproval: null
 })
 
@@ -57,8 +58,7 @@ function closeSheet(): void {
 </script>
 
 <template>
-  <Sheet v-model:open="visibleModel">
-    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+  <DetailSheetSurface v-model:open="visibleModel" :embedded="embedded" v-bind="elevated ? { elevated: true } : {}">
       <ApprovalSourceHeader
         v-if="sourceApproval"
         :source="sourceApproval"
@@ -80,6 +80,5 @@ function closeSheet(): void {
         @view-payment-plan="emit('view-payment-plan', $event)"
       />
       <ApprovalSourceFooter v-if="sourceApproval" @back="emit('back')" />
-    </DetailSheetContent>
-  </Sheet>
+  </DetailSheetSurface>
 </template>

@@ -21,13 +21,12 @@ import {
   X,
 } from 'lucide-vue-next'
 import {
-  Sheet,
   SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import {
   Card,
   CardContent,
@@ -106,12 +105,14 @@ interface Props {
   visible: boolean
   autoEditReissueId?: number | null
   elevated?: boolean
+  embedded?: boolean
   /** 从审批详情下钻时传入：只读查看，隐藏所有操作与审批组件 */
   sourceApproval?: ApprovalSourceContext | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
   autoEditReissueId: null,
+  embedded: false,
   sourceApproval: null,
 })
 
@@ -1044,6 +1045,7 @@ watch(
 )
 
 onBeforeUnmount((): void => {
+  activeRequestId.value += 1
   revokeInvoiceFilePreviewUrl()
   revokeLocalFileUrl('complete-red')
   revokeLocalFileUrl('complete-new')
@@ -1052,8 +1054,12 @@ onBeforeUnmount((): void => {
 </script>
 
 <template>
-  <Sheet :open="visible" @update:open="handleOpenChange">
-    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+  <DetailSheetSurface
+    :open="visible"
+    :embedded="embedded"
+    :elevated="elevated"
+    @update:open="handleOpenChange"
+  >
       <ApprovalSourceHeader
         v-if="sourceApproval"
         :source="sourceApproval"
@@ -1508,8 +1514,7 @@ onBeforeUnmount((): void => {
         </Button>
       </SheetFooter>
       <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
-    </DetailSheetContent>
-  </Sheet>
+  </DetailSheetSurface>
 
   <InvoiceMarkIssuedDialog
     v-if="!isSourceMode && invoiceInfo"

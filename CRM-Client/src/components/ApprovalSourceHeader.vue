@@ -24,18 +24,28 @@ const emit = defineEmits<{
       <button
         type="button"
         class="approval-source-header__back"
+        aria-label="返回审批详情"
         data-testid="approval-source-back-top"
         @click="emit('back')"
       >
         <ArrowLeft class="h-4 w-4" aria-hidden="true" />
-        返回审批详情
       </button>
-      <span class="approval-source-header__sep" aria-hidden="true">/</span>
-      <span class="approval-source-header__current">{{ subjectLabel }}</span>
+      <div class="approval-source-header__breadcrumb">
+        <button
+          type="button"
+          class="approval-source-header__breadcrumb-back"
+          data-testid="approval-source-back-breadcrumb"
+          @click="emit('back')"
+        >
+          审批详情
+        </button>
+        <span class="approval-source-header__sep" aria-hidden="true">/</span>
+        <span class="approval-source-header__current" aria-current="page">{{ subjectLabel }}</span>
+      </div>
     </nav>
     <Alert variant="info" class="approval-source-header__banner" data-testid="approval-source-banner">
       <AlertDescription>
-        来自{{ source.approvalLabel }} {{ source.applicationNumber }} · 只读查看
+        来自{{ source.approvalLabel }} {{ source.applicationNumber }} · <span class="whitespace-nowrap">只读查看</span>
       </AlertDescription>
     </Alert>
   </div>
@@ -55,6 +65,7 @@ const emit = defineEmits<{
 
 .approval-source-header__nav {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: $wolf-space-sm-v2;
   min-width: 0;
@@ -62,7 +73,8 @@ const emit = defineEmits<{
   color: $wolf-text-secondary-v2;
 }
 
-.approval-source-header__back {
+.approval-source-header__back,
+.approval-source-header__breadcrumb-back {
   display: inline-flex;
   align-items: center;
   gap: $wolf-space-xs-v2;
@@ -83,10 +95,22 @@ const emit = defineEmits<{
 }
 
 .approval-source-header__current {
+  overflow-wrap: anywhere;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.approval-source-header__back {
+  justify-content: center;
+  width: 32px;
+}
+
+.approval-source-header__breadcrumb {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  min-width: 0;
 }
 
 .approval-source-header__banner {

@@ -285,14 +285,16 @@
       </DataTable>
 
     <!-- 详情 Sheet -->
-    <Sheet v-model:open="sheetVisible" @closed="onSheetClosed">
-      <DetailSheetContent>
+    <Sheet v-model:open="sheetVisible">
+      <DetailSheetContent aria-describedby="" @close-auto-focus="restoreListFocus">
+        <SheetTitle v-if="drillTarget === 'customer' || drillTarget === 'opportunity'" class="sr-only">{{ drillTarget === 'customer' ? '客户详情' : '商机详情' }}</SheetTitle>
+        <div v-show="drillTarget === null" class="flex flex-1 flex-col min-h-0 min-w-0">
         <!-- Header -->
         <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
-          <SheetTitle class="text-lg font-semibold">审批详情</SheetTitle>
-          <SheetDescription class="font-mono text-sm mt-1">
+          <SheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</SheetTitle>
+          <p class="font-mono text-sm mt-1">
             {{ selectedApproval?.application_number || '-' }}
-          </SheetDescription>
+          </p>
         </SheetHeader>
 
         <!-- Content -->
@@ -415,6 +417,14 @@
             {{ uploadFooterLabel }}
           </Button>
         </SheetFooter>
+        </div>
+        <div v-if="drillTarget !== null" ref="drillSurface" class="flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden">
+          <ContractDetailSheet v-if="drillTarget === 'contract'" :contract-id="Number(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+          <PaymentRecordDetailSheet v-else-if="drillTarget === 'payment'" :record-id="Number(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+          <InvoiceDetailSheet v-else-if="drillTarget === 'invoice'" :invoice-id="Number(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+          <OpportunityDetailSheet v-else-if="drillTarget === 'opportunity'" :opportunity-id="String(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+          <CustomerDetailSheet v-else-if="drillTarget === 'customer'" :customer-id="String(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
+        </div>
       </DetailSheetContent>
     </Sheet>
 
@@ -447,11 +457,6 @@
       @update:visible="handleInvoiceDetailSheetVisibleChange"
       @refresh="handleInvoiceDetailRefresh"
     />
-    <ContractDetailSheet :contract-id="drillTarget === 'contract' ? Number(drillId) : null" :visible="drillTarget === 'contract'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
-    <PaymentRecordDetailSheet :record-id="drillTarget === 'payment' ? Number(drillId) : null" :visible="drillTarget === 'payment'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
-    <InvoiceDetailSheet :invoice-id="drillTarget === 'invoice' ? Number(drillId) : null" :visible="drillTarget === 'invoice'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
-    <OpportunityDetailSheet :opportunity-id="drillTarget === 'opportunity' ? String(drillId) : null" :visible="drillTarget === 'opportunity'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
-    <CustomerDetailSheet :customer-id="drillTarget === 'customer' ? String(drillId) : null" :visible="drillTarget === 'customer'" elevated :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
 
     <LicenseIssueDialog
       v-if="selectedApproval?.business_type === 'LICENSE'"
@@ -548,7 +553,7 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from '@/components/ui/sheet'
+import { Sheet, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -673,8 +678,8 @@ const focusedRowEl = ref<HTMLElement | null>(null)
 const resubmitPendingId = ref<number | null>(null)
 const remindPendingId = ref<number | null>(null)
 
-type DrillTarget = Exclude<ApprovalSubjectLinkTarget, 'invoice'> | 'invoice'
-const drillTarget = ref<DrillTarget | null>(null)
+const drillTarget = ref<ApprovalSubjectLinkTarget | null>(null)
+const drillSurface = ref<HTMLElement | null>(null)
 const drillId = ref<number | string | null>(null)
 const approvalSource = computed<ApprovalSourceContext | null>(() => {
   const approval = selectedApproval.value
@@ -1299,6 +1304,9 @@ const openDrilldown = (target: ApprovalSubjectLinkTarget, id: string | number): 
   drillTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
   drillId.value = id
   drillTarget.value = target
+  void nextTick(() => {
+    drillSurface.value?.querySelector<HTMLElement>('[data-testid="approval-source-back-top"]')?.focus({ preventScroll: true })
+  })
 }
 
 const hasFieldDrilldown = (field: ApprovalSubjectField): boolean =>
@@ -1337,6 +1345,15 @@ const openDetail = (row: ApprovalListItem, index?: number): void => {
   sheetVisible.value = true
 }
 
+watch(sheetVisible, (open): void => {
+  if (!open) void nextTick(onSheetClosed)
+})
+
+const restoreListFocus = (event: Event): void => {
+  event.preventDefault()
+  getDetailTrigger(triggerRowIndex.value)?.focus({ preventScroll: true })
+}
+
 const onSheetClosed = (): void => {
   closeDrilldown()
   const target = focusedRowEl.value?.isConnected === true ? focusedRowEl.value : getDetailTrigger(triggerRowIndex.value)
@@ -1346,7 +1363,7 @@ const onSheetClosed = (): void => {
   markIssuedDialogVisible.value = false
   reissueCompleteDialogVisible.value = false
   licenseIssueDialogVisible.value = false
-  triggerRowIndex.value = -1
+  // Keep the list index until the dialog finishes its close-focus lifecycle.
 }
 
 const onApprovalActionDone = async (): Promise<void> => {

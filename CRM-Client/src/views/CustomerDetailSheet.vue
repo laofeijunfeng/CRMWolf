@@ -9,11 +9,10 @@
  */
 import { computed, ref, watch } from 'vue'
 import {
-  Sheet,
   SheetHeader,
   SheetFooter
 } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -68,6 +67,7 @@ interface Props {
   targetPanel?: CustomerDetailPanelTarget | null
   visible: boolean
   elevated?: boolean
+  embedded?: boolean
   /** 从审批详情下钻时传入：只读查看客户信息，并显示来源审批与返回入口 */
   sourceApproval?: ApprovalSourceContext | null
 }
@@ -76,6 +76,7 @@ const props = withDefaults(defineProps<Props>(), {
   targetOpportunityId: null,
   targetJourneyId: null,
   targetPanel: null,
+  embedded: false,
   sourceApproval: null,
 })
 const emit = defineEmits<{
@@ -849,8 +850,12 @@ watch(() => props.targetPanel, (panel): void => {
 </script>
 
 <template>
-  <Sheet :open="visible" @update:open="emit('update:visible', $event)">
-    <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
+  <DetailSheetSurface
+    :open="visible"
+    :embedded="embedded"
+    :elevated="elevated"
+    @update:open="emit('update:visible', $event)"
+  >
       <ApprovalSourceHeader
         v-if="sourceApproval"
         :source="sourceApproval"
@@ -1176,8 +1181,7 @@ watch(() => props.targetPanel, (panel): void => {
         </SheetFooter>
       </template>
       <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
-    </DetailSheetContent>
-  </Sheet>
+  </DetailSheetSurface>
 
   <!-- Dialogs -->
   <FollowUpFormDialog v-bind="elevated ? { elevated: true } : {}"
