@@ -7,7 +7,8 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingContent
+
+from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingContent  # noqa: TC001
 
 ActivityKind = Literal["FOLLOW_UP", "ONLINE_MEETING", "OFFLINE_MEETING"]
 CanonicalActivityKind = Literal[
@@ -53,7 +54,16 @@ TimeKind = Literal[
     "EXPLICIT_DATE", "MONTH_DAY", "DAY_OF_MONTH", "MONTH_SEGMENT", "FULL_MONTH", "RELATIVE_DAY",
     "RELATIVE_WEEK", "RELATIVE_MONTH", "RELATIVE_WEEKDAY", "UNKNOWN",
 ]
-TimeRole = Literal["CUSTOMER_COMMITMENT", "CUSTOMER_ACTION", "SALES_FOLLOW_UP", "INTERNAL_ACTION", "OTHER"]
+TimeRole = Literal[
+    "CUSTOMER_COMMITMENT",
+    "CUSTOMER_ACTION",
+    "SALES_FOLLOW_UP",
+    "INTERNAL_ACTION",
+    "COMMUNICATION_TIME",
+    "COMPLETED_EVENT",
+    "NON_BUSINESS_TIME",
+    "OTHER",
+]
 
 
 class ModelTemporalMention(BaseModel):

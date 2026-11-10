@@ -48,7 +48,8 @@ KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断
 - noise_spans 标出不属于沟通内容的片段，每项字段只有 kind、raw_text、quote_start、quote_end。
   kind 只能是 SPEAKER_TIMESTAMP 或 CHANNEL_MENTION。
   SPEAKER_TIMESTAMP 是会议转写、聊天记录里发言人旁边的发言时间或录音时间戳，
-  如「13:45 张总：」里的「13:45」、「[00:12:33]」、「说话人1 00:03」里的「00:03」、「张总 下午1:45」里的「下午1:45」；
+  如「13:45 张总：」里的「13:45」、「[00:12:33]」、「说话人1 00:03」里的「00:03」、
+  「张总 下午1:45」里的「下午1:45」；
   只标时间本身，不标发言人。
   CHANNEL_MENTION 是按上一条不算渠道的渠道词，只标渠道词本身（如「邮件」），不标整句。
   约定时间、截止时间、下次联系时间和本次实际使用的渠道不能标。拿不准就不标；没有就返回空列表。
@@ -63,13 +64,30 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
 - content 覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实。
 - customer_name 只填原文明确出现的客户名称，没有则留空。
 - next_action 忠于原文，没有则留空。
-- content_json 必须完整填写：content、customer_feedback、current_progress、risks、next_action、next_action_absence_reason、next_follow_time_text；没有对应事实的字段也必须返回空值，不得省略。
-- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，不得把缺少行动推断成暂无行动。
+- content_json 必须完整填写：content、customer_feedback、current_progress、risks、
+  next_action、next_action_absence_reason、next_follow_time_text；
+  没有对应事实的字段也必须返回空值，不得省略。
+- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，
+  不得把缺少行动推断成暂无行动。
 - 不确定的信息一律留空，禁止编造。
 - 会议转写或聊天记录里，客户方发言人说的「我们」「我们这边」指客户自己，
   对应时间的 role 是 CUSTOMER_COMMITMENT 或 CUSTOMER_ACTION，不是销售下次跟进。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
-- actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、action_status、evidence_quote、quote_start、quote_end。owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
+- SALES_FOLLOW_UP 只用于明确的、未来由销售发起或负责的跟进时间。COMMUNICATION_TIME 仅用于录音、
+  转写或记录元数据中的时间；COMPLETED_EVENT 仅用于已经完成的历史事件时间；
+  NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
+  但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
+  role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+  DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
+  RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
+  月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
+  不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、
+  SALES_FOLLOW_UP、INTERNAL_ACTION、COMMUNICATION_TIME、COMPLETED_EVENT、
+  NON_BUSINESS_TIME、OTHER。不要输出 ISO 日期或公历结果。
+- actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
+  action_status、evidence_quote、quote_start、quote_end。
+  owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、
+  COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
 - quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
 只输出结构化结果。"""
 
@@ -78,16 +96,35 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
 规则：
 - customer_name 只填原文明确出现的客户（公司）名称，没有则留空。
 - meeting_subject 填会议主题；content 按发言人分组整理关键讨论、客户诉求、决策和承诺。
-- content_json 必须完整填写 meeting_subject、meeting_background、communication_context、participants（internal/customer）、key_minutes、qa_items、requirements、concerns_or_objections、risks、decisions_or_commitments、action_items、next_step_summary、next_action_absence_reason；没有对应事实的字段也必须返回空值，不得省略。
-- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，不得把缺少行动推断成暂无行动。
+- content_json 必须完整填写 meeting_subject、meeting_background、
+  communication_context、participants（internal/customer）、key_minutes、
+  qa_items、requirements、concerns_or_objections、risks、
+  decisions_or_commitments、action_items、next_step_summary、
+  next_action_absence_reason；没有对应事实的字段也必须返回空值，不得省略。
+- next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，
+  不得把缺少行动推断成暂无行动。
 - action_items 每项均包含 owner、action、due_date，保留原文的所有行动项，不可只保留首条。
 - participants 区分我方与客户方成员及其角色，只有「双方参会」时保留原样。
 - next_action 填首要行动项，尽量含负责人和时间；原文没有则留空。
 - 不确定的信息一律留空，禁止编造。
 - 会议转写或聊天记录里，客户方发言人说的「我们」「我们这边」指客户自己，
   对应时间的 role 是 CUSTOMER_COMMITMENT 或 CUSTOMER_ACTION，不是销售下次跟进。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、SALES_FOLLOW_UP、INTERNAL_ACTION、OTHER。不要输出 ISO 日期或公历结果。
-- actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、action_status、evidence_quote、quote_start、quote_end。owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
+- SALES_FOLLOW_UP 只用于明确的、未来由销售发起或负责的跟进时间。COMMUNICATION_TIME 仅用于录音、
+  转写或记录元数据中的时间；COMPLETED_EVENT 仅用于已经完成的历史事件时间；
+  NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
+  但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
+  role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+  DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
+  RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
+  月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
+  不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、
+  SALES_FOLLOW_UP、INTERNAL_ACTION、COMMUNICATION_TIME、COMPLETED_EVENT、
+  NON_BUSINESS_TIME、OTHER。不要输出 ISO 日期或公历结果。
+- actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
+  action_status、evidence_quote、quote_start、quote_end。
+  owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、
+  COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
 - quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
 只输出结构化结果。"""
 
@@ -154,7 +191,15 @@ class AssistantLLM:
             raise AssistantLLMError(f"{label}：结构化输出无效") from exc
 
     async def classify_kind(self, db: Session, *, team_id: int, user_text: str) -> KindDecision:
-        decision = await self._invoke(db, team_id, KIND_SYSTEM_PROMPT, user_text, KindDecision, "活动类型判断", timeout_seconds=30)
+        decision = await self._invoke(
+            db,
+            team_id,
+            KIND_SYSTEM_PROMPT,
+            user_text,
+            KindDecision,
+            "活动类型判断",
+            timeout_seconds=30,
+        )
         if "kind" not in decision.model_fields_set:
             raise AssistantLLMError("活动类型判断：缺少活动类型")
         return decision
