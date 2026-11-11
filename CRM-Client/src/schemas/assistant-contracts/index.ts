@@ -63,6 +63,23 @@ export const ActivityPreviewSchema = z.object({
   next_follow_time: z.string().nullable().optional(),
   next_follow_time_text: z.string().nullable().optional(),
   next_follow_time_granularity: z.enum(['DATE', 'DATETIME', 'UNKNOWN']).optional(),
+  comparison: z.object({
+    kind: z.enum(['CUSTOMER_COMMITMENT', 'RESCHEDULE']),
+    subject: z.string().min(1).max(80),
+    action_id: z.string().min(1).max(100),
+    summary: z.string().min(1).max(300),
+    current: z.object({
+      segment_id: z.string().min(1).max(100), quote_start: z.number().int().nonnegative(),
+      quote_end: z.number().int().nonnegative(), quote: z.string().min(1).max(500)
+    }).strict(),
+    previous: z.object({
+      ref: z.string().min(1).max(16), source_type: z.string().min(1).max(40), occurred_at: z.string().nullable().optional(),
+      quote_start: z.number().int().nonnegative(), quote_end: z.number().int().nonnegative(), quote: z.string().min(1).max(120)
+    }).strict(),
+    previous_date: z.string().nullable().optional(),
+    current_date: z.string().nullable().optional()
+  }).strict().nullable().optional(),
+  context_status: z.string().max(120).nullable().optional(),
   change_signal: z.enum(['推进', '持平', '放缓', '待确认']).nullable().optional(),
   change_summary: z.string().nullable().optional(),
   opportunity_name: z.string().nullable().optional(),

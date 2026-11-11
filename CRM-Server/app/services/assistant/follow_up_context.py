@@ -9,11 +9,19 @@ This pack is a separate, permission-filtered read for one follow-up confirmation
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import ValidationError
+
+from app.services.assistant.action_evidence import SourceSegment, parse_deadline
+from app.services.assistant.contracts import ComparisonCurrentSource, ComparisonHistoricalSource, FollowUpComparison
+
 from app.services.assistant.llm import AssistantLLM, AssistantLLMError
+from app.services.assistant.llm_contracts import ChangeJudgment
+from app.services.assistant.temporal_evidence import PROTOCOL_VERSION, StoredAction, StoredMention
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +32,6 @@ if TYPE_CHECKING:
     from app.models.opportunity import Opportunity
 
 SectionStatus = Literal["ready", "empty", "denied", "failed"]
-Signal = Literal["推进", "持平", "放缓", "待确认"]
 ChoiceKind = Literal["bound", "ask", "none", "unavailable", "stale"]
 
 AUTO_CONFIDENCE = 0.85
@@ -32,15 +39,6 @@ AUTO_MARGIN = 0.25
 ACTIVITY_LIMIT = 5
 ACTIVITY_WINDOW_DAYS = 90
 SUMMARY_LIMIT = 80
-HESITATION_PHRASES = ("再考虑", "考虑一下", "再看看")
-
-SIGNAL_SUMMARY: dict[str, str] = {
-    "推进": "这次出现了新的确认或下一步。",
-    "持平": "这次和近期记录相比，没有足够的新变化。",
-    "放缓": "这次出现了等待或延期，还不是丢单。",
-    "待确认": "现有依据不够，先不判断变化。",
-}
-CONFLICT_SUMMARY = "来源有冲突，先不判断变化。"
 NOTICE_NO_ACTIVITY = "暂无近期已确认跟进"
 NOTICE_NO_OPPORTUNITY = "没有进行中商机"
 NOTICE_DENIED = "没有权限查看这部分内容"
@@ -49,6 +47,8 @@ NOTICE_STALE = "数据可能已过期"
 OPPORTUNITY_PROMPT = "请选择这次沟通对应的商机。"
 
 CONTEXT_COMMAND_KEYS = (
+    "comparison",
+    "context_status",
     "change_signal",
     "change_summary",
     "opportunity_name",
@@ -89,7 +89,12 @@ class EvidencePack:
     as_of: str | None = None
 
     def known_refs(self) -> set[str]:
-        return {item.ref for item in (*self.activities, *self.tasks, *self.commitments)}
+        return {
+            item.ref
+            for status, items in ((self.activities_status, self.activities), (self.tasks_status, self.tasks),
+                                  (self.commitments_status, self.commitments))
+            if status == "ready" for item in items
+        }
 
     def model_items(self) -> list[dict[str, str | None]]:
         return [
@@ -99,7 +104,9 @@ class EvidencePack:
                 "occurred_at": item.occurred_at,
                 "summary": item.summary,
             }
-            for item in (*self.activities, *self.tasks, *self.commitments)
+            for status, items in ((self.activities_status, self.activities), (self.tasks_status, self.tasks),
+                                  (self.commitments_status, self.commitments))
+            if status == "ready" for item in items
         ]
 
 
@@ -115,8 +122,8 @@ class OpportunityChoice:
 
 @dataclass(frozen=True)
 class ChangeCard:
-    change_signal: str
-    change_summary: str
+    comparison: FollowUpComparison | None
+    context_status: str | None
     opportunity_name: str | None
     opportunity_stage: str | None
     context_as_of: str | None
@@ -125,8 +132,8 @@ class ChangeCard:
 
     def as_command(self) -> dict[str, object]:
         return {
-            "change_signal": self.change_signal,
-            "change_summary": self.change_summary,
+            "comparison": self.comparison.model_dump(mode="json") if self.comparison is not None else None,
+            "context_status": self.context_status,
             "opportunity_name": self.opportunity_name,
             "opportunity_stage": self.opportunity_stage,
             "context_as_of": self.context_as_of,
@@ -204,62 +211,174 @@ def _ask(options: list[OpportunityOption]) -> OpportunityChoice:
     return OpportunityChoice("ask", candidates=candidates)
 
 
-def decide_signal(
-    *,
-    proposed: str,
-    uses: list[tuple[str, str]],
-    known_refs: set[str],
-    user_text: str,
-) -> tuple[str, str]:
-    """Canonical sentence only. 放缓 requires an in-window citation, so 再考虑 alone cannot become 放缓."""
+def _quote_matches(text: str, start: int, end: int, quote: str) -> bool:
+    return 0 <= start < end <= len(text) and text[start:end] == quote
 
-    valid = [(ref, relation) for ref, relation in uses if ref in known_refs]
-    relations = {relation for _, relation in valid}
-    if "冲突" in relations or {"推进", "放缓"} <= relations:
-        return "待确认", CONFLICT_SUMMARY
-    signal = proposed if proposed in SIGNAL_SUMMARY else "待确认"
-    cited_slowdown = any(relation == "放缓" for _, relation in valid)
-    hesitation = any(phrase in user_text for phrase in HESITATION_PHRASES)
-    if signal == "放缓" and (not cited_slowdown or (hesitation and not cited_slowdown)):
-        signal = "待确认"
-    return signal, SIGNAL_SUMMARY[signal]
+
+def _matter_clause(text: str, subject: str, *, quoted: str) -> str | None:
+    """A quote must include the one complete source clause naming this matter."""
+
+    clauses = [match.group().strip() for match in re.finditer(r"[^，,。；;！？!?\n]+", text) if subject in match.group()]
+    if len(clauses) != 1 or clauses[0].count(subject) != 1 or clauses[0] not in quoted:
+        return None
+    return clauses[0]
+
+
+def _matter_predicate(clause: str, subject: str, predicate: str) -> bool:
+    # Do not borrow a predicate/date from an unpunctuated second matter either.
+    suffix = clause.split(subject, 1)[1].strip()
+    return re.match(r"(?:的)?(?:时间|日期|计划)?" + predicate, suffix) is not None
+
+
+def verify_comparison(
+    judged: ChangeJudgment,
+    *,
+    pack: EvidencePack,
+    source_records: list[SourceSegment],
+    content_json: dict[str, object],
+) -> FollowUpComparison | None:
+    """Validate both source authorities before allowing one concrete, nonduplicated difference."""
+
+    candidate = judged.candidate
+    if candidate is None or judged.classification not in {"CUSTOMER_COMMITMENT", "RESCHEDULE"}:
+        return None
+    expected_increment = "DATE_CHANGED" if judged.classification == "RESCHEDULE" else "NEW_CUSTOMER_CONFIRMATION"
+    if candidate.increment != expected_increment:
+        return None
+    current, previous = candidate.current, candidate.previous
+    records = {item.segment_id: item for item in source_records}
+    record = records.get(current.segment_id)
+    if record is None or not _quote_matches(record.text, current.quote_start, current.quote_end, current.quote):
+        return None
+    if len(records) != len(source_records):
+        return None
+    sections = (
+        (pack.activities_status, pack.activities), (pack.tasks_status, pack.tasks),
+        (pack.commitments_status, pack.commitments),
+    )
+    history = next((item for status, items in sections if status == "ready" for item in items if item.ref == previous.ref), None)
+    if history is None or not _quote_matches(history.summary, previous.quote_start, previous.quote_end, previous.quote):
+        return None
+    # Historical summaries are a separate authority, never another copy of current speech.
+    if any(previous.quote in item.text for item in source_records):
+        return None
+    bundle = content_json.get("temporal_evidence")
+    if not isinstance(bundle, dict) or bundle.get("version") != PROTOCOL_VERSION:
+        return None
+    try:
+        actions = [StoredAction.model_validate(item) for item in bundle.get("actions", [])]
+        mentions = [StoredMention.model_validate(item) for item in bundle.get("mentions", [])]
+    except (ValidationError, TypeError):
+        return None
+    matching = [item for item in actions if item.action_id == candidate.action_id and item.state == "ACTIVE"]
+    if len(matching) != 1:
+        return None
+    action = matching[0]
+    if action.owner_role != "CUSTOMER" or action.action_status != "COMMITTED":
+        return None
+    if action.source_segment_id != current.segment_id:
+        return None
+    if not _quote_matches(record.text, action.quote_start, action.quote_end, action.evidence_quote):
+        return None
+    if not (current.quote_start <= action.quote_start < action.quote_end <= current.quote_end):
+        return None
+    linked = [item for item in mentions if item.action_id == action.action_id and item.state == "ACTIVE"]
+    if any(item.role != "CUSTOMER_COMMITMENT" for item in linked):
+        return None
+    if action.temporal_mention_id is not None and not any(item.mention_id == action.temporal_mention_id for item in linked):
+        return None
+    # The same literal matter must be present in both sources and the already accepted action.
+    subject = candidate.subject.strip()
+    if len(subject) < 2 or any(subject not in text for text in (action.action_text, current.quote, previous.quote)):
+        return None
+    historical_clause = _matter_clause(history.summary, subject, quoted=previous.quote)
+    if historical_clause is None:
+        return None
+    previous_date = current_date = None
+    if judged.classification == "RESCHEDULE":
+        if not candidate.previous_date or not candidate.current_date or not history.occurred_at:
+            return None
+        if not _matter_predicate(
+            historical_clause, subject,
+            r"(?:原定|定于|安排在|安排为|原为|为|是|在|于|已确认|确认|定在)?\s*" + re.escape(candidate.previous_date),
+        ):
+            return None
+        current_clause = _matter_clause(action.evidence_quote, subject, quoted=current.quote)
+        if current_clause is None or not _matter_predicate(
+            current_clause, subject,
+            r"(?:现|现已|已)?(?:改至|改到|改为|延期至|延期到|推迟至|推迟到|延后至|延后到)\s*" + re.escape(candidate.current_date),
+        ):
+            return None
+        active_dates = [
+            item for item in mentions
+            if item.mention_id == action.temporal_mention_id and item.action_id == action.action_id
+            and item.state == "ACTIVE" and item.role == "CUSTOMER_COMMITMENT"
+            and item.resolution_status == "RESOLVED" and item.resolved_at is not None
+        ]
+        if len(active_dates) != 1:
+            return None
+        mention = active_dates[0]
+        if mention.source_segment_id != record.segment_id or mention.raw_text != candidate.current_date:
+            return None
+        if not _quote_matches(record.text, mention.quote_start, mention.quote_end, mention.raw_text):
+            return None
+        if not (action.quote_start <= mention.quote_start < mention.quote_end <= action.quote_end):
+            return None
+        try:
+            old_at, old_granularity = parse_deadline(candidate.previous_date, anchor=datetime.fromisoformat(history.occurred_at))
+            new_at, new_granularity = parse_deadline(candidate.current_date, anchor=record.recorded_at)
+        except (ValueError, TypeError):
+            return None
+        if old_at is None or new_at is None or old_granularity not in {"DATE", "DATETIME"} or new_granularity not in {"DATE", "DATETIME"}:
+            return None
+        if old_granularity != new_granularity or new_at != mention.resolved_at or new_at <= old_at:
+            return None
+        if new_granularity == "DATETIME":
+            precision = "seconds" if old_at.second or new_at.second else "minutes"
+            previous_date = old_at.isoformat(sep=" ", timespec=precision)
+            current_date = new_at.isoformat(sep=" ", timespec=precision)
+        else:
+            previous_date, current_date = old_at.date().isoformat(), new_at.date().isoformat()
+        summary = f"{subject}由 {previous_date} 改至 {current_date}。"
+    else:
+        # An already recorded commitment is not a new confirmation. With no explicit
+        # historical absence of an arrangement, prefer omitting a speculative increment.
+        if not _matter_predicate(
+            historical_clause, subject,
+            r"(?:仍|还|目前|此前)?(?:尚未|未定|待定|未明确|未确认|待确认|待确定|没有明确)",
+        ):
+            return None
+        summary = f"此前记录：{historical_clause}；本次已明确，具体承诺见上方。"
+    return FollowUpComparison(
+        kind=judged.classification, subject=subject, action_id=action.action_id, summary=summary,
+        current=ComparisonCurrentSource(**current.model_dump()),
+        previous=ComparisonHistoricalSource(**previous.model_dump(), source_type=history.source_type, occurred_at=history.occurred_at),
+        previous_date=previous_date, current_date=current_date,
+    )
 
 
 def render_change_card(
     pack: EvidencePack,
     choice: OpportunityChoice,
     *,
-    signal: str,
-    summary: str,
-    uses: list[tuple[str, str]],
+    comparison: FollowUpComparison | None,
+    status: str | None,
 ) -> ChangeCard:
-    relations = {ref: relation for ref, relation in uses if ref in pack.known_refs()}
-    cited = [item for item in (*pack.activities, *pack.tasks, *pack.commitments) if item.ref in relations]
-    highlights = cited[:2]
-    if not highlights and pack.activities:
-        highlights = pack.activities[:1]
-    highlight_refs = {item.ref for item in highlights}
     evidence = [
-        {
-            "source_type": item.source_type,
-            "occurred_at": item.occurred_at,
-            "summary": item.summary,
-            "relation": relations.get(item.ref, "背景"),
-            "key": item.ref in highlight_refs,
-        }
-        for item in (*pack.activities, *pack.tasks, *pack.commitments)
+        {"source_type": item.source_type, "occurred_at": item.occurred_at, "summary": item.summary,
+         "relation": "背景", "key": False}
+        for section, items in ((pack.activities_status, pack.activities), (pack.tasks_status, pack.tasks),
+                               (pack.commitments_status, pack.commitments))
+        if section == "ready" for item in items
+        if comparison is None or item.ref != comparison.previous.ref
     ]
     show_opportunity = choice.kind == "bound"
-    notices = _dedupe([*pack.notices, *choice.notices])
-    if signal == "待确认" and summary == CONFLICT_SUMMARY and CONFLICT_SUMMARY not in notices:
-        notices = _dedupe([CONFLICT_SUMMARY, *notices])
     return ChangeCard(
-        change_signal=signal,
-        change_summary=summary,
+        comparison=comparison, context_status=status,
         opportunity_name=choice.name if show_opportunity else None,
         opportunity_stage=choice.stage if show_opportunity else None,
         context_as_of=pack.as_of,
-        context_notices=tuple(notices),
+        context_notices=tuple(_dedupe([*pack.notices, *choice.notices])),
         context_evidence=tuple(evidence),
     )
 
@@ -548,29 +667,36 @@ class RealFollowUpContext:
         db: Session,
         *,
         team_id: int,
-        user_text: str,
         pack: EvidencePack,
         choice: OpportunityChoice,
+        source_records: list[SourceSegment | dict[str, object]],
+        content_json: dict[str, object],
     ) -> ChangeCard:
-        uses: list[tuple[str, str]] = []
-        proposed = "待确认"
-        if choice.kind not in {"unavailable", "stale"}:
+        comparison = None
+        status = "未形成可验证的历史对比，仍可确认本次活动。"
+        try:
+            records = [SourceSegment.model_validate(item) for item in source_records]
+        except (ValidationError, TypeError):
+            records = []
+        if choice.kind not in {"unavailable", "stale"} and records and pack.known_refs():
             try:
                 judged = await self.llm.judge_change(
-                    db,
-                    team_id=team_id,
-                    user_text=user_text,
+                    db, team_id=team_id,
+                    source_records=[item.model_dump(mode="json") for item in records],
+                    action_evidence=content_json.get("temporal_evidence"),
                     evidence=pack.model_items(),
                     opportunity_name=choice.name if choice.kind == "bound" else None,
                     opportunity_stage=choice.stage if choice.kind == "bound" else None,
                 )
-                proposed = judged.signal
-                uses = [(item.ref, item.relation) for item in judged.uses]
-            except AssistantLLMError:
-                proposed = "待确认"
-        signal, summary = decide_signal(
-            proposed=proposed, uses=uses, known_refs=pack.known_refs(), user_text=user_text
-        )
-        if choice.kind in {"unavailable", "stale"}:
-            signal, summary = "待确认", SIGNAL_SUMMARY["待确认"]
-        return render_change_card(pack, choice, signal=signal, summary=summary, uses=uses)
+                comparison = verify_comparison(judged, pack=pack, source_records=records, content_json=content_json)
+                if comparison is not None:
+                    status = None
+                elif judged.classification == "SALES_ACTION":
+                    status = "本次是销售行动，不作为客户新增承诺。"
+                elif judged.classification == "NO_CHANGE":
+                    status = "未发现可单独展示的历史差异。"
+            except (AssistantLLMError, ValidationError, TypeError, ValueError):
+                status = "历史对比暂时不可用，仍可确认本次活动。"
+        elif not pack.known_refs():
+            status = "暂无可用于比较的授权历史，本次活动仍可确认。"
+        return render_change_card(pack, choice, comparison=comparison, status=status)

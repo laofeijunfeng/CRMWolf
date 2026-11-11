@@ -300,7 +300,8 @@ class AssistantLLM:
         db: Session,
         *,
         team_id: int,
-        user_text: str,
+        source_records: list[dict[str, object]],
+        action_evidence: object,
         evidence: list[dict[str, object]],
         opportunity_name: str | None,
         opportunity_stage: str | None,
@@ -310,12 +311,23 @@ class AssistantLLM:
         return await self._invoke(
             db,
             team_id,
-            "你只判断这次跟进相对给定证据的变化信号：推进、持平、放缓或待确认。"
-            "只能引用给定 ref。relation 只能是推进、持平、放缓、冲突或背景。"
-            "“再考虑”本身不是放缓，不得判断输单、退步或商机回退。只输出结构化结果。",
+            "你只提名一个可核实的历史差异，明确延期优先。classification 为 CUSTOMER_COMMITMENT（客户新增确认或承诺）、"
+            "SALES_ACTION（销售自己的行动）、RESCHEDULE（同一客户事项明确延期）、NO_CHANGE 或 INSUFFICIENT_EVIDENCE。"
+            "仅销售回访、发资料不能成为客户进展。不得判断输单、阶段回退或意愿。"
+            "candidate 只能绑定给定 temporal_evidence 的 ACTIVE、CUSTOMER、COMMITTED 动作 action_id；"
+            "subject 必须是当前动作、本次原话、历史摘要三者都包含的同一具体事项原文。"
+            "current 用 source_records 的 segment_id 和该段原文精确 quote_start/quote_end；"
+            "previous 用 evidence 的 ref 和 summary 内的精确区间（左闭右开）。历史摘要不是客户原话。"
+            "不得用本次原话作为历史。无历史或引用不够就 candidate=null。"
+            "新增客户确认只有历史明确尚未确认而本次确认才有增量，increment=NEW_CUSTOMER_CONFIRMATION。"
+            "延期 increment=DATE_CHANGED，必须同一事项有明确改期词，previous_date/current_date 逐字来自两侧引用，"
+            "并与已接受的动作日期一致。历史80字摘要缺日期就放弃。"
+            "已在正文/客户承诺/下一步表达的行动不再复述；没有历史增量用 NONE 或 candidate=null。"
+            "不输出自由结论或抽象推进/持平/放缓标签，只输出结构化结果。",
             json.dumps(
                 {
-                    "follow_up": user_text,
+                    "source_records": source_records,
+                    "temporal_evidence": action_evidence,
                     "evidence": evidence,
                     "opportunity_name": opportunity_name,
                     "opportunity_stage": opportunity_stage,

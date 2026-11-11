@@ -437,7 +437,7 @@ def test_written_activity_lists_accepted_snapshot_facts_once() -> None:
     assert "不该出现的候选正文" not in result.message
 
 
-def test_confirmation_keeps_distinct_risk_notices_and_drops_the_repeated_summary() -> None:
+def test_confirmation_preserves_legacy_conflict_and_distinct_notices_once() -> None:
     waiting = _confirmation(
         _preview(
             change_signal="待确认",
@@ -450,8 +450,8 @@ def test_confirmation_keeps_distinct_risk_notices_and_drops_the_repeated_summary
     envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
     interaction = envelope.blocks[0]
     assert interaction.type == "interaction"
-    notices = [fact.value for fact in interaction.facts if fact.key.startswith("context_notice_")]
-    assert notices == ["没有权限查看这部分内容"]
+    notices = [fact.value for fact in interaction.facts if fact.key == "context_status"]
+    assert notices == ["来源有冲突，先不判断变化。；没有权限查看这部分内容"]
     assert interaction.submit_action_id == "act_1"
 
 
@@ -745,7 +745,7 @@ def test_confirmation_card_splits_customer_segment_from_sales_date() -> None:
     assert labels["customer_commitment"] == "客户承诺"
     assert values["customer_commitment"] == "下个月初付款（模糊时间，未确定具体日期）"
     assert values["next_follow_time"] == "2026年11月5日（周四）09:00"
-    assert facts["next_follow_time"].status_label == "未说时刻，默认 09:00 提醒"
+    assert facts["next_follow_time"].status_label == "默认时刻"
     assert facts["next_follow_time"].source == "原话：“11 月 5 号”"
     assert values["next_action"] == "跟进付款进展"
 
@@ -971,7 +971,7 @@ def test_follow_time_shows_the_frozen_year_and_default_reminder_hour() -> None:
     )
     assert (fact.value, fact.status_label, fact.source) == (
         "2027年1月15日（周五）09:00",
-        "未说时刻，默认 09:00 提醒",
+        "默认时刻",
         "原话：“明年 1 月 15 号”",
     )
 
@@ -1107,3 +1107,48 @@ def test_required_kind_keeps_the_reason_when_the_text_names_no_channel() -> None
     fact = next(item for item in interaction.facts if item.key == "activity_kind")
     assert fact.source == "原文没有写明渠道"
     assert [option.label for option in fact.options] == [_KIND_LABELS[kind] for kind in FOLLOW_UP_KINDS]
+
+
+def test_verified_comparison_keeps_both_sources_and_score_with_full_details() -> None:
+    preview = _preview(
+        comparison={
+            "kind": "RESCHEDULE", "subject": "评审", "action_id": "action_1",
+            "summary": "评审由11月12日改至11月13日",
+            "current": {"segment_id": "s1", "quote_start": 0, "quote_end": 12, "quote": "客户将评审改至11月13日"},
+            "previous": {
+                "ref": "A1", "source_type": "电话跟进", "occurred_at": "2026-11-10",
+                "quote_start": 0, "quote_end": 9, "quote": "评审定于11月12日",
+            },
+            "previous_date": "2026-11-12", "current_date": "2026-11-13",
+        },
+        opportunity_name="续费项目", opportunity_stage="方案评审",
+        context_status="已核对历史记录", context_notices=[f"来源提示{i}" for i in range(12)],
+        ignored_noise_summary="已忽略发言时间",
+        next_follow_time="2026-11-13T09:00:00", next_follow_time_granularity="DATE",
+    )
+    envelope = project_assistant_message(
+        _message("comparison", "确认", _task(waiting=_confirmation(preview))),
+        active_waiting=True, active_boundary=False,
+    )
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    facts = {fact.key: fact for fact in interaction.facts}
+    assert len(facts) <= 20
+    assert facts["comparison_current"].value == "客户将评审改至11月13日"
+    assert facts["comparison_previous"].value == "评审定于11月12日"
+    assert facts["comparison_previous"].source == "电话跟进 · 2026-11-10"
+    assert facts["opportunity"].value == "续费项目 · 方案评审"
+    assert facts["score"].value == "88 / 100"
+    assert facts["score_reason"].value == "原评分"
+    assert "change_signal" not in facts
+
+
+def test_legacy_signal_is_not_promoted_to_an_unverified_comparison() -> None:
+    preview = _preview(change_signal="推进", change_summary="旧判断", opportunity_name="旧商机")
+    envelope = project_assistant_message(
+        _message("legacy", "确认", _task(waiting=_confirmation(preview))),
+        active_waiting=False, active_boundary=False,
+    )
+    interaction = next(block for block in envelope.blocks if block.type == "interaction")
+    assert {fact.key for fact in interaction.facts}.isdisjoint({"change_signal", "change_summary"})
+    assert next(fact.value for fact in interaction.facts if fact.key == "opportunity") == "旧商机"
+    assert interaction.submit_action_id is None

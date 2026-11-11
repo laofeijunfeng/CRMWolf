@@ -32,6 +32,45 @@ class ContextEvidence(BaseModel):
     key: bool = False
 
 
+class ComparisonCurrentSource(BaseModel):
+    """Verified original quote, frozen with source-local coordinates."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    segment_id: str = Field(min_length=1, max_length=100)
+    quote_start: int = Field(ge=0)
+    quote_end: int = Field(ge=0)
+    quote: str = Field(min_length=1, max_length=500)
+
+
+class ComparisonHistoricalSource(BaseModel):
+    """Quote from the authorized historical summary, not attributed customer speech."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    ref: str = Field(min_length=1, max_length=16)
+    source_type: str = Field(min_length=1, max_length=40)
+    occurred_at: str | None = None
+    quote_start: int = Field(ge=0)
+    quote_end: int = Field(ge=0)
+    quote: str = Field(min_length=1, max_length=120)
+
+
+class FollowUpComparison(BaseModel):
+    """At most one server-verified historical difference; never a stage judgment."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    kind: Literal["CUSTOMER_COMMITMENT", "RESCHEDULE"]
+    subject: str = Field(min_length=1, max_length=80)
+    action_id: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=300)
+    current: ComparisonCurrentSource
+    previous: ComparisonHistoricalSource
+    previous_date: str | None = None
+    current_date: str | None = None
+
+
 class ActivityPreview(BaseModel):
     """The public subset of the frozen command; never a mutable draft."""
 
@@ -64,6 +103,9 @@ class ActivityPreview(BaseModel):
     next_follow_time: str | None = None
     next_follow_time_text: str | None = None
     next_follow_time_granularity: Literal["DATE", "DATETIME", "UNKNOWN"] = "UNKNOWN"
+    comparison: FollowUpComparison | None = None
+    context_status: str | None = Field(default=None, max_length=120)
+    # Persisted previews only: generation no longer emits the old signal contract.
     change_signal: Literal["推进", "持平", "放缓", "待确认"] | None = None
     change_summary: str | None = Field(default=None, max_length=80)
     opportunity_name: str | None = None

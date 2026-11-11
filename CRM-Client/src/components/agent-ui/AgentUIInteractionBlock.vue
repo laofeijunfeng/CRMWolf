@@ -207,12 +207,19 @@ const submitManualDate = (): void => {
 }
 
 const kindEditorOpen = ref(false)
+const activityReferenceRef = ref<HTMLDetailsElement | null>(null)
+const activityHistoryHeadingRef = ref<HTMLElement | null>(null)
 const isActivityConfirmation = computed(() => props.block.business_action === 'confirm_activity_write')
 const activityFact = (key: string): InteractionBlock['facts'][number] | undefined => props.block.facts.find(fact => fact.key === key)
 const activityKindFact = computed(() => activityFact('activity_kind'))
 const activityScoreFact = computed(() => activityFact('score'))
 const activityScoreReason = computed(() => activityFact('score_reason'))
-const activityContext = computed(() => activityFact('change_signal'))
+const activityChangeSummary = computed(() => activityFact('change_summary'))
+const activityComparisonCurrent = computed(() => activityFact('comparison_current'))
+const activityComparisonPrevious = computed(() => activityFact('comparison_previous'))
+const activityContextStatus = computed(() => activityFact('context_status'))
+const activityLegacyContext = computed(() => activityFact('change_signal'))
+const activityTimeFact = computed(() => activityFact('next_follow_time'))
 const activityOpportunity = computed(() => activityFact('opportunity'))
 const activityEvidence = computed(() => activityFact('context_evidence'))
 const activityEvidenceLines = computed(() => (activityEvidence.value?.value ?? '').split('；').map(line => line.trim()).filter(line => line !== ''))
@@ -221,15 +228,26 @@ const activityIgnoredNoise = computed(() => activityFact('ignored_noise'))
 const activitySourceFolded = computed(() => {
   const fact = activityKindFact.value
   if (fact === undefined || fact.source === null || fact.source === undefined || fact.source === '') return ''
-  if (fact.status_label === '未识别 · 需要确认' || fact.status_label === '已选择') return ''
+  if (fact.status_label === '未识别 · 需要确认') return ''
   return fact.source
 })
-const showActivityBasis = computed(() => activitySourceFolded.value !== '' || activityEvidenceLines.value.length > 0)
-const activityScoreNumber = computed(() => (activityScoreFact.value?.value ?? '').split('/')[0]?.trim() ?? '')
-const activityPassed = computed(() => {
-  const score = Number(activityScoreNumber.value)
-  return Number.isFinite(score) && score >= 60
-})
+const showActivityOrganizingBasis = computed(() => Boolean(
+  activityScoreFact.value || activityScoreReason.value || activitySourceFolded.value
+  || (activityTimeFact.value?.source ?? '') !== '' || activityIgnoredNoise.value
+))
+const showActivityHistory = computed(() => Boolean(
+  activityChangeSummary.value || activityComparisonCurrent.value || activityComparisonPrevious.value
+  || activityContextStatus.value || activityLegacyContext.value || activityEvidenceLines.value.length > 0
+  || activityNotices.value.length > 0
+))
+const showActivityBasis = computed(() => showActivityHistory.value || activityOpportunity.value || showActivityOrganizingBasis.value)
+const openActivityComparison = async (): Promise<void> => {
+  if (activityReferenceRef.value === null) return
+  activityReferenceRef.value.open = true
+  await nextTick()
+  activityHistoryHeadingRef.value?.focus({ preventScroll: true })
+  activityHistoryHeadingRef.value?.scrollIntoView?.({ block: 'nearest' })
+}
 const activityHistory = computed(() => props.block.state === 'READ_ONLY')
 const activityWaitingLabel = computed(() => {
   if (activityHistory.value) return '历史'
@@ -588,7 +606,7 @@ const submit = async (): Promise<void> => {
     ref="interactionRef"
     class="agent-ui-interaction grid rounded-wolf-surface p-3"
     :class="isActivityConfirmation
-      ? (block.state === 'READ_ONLY' ? 'activity-card gap-0 overflow-hidden border border-dashed border-[#cbd5e1] bg-white p-0' : 'activity-card gap-0 overflow-hidden border border-[#e2e8f0] bg-white p-0')
+      ? (block.state === 'READ_ONLY' ? 'activity-card gap-0 overflow-hidden border border-dashed border-border bg-card p-0' : 'activity-card gap-0 overflow-hidden border border-border bg-card p-0')
       : (block.state === 'READ_ONLY' ? 'gap-3 border border-dashed border-border bg-muted/40' : 'gap-3 border border-[#bfdbfe] bg-[#f8fbff]')"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
@@ -600,9 +618,6 @@ const submit = async (): Promise<void> => {
       </header>
       <div class="activity-main">
         <section class="activity-section">
-          <div v-if="activityScoreFact" class="activity-section-head">
-            <span class="activity-pill" :class="activityPassed ? 'is-success' : 'is-warning'">{{ activityPassed ? `质量通过 · ${activityScoreNumber} 分` : `质量未通过 · ${activityScoreNumber} 分` }}</span>
-          </div>
           <p v-if="activityFact('customer')" class="activity-customer">
             <b>{{ activityFact('customer')?.value }}</b>
             <span aria-hidden="true">/</span>
@@ -613,22 +628,20 @@ const submit = async (): Promise<void> => {
             v-if="activityFact('next_action') || activityFact('customer_commitment') || activityFact('next_follow_time') || activityKindFact"
             class="activity-meta"
           >
-            <div v-if="activityFact('next_action')" class="activity-meta-row">
-              <dt>下一步</dt>
-              <dd>{{ activityFact('next_action')?.value }}</dd>
-            </div>
             <div v-if="activityFact('customer_commitment')" class="activity-meta-row">
               <dt>客户承诺</dt>
               <dd>{{ activityFact('customer_commitment')?.value }}</dd>
+            </div>
+            <div v-if="activityFact('next_action')" class="activity-meta-row">
+              <dt>下一步</dt>
+              <dd>{{ activityFact('next_action')?.value }}</dd>
             </div>
             <div v-if="activityFact('next_follow_time')" class="activity-meta-row">
               <dt>跟进时间</dt>
               <dd>
                 <div class="activity-time">
-                  <span class="activity-time-value">{{ activityFact('next_follow_time')?.value }}</span>
-                  <span v-if="activityFact('next_follow_time')?.status_label" class="activity-pill is-muted">{{ activityFact('next_follow_time')?.status_label }}</span>
+                  <span class="activity-time-value">{{ activityFact('next_follow_time')?.value }}</span><span v-if="activityTimeFact?.status_label" class="activity-time-status">（{{ activityTimeFact.status_label }}）</span>
                 </div>
-                <p v-if="activityFact('next_follow_time')?.source" class="activity-caption">{{ activityFact('next_follow_time')?.source }}</p>
               </dd>
             </div>
             <div v-if="activityKindFact" class="activity-meta-row">
@@ -640,7 +653,6 @@ const submit = async (): Promise<void> => {
                   <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}</button>
                 </div>
                 <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption" data-agent-ui-kind-evidence>{{ activityKindFact.source }}</p>
-                <p v-else-if="activityKindFact.source && activityKindFact.status_label === '已选择'" class="activity-caption">{{ activityKindFact.source }}</p>
               </dd>
             </div>
           </dl>
@@ -653,33 +665,58 @@ const submit = async (): Promise<void> => {
             </div>
           </div>
         </section>
-        <section v-if="activityContext" class="activity-context">
-          <div class="activity-section-head">
-            <div class="activity-context-title">
-              <h3>客户上下文判断</h3>
-              <span>AI 辅助</span>
-            </div>
-            <span class="activity-pill is-warning">{{ activityContext.value }}</span>
-          </div>
-          <p v-if="activityContext.source" class="activity-body">{{ activityContext.source }}</p>
-          <p v-if="activityOpportunity" class="activity-inline"><span>关联商机</span><b>{{ activityOpportunity.value }}</b></p>
+        <section v-if="activityChangeSummary" class="activity-change">
+          <p class="activity-body">{{ activityChangeSummary.value }}</p>
+          <button type="button" class="activity-link" data-activity-comparison-link @click="openActivityComparison">查看对比依据</button>
         </section>
-        <ul v-if="activityNotices.length > 0" class="activity-notices">
-          <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
-        </ul>
-        <p v-if="activityIgnoredNoise" class="activity-caption" data-activity-ignored-noise>{{ activityIgnoredNoise.value }}</p>
-        <details v-if="showActivityBasis" class="activity-details activity-basis">
-          <summary>查看依据</summary>
-          <div>
-            <p v-if="activitySourceFolded">识别来源：{{ activitySourceFolded }}</p>
-            <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
-          </div>
-        </details>
-        <details v-if="activityScoreReason" class="activity-details activity-score">
-          <summary>查看评分依据 · 内容质量</summary>
-          <div class="activity-score-body">
-            <strong>{{ activityScoreFact?.value }} · {{ activityPassed ? '质量通过' : '质量未通过' }}</strong>
-            <p>{{ activityScoreReason.value }}</p>
+        <details v-if="showActivityBasis" ref="activityReferenceRef" class="activity-details activity-basis">
+          <summary>查看参考与依据</summary>
+          <div class="activity-reference-body">
+            <section v-if="showActivityHistory" class="activity-reference-section">
+              <h3 ref="activityHistoryHeadingRef" class="activity-reference-heading" tabindex="-1" data-activity-history-heading>历史对比</h3>
+              <div v-if="activityComparisonPrevious" class="activity-reference-quote" data-activity-comparison-previous>
+                <h4>此前</h4>
+                <p>{{ activityComparisonPrevious.value }}</p>
+                <p v-if="activityComparisonPrevious.source" class="activity-caption">{{ activityComparisonPrevious.source }}</p>
+              </div>
+              <div v-if="activityComparisonCurrent" class="activity-reference-quote" data-activity-comparison-current>
+                <h4>本次</h4>
+                <p>{{ activityComparisonCurrent.value }}</p>
+                <p v-if="activityComparisonCurrent.source" class="activity-caption">{{ activityComparisonCurrent.source }}</p>
+              </div>
+              <p v-if="activityContextStatus" class="activity-caption">{{ activityContextStatus.value }}</p>
+              <div v-if="activityLegacyContext || activityEvidenceLines.length > 0" class="activity-reference-quote">
+                <h4>历史参考背景</h4>
+                <p v-if="activityLegacyContext">{{ activityLegacyContext.source || activityLegacyContext.value }}</p>
+                <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
+              </div>
+              <ul v-if="activityNotices.length > 0" class="activity-reference-notices">
+                <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
+              </ul>
+            </section>
+            <section v-if="activityOpportunity" class="activity-reference-section" data-activity-opportunity>
+              <h3 class="activity-reference-heading">参考商机</h3>
+              <p class="activity-body">{{ activityOpportunity.value }}</p>
+              <p class="activity-caption">本次仅记录客户活动，不修改商机阶段。</p>
+            </section>
+            <details v-if="showActivityOrganizingBasis" class="activity-details activity-score">
+              <summary>内容评分与整理依据</summary>
+              <div class="activity-score-body">
+                <div v-if="activityScoreFact || activityScoreReason" class="activity-reference-quote">
+                  <h4 v-if="activityScoreFact">内容评分：{{ activityScoreFact.value }}</h4>
+                  <p v-if="activityScoreReason">{{ activityScoreReason.value }}</p>
+                </div>
+                <div v-if="activityTimeFact?.source" class="activity-reference-quote">
+                  <h4>日期原话</h4>
+                  <p>{{ activityTimeFact.source }}</p>
+                </div>
+                <div v-if="activitySourceFolded" class="activity-reference-quote">
+                  <h4>类型来源</h4>
+                  <p>{{ activitySourceFolded }}</p>
+                </div>
+                <p v-if="activityIgnoredNoise" class="activity-caption" data-activity-ignored-noise>{{ activityIgnoredNoise.value }}</p>
+              </div>
+            </details>
           </div>
         </details>
       </div>
@@ -1040,7 +1077,9 @@ const submit = async (): Promise<void> => {
 <style scoped>
 .activity-card {
   gap: 0;
-  color: #020817;
+  min-width: 0;
+  color: hsl(var(--card-foreground));
+  overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 22px;
   font-weight: 400;
@@ -1051,13 +1090,14 @@ const submit = async (): Promise<void> => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #edf2f7;
+  border-bottom: 1px solid hsl(var(--border));
   padding: 12px 16px;
 }
 
 .activity-title {
   margin: 0;
-  color: #020817;
+  min-width: 0;
+  color: hsl(var(--foreground));
   font-size: 15px;
   font-weight: 600;
   line-height: 22px;
@@ -1066,58 +1106,43 @@ const submit = async (): Promise<void> => {
 .activity-main {
   display: grid;
   gap: 16px;
-  padding: 16px;
+  min-width: 0;
+  padding: 16px 16px 8px;
 }
 
 .activity-section,
-.activity-context,
+.activity-change,
 .activity-score-body {
   display: grid;
+  min-width: 0;
   gap: 8px;
 }
 
-.activity-section-head,
 .activity-kind,
-.activity-time,
 .activity-kind-editor-head,
-.activity-customer,
-.activity-inline,
-.activity-context-title {
+.activity-customer {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.activity-section-head,
 .activity-kind-editor-head {
   justify-content: space-between;
 }
 
-.activity-section-head > .activity-pill {
-  margin-left: auto;
-}
-
-.activity-kicker,
-.activity-context-title h3,
 .activity-kind-editor-head span:first-child {
   margin: 0;
-  color: #334155;
+  color: hsl(var(--foreground));
   font-size: 13px;
   font-weight: 600;
   line-height: 20px;
 }
 
-.activity-kicker {
-  color: #1d4ed8;
-}
-
 .activity-customer,
-.activity-inline,
-.activity-context-title span,
 .activity-kind-editor-head {
   margin: 0;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
   font-weight: 400;
   line-height: 20px;
@@ -1126,20 +1151,20 @@ const submit = async (): Promise<void> => {
 .activity-customer b,
 .activity-kind-name,
 .activity-time-value {
-  color: #020817;
+  color: hsl(var(--foreground));
   font-size: 14px;
   font-weight: 600;
   line-height: 22px;
 }
 
-.activity-inline b {
-  color: #334155;
-  font-weight: 500;
+.activity-time-status {
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
 }
 
 .activity-body {
   margin: 0;
-  color: #334155;
+  color: hsl(var(--foreground));
   font-size: 14px;
   font-weight: 400;
   line-height: 22px;
@@ -1149,7 +1174,7 @@ const submit = async (): Promise<void> => {
   display: grid;
   gap: 8px;
   margin: 4px 0 0;
-  border-top: 1px solid #edf2f7;
+  border-top: 1px solid hsl(var(--border));
   padding-top: 12px;
 }
 
@@ -1163,7 +1188,7 @@ const submit = async (): Promise<void> => {
 .activity-meta-row dt {
   margin: 0;
   padding-top: 1px;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
   font-weight: 400;
   line-height: 20px;
@@ -1172,7 +1197,7 @@ const submit = async (): Promise<void> => {
 .activity-meta-row dd {
   margin: 0;
   min-width: 0;
-  color: #334155;
+  color: hsl(var(--foreground));
   font-size: 14px;
   font-weight: 400;
   line-height: 22px;
@@ -1185,7 +1210,7 @@ const submit = async (): Promise<void> => {
   border: 0;
   background: transparent;
   padding: 0;
-  color: #1d4ed8;
+  color: hsl(var(--primary));
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
@@ -1198,7 +1223,7 @@ const submit = async (): Promise<void> => {
 .activity-kind-editor > p,
 .activity-actions-hint {
   margin: 0;
-  color: #64748b;
+  color: hsl(var(--muted-foreground));
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
@@ -1208,46 +1233,41 @@ const submit = async (): Promise<void> => {
   margin-top: 4px;
 }
 
-.activity-caption span {
-  color: #475569;
-  font-weight: 600;
-}
-
 .activity-pill {
   display: inline-flex;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 500;
   line-height: 20px;
-  white-space: nowrap;
+  max-width: 100%;
 }
 
 .activity-pill.is-info,
 .activity-card :deep(.is-info) {
-  border-color: #dbeafe;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: hsl(var(--primary) / 0.2);
+  background: hsl(var(--primary) / 0.08);
+  color: hsl(var(--primary));
 }
 
 .activity-pill.is-success {
-  border-color: #d1fae5;
-  background: #ecfdf5;
-  color: #047857;
+  border-color: hsl(var(--success) / 0.3);
+  background: hsl(var(--success) / 0.08);
+  color: hsl(var(--foreground));
 }
 
 .activity-pill.is-warning {
-  border-color: #fde68a;
-  background: #fffbeb;
-  color: #b45309;
+  border-color: hsl(var(--warning) / 0.4);
+  background: hsl(var(--warning) / 0.12);
+  color: hsl(var(--foreground));
 }
 
 .activity-pill.is-muted {
-  border-color: #e2e8f0;
-  background: #f1f5f9;
-  color: #64748b;
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .activity-section > .activity-kind-editor {
@@ -1256,9 +1276,9 @@ const submit = async (): Promise<void> => {
 
 .activity-kind-editor {
   margin-top: 8px;
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-  background: #eff6ff;
+  border: 1px solid hsl(var(--primary) / 0.2);
+  border-radius: 12px;
+  background: hsl(var(--primary) / 0.08);
   padding: 12px;
 }
 
@@ -1270,11 +1290,13 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-kind-option {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  padding: 4px 10px;
-  color: #334155;
+  min-height: 44px;
+  max-width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  padding: 8px 12px;
+  color: hsl(var(--foreground));
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
@@ -1282,9 +1304,9 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-kind-option.is-selected {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #fff;
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 .activity-kind-option:disabled {
@@ -1296,46 +1318,60 @@ const submit = async (): Promise<void> => {
   margin-top: 8px;
 }
 
-.activity-context {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 12px;
+.activity-reference-body,
+.activity-reference-section,
+.activity-reference-quote {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
 }
 
-.activity-notices {
+.activity-reference-body {
+  gap: 12px;
+}
+
+.activity-reference-heading,
+.activity-reference-quote h4,
+.activity-reference-quote p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.activity-reference-heading,
+.activity-reference-quote h4 {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.activity-reference-quote p {
+  color: hsl(var(--muted-foreground));
+}
+
+.activity-reference-notices {
   display: grid;
   gap: 8px;
   margin: 0;
   padding: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  line-height: 20px;
   list-style: none;
 }
 
-.activity-notices li {
-  border: 1px solid #fde68a;
-  border-radius: 8px;
-  background: #fffbeb;
-  padding: 10px 12px;
-  color: #92400e;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 22px;
-}
-
 .activity-details {
-  border-top: 1px solid #e2e8f0;
-  padding-top: 4px;
+  min-width: 0;
+  border-top: 1px solid hsl(var(--border));
 }
 
-.activity-score {
-  border-top-color: #edf2f7;
-}
-
-.activity-details summary {
+.activity-details > summary {
   display: flex;
   align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
   min-height: 44px;
-  color: #475569;
+  padding: 8px 0;
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
@@ -1343,42 +1379,36 @@ const submit = async (): Promise<void> => {
   cursor: pointer;
 }
 
-.activity-details summary::-webkit-details-marker {
+.activity-details > summary::before {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  content: '';
+  transform: rotate(-45deg);
+}
+
+.activity-details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.activity-details > summary::-webkit-details-marker {
   display: none;
 }
 
-.activity-details > div > p,
-.activity-score-body > p {
-  margin: 0;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 20px;
-}
-
-.activity-details > div > p {
-  border-bottom: 1px solid #e2e8f0;
-  padding: 8px 0;
-}
-
-.activity-details > div > p:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
+.activity-details > summary:focus-visible,
+.activity-reference-heading:focus,
+.activity-link:focus-visible,
+.activity-kind-option:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 .activity-score-body {
-  margin-top: 4px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 12px;
-}
-
-.activity-score-body strong {
-  color: #334155;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
+  min-width: 0;
+  padding-bottom: 8px;
 }
 
 .activity-actions {
@@ -1387,19 +1417,19 @@ const submit = async (): Promise<void> => {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  border-top: 1px solid #edf2f7;
+  border-top: 1px solid hsl(var(--border));
   padding: 12px 16px;
 }
 
 .activity-actions-hint {
   margin-right: auto;
-  color: #b45309;
+  color: hsl(var(--foreground));
 }
 
 .activity-card :deep(.activity-action) {
   height: auto;
   min-height: 44px;
-  border-radius: 8px;
+  border-radius: 6px;
   padding-right: 16px;
   padding-left: 16px;
   font-size: 13px;
@@ -1417,16 +1447,15 @@ const submit = async (): Promise<void> => {
     padding-top: 0;
   }
 
-  .activity-header,
-  .activity-section-head {
+  .activity-header {
     align-items: flex-start;
   }
 }
 
 .activity-card :deep(.activity-action:disabled) {
-  border-color: #cbd5e1;
-  background: #e2e8f0;
-  color: #94a3b8;
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   opacity: 1;
 }
 </style>

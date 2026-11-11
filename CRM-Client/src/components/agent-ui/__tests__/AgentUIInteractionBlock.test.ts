@@ -439,7 +439,7 @@ it('splits a customer month segment from a dated sales follow-up', () => {
       { key: 'summary', label: '摘要', value: '客户说下个月初付款，11 月 5 号跟进下付款进展。', group: 'write' },
       { key: 'next_action', label: '下一步', value: '跟进付款进展', group: 'write' },
       { key: 'customer_commitment', label: '客户承诺', value: '下个月初付款（模糊时间，未确定具体日期）', group: 'write' },
-      { key: 'next_follow_time', label: '跟进时间', value: '2026-11-05（周四）09:00', group: 'write', status_label: '未说时刻，默认 09:00 提醒', source: '原话：“11 月 5 号”' },
+      { key: 'next_follow_time', label: '跟进时间', value: '2026-11-05（周四）09:00', group: 'write', status_label: '默认时刻', source: '原话：“11 月 5 号”' },
       { key: 'activity_kind', label: '活动类型', value: '电话跟进', group: 'activity_kind', status_label: '已识别' }
     ],
     options: [
@@ -460,8 +460,9 @@ it('splits a customer month segment from a dated sales follow-up', () => {
   expect(rows['下一步']).toBe('跟进付款进展')
   expect(rows['客户承诺']).toBe('下个月初付款（模糊时间，未确定具体日期）')
   expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-05（周四）09:00')
-  expect(wrapper.get('.activity-time .activity-pill').text()).toBe('未说时刻，默认 09:00 提醒')
-  expect(wrapper.get('.activity-time + .activity-caption').text()).toBe('原话：“11 月 5 号”')
+  expect(rows['跟进时间']).toBe('2026-11-05（周四）09:00（默认时刻）')
+  expect(wrapper.get('details.activity-score').text()).toContain('原话：“11 月 5 号”')
+  expect(wrapper.get('details.activity-score').element.closest('details.activity-basis')).not.toBeNull()
   expect(wrapper.text()).not.toContain('2026-11-01')
 })
 
@@ -500,14 +501,14 @@ it('shows a full month commitment separately from a sales date', () => {
 
   expect(rows['客户承诺']).toBe('预计11月份可以完成付款（整月，未确定具体日期）')
   expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-15（周日）15:00')
-  expect(wrapper.find('.activity-time .activity-pill').exists()).toBe(false)
-  expect(wrapper.get('.activity-time + .activity-caption').text()).toBe('原话：“11月15号下午3点”')
+  expect(rows['跟进时间']).toBe('2026-11-15（周日）15:00')
+  expect(wrapper.get('details.activity-score').text()).toContain('原话：“11月15号下午3点”')
   expect(rows['下一步']).toBe('11月15号跟进付款方面的情况')
   expect(wrapper.text()).not.toContain('11月1日')
   expect(wrapper.text()).not.toContain('11月30')
 })
 
-it('keeps activity facts visible and folds recognition source and evidence', () => {
+it('keeps business fields primary and nests legacy background and organizing sources under one reference disclosure', () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_density',
     type: 'interaction',
@@ -540,26 +541,81 @@ it('keeps activity facts visible and folds recognition source and evidence', () 
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('.activity-title').text()).toBe('确认写入客户活动')
-  expect(wrapper.text()).toContain('待确认')
-  expect(wrapper.text()).not.toContain('等待你确认')
-  expect(wrapper.text()).not.toContain('本次将写入 CRM')
-  expect(wrapper.text()).toContain('上海期货信息技术有限公司')
-  expect(wrapper.text()).toContain('今天通过微信对齐了合同和发票。')
-  expect(wrapper.text()).toContain('没有权限查看这部分内容')
-  expect(wrapper.text()).toContain('这次出现了新的确认或下一步。')
-  expect(wrapper.get('.activity-notices').text()).toContain('没有权限查看这部分内容')
-
+  expect(wrapper.get('.activity-customer').text()).toContain('上海期货信息技术有限公司')
+  expect(wrapper.get('.activity-body').text()).toBe('今天通过微信对齐了合同和发票。')
+  expect(wrapper.find('.activity-context').exists()).toBe(false)
+  expect(wrapper.find('.activity-change').exists()).toBe(false)
+  expect(wrapper.find('.activity-section .activity-pill.is-success').exists()).toBe(false)
   const basis = wrapper.get('details.activity-basis')
+  const organizing = basis.get('details.activity-score')
   expect(basis.attributes('open')).toBeUndefined()
-  expect(basis.text()).toContain('查看依据')
-  expect(basis.text()).toContain('从今天微信联系中识别')
+  expect(organizing.attributes('open')).toBeUndefined()
+  expect(wrapper.findAll('details').filter(details => details.element.parentElement?.closest('details') === null)).toHaveLength(1)
   expect(basis.text()).toContain('2026-09-23 微信沟通')
-  expect(wrapper.get('.activity-kind').text()).not.toContain('识别来源')
+  expect(basis.text()).toContain('没有权限查看这部分内容')
+  expect(organizing.text()).toContain('从今天微信联系中识别')
+  expect(organizing.text()).toContain('76 / 100')
+  expect(organizing.text()).toContain('主体和下一步都已整理')
+  expect(wrapper.get('.activity-kind').text()).not.toContain('从今天微信联系中识别')
   expect(wrapper.findAll('button').map(button => button.text())).toEqual(['取消', '确认写入'])
 })
 
-it('shows ignored input noise once as a muted caption and omits it when absent', () => {
+it('opens the existing reference disclosure and focuses the frozen comparison without submitting an action', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_comparison',
+    type: 'interaction',
+    interaction_id: 'ix_comparison',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    facts: [
+      { key: 'customer', label: '客户', value: '通力电梯', group: 'write' },
+      { key: 'summary', label: '摘要', value: '客户更新了评审安排。', group: 'write' },
+      { key: 'customer_commitment', label: '客户承诺', value: '客户确认周五评审', group: 'write' },
+      { key: 'next_action', label: '下一步', value: '发送更新后的材料', group: 'write' },
+      { key: 'change_summary', label: '具体变化', value: '评审由周四改至周五', group: 'context' },
+      { key: 'comparison_previous', label: '此前', value: '原定周四评审', source: '2026-11-10 活动摘要', group: 'context' },
+      { key: 'comparison_current', label: '本次', value: '改到周五评审', source: '本次客户原话', group: 'context' },
+      { key: 'context_status', label: '参考状态', value: '仅比较可读取的历史', group: 'context' },
+      { key: 'opportunity', label: '参考商机', value: '电梯更新 · 方案评审', group: 'context' },
+      { key: 'score', label: '内容质量', value: '82 / 100', group: 'score' }
+    ],
+    options: [
+      { value: 'confirm', label: '确认写入', disabled: false },
+      { value: 'cancel', label: '取消', disabled: false }
+    ],
+    selection_mode: 'single',
+    submit_on_select: true,
+    submit_action_id: 'act_comparison'
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block }, attachTo: document.body })
+  try {
+    const basis = wrapper.get<HTMLDetailsElement>('details.activity-basis')
+    const nested = basis.get<HTMLDetailsElement>('details.activity-score')
+    expect(basis.attributes('open')).toBeUndefined()
+    expect(wrapper.findAll('.activity-meta-row dt').map(node => node.text())).toEqual(['客户承诺', '下一步'])
+    expect(wrapper.get('.activity-change').text()).toContain('评审由周四改至周五')
+    expect(basis.get('[data-activity-comparison-previous]').text()).toContain('原定周四评审')
+    expect(basis.get('[data-activity-comparison-previous]').text()).toContain('2026-11-10 活动摘要')
+    expect(basis.get('[data-activity-comparison-current]').text()).toContain('改到周五评审')
+    expect(basis.get('[data-activity-comparison-current]').text()).toContain('本次客户原话')
+    expect(basis.get('[data-activity-opportunity]').text()).toContain('电梯更新 · 方案评审')
+    expect(basis.text()).toContain('仅比较可读取的历史')
+    expect(nested.text()).toContain('82 / 100')
+    await wrapper.get('[data-activity-comparison-link]').trigger('click')
+    expect(basis.element.open).toBe(true)
+    expect(nested.element.open).toBe(false)
+    expect(document.activeElement).toBe(basis.get('[data-activity-history-heading]').element)
+    expect(wrapper.findAll('.activity-meta-row dd').filter(node => node.text() === '客户确认周五评审')).toHaveLength(1)
+    expect(wrapper.emitted('submit')).toBeUndefined()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('keeps ignored input noise only in nested organizing details and omits it when absent', () => {
   const confirmation = (extra: Record<string, string>[]): ReturnType<typeof InteractionBlockSchema.parse> => InteractionBlockSchema.parse({
     id: 'b_interaction_noise',
     type: 'interaction',
@@ -587,7 +643,7 @@ it('shows ignored input noise once as a muted caption and omits it when absent',
     props: { block: confirmation([{ key: 'ignored_noise', label: '已忽略', value: '已忽略 3 处发言时间', group: 'context' }]) }
   })
   expect(shown.findAll('[data-activity-ignored-noise]').map(node => node.text())).toEqual(['已忽略 3 处发言时间'])
-  expect(shown.text().split('已忽略 3 处发言时间')).toHaveLength(2)
+  expect(shown.get('[data-activity-ignored-noise]').element.closest('details.activity-score')).not.toBeNull()
 
   const absent = mount(AgentUIInteractionBlock, { props: { block: confirmation([]) } })
   expect(absent.find('[data-activity-ignored-noise]').exists()).toBe(false)
@@ -877,8 +933,8 @@ it('shows the chosen kind with its origin and only same-category revisions', asy
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('.activity-caption').text()).toBe('你选择：微信跟进')
-  expect(wrapper.find('details.activity-basis').exists()).toBe(false)
+  expect(wrapper.get('details.activity-score').text()).toContain('你选择：微信跟进')
+  expect(wrapper.get('.activity-kind').text()).not.toContain('你选择：微信跟进')
 
   await wrapper.get('button.activity-link').trigger('click')
   expect(wrapper.get('button.activity-link').text()).toBe('收起类型选项')

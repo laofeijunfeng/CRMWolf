@@ -166,15 +166,40 @@ class OpportunityRank(BaseModel):
     ranked: list[OpportunityRankItem] = Field(default_factory=list, max_length=5)
 
 
-class EvidenceUse(BaseModel):
+class CurrentComparisonQuote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segment_id: str = Field(min_length=1, max_length=100)
+    quote_start: int = Field(ge=0)
+    quote_end: int = Field(ge=0)
+    quote: str = Field(min_length=1, max_length=500)
+
+
+class HistoricalComparisonQuote(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ref: str = Field(min_length=1, max_length=16)
-    relation: Literal["推进", "持平", "放缓", "冲突", "背景"]
+    quote_start: int = Field(ge=0)
+    quote_end: int = Field(ge=0)
+    quote: str = Field(min_length=1, max_length=120)
+
+
+class ComparisonCandidate(BaseModel):
+    """A nomination tied to an existing action, never a free-form conclusion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str = Field(min_length=2, max_length=80)
+    action_id: str = Field(min_length=1, max_length=100)
+    increment: Literal["NEW_CUSTOMER_CONFIRMATION", "DATE_CHANGED", "NONE"]
+    current: CurrentComparisonQuote
+    previous: HistoricalComparisonQuote
+    previous_date: str | None = Field(default=None, max_length=80)
+    current_date: str | None = Field(default=None, max_length=80)
 
 
 class ChangeJudgment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    signal: Literal["推进", "持平", "放缓", "待确认"]
-    uses: list[EvidenceUse] = Field(default_factory=list, max_length=8)
+    classification: Literal["CUSTOMER_COMMITMENT", "SALES_ACTION", "RESCHEDULE", "NO_CHANGE", "INSUFFICIENT_EVIDENCE"]
+    candidate: ComparisonCandidate | None = None

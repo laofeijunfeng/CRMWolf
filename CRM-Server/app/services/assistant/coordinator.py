@@ -1755,7 +1755,10 @@ class AssistantCoordinator:
                 ),
             )
             task = result.task
-        card = await self._follow_up.judge(db, team_id=task.team_id, user_text=user_text, pack=pack, choice=choice)
+        card = await self._follow_up.judge(
+            db, team_id=task.team_id, pack=pack, choice=choice,
+            source_records=draft.source_records, content_json=draft.content_json,
+        )
         return task, card.as_command()
 
     def _ask_field(self, db: Session, task: AssistantTask, parameters: dict[str, object]) -> CoordinatorOutcome:

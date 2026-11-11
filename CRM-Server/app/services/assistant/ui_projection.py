@@ -666,40 +666,40 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         source=_kind_source(preview, legacy_label),
         options=options,
     )
-    if preview.change_signal:
+    comparison = preview.comparison
+    if comparison:
+        _add_fact(facts, "change_summary", "具体变化", comparison.summary, group="context")
         _add_fact(
-            facts,
-            "change_signal",
-            "客户上下文判断",
-            preview.change_signal,
-            group="context",
-            source=preview.change_summary,
+            facts, "comparison_current", "本次原话", comparison.current.quote,
+            group="context", source="本次记录原话",
         )
-        if preview.opportunity_name:
-            stage = f" · {preview.opportunity_stage}" if preview.opportunity_stage else ""
-            _add_fact(facts, "opportunity", "关联商机", f"{preview.opportunity_name}{stage}", group="context")
+        previous_source = " · ".join(
+            part for part in (comparison.previous.source_type, comparison.previous.occurred_at) if part
+        )
+        _add_fact(
+            facts, "comparison_previous", "历史来源摘要", comparison.previous.quote,
+            group="context", source=previous_source,
+        )
+    elif preview.context_evidence:
         evidence = [
-            " ".join(part for part in (item.occurred_at, item.summary) if part) for item in preview.context_evidence[:3]
+            " · ".join(part for part in (item.source_type, item.occurred_at, item.summary) if part)
+            for item in preview.context_evidence[:3]
         ]
-        if evidence:
-            _add_fact(facts, "context_evidence", "依据", "；".join(evidence), group="context")
+        _add_fact(facts, "context_evidence", "历史来源摘要", "；".join(evidence), group="context")
+    if preview.opportunity_name:
+        stage = f" · {preview.opportunity_stage}" if preview.opportunity_stage else ""
+        _add_fact(facts, "opportunity", "参考商机", f"{preview.opportunity_name}{stage}", group="context")
+    notices = list(dict.fromkeys(
+        text for value in (preview.context_status, preview.change_summary, *preview.context_notices)
+        if (text := _plain(value))
+    ))
+    _add_fact(facts, "context_status", "参考说明", "；".join(notices), group="context")
     _add_fact(facts, "ignored_noise", "已忽略", preview.ignored_noise_summary, group="context")
-    summary = _plain(preview.change_summary) if preview.change_signal else ""
-    seen_notices: set[str] = set()
-    notice_index = 0
-    for notice in preview.context_notices:
-        text = _plain(notice)
-        if not text or text in seen_notices or text == summary:
-            continue
-        # Keep the score facts. The interaction contract allows 20 facts.
-        if len(facts) >= 18:
-            break
-        seen_notices.add(text)
-        notice_index += 1
-        _add_fact(facts, f"context_notice_{notice_index}", "需要注意", text, group="context")
     _add_fact(facts, "score", "内容质量", f"{preview.score} / 100", group="score")
     _add_fact(facts, "score_reason", "评分依据", preview.score_reason, group="score")
-    return facts[:20]
+    # At most ten business/type facts, three comparison facts and five detail facts.
+    # Optional notices share one fact; no terminal slice may discard frozen business data.
+    return facts
 
 
 # Persisted previews carry the pre-CRM-78 recognition labels, which named the origin.
@@ -805,7 +805,7 @@ def _add_follow_time_fact(facts: list[InteractionConfirmationFact], preview: Act
         "跟进时间",
         _format_temporal_date(at, include_time=True),
         group="write",
-        status_label="未说时刻，默认 09:00 提醒" if defaulted else None,
+        status_label="默认时刻" if defaulted else None,
         source=_follow_time_source(preview, raw),
     )
     return True

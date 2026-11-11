@@ -15,21 +15,20 @@ from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskSt
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity
-from app.services.assistant.contracts import TaskDraft
+from app.services.assistant.contracts import ActivityPreview, DraftField, TaskDraft, TaskWaiting
 from app.services.assistant.coordinator import AssistantCoordinator, AssistantInput
 from app.services.assistant.follow_up_context import (
-    SIGNAL_SUMMARY,
+    RealFollowUpContext,
     ChangeCard,
     EvidenceItem,
     EvidencePack,
     OpportunityChoice,
     OpportunityOption,
-    decide_signal,
     read_follow_up_evidence,
     select_opportunity,
 )
 from app.services.assistant.llm import AssistantLLMError
-from app.services.assistant.llm_contracts import KindDecision, StructureDraftResult
+from app.services.assistant.llm_contracts import ChangeJudgment, KindDecision, StructureDraftResult
 from app.services.assistant.quality_gate import QualityGateOutcome
 from app.utils.time import business_now
 
@@ -41,48 +40,202 @@ def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
-def test_reconsider_without_prior_evidence_cannot_slow_down():
-    signal, summary = decide_signal(
-        proposed="放缓",
-        uses=[],
-        known_refs=set(),
-        user_text="他说再考虑",
+def _comparison_input(*, role="CUSTOMER", reschedule=False):
+    previous = "客户评审安排尚未明确" if not reschedule else "客户评审安排为2026年11月19日"
+    current = "客户确认评审安排为2026年11月20日" if not reschedule else "客户将评审安排改至2026年11月20日"
+    action = {
+        "action_id": "act_review", "owner_role": role, "owner_text": "客户",
+        "action_text": "评审安排", "action_status": "COMMITTED", "state": "ACTIVE",
+        "source_segment_id": "seg_current", "evidence_quote": current,
+        "quote_start": 0, "quote_end": len(current), "temporal_mention_id": "mention_review",
+    }
+    date_start = current.index("2026")
+    mention = {
+        "mention_id": "mention_review", "source_segment_id": "seg_current", "action_id": "act_review",
+        "raw_text": "2026年11月20日", "quote_start": date_start, "quote_end": len(current),
+        "kind": "EXPLICIT_DATE", "role": "CUSTOMER_COMMITMENT", "anchor_at": "2026-11-11T10:00:00",
+        "resolution_status": "RESOLVED", "resolved_at": "2026-11-20T00:00:00", "granularity": "DATE",
+    }
+    candidate = {
+        "subject": "评审安排", "action_id": "act_review",
+        "increment": "DATE_CHANGED" if reschedule else "NEW_CUSTOMER_CONFIRMATION",
+        "current": {"segment_id": "seg_current", "quote_start": 0, "quote_end": len(current), "quote": current},
+        "previous": {"ref": "A1", "quote_start": 0, "quote_end": len(previous), "quote": previous},
+        "previous_date": "2026年11月19日" if reschedule else None,
+        "current_date": "2026年11月20日" if reschedule else None,
+    }
+    return {
+        "pack": EvidencePack(activities_status="ready", activities=[EvidenceItem("A1", "电话跟进", "2026-11-10 09:00", previous)]),
+        "source_records": [{"segment_id": "seg_current", "recorded_at": "2026-11-11T10:00:00", "text": current}],
+        "content_json": {"temporal_evidence": {"version": "temporal-evidence-v1", "actions": [action], "mentions": [mention]}},
+        "judgment": {"classification": "RESCHEDULE" if reschedule else "CUSTOMER_COMMITMENT", "candidate": candidate},
+    }
+
+
+async def _judge_comparison(inputs):
+    class Model:
+        async def judge_change(self, db, **kwargs):
+            return ChangeJudgment.model_validate(inputs["judgment"])
+
+    return await RealFollowUpContext(Model()).judge(
+        None, team_id=1, pack=inputs["pack"],
+        choice=OpportunityChoice("none"), source_records=inputs["source_records"], content_json=inputs["content_json"],
     )
-    assert signal == "待确认"
-    assert summary == SIGNAL_SUMMARY["待确认"]
-    assert "输单" not in summary
-    assert "回退" not in summary
 
 
-def test_slowdown_requires_a_cited_in_window_source():
-    signal, summary = decide_signal(
-        proposed="放缓",
-        uses=[("A1", "放缓")],
-        known_refs={"A1"},
-        user_text="他说再考虑",
+async def test_verified_customer_confirmation_preserves_both_sources_without_repeating_commitment():
+    inputs = _comparison_input()
+    card = await _judge_comparison(inputs)
+    assert card.comparison is not None
+    assert card.comparison.previous.ref == "A1"
+    assert card.comparison.current.quote == inputs["source_records"][0]["text"]
+    assert card.comparison.current.quote not in card.comparison.summary
+    assert card.comparison.previous.quote in card.comparison.summary
+    assert card.context_evidence == ()
+    assert "change_signal" not in card.as_command()
+    assert "change_summary" not in card.as_command()
+
+
+async def test_sales_action_cannot_be_promoted_to_customer_confirmation():
+    inputs = _comparison_input(role="SALES")
+    card = await _judge_comparison(inputs)
+    assert card.comparison is None
+    assert card.context_status
+
+
+@pytest.mark.parametrize("corruption", ["no_history", "unknown_ref", "current_span", "history_span", "wrong_action", "superseded", "different_subject", "current_as_history"])
+async def test_unverifiable_comparison_downgrades_without_blocking(corruption):
+    inputs = _comparison_input()
+    candidate = inputs["judgment"]["candidate"]
+    if corruption == "no_history":
+        inputs["pack"] = EvidencePack()
+    elif corruption == "unknown_ref":
+        candidate["previous"]["ref"] = "A999"
+    elif corruption == "current_span":
+        candidate["current"]["quote_start"] = 1
+    elif corruption == "history_span":
+        candidate["previous"]["quote_end"] -= 1
+    elif corruption == "wrong_action":
+        candidate["action_id"] = "invented"
+    elif corruption == "superseded":
+        inputs["content_json"]["temporal_evidence"]["actions"][0]["state"] = "SUPERSEDED"
+    elif corruption == "different_subject":
+        candidate["subject"] = "采购审批"
+    else:
+        text = inputs["source_records"][0]["text"]
+        inputs["pack"].activities = [EvidenceItem("A1", "电话跟进", "2026-11-10 09:00", text)]
+        candidate["previous"] = {"ref": "A1", "quote_start": 0, "quote_end": len(text), "quote": text}
+    card = await _judge_comparison(inputs)
+    assert card.comparison is None
+    assert card.context_status
+
+
+async def test_explicit_same_customer_matter_reschedule_requires_verified_dates():
+    inputs = _comparison_input(reschedule=True)
+    card = await _judge_comparison(inputs)
+    assert card.comparison is not None
+    assert card.comparison.kind == "RESCHEDULE"
+    assert card.comparison.previous_date == "2026-11-19"
+    assert card.comparison.current_date == "2026-11-20"
+    inputs["judgment"]["candidate"]["previous_date"] = "2026年11月18日"
+    assert (await _judge_comparison(inputs)).comparison is None
+
+
+@pytest.mark.parametrize("reschedule,previous", [
+    (False, "客户评审安排已确认2026年11月20日；采购预算尚未明确"),
+    (True, "客户评审安排为2026年11月25日；培训安排为2026年11月19日"),
+    (False, "客户评审安排已确认采购预算尚未明确"),
+])
+async def test_other_matter_history_cannot_supply_absence_or_previous_date(reschedule, previous):
+    inputs = _comparison_input(reschedule=reschedule)
+    inputs["pack"].activities = [EvidenceItem("A1", "电话跟进", "2026-11-10 09:00", previous)]
+    inputs["judgment"]["candidate"]["previous"] = {
+        "ref": "A1", "quote_start": 0, "quote_end": len(previous), "quote": previous,
+    }
+    assert (await _judge_comparison(inputs)).comparison is None
+
+
+async def test_another_action_reschedule_marker_cannot_authorize_customer_date_change():
+    inputs = _comparison_input(reschedule=True)
+    current = "客户确认评审安排为2026年11月20日"
+    inputs["source_records"][0]["text"] = current + "；培训安排延期"
+    candidate = inputs["judgment"]["candidate"]
+    candidate["current"] = {
+        "segment_id": "seg_current", "quote_start": 0,
+        "quote_end": len(inputs["source_records"][0]["text"]), "quote": inputs["source_records"][0]["text"],
+    }
+    action = inputs["content_json"]["temporal_evidence"]["actions"][0]
+    action.update(evidence_quote=current, quote_end=len(current))
+    mention = inputs["content_json"]["temporal_evidence"]["mentions"][0]
+    mention.update(quote_start=current.index("2026"), quote_end=len(current))
+    assert (await _judge_comparison(inputs)).comparison is None
+
+
+async def test_same_day_explicit_time_reschedule_preserves_the_two_distinct_instants():
+    inputs = _comparison_input(reschedule=True)
+    previous = "客户评审安排为2026年11月20日09:00"
+    current = "客户将评审安排改至2026年11月20日10:00"
+    inputs["pack"].activities = [EvidenceItem("A1", "电话跟进", "2026-11-10 09:00", previous)]
+    inputs["source_records"][0]["text"] = current
+    candidate = inputs["judgment"]["candidate"]
+    candidate.update(previous_date="2026年11月20日09:00", current_date="2026年11月20日10:00")
+    candidate["current"].update(quote=current, quote_end=len(current))
+    candidate["previous"].update(quote=previous, quote_end=len(previous))
+    inputs["content_json"]["temporal_evidence"]["actions"][0].update(evidence_quote=current, quote_end=len(current))
+    inputs["content_json"]["temporal_evidence"]["mentions"][0].update(
+        raw_text=candidate["current_date"], quote_end=len(current), granularity="DATETIME", resolved_at="2026-11-20T10:00:00",
     )
-    assert signal == "放缓"
-    assert summary == SIGNAL_SUMMARY["放缓"]
+    comparison = (await _judge_comparison(inputs)).comparison
+    assert comparison is not None
+    assert comparison.previous_date == "2026-11-20 09:00"
+    assert comparison.current_date == "2026-11-20 10:00"
+    assert comparison.previous_date in comparison.summary
+    assert comparison.current_date in comparison.summary
 
 
-def test_conflicting_relations_stay_unresolved():
-    signal, summary = decide_signal(
-        proposed="推进",
-        uses=[("A1", "推进"), ("A2", "放缓")],
-        known_refs={"A1", "A2"},
-        user_text="客户说可以继续，但另一个记录说先暂停",
+async def test_same_customer_commitment_is_not_a_new_comparison():
+    inputs = _comparison_input()
+    inputs["judgment"]["candidate"]["increment"] = "NONE"
+    assert (await _judge_comparison(inputs)).comparison is None
+
+
+async def test_conflicting_model_shape_downgrades_instead_of_creating_multiple_comparisons():
+    inputs = _comparison_input()
+    inputs["judgment"]["candidates"] = [inputs["judgment"]["candidate"], inputs["judgment"]["candidate"]]
+    card = await _judge_comparison(inputs)
+    assert card.comparison is None
+    assert card.context_status
+
+
+async def test_model_failure_keeps_the_authorized_history_available_without_comparison():
+    inputs = _comparison_input()
+
+    class FailingModel:
+        async def judge_change(self, db, **kwargs):
+            raise AssistantLLMError("unavailable")
+
+    card = await RealFollowUpContext(FailingModel()).judge(
+        None, team_id=1, pack=inputs["pack"],
+        choice=OpportunityChoice("none"), source_records=inputs["source_records"], content_json=inputs["content_json"],
     )
-    assert (signal, summary) == ("待确认", "来源有冲突，先不判断变化。")
+    assert card.comparison is None
+    assert card.context_evidence[0]["summary"] == inputs["pack"].activities[0].summary
 
 
-def test_unknown_evidence_ref_cannot_support_slowdown():
-    signal, _summary = decide_signal(
-        proposed="放缓",
-        uses=[("A9", "放缓")],
-        known_refs={"A1"},
-        user_text="先暂停",
+async def test_unavailable_history_is_not_given_to_the_model_or_exposed():
+    inputs = _comparison_input()
+    inputs["pack"].activities_status = "denied"
+
+    class NeverModel:
+        async def judge_change(self, db, **kwargs):
+            raise AssertionError("unavailable evidence must not reach a model")
+
+    card = await RealFollowUpContext(NeverModel()).judge(
+        None, team_id=1, pack=inputs["pack"],
+        choice=OpportunityChoice("none"), source_records=inputs["source_records"], content_json=inputs["content_json"],
     )
-    assert signal == "待确认"
+    assert card.comparison is None
+    assert card.context_evidence == ()
 
 
 def test_unique_full_name_binds_and_close_scores_ask():
@@ -273,8 +426,8 @@ class Context:
 
     async def judge(self, db, **kwargs):
         return ChangeCard(
-            change_signal="待确认",
-            change_summary=SIGNAL_SUMMARY["待确认"],
+            comparison=None,
+            context_status="暂无可验证的历史对比",
             opportunity_name=None,
             opportunity_stage=None,
             context_as_of="2026-10-28 10:00",
@@ -323,7 +476,7 @@ async def test_customer_is_required_before_any_evidence_read(db_session):
     assert outcome.reply.waiting.type == "FIELD"
 
 
-async def test_bound_customer_confirmation_shows_signal_without_writing_it_into_content(db_session):
+async def test_bound_customer_freezes_context_without_adding_a_signal_or_mutating_content(db_session):
     context = Context("广州睿狐科技有限公司")
     coordinator = AssistantCoordinator(Chooser(), structurer=Structurer(), quality_gate=Gate(), follow_up=context)
     outcome = await coordinator.handle_task(
@@ -332,13 +485,69 @@ async def test_bound_customer_confirmation_shows_signal_without_writing_it_into_
     waiting = outcome.reply.waiting
     assert waiting is not None and waiting.type == "CONFIRMATION"
     preview = waiting.confirmation_payload.preview
-    assert preview.change_signal == "待确认"
-    assert preview.change_summary == "现有依据不够，先不判断变化。"
+    assert preview.comparison is None
+    assert preview.context_status
     assert preview.context_evidence[0].summary == "报价后说下周答复"
     command = outcome.task.authority_json["frozen_activity_command"]
-    assert command["change_signal"] == "待确认"
-    assert "change_signal" not in command["content_json"]
+    assert "change_signal" not in command
+    assert "change_summary" not in command
+    assert "comparison" not in command["content_json"]
     assert context.reads == 1
+
+
+async def test_verified_comparison_survives_freeze_reload_revision_and_confirmation_without_models(db_session):
+    from app.services.assistant.confirmation import (
+        WriteActivityResult, command_fingerprint, execute_confirmation, freeze_confirmation, revise_frozen_activity_kind,
+    )
+
+    inputs = _comparison_input(reschedule=True)
+    card = await _judge_comparison(inputs)
+    task = _task(db_session)
+    text = inputs["source_records"][0]["text"]
+    task.activity_kind = "FOLLOW_UP"
+    task.draft_json = TaskDraft(
+        content=DraftField(status="CANDIDATE", value=text),
+        content_json={"content": text, "next_action": "我发送评审材料", **inputs["content_json"]},
+        source_segments=[text], source_records=inputs["source_records"],
+        quality_score=DraftField(status="CANDIDATE", value="88"), score_reason="事实完整",
+        channel_kind="PHONE_FOLLOW_UP", channel_status="recognized",
+        channel_options=["PHONE_FOLLOW_UP", "WECHAT_FOLLOW_UP"],
+    ).model_dump(mode="json")
+    db_session.flush()
+    task, waiting = freeze_confirmation(db_session, task, customer=_customer(db_session), context_card=card.as_command())
+    command = task.authority_json["frozen_activity_command"]
+    assert waiting.confirmation_payload.preview.comparison == card.comparison
+    assert command_fingerprint(command) == command["fingerprint"]
+    serialized = waiting.model_dump(mode="json")
+    assert TaskWaiting.model_validate(serialized).confirmation_payload.preview.comparison == card.comparison
+    task, revised = revise_frozen_activity_kind(db_session, task, "WECHAT_FOLLOW_UP")
+    assert revised.confirmation_payload.preview.comparison == card.comparison
+
+    class Writer:
+        async def write_activity(self, db, *, task, command):
+            assert command["comparison"] == card.as_command()["comparison"]
+            return WriteActivityResult(True, "act_verified", None, _customer(db).id)
+
+    confirmed, _message = await execute_confirmation(db_session, task, writer=Writer())
+    assert confirmed.authority_json["frozen_activity_command"]["execution_status"] == "SUCCEEDED"
+
+
+def test_strict_persisted_legacy_preview_remains_readable_without_mutating_its_command():
+    from app.services.assistant.confirmation import command_fingerprint
+
+    legacy = {
+        "customer_name": "广州睿狐科技有限公司", "content_json": {"content": "旧活动"},
+        "source_content": "旧活动", "score": 88, "score_reason": "完整",
+        "change_signal": "推进", "change_summary": "这次出现了新的确认或下一步。",
+    }
+    command = {**legacy, "submission_id": "asub_old", "execution_status": "PENDING"}
+    command["fingerprint"] = command_fingerprint(command)
+    before = dict(command)
+    preview = ActivityPreview.model_validate(legacy)
+    assert preview.change_signal == "推进"
+    assert preview.comparison is None
+    assert command == before
+    assert command_fingerprint(command) == command["fingerprint"]
 
 
 async def test_meeting_does_not_read_customer_history(db_session):
@@ -367,7 +576,7 @@ async def test_meeting_does_not_read_customer_history(db_session):
     assert structurer.structured is True
     assert outcome.reply.waiting is not None
     assert outcome.reply.waiting.type == "CONFIRMATION"
-    assert outcome.reply.waiting.confirmation_payload.preview.change_signal is None
+    assert outcome.reply.waiting.confirmation_payload.preview.comparison is None
 
 
 class AskingContext(Context):
@@ -427,7 +636,7 @@ async def test_high_confidence_phone_is_frozen_without_rewriting_follow_up_conte
     assert preview.channel_status == "recognized"
     assert preview.title == "电话跟进"
     assert preview.summary == "客户说再考虑。"
-    assert "change_signal" not in preview.content_json
+    assert "comparison" not in preview.content_json
     command = outcome.task.authority_json["frozen_activity_command"]
     assert command["activity_kind"] == "PHONE_FOLLOW_UP"
     assert outcome.task.activity_kind == "FOLLOW_UP"
@@ -441,7 +650,8 @@ async def test_high_confidence_phone_is_frozen_without_rewriting_follow_up_conte
     assert revised_preview.channel_status == "revised"
     assert revised_preview.channel_status_label == "已手动修正"
     assert revised_preview.score == preview.score
-    assert revised_preview.change_signal == preview.change_signal
+    assert revised_preview.comparison == preview.comparison
+    assert revised_preview.context_status == preview.context_status
     assert revised.authority_json["frozen_activity_command"]["submission_id"] == command["submission_id"]
     assert revised.authority_json["frozen_activity_command"]["fingerprint"] != command["fingerprint"]
     assert revised.activity_kind == "FOLLOW_UP"
