@@ -297,13 +297,25 @@
         </SheetHeader>
 
         <!-- Content -->
-        <ScrollArea class="flex-1">
+        <ScrollArea class="flex-1 min-h-0 min-w-0">
           <div class="p-6 space-y-6 min-h-[400px]">
             <!-- 申请主体信息：优先展示审批关联业务内容 -->
             <Card v-if="selectedApproval" class="info-card">
               <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
+                <div class="p-4 border-b border-wolf-border-light-v2 flex flex-wrap items-center justify-between gap-3">
                   <h3 class="text-sm font-semibold text-wolf-text-primary-v2">{{ approvalSubjectTitle }}</h3>
+                  <Button
+                    v-if="invoiceBillingType"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    class="border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+                    :disabled="invoiceBillingFields.length === 0"
+                    @click="copyAllInvoiceBilling"
+                  >
+                    <Copy class="h-4 w-4 mr-2" aria-hidden="true" />
+                    复制全部开票信息
+                  </Button>
                 </div>
                 <div class="p-4">
                   <div class="attributes-grid">
@@ -334,6 +346,34 @@
                       <div v-else class="attribute-value">{{ displayFieldValue(field.value) }}</div>
                     </div>
                   </div>
+                  <section v-if="invoiceBillingType" class="mt-5 border-t border-dashed border-border pt-5 min-w-0" aria-label="开票信息">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-4">
+                      <h4 class="text-sm font-semibold text-foreground">{{ invoiceBillingType === 'INVOICE_REISSUE' ? '新开票信息' : '开票信息' }}</h4>
+                      <span class="text-xs text-muted-foreground">点击内容即可复制</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 min-w-0">
+                      <div v-for="field in unchangedInvoiceBillingFields" :key="field.key" :class="['min-w-0 space-y-1', field.wide && 'sm:col-span-2']">
+                        <div class="text-xs text-muted-foreground">{{ field.label }}</div>
+                        <button type="button" class="billing-copy-value" :aria-label="`复制${field.label}：${field.displayValue}`" @click="copyInvoiceBillingField(field)">
+                          <AmountText v-if="field.isAmount && field.copyValue !== ''" :value="field.copyValue" tone="primary" class="billing-copy-amount" />
+                          <template v-else>{{ field.displayValue }}</template>
+                        </button>
+                      </div>
+                    </div>
+                    <div v-if="changedInvoiceBillingFields.length > 0" class="mt-4 space-y-3">
+                      <div v-for="field in changedInvoiceBillingFields" :key="field.key" class="min-w-0 rounded-md border border-warning/20 bg-warning/5 p-3">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="text-xs text-muted-foreground">{{ field.label }}</span>
+                          <Badge variant="outline" class="border-warning/30 bg-warning/10 text-warning">已改</Badge>
+                        </div>
+                        <button type="button" class="billing-copy-value" :aria-label="`复制${field.label}：${field.displayValue}`" @click="copyInvoiceBillingField(field)">
+                          <AmountText v-if="field.isAmount && field.copyValue !== ''" :value="field.copyValue" tone="primary" class="billing-copy-amount" />
+                          <template v-else>{{ field.displayValue }}</template>
+                        </button>
+                        <div class="mt-1 text-xs text-muted-foreground break-all whitespace-pre-wrap">原：<span class="line-through">{{ field.originalValue }}</span></div>
+                      </div>
+                    </div>
+                  </section>
                 </div>
               </CardContent>
             </Card>
@@ -557,7 +597,7 @@ import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { BellRing, Clock } from 'lucide-vue-next'
+import { BellRing, Clock, Copy } from 'lucide-vue-next'
 import { AmountText, CopyableText, DataTable, Badge, FileAttachment, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
@@ -593,6 +633,7 @@ import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatDateRelative } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
+import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy, type ApprovalInvoiceBillingField } from '@/utils/approvalInvoiceBilling'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import { handleApiError } from '@/utils/errorHandler'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -858,6 +899,18 @@ const approvalSubjectTitle = computed<string>(() => {
   }
   return type ? map[type] ?? '申请信息' : '申请信息'
 })
+const invoiceBillingType = computed<'INVOICE' | 'INVOICE_REISSUE' | null>(() => {
+  const type = selectedApproval.value?.business_type
+  return type === 'INVOICE' || type === 'INVOICE_REISSUE' ? type : null
+})
+const invoiceBillingFields = computed(() => {
+  const type = invoiceBillingType.value
+  const detail = activeApprovalDetail.value?.entity_detail
+  return type && detail ? buildApprovalInvoiceBillingFields(type, detail) : []
+})
+const unchangedInvoiceBillingFields = computed(() => invoiceBillingFields.value.filter(field => !field.changed))
+const changedInvoiceBillingFields = computed(() => invoiceBillingFields.value.filter(field => field.changed))
+
 
 const licenseStatusLabel = (status?: string | null): string => {
   const map: Record<string, string> = {
@@ -926,13 +979,6 @@ const invoiceReissueStatusLabel = (status?: string | null): string => {
   return status == null ? '-' : (map[status] ?? status)
 }
 
-const invoiceTypeLabel = (type?: string | null): string => {
-  const map: Record<string, string> = {
-    VAT_SPECIAL: '增值税专用发票',
-    VAT_NORMAL: '普通发票'
-  }
-  return type == null ? '-' : (map[type] ?? type)
-}
 
 const opportunityStatusLabel = (status?: number | string | null): string => {
   const map: Record<string, string> = {
@@ -1080,17 +1126,15 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
     ]
     case 'INVOICE': return [
       { key: 'number', label: '申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
-      { key: 'title', label: '发票抬头', value: detail('invoice_title_text') ?? subjectName.value }, customerField,
+      customerField,
       { key: 'amount', label: '开票金额', value: detail('invoice_amount') ?? subjectAmount.value, type: 'amount' },
-      { key: 'invoice_type', label: '发票类型', value: invoiceTypeLabel(detail('invoice_type')?.toString()) },
       { key: 'status', label: '发票状态', value: invoiceStatusLabel(detail('status')?.toString()), type: 'status' },
     ]
     case 'INVOICE_REISSUE': return [
       { key: 'number', label: '重开申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
       { key: 'original_number', label: '原发票申请', value: detail('original_invoice_application_number'), type: 'link', linkTarget: 'invoice', linkId: getOriginalInvoiceApplicationId(selected) },
       { key: 'reason', label: '重开原因', value: detail('reason') },
-      { key: 'title', label: '新开票抬头', value: detail('invoice_title_text') ?? subjectName.value }, customerField,
-      { key: 'amount', label: '新开票金额', value: detail('invoice_amount') ?? subjectAmount.value, type: 'amount' },
+      customerField,
       { key: 'status', label: '重开状态', value: invoiceReissueStatusLabel(detail('status')?.toString()), type: 'status' },
     ]
     case 'LICENSE': return [
@@ -1310,6 +1354,36 @@ const handleSortReset = (): void => {
   activeSorts.value = []
   page.value = 1
   fetchList()
+}
+
+const copyText = async (value: string, successMessage: string): Promise<void> => {
+  try {
+    if (typeof navigator?.clipboard?.writeText === 'function') {
+      await navigator.clipboard.writeText(value)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = value
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      try {
+        textarea.select()
+        if (!document.execCommand('copy')) throw new Error('Clipboard copy rejected')
+      } finally {
+        textarea.remove()
+      }
+    }
+    toast.success(successMessage)
+  } catch {
+    toast.error('复制失败，请手动选择内容复制')
+  }
+}
+
+const copyInvoiceBillingField = (field: ApprovalInvoiceBillingField): Promise<void> =>
+  copyText(field.copyValue, `已复制${field.label}`)
+const copyAllInvoiceBilling = (): Promise<void> | undefined => {
+  if (invoiceBillingFields.value.length === 0) return
+  return copyText(formatApprovalInvoiceBillingCopy(invoiceBillingFields.value), '已复制全部开票信息')
 }
 
 const getVisibleDetailTriggers = (): HTMLElement[] => {
@@ -1983,5 +2057,27 @@ watch(rows, async () => {
   &:hover {
     text-decoration: underline;
   }
+}
+.billing-copy-value {
+  max-width: 100%;
+  padding: 2px 0;
+  color: hsl(var(--primary));
+  text-align: left;
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: hsl(var(--primary) / 0.35);
+  text-underline-offset: 5px;
+  border-radius: 2px;
+
+  &:hover { background: hsl(var(--primary) / 0.05); }
+  &:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
+}
+
+.billing-copy-amount {
+  text-decoration: inherit;
+  text-underline-offset: inherit;
 }
 </style>

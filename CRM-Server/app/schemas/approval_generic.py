@@ -94,6 +94,20 @@ class ApprovalListItemResponse(BaseModel):
     overdue_hours: Optional[int] = Field(None, description="超时小时数（now - created_time），仅 PENDING 行有意义")
 
 
+class ApprovalInvoiceBillingSnapshotResponse(BaseModel):
+    """Original invoice snapshot disclosed for a same-team reissue approval."""
+
+    invoice_type: Optional[str] = None
+    invoice_title_type: Optional[str] = None
+    invoice_title_text: Optional[str] = None
+    invoice_taxpayer_id: Optional[str] = None
+    invoice_address: Optional[str] = None
+    invoice_phone: Optional[str] = None
+    invoice_bank_name: Optional[str] = None
+    invoice_bank_account: Optional[str] = None
+    invoice_amount: Optional[float] = None
+
+
 class ApprovalEntityDetailResponse(BaseModel):
     """Typed change fields while preserving existing business detail fields."""
 
@@ -107,6 +121,18 @@ class ApprovalEntityDetailResponse(BaseModel):
     attachment_size: Optional[int] = None
     attachment_mime_type: Optional[str] = None
     financial_snapshot: Optional[ContractFinancialSnapshotResponse] = None
+    invoice_type: Optional[str] = None
+    invoice_title_type: Optional[str] = None
+    invoice_title_text: Optional[str] = None
+    invoice_taxpayer_id: Optional[str] = None
+    invoice_address: Optional[str] = None
+    invoice_phone: Optional[str] = None
+    invoice_bank_name: Optional[str] = None
+    invoice_bank_account: Optional[str] = None
+    invoice_amount: Optional[float] = None
+    remark: Optional[str] = None
+    original_invoice_application_number: Optional[str] = None
+    original_invoice: Optional[ApprovalInvoiceBillingSnapshotResponse] = None
 
 
 class GenericApprovalDetailResponse(ApprovalListItemResponse):

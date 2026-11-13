@@ -80,8 +80,23 @@ export const ApprovalRecordSchema = z.object({
 
 export type ApprovalRecord = z.infer<typeof ApprovalRecordSchema>
 
+const ApprovalInvoiceBillingSnapshotSchema = z.object({
+  invoice_type: z.string().nullable().optional(),
+  invoice_title_type: z.string().nullable().optional(),
+  invoice_title_text: z.string().nullable().optional(),
+  invoice_taxpayer_id: z.string().nullable().optional(),
+  invoice_address: z.string().nullable().optional(),
+  invoice_phone: z.string().nullable().optional(),
+  invoice_bank_name: z.string().nullable().optional(),
+  invoice_bank_account: z.string().nullable().optional(),
+  invoice_amount: z.union([z.number(), z.string()]).nullable().optional()
+})
+
 // ===== 审批详情响应 =====
 export const ApprovalEntityDetailSchema = z.object({
+  ...ApprovalInvoiceBillingSnapshotSchema.shape,
+  original_invoice: ApprovalInvoiceBillingSnapshotSchema.nullable().optional(),
+  remark: z.string().nullable().optional(),
   contract_id: z.number().int().nullable().optional(),
   contract_name: z.string().nullable().optional(),
   change_items: z.array(ContractChangeItemSchema).nullable().optional(),

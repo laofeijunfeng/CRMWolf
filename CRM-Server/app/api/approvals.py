@@ -1668,6 +1668,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
     not only approval-instance metadata. Keep this payload generic so the
     frontend can render type-specific fields without extra round trips.
     """
+    from app.crud.invoice import invoice_application_crud
     from app.models.contract_change import ContractChangeRequest
     from app.models.contract import Contract
     from app.models.customer import Contact
@@ -1798,6 +1799,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
         plan = invoice.payment_plan
         return {
             "application_number": invoice.application_number,
+            "invoice_title_type": invoice.invoice_title_type,
             "invoice_title_text": invoice.invoice_title_text,
             "invoice_type": invoice.invoice_type,
             "invoice_amount": money(invoice.invoice_amount),
@@ -1824,12 +1826,26 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
         ).first()
         if not reissue:
             return {}
-        original = reissue.original_invoice_application
+        original = invoice_application_crud.get_by_id(
+            db, reissue.original_invoice_application_id, team_id
+        )
         return {
             "application_number": reissue.application_number,
             "original_invoice_application_id": reissue.original_invoice_application_id,
             "original_invoice_application_number": original.application_number if original else None,
+            "original_invoice": {
+                "invoice_type": original.invoice_type,
+                "invoice_title_type": original.invoice_title_type,
+                "invoice_title_text": original.invoice_title_text,
+                "invoice_taxpayer_id": original.invoice_taxpayer_id,
+                "invoice_address": original.invoice_address,
+                "invoice_phone": original.invoice_phone,
+                "invoice_bank_name": original.invoice_bank_name,
+                "invoice_bank_account": original.invoice_bank_account,
+                "invoice_amount": money(original.invoice_amount),
+            } if original else None,
             "reason": reissue.reason,
+            "invoice_title_type": reissue.invoice_title_type,
             "invoice_title_text": reissue.invoice_title_text,
             "invoice_type": reissue.invoice_type,
             "invoice_amount": money(reissue.invoice_amount),
