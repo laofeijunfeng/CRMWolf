@@ -34,6 +34,8 @@ const BILLING_FIELDS: readonly BillingFieldDefinition[] = [
 
 const REMARK_FIELD: BillingFieldDefinition = { key: 'remark', label: '备注', wide: true }
 const AMOUNT_FIELD: BillingFieldDefinition = { key: 'invoice_amount', label: '开票金额' }
+// 重开「新开票信息」：地址置底通栏，其余字段两列；发票申请沿用定义里的 wide。
+const REISSUE_TRAILING_KEY: BillingFieldKey = 'invoice_address'
 
 const numericAmount = (value: BillingValue): number | undefined => {
   if (value == null || value === '' || (typeof value === 'string' && !/\S/.test(value))) {
@@ -84,10 +86,23 @@ export const buildApprovalInvoiceBillingFields = (
       displayValue: copyValue === '' ? '-' : copyValue,
       ...(original ? { originalValue: originalCopyValue === '' ? '-' : originalCopyValue } : {}),
       changed: original != null && !equal,
-      wide: wide ?? false,
+      wide: type === 'INVOICE_REISSUE' ? key === REISSUE_TRAILING_KEY : wide ?? false,
       isAmount,
     }
   })
+}
+
+/** 展示顺序：未改字段 → 已改字段 → 重开地址置底。复制顺序不受影响，仍按字段定义。 */
+export const orderApprovalInvoiceBillingDisplay = (
+  type: 'INVOICE' | 'INVOICE_REISSUE',
+  fields: ApprovalInvoiceBillingField[],
+): ApprovalInvoiceBillingField[] => {
+  const isTrailing = (field: ApprovalInvoiceBillingField): boolean => type === 'INVOICE_REISSUE' && field.key === REISSUE_TRAILING_KEY
+  return [
+    ...fields.filter(field => !field.changed && !isTrailing(field)),
+    ...fields.filter(field => field.changed && !isTrailing(field)),
+    ...fields.filter(isTrailing),
+  ]
 }
 
 export const formatApprovalInvoiceBillingCopy = (fields: ApprovalInvoiceBillingField[]): string => {

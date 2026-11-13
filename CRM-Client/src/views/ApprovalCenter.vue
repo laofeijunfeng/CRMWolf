@@ -352,25 +352,21 @@
                       <span class="text-xs text-muted-foreground">点击内容即可复制</span>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 min-w-0">
-                      <div v-for="field in unchangedInvoiceBillingFields" :key="field.key" :class="['min-w-0 space-y-1', field.wide && 'sm:col-span-2']">
-                        <div class="text-xs text-muted-foreground">{{ field.label }}</div>
-                        <button type="button" class="billing-copy-value" :aria-label="`复制${field.label}：${field.displayValue}`" @click="copyInvoiceBillingField(field)">
-                          <AmountText v-if="field.isAmount && field.copyValue !== ''" :value="field.copyValue" tone="primary" class="billing-copy-amount" />
-                          <template v-else>{{ field.displayValue }}</template>
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="changedInvoiceBillingFields.length > 0" class="mt-4 space-y-3">
-                      <div v-for="field in changedInvoiceBillingFields" :key="field.key" class="min-w-0 rounded-md border border-warning/20 bg-warning/5 p-3">
-                        <div class="flex items-center gap-2 mb-1">
+                      <div
+                        v-for="field in invoiceBillingDisplayFields"
+                        :key="field.key"
+                        :class="['min-w-0', field.changed ? 'rounded-md border border-warning/20 bg-warning/5 p-3' : 'space-y-1', (field.wide || field.changed) && 'sm:col-span-2']"
+                      >
+                        <div v-if="field.changed" class="flex items-center gap-2 mb-1">
                           <span class="text-xs text-muted-foreground">{{ field.label }}</span>
                           <Badge variant="outline" class="border-warning/30 bg-warning/10 text-warning">已改</Badge>
                         </div>
+                        <div v-else class="text-xs text-muted-foreground">{{ field.label }}</div>
                         <button type="button" class="billing-copy-value" :aria-label="`复制${field.label}：${field.displayValue}`" @click="copyInvoiceBillingField(field)">
                           <AmountText v-if="field.isAmount && field.copyValue !== ''" :value="field.copyValue" tone="primary" class="billing-copy-amount" />
                           <template v-else>{{ field.displayValue }}</template>
                         </button>
-                        <div class="mt-1 text-xs text-muted-foreground break-all whitespace-pre-wrap">原：<span class="line-through">{{ field.originalValue }}</span></div>
+                        <div v-if="field.changed" class="mt-1 text-xs text-muted-foreground break-all whitespace-pre-wrap">原：<span class="line-through">{{ field.originalValue }}</span></div>
                       </div>
                     </div>
                   </section>
@@ -633,7 +629,7 @@ import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatDateRelative } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
-import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy, type ApprovalInvoiceBillingField } from '@/utils/approvalInvoiceBilling'
+import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy, orderApprovalInvoiceBillingDisplay, type ApprovalInvoiceBillingField } from '@/utils/approvalInvoiceBilling'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
 import { handleApiError } from '@/utils/errorHandler'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -908,8 +904,10 @@ const invoiceBillingFields = computed(() => {
   const detail = activeApprovalDetail.value?.entity_detail
   return type && detail ? buildApprovalInvoiceBillingFields(type, detail) : []
 })
-const unchangedInvoiceBillingFields = computed(() => invoiceBillingFields.value.filter(field => !field.changed))
-const changedInvoiceBillingFields = computed(() => invoiceBillingFields.value.filter(field => field.changed))
+const invoiceBillingDisplayFields = computed(() => {
+  const type = invoiceBillingType.value
+  return type ? orderApprovalInvoiceBillingDisplay(type, invoiceBillingFields.value) : []
+})
 
 
 const licenseStatusLabel = (status?: string | null): string => {

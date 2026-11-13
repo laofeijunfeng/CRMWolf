@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy } from '../approvalInvoiceBilling'
+import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy, orderApprovalInvoiceBillingDisplay } from '../approvalInvoiceBilling'
 
 const snapshot = {
   invoice_type: 'VAT_SPECIAL',
@@ -61,5 +61,26 @@ describe('approval invoice billing', () => {
     expect(invoice.find(field => field.key === 'remark')?.copyValue).toBe('第一行\n第二行')
     const reissue = buildApprovalInvoiceBillingFields('INVOICE_REISSUE', { ...snapshot, original_invoice: null })
     expect(reissue.filter(field => field.changed)).toEqual([])
+  })
+
+  it('lays reissue billing out in two columns with the address last and full width, even when fields changed', () => {
+    const layout = (detail: Parameters<typeof buildApprovalInvoiceBillingFields>[1]): unknown[][] =>
+      orderApprovalInvoiceBillingDisplay('INVOICE_REISSUE', buildApprovalInvoiceBillingFields('INVOICE_REISSUE', detail))
+        .map(field => [field.label, field.wide, field.changed])
+    expect(layout({ ...snapshot, original_invoice: snapshot })).toEqual([
+      ['发票类型', false, false], ['抬头类型', false, false],
+      ['发票抬头', false, false], ['纳税人识别号', false, false],
+      ['电话', false, false], ['开户银行', false, false],
+      ['银行账号', false, false], ['开票金额', false, false],
+      ['地址', true, false],
+    ])
+    const changed = layout({ ...snapshot, invoice_title_text: '新抬头', invoice_address: '新地址', original_invoice: snapshot })
+    expect(changed.slice(-2)).toEqual([['发票抬头', false, true], ['地址', true, true]])
+  })
+
+  it('keeps the invoice billing layout as defined', () => {
+    const fields = orderApprovalInvoiceBillingDisplay('INVOICE', buildApprovalInvoiceBillingFields('INVOICE', snapshot))
+    expect(fields.filter(field => field.wide).map(field => field.label)).toEqual(['发票抬头', '地址', '备注'])
+    expect(fields.map(field => field.label)).toEqual(['发票类型', '抬头类型', '发票抬头', '纳税人识别号', '地址', '电话', '开户银行', '银行账号', '备注'])
   })
 })
