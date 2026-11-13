@@ -176,16 +176,29 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 
 
 .list-view-state-summary-filter {
+  position: relative;
   display: inline-flex;
+  min-height: $wolf-touch-target-min-v2;
   max-width: min(360px, 100%);
   align-items: center;
   gap: 4px;
-  padding: 3px 5px 3px 8px;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-control-v2;
-  background: $wolf-bg-muted-v2;
+  padding: 0 5px 0 8px;
   color: $wolf-text-secondary-v2;
   white-space: nowrap;
+
+  &::before {
+    position: absolute;
+    inset: 7px 0;
+    border: 1px solid $wolf-border-light-v2;
+    border-radius: $wolf-radius-control-v2;
+    background: $wolf-bg-muted-v2;
+    pointer-events: none;
+    content: '';
+  }
+
+  > * {
+    position: relative;
+  }
 }
 
 .list-view-state-summary-filter > span {
@@ -204,10 +217,13 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 
 .list-view-state-summary-remove {
   display: inline-flex;
-  min-width: 22px;
-  min-height: 22px;
+  width: $wolf-touch-target-min-v2;
+  height: $wolf-touch-target-min-v2;
+  min-width: $wolf-touch-target-min-v2;
+  min-height: $wolf-touch-target-min-v2;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;

@@ -85,27 +85,35 @@
                 side="top"
                 align="end"
                 content-class="effectiveness-hover-card"
+                enable-touch
               >
                 <template #trigger>
                   <button
                     type="button"
                     class="effectiveness-indicator"
-                    :class="getEffectivenessClass(followUp)"
                     :aria-label="getEffectivenessLabel(followUp)"
                     @click.stop
                   >
-                    <Loader2
-                      v-if="followUp.effectiveness_status === 'GENERATING'"
-                      class="effectiveness-icon effectiveness-icon-loading"
-                    />
-                    <ThumbsUp
-                      v-else-if="followUp.effectiveness_is_valid"
-                      class="effectiveness-icon"
-                    />
-                    <ThumbsDown
-                      v-else
-                      class="effectiveness-icon"
-                    />
+                    <span
+                      class="effectiveness-indicator-visual"
+                      :class="getEffectivenessClass(followUp)"
+                    >
+                      <Loader2
+                        v-if="followUp.effectiveness_status === 'GENERATING'"
+                        class="effectiveness-icon effectiveness-icon-loading"
+                        aria-hidden="true"
+                      />
+                      <ThumbsUp
+                        v-else-if="followUp.effectiveness_is_valid"
+                        class="effectiveness-icon"
+                        aria-hidden="true"
+                      />
+                      <ThumbsDown
+                        v-else
+                        class="effectiveness-icon"
+                        aria-hidden="true"
+                      />
+                    </span>
                   </button>
                 </template>
                 <div class="effectiveness-card">
@@ -864,29 +872,39 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .effectiveness-indicator {
-  border: none;
+  width: $wolf-touch-target-min-v2;
+  height: $wolf-touch-target-min-v2;
+  min-width: $wolf-touch-target-min-v2;
+  min-height: $wolf-touch-target-min-v2;
   padding: 0;
+  border: none;
+  border-radius: $wolf-radius-sm-v2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  cursor: help;
+}
+
+.effectiveness-indicator-visual {
   width: 24px;
   height: 24px;
   border-radius: $wolf-radius-sm-v2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: $wolf-text-tertiary-v2;
-  background: transparent;
-  cursor: help;
 }
 
-.effectiveness-indicator.is-valid {
+.effectiveness-indicator-visual.is-valid {
   color: $wolf-success-v2;
 }
 
-.effectiveness-indicator.is-invalid {
+.effectiveness-indicator-visual.is-invalid {
   color: $wolf-danger-v2;
   background: $wolf-danger-bg-v2;
 }
 
-.effectiveness-indicator.is-loading {
+.effectiveness-indicator-visual.is-loading {
   color: $wolf-text-tertiary-v2;
 }
 

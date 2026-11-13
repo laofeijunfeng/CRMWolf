@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   open?: boolean
   openDelay?: number
   closeDelay?: number
+  enableTouch?: boolean
   contentClass?: HTMLAttributes['class']
 }>(), {
   side: 'top',
@@ -44,6 +45,7 @@ const hoverCardProps = computed(() => {
     open,
     openDelay: props.openDelay,
     closeDelay: props.closeDelay,
+    enableTouch: props.enableTouch,
   })
 })
 

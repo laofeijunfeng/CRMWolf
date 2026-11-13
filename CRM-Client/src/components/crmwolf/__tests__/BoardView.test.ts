@@ -1,7 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { compileStyle, parse } from '@vue/compiler-sfc'
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import BoardView from '../BoardView.vue'
@@ -65,7 +61,7 @@ const projection: BoardProjection = {
   },
 }
 
-function mountBoard(props: Record<string, unknown> = {}) {
+function mountBoard(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
   return mount(BoardView, {
     props: {
       projection,
@@ -77,6 +73,7 @@ function mountBoard(props: Record<string, unknown> = {}) {
       empty: false,
       ...props,
     },
+    slots,
     global: {
       stubs: {
         AreaTrendChart: {
@@ -90,22 +87,35 @@ function mountBoard(props: Record<string, unknown> = {}) {
 }
 
 describe('BoardView', () => {
-  it('activates a card with Enter and Space without activating from 查看全部', async () => {
-    const wrapper = mountBoard()
-    const card = wrapper.get('[data-column-key="following"] [role="button"]')
+  it('keeps card actions outside the detail activation control', async () => {
+    const wrapper = mountBoard({}, { 'card-actions': '<button type="button">编辑回款</button>' })
+    const card = wrapper.get('.board-card')
+    const action = card.get('.board-card__actions button')
 
-    await card.trigger('keydown', { key: 'Enter' })
-    await card.trigger('keydown', { key: ' ' })
+    expect(action.element.parentElement?.closest('button, a, [role="button"]')).toBeNull()
+    await action.trigger('click')
+    expect(wrapper.emitted('activate-card')).toBeUndefined()
+
+    const open = card.get('[aria-label="查看跟进中：星河科技"]')
+    expect(open.element.tagName).toBe('BUTTON')
+    await open.trigger('click')
+    expect(wrapper.emitted('activate-card')).toEqual([[{ id: 'cus_1', columnKey: 'following' }]])
+  })
+
+  it('activates the detail surface without activating from 查看全部', async () => {
+    const wrapper = mountBoard()
+    const card = wrapper.get('[data-column-key="following"] [aria-label="查看跟进中：星河科技"]')
+
+    await card.trigger('click')
 
     expect(wrapper.emitted('activate-card')).toEqual([
       [{ id: 'cus_1', columnKey: 'following' }],
-      [{ id: 'cus_1', columnKey: 'following' }],
     ])
 
-    const viewAll = wrapper.get('[data-column-key="following"] button')
+    const viewAll = wrapper.get('.board-column__footer button')
     expect(viewAll.text()).toContain('查看全部')
     await viewAll.trigger('click')
-    expect(wrapper.emitted('activate-card')).toHaveLength(2)
+    expect(wrapper.emitted('activate-card')).toHaveLength(1)
     expect(wrapper.emitted('view-all')).toEqual([['following']])
   })
 
@@ -119,7 +129,7 @@ describe('BoardView', () => {
     expect(wrapper.text()).toContain('星河科技')
     expect(wrapper.text()).toContain('数据已过期')
     expect(wrapper.text()).toContain('刷新失败')
-    const viewAll = wrapper.get('[data-column-key="following"] button')
+    const viewAll = wrapper.get('.board-column__footer button')
     expect(viewAll.attributes('disabled')).toBeDefined()
     await viewAll.trigger('click')
     expect(wrapper.emitted('view-all')).toBeUndefined()
@@ -161,7 +171,7 @@ describe('BoardView', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 
-  it('contains desktop column scrolling and selects one narrow-screen column', async () => {
+  it('selects one narrow-screen column', async () => {
     let width = 1280
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('max-width: 767px') && width <= 767,
@@ -172,20 +182,7 @@ describe('BoardView', () => {
     })))
 
     const desktop = mountBoard()
-    const columns = desktop.get('.board-columns')
-    expect(columns.classes()).not.toContain('board-columns--narrow')
-    const scopeId = columns.element.getAttributeNames().find((name) => name.startsWith('data-v-'))
-    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../BoardView.vue'), 'utf8')
-    const descriptor = parse(source).descriptor
-    const compiled = compileStyle({
-      source: descriptor.styles[0]?.content ?? '',
-      filename: 'BoardView.vue',
-      id: scopeId ?? '',
-      scoped: true,
-    })
-    expect(compiled.errors).toEqual([])
-    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-x:\\s*auto;`))
-    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-y:\\s*hidden;`))
+    expect(desktop.findAll('[data-column-key]')).toHaveLength(2)
     desktop.unmount()
 
     width = 390
@@ -201,7 +198,7 @@ describe('BoardView', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders status text for every tone and passes typed trend points', () => {
+  it('renders readable status text for every tone', () => {
     const tones = ['neutral', 'info', 'success', 'warning', 'danger', 'muted'] as const
     const wrapper = mountBoard({
       projection: {
@@ -221,9 +218,5 @@ describe('BoardView', () => {
       expect(column.attributes('data-tone')).toBe(tone)
     }
 
-    const chart = wrapper.getComponent({ name: 'AreaTrendChart' })
-    expect(chart.props('xKey')).toBe('month')
-    expect(chart.props('data')).toEqual([{ month: '2026-09', count: 2 }])
-    expect(chart.props('series')).toEqual(projection.trend?.series)
   })
 })

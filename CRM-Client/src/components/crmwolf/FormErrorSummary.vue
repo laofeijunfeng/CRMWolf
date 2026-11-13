@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick } from 'vue'
+import { Button } from '@/components/ui/button'
 
 export interface FormErrorSummaryItem {
   field: string
@@ -40,14 +41,15 @@ async function focusField(item: FormErrorSummaryItem): Promise<void> {
     <h3 class="form-error-summary__title">{{ props.title }}</h3>
     <ul class="form-error-summary__list">
       <li v-for="item in props.items" :key="item.field" class="form-error-summary__item">
-        <button
+        <Button
           v-if="item.targetId"
           type="button"
-          class="form-error-summary__link"
+          variant="link"
+          class="form-error-summary__link h-auto min-h-touch-target justify-start whitespace-normal p-0 font-normal"
           @click="focusField(item)"
         >
           {{ item.label }}：{{ item.message }}
-        </button>
+        </Button>
         <span v-else>{{ item.label }}：{{ item.message }}</span>
       </li>
     </ul>

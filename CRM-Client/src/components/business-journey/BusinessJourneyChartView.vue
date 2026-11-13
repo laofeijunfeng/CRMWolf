@@ -358,15 +358,16 @@ function openJourney(item: BusinessJourneyChartPreview): void {
             </span>
             <AmountText :value="item.amount" size="sm" />
           </button>
-          <button
+          <Button
             v-if="(segmentItems?.length ?? 0) < (segmentTotal ?? 0)"
             type="button"
-            class="journey-chart-preview__more"
+            variant="link"
+            class="journey-chart-preview__more h-auto min-h-11 justify-start whitespace-normal font-normal"
             :disabled="segmentLoading"
             @click="emit('load-more')"
           >
             {{ segmentLoading ? '正在读取…' : segmentError || '查看更多' }}
-          </button>
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -12,7 +12,7 @@
  * - §5 HIGH: Safe area handling (iOS notch / Android gesture bar)
  * - §1 CRITICAL: aria-label, aria-current
  */
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { computed } from 'vue'
 import {
   Banknote,
@@ -52,7 +52,6 @@ const emit = defineEmits<{
 }>()
 
 const route = useRoute()
-const router = useRouter()
 const permissionStore = usePermissionStore()
 
 // Primary navigation items (§9 bottom-nav-limit: max 5)
@@ -104,23 +103,6 @@ function isRouteActive(itemRoute: string): boolean {
   return route.path.startsWith(itemRoute)
 }
 
-/**
- * Handle navigation item click
- */
-function handleNavClick(itemRoute: string): void {
-  router.push(itemRoute)
-}
-
-/**
- * Handle an overflow navigation or action selection.
- */
-function handleOverflowSelect(item: NavItem): void {
-  if (item.kind === 'route') {
-    router.push(item.route)
-  } else {
-    emit('logout')
-  }
-}
 </script>
 
 <template>
@@ -136,13 +118,12 @@ function handleOverflowSelect(item: NavItem): void {
         :key="item.route"
         :item="item"
         :active="isRouteActive(item.route)"
-        @click="handleNavClick(item.route)"
       />
 
       <!-- Overflow Menu ("更多") -->
       <BottomNavOverflow
         :items="overflowItems"
-        @select="handleOverflowSelect"
+        @select="emit('logout')"
       />
     </div>
   </nav>

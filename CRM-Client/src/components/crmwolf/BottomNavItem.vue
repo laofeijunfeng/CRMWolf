@@ -12,6 +12,7 @@
  * - §9 HIGH: Icon + text label (nav-label-icon)
  */
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { cn } from '@/lib/utils'
 import type { Component } from 'vue'
 
@@ -27,10 +28,6 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-
-const emit = defineEmits<{
-  click: []
-}>()
 
 const itemClasses = computed((): string =>
   cn(
@@ -56,27 +53,14 @@ const itemClasses = computed((): string =>
     ]
   )
 )
-
-function handleClick(): void {
-  emit('click')
-}
-
-function handleKeyDown(event: KeyboardEvent): void {
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault()
-    emit('click')
-  }
-}
 </script>
 
 <template>
-  <button
+  <RouterLink
+    :to="item.route"
     :class="itemClasses"
     :aria-label="item.label"
     :aria-current="active ? 'page' : undefined"
-    type="button"
-    @click="handleClick"
-    @keydown="handleKeyDown"
   >
     <!-- Icon -->
     <component
@@ -89,7 +73,7 @@ function handleKeyDown(event: KeyboardEvent): void {
     <span class="bottom-nav-label text-wolf-caption text-center whitespace-nowrap">
       {{ item.label }}
     </span>
-  </button>
+  </RouterLink>
 </template>
 
 <style scoped lang="scss">

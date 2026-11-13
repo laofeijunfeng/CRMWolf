@@ -60,11 +60,12 @@ const handleSubmitApproval = async (): Promise<void> => {
 }
 
 const handleLater = (): void => {
+  if (submitting.value) return
   emit('update:visible', false)
 }
 
 const handleViewDetail = (): void => {
-  if (!props.record) return
+  if (!props.record || submitting.value) return
   router.push({
     path: '/payments/plans',
     query: { planId: String(props.record.payment_plan_id) }
@@ -74,9 +75,11 @@ const handleViewDetail = (): void => {
 </script>
 
 <template>
-  <Dialog :open="visible" @update:open="emit('update:visible', $event)">
+  <Dialog :open="visible" @update:open="!submitting && emit('update:visible', $event)">
     <DialogContent
       class="sm:max-w-[440px]"
+      :hide-close="submitting"
+      @escape-key-down="(event) => submitting && event.preventDefault()"
       @interact-outside="(event) => event.preventDefault()"
     >
       <DialogHeader>
@@ -105,7 +108,8 @@ const handleViewDetail = (): void => {
         <button
           type="button"
           class="flex w-full items-center gap-3 rounded-md border bg-primary px-3 py-3 text-left text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="submitting"
+          :disabled="submitting || !record"
+          :aria-busy="submitting ? 'true' : undefined"
           @click="handleSubmitApproval"
         >
           <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary-foreground/15">
@@ -123,7 +127,8 @@ const handleViewDetail = (): void => {
 
         <button
           type="button"
-          class="flex w-full items-center gap-3 rounded-md border bg-background px-3 py-3 text-left transition-colors hover:bg-muted/60"
+          class="flex w-full items-center gap-3 rounded-md border bg-background px-3 py-3 text-left transition-colors hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="submitting"
           @click="handleLater"
         >
           <span class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -140,6 +145,7 @@ const handleViewDetail = (): void => {
           type="button"
           variant="ghost"
           class="w-full justify-center gap-2"
+          :disabled="submitting || !record"
           @click="handleViewDetail"
         >
           <Eye class="size-4" aria-hidden="true" />

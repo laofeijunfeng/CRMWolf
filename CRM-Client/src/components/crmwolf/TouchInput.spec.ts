@@ -124,4 +124,28 @@ describe('TouchInput', () => {
     const input = wrapper.find('input')
     expect(label.attributes('for')).toBe(input.attributes('id'))
   })
+
+  it('does not reveal a disabled password input and restores the toggle when re-enabled', async () => {
+    const wrapper = mount(TouchInput, {
+      props: {
+        label: 'Password',
+        type: 'password',
+        showPasswordToggle: true,
+        disabled: true,
+      },
+    })
+
+    const input = wrapper.get('input')
+    const toggle = wrapper.get('button')
+    expect(input.attributes('type')).toBe('password')
+    expect(toggle.attributes('disabled')).toBeDefined()
+
+    await toggle.trigger('click')
+    expect(input.attributes('type')).toBe('password')
+
+    await wrapper.setProps({ disabled: false })
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.get('input').attributes('type')).toBe('text')
+  })
 })

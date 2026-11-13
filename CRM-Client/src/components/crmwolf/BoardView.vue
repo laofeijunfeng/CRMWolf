@@ -234,13 +234,13 @@ function metricValueType(valueType: BoardValueType): string {
               v-for="card in column.cards"
               :key="String(card.id)"
               class="board-card"
-              tabindex="0"
-              role="button"
-              :aria-label="`查看${card.statusLabel}：${card.title}`"
-              @click="activateCard(column, card)"
-              @keydown.enter.prevent="activateCard(column, card)"
-              @keydown.space.prevent="activateCard(column, card)"
             >
+              <button
+                type="button"
+                class="board-card__open"
+                :aria-label="`查看${card.statusLabel}：${card.title}`"
+                @click="activateCard(column, card)"
+              />
               <div class="board-card__topline">
                 <span>{{ card.subtitle ?? '-' }}</span>
                 <Badge variant="outline">{{ card.statusLabel }}</Badge>
@@ -255,7 +255,7 @@ function metricValueType(valueType: BoardValueType): string {
                   <dd>{{ row.value }}</dd>
                 </div>
               </dl>
-              <div v-if="$slots['card-actions']" class="board-card__actions" @click.stop @keydown.stop>
+              <div v-if="$slots['card-actions']" class="board-card__actions">
                 <slot name="card-actions" :card="card" :column="column" />
               </div>
             </article>
@@ -263,13 +263,15 @@ function metricValueType(valueType: BoardValueType): string {
           </div>
           <footer class="board-column__footer">
             <span v-if="column.hasMore">还有 {{ column.remainingCount }} 条</span>
-            <button
+            <Button
               type="button"
+              variant="link"
+              size="sm"
               :disabled="!columnDrillEnabled(column)"
               @click.stop="viewAll(column)"
             >
               查看全部
-            </button>
+            </Button>
           </footer>
         </section>
       </div>
@@ -391,19 +393,31 @@ function metricValueType(valueType: BoardValueType): string {
 }
 
 .board-card {
+  position: relative;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--card));
   padding: 12px;
-  cursor: pointer;
 }
 
-.board-card:focus-visible {
+.board-card__open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.board-card__open:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
 
 .board-card__actions {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

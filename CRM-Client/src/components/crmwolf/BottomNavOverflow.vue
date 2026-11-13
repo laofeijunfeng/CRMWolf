@@ -9,7 +9,7 @@
  * - §7 MEDIUM: Reduced motion support
  */
 import { computed, type Component } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { MoreHorizontal } from 'lucide-vue-next'
 import {
   DropdownMenu,
@@ -43,7 +43,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  select: [item: NavItem]
+  select: [item: ActionNavItem]
 }>()
 
 const route = useRoute()
@@ -97,18 +97,32 @@ const overflowButtonClasses = computed((): string =>
 
     <DropdownMenuContent side="top" align="end" :side-offset="8" class="overflow-menu">
       <div role="group" aria-label="次要导航">
-        <DropdownMenuItem
-          v-for="item in items"
-          :key="item.label"
-          class="overflow-item"
-          :class="{ 'overflow-item-active': isItemActive(item) }"
-          :aria-label="item.label"
-          :aria-current="isItemActive(item) ? 'page' : undefined"
-          @select="emit('select', item)"
-        >
-          <component :is="item.icon" class="overflow-icon" />
-          <span class="overflow-label">{{ item.label }}</span>
-        </DropdownMenuItem>
+        <template v-for="item in items" :key="item.label">
+          <DropdownMenuItem
+            v-if="item.kind === 'route'"
+            as-child
+            class="overflow-item"
+            :class="{ 'overflow-item-active': isItemActive(item) }"
+          >
+            <RouterLink
+              :to="item.route"
+              :aria-label="item.label"
+              :aria-current="isItemActive(item) ? 'page' : undefined"
+            >
+              <component :is="item.icon" class="overflow-icon" aria-hidden="true" />
+              <span class="overflow-label">{{ item.label }}</span>
+            </RouterLink>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            v-else
+            class="overflow-item"
+            :aria-label="item.label"
+            @select="emit('select', item)"
+          >
+            <component :is="item.icon" class="overflow-icon" aria-hidden="true" />
+            <span class="overflow-label">{{ item.label }}</span>
+          </DropdownMenuItem>
+        </template>
       </div>
     </DropdownMenuContent>
   </DropdownMenu>

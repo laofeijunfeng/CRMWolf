@@ -79,14 +79,13 @@ const emit = defineEmits<{
   align-items: center;
   gap: $wolf-space-xs-v2;
   flex-shrink: 0;
-  min-height: 32px;
+  min-height: $wolf-touch-target-min-v2;
   border: 0;
   background: transparent;
   padding: 0;
   color: $wolf-primary-v2;
   font-weight: 500;
   cursor: pointer;
-
   &:focus-visible {
     outline: 2px solid $wolf-primary-v2;
     outline-offset: 2px;
@@ -101,7 +100,7 @@ const emit = defineEmits<{
 
 .approval-source-header__back {
   justify-content: center;
-  width: 32px;
+  width: $wolf-touch-target-min-v2;
 }
 
 .approval-source-header__breadcrumb {

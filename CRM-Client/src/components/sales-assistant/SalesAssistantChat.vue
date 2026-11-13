@@ -1209,13 +1209,15 @@ void loadConversation()
               @action="(actionId) => { void retryRootFailure(entry, actionId) }"
             />
             <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
-            <button
+            <Button
               v-if="showExplicitNone(entry)"
               type="button"
-              class="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              variant="link"
+              size="sm"
+              class="h-auto min-h-11 px-0 text-xs font-normal text-muted-foreground underline-offset-2"
               :disabled="busy"
               @click="() => { void gapNone(entry) }"
-            >这条没有下一步</button>
+            >这条没有下一步</Button>
           </div>
         </div>
       </template>

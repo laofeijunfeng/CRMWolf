@@ -154,9 +154,9 @@ describe('PaymentRecordBoardProjection', () => {
   it('emits the numeric record id and canonical approved column key', async () => {
     const wrapper = mountProjection()
 
-    await wrapper.get('[data-column-key="approved"] [role="button"]').trigger('click')
+    await wrapper.get('[data-column-key="approved"] .board-card__open').trigger('click')
     expect(wrapper.emitted('activate-card')).toEqual([[{ id: 91, columnKey: 'approved' }]])
-    await wrapper.get('[data-column-key="approved"] button').trigger('click')
+    await wrapper.get('[data-column-key="approved"] .board-column__footer button').trigger('click')
     expect(wrapper.emitted('view-all')).toEqual([['approved']])
   })
 
