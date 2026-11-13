@@ -9,6 +9,26 @@ import { expect, test, type Page, type Route } from '@playwright/test'
  */
 const evidence = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.xwing-task/crmwolf/evidence')
 
+const previewPdf = (): Buffer => {
+  const content = 'BT /F1 24 Tf 72 720 Td (CRM-105 Invoice Preview) Tj ET'
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Count 1 /Kids [3 0 R] >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets = [0]
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf))
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`
+  })
+  const xref = Buffer.byteLength(pdf)
+  pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  return Buffer.from(pdf)
+}
+
 const permission = (code: string, id: number) => ({
   id,
   code,
@@ -51,7 +71,7 @@ const reissue = (ordinal: 1 | 2) => {
   }
 }
 
-const invoice = () => ({
+const invoice = (includeRedOffset = false) => ({
   id: 18,
   application_number: 'INV202607220001',
   customer_id: 'cus_weipai',
@@ -87,14 +107,27 @@ const invoice = () => ({
   invoice_title_title: '武汉微派网络科技有限公司',
   applicant_name: '林晓',
   reviewer_name: '周衡',
-  reissue_status: 'REISSUED',
-  invoice_effective_status: 'REISSUED',
-  current_invoice_file_kind: 'reissue_new',
-  current_invoice_file_path: 'invoices/new-2.ofd',
-  current_invoice_number: '244220000000032345678',
-  current_reissue_id: 2,
-  red_offsets: [],
-  reissue_applications: [reissue(1), reissue(2)],
+  reissue_status: includeRedOffset ? 'NONE' : 'REISSUED',
+  invoice_effective_status: includeRedOffset ? 'RED_OFFSET' : 'REISSUED',
+  current_invoice_file_kind: includeRedOffset ? null : 'reissue_new',
+  current_invoice_file_path: includeRedOffset ? null : 'invoices/new-2.ofd',
+  current_invoice_number: includeRedOffset ? null : '244220000000032345678',
+  current_reissue_id: includeRedOffset ? null : 2,
+  red_offsets: includeRedOffset ? [{
+    id: 3,
+    invoice_application_id: 18,
+    source_type: 'MANUAL',
+    reissue_application_id: null,
+    red_invoice_file_path: 'invoices/red-offset-3.pdf',
+    red_invoice_number: 'RED-3',
+    reason: '冲红文件预览验证',
+    created_by: '7',
+    created_by_name: '林晓',
+    red_offset_time: '2026-10-19T09:00:00',
+    created_time: '2026-10-19T09:00:00',
+    last_modified_time: '2026-10-19T09:00:00',
+  }] : [],
+  reissue_applications: includeRedOffset ? [] : [reissue(1), reissue(2)],
 })
 
 const approvalDetail = (businessType: string, businessId: number) => ({
@@ -125,9 +158,14 @@ async function fulfill(route: Route, body: unknown): Promise<void> {
   })
 }
 
-async function installApi(page: Page): Promise<void> {
+async function installApi(page: Page, includeRedOffset = false): Promise<void> {
   await page.route('**/api/v1/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
+    if (/\/invoice-applications\/(reissues\/\d+\/(red|new)-file|red-offsets\/\d+\/file)$/.test(pathname)) {
+      const unsupported = pathname.endsWith('/reissues/2/new-file')
+      await route.fulfill({ status: 200, contentType: unsupported ? 'application/octet-stream' : 'application/pdf', body: unsupported ? Buffer.from('OFD fixture') : previewPdf() })
+      return
+    }
     if (pathname === '/api/v1/auth/me') {
       await fulfill(route, {
         id: 7,
@@ -182,11 +220,11 @@ async function installApi(page: Page): Promise<void> {
       return
     }
     if (pathname === '/api/v1/invoice-applications') {
-      await fulfill(route, { items: [invoice()], total: 1, page: 1, page_size: 20 })
+      await fulfill(route, { items: [invoice(includeRedOffset)], total: 1, page: 1, page_size: 20 })
       return
     }
     if (pathname === '/api/v1/invoice-applications/18') {
-      await fulfill(route, invoice())
+      await fulfill(route, invoice(includeRedOffset))
       return
     }
     const approval = pathname.match(/^\/api\/v1\/approvals\/(INVOICE|INVOICE_REISSUE)\/(\d+)\/detail$/)
@@ -226,4 +264,54 @@ test('已重开两次的发票详情仍可申请重开，并且当前发票是�
   await sheet.screenshot({ path: path.join(evidence, 'crm68-reissued-twice-detail.png') })
   await sheet.getByRole('button', { name: '不能下载' }).scrollIntoViewIfNeeded()
   await sheet.screenshot({ path: path.join(evidence, 'crm68-original-blocked.png') })
+
+  for (const name of ['红字发票-第2次.pdf', '红字发票-第1次.pdf', '新发票-第1次.pdf']) {
+    const preview = sheet.getByRole('button', { name: `预览${name}`, exact: true })
+    await expect(preview).toBeVisible()
+    await expect(sheet.getByRole('button', { name: `下载${name}`, exact: true })).toBeVisible()
+    await preview.click()
+    const dialog = page.getByTestId('file-preview-dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('iframe')).toHaveAttribute('src', /^blob:.*#view=FitH$/)
+    if (process.env.CRM105_VERIFY_PDF === '1') {
+      await expect(dialog.locator('[data-state="loading"]')).toHaveCount(0)
+      await expect(dialog.locator('[data-state="error"]')).toHaveCount(0)
+    }
+    const downloaded = page.waitForEvent('download')
+    await dialog.getByRole('button', { name: '下载文件', exact: true }).click()
+    const download = await downloaded
+    expect(download.suggestedFilename()).toBe(`${name.startsWith('新') ? '244220000000012348888' : name.includes('第2') ? '244220000000022345678' : '244220000000012349999'}.pdf`)
+    await dialog.locator('xpath=..').screenshot({ path: path.join(evidence, `crm105-preview-${name}.png`) })
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  }
+  await expect(sheet.getByRole('button', { name: '预览新发票-第2次.ofd', exact: true })).toHaveCount(0)
+  const unsupportedDownload = page.waitForEvent('download')
+  await sheet.getByRole('button', { name: '下载新发票-第2次.ofd', exact: true }).click()
+  expect((await unsupportedDownload).suggestedFilename()).toBe('244220000000032345678')
+  await expect(sheet.getByRole('button', { name: '预览原蓝字发票.pdf', exact: true })).toHaveCount(0)
+  await expect(sheet.getByRole('button', { name: '不能下载', exact: true })).toBeDisabled()
+  await sheet.getByText('第 1 次 · 已被下一次红冲').scrollIntoViewIfNeeded()
+  await sheet.screenshot({ path: path.join(evidence, 'crm105-unified-file-actions.png') })
+})
+
+test('冲红记录复用预览窗口且原蓝字保持禁用', async ({ page }) => {
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 86_400 })).toString('base64url')
+  await page.addInitScript(token => window.localStorage.setItem('token', token), `eyJhbGciOiJub25lIn0.${payload}.sig`)
+  await installApi(page, true)
+  await page.goto('/invoices')
+  await page.getByRole('table').getByText('INV202607220001', { exact: true }).click()
+  await page.getByRole('button', { name: '预览冲红记录-3-红字发票.pdf', exact: true }).click()
+  const dialog = page.getByTestId('file-preview-dialog')
+  await expect(dialog.locator('iframe')).toHaveAttribute('src', /^blob:.*#view=FitH$/)
+  if (process.env.CRM105_VERIFY_PDF === '1') {
+    await expect(dialog.locator('[data-state="loading"]')).toHaveCount(0)
+    await expect(dialog.locator('[data-state="error"]')).toHaveCount(0)
+  }
+  await dialog.locator('xpath=..').screenshot({ path: path.join(evidence, 'crm105-red-offset-preview.png') })
+  const downloaded = page.waitForEvent('download')
+  await dialog.getByRole('button', { name: '下载文件', exact: true }).click()
+  expect((await downloaded).suggestedFilename()).toBe('冲红记录-3-红字发票.pdf')
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.getByRole('button', { name: '预览原蓝字发票.pdf', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '不能下载', exact: true })).toBeDisabled()
 })

@@ -76,11 +76,14 @@ import invoiceApi, {
 import approvalGenericApi from '@/api/approvalGeneric'
 import {
   createInvoiceFileObjectUrl,
+  createInvoiceRedOffsetFileObjectUrl,
+  createInvoiceReissueFileObjectUrl,
   downloadInvoiceFile as downloadInvoiceFileApi,
   downloadInvoiceRedOffsetFile,
   downloadInvoiceReissueFile,
 } from '@/api/fileUpload'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
+import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
 import type { ApprovalSourceContext } from '@/types/approvalSource'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { usePermissionStore } from '@/stores/permissions'
@@ -144,6 +147,8 @@ const redOffsetting = ref<boolean>(false)
 const deleting = ref<boolean>(false)
 const invoiceFilePreviewUrl = ref<string>('')
 const invoiceFilePreviewLoading = ref<boolean>(false)
+const persistedFilePreviewUrls = ref<Record<string, string>>({})
+const persistedFilePreviewStates = ref<Record<string, 'processing' | 'done' | 'error'>>({})
 const completeReissueRedFileUrl = ref<string>('')
 const completeReissueNewFileUrl = ref<string>('')
 const redOffsetFileUrl = ref<string>('')
@@ -345,7 +350,9 @@ const getReissueInvoiceFiles = (card: ReissueTimelineCard): FileAttachmentItem[]
       id: `reissue-${reissue.id}-red`,
       name: card.redFileName,
       extension: getFileExtension(reissue.red_invoice_file_path),
-      status: 'done',
+      status: persistedFilePreviewStates.value[`reissue-${reissue.id}-red`] ?? 'done',
+      url: persistedFilePreviewUrls.value[`reissue-${reissue.id}-red`] ?? '',
+      errorMessage: '预览加载失败，仍可下载文件',
       description: card.redCaption,
     })
   }
@@ -355,7 +362,9 @@ const getReissueInvoiceFiles = (card: ReissueTimelineCard): FileAttachmentItem[]
       id: `reissue-${reissue.id}-new`,
       name: card.newFileName,
       extension: getFileExtension(reissue.new_invoice_file_path),
-      status: 'done',
+      status: persistedFilePreviewStates.value[`reissue-${reissue.id}-new`] ?? 'done',
+      url: persistedFilePreviewUrls.value[`reissue-${reissue.id}-new`] ?? '',
+      errorMessage: '预览加载失败，仍可下载文件',
       description: card.newCaption,
     }
     if (card.isCurrent) newFile.descriptionTone = 'success'
@@ -376,7 +385,9 @@ const getRedOffsetFiles = (redOffset: InvoiceRedOffsetResponse): FileAttachmentI
     id: `red-offset-${redOffset.id}`,
     name: buildRedOffsetFileName(redOffset),
     extension: getFileExtension(redOffset.red_invoice_file_path),
-    status: 'done',
+    status: persistedFilePreviewStates.value[`red-offset-${redOffset.id}`] ?? 'done',
+    url: persistedFilePreviewUrls.value[`red-offset-${redOffset.id}`] ?? '',
+    errorMessage: '预览加载失败，仍可下载文件',
   }
   if (redOffset.red_invoice_number !== null && redOffset.red_invoice_number.trim() !== '') {
     file.description = `发票号码：${redOffset.red_invoice_number}`
@@ -388,6 +399,49 @@ const revokeInvoiceFilePreviewUrl = (): void => {
   if (invoiceFilePreviewUrl.value.length === 0) return
   window.URL.revokeObjectURL(invoiceFilePreviewUrl.value)
   invoiceFilePreviewUrl.value = ''
+}
+
+const revokePersistedFilePreviewUrls = (): void => {
+  for (const url of Object.values(persistedFilePreviewUrls.value)) {
+    window.URL.revokeObjectURL(url)
+  }
+  persistedFilePreviewUrls.value = {}
+  persistedFilePreviewStates.value = {}
+}
+
+const loadPersistedFilePreviewUrls = (
+  invoice: InvoiceApplicationResponse,
+  requestId: number,
+): void => {
+  const load = async (file: FileAttachmentItem, createUrl: () => Promise<string>): Promise<void> => {
+    if (getFilePreviewKind(file) === 'unsupported') return
+    const key = String(file.id)
+    persistedFilePreviewStates.value[key] = 'processing'
+    try {
+      const url = await createUrl()
+      if (requestId !== activeRequestId.value || invoiceInfo.value?.id !== invoice.id) {
+        window.URL.revokeObjectURL(url)
+        return
+      }
+      persistedFilePreviewUrls.value[String(file.id)] = url
+      persistedFilePreviewStates.value[key] = 'done'
+    } catch (error: unknown) {
+      if (requestId !== activeRequestId.value || invoiceInfo.value?.id !== invoice.id) return
+      persistedFilePreviewStates.value[key] = 'error'
+      logger.error('[InvoiceDetailSheet]', '加载发票文件预览失败', { fileId: file.id, error })
+    }
+  }
+
+  for (const card of buildReissueTimeline(invoice.reissue_applications)) {
+    for (const file of getReissueInvoiceFiles(card)) {
+      const kind: ReissueFileKind = String(file.id).endsWith('-red') ? 'red' : 'new'
+      void load(file, () => createInvoiceReissueFileObjectUrl(card.reissue.id, kind))
+    }
+  }
+  for (const redOffset of manualRedOffsets.value) {
+    const file = getRedOffsetFiles(redOffset)[0]
+    if (file !== undefined) void load(file, () => createInvoiceRedOffsetFileObjectUrl(redOffset.id))
+  }
 }
 
 const revokeLocalFileUrl = (kind: 'complete-red' | 'complete-new' | 'red-offset'): void => {
@@ -455,6 +509,8 @@ const loadInvoiceFilePreviewUrl = async (
 const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
   const requestId = activeRequestId.value + 1
   activeRequestId.value = requestId
+  revokeInvoiceFilePreviewUrl()
+  revokePersistedFilePreviewUrls()
   loading.value = true
   errorMessage.value = ''
   loadError.value = null
@@ -466,6 +522,7 @@ const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
     invoiceInfo.value = data
     openAutoEditReissueIfNeeded(data)
     void loadInvoiceFilePreviewUrl(data, requestId)
+    loadPersistedFilePreviewUrls(data, requestId)
   } catch (error: unknown) {
     if (requestId !== activeRequestId.value) return
     logger.error('[InvoiceDetailSheet]', '获取发票申请详情失败', { error })
@@ -488,6 +545,7 @@ const fetchInvoiceDetail = async (invoiceId: number): Promise<void> => {
 const resetState = (): void => {
   activeRequestId.value += 1
   revokeInvoiceFilePreviewUrl()
+  revokePersistedFilePreviewUrls()
   invoiceFilePreviewLoading.value = false
   loading.value = false
   errorMessage.value = ''
@@ -1047,6 +1105,7 @@ watch(
 onBeforeUnmount((): void => {
   activeRequestId.value += 1
   revokeInvoiceFilePreviewUrl()
+  revokePersistedFilePreviewUrls()
   revokeLocalFileUrl('complete-red')
   revokeLocalFileUrl('complete-new')
   revokeLocalFileUrl('red-offset')
@@ -1290,8 +1349,6 @@ onBeforeUnmount((): void => {
                   <FileAttachment
                     mode="readonly"
                     :files="getReissueInvoiceFiles(card)"
-                    :allow-preview="false"
-                    download-label="下载"
                     :show-header="false"
                     empty-text="暂无重开发票文件"
                     @download="handleDownloadReissueAttachment(card.reissue, $event)"
@@ -1345,7 +1402,6 @@ onBeforeUnmount((): void => {
                   <FileAttachment
                     mode="readonly"
                     :files="getRedOffsetFiles(redOffset)"
-                    :allow-preview="false"
                     :show-header="false"
                     empty-text="暂无红字发票文件"
                     @download="handleDownloadRedOffsetAttachment(redOffset, $event)"

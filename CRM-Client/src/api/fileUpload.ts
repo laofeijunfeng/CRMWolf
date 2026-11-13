@@ -1,8 +1,7 @@
-/* eslint-disable crmwolf/require-zod-schema */
 /**
- * 发票文件下载 API
+ * 发票文件预览与下载 API
  *
- * 上传发票文件由审批中心流程负责；发票管理和发票详情只保留下载能力。
+ * 上传发票文件由审批中心流程负责；发票详情通过既有文件端点加载预览。
  */
 import { BlobPartResponseSchema } from '@/schemas/common'
 import request from '@/utils/request'
@@ -35,6 +34,27 @@ export const createInvoiceFileObjectUrl = async (invoiceId: number): Promise<str
   )
   const blob = toBlob(response)
   return window.URL.createObjectURL(blob)
+}
+
+export const createInvoiceReissueFileObjectUrl = async (
+  reissueId: number,
+  fileKind: 'red' | 'new',
+): Promise<string> => {
+  const response = BlobPartResponseSchema.parse(
+    await request.get<unknown>(getInvoiceReissueFilePath(reissueId, fileKind), {
+      responseType: 'blob'
+    })
+  )
+  return window.URL.createObjectURL(toBlob(response))
+}
+
+export const createInvoiceRedOffsetFileObjectUrl = async (redOffsetId: number): Promise<string> => {
+  const response = BlobPartResponseSchema.parse(
+    await request.get<unknown>(getInvoiceRedOffsetFilePath(redOffsetId), {
+      responseType: 'blob'
+    })
+  )
+  return window.URL.createObjectURL(toBlob(response))
 }
 
 export const downloadInvoiceFile = async (invoiceId: number, fileName?: string): Promise<void> => {
