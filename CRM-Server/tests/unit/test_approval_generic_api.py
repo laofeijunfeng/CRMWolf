@@ -50,6 +50,8 @@ from app.models.invoice import (
     InvoiceApplication,
     InvoiceApplicationStatus,
     InvoiceType,
+    InvoiceReissueApplication,
+    InvoiceReissueApplicationStatus,
 )
 from app.models.opportunity import Opportunity
 from app.models.outbound_notification_job import (
@@ -98,6 +100,7 @@ def db_session():
         Opportunity.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
+        InvoiceReissueApplication.__table__,
         PaymentPlan.__table__,
         PaymentRecord.__table__,
         ApprovalFlow.__table__,
@@ -566,6 +569,124 @@ def test_issued_invoice_detail_serializes_issue_timestamp(
 
     assert response.status_code == 200, response.text
     assert response.json()["issued_time"] == issued_time.isoformat()
+
+
+@pytest.fixture
+def seed_invoice_reissue_approval(
+    db_session, seed_invoice_draft, seed_invoice_flow_with_finance_node,
+):
+    original = seed_invoice_draft
+    original.invoice_bank_name = "原开户银行"
+    original.invoice_bank_account = "0000123400"
+    original.invoice_address = " 原开票地址 "
+    original.invoice_phone = None
+    original.status = InvoiceApplicationStatus.ISSUED
+    flow, node = seed_invoice_flow_with_finance_node
+    flow.business_type = BusinessType.INVOICE_REISSUE
+    reissue = InvoiceReissueApplication(
+        team_id=1,
+        application_number="INVR-2026-002",
+        original_invoice_application_id=original.id,
+        applicant_id=original.applicant_id,
+        reason="再次更正开票信息",
+        status=InvoiceReissueApplicationStatus.PENDING_REVIEW,
+        invoice_type=InvoiceType.VAT_SPECIAL,
+        invoice_title_type="PERSONAL",
+        invoice_title_text="当前重开抬头",
+        invoice_taxpayer_id="CURRENT-TAX-ID",
+        invoice_address="当前地址",
+        invoice_phone="010-00000000",
+        invoice_bank_name="当前开户银行",
+        invoice_bank_account="0000987600",
+        invoice_amount=Decimal("4321.09"),
+    )
+    db_session.add(reissue)
+    db_session.flush()
+    db_session.add(Approval(
+        team_id=1,
+        business_type=BusinessType.INVOICE_REISSUE,
+        business_id=reissue.id,
+        flow_id=flow.id,
+        current_node_id=node.id,
+        submitter_id=original.applicant_id,
+        status=ApprovalStatus.PENDING,
+    ))
+    db_session.commit()
+    return reissue
+
+
+def test_reissue_detail_compares_initial_invoice_not_previous_reissue(
+    db_session, client, seed_invoice_draft, seed_invoice_reissue_approval,
+):
+    original = seed_invoice_draft
+    current = seed_invoice_reissue_approval
+    db_session.add(InvoiceReissueApplication(
+        team_id=1,
+        application_number="INVR-2026-001",
+        original_invoice_application_id=original.id,
+        applicant_id=original.applicant_id,
+        reason="首次更正开票信息",
+        status=InvoiceReissueApplicationStatus.COMPLETED,
+        invoice_type=InvoiceType.VAT_SPECIAL,
+        invoice_title_type="PERSONAL",
+        invoice_title_text="上次重开抬头",
+        invoice_taxpayer_id="PREVIOUS-TAX-ID",
+        invoice_amount=Decimal("4500.50"),
+        new_invoice_file_path="invoices/previous.pdf",
+        completed_time=business_now() - timedelta(days=1),
+        created_time=business_now() - timedelta(days=2),
+    ))
+    db_session.commit()
+
+    response = client.get(f"/v1/approvals/INVOICE_REISSUE/{current.id}/detail")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    detail = body["entity_detail"]
+    assert body["application_number"] == current.application_number
+    assert body["entity_name"] == "当前重开抬头"
+    assert body["entity_amount"] == 4321.09
+    assert detail["invoice_title_type"] == "PERSONAL"
+    assert detail["invoice_amount"] == 4321.09
+    assert detail["reason"] == "再次更正开票信息"
+    assert detail["original_invoice_application_number"] == original.application_number
+    assert detail["original_invoice"] == {
+        "invoice_type": InvoiceType.VAT_NORMAL,
+        "invoice_title_type": "COMPANY",
+        "invoice_title_text": "测试公司",
+        "invoice_taxpayer_id": "91110000XXXXXXX",
+        "invoice_address": " 原开票地址 ",
+        "invoice_phone": None,
+        "invoice_bank_name": "原开户银行",
+        "invoice_bank_account": "0000123400",
+        "invoice_amount": 5000.0,
+    }
+
+
+@pytest.mark.parametrize("original_state", ["other_team", "missing"])
+def test_reissue_detail_hides_unavailable_original_without_losing_current_billing(
+    db_session, client, seed_invoice_draft, seed_invoice_reissue_approval, original_state,
+):
+    reissue = seed_invoice_reissue_approval
+    if original_state == "other_team":
+        seed_invoice_draft.team_id = 2
+    else:
+        reissue.original_invoice_application_id = 999999
+    db_session.commit()
+
+    response = client.get(f"/v1/approvals/INVOICE_REISSUE/{reissue.id}/detail")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    detail = body["entity_detail"]
+    assert detail["original_invoice"] is None
+    assert detail["original_invoice_application_number"] is None
+    assert body["customer_info"] is None
+    assert detail["invoice_title_text"] == "当前重开抬头"
+    assert detail["invoice_amount"] == 4321.09
+    assert detail["reason"] == "再次更正开票信息"
+    assert body["application_number"] == "INVR-2026-002"
+
 
 def test_entity_detail_exposes_subject_drilldown_ids(db_session, seed_payment_record_self):
     """审批详情需返回主体下钻所需的关联合同/商机标识，前端据此打开只读主体详情。"""
