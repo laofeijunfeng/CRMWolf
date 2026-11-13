@@ -37,7 +37,6 @@
     "lunar-javascript": "^1.7.7",
     "markdown-it": "^14.2.0",
     "pinia": "^2.3.0",
-    "radix-vue": "^1.9.17",
     "reka-ui": "^2.10.1",
     "tailwind-merge": "^3.6.0",
     "vaul-vue": "^0.4.1",

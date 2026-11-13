@@ -2,7 +2,7 @@
 /**
  * PaginationContent - Container for pagination items
  */
-import { PaginationList } from 'radix-vue'
+import { PaginationList } from 'reka-ui'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
 

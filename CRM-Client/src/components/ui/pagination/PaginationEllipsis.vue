@@ -2,7 +2,7 @@
 /**
  * PaginationEllipsis - Shows ... for skipped pages
  */
-import { PaginationEllipsis as RadixEllipsis } from 'radix-vue'
+import { PaginationEllipsis as RekaEllipsis } from 'reka-ui'
 import { MoreHorizontal } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
@@ -15,9 +15,9 @@ const props = defineProps<Props>()
 </script>
 
 <template>
-  <RadixEllipsis
+  <RekaEllipsis
     :class="cn('flex size-9 items-center justify-center text-wolf-text-tertiary', props.class)"
   >
     <MoreHorizontal class="h-4 w-4" aria-hidden="true" />
-  </RadixEllipsis>
+  </RekaEllipsis>
 </template>

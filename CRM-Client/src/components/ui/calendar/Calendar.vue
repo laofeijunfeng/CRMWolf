@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Calendar - 基于 radix-vue Calendar
- * 官方文档：https://www.radix-vue.com/components/calendar
+ * Calendar - 基于 reka-ui Calendar
+ * 锁定版本：reka-ui 2.10.1
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { getLocalTimeZone, parseDate, today, type DateValue } from '@internationalized/date'
 import {
@@ -18,7 +18,8 @@ import {
   CalendarHeader,
   CalendarNext,
   CalendarPrev,
-} from 'radix-vue'
+  type CalendarRootProps,
+} from 'reka-ui'
 import {
   Select,
   SelectContent,
@@ -57,7 +58,7 @@ const emit = defineEmits<{
   'update:placeholder': [value: DateValue | undefined]
 }>()
 
-const displayPlaceholder = ref<DateValue>(
+const displayPlaceholder = shallowRef<DateValue>(
   props.modelValue ?? props.placeholder ?? props.defaultValue ?? today(getLocalTimeZone())
 )
 
@@ -151,11 +152,14 @@ function handleModelValue(value: DateValue | undefined): void {
 
 const shellRef = ref<HTMLElement | null>(null)
 
-function handleFrameClick(event: MouseEvent): void {
+function handleFrameClick(event: MouseEvent | KeyboardEvent): void {
   if (!props.range) return
+  if (event instanceof KeyboardEvent && (
+    !['Enter', 'Space'].includes(event.code) || event.ctrlKey || event.metaKey || event.altKey
+  )) return
   const target = event.target
   if (!(target instanceof Element)) return
-  const cell = target.closest<HTMLElement>('[data-radix-vue-calendar-cell-trigger]')
+  const cell = target.closest<HTMLElement>('[data-reka-calendar-cell-trigger]')
   if (cell === null || cell.hasAttribute('data-disabled') || cell.hasAttribute('data-outside-view')) return
   const raw = cell.dataset['value']
   if (raw === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return
@@ -164,14 +168,16 @@ function handleFrameClick(event: MouseEvent): void {
 
 onMounted(() => {
   shellRef.value?.addEventListener('click', handleFrameClick)
+  shellRef.value?.addEventListener('keydown', handleFrameClick, true)
 })
 
 onBeforeUnmount(() => {
   shellRef.value?.removeEventListener('click', handleFrameClick)
+  shellRef.value?.removeEventListener('keydown', handleFrameClick, true)
 })
 
-const calendarRootProps = computed(() => {
-  const rootProps: Record<string, unknown> = {
+const calendarRootProps = computed<CalendarRootProps>(() => {
+  const rootProps: CalendarRootProps = {
     placeholder: displayPlaceholder.value,
     disabled: props.disabled,
     locale: props.locale,
@@ -179,14 +185,14 @@ const calendarRootProps = computed(() => {
   }
 
   if (props.range) {
-    rootProps['modelValue'] = undefined
-    rootProps['preventDeselect'] = true
+    rootProps.modelValue = null
+    rootProps.preventDeselect = true
   } else if (props.modelValue !== undefined) {
-    rootProps['modelValue'] = props.modelValue
+    rootProps.modelValue = props.modelValue
   }
 
   if (props.defaultValue !== undefined) {
-    rootProps['defaultValue'] = props.defaultValue
+    rootProps.defaultValue = props.defaultValue
   }
 
   return rootProps
@@ -197,11 +203,11 @@ const calendarRootProps = computed(() => {
   <div ref="shellRef" class="date-picker-calendar-shell">
   <CalendarRoot
     v-slot="{ weekDays, grid }"
-    v-bind="calendarRootProps as any"
+    v-bind="calendarRootProps"
     :class="cn('date-picker-calendar p-3', props.class)"
     class="rounded-md border bg-white"
-    @update:model-value="handleModelValue($event as DateValue | undefined)"
-    @update:placeholder="handlePlaceholderChange($event as DateValue)"
+    @update:model-value="handleModelValue"
+    @update:placeholder="handlePlaceholderChange"
   >
     <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
       <CalendarPrev

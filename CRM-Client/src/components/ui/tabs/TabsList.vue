@@ -3,7 +3,7 @@
  * TabsList - shadcn-vue TabsList component
  * Container for tab triggers
  */
-import { TabsList } from 'radix-vue'
+import { TabsList } from 'reka-ui'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
 

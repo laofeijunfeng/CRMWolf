@@ -74,6 +74,21 @@ describe('date between filter', () => {
     vi.useRealTimers()
   })
 
+  it('reports both keyboard activations when a range starts and ends on the same day', async () => {
+    const wrapper = mount(Calendar, {
+      props: { range: true, placeholder: new CalendarDate(2026, 10, 1) },
+      attachTo: document.body
+    })
+    attached.push(wrapper)
+    const day = wrapper.get('.date-picker-calendar__cell-trigger[data-value="2026-10-05"]')
+    await day.trigger('keydown', { key: 'Enter', code: 'Enter' })
+    await day.trigger('keydown', { key: ' ', code: 'Space' })
+    expect(wrapper.emitted('update:modelValue')).toEqual([
+      [new CalendarDate(2026, 10, 5)],
+      [new CalendarDate(2026, 10, 5)]
+    ])
+  })
+
   it('places 介于 between 早于 and 为空 and does not refresh after one click', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 9, 15, 12, 0, 0))

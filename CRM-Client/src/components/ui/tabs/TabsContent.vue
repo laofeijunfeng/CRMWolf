@@ -4,9 +4,9 @@
  * Content panel for each tab
  * UI/UX Pro Max §7: Animation - fade transition for content switch
  */
-import { TabsContent } from 'radix-vue'
+import { TabsContent, injectTabsRootContext } from 'reka-ui'
 import { cn } from '@/lib/utils'
-import type { HTMLAttributes } from 'vue'
+import { computed, useAttrs, type HTMLAttributes } from 'vue'
 
 interface Props {
   class?: HTMLAttributes['class']
@@ -14,11 +14,21 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {})
+const attrs = useAttrs()
+const rootContext = injectTabsRootContext()
+// Reka keeps forced panels present; retain the wrapper's inactive-hidden contract.
+const forcedHiddenAttrs = computed(() => {
+  const forced = attrs['forceMount'] ?? attrs['force-mount']
+  return forced === '' || forced === true
+    ? { hidden: rootContext.modelValue.value !== props.value }
+    : {}
+})
 </script>
 
 <template>
   <TabsContent
     :value="props.value"
+    v-bind="forcedHiddenAttrs"
     :class="cn(
       'mt-wolf-md',
       'ring-offset-wolf',

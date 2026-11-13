@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
  * Pagination - shadcn-vue style pagination component
- * Based on radix-vue PaginationRoot
+ * Based on reka-ui PaginationRoot
  */
-import { PaginationRoot } from 'radix-vue'
+import { PaginationRoot } from 'reka-ui'
 import { computed, provide, toRef } from 'vue'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'

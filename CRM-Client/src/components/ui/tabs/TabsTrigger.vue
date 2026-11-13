@@ -3,7 +3,7 @@
  * TabsTrigger - shadcn-vue TabsTrigger component
  * Clickable tab button
  */
-import { TabsTrigger } from 'radix-vue'
+import { TabsTrigger } from 'reka-ui'
 import { cn } from '@/lib/utils'
 import type { HTMLAttributes } from 'vue'
 

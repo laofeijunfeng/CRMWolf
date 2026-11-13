@@ -10,7 +10,7 @@
  * 基于 shadcn-vue Tabs 组件改造（MASTER.md §3.1）
  */
 import { computed } from 'vue'
-import { TabsRoot, TabsList, TabsTrigger } from 'radix-vue'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 
@@ -53,7 +53,7 @@ function handleTabChange(value: string): void {
 </script>
 
 <template>
-  <TabsRoot
+  <Tabs
     :model-value="activeTabKey"
     class="context-tabs-wrapper"
     @update:model-value="handleTabChange"
@@ -104,7 +104,7 @@ function handleTabChange(value: string): void {
         </span>
       </TabsTrigger>
     </TabsList>
-  </TabsRoot>
+  </Tabs>
 </template>
 
 <style scoped lang="scss">
