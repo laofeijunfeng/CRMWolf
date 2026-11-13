@@ -69,17 +69,11 @@
 
         <!-- 单号列：mono font + 点击复制 -->
         <template #cell-application_number="{ row }">
-          <Button
-            type="button"
-            variant="link"
-            class="font-mono px-0"
+          <CopyableText
+            :value="row.application_number"
+            label="审批单号"
             data-testid="copy-number"
-            :aria-label="`复制审批单号 ${row.application_number}`"
-            @click.stop="copyNumber(row.application_number)"
-          >
-            <Copy class="w-4 h-4" aria-hidden="true" />
-            {{ row.application_number }}
-          </Button>
+          />
         </template>
 
         <!-- 类型列 -->
@@ -127,13 +121,12 @@
         <template #mobile-card="{ row }">
           <div :class="cn('approval-mobile-card', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
             <div class="flex justify-between items-center mb-3">
-              <span
-                class="font-mono text-primary text-base cursor-pointer"
+              <CopyableText
+                :value="row.application_number"
+                label="审批单号"
+                class="text-base"
                 data-testid="copy-number-mobile"
-                @click.stop="copyNumber(row.application_number)"
-              >
-                {{ row.application_number }}
-              </span>
+              />
               <ApprovalStatusBadge :status="row.status" size="small" />
             </div>
 
@@ -293,7 +286,13 @@
         <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
           <SheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</SheetTitle>
           <p class="font-mono text-sm mt-1">
-            {{ selectedApproval?.application_number || '-' }}
+            <CopyableText
+              v-if="selectedApproval?.application_number"
+              :value="selectedApproval.application_number"
+              label="审批单号"
+              data-testid="copy-number-detail"
+            />
+            <template v-else>-</template>
           </p>
         </SheetHeader>
 
@@ -314,14 +313,9 @@
                       :class="cn('attribute-item', field.wide && 'attribute-item-wide')"
                     >
                       <div class="attribute-label">{{ field.label }}</div>
-                      <button
-                        v-if="field.type === 'copy'"
-                        type="button"
-                        class="attribute-value attribute-value-link font-mono text-left"
-                        @click="copyNumber(displayFieldValue(field.value))"
-                      >
-                        {{ displayFieldValue(field.value) }}
-                      </button>
+                      <div v-if="field.type === 'copy' && hasFieldValue(field.value)" class="attribute-value">
+                        <CopyableText :value="String(field.value)" :label="field.label" />
+                      </div>
                       <button
                         v-else-if="field.type === 'link' && hasFieldDrilldown(field)"
                         type="button"
@@ -563,8 +557,8 @@ import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { BellRing, Clock, Copy } from 'lucide-vue-next'
-import { AmountText, DataTable, Badge, FileAttachment, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
+import { BellRing, Clock } from 'lucide-vue-next'
+import { AmountText, CopyableText, DataTable, Badge, FileAttachment, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -962,8 +956,10 @@ const formatDateValue = (value: string | number | null | undefined): string | nu
   return String(value).split('T')[0] ?? String(value)
 }
 
+const hasFieldValue = (value: string | number | null | undefined): value is string | number => value != null && value !== ''
+
 const displayFieldValue = (value: string | number | null | undefined): string => {
-  if (value == null || value === '') return '-'
+  if (!hasFieldValue(value)) return '-'
   return String(value)
 }
 
@@ -1314,27 +1310,6 @@ const handleSortReset = (): void => {
   activeSorts.value = []
   page.value = 1
   fetchList()
-}
-
-const copyNumber = async (num: string): Promise<void> => {
-  try {
-    if (typeof navigator?.clipboard?.writeText === 'function') {
-      await navigator.clipboard.writeText(num)
-    } else {
-      // 降级：document.execCommand
-      const ta = document.createElement('textarea')
-      ta.value = num
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-    }
-    toast.success('已复制单号')
-  } catch {
-    toast.error('复制失败，请手动选择单号复制')
-  }
 }
 
 const getVisibleDetailTriggers = (): HTMLElement[] => {

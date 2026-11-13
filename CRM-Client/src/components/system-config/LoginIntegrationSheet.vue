@@ -16,6 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { oauthApi, type OAuthProviderConfigResponse, type OAuthProviderConfigUpdate } from '@/api/oauth'
 import { handleApiError } from '@/utils/errorHandler'
+import { copyToClipboard } from '@/utils/clipboard'
 
 interface Props {
   open?: boolean
@@ -128,12 +129,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 const copyCallbackUrl = async (): Promise<void> => {
-  try {
-    await navigator.clipboard.writeText(values.redirect_uri ?? callbackUrl.value)
-    toast.success('重定向 URL 已复制')
-  } catch {
-    toast.warning('复制失败，请手动复制')
-  }
+  await copyToClipboard(values.redirect_uri ?? callbackUrl.value, '重定向 URL')
 }
 
 const copyBotCallbackUrl = async (): Promise<void> => {
@@ -141,12 +137,7 @@ const copyBotCallbackUrl = async (): Promise<void> => {
     toast.warning('请先保存第三方集成配置')
     return
   }
-  try {
-    await navigator.clipboard.writeText(botCallbackUrl.value)
-    toast.success('机器人回调地址已复制')
-  } catch {
-    toast.warning('复制失败，请手动复制')
-  }
+  await copyToClipboard(botCallbackUrl.value, '机器人回调地址')
 }
 
 const copyBotEncryptKey = async (): Promise<void> => {
@@ -155,12 +146,7 @@ const copyBotEncryptKey = async (): Promise<void> => {
     toast.warning('保存后系统会生成 Encrypt Key')
     return
   }
-  try {
-    await navigator.clipboard.writeText(encryptKey)
-    toast.success('Encrypt Key 已复制')
-  } catch {
-    toast.warning('复制失败，请手动复制')
-  }
+  await copyToClipboard(encryptKey, 'Encrypt Key')
 }
 
 watch(active, (isActive) => {

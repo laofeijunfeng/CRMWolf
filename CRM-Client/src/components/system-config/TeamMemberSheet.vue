@@ -51,6 +51,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { handleApiError } from '@/utils/errorHandler'
+import { copyToClipboard } from '@/utils/clipboard'
 import { confirmDialog, confirmDelete } from '@/utils/confirmDialog'
 import {
   teamApi,
@@ -405,12 +406,7 @@ const handleRegenerateCode = async (): Promise<void> => {
 
 const handleCopyInviteLink = async (): Promise<void> => {
   if (inviteLink.value.length === 0) return
-  try {
-    await navigator.clipboard.writeText(inviteLink.value)
-    toast.success('邀请链接已复制')
-  } catch {
-    toast.warning('复制失败，请手动复制')
-  }
+  await copyToClipboard(inviteLink.value, '邀请链接')
 }
 
 // ==================== Lifecycle ====================

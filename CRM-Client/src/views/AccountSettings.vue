@@ -13,6 +13,7 @@ import {
   Card,
   CardContent,
   CardHeader,
+  CopyableText,
   DataViewStatePanel,
   Dialog,
   DialogContent,
@@ -144,15 +145,6 @@ const submitPassword = handleSubmit(async (values): Promise<void> => {
   }
 }, focusFirstInvalidField)
 
-const copyUserId = async (): Promise<void> => {
-  try {
-    await navigator.clipboard.writeText(String(userInfo.value?.id ?? ''))
-    toast.success('用户 ID 已复制')
-  } catch (error: unknown) {
-    handleApiError(error, '复制用户 ID')
-  }
-}
-
 const bindFeishu = async (): Promise<void> => {
   oauthSubmitting.value = true
   try {
@@ -241,14 +233,8 @@ onMounted(() => {
             <dt>工号</dt><dd>{{ displayValue(userInfo.employee_no) }}</dd>
             <dt>账户状态</dt><dd><Badge>{{ displayValue(userInfo.status) }}</Badge></dd>
             <dt>用户 ID</dt>
-            <dd class="flex items-center gap-2 tabular-nums">
-              <span>{{ userInfo.id }}</span>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button type="button" variant="ghost" size="sm" aria-label="复制用户 ID" @click="copyUserId">复制</Button>
-                </TooltipTrigger>
-                <TooltipContent>复制用户 ID</TooltipContent>
-              </Tooltip>
+            <dd class="tabular-nums">
+              <CopyableText :value="String(userInfo.id)" label="用户 ID" />
             </dd>
             <dt>角色</dt>
             <dd class="flex flex-wrap gap-2">

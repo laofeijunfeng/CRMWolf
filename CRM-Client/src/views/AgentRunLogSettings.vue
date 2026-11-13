@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
@@ -12,6 +11,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { handleApiError } from '@/utils/errorHandler'
+import { copyToClipboard } from '@/utils/clipboard'
 import { formatDateRelative } from '@/utils/format'
 import { toFeedbackError } from '@/types/feedback'
 import type { FeedbackError } from '@/types/feedback'
@@ -168,12 +168,7 @@ const openTurn = async (row: AgentRunLogTurnListItem): Promise<void> => {
 const copyLog = async (): Promise<void> => {
   const log = detail.value?.log
   if (log === undefined) return
-  try {
-    await navigator.clipboard.writeText(log)
-    toast.success('完整日志已复制')
-  } catch {
-    toast.error('复制失败，请手动选择日志复制')
-  }
+  await copyToClipboard(log, '完整日志')
 }
 
 watch([permissionsPending, permissionsUnavailable, hasAccess], () => {

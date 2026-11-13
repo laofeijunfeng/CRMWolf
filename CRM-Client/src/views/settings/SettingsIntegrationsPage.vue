@@ -16,6 +16,7 @@ import ErrorState from '@/components/ErrorState.vue'
 import { oauthApi } from '@/api/oauth'
 import type { OAuthProviderConfigResponse, OAuthProviderConfigUpdate } from '@/api/oauth'
 import { handleApiError } from '@/utils/errorHandler'
+import { copyToClipboard } from '@/utils/clipboard'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
@@ -149,12 +150,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 const copyCallbackUrl = async (): Promise<void> => {
-  try {
-    await navigator.clipboard.writeText(values.redirect_uri ?? callbackUrl.value)
-    toast.success('重定向 URL 已复制')
-  } catch {
-    toast.warning('复制失败，请手动复制')
-  }
+  await copyToClipboard(values.redirect_uri ?? callbackUrl.value, '重定向 URL')
 }
 
 onMounted(() => {

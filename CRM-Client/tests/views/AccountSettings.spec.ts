@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick, ref, type Ref } from 'vue'
-
+import CopyableText from '@/components/crmwolf/CopyableText.vue'
 interface UserFixture {
   id: number
   name: string
@@ -66,6 +66,7 @@ vi.mock('@/components/crmwolf', async () => {
   })
 
   return {
+    CopyableText,
     Alert: passthrough('Alert'), AlertDescription: passthrough('AlertDescription'), AlertTitle: passthrough('AlertTitle'),
     Avatar: passthrough('Avatar'), AvatarFallback: passthrough('AvatarFallback'), AvatarImage: avatarImage,
     Badge: passthrough('Badge'), Button: button, Card: passthrough('Card'), CardContent: passthrough('CardContent'),

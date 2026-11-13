@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import ErrorState from '@/components/ErrorState.vue'
 import { teamApi, type TeamResponse } from '@/api/team'
 import { handleApiError } from '@/utils/errorHandler'
+import { copyToClipboard } from '@/utils/clipboard'
 import { confirmDialog } from '@/utils/confirmDialog'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
@@ -134,12 +135,7 @@ const regenerateInviteCode = async (): Promise<void> => {
 
 const copyInviteLink = async (): Promise<void> => {
   if (inviteLink.value.length === 0) return
-  try {
-    await navigator.clipboard.writeText(inviteLink.value)
-    toast.success('邀请链接已复制')
-  } catch (error: unknown) {
-    handleApiError(error, '复制邀请链接')
-  }
+  await copyToClipboard(inviteLink.value, '邀请链接')
 }
 
 onMounted(() => {

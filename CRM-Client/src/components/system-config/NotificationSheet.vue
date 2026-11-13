@@ -17,7 +17,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
-import { Save, Send, ExternalLink, Copy, Check, AlertTriangle } from 'lucide-vue-next'
+import { Save, Send, ExternalLink, AlertTriangle } from 'lucide-vue-next'
 import {
   Sheet,
   SheetHeader,
@@ -39,6 +39,7 @@ import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { handleApiError } from '@/utils/errorHandler'
+import { CopyableText } from '@/components/crmwolf'
 import { notificationConfigApi, type NotificationConfigResponse, type NotificationConfigUpdate } from '@/api/notificationConfig'
 
 // ==================== Props & Emits ====================
@@ -66,7 +67,6 @@ const testing = ref(false)
 const configInfo = ref<NotificationConfigResponse | null>(null)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const savedUrl = ref('')
-const copySuccess = ref(false)
 
 // ==================== Zod Schema ====================
 const notificationSchema = toTypedSchema(
@@ -129,19 +129,6 @@ function isValidWebhookUrl(url: string): boolean {
     return url.includes('open.feishu.cn/open-apis/bot/v2/hook')
   } catch {
     return false
-  }
-}
-
-async function copyWebhookExample(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText('https://open.feishu.cn/open-apis/bot/v2/hook/xxx')
-    copySuccess.value = true
-    setTimeout(() => {
-      copySuccess.value = false
-    }, 3000)
-    toast.success('示例 URL 已复制到剪贴板')
-  } catch {
-    toast.warning('复制失败，请手动复制')
   }
 }
 
@@ -408,14 +395,11 @@ watch(active, (isActive) => {
                   </div>
                   <div class="flex-1">
                     <div class="font-medium text-sm">复制 Webhook URL</div>
-                    <div
-                      class="mt-2 inline-flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md cursor-pointer hover:bg-muted/80 transition-colors"
-                      @click="copyWebhookExample"
-                    >
-                      <code class="text-xs text-muted-foreground">https://open.feishu.cn/open-apis/bot/v2/hook/xxx</code>
-                      <Copy v-if="!copySuccess" class="w-3 h-3 text-muted-foreground" />
-                      <Check v-else class="w-3 h-3 text-green-500" />
-                    </div>
+                    <CopyableText
+                      class="mt-2 text-xs"
+                      value="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                      label="示例 Webhook URL"
+                    />
                   </div>
                 </div>
 
