@@ -391,6 +391,7 @@ const chartBucketError = ref('')
 const chartBucketRequest = ref<{ card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
+const chartBucketResetToken = ref(0)
 const CHART_PAGE_SIZE = 10
 
 const chartQuery = (): PaymentRecordListParams => {
@@ -407,6 +408,7 @@ const chartQuery = (): PaymentRecordListParams => {
 
 const closeChartBucket = (): void => {
   chartBucketRequestId += 1
+  chartBucketResetToken.value += 1
   chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
@@ -492,7 +494,7 @@ const handleDisplayModeChange = (mode: string | number): void => {
   if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
-  closeChartBucket()
+  if (mode !== 'chart') closeChartBucket()
   void refreshActivePaymentRecordView()
 }
 
@@ -1004,6 +1006,7 @@ defineExpose({
           :bucket-records="chartBucket"
           :bucket-loading="chartBucketLoading"
           :bucket-error="chartBucketError"
+          :reset-token="chartBucketResetToken"
           @retry="fetchPaymentChart"
           @open-record="openChartRecord"
           @view-bucket="openChartBucket"

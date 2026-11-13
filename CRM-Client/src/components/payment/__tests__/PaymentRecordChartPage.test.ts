@@ -1,5 +1,5 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import PaymentRecordChartPage from '@/components/payment/PaymentRecordChartPage.vue'
 import type { PaymentRecordChartBucket, PaymentRecordChartResponse } from '@/schemas/paymentRecordChart'
@@ -98,8 +98,16 @@ const chart: PaymentRecordChartResponse = {
   ],
 }
 
+const mountedCharts: VueWrapper[] = []
+
+afterEach(() => {
+  for (const wrapper of mountedCharts.splice(0)) {
+    if (wrapper.exists()) wrapper.unmount()
+  }
+})
+
 function mountChart(value: PaymentRecordChartResponse = chart): VueWrapper {
-  return mount(PaymentRecordChartPage, {
+  const wrapper = mount(PaymentRecordChartPage, {
     props: {
       chart: value,
       loading: false,
@@ -110,6 +118,8 @@ function mountChart(value: PaymentRecordChartResponse = chart): VueWrapper {
     },
     attachTo: document.body,
   })
+  mountedCharts.push(wrapper)
+  return wrapper
 }
 
 describe('PaymentRecordChartPage', () => {
@@ -119,9 +129,6 @@ describe('PaymentRecordChartPage', () => {
     expect(wrapper.get('[data-testid="payment-record-chart-title"]').text()).toContain('2 笔')
     expect(wrapper.get('[data-testid="payment-record-chart-title"]').text()).toContain('¥ 15 万')
     expect(wrapper.get('.payment-record-chart__heading p').text()).toBe('当前筛选范围内的回款。一页同时看，没有审批和确认状态。金额按回款金额汇总。')
-    expect(wrapper.get('[data-testid="payment-chart-card-license_type"]').classes()).not.toContain('payment-record-chart__wide')
-    expect(wrapper.get('[data-testid="payment-chart-card-purchase_type"]').classes()).not.toContain('payment-record-chart__wide')
-    expect(wrapper.get('[data-testid="payment-chart-card-amount_band"]').classes()).toContain('payment-record-chart__wide')
     const legend = wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]')
     const split = wrapper.get('[data-testid="payment-chart-card-license_type"] .payment-record-chart__donut-body')
     expect(split.element.contains(legend.element)).toBe(true)
@@ -158,7 +165,21 @@ describe('PaymentRecordChartPage', () => {
           }
         : card),
     }
-    await wrapper.setProps({ chart: widePreview })
+    await wrapper.setProps({
+      chart: widePreview,
+      bucketRecords: {
+        chart: 'license_type',
+        bucket: 'SUBSCRIPTION',
+        total: 6,
+        records: Array.from({ length: 5 }, (_item, index) => ({
+          id: index + 8,
+          record_number: `HK00${index + 8}`,
+          customer_name: '甲',
+          amount: 150000,
+          payment_date: '2026-10-02',
+        })),
+      },
+    })
     await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
     expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).not.toBeNull()
     document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-more"]')?.click()
@@ -166,14 +187,96 @@ describe('PaymentRecordChartPage', () => {
     wrapper.unmount()
   })
 
-  it('places the ARR card under the month chart and labels only defined months', () => {
+  it('closes the selected bucket when the parent reset token changes', async () => {
+    const wrapper = mountChart()
+
+    await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
+
+    await wrapper.setProps({ resetToken: 1 })
+    await wrapper.vm.$nextTick()
+
+    expect(document.body.querySelector('[role="dialog"][data-state="open"]')).toBeNull()
+    expect(wrapper.emitted('close-bucket')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('opens a zero-payment month through its accessible bucket action', async () => {
+    const wrapper = mountChart()
+    const action = wrapper.get('[data-testid="payment-chart-month-2026-01"]')
+
+    expect(action.attributes('disabled')).toBeUndefined()
+    await action.trigger('click')
+    expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
+      { key: 'payment_month' },
+      { key: '2026-01', count: 0 },
+    ])
+
+    await wrapper.setProps({
+      bucketRecords: { chart: 'payment_month', bucket: '2026-01', total: 0, records: [] },
+    })
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('这一段没有回款。')
+  })
+
+  it('renders paged record details and keeps loaded rows during load-more errors', async () => {
+    const wrapper = mountChart()
+    await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
+    expect(document.body.querySelector('[role="status"]')?.textContent).toContain('正在读取这一段回款')
+
+    await wrapper.setProps({ bucketError: '暂时无法读取' })
+    const dialog = document.body.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('暂时无法读取')
+    dialog?.querySelector<HTMLButtonElement>('[role="alert"] button')?.click()
+    expect(wrapper.emitted('retry-bucket')?.[0]).toMatchObject([
+      { key: 'license_type' }, { key: 'SUBSCRIPTION' },
+    ])
+
+    await wrapper.setProps({
+      bucketError: '',
+      bucketRecords: {
+        chart: 'license_type', bucket: 'SUBSCRIPTION', total: 2,
+        records: [{ id: 8, record_number: 'HK008', customer_name: '甲', amount: 150000, payment_date: '2026-10-02' }],
+      },
+    })
+    expect(dialog?.textContent).toContain('HK008')
+    expect(dialog?.textContent).toContain('甲 · 2026-10-02')
+    dialog?.querySelector<HTMLButtonElement>('.payment-record-chart__dialog-list button')?.click()
+    expect(wrapper.emitted('open-record')?.[0]).toEqual([8])
+    document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-more"]')?.click()
+    expect(wrapper.emitted('load-more')).toHaveLength(1)
+
+    await wrapper.setProps({ bucketError: '读取更多失败' })
+    expect(dialog?.textContent).toContain('HK008')
+    expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')?.textContent).toContain('读取更多失败')
+  })
+
+  it('ignores undefined ARR months but opens a defined zero-percent month', async () => {
+    const wrapper = mountChart({
+      ...chart,
+      cards: [...chart.cards, {
+        key: 'arr_ratio', title: 'ARR 占比', description: '',
+        buckets: [bucket('2026-01', '1月', 0, 0), { ...bucket('2026-02', '2月', 1, 200000), plotted_ratio: 0 }],
+      }],
+    })
+    const plot = wrapper.get('.payment-record-chart__arr-plot')
+    vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
+
+    await plot.trigger('click', { clientX: 48, clientY: 100 })
+    expect(wrapper.emitted('view-bucket')).toBeUndefined()
+    await plot.trigger('click', { clientX: 248, clientY: 100 })
+    expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
+      { key: 'arr_ratio' }, { key: '2026-02', plotted_ratio: 0 },
+    ])
+  })
+
+  it('places the ARR card under the month chart and labels only defined months', async () => {
     const months = Array.from({ length: 12 }, (_item, index) => {
       const key = `2026-${String(index + 1).padStart(2, '0')}`
       const label = `${index + 1}月`
       if (index === 1) return bucket(key, label, 0, 0)
       if (index === 3) {
         return {
-          ...bucket(key, label, 1, 200000),
+          ...bucket(key, label, 0, 200000),
           plotted_ratio: 0,
           annualized_subscription: 0,
           buyout_amount: 200000,
@@ -215,6 +318,13 @@ describe('PaymentRecordChartPage', () => {
     expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-04"]').text()).toBe('0%')
     expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-10"]').text()).toBe('57%')
     expect(wrapper.find('[data-testid="payment-chart-arr-label-2026-02"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payment-chart-arr-2026-04"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="payment-chart-arr-2026-02"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="payment-chart-arr-2026-04"]').trigger('click')
+    const viewBuckets = wrapper.emitted('view-bucket') ?? []
+    expect(viewBuckets[viewBuckets.length - 1]).toMatchObject([
+      { key: 'arr_ratio' }, { key: '2026-04', plotted_ratio: 0 },
+    ])
     wrapper.unmount()
   })
 })

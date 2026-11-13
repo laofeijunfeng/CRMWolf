@@ -384,6 +384,7 @@ const chartBucket = ref<ContractChartBucketContracts | null>(null)
 const chartBucketLoading = ref(false)
 const chartBucketError = ref('')
 const chartBucketRequest = ref<{ card: ContractChartCard, bucket: ContractChartBucket } | null>(null)
+const chartBucketResetToken = ref(0)
 let chartRequestId = 0
 let chartBucketRequestId = 0
 
@@ -408,7 +409,10 @@ const fetchContractChart = async (): Promise<boolean> => {
 }
 
 const refreshActiveContractView = (): Promise<boolean> => {
-  if (displayMode.value === 'chart') return fetchContractChart()
+  if (displayMode.value === 'chart') {
+    closeChartBucket()
+    return fetchContractChart()
+  }
   if (displayMode.value !== 'board') return fetchContractList()
   return contractBoard.refresh(boardParams.value).then(() => true, () => false)
 }
@@ -417,13 +421,17 @@ const handleDisplayModeChange = (mode: string | number | undefined): void => {
   if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
-  chartBucket.value = null
-  chartBucketError.value = ''
+  if (mode !== 'chart') closeChartBucket()
   void refreshActiveContractView()
 }
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board' || displayMode.value === 'chart') void refreshActiveContractView()
+  if (displayMode.value === 'chart') closeChartBucket()
+}, { flush: 'sync' })
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'chart') void fetchContractChart()
+  else if (displayMode.value === 'board') void refreshActiveContractView()
 })
 
 const CHART_PAGE_SIZE = 10
@@ -467,6 +475,7 @@ const loadMoreChartBucket = (): void => {
 
 const closeChartBucket = (): void => {
   chartBucketRequestId += 1
+  chartBucketResetToken.value += 1
   chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
@@ -934,6 +943,7 @@ defineExpose({
           :bucket-contracts="chartBucket"
           :bucket-loading="chartBucketLoading"
           :bucket-error="chartBucketError"
+          :bucket-reset-token="chartBucketResetToken"
           @retry="fetchContractChart"
           @retry-bucket="retryChartBucket"
           @open-contract="viewingContractId = $event"
