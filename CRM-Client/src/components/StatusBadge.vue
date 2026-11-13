@@ -1,21 +1,18 @@
 /**
- * StatusBadge — 状态徽章组件（统一状态语言）
+ * StatusBadge — shared workflow and attribute status presentation.
  *
- * 设计目的：
- * - 取代各页面散落的状态样式定义
- * - 提供一致的状态视觉语言（深色背景 + 白色文字）
- * - 支持 WCAG AA 对比度标准（4.5:1）
- *
- * 无障碍：
- * - role="status" 标记状态信息
- * - aria-label 包含中文文案
- * - 颜色非唯一指示（文字 + 颜色）
+ * Status text remains the primary cue. The dot and semantic tone provide
+ * scanning support without making color the only indicator.
  */
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
+import {
+  getStatusPresentation,
+  type StatusDomain,
+  type StatusTone,
+} from '@/utils/statusPresentation'
 
-// 状态类型定义
 export type LeadStatus = 'new' | 'following' | 'converted' | 'invalid'
 export type CustomerStatus = 'following' | 'won' | 'lost' | 'expired'
 export type CustomerDerivedStatusKey = 'not_started' | 'following' | 'repurchasing' | 'won' | 'lost' | 'public_pool'
@@ -25,174 +22,59 @@ export type InvoiceStatus = 'draft' | 'pending_review' | 'approved' | 'rejected'
 export type PaymentPlanStatus = 'pending' | 'partial' | 'completed' | 'overdue'
 export type PaymentRecordStatus = 'pending' | 'confirmed' | 'rejected'
 export type GenericStatus = 'active' | 'inactive' | 'pending' | 'success' | 'warning' | 'danger'
-
-// 新增枚举字段类型
 export type SourceType = string
 export type AuthorizationModeType = 'SUBSCRIPTION' | 'PERPETUAL'
 export type ProcurementTypeType = 'NEW' | 'RENEWAL' | 'EXPANSION'
-export type IndustryType = 'IT/互联网' | '金融' | '教育' | '医疗' | '制造' | '零售' | '房地产' | '其他'
+export type IndustryType = string
 export type CompanyScaleType = '1-50人' | '51-200人' | '201-500人' | '501-1000人' | '1000人以上'
 
-type StatusType = 'lead' | 'customer' | 'customerDerived' | 'opportunity' | 'contract' | 'invoice' | 'paymentPlan' | 'paymentRecord' | 'generic' | 'source' | 'authorizationMode' | 'procurementType' | 'industry' | 'companyScale'
-type StatusColor = 'neutral' | 'info' | 'warning' | 'success' | 'danger'
-
-interface StatusConfigItem {
-  label: string
-  color: StatusColor
-}
+export type StatusType = StatusDomain
 
 const props = defineProps<{
-  status: LeadStatus | CustomerStatus | OpportunityStatus | ContractStatus | InvoiceStatus | PaymentPlanStatus | PaymentRecordStatus | GenericStatus | SourceType | AuthorizationModeType | ProcurementTypeType | string // 行业字段允许任意 string
+  status: string
   type?: StatusType
   size?: 'default' | 'small'
 }>()
 
-// 设置默认值
-const type = computed(() => props.type ?? 'generic')
+const domain = computed<StatusDomain>(() => props.type ?? 'generic')
+const presentation = computed(() => getStatusPresentation(domain.value, props.status))
 const size = computed(() => props.size ?? 'default')
-
-// 状态配置映射
-const STATUS_CONFIG = {
-  lead: {
-    new: { label: '新建', color: 'neutral' },
-    following: { label: '跟进中', color: 'warning' },
-    converted: { label: '已转化', color: 'success' },
-    invalid: { label: '无效', color: 'danger' }
-  },
-  customer: {
-    following: { label: '跟进中', color: 'warning' },
-    won: { label: '已赢单', color: 'success' },
-    lost: { label: '已输单', color: 'danger' },
-    expired: { label: '已失效', color: 'danger' }
-  },
-  customerDerived: {
-    not_started: { label: '未启动', color: 'neutral' },
-    following: { label: '跟进中', color: 'info' },
-    repurchasing: { label: '复购中', color: 'success' },
-    won: { label: '已成交', color: 'success' },
-    lost: { label: '已流失', color: 'danger' },
-    public_pool: { label: '公海', color: 'neutral' }
-  },
-  opportunity: {
-    active: { label: '跟进中', color: 'warning' },
-    won: { label: '已赢单', color: 'success' },
-    lost: { label: '已输单', color: 'danger' }
-  },
-  contract: {
-    draft: { label: '草稿', color: 'neutral' },
-    pending_review: { label: '审批中', color: 'warning' },
-    signed: { label: '已签署', color: 'success' },
-    expired: { label: '已到期', color: 'danger' },
-    terminated: { label: '已终止', color: 'neutral' }
-  },
-  invoice: {
-    draft: { label: '草稿', color: 'neutral' },
-    pending_review: { label: '待审批', color: 'warning' },
-    approved: { label: '已批准', color: 'success' },
-    rejected: { label: '已拒绝', color: 'danger' },
-    issued: { label: '已开票', color: 'success' },
-    cancelled: { label: '已取消', color: 'neutral' }
-  },
-  paymentPlan: {
-    pending: { label: '待登记', color: 'warning' },
-    partial: { label: '部分回款', color: 'warning' },
-    completed: { label: '已登记', color: 'success' },
-    overdue: { label: '已逾期', color: 'danger' }
-  },
-  paymentRecord: {
-    pending: { label: '待确认', color: 'warning' },
-    confirmed: { label: '已确认', color: 'success' },
-    rejected: { label: '已驳回', color: 'danger' }
-  },
-  generic: {
-    active: { label: '启用', color: 'success' },
-    inactive: { label: '禁用', color: 'neutral' },
-    pending: { label: '待处理', color: 'warning' },
-    success: { label: '成功', color: 'success' },
-    warning: { label: '警告', color: 'warning' },
-    danger: { label: '危险', color: 'danger' }
-  },
-  authorizationMode: {
-    'SUBSCRIPTION': { label: '订阅制', color: 'warning' },
-    'PERPETUAL': { label: '买断制', color: 'success' }
-  },
-  procurementType: {
-    'NEW': { label: '新购', color: 'warning' },
-    'RENEWAL': { label: '续购', color: 'success' },
-    'EXPANSION': { label: '增购', color: 'info' }
-  },
-  industry: {
-    // 行业字段统一使用 neutral 颜色
-    // 因为行业数据存储在数据库中，可能动态变化
-    // 不硬编码所有可能的值，统一视觉风格
-    '__default__': { label: '__LABEL__', color: 'neutral' }
-  } as Record<string, StatusConfigItem>,
-  companyScale: {
-    '1-50人': { label: '1-50人', color: 'neutral' },
-    '51-200人': { label: '51-200人', color: 'warning' },
-    '201-500人': { label: '201-500人', color: 'warning' },
-    '501-1000人': { label: '501-1000人', color: 'success' },
-    '1000人以上': { label: '1000人以上', color: 'success' }
-  }
-} as const
-
-// 获取状态配置
-const config = computed<StatusConfigItem>(() => {
-  // 行业 / 获客来源名称可配置，动态显示，统一颜色
-  if (type.value === 'industry' || type.value === 'source') {
-    return {
-      label: String(props.status),
-      color: 'neutral' as StatusColor
-    }
-  }
-
-  const typeConfig = STATUS_CONFIG[type.value] as Record<string, StatusConfigItem>
-  const statusConfig = typeConfig[props.status]
-  return statusConfig ?? { label: '未知', color: 'neutral' }
+const isUnknown = computed(() => presentation.value.traceValue !== undefined)
+const statusClasses = computed(() => [
+  'status-badge',
+  size.value === 'small' ? 'status-badge--small' : '',
+])
+const statusTone = computed<StatusTone>(() => presentation.value.tone)
+const statusTitle = computed(() => {
+  if (!isUnknown.value) return undefined
+  return `${domain.value}: ${presentation.value.traceValue}`
 })
-
-// 状态徽章样式类（深色背景 + 白色文字）
-const statusClasses = computed(() => {
-  const colorMap: Record<StatusColor, string> = {
-    neutral: 'status-neutral',
-    info: 'status-info',
-    warning: 'status-warning',
-    success: 'status-success',
-    danger: 'status-danger'
-  }
-  return [
-    'status-badge',
-    colorMap[config.value.color],
-    size.value === 'small' ? 'status-badge--small' : ''
-  ]
-})
-
-// aria-label
-const ariaLabel = computed(() => config.value.label)
 </script>
 
 <template>
   <Badge
+    variant="status"
     :class="statusClasses"
+    :data-status-tone="statusTone"
+    :data-status-domain="domain"
+    :data-status-value="status"
+    :title="statusTitle"
     role="status"
-    :aria-label="ariaLabel"
+    :aria-label="presentation.label"
   >
     <span class="status-badge-dot" aria-hidden="true"></span>
-    {{ config.label }}
+    {{ presentation.label }}
   </Badge>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
-// 状态徽章基础样式（深色背景 + 白色文字）
 .status-badge {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  border-radius: $wolf-radius-full-v2;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 9999px;
   white-space: nowrap;
   border: none;
 }
@@ -209,32 +91,5 @@ const ariaLabel = computed(() => config.value.label)
 .status-badge--small {
   padding: 2px 6px;
   font-size: 11px;
-}
-
-// 状态徽章样式 - 遵循 V2 设计规范：浅底色 + 同色系文字
-// 规则来源: CRM-Docs/design-system/foundations/color-tokens.md
-.status-neutral {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-tertiary-v2;
-}
-
-.status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-}
-
-.status-info {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-}
-
-.status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-}
-
-.status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
 }
 </style>

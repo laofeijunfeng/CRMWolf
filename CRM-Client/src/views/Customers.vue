@@ -1914,12 +1914,20 @@ defineExpose({
   line-height: 18px;
 }
 
+.license-summary__primary.is-soon,
+.license-summary__primary.is-urgent {
+  padding-inline: 4px;
+  border-radius: 4px;
+}
+
 .license-summary__primary.is-soon {
-  color: $wolf-warning-text-v2;
+  color: var(--status-warning-foreground);
+  background-color: var(--status-warning-background);
 }
 
 .license-summary__primary.is-urgent {
-  color: $wolf-danger-text-v2;
+  color: var(--status-danger-foreground);
+  background-color: var(--status-danger-background);
 }
 
 .license-summary__secondary {
@@ -1928,10 +1936,10 @@ defineExpose({
   line-height: 16px;
 }
 
-.license-badge--official { color: $wolf-success-v2; }
-.license-badge--trial { color: $wolf-warning-v2; }
-.license-badge--expired { color: $wolf-danger-v2; }
-.license-badge--none { color: $wolf-text-tertiary-v2; }
+.license-badge--official { color: var(--status-success-foreground); }
+.license-badge--trial { color: var(--status-warning-foreground); }
+.license-badge--expired { color: var(--status-danger-foreground); }
+.license-badge--none { color: var(--status-neutral-foreground); }
 
 .customer-mobile-card-header {
   display: flex;

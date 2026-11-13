@@ -749,7 +749,7 @@ const getRowActions = (row: ContractListResponse): TableRowActionSet => ({
 })
 
 // ==================== 格式化函数 ====================
-const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated' => {
+const mapContractStatus = (status: string): string => {
   const map: Record<string, 'draft' | 'pending_review' | 'signed' | 'expired' | 'terminated'> = {
     'DRAFT': 'draft',
     'PENDING_REVIEW': 'pending_review',
@@ -758,7 +758,7 @@ const mapContractStatus = (status: string): 'draft' | 'pending_review' | 'signed
     'EXPIRED': 'expired',
     'TERMINATED': 'terminated'
   }
-  return map[status] || 'draft'
+  return Object.prototype.hasOwnProperty.call(map, status) ? map[status] ?? status : status
 }
 
 const getPurchaseYearsText = (row: ContractListResponse): string => {

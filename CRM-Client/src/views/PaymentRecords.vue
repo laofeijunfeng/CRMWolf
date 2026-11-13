@@ -847,13 +847,13 @@ const getRowActions = (row: PaymentRecordWithDetails): TableRowActionSet => ({
 })
 
 // ==================== 格式化函数 ====================
-const mapPaymentRecordStatus = (status: string): 'pending' | 'confirmed' | 'rejected' => {
+const mapPaymentRecordStatus = (status: string): string => {
   const map: Record<string, 'pending' | 'confirmed' | 'rejected'> = {
     'PENDING': 'pending',
     'CONFIRMED': 'confirmed',
     'DISPUTED': 'rejected'
   }
-  return map[status] || 'pending'
+  return Object.prototype.hasOwnProperty.call(map, status) ? map[status] ?? status : status
 }
 
 // ==================== Lifecycle ====================

@@ -60,13 +60,12 @@ import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ErrorState from '@/components/ErrorState.vue'
-import StatusBadge, { type InvoiceStatus as InvoiceBadgeStatus } from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
 import invoiceApi, {
   type InvoiceApplicationResponse,
-  type InvoiceApplicationStatus,
   type InvoiceRedOffsetResponse,
   type InvoiceReissueApplicationCreate,
   type InvoiceReissueApplicationResponse,
@@ -1039,17 +1038,6 @@ const getInvoiceFileName = (invoice: InvoiceApplicationResponse): string => {
   return `${invoice.application_number || `invoice-${invoice.id}`}${suffix}`
 }
 
-const mapInvoiceStatus = (status: InvoiceApplicationStatus): InvoiceBadgeStatus => {
-  const statusMap: Record<InvoiceApplicationStatus, InvoiceBadgeStatus> = {
-    DRAFT: 'draft',
-    PENDING_REVIEW: 'pending_review',
-    APPROVED: 'approved',
-    REJECTED: 'rejected',
-    ISSUED: 'issued',
-    CANCELLED: 'cancelled',
-  }
-  return statusMap[status]
-}
 
 const getInvoiceTypeText = (type: InvoiceType | string | undefined): string => {
   const typeMap: Record<string, string> = {
@@ -1138,28 +1126,37 @@ onBeforeUnmount((): void => {
             <SheetDescription class="invoice-sheet-description">
               <StatusBadge
                 v-if="invoiceInfo"
-                :status="mapInvoiceStatus(invoiceInfo.status)"
-                type="invoice"
+                :status="invoiceInfo.status"
+                type="invoiceApplication"
               />
               <span v-if="invoiceInfo" class="type-badge">{{ getInvoiceTypeText(invoiceInfo.invoice_type) }}</span>
-              <span
+              <Badge
                 v-if="invoiceInfo?.invoice_effective_status === 'RED_OFFSET'"
-                class="reissue-badge reissue-badge--done"
+                variant="status"
+                data-status-tone="success"
+                data-status-domain="invoiceEffectiveStatus"
+                data-status-value="RED_OFFSET"
               >
                 已冲红
-              </span>
-              <span
+              </Badge>
+              <Badge
                 v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING'"
-                class="reissue-badge reissue-badge--pending"
+                variant="status"
+                data-status-tone="warning"
+                data-status-domain="invoiceReissueStatus"
+                data-status-value="REISSUE_PENDING"
               >
                 重开处理中
-              </span>
-              <span
+              </Badge>
+              <Badge
                 v-if="invoiceInfo?.reissue_status === 'REISSUED'"
-                class="reissue-badge reissue-badge--done"
+                variant="status"
+                data-status-tone="success"
+                data-status-domain="invoiceReissueStatus"
+                data-status-value="REISSUED"
               >
                 已重开
-              </span>
+              </Badge>
               <span v-if="!invoiceInfo">{{ loading ? '正在加载发票申请' : '查看申请、审批与发票文件' }}</span>
             </SheetDescription>
           </div>
@@ -1608,7 +1605,7 @@ onBeforeUnmount((): void => {
           </div>
           <div class="red-offset-context__item">
             <span>当前状态</span>
-            <StatusBadge :status="mapInvoiceStatus(invoiceInfo.status)" type="invoice" size="small" />
+            <StatusBadge :status="invoiceInfo.status" type="invoiceApplication" size="small" />
           </div>
         </div>
         <p class="red-offset-context__impact">提交后原发票状态将变更为“已冲红”，后续不可再次发起手工冲红。</p>
@@ -1930,8 +1927,7 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 }
 
 .type-badge,
-.title-type-badge,
-.reissue-badge {
+.title-type-badge {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -1944,15 +1940,6 @@ $invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   line-height: $wolf-line-height-body-v2;
 }
 
-.reissue-badge--pending {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-}
-
-.reissue-badge--done {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-}
 
 .sheet-body {
   padding: $wolf-space-xl-v2;

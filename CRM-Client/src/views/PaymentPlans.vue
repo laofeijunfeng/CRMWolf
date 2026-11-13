@@ -683,14 +683,14 @@ const getRowActions = (row: PaymentPlanWithDetails): TableRowActionSet => ({
 })
 
 // ==================== 格式化函数 ====================
-const mapPaymentPlanStatus = (status: string): 'pending' | 'partial' | 'completed' | 'overdue' => {
+const mapPaymentPlanStatus = (status: string): string => {
   const map: Record<string, 'pending' | 'partial' | 'completed' | 'overdue'> = {
     'PENDING': 'pending',
     'PARTIAL': 'partial',
     'COMPLETED': 'completed',
     'OVERDUE': 'overdue'
   }
-  return map[status] || 'pending'
+  return Object.prototype.hasOwnProperty.call(map, status) ? map[status] ?? status : status
 }
 
 // ==================== Lifecycle ====================

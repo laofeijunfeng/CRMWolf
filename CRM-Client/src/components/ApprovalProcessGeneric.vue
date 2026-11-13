@@ -31,6 +31,7 @@ import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
 import ErrorState from './ErrorState.vue'
 import { Button } from '@/components/ui/button'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import { getStatusPresentation } from '@/utils/statusPresentation'
 import {
   Empty,
   EmptyContent,
@@ -151,15 +152,7 @@ const approvalObjectLabel = computed<string>(() => {
       ? number
       : approvalTitle.value
 })
-const approvalStatusLabel = computed<string>(() => {
-  const map: Record<ApprovalDetail['status'], string> = {
-    PENDING: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回',
-    CANCELLED: '已撤回'
-  }
-  return status.value ? map[status.value] : '未知状态'
-})
+const approvalStatusLabel = computed<string>(() => getStatusPresentation('approval', status.value).label)
 
 // ===== 错误识别：仅匹配 axios 风格 error.response.status，不用 any =====
 const isAxiosStatus = (err: unknown, code: number): boolean => {

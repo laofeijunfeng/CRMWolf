@@ -1,149 +1,87 @@
 /**
- * ApprovalStatusBadge — 审批状态徽章
+ * ApprovalStatusBadge — generic approval status badge.
  *
- * 基于 V2 设计规范：
- * - 使用 variables-v2.scss 语义 Token
- * - 浅底色 + 同色系文字（符合 MASTER.md 功能色规则）
- * - 支持 WCAG AA 对比度标准
- *
- * 无障碍：
- * - role="status" 标记状态信息
- * - aria-label 包含中文文案
- * - 颜色非唯一指示（图标 + 文字）
+ * The public props and icon cues remain stable while the visual base and
+ * semantic presentation are shared with other business-status badges.
  */
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { PropType, Component } from 'vue'
+import { computed, type Component } from 'vue'
 import {
   Clock,
   CheckCircle2,
   XCircle,
-  MinusCircle
+  MinusCircle,
 } from 'lucide-vue-next'
-import type { ApprovalStatus } from '@/schemas/approvalGeneric'
+import { Badge } from '@/components/ui/badge'
+import { getStatusPresentation } from '@/utils/statusPresentation'
+import type { StatusTone } from '@/utils/statusPresentation'
 
-// ==================== Types ====================
-interface StatusConfig {
-  label: string
-  icon: Component
-  textClass: string
-  bgClass: string
-}
-
-const props = defineProps({
-  status: {
-    type: String as PropType<ApprovalStatus | string>,
-    required: true
-  },
-  size: {
-    type: String as PropType<'default' | 'small'>,
-    default: 'default'
-  }
+const props = withDefaults(defineProps<{
+  status: string
+  size?: 'default' | 'small'
+}>(), {
+  size: 'default',
 })
 
-// ==================== Status Config ====================
-// 使用 Tailwind wolf 颜色配置：浅底色 + 同色系文字
-const STATUS_CONFIG: Record<string, StatusConfig> = {
-  PENDING: {
-    label: '待审批',
-    icon: Clock,
-    textClass: 'text-wolf-warning-text',
-    bgClass: 'bg-wolf-warning-bg'
-  },
-  APPROVED: {
-    label: '已通过',
-    icon: CheckCircle2,
-    textClass: 'text-wolf-success-text',
-    bgClass: 'bg-wolf-success-bg'
-  },
-  REJECTED: {
-    label: '已驳回',
-    icon: XCircle,
-    textClass: 'text-wolf-danger-text',
-    bgClass: 'bg-wolf-danger-bg'
-  },
-  CANCELLED: {
-    label: '已撤回',
-    icon: MinusCircle,
-    textClass: 'text-wolf-text-tertiary',
-    bgClass: 'bg-wolf-bg-muted'
-  }
+const iconMap: Record<string, Component> = {
+  PENDING: Clock,
+  APPROVED: CheckCircle2,
+  REJECTED: XCircle,
+  CANCELLED: MinusCircle,
 }
 
-// ==================== Computed ====================
-// API 可能在后端新增状态。未知状态必须保留可读文本和图标，不能因为映射缺失导致渲染异常。
-const UNKNOWN_STATUS_CONFIG: StatusConfig = {
-  label: '未知状态',
-  icon: MinusCircle,
-  textClass: 'text-wolf-text-tertiary',
-  bgClass: 'bg-wolf-bg-muted'
-}
-
-const config = computed<StatusConfig>(() => STATUS_CONFIG[props.status] ?? UNKNOWN_STATUS_CONFIG)
-
-const ariaLabel = computed<string>(() => config.value.label)
+const presentation = computed(() => getStatusPresentation('approval', props.status))
+const tone = computed<StatusTone>(() => presentation.value.tone)
+const icon = computed(() => Object.prototype.hasOwnProperty.call(iconMap, props.status) ? iconMap[props.status] : MinusCircle)
+const isUnknown = computed(() => presentation.value.traceValue !== undefined)
+const title = computed(() => isUnknown.value ? `approval: ${presentation.value.traceValue}` : undefined)
 </script>
 
 <template>
-  <span
+  <Badge
+    variant="status"
     class="approval-status-badge"
-    :class="[
-      config.textClass,
-      config.bgClass,
-      size === 'small' ? 'approval-status-badge--small' : ''
-    ]"
+    :class="size === 'small' ? 'approval-status-badge--small' : ''"
+    :data-status-tone="tone"
+    data-status-domain="approval"
+    :data-status-value="status"
+    :title="title"
     role="status"
-    :aria-label="ariaLabel"
+    :aria-label="presentation.label"
   >
     <component
-      :is="config.icon"
+      :is="icon"
       class="approval-status-badge__icon"
       :size="size === 'small' ? 12 : 14"
+      aria-hidden="true"
     />
-    <span class="approval-status-badge__label">{{ config.label }}</span>
-  </span>
+    <span class="approval-status-badge__label">{{ presentation.label }}</span>
+  </Badge>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-
-// ==================== 状态徽章基础样式 ====================
 .approval-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: $wolf-space-xs-v2;
-  height: $wolf-tag-height-v2;
-  padding: $wolf-tag-padding-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-tag-font-size-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  height: 22px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
   white-space: nowrap;
   vertical-align: middle;
-  transition: all $wolf-transition-v2;
 
-  // 图标样式
   .approval-status-badge__icon {
     flex-shrink: 0;
   }
 
-  // 文字样式（颜色继承父级）
   .approval-status-badge__label {
     color: inherit;
   }
 }
 
-// ==================== Small 尺寸 ====================
 .approval-status-badge--small {
-  height: $wolf-tag-height-sm-v2;
-  padding: $wolf-tag-padding-sm-v2;
-  font-size: $wolf-tag-font-size-sm-v2;
-}
-
-// ==================== Reduced Motion ====================
-@media (prefers-reduced-motion: reduce) {
-  .approval-status-badge {
-    transition-duration: $wolf-reduced-motion-duration-v2;
-  }
+  height: 18px;
+  padding: 2px 6px;
+  font-size: 11px;
 }
 </style>

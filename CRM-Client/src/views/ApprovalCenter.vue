@@ -339,6 +339,18 @@
                       <div v-else-if="field.type === 'amount'" class="attribute-value">
                         <AmountText :value="field.value" tone="warning" />
                       </div>
+                      <div v-else-if="field.statusDomain" class="attribute-value">
+                        <Badge
+                          variant="status"
+                          :data-status-tone="getStatusPresentation(field.statusDomain, field.value?.toString()).tone"
+                          :data-status-domain="field.statusDomain"
+                          :data-status-value="field.value"
+                          :title="field.value == null || getStatusPresentation(field.statusDomain, field.value.toString()).traceValue !== undefined ? `${field.statusDomain}: ${String(field.value)}` : undefined"
+                          role="status"
+                        >
+                          {{ getStatusPresentation(field.statusDomain, field.value?.toString()).label }}
+                        </Badge>
+                      </div>
                       <div v-else-if="field.type === 'status'" class="attribute-value">
                         <Badge variant="outline">{{ displayFieldValue(field.value) }}</Badge>
                       </div>
@@ -628,6 +640,7 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatDateRelative } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
+import { getStatusOptions, getStatusPresentation } from '@/utils/statusPresentation'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { buildApprovalInvoiceBillingFields, formatApprovalInvoiceBillingCopy, orderApprovalInvoiceBillingDisplay, type ApprovalInvoiceBillingField } from '@/utils/approvalInvoiceBilling'
 import { createConfirmDialog } from '@/utils/confirmDialogImpl'
@@ -650,6 +663,7 @@ interface ApprovalSubjectField {
   label: string
   value: string | number | null | undefined
   type?: 'text' | 'copy' | 'amount' | 'status' | 'mono' | 'link'
+  statusDomain?: 'licenseApplication'
   linkTarget?: ApprovalSubjectLinkTarget
   linkId?: number | string | null
   wide?: boolean
@@ -910,16 +924,6 @@ const invoiceBillingDisplayFields = computed(() => {
 })
 
 
-const licenseStatusLabel = (status?: string | null): string => {
-  const map: Record<string, string> = {
-    DRAFT: '草稿',
-    PENDING_REVIEW: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回',
-    ISSUED: '已签发'
-  }
-  return status == null ? '-' : (map[status] ?? status)
-}
 
 const licenseTypeLabel = (type?: string | null): string => {
   const map: Record<string, string> = {
@@ -1138,7 +1142,7 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
     case 'LICENSE': return [
       { key: 'number', label: '申请编号', value: detail('application_number') ?? subjectNumber.value, type: 'copy' },
       { key: 'type', label: 'License 类型', value: licenseTypeLabel(detail('license_type')?.toString() ?? subjectName.value?.toString()) },
-      { key: 'status', label: '签发状态', value: licenseStatusLabel(activeApprovalDetail.value?.license_status ?? selected.license_status), type: 'status' }, customerField,
+      { key: 'status', label: '签发状态', value: activeApprovalDetail.value?.license_status ?? selected.license_status, type: 'status', statusDomain: 'licenseApplication' }, customerField,
       { key: 'deployment', label: '部署名称', value: detail('deployment_name') },
       { key: 'users', label: '使用人数', value: detail('authorized_users') },
       { key: 'expiry', label: '到期时间', value: formatDateValue(detail('expiry_date')) },
@@ -1185,12 +1189,7 @@ const approvalBusinessTypeOptions = [
   { value: 'LICENSE', label: 'License' },
   { value: 'OPPORTUNITY', label: '商机' }
 ]
-const approvalStatusOptions = [
-  { value: 'PENDING', label: '审批中' },
-  { value: 'APPROVED', label: '已通过' },
-  { value: 'REJECTED', label: '已驳回' },
-  { value: 'CANCELLED', label: '已撤回' }
-]
+const approvalStatusOptions = getStatusOptions('approval')
 
 const fields: ListFieldDefinition[] = [
   {

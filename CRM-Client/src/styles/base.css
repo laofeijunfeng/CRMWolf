@@ -38,6 +38,17 @@
   --warning: 37.7 92.1% 50.2%;
   --info: 217.2 91.2% 59.8%;
 
+  --status-neutral-foreground: hsl(215.294118 19.318182% 34.509804%);
+  --status-neutral-background: hsl(210.000000 40.000000% 96.078431%);
+  --status-info-foreground: hsl(224.278075 76.326531% 48.039216%);
+  --status-info-background: hsl(213.750000 100.000000% 96.862745%);
+  --status-warning-foreground: hsl(25.964912 90.476190% 37.058824%);
+  --status-warning-background: hsl(48.000000 100.000000% 96.078431%);
+  --status-success-foreground: hsl(162.931034 93.548387% 24.313725%);
+  --status-success-background: hsl(151.764706 80.952381% 95.882353%);
+  --status-danger-foreground: hsl(0.000000 73.708920% 41.764706%);
+  --status-danger-background: hsl(0.000000 85.714286% 97.254902%);
+
   --sidebar-background: 210 40% 98%;
   --sidebar-foreground: 240 5.3% 26.1%;
   --sidebar-primary: 221.2 83.2% 53.3%;
@@ -82,6 +93,17 @@
   --warning: 43 96% 56%;
   --info: 213 94% 68%;
 
+  --status-neutral-foreground: hsl(212.727273 26.829268% 83.921569%);
+  --status-neutral-background: hsl(217.241379 32.584270% 17.450980%);
+  --status-info-foreground: hsl(211.698113 96.363636% 78.431373%);
+  --status-info-background: hsl(226.229508 57.009346% 20.980392%);
+  --status-warning-foreground: hsl(45.942857 96.685083% 64.509804%);
+  --status-warning-background: hsl(20.909091 91.666667% 14.117647%);
+  --status-success-foreground: hsl(156.198347 71.597633% 66.862745%);
+  --status-success-background: hsl(165.714286 91.304348% 9.019608%);
+  --status-danger-foreground: hsl(0.000000 93.548387% 81.764706%);
+  --status-danger-background: hsl(0.000000 74.683544% 15.490196%);
+
   --sidebar-background: 240 5.9% 10%;
   --sidebar-foreground: 240 4.8% 95.9%;
   --sidebar-primary: 213.9 93.9% 67.8%;
@@ -92,6 +114,33 @@
   --sidebar-active-foreground: 213.3 96.9% 87.3%;
   --sidebar-border: 240 3.7% 15.9%;
   --sidebar-ring: 213.9 93.9% 67.8%;
+}
+
+/* Opaque pairs keep status contrast independent of the containing surface. */
+.business-status {
+  color: var(--status-neutral-foreground);
+  background-color: var(--status-neutral-background);
+  white-space: nowrap;
+}
+
+.business-status[data-status-tone="info"] {
+  color: var(--status-info-foreground);
+  background-color: var(--status-info-background);
+}
+
+.business-status[data-status-tone="warning"] {
+  color: var(--status-warning-foreground);
+  background-color: var(--status-warning-background);
+}
+
+.business-status[data-status-tone="success"] {
+  color: var(--status-success-foreground);
+  background-color: var(--status-success-background);
+}
+
+.business-status[data-status-tone="danger"] {
+  color: var(--status-danger-foreground);
+  background-color: var(--status-danger-background);
 }
 
 /* ==================== CRMWolf Base Layer Overrides ==================== */
