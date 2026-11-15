@@ -232,6 +232,10 @@ describe('PaymentRecordDialog', () => {
     await openSupplementArea(wrapper)
     await wrapper.get('input[name="proof_attachment"]').setValue('https://example.com/proof.pdf')
     await wrapper.get('textarea[name="notes"]').setValue('首笔回款')
+    await wrapper.get('input[name="renewal_headcount"]').setValue('3')
+    await wrapper.get('input[name="renewal_amount"]').setValue('1000')
+    await wrapper.get('input[name="expansion_headcount"]').setValue('2')
+    await wrapper.get('input[name="expansion_amount"]').setValue('234.56')
     await wrapper.get('form').trigger('submit')
     await nextTick()
 
@@ -242,6 +246,10 @@ describe('PaymentRecordDialog', () => {
       proof_attachment: 'https://example.com/proof.pdf',
       commission_member_id: 'user-1',
       notes: '首笔回款',
+      composition: {
+        renewal: { headcount: 3, amount: 1000 },
+        expansion: { headcount: 2, amount: 234.56 },
+      },
     }])
   })
 

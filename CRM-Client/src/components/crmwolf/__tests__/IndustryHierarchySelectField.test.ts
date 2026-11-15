@@ -4,6 +4,7 @@ import IndustryHierarchySelectField from '../IndustryHierarchySelectField.vue'
 
 Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
+  writable: true,
   value: () => undefined,
 })
 

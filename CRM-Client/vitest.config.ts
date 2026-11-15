@@ -2,7 +2,7 @@
  * Vitest Configuration
  */
 
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -11,6 +11,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    unstubGlobals: true,
+    exclude: [...configDefaults.exclude, 'tests/e2e/**', 'scripts/tests/**'],
     pool: 'threads',
     poolOptions: {
       threads: {

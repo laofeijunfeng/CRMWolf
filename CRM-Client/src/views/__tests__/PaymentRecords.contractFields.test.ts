@@ -25,12 +25,18 @@ vi.mock('@/api/payment', () => ({
   },
 }))
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: (): Record<string, unknown> => ({ hasPermission: (): boolean => true, hasAnyPermission: (): boolean => true }),
+  usePermissionStore: (): Record<string, unknown> => ({
+    permissions: [{ code: 'payment:record:export' }],
+    loadState: 'ready',
+    hasPermission: (): boolean => true,
+    hasAnyPermission: (): boolean => true,
+  }),
 }))
 vi.mock('@/stores/approval', () => ({
   useApprovalStore: (): Record<string, unknown> => ({ submitEntity: vi.fn() }),
 }))
 vi.mock('@/stores/header', () => ({ useHeaderStore: (): typeof headerStore => headerStore }))
+vi.mock('@/stores/team', () => ({ useTeamStore: (): Record<string, unknown> => ({ currentTeam: { id: 11 } }) }))
 vi.mock('@/stores/user', () => ({ useUserStore: (): Record<string, unknown> => ({ userInfo: { id: 1 } }) }))
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: (): void => undefined }))
 vi.mock('@/composables/useTopBarRegistration', () => ({ useTopBarRegistration: (): void => undefined }))
@@ -131,6 +137,7 @@ describe('PaymentRecords contract fields', () => {
     mocks.loadCustomViews.mockReset().mockResolvedValue(undefined)
     headerStore.activeTab = 'all'
   })
+
 
   it('exposes adjacent enum columns and their filter, sort, preference and export capabilities', async () => {
     const wrapper = mount(PaymentRecords)

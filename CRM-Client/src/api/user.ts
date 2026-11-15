@@ -1,12 +1,18 @@
 import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
+import {
+  UserListResponseSchema,
+  UserResponseSchema,
+  UserSearchResultsSchema,
+  UserWithRolesResponseSchema,
+  UserStatus,
+  type UserMutationResponse
+} from '@/schemas/user'
 
-export enum UserStatus {
-  ACTIVE = 'active',
-  INACTIVE = 'inactive'
-}
+export { UserStatus } from '@/schemas/user'
 
 export interface RoleInfo {
+  id?: number
   code: string
   name: string
 }
@@ -61,38 +67,27 @@ export interface UserSearchResult {
 }
 
 const userApi = {
-  getUsers: async (params?: UserQueryParams) => {
-    const response = await request.get<UserResponse[] | PaginatedResponse<UserResponse>>('/v1/users/', { params })
-    return response
-  },
+  getUsers: async (params?: UserQueryParams): Promise<UserResponse[] | PaginatedResponse<UserResponse>> =>
+    UserListResponseSchema.parse(await request.get('/v1/users/', { params })),
 
-  getUser: async (userId: number) => {
-    const response = await request.get<UserResponse>(`/v1/users/${userId}`)
-    return response
-  },
+  getUser: async (userId: number): Promise<UserResponse> =>
+    UserWithRolesResponseSchema.parse(await request.get(`/v1/users/${userId}`)),
 
-  createUser: async (data: UserCreate) => {
-    const response = await request.post<UserResponse>('/v1/users/', data)
-    return response
-  },
+  createUser: async (data: UserCreate): Promise<UserMutationResponse> =>
+    UserResponseSchema.parse(await request.post('/v1/users/', data)),
 
-  updateUser: async (userId: number, data: UserUpdate) => {
-    const response = await request.put<UserResponse>(`/v1/users/${userId}`, data)
-    return response
-  },
+  updateUser: async (userId: number, data: UserUpdate): Promise<UserMutationResponse> =>
+    UserResponseSchema.parse(await request.put(`/v1/users/${userId}`, data)),
 
-  deleteUser: async (userId: number) => {
-    const response = await request.delete<UserResponse>(`/v1/users/${userId}`)
-    return response
-  },
+  deleteUser: async (userId: number): Promise<UserMutationResponse> =>
+    UserResponseSchema.parse(await request.delete(`/v1/users/${userId}`)),
 
-  searchUsers: async (email: string, excludeTeamId?: number) => {
+  searchUsers: async (email: string, excludeTeamId?: number): Promise<UserSearchResult[]> => {
     const params: Record<string, unknown> = { email, limit: 10 }
-    if (excludeTeamId) {
+    if (excludeTeamId !== undefined) {
       params['exclude_team_id'] = excludeTeamId
     }
-    const response = await request.get<UserSearchResult[]>('/v1/users/search', { params })
-    return response
+    return UserSearchResultsSchema.parse(await request.get('/v1/users/search', { params }))
   }
 }
 

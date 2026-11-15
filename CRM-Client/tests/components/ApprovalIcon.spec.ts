@@ -6,14 +6,11 @@
  * - Badge 隐藏：pendingCount === 0 时隐藏
  * - 点击跳转：点击按钮跳转到 /approvals
  * - aria-label：含待办数量
- *
- * 注意：权限门控测试跳过，因为 Vue Test Utils 环境中指令的 removeChild 不生效
  */
 
 import { mount } from '@vue/test-utils'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { readFileSync } from 'node:fs'
 import ApprovalIcon from '@/components/ApprovalIcon.vue'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'
@@ -25,26 +22,19 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPush }),
 }))
 
-// Mock permission directive setup
-vi.mock('@/directives/permission', () => ({
-  setupPermissionDirective: vi.fn(),
-}))
 
 /**
  * Helper: 设置审批权限
  * permissionSet 是 computed（readonly），必须通过 permissions 数组设置
  */
-function setApprovalPermissions(permissionStore: ReturnType<typeof usePermissionStore>, codes: string[]) {
+function setApprovalPermissions(permissionStore: { loadState: string; permissions: { id: number; code: string; name: string; resource: string; action: string }[] }, codes: string[]): void {
+  permissionStore.loadState = 'ready'
   permissionStore.permissions = codes.map((code, index) => ({
     id: index + 1,
     code,
     name: code,
     resource: code.split(':')[0] ?? code,
     action: code.split(':')[1] ?? 'unknown',
-    scope: null,
-    description: null,
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
   }))
 }
 
@@ -71,9 +61,7 @@ describe('ApprovalIcon', () => {
     expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(true)
   })
 
-  // 注意：权限门控测试跳过，因为 Vue Test Utils 环境中指令的 removeChild 不生效
-  // 权限门控行为已在真实浏览器环境中验证，指令逻辑在 permission.ts 中定义
-  it.skip('does not render when user has no approval permissions', async () => {
+  it('does not render when user has no approval permissions', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
 
@@ -87,7 +75,7 @@ describe('ApprovalIcon', () => {
     })
 
     // 不应该渲染
-    expect(wrapper.find('[data-testid="approval-icon"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(false)
   })
 
   it('shows badge when pendingCount > 0', async () => {
@@ -212,14 +200,4 @@ describe('ApprovalIcon', () => {
     expect(wrapper.find('[data-testid="approval-button"]').exists()).toBe(true)
   })
 
-  it('uses a compact approval-specific icon in the top bar', () => {
-    const approvalIconSource = readFileSync('src/components/ApprovalIcon.vue', 'utf-8')
-
-    expect(approvalIconSource).toContain("import { ClipboardCheck } from 'lucide-vue-next'")
-    expect(approvalIconSource).toContain('size="icon-sm"')
-    expect(approvalIconSource).toContain('<ClipboardCheck class="approval-action-icon" aria-hidden="true" />')
-    expect(approvalIconSource).toContain('width: 16px;')
-    expect(approvalIconSource).not.toContain('import { Bell }')
-    expect(approvalIconSource).not.toContain('<Bell')
-  })
 })

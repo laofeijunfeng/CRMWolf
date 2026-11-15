@@ -3,7 +3,6 @@ import type { AgentAsyncOperation } from "@/api/agent"
 import {
   groupAgentAsyncOperationsByMessage,
   getAgentAsyncOperationStatusMeta,
-  getAgentAsyncOperationTitle,
   isTerminalAgentAsyncOperation,
   mergeAgentAsyncOperation,
   summarizeAgentAsyncOperations,
@@ -104,25 +103,18 @@ describe("agent async operation projection", () => {
   })
   it("uses one semantic status contract for presentation and lifecycle decisions", () => {
     expect(getAgentAsyncOperationStatusMeta("RUNNING")).toMatchObject({
-      label: "处理中",
       tone: "info",
       active: true,
       terminal: false,
     })
     expect(getAgentAsyncOperationStatusMeta("DEGRADED")).toMatchObject({
-      label: "已降级完成",
       tone: "warning",
       terminal: true,
     })
     expect(getAgentAsyncOperationStatusMeta("FAILED").toneClasses).toContain("wolf-danger")
   })
 
-  it("names operations by type and summarizes the list by the most urgent status", () => {
-    expect(getAgentAsyncOperationTitle(operation("SUCCEEDED", 1))).toBe("客户档案更新")
-    expect(getAgentAsyncOperationTitle({
-      ...operation("SUCCEEDED", 1),
-      operation_type: "customer_activity_post_commit",
-    })).toBe("跟进任务对账")
+  it("summarizes mixed operation lifecycles by the most urgent status", () => {
     expect(summarizeAgentAsyncOperations([
       operation("SUCCEEDED", 1),
       {

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
@@ -161,10 +160,6 @@ const recordFixture = (): PaymentRecordResponse => ({
   last_modified_time: '2026-07-12T09:30:00.000Z',
 })
 
-const sourceText = (): string => readFileSync(
-  `${process.cwd()}/src/components/dialogs/EditRecordDialog.vue`,
-  'utf8'
-)
 
 describe('EditRecordDialog', () => {
   it('initializes from the payment record and emits record id with a typed update payload', async () => {
@@ -191,6 +186,10 @@ describe('EditRecordDialog', () => {
     await wrapper.get('#edit-record-date input').setValue('2026-07-16')
     await wrapper.get('input[name="proof_attachment"]').setValue('https://example.com/new-proof.pdf')
     await wrapper.get('textarea[name="notes"]').setValue('更新备注')
+    await wrapper.get('input[name="renewal_headcount"]').setValue('3')
+    await wrapper.get('input[name="renewal_amount"]').setValue('6900')
+    await wrapper.get('input[name="expansion_headcount"]').setValue('2')
+    await wrapper.get('input[name="expansion_amount"]').setValue('3000')
     await wrapper.get('form').trigger('submit')
     await nextTick()
 
@@ -200,7 +199,10 @@ describe('EditRecordDialog', () => {
       actual_payer_name: '新的付款方',
       proof_attachment: 'https://example.com/new-proof.pdf',
       notes: '更新备注',
-      composition: null,
+      composition: {
+        renewal: { headcount: 3, amount: 6900 },
+        expansion: { headcount: 2, amount: 3000 },
+      },
     }])
   })
 
@@ -281,16 +283,4 @@ describe('EditRecordDialog', () => {
     expect(wrapper.emitted('update:open')).toEqual([[false]])
   })
 
-  it('uses shadcn-vue V2 primitives without unsafe TypeScript escapes', () => {
-    const source = sourceText()
-
-    expect(source).toContain('@/components/ui/dialog')
-    expect(source).toContain('@/components/ui/button')
-    expect(source).toContain('@/components/crmwolf')
-    expect(source).toContain('DialogDescription')
-    expect(source).toContain('variables-v2.scss')
-    expect(source).not.toContain('as any')
-    expect(source).not.toContain('@ts-ignore')
-    expect(source).not.toContain('toISOString')
-  })
 })

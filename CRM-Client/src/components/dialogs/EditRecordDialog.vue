@@ -7,6 +7,7 @@ import {
   compositionFormFrom,
   emptyCompositionForm,
   validatePaymentComposition,
+  type PaymentCompositionForm,
 } from '@/components/dialogs/paymentComposition'
 import {
   Dialog,
@@ -181,6 +182,10 @@ function parseLocalDate(value: string): Date | null {
 
 function handlePaymentDateChange(date: Date | null): void {
   form.paymentDate = date !== null ? formatLocalDate(date) : ''
+}
+
+function handleCompositionUpdate(value: PaymentCompositionForm): void {
+  Object.assign(form, value)
 }
 
 function validateForm(): boolean {
@@ -399,6 +404,7 @@ watch(
                 :form="form"
                 :actual-amount="form.actualAmount"
                 :disabled="isSubmitting || record === null"
+                @update:form="handleCompositionUpdate"
               />
               <div class="edit-record-dialog__optional-grid">
                 <InputField

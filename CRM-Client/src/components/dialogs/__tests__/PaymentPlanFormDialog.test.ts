@@ -2,7 +2,9 @@ import { defineComponent, h, nextTick, ref, type VNode } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PaymentPlanFormDialog from '../PaymentPlanFormDialog.vue'
-import contractApi, { type ContractListResponse } from '@/api/contract'
+import contractApi from '@/api/contract'
+import type { ContractListResponse, ContractResponse } from '@/api/contract'
+import customerApi from '@/api/customer'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import paymentApi, { type PaymentPlanResponse } from '@/api/payment'
 import { formatCurrency } from '@/utils/format'
@@ -99,9 +101,35 @@ async function fillAndSubmit(wrapper: ReturnType<typeof mount<typeof PaymentPlan
   await flushPromises()
 }
 
+function contractFixture(): ContractResponse {
+  return {
+    id: 1,
+    contract_number: 'CT-2026-001',
+    contract_name: '合同',
+    customer_id: 'customer-1',
+    opportunity_id: null,
+    signing_contact_id: 1,
+    user_count: 10,
+    total_amount: '40000',
+    license_type: 'SUBSCRIPTION',
+    subscription_years: 1,
+    standard_unit_price: '4000',
+    status: 'SIGNED',
+    signing_date: '2026-08-01',
+    effective_date: '2026-08-01',
+    expiry_date: '2027-08-01',
+    owner_id: 'user-1',
+    creator_id: 'user-1',
+    created_time: '2026-08-01T00:00:00.000Z',
+    last_modified_time: '2026-08-01T00:00:00.000Z',
+  }
+}
+
 describe('PaymentPlanFormDialog', () => {
   beforeEach(() => {
     vi.spyOn(paymentApi, 'getPaymentPlans').mockResolvedValue([])
+    vi.spyOn(contractApi, 'getContract').mockResolvedValue(contractFixture())
+    vi.spyOn(customerApi, 'getCustomers').mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -360,10 +388,6 @@ describe('PaymentPlanFormDialog', () => {
   it('loads contract total when editing without a fixed contract', async () => {
     const current = existingPlan(12000, 1)
     vi.spyOn(paymentApi, 'getPaymentPlans').mockResolvedValue([current])
-    vi.spyOn(contractApi, 'getContract').mockResolvedValue({
-      id: 1,
-      total_amount: '40000',
-    } as Awaited<ReturnType<typeof contractApi.getContract>>)
 
     const wrapper = mount(PaymentPlanFormDialog, {
       props: {
@@ -497,10 +521,6 @@ describe('PaymentPlanFormDialog', () => {
     vi.spyOn(paymentApi, 'getPaymentPlans')
       .mockResolvedValueOnce([current])
       .mockResolvedValue([])
-    vi.spyOn(contractApi, 'getContract').mockResolvedValue({
-      id: 1,
-      total_amount: '40000',
-    } as Awaited<ReturnType<typeof contractApi.getContract>>)
 
     const wrapper = mount(PaymentPlanFormDialog, {
       props: {

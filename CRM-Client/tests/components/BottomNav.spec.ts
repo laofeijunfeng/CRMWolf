@@ -15,10 +15,13 @@ import BottomNav from '@/components/crmwolf/BottomNav.vue'
 import appRouter from '@/router'
 
 describe('BottomNav account affordances', () => {
+  let pinia = createPinia()
   beforeEach(() => {
     router.push.mockReset()
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     const permissionStore = usePermissionStore()
+    permissionStore.loadState = 'ready'
     permissionStore.permissions = [{
       id: 1,
       code: 'sales_dashboard:view:own',
@@ -37,7 +40,7 @@ describe('BottomNav account affordances', () => {
   })
 
   it('orders primary mobile navigation as Agent, customers, opportunities, contracts, more', () => {
-    const wrapper = mount(BottomNav)
+    const wrapper = mount(BottomNav, { global: { plugins: [pinia] } })
 
     const labels = wrapper
       .findAll('.bottom-nav-container > button')
@@ -47,7 +50,7 @@ describe('BottomNav account affordances', () => {
   })
 
   it('orders More menu as dashboard, leads, payments, invoices, account settings, logout', async () => {
-    const wrapper = mount(BottomNav)
+    const wrapper = mount(BottomNav, { global: { plugins: [pinia] } })
     await wrapper.get('button[aria-label="更多"]').trigger('click')
 
     const menuLabels = Array.from(document.body.querySelectorAll('[role="menuitem"]'))
@@ -58,7 +61,7 @@ describe('BottomNav account affordances', () => {
   })
 
   it('offers account settings in More and navigates to its dedicated route', async () => {
-    const wrapper = mount(BottomNav)
+    const wrapper = mount(BottomNav, { global: { plugins: [pinia] } })
     await wrapper.get('button[aria-label="更多"]').trigger('click')
 
     const accountItem = document.body.querySelector('[role="menuitem"][aria-label="账户设置"]') as HTMLElement
@@ -69,7 +72,7 @@ describe('BottomNav account affordances', () => {
   })
 
   it('emits logout rather than mutating authentication state itself', async () => {
-    const wrapper = mount(BottomNav)
+    const wrapper = mount(BottomNav, { global: { plugins: [pinia] } })
     await wrapper.get('button[aria-label="更多"]').trigger('click')
 
     const logoutItem = document.body.querySelector('[role="menuitem"][aria-label="退出登录"]') as HTMLElement
@@ -82,7 +85,7 @@ describe('BottomNav account affordances', () => {
 
 describe('account settings route', () => {
   it('requires authentication and has the account settings title', () => {
-    const accountRoute = appRouter.getRoutes().find(record => record.path === '/account')
+    const accountRoute = appRouter.resolve('/settings/account')
 
     expect(accountRoute?.meta.requiresAuth).toBe(true)
     expect(accountRoute?.meta.title).toBe('账户设置')

@@ -7,7 +7,8 @@ import { useTopBarRegistration } from '../useTopBarRegistration'
 
 describe('useTopBarRegistration', () => {
   it('clears registered TopBar actions on unmount', () => {
-    setActivePinia(createPinia())
+    const pinia = createPinia()
+    setActivePinia(pinia)
     const headerStore = useHeaderStore()
     const Host = defineComponent({
       name: 'TopBarHost',
@@ -23,7 +24,7 @@ describe('useTopBarRegistration', () => {
       },
     })
 
-    const wrapper = mount(Host)
+    const wrapper = mount(Host, { global: { plugins: [pinia] } })
     expect(headerStore.actions.some((action) => action.id === 'invite-member')).toBe(true)
 
     wrapper.unmount()
@@ -31,7 +32,8 @@ describe('useTopBarRegistration', () => {
   })
 
   it('clears registered TopBar tabs on unmount without calling full clear', () => {
-    setActivePinia(createPinia())
+    const pinia = createPinia()
+    setActivePinia(pinia)
     const headerStore = useHeaderStore()
     headerStore.setBack(true, '/settings/procurement-methods')
     const Host = defineComponent({
@@ -44,7 +46,7 @@ describe('useTopBarRegistration', () => {
       },
     })
 
-    const wrapper = mount(Host)
+    const wrapper = mount(Host, { global: { plugins: [pinia] } })
     expect(headerStore.tabs).not.toBeNull()
 
     wrapper.unmount()

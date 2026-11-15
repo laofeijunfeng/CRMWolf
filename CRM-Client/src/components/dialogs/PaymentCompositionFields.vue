@@ -18,11 +18,19 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
 })
 
+const emit = defineEmits<{
+  'update:form': [value: PaymentCompositionForm]
+}>()
+
 const check = computed(() => validatePaymentComposition(props.form, props.actualAmount))
 const showStatus = computed(() => !check.value.empty && check.value.message.length > 0)
 
 function fieldId(suffix: string): string {
   return `${props.idPrefix}-${suffix}`
+}
+
+function updateField(field: keyof PaymentCompositionForm, value: string | number): void {
+  emit('update:form', { ...props.form, [field]: String(value) })
 }
 </script>
 
@@ -42,7 +50,7 @@ function fieldId(suffix: string): string {
         <Label class="sr-only" :for="fieldId('renewal-headcount')">续购人数</Label>
         <InputField
           :id="fieldId('renewal-headcount')"
-          v-model="form.renewalHeadcount"
+          :model-value="form.renewalHeadcount"
           name="renewal_headcount"
           type="number"
           inputmode="numeric"
@@ -50,13 +58,14 @@ function fieldId(suffix: string): string {
           step="1"
           :disabled="props.disabled"
           aria-label="续购人数"
+          @update:model-value="updateField('renewalHeadcount', $event)"
         />
       </div>
       <div>
         <Label class="sr-only" :for="fieldId('renewal-amount')">续购金额</Label>
         <InputField
           :id="fieldId('renewal-amount')"
-          v-model="form.renewalAmount"
+          :model-value="form.renewalAmount"
           name="renewal_amount"
           type="number"
           inputmode="decimal"
@@ -64,6 +73,7 @@ function fieldId(suffix: string): string {
           step="0.01"
           :disabled="props.disabled"
           aria-label="续购金额"
+          @update:model-value="updateField('renewalAmount', $event)"
         />
       </div>
 
@@ -72,7 +82,7 @@ function fieldId(suffix: string): string {
         <Label class="sr-only" :for="fieldId('expansion-headcount')">增购人数</Label>
         <InputField
           :id="fieldId('expansion-headcount')"
-          v-model="form.expansionHeadcount"
+          :model-value="form.expansionHeadcount"
           name="expansion_headcount"
           type="number"
           inputmode="numeric"
@@ -80,13 +90,14 @@ function fieldId(suffix: string): string {
           step="1"
           :disabled="props.disabled"
           aria-label="增购人数"
+          @update:model-value="updateField('expansionHeadcount', $event)"
         />
       </div>
       <div>
         <Label class="sr-only" :for="fieldId('expansion-amount')">增购金额</Label>
         <InputField
           :id="fieldId('expansion-amount')"
-          v-model="form.expansionAmount"
+          :model-value="form.expansionAmount"
           name="expansion_amount"
           type="number"
           inputmode="decimal"
@@ -94,6 +105,7 @@ function fieldId(suffix: string): string {
           step="0.01"
           :disabled="props.disabled"
           aria-label="增购金额"
+          @update:model-value="updateField('expansionAmount', $event)"
         />
       </div>
     </div>
