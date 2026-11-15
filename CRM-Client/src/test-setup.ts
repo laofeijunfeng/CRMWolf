@@ -32,14 +32,19 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
 })
 
 if (typeof window.CSS?.escape !== 'function') {
-  Object.defineProperty(window, 'CSS', {
-    configurable: true,
-    writable: true,
-    value: {
-      ...(window.CSS ?? {}),
-      escape: cssEscape,
-    },
-  })
+  if (window.CSS === undefined) {
+    Object.defineProperty(window, 'CSS', {
+      configurable: true,
+      writable: true,
+      value: { escape: cssEscape },
+    })
+  } else {
+    Object.defineProperty(window.CSS, 'escape', {
+      configurable: true,
+      writable: true,
+      value: cssEscape,
+    })
+  }
 }
 
 afterEach(() => {
