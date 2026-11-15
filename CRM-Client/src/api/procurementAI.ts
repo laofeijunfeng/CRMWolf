@@ -2,6 +2,13 @@
  * AI 采购方式解析 API
  */
 import request from '@/utils/request'
+import {
+  ProcurementAICreateResultSchema,
+  ProcurementAIParseSSEEventSchema,
+  type ProcurementAICreateResult
+} from '@/schemas/procurementAI'
+
+export type { ProcurementAICreateResult } from '@/schemas/procurementAI'
 
 export interface ProcurementAIParseRequest {
   content: string
@@ -14,22 +21,22 @@ export interface ProcurementAIParsedStage {
   sort_order: number
   is_default_start: boolean
   can_skip: boolean
-  description?: string
+  description?: string | null | undefined
 }
 
 export interface ProcurementAIParsedMethod {
   name: string
   code: string
-  description?: string
+  description?: string | null | undefined
   stages: ProcurementAIParsedStage[]
 }
 
 export interface ProcurementAIParseSSEEvent {
   event: 'status' | 'content' | 'parsed' | 'error'
-  message?: string
-  content?: string
-  method?: ProcurementAIParsedMethod
-  thinking_process?: string
+  message?: string | null | undefined
+  content?: string | null | undefined
+  method?: ProcurementAIParsedMethod | null | undefined
+  thinking_process?: string | null | undefined
 }
 
 export interface ProcurementAICreateRequest {
@@ -40,26 +47,6 @@ export interface ProcurementAICreateRequest {
   team_id?: number
 }
 
-export interface ProcurementAICreateResult {
-  success: boolean
-  message: string
-  data: {
-    method: {
-      id: number
-      name: string
-      code: string
-      description?: string
-    }
-    stages: {
-      id: number
-      stage_name: string
-      template_code: string
-      win_probability: number
-      sort_order: number
-      is_default_start: boolean
-    }[]
-  }
-}
 
 export const procurementAiApi = {
   /**
@@ -104,15 +91,13 @@ export const procurementAiApi = {
 
       // 解析 SSE 数据
       const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
+      buffer = lines.pop() ?? ''
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            const eventData = JSON.parse(line.slice(6)) as ProcurementAIParseSSEEvent
+            const eventData = ProcurementAIParseSSEEventSchema.parse(JSON.parse(line.slice(6)))
             onEvent(eventData)
-
-            // 收到 parsed 或 error 事件后结束
             if (eventData.event === 'parsed' || eventData.event === 'error') {
               return
             }
@@ -129,10 +114,7 @@ export const procurementAiApi = {
    * @param data 创建请求数据
    * @returns 创建成功的采购方式数据
    */
-  createFromAI: (data: ProcurementAICreateRequest) => {
-    return request.post<ProcurementAICreateResult>(
-      '/v1/procurement-ai/create',
-      data
-    )
+  createFromAI: async (data: ProcurementAICreateRequest): Promise<ProcurementAICreateResult> => {
+    return ProcurementAICreateResultSchema.parse(await request.post('/v1/procurement-ai/create', data))
   }
 }

@@ -29,6 +29,7 @@ vi.mock('@/api/product', () => ({
 }))
 Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
+  writable: true,
   value: vi.fn(),
 })
 

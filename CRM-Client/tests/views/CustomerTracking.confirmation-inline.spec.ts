@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { defineComponent, h, ref, toValue, type PropType } from 'vue'
+import { computed, defineComponent, h, ref, toValue, type PropType } from 'vue'
 import CustomerTracking from '@/views/CustomerTracking.vue'
 import type { FollowUpTaskItem } from '@/api/followUpTask'
 import type { TabItem } from '@/stores/header'
@@ -44,14 +44,22 @@ vi.mock('@/composables/useTopBarRegistration', () => ({
 vi.mock('@/composables/useCustomFilterViews', () => ({
   isCustomFilterViewTab: (key: string) => key.startsWith('custom-view:'),
   useCustomFilterViews: () => ({
+    customViews: ref([]),
+    customViewTabs: computed(() => []),
+    loading: ref(false),
     saving: ref(false),
+    applying: ref(false),
+    applyError: ref(null),
     mergeTabs: (tabs: TabItem[]) => tabs,
     loadCustomViews: vi.fn(() => Promise.resolve()),
     applyCustomViewTab: vi.fn(() => false),
     applyBuiltInTab: vi.fn(() => false),
-    saveAsCustomView: vi.fn(),
-    updateActiveCustomViewConfig: vi.fn(),
-    saveActiveCustomViewColumns: vi.fn(),
+    consumeFailedViewApply: vi.fn(() => false),
+    retryViewApply: vi.fn(() => Promise.resolve()),
+    saveAsCustomView: vi.fn(() => Promise.resolve()),
+    saveCurrentAsCustomView: vi.fn(() => Promise.resolve()),
+    updateActiveCustomViewConfig: vi.fn(() => Promise.resolve()),
+    saveActiveCustomViewColumns: vi.fn(() => Promise.resolve()),
   }),
 }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError: vi.fn() }))
@@ -330,7 +338,11 @@ describe('CustomerTracking inline follow-up confirmations', () => {
     expect(followUpTaskApi.transition).toHaveBeenCalledWith('fut_12', {
       action: 'complete',
       reason: 'manual_complete',
-    })
+    }, expect.objectContaining({
+      correlationId: expect.any(String),
+      idempotencyKey: expect.any(String),
+      operationId: expect.any(String),
+    }))
     expect(wrapper.find('[data-testid="tracking-detail-sheet"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="task-fut_12"]').exists()).toBe(false)
   })

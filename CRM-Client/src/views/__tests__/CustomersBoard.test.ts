@@ -1,11 +1,14 @@
-import { defineComponent, h, nextTick, reactive, ref, type Ref, type VNode } from 'vue'
+import { nextTick, ref, toValue, watch, type MaybeRefOrGetter, type Ref, type VNode } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import type { CustomerBoardParams, CustomerResponse } from '@/api/customer'
 import { normalizeListChartDisplayMode, type ViewDisplayMode } from '@/api/viewPreference'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { CustomerBoardResponse } from '@/schemas/customerBoard'
+
+const { defineComponent, h, reactive } = await vi.hoisted(async () => import('vue'))
 
 const mocks = vi.hoisted(() => ({
   getCustomers: vi.fn(),
@@ -39,8 +42,9 @@ const headerStore = vi.hoisted(() => {
       store.activeTab = tab
     },
     tabs: null as { key: string, label: string }[] | null,
-    setTabs: (next: { key: string, label: string }[] | null): void => {
-      store.tabs = next
+    setTabs: (next: { key: string, label: string }[] | null | undefined, activeTab?: string): void => {
+      store.tabs = next ?? null
+      if (activeTab !== undefined) store.activeTab = activeTab
     },
     setActions: (): void => undefined,
   })
@@ -159,8 +163,19 @@ vi.mock('@/stores/header', () => ({
   useHeaderStore: (): typeof headerStore => headerStore,
 }))
 
-vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: (): void => undefined }))
-vi.mock('@/composables/useTopBarRegistration', () => ({ useTopBarRegistration: (): void => undefined }))
+vi.mock('@/composables/useTopBarRegistration', () => ({
+  useTopBarRegistration: (options: {
+    tabs?: MaybeRefOrGetter<{ key: string, label: string }[] | null>
+    activeTab?: MaybeRefOrGetter<string>
+  }): void => {
+    if (options.tabs === undefined) return
+    watch(
+      () => toValue(options.tabs),
+      (tabs) => headerStore.setTabs(tabs, options.activeTab === undefined ? undefined : toValue(options.activeTab)),
+      { immediate: true },
+    )
+  },
+}))
 vi.mock('@/composables/useAcquisitionSourceOptions', () => ({
   useAcquisitionSourceOptions: (): {
     filterSelectOptions: Ref<never[]>
@@ -218,6 +233,12 @@ function applySavedView(wrapper: VueWrapper): void {
   page.activeFilters = savedViewState.filters.map((filter) => ({ ...filter }))
   page.activeSorts = savedViewState.sorts.map((sort) => ({ ...sort }))
   page.displayMode = normalizeListChartDisplayMode(savedViewState.displayMode)
+  if (savedViewState.displayMode !== 'chart') {
+    const table = wrapper.getComponent({ name: 'DataTable' })
+    const tableVm = table.vm as unknown as { $emit: (event: string, value: unknown) => void }
+    tableVm.$emit('filter-apply', savedViewState.filters)
+    tableVm.$emit('sort-apply', savedViewState.sorts)
+  }
 }
 
 
@@ -333,6 +354,7 @@ const boardResponse: CustomerBoardResponse = {
 function mountPage(): VueWrapper {
   return mount(Customers, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         StatusBadge: defineComponent({
           name: 'StatusBadge',
@@ -655,7 +677,10 @@ describe('Customers board integration', () => {
       filters: JSON.stringify([{ field: 'owner_id', op: 'eq', value: '42' }]),
       sorts: JSON.stringify([{ field: 'account_name', direction: 'asc' }]),
     }))
-    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:customers'), revokeObjectURL: vi.fn() })
+    vi.stubGlobal('URL', class extends URL {
+      static override createObjectURL = vi.fn(() => 'blob:customers')
+      static override revokeObjectURL = vi.fn()
+    })
     const table = wrapper.getComponent({ name: 'DataTable' })
     expect(table.props('exportEnabled')).toBe(true)
     const exportHandler = table.props('exportHandler') as (fields: string[]) => Promise<void>

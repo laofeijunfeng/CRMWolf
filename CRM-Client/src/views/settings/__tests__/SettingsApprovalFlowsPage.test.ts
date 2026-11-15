@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 
 const { getApprovalFlows } = mocks
 
+let pinia = createPinia()
+
 vi.mock('@/api/approvalFlow', () => ({
   default: {
     getApprovalFlows: mocks.getApprovalFlows,
@@ -46,7 +48,8 @@ const pageStubs = {
 }
 
 function seedOwnerPinia(): void {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   const teamStore = useTeamStore()
   const userStore = useUserStore()
   const permissionStore = usePermissionStore()
@@ -79,7 +82,7 @@ describe('SettingsApprovalFlowsPage', () => {
 
     getApprovalFlows.mockResolvedValue([{ id: 1, flow_name: '合同审批', flow_code: 'CONTRACT_FLOW', business_type: 'CONTRACT', is_active: true, nodes: [] }])
     const wrapper = mount(SettingsApprovalFlowsPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await vi.waitFor(() => expect(getApprovalFlows).toHaveBeenCalled())
     expect(getApprovalFlows.mock.calls[0]?.[0]).toBeUndefined()
@@ -99,7 +102,7 @@ describe('SettingsApprovalFlowsPage', () => {
     }))
 
     const wrapper = mount(SettingsApprovalFlowsPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await nextTick()
     expect(wrapper.find('[data-testid="form-dialog"]').exists()).toBe(true)

@@ -1,13 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildDataTableExportFileName, downloadBlob } from '../downloadBlob'
 
 const createObjectURL = vi.fn(() => 'blob:export-url')
 const revokeObjectURL = vi.fn()
 
-vi.stubGlobal('URL', Object.assign(URL, {
-  createObjectURL,
-  revokeObjectURL,
-}))
+beforeEach(() => {
+  vi.stubGlobal('URL', class extends URL {
+    static override createObjectURL = createObjectURL
+    static override revokeObjectURL = revokeObjectURL
+  })
+})
 
 describe('buildDataTableExportFileName', () => {
   it('combines sanitized title, tab label, and local timestamp', () => {

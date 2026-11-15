@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 
 const { listMethods } = mocks
 
+let pinia = createPinia()
+
 vi.mock('@/api/procurement', () => ({
   default: {
     getProcurementMethods: mocks.listMethods,
@@ -53,7 +55,8 @@ const pageStubs = {
 }
 
 function seedOwnerPinia(): void {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   const teamStore = useTeamStore()
   const userStore = useUserStore()
   const permissionStore = usePermissionStore()
@@ -98,7 +101,7 @@ describe('SettingsProcurementMethodsPage', () => {
       stage_templates: [{}, {}],
     })
     const wrapper = mount(SettingsProcurementMethodsPage, {
-      global: { stubs: { DataTable: { props: ['data'], template: '<div>{{ data[0]?.name }}</div>' }, TableRowActions: true, SettingsContent: { template: '<main><slot /></main>' }, Dialog: true } },
+      global: { plugins: [pinia], stubs: { DataTable: { props: ['data'], template: '<div>{{ data[0]?.name }}</div>' }, TableRowActions: true, SettingsContent: { template: '<main><slot /></main>' }, Dialog: true } },
     })
     await vi.waitFor(() => expect(listMethods).toHaveBeenCalled())
     await vi.waitFor(() => expect(mocks.getProcurementMethod).toHaveBeenCalledWith(1))
@@ -129,7 +132,7 @@ describe('SettingsProcurementMethodsPage', () => {
       stage_templates: [{ id: 11 }, { id: 12 }],
     })
     const wrapper = mount(SettingsProcurementMethodsPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await vi.waitFor(() => expect(listMethods).toHaveBeenCalled())
     await vi.waitFor(() => expect(mocks.getProcurementMethod).toHaveBeenCalledWith(1))
@@ -151,7 +154,7 @@ describe('SettingsProcurementMethodsPage', () => {
     }))
 
     const wrapper = mount(SettingsProcurementMethodsPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs }
     })
     await nextTick()
     expect(wrapper.find('[data-testid="method-dialog"]').exists()).toBe(true)

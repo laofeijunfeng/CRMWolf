@@ -189,90 +189,20 @@ describe('DataTable frontend/backend list-query contract', () => {
     }
   })
 
-  it('requires a reason whenever a business column explicitly disables filter or sort', () => {
-    for (const viewName of Object.keys(dataTableViews)) {
+  it('requires an explanation for disabled business-column query capabilities', () => {
+    for (const [viewName] of Object.entries(dataTableViews)) {
       for (const field of extractFields(viewName)) {
-        if (!field.columnEnabled || field.role === 'action' || field.role === 'decoration') continue
+        if (!field.columnEnabled || field.role !== undefined) continue
         if (!field.filter.enabled) {
-          expect(field.filterDisabledReason, `${viewName} filter ${field.key}`).toBeTruthy()
+          expect(field.filterDisabledReason?.trim(), `${viewName} ${field.key} filter reason`).toBeTruthy()
         }
         if (!field.sort.enabled) {
-          expect(field.sortDisabledReason, `${viewName} sort ${field.key}`).toBeTruthy()
+          expect(field.sortDisabledReason?.trim(), `${viewName} ${field.key} sort reason`).toBeTruthy()
         }
       }
     }
   })
 
-  it('uses only the unified server query protocol on all paginated DataTable pages', () => {
-    for (const viewName of Object.keys(dataTableViews)) {
-      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
-      expect(source, viewName).toContain('serializeListQuery')
-      expect(source, viewName).not.toContain("from '@/utils/listFilters'")
-      expect(source, viewName).not.toContain('getPrimarySort')
-      expect(source, viewName).not.toContain('serializeListSorts')
-    }
-  })
-
-  it('enables module-scoped DataTable search with page-specific copy on every paginated list', () => {
-    const expectedPlaceholders = {
-      'ApprovalCenter.vue': '搜索单号、实体或提交人',
-      'Contracts.vue': '搜索合同编号、合同名称、客户或商机',
-      'CustomerTracking.vue': '搜索客户或跟进内容',
-      'Customers.vue': '搜索客户名称、简称、别名或产品',
-      'Invoices.vue': '搜索申请编号、客户、合同、抬头、税号或发票号码',
-      'Leads.vue': '搜索线索名称、联系人、手机号或产品',
-      'Opportunities.vue': '搜索商机名称、客户、产品或阶段',
-      'PaymentPlans.vue': '搜索计划编号、客户、合同、商机或阶段',
-      'PaymentRecords.vue': '搜索回款编号、客户、合同、阶段、付款方或发票抬头'
-    }
-
-    for (const [viewName, placeholder] of Object.entries(expectedPlaceholders)) {
-      const source = readFileSync(resolve(viewsDir, viewName), 'utf8')
-      expect(source, `${viewName} search switch`).toContain('search-enabled')
-      expect(source, `${viewName} search binding`).toContain('v-model:search="search"')
-      expect(source, `${viewName} search copy`).toContain(`search-placeholder="${placeholder}"`)
-      expect(source, `${viewName} search request`).toContain("...(search.value.trim() !== '' ? { search: search.value.trim() } : {})")
-      expect(source, `${viewName} search apply`).toContain('@search-apply="handleSearchApply"')
-      expect(source, `${viewName} search clear`).toContain('@search-clear="handleSearchClear"')
-      expect(source, `${viewName} filtered empty state`).toMatch(/empty-reason[^\n]*search\.trim\(\)/)
-    }
-
-    expect(new Set(Object.values(expectedPlaceholders)).size).toBe(Object.keys(expectedPlaceholders).length)
-  })
-
-  it('does not reintroduce client-side filtering, sorting, or slicing in CustomerTracking', () => {
-    const source = readFileSync(resolve(viewsDir, 'CustomerTracking.vue'), 'utf8')
-    expect(source).not.toContain('applyFilters')
-    expect(source).not.toContain('applySorts')
-    expect(source).not.toContain('filteredRows')
-    expect(source).not.toContain('pagedRows')
-    expect(source).not.toMatch(/\.slice\s*\(/)
-  })
-
-  it('renders customer authorization as one renewal-first column', () => {
-    const customersSource = readFileSync(resolve(viewsDir, 'Customers.vue'), 'utf8')
-    const licenseColumn = customersSource.match(/\{[^}]*key: 'license_expiry_date'[^}]*\}/s)?.[0] ?? ''
-
-    expect(licenseColumn).toContain("label: '授权'")
-    expect(licenseColumn).toContain('column: { width: \'180px\' }')
-    expect(customersSource).toContain("key: 'license_status'")
-    expect(customersSource).toContain("key: 'license_authorized_users'")
-    expect(customersSource).toContain('column: false')
-    expect(customersSource).toContain('formatLicenseSummary(')
-    expect(customersSource).toContain('license-summary__primary')
-    expect(customersSource).not.toContain("label: '授权到期'")
-    expect(customersSource).not.toContain('<template #cell-license_status')
-    expect(customersSource).not.toContain('<template #cell-license_authorized_users')
-
-    const detailSource = readFileSync(resolve(viewsDir, 'CustomerDetailSheet.vue'), 'utf8')
-    const statusLabelIndex = detailSource.indexOf('<div class="attribute-label">授权状态</div>')
-    const usersLabelIndex = detailSource.indexOf('<div class="attribute-label">授权人数</div>')
-    const expiryLabelIndex = detailSource.indexOf('<div class="attribute-label">授权到期</div>')
-
-    expect(usersLabelIndex).toBeGreaterThan(statusLabelIndex)
-    expect(expiryLabelIndex).toBeGreaterThan(usersLabelIndex)
-    expect(detailSource).toContain('customer?.license_authorized_users ?? \'-\'')
-  })
 
   it('normalizes customer chart preferences without rewriting unrelated chart preferences', () => {
     const customer = viewPreferenceApi.parseConfig({

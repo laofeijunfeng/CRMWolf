@@ -85,6 +85,40 @@ describe('CRM Agent frozen contracts', () => {
     expect(QueryErrorSchema.parse(examples.query_error).code).toBe('QUERY_INVALID')
   })
 
+  it('requires a closed semantic plan without weakening route risk validation', () => {
+    const decision = RootDecisionSchema.parse(examples.root_decision)
+    const { semantic_plan: semanticPlan, ...withoutSemanticPlan } = decision
+
+    expect(RootDecisionSchema.safeParse(withoutSemanticPlan).success).toBe(false)
+    expect(RootDecisionSchema.safeParse({
+      ...decision, semantic_plan: { ...semanticPlan, speech_act: 'UNRECOGNIZED' }
+    }).success).toBe(false)
+    expect(RootDecisionSchema.safeParse({
+      ...decision, semantic_plan: { ...semanticPlan, tool_authorization: true }
+    }).success).toBe(false)
+    expect(RootDecisionSchema.safeParse({ ...decision, risk: 'WRITE' }).success).toBe(false)
+    expect(RootDecisionSchema.safeParse({ ...decision, route: 'WORKFLOW' }).success).toBe(false)
+  })
+
+  it('validates optional semantic query plans as closed typed data', () => {
+    const decision = RootDecisionSchema.parse(examples.root_decision)
+    const queryPlan = {
+      scope: 'customer_scoped', resource: 'customer_activities', query_goal: 'summarize',
+      customer_text: '上海客户', temporal: { kind: 'this_week', timezone: 'Asia/Shanghai' }
+    }
+    const withQueryPlan = (query_plan: unknown): unknown => ({
+      ...decision, semantic_plan: { ...decision.semantic_plan, query_plan }
+    })
+
+    expect(RootDecisionSchema.parse(withQueryPlan(queryPlan)).semantic_plan.query_plan)
+      .toMatchObject(queryPlan)
+    expect(RootDecisionSchema.safeParse(withQueryPlan({ ...queryPlan, scope: 'all' })).success).toBe(false)
+    expect(RootDecisionSchema.safeParse(withQueryPlan({
+      ...queryPlan, temporal: { kind: 'this_week', timezone: 'x'.repeat(129) }
+    })).success).toBe(false)
+    expect(RootDecisionSchema.safeParse(withQueryPlan({ ...queryPlan, unsafe_filter: true })).success).toBe(false)
+  })
+
   it('parses the backend-reviewed Agent UI example', () => {
     const envelope = AgentUIEnvelopeSchema.parse(examples.agent_ui_envelope)
 
@@ -117,7 +151,7 @@ describe('CRM Agent frozen contracts', () => {
 
   it('matches the backend cross-language conformance corpus', () => {
     for (const testCase of conformance.valid) {
-      expect(conformanceSchemas[testCase.schema].safeParse(testCase.payload).success).toBe(true)
+      expect(conformanceSchemas[testCase.schema].safeParse(testCase.payload).success, testCase.reason).toBe(true)
     }
     for (const testCase of conformance.invalid) {
       expect(conformanceSchemas[testCase.schema].safeParse(testCase.payload).success, testCase.reason).toBe(false)

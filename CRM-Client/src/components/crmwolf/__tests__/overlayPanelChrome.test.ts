@@ -1,5 +1,5 @@
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import ColumnConfigPopover from '../ColumnConfigPopover.vue'
 import ListFilterPopover from '../ListFilterPopover.vue'
@@ -46,7 +46,7 @@ const openToolbarPopover = async (wrapper: VueWrapper, triggerLabel: string): Pr
 }
 
 describe('overlay panel chrome', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     vi.stubGlobal('CSS', { escape: (value: string) => value.replace(/["\\]/g, '\\$&') })
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: mediaMatches,
@@ -234,7 +234,7 @@ describe('overlay panel chrome', () => {
     expect(activeOperator?.textContent?.trim()).toBe('包含')
   })
 
-  it('keeps the field panel open after a narrow-screen click', async () => {
+  it('toggles the field panel with narrow-screen clicks', async () => {
     mediaMatches = true
     const wrapper = mountAttached(ListFilterPopover, {
       fields: [{ key: 'name', label: '名称', type: 'text' }]
@@ -247,6 +247,9 @@ describe('overlay panel chrome', () => {
     await nextTick()
 
     expect(document.querySelector('.filter-field-panel')).not.toBeNull()
+    fieldButton.click()
+    await nextTick()
+    expect(document.querySelector('.filter-field-panel')).toBeNull()
   })
 
   it('shows a calendar after changing a date operator from a preset', async () => {

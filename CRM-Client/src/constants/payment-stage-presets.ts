@@ -11,7 +11,7 @@ suggestedPercentage?: number | undefined // 建议金额占比（0-100）
   description?: string
 }
 
-export const STAGE_PRESETS: StagePreset[] = [
+export const STAGE_PRESETS: readonly [StagePreset, StagePreset, StagePreset, StagePreset, StagePreset, StagePreset, StagePreset] = [
   {
     label: '首付款',
     value: '首付款',
@@ -63,21 +63,21 @@ export const STAGE_PRESETS: StagePreset[] = [
  */
 export function suggestNextStage(existingStages: string[]): StagePreset {
   if (existingStages.length === 0) {
-    return STAGE_PRESETS[0]! // 默认首付款
+    return STAGE_PRESETS[0] // 默认首付款
   }
 
   if (!existingStages.includes('首付款') && !existingStages.includes('全款')) {
-    return STAGE_PRESETS[0]!
+    return STAGE_PRESETS[0]
   }
 
   if (existingStages.includes('首付款') && !existingStages.includes('尾款')) {
-    return STAGE_PRESETS[2]! // 已有首付款，建议尾款
+    return STAGE_PRESETS[2] // 已有首付款，建议尾款
   }
 
   if (existingStages.includes('全款')) {
-    return STAGE_PRESETS[6]! // 已有全款，建议维护费
+    return STAGE_PRESETS[6] // 已有全款，建议维护费
   }
 
   // 默认返回进度款
-  return STAGE_PRESETS[1]!
+  return STAGE_PRESETS[1]
 }

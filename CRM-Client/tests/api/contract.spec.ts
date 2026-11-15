@@ -31,7 +31,7 @@ describe('contract API', () => {
         contract_name: '测试合同',
         customer_id: 'CUS202607260001',
         customer_name: '测试客户',
-        opportunity_id: 20,
+        opportunity_id: 'opp_test_20',
         opportunity_name: '测试商机',
         purchase_type: 'RENEWAL',
         signing_contact_id: 30,
