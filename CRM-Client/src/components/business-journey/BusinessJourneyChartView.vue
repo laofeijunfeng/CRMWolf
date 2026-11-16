@@ -340,34 +340,39 @@ function openJourney(item: BusinessJourneyChartPreview): void {
     </template>
 
     <Dialog :open="segmentOpen ?? false" @update:open="emit('update:segment-open', $event)">
-      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+      <DialogContent class="journey-chart-segment-dialog w-[calc(100%-2rem)] max-w-lg">
         <DialogHeader>
           <DialogTitle>{{ segmentLabel }}</DialogTitle>
           <DialogDescription>{{ selectedCardTitle }} · 共 {{ segmentTotal }} 条</DialogDescription>
         </DialogHeader>
-        <div v-if="segmentLoading && (segmentItems?.length ?? 0) === 0" class="journey-chart-state">正在读取这一段…</div>
-        <div v-else-if="segmentError && (segmentItems?.length ?? 0) === 0" class="journey-chart-state" role="alert">
-          <span>{{ segmentError }}</span>
-          <Button type="button" variant="outline" size="sm" @click="openSelected">重试</Button>
-        </div>
-        <div v-else class="journey-chart-segment-list">
-          <button v-for="item in segmentItems" :key="item.public_id" type="button" @click="openJourney(item)">
-            <span class="min-w-0">
-              <span class="block">{{ item.name }}</span>
-              <small class="block">{{ item.customer_name }}</small>
-            </span>
-            <AmountText :value="item.amount" size="sm" />
-          </button>
-          <Button
-            v-if="(segmentItems?.length ?? 0) < (segmentTotal ?? 0)"
-            type="button"
-            variant="link"
-            class="journey-chart-preview__more h-auto min-h-11 justify-start whitespace-normal font-normal"
-            :disabled="segmentLoading"
-            @click="emit('load-more')"
-          >
-            {{ segmentLoading ? '正在读取…' : segmentError || '查看更多' }}
-          </Button>
+        <div class="journey-chart-segment-body">
+          <div v-if="segmentLoading && (segmentItems?.length ?? 0) === 0" class="journey-chart-state">正在读取这一段…</div>
+          <div v-else-if="segmentError && (segmentItems?.length ?? 0) === 0" class="journey-chart-state" role="alert">
+            <span>{{ segmentError }}</span>
+            <Button type="button" variant="outline" size="sm" @click="openSelected">重试</Button>
+          </div>
+          <template v-else>
+            <div class="journey-chart-segment-items">
+              <button v-for="item in segmentItems" :key="item.public_id" type="button" @click="openJourney(item)">
+                <span class="min-w-0">
+                  <span class="block">{{ item.name }}</span>
+                  <small class="block">{{ item.customer_name }}</small>
+                </span>
+                <AmountText :value="item.amount" size="sm" />
+              </button>
+            </div>
+            <div v-if="(segmentItems?.length ?? 0) < (segmentTotal ?? 0)" class="journey-chart-segment-actions">
+              <Button
+                type="button"
+                variant="link"
+                class="journey-chart-preview__more h-auto min-h-11 justify-start whitespace-normal font-normal"
+                :disabled="segmentLoading"
+                @click="emit('load-more')"
+              >
+                {{ segmentLoading ? '正在读取…' : segmentError || '查看更多' }}
+              </Button>
+            </div>
+          </template>
         </div>
       </DialogContent>
     </Dialog>
@@ -424,7 +429,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-bars button,
 .journey-chart-legend button,
 .journey-chart-preview button,
-.journey-chart-segment-list button {
+:global(.journey-chart-segment-items button) {
   border: 0;
   background: transparent;
 }
@@ -441,12 +446,13 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-preview small,
-.journey-chart-segment-list small {
+:global(.journey-chart-segment-items small) {
   color: $wolf-text-tertiary-v2;
   font-size: 12px;
 }
 
 .journey-chart-state,
+:global(.journey-chart-segment-body .journey-chart-state),
 .journey-chart-refreshing {
   display: flex;
   min-height: 48px;
@@ -457,7 +463,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-preview,
-.journey-chart-segment-list {
+:global(.journey-chart-segment-items) {
   display: flex;
   flex-direction: column;
 }
@@ -468,7 +474,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-preview button,
-.journey-chart-segment-list button {
+:global(.journey-chart-segment-items button) {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -490,9 +496,32 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   flex-direction: column;
 }
 
-.journey-chart-segment-list {
+:global(.journey-chart-segment-dialog) {
+  display: flex;
+  height: min(80dvh, 640px);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:global(.journey-chart-segment-body) {
+  display: flex;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  flex: 1;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+}
+
+:global(.journey-chart-segment-items) {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+:global(.journey-chart-segment-actions) {
+  flex: none;
 }
 
 @media (max-width: 900px) {

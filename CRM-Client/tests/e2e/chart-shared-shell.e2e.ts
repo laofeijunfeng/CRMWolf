@@ -10,6 +10,9 @@ type FixtureState = {
   requests: RequestRecord[]
   chartFailures: Partial<Record<Entity, number>>
   bucketFailures: Partial<Record<Entity, number>>
+  bucketAppendWait?: Partial<Record<Entity, Promise<void>>>
+  journeySegmentFailures?: number
+  journeyAppendWait?: Promise<void>
 }
 
 const permission = (code: string, id: number) => ({
@@ -150,6 +153,14 @@ const listPayment = {
 }
 
 const pageResponse = (items: unknown[]) => ({ items, total: items.length, page: 1, page_size: 20, total_pages: 1 })
+const journeyChart = {
+  summary: { total_count: 11, total_amount: 1100000 },
+  cards: ['stage', 'purchase_type', 'amount_band', 'product', 'recent_activity', 'expected_closing'].map((key) => ({
+    key, title: key === 'stage' ? '阶段' : key, description: '业务旅程汇总', graphic: 'horizontal_bar',
+    segments: [{ key: 'active_progress', label: '持续推进', count: 11, amount: 1100000, preview: [] }],
+  })),
+}
+
 
 async function fulfill(route: Route, body: unknown, status = 200): Promise<void> {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -186,6 +197,8 @@ async function installApi(page: Page, state: FixtureState): Promise<void> {
         await fulfill(route, { detail: 'fixture bucket failure' }, 500)
         return
       }
+      const appendWait = state.bucketAppendWait?.[entity]
+      if (appendWait !== undefined && Number(url.searchParams.get('skip') ?? 0) > 0) await appendWait
     }
     if (pathname === '/api/v1/auth/me') return fulfill(route, user)
     if (pathname === '/api/v1/auth/me/roles') return fulfill(route, [])
@@ -206,6 +219,23 @@ async function installApi(page: Page, state: FixtureState): Promise<void> {
     if (pathname === '/api/v1/customers/chart') return fulfill(route, customerChart)
     if (pathname === '/api/v1/opportunities/chart') return fulfill(route, opportunityChart)
     if (pathname === '/api/v1/payments/payment-records/chart') return fulfill(route, paymentChart)
+    if (pathname === '/api/v1/business-journeys/chart') return fulfill(route, journeyChart)
+    if (pathname === '/api/v1/business-journeys/chart/segment') {
+      const skip = Number(url.searchParams.get('skip') ?? 0)
+      if (skip > 0) {
+        if ((state.journeySegmentFailures ?? 0) > 0) {
+          state.journeySegmentFailures = (state.journeySegmentFailures ?? 1) - 1
+          return fulfill(route, { detail: 'fixture journey append failure' }, 500)
+        }
+        if (state.journeyAppendWait !== undefined) await state.journeyAppendWait
+      }
+      return fulfill(route, {
+        card: url.searchParams.get('card'), segment: url.searchParams.get('segment'), label: '持续推进', total: 11,
+        items: Array.from({ length: skip === 0 ? 10 : 1 }, (_, index) => ({
+          public_id: `journey_${skip + index + 1}`, customer_id: 'cus_1', name: `旅程明细 ${skip + index + 1}`, customer_name: '星河科技', amount: 100000,
+        })),
+      })
+    }
     const skip = Number(url.searchParams.get('skip') ?? 0)
     const count = skip === 0 ? 10 : 1
     if (pathname === '/api/v1/contracts/chart/contracts') return fulfill(route, { chart: url.searchParams.get('chart'), bucket: url.searchParams.get('bucket'), total: 11, contracts: Array.from({ length: count }, (_, index) => previewContract(skip + index + 1, `合同明细 ${skip + index + 1}`)) })
@@ -231,6 +261,39 @@ async function seedSession(page: Page): Promise<void> {
   await page.addInitScript((token) => window.localStorage.setItem('token', token), `eyJhbGciOiJub25lIn0.${payload}.sig`)
 }
 
+async function verifyScrollRegion(page: Page, itemsSelector: string): Promise<void> {
+  const dialog = page.getByRole('dialog')
+  const items = dialog.locator(itemsSelector)
+  const more = dialog.getByRole('button', { name: '查看更多', exact: true })
+  await expect(more).toBeVisible()
+  await dialog.evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished)) })
+  const before = await dialog.boundingBox()
+  const headingBefore = await dialog.getByRole('heading').boundingBox()
+  const actionBefore = await more.boundingBox()
+  const geometry = await items.evaluate((element) => ({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight, rect: element.getBoundingClientRect().toJSON(), overflowY: getComputedStyle(element).overflowY, parent: element.parentElement?.getBoundingClientRect().toJSON(), dialog: element.closest('[role="dialog"]')?.getBoundingClientRect().toJSON() }))
+  expect(geometry.overflowY).toBe('auto')
+  expect(geometry.scrollHeight, JSON.stringify(geometry)).toBeGreaterThan(geometry.clientHeight)
+  await items.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  expect(await items.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  expect(await dialog.boundingBox()).toEqual(before)
+  expect(await dialog.getByRole('heading').boundingBox()).toEqual(headingBefore)
+  expect(await more.boundingBox()).toEqual(actionBefore)
+  expect(await more.evaluate((element) => {
+    const action = element.getBoundingClientRect()
+    const shell = element.closest('[role="dialog"]')!.getBoundingClientRect()
+    return action.top >= shell.top && action.bottom <= shell.bottom
+  })).toBe(true)
+  expect(await items.evaluate((element) => {
+    let parent = element.parentElement
+    while (parent !== null && parent.getAttribute('role') !== 'dialog') {
+      if (parent.scrollHeight > parent.clientHeight && /auto|scroll/.test(getComputedStyle(parent).overflowY)) return false
+      parent = parent.parentElement
+    }
+    return true
+  })).toBe(true)
+  await items.evaluate((element) => { element.scrollTop = 0 })
+}
+
 const routeConfig: Array<{
   entity: Entity
   path: string
@@ -253,12 +316,54 @@ test.describe('fixture-backed chart shared shell regression', () => {
   test.beforeEach(async ({ page }) => {
     await seedSession(page)
   })
+  test('journeys: fixed header and actions, append recovery and narrow scrolling', async ({ page }) => {
+    const state: FixtureState = { requests: [], chartFailures: {}, bucketFailures: {}, journeySegmentFailures: 1 }
+    await installApi(page, state)
+    await page.setViewportSize({ width: 1440, height: 720 })
+    await page.goto('/business-journeys')
+    await page.getByRole('tab', { name: '图表', exact: true }).click()
+    const opener = page.locator('.journey-chart-bars button').first()
+    await opener.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('旅程明细 1', { exact: true })).toBeVisible()
+    await verifyScrollRegion(page, '.journey-chart-segment-items')
+    await page.screenshot({ path: path.join(evidence, 'crm120-journeys-desktop-dialog.png'), fullPage: true })
+    const before = await dialog.boundingBox()
+    let releaseAppend!: () => void
+    const appendGate = new Promise<void>((resolve) => { releaseAppend = resolve })
+    state.journeyAppendWait = appendGate
+    await dialog.getByRole('button', { name: '查看更多', exact: true }).click()
+    const retry = dialog.getByRole('button', { name: '这一段旅程加载失败，请重试', exact: true })
+    await expect(retry).toBeVisible()
+    await expect(dialog.getByText('旅程明细 1', { exact: true })).toBeVisible()
+    expect(await dialog.boundingBox()).toEqual(before)
+    await retry.click()
+    await expect(dialog.getByRole('button', { name: '正在读取…', exact: true })).toBeDisabled()
+    await expect(dialog.getByText('旅程明细 1', { exact: true })).toBeVisible()
+    releaseAppend()
+    await expect(dialog.locator('.journey-chart-segment-items button')).toHaveCount(11)
+    expect(await dialog.boundingBox()).toEqual(before)
+    await expect(dialog.getByRole('button', { name: '查看更多', exact: true })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(opener).toBeFocused()
+    await page.setViewportSize({ width: 375, height: 667 })
+    await opener.click()
+    await expect(dialog.getByText('旅程明细 1', { exact: true })).toBeVisible()
+    await verifyScrollRegion(page, '.journey-chart-segment-items')
+    const bounds = await dialog.boundingBox()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(375)
+    await page.screenshot({ path: path.join(evidence, 'crm120-journeys-mobile-dialog.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(opener).toBeFocused()
+  })
 
   for (const config of routeConfig) {
     test(`${config.entity}: chart mode, bucket dialog, keyboard return and 375px layout`, async ({ page }) => {
       const state: FixtureState = { requests: [], chartFailures: {}, bucketFailures: {} }
       await installApi(page, state)
-      await page.setViewportSize({ width: 1440, height: 1200 })
+      await page.setViewportSize({ width: 1440, height: 480 })
       await page.goto(config.path)
       await page.getByRole('tab', { name: '图表', exact: true }).click()
       const chartSection = page.locator(`section[aria-label="${config.section}"]`)
@@ -277,6 +382,27 @@ test.describe('fixture-backed chart shared shell regression', () => {
       const dialog = page.getByRole('dialog')
       await expect(dialog).toBeVisible()
       await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
+      await verifyScrollRegion(page, '.chart-bucket-dialog__items')
+      await page.screenshot({ path: path.join(evidence, `crm120-${config.entity}-desktop-dialog.png`), fullPage: true })
+      const initialDialogBounds = await dialog.boundingBox()
+      const more = dialog.getByRole('button', { name: '查看更多', exact: true })
+      state.bucketFailures[config.entity] = 1
+      await more.click()
+      await expect(dialog.locator('.chart-bucket-dialog__inline-error')).toBeVisible()
+      await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
+      expect(await dialog.boundingBox()).toEqual(initialDialogBounds)
+      let releaseAppend!: () => void
+      const appendGate = new Promise<void>((resolve) => { releaseAppend = resolve })
+      state.bucketAppendWait = { [config.entity]: appendGate }
+      const retryMore = dialog.locator(config.entity === 'payments' ? '[data-testid="payment-chart-view-more"]' : '.chart-bucket-dialog__load-more')
+      await retryMore.click()
+      await expect(retryMore).toBeDisabled()
+      await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
+      releaseAppend()
+      await expect(dialog.locator('.chart-bucket-dialog__items button')).toHaveCount(11)
+      await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
+      await expect(dialog.getByRole('button', { name: '查看更多', exact: true })).toHaveCount(0)
+      expect(await dialog.boundingBox()).toEqual(initialDialogBounds)
       expect(state.requests.find((request) => request.pathname === config.endpoint)?.query).toMatchObject({
         chart: config.chartKey, bucket: config.bucketKey, skip: '0', limit: '10', filters: '[]', sorts: '[]',
       })
@@ -289,12 +415,14 @@ test.describe('fixture-backed chart shared shell regression', () => {
       await expect(chartSection).toHaveCount(0)
       await expect(page.getByRole('tab', { name: '列表', exact: true })).toHaveAttribute('aria-selected', 'true')
       await expect(page.getByRole('table')).toBeVisible()
-      await page.setViewportSize({ width: 375, height: 900 })
+      await page.setViewportSize({ width: 375, height: 667 })
       await page.getByRole('tab', { name: '图表', exact: true }).click()
       await expect(chartSection.getByRole('heading', { name: config.chartTitle })).toBeVisible()
       await enabled.scrollIntoViewIfNeeded()
       await enabled.click()
       await expect(dialog).toBeVisible()
+      await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
+      await verifyScrollRegion(page, '.chart-bucket-dialog__items')
       const bounds = await dialog.boundingBox()
       expect(bounds).not.toBeNull()
       expect(bounds?.x).toBeGreaterThanOrEqual(0)
@@ -382,7 +510,7 @@ test.describe('fixture-backed chart shared shell regression', () => {
     await expect(dialog.getByText('合同明细 1', { exact: true })).toBeVisible()
     await expect(dialog.getByText('合同明细 10', { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: '查看更多', exact: true }).click()
-    await expect(dialog.getByText('合同明细 11', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('合同明细 11', { exact: true })).toBeAttached()
     await expect(dialog.getByRole('button', { name: '查看更多', exact: true })).toHaveCount(0)
     const bucketRequests = state.requests.filter((request) => request.pathname.endsWith('/chart/contracts'))
     expect(bucketRequests.map((request) => request.query['skip'])).toEqual(['0', '0', '10'])

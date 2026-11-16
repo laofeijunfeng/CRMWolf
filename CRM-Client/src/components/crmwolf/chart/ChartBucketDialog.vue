@@ -59,7 +59,7 @@ function close(open: boolean): void {
 
 <template>
   <Dialog :open="open" @update:open="close">
-    <DialogContent :class="['w-[calc(100vw-2rem)] max-w-2xl', props.class]">
+    <DialogContent :class="['chart-bucket-dialog__content w-[calc(100vw-2rem)] max-w-2xl', props.class]">
       <DialogHeader v-if="title || description">
         <DialogTitle v-if="title">{{ title }}</DialogTitle>
         <DialogDescription v-if="description">{{ description }}</DialogDescription>
@@ -85,22 +85,24 @@ function close(open: boolean): void {
             <slot name="empty">暂无明细</slot>
           </div>
           <template v-else>
-            <div v-if="error" class="chart-bucket-dialog__inline-error" role="alert">
-              <slot name="error"><span>{{ error }}</span></slot>
-            </div>
             <div class="chart-bucket-dialog__items"><slot name="items" /></div>
-            <Button
-              v-if="hasMore"
-              type="button"
-              variant="outline"
-              :loading="loading === true"
-              :disabled="loading === true"
-              :data-testid="`${testIdPrefix}-load-more`"
-              class="chart-bucket-dialog__load-more focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              @click="emit('load-more')"
-            >
-              <slot name="load-more-label">{{ loading ? '正在读取…' : '查看更多' }}</slot>
-            </Button>
+            <div v-if="error || hasMore" class="chart-bucket-dialog__actions">
+              <div v-if="error" class="chart-bucket-dialog__inline-error" role="alert">
+                <slot name="error"><span>{{ error }}</span></slot>
+              </div>
+              <Button
+                v-if="hasMore"
+                type="button"
+                variant="outline"
+                :loading="loading === true"
+                :disabled="loading === true"
+                :data-testid="`${testIdPrefix}-load-more`"
+                class="chart-bucket-dialog__load-more focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                @click="emit('load-more')"
+              >
+                <slot name="load-more-label">{{ loading ? '正在读取…' : '查看更多' }}</slot>
+              </Button>
+            </div>
           </template>
         </template>
       </div>
@@ -112,18 +114,25 @@ function close(open: boolean): void {
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-
-.chart-bucket-dialog__body {
-  display: grid;
-  min-width: 0;
-  max-height: min(55vh, 440px);
-  gap: $wolf-space-sm-v2;
-  overflow-y: auto;
+:global(.chart-bucket-dialog__content) {
+  display: flex;
+  height: min(80dvh, 640px);
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.chart-bucket-dialog__state {
+:global(.chart-bucket-dialog__body) {
   display: flex;
-  min-height: 120px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: $wolf-space-sm-v2;
+}
+
+:global(.chart-bucket-dialog__state) {
+  display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
   gap: $wolf-space-sm-v2;
@@ -131,17 +140,25 @@ function close(open: boolean): void {
   text-align: center;
 }
 
-.chart-bucket-dialog__inline-error {
+:global(.chart-bucket-dialog__inline-error) {
   color: $wolf-danger-text-v2;
 }
 
-.chart-bucket-dialog__items {
+:global(.chart-bucket-dialog__items) {
   min-width: 0;
-  max-height: min(55vh, 440px);
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-.chart-bucket-dialog__load-more {
+:global(.chart-bucket-dialog__actions) {
+  display: grid;
+  flex: none;
+  gap: $wolf-space-sm-v2;
+}
+
+:global(.chart-bucket-dialog__load-more) {
   justify-self: center;
 }
 </style>

@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { Donut } from '@unovis/ts'
 import { VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } from '@unovis/vue'
@@ -143,8 +144,9 @@ describe('BusinessJourneyChartView', () => {
     })
 
     await wrapper.find('.journey-chart-bars button').trigger('click')
+    await nextTick()
     expect(wrapper.emitted('open-segment')).toHaveLength(1)
-    const detailButton = document.body.querySelector('.journey-chart-segment-list button')
+    const detailButton = document.body.querySelector('.journey-chart-segment-items button')
     if (!(detailButton instanceof HTMLElement)) throw new Error('记录没有出现在对话框里')
     expect(detailButton.textContent).toContain('示例旅程')
     detailButton.click()
