@@ -22,7 +22,7 @@ export const buildInvoiceDownloadFileName = (
   filePath: string | null | undefined,
   date: Date = new Date(),
 ): string => {
-  const safeCustomerName = sanitizeFileNamePart(customerName || '未知客户') || '未知客户'
+  const safeCustomerName = sanitizeFileNamePart(customerName ?? '未知客户') || '未知客户'
   const extension = getFileExtension(filePath)
   const suffix = extension === '' ? '' : `.${extension}`
 

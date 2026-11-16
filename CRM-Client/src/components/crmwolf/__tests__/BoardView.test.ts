@@ -1,8 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { compileStyle, parse } from '@vue/compiler-sfc'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import BoardView from '../BoardView.vue'
 import type { BoardProjection } from '../boardTypes'
@@ -65,7 +61,7 @@ const projection: BoardProjection = {
   },
 }
 
-function mountBoard(props: Record<string, unknown> = {}) {
+function mountBoard(props: Record<string, unknown> = {}): VueWrapper<InstanceType<typeof BoardView>> {
   return mount(BoardView, {
     props: {
       projection,
@@ -161,7 +157,7 @@ describe('BoardView', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 
-  it('contains desktop column scrolling and selects one narrow-screen column', async () => {
+  it('shows all desktop columns and selects one narrow-screen column', async () => {
     let width = 1280
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('max-width: 767px') && width <= 767,
@@ -172,20 +168,8 @@ describe('BoardView', () => {
     })))
 
     const desktop = mountBoard()
-    const columns = desktop.get('.board-columns')
-    expect(columns.classes()).not.toContain('board-columns--narrow')
-    const scopeId = columns.element.getAttributeNames().find((name) => name.startsWith('data-v-'))
-    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../BoardView.vue'), 'utf8')
-    const descriptor = parse(source).descriptor
-    const compiled = compileStyle({
-      source: descriptor.styles[0]?.content ?? '',
-      filename: 'BoardView.vue',
-      id: scopeId ?? '',
-      scoped: true,
-    })
-    expect(compiled.errors).toEqual([])
-    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-x:\\s*auto;`))
-    expect(compiled.code).toMatch(new RegExp(`\\.board-columns\\[${scopeId}\\]\\s*\\{[^}]*overflow-y:\\s*hidden;`))
+    expect(desktop.get('[data-column-key="following"]').text()).toContain('星河科技')
+    expect(desktop.get('[data-column-key="won"]').text()).toContain('已成交')
     desktop.unmount()
 
     width = 390

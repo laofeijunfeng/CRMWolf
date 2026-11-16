@@ -6,7 +6,6 @@ import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
 import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
-import type { ContractListResponse } from '@/api/contract'
 import type { DealJourney } from '@/schemas/dealJourney'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
@@ -26,8 +25,6 @@ const dealJourneyApi = vi.hoisted(() => ({
   listByCustomer: vi.fn(),
   getByCustomer: vi.fn(),
 }))
-const contractApi = vi.hoisted(() => ({ getCustomerContracts: vi.fn() }))
-const paymentApi = vi.hoisted(() => ({ getPaymentPlans: vi.fn() }))
 const invoiceApi = vi.hoisted(() => ({ getInvoiceTitles: vi.fn() }))
 const deploymentApi = vi.hoisted(() => ({ list: vi.fn() }))
 const handleApiError = vi.hoisted(() => vi.fn())
@@ -56,8 +53,6 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/customer', () => ({ default: customerApi }))
 vi.mock('@/api/customerActivity', () => ({ default: customerActivityApi }))
 vi.mock('@/api/dealJourney', () => ({ dealJourneyApi, default: dealJourneyApi }))
-vi.mock('@/api/contract', () => ({ default: contractApi }))
-vi.mock('@/api/payment', () => ({ default: paymentApi }))
 vi.mock('@/api/invoice', () => ({ default: invoiceApi }))
 vi.mock('@/api/deployment', () => ({ default: deploymentApi }))
 vi.mock('@/api/customerProfile', () => ({
@@ -178,33 +173,8 @@ vi.mock('@/components/panels/DealJourneysPanel.vue', () => ({
     ]),
   }),
 }))
-vi.mock('@/components/panels/ContractsPanel.vue', () => ({
-  default: defineComponent({
-    name: 'ContractsPanel',
-    props: { contracts: { type: Array, default: () => [] } },
-    emits: ['view'],
-    setup: (props, { emit }) => () => h('div', {
-      'data-testid': 'contracts-panel',
-      'data-contract-count': String((props.contracts as ContractListResponse[]).length),
-    }, [
-      h('button', { type: 'button', 'data-testid': 'view-contract', onClick: () => emit('view', 701) }, 'view contract'),
-    ]),
-  }),
-}))
-vi.mock('@/components/panels/PaymentsPanel.vue', () => ({ default: defineComponent({ name: 'PaymentsPanel', setup: () => () => h('div', 'payments') }) }))
 vi.mock('@/components/panels/InvoicesPanel.vue', () => ({ default: defineComponent({ name: 'InvoicesPanel', setup: () => () => h('div', 'invoices') }) }))
 vi.mock('@/components/panels/LicensePanel.vue', () => ({ default: defineComponent({ name: 'LicensePanel', setup: () => () => h('div', 'license') }) }))
-vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
-  default: defineComponent({
-    name: 'ContractDetailContent',
-    props: { contractId: Number, embedded: Boolean },
-    setup: (props) => () => h('div', {
-      'data-testid': 'contract-detail-content',
-      'data-contract-id': String(props.contractId),
-      'data-embedded': String(props.embedded),
-    }),
-  }),
-}))
 
 vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
   default: defineComponent({
@@ -254,23 +224,6 @@ vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({
     }, [
       h('button', { type: 'button', 'data-testid': 'opportunity-success', onClick: () => emit('success') }, 'success'),
     ]),
-  }),
-}))
-vi.mock('@/components/dialogs/ContractFormDialog.vue', () => ({
-  default: defineComponent({
-    name: 'ContractFormDialog',
-    props: {
-      open: Boolean,
-      customerId: String,
-    },
-    emits: ['success', 'update:open'],
-    setup: (props, { emit }) => () => props.open
-      ? h('button', {
-        type: 'button',
-        'data-testid': 'contract-dialog-success',
-        onClick: () => emit('success'),
-      }, 'success')
-      : null,
   }),
 }))
 vi.mock('@/components/dialogs/InvoiceTitleFormDialog.vue', () => ({ default: defineComponent({ name: 'InvoiceTitleFormDialog', setup: () => () => null }) }))
@@ -341,30 +294,6 @@ const journeyFixture = (overrides: Partial<DealJourney> = {}): DealJourney => ({
   ...overrides,
 })
 
-const contractFixture = (): ContractListResponse => ({
-  id: 701,
-  contract_number: 'CON-701',
-  contract_name: 'CRM 升级合同',
-  customer_id: 'cus_test_19',
-  customer_name: '上海测试客户',
-  opportunity_id: OPPORTUNITY_PUBLIC_ID,
-  opportunity_name: 'CRM 升级项目',
-  signing_contact_id: 1,
-  user_count: 20,
-  total_amount: '320000',
-  license_type: 'SUBSCRIPTION',
-  subscription_years: 1,
-  standard_unit_price: '16000',
-  status: 'SIGNED',
-  approval_phase: 'approved',
-  signing_date: '2026-08-01',
-  effective_date: '2026-08-01',
-  expiry_date: '2027-08-01',
-  owner_id: '9',
-  creator_id: '9',
-  created_time: '2026-07-15T00:00:00.000Z',
-  last_modified_time: '2026-07-15T00:00:00.000Z',
-})
 
 describe('CustomerDetailSheet journey drilldown', () => {
   beforeEach(() => {
@@ -385,28 +314,11 @@ describe('CustomerDetailSheet journey drilldown', () => {
     customerActivityApi.getActivities.mockResolvedValue([])
     dealJourneyApi.listByCustomer.mockResolvedValue([journeyFixture()])
     dealJourneyApi.getByCustomer.mockResolvedValue(journeyFixture())
-    contractApi.getCustomerContracts.mockResolvedValue([])
-    paymentApi.getPaymentPlans.mockResolvedValue([])
     invoiceApi.getInvoiceTitles.mockResolvedValue({ invoice_titles: [] })
     deploymentApi.list.mockResolvedValue([])
     customerApi.getCustomerMembers.mockResolvedValue([])
   })
 
-  it('labels the fourth tab as 业务旅程', async () => {
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: 'cus_test_19',
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await nextTick()
-
-    const journeysTab = wrapper.get('[data-testid="tab-journeys"]')
-    expect(journeysTab.text()).toBe('业务旅程')
-    expect(wrapper.find('[data-testid="tab-opportunities"]').exists()).toBe(false)
-  })
 
   it('opens the matching journey when a target opportunity id is provided', async () => {
     const wrapper = mount(CustomerDetailSheet, {
@@ -515,28 +427,6 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.text()).toContain('新建商机')
   })
 
-  it('opens a contract from the customer info panel inside the same detail sheet', async () => {
-    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
-
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: 'cus_test_19',
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.get('[data-testid="contracts-panel"]').attributes('data-contract-count')).toBe('1')
-    await wrapper.get('[data-testid="view-contract"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
-    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-embedded')).toBe('true')
-  })
 
   it('renders journey detail content inside the current customer sheet when a journey is selected', async () => {
     const wrapper = mount(CustomerDetailSheet, {
@@ -622,7 +512,6 @@ describe('CustomerDetailSheet journey drilldown', () => {
     customerApi.getCustomerDetail.mockClear()
     customerActivityApi.getActivities.mockClear()
     dealJourneyApi.listByCustomer.mockClear()
-    contractApi.getCustomerContracts.mockClear()
     invoiceApi.getInvoiceTitles.mockClear()
     deploymentApi.list.mockClear()
     customerApi.getCustomerMembers.mockClear()
@@ -633,7 +522,6 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(customerApi.getCustomerDetail).toHaveBeenCalledWith('cus_test_42')
     expect(customerActivityApi.getActivities).toHaveBeenCalledWith('cus_test_42')
     expect(dealJourneyApi.listByCustomer).toHaveBeenCalledWith('cus_test_42')
-    expect(contractApi.getCustomerContracts).toHaveBeenCalledWith('cus_test_42')
     expect(invoiceApi.getInvoiceTitles).toHaveBeenCalledWith('cus_test_42')
     expect(deploymentApi.list).toHaveBeenCalledWith('cus_test_42')
     expect(customerApi.getCustomerMembers).toHaveBeenCalledWith('cus_test_42')
@@ -715,7 +603,7 @@ describe('CustomerDetailSheet journey drilldown', () => {
 
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-customer-info"]').attributes('data-active')).toBe('true')
     expect(wrapper.find('[data-testid="deal-journeys-panel"]').exists()).toBe(false)
   })
 
@@ -772,7 +660,7 @@ describe('CustomerDetailSheet journey drilldown', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="deal-journey-detail"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="tab-customer-profile"]').attributes('data-active')).toBe('true')
+    expect(wrapper.get('[data-testid="tab-customer-info"]').attributes('data-active')).toBe('true')
   })
 
   it('returns to the journeys list locally without changing the route query', async () => {
@@ -998,25 +886,4 @@ describe('CustomerDetailSheet journey drilldown', () => {
     expect(wrapper.emitted('update:visible')).toEqual([[false]])
   })
 
-  it('keeps the outer context host for a direct customer-root contract drilldown', async () => {
-    contractApi.getCustomerContracts.mockResolvedValue([contractFixture()])
-
-    const wrapper = mount(CustomerDetailSheet, {
-      props: {
-        customerId: CUSTOMER_ID,
-        visible: true,
-      },
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="tab-customer-info"]').trigger('click')
-    await nextTick()
-    await wrapper.get('[data-testid="view-contract"]').trigger('click')
-    await nextTick()
-
-    expect(wrapper.findAllComponents(DetailContextHost)).toHaveLength(1)
-    expect(wrapper.findComponent(DealJourneyDetailHost).exists()).toBe(false)
-    expect(wrapper.get('[data-testid="contract-detail-content"]').attributes('data-contract-id')).toBe('701')
-    expect(wrapper.findAll('[data-testid="sheet-root"]')).toHaveLength(1)
-  })
 })

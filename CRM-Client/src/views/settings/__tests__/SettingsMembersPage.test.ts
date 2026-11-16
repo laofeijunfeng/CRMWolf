@@ -6,6 +6,8 @@ import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
 
+let pinia = createPinia()
+
 
 const mocks = vi.hoisted(() => ({
   getTeamMembers: vi.fn(),
@@ -48,7 +50,8 @@ describe('SettingsMembersPage', () => {
     vi.clearAllMocks()
   })
   function seedTeamUser(): void {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     const teamStore = useTeamStore()
     const userStore = useUserStore()
     const permissionStore = usePermissionStore()
@@ -112,7 +115,7 @@ describe('SettingsMembersPage', () => {
     }])
 
     const wrapper = mount(SettingsMembersPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await vi.waitFor(() => expect(getTeamMembers).toHaveBeenCalledWith(7))
     expect(wrapper.text()).toContain('成员一')
@@ -139,7 +142,7 @@ describe('SettingsMembersPage', () => {
     getTeamMembers.mockResolvedValue([])
 
     const wrapper = mount(SettingsMembersPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await flushPromises()
     expect(getTeamMembers).not.toHaveBeenCalled()
@@ -170,7 +173,7 @@ describe('SettingsMembersPage', () => {
     }])
 
     const wrapper = mount(SettingsMembersPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await flushPromises()
     expect(getTeamMembers).not.toHaveBeenCalled()
@@ -200,7 +203,7 @@ describe('SettingsMembersPage', () => {
     }])
 
     const wrapper = mount(SettingsMembersPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await vi.waitFor(() => expect(getTeamMembers).toHaveBeenCalledWith(7))
 

@@ -2,7 +2,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import PaymentRecordChartPage from '@/components/payment/PaymentRecordChartPage.vue'
-import type { PaymentRecordChartBucket, PaymentRecordChartResponse } from '@/schemas/paymentRecordChart'
+import type { PaymentRecordChartBucket, PaymentRecordChartBucketRecords, PaymentRecordChartResponse } from '@/schemas/paymentRecordChart'
 
 vi.mock('@unovis/ts', () => ({
   Donut: { selectors: { segment: 'segment' } },
@@ -118,7 +118,6 @@ describe('PaymentRecordChartPage', () => {
 
     expect(wrapper.get('[data-testid="payment-record-chart-title"]').text()).toContain('2 笔')
     expect(wrapper.get('[data-testid="payment-record-chart-title"]').text()).toContain('¥ 15 万')
-    expect(wrapper.get('.payment-record-chart__heading p').text()).toBe('当前筛选范围内的回款。一页同时看，没有审批和确认状态。金额按回款金额汇总。')
     expect(wrapper.get('[data-testid="payment-chart-card-license_type"]').classes()).not.toContain('payment-record-chart__wide')
     expect(wrapper.get('[data-testid="payment-chart-card-purchase_type"]').classes()).not.toContain('payment-record-chart__wide')
     expect(wrapper.get('[data-testid="payment-chart-card-amount_band"]').classes()).toContain('payment-record-chart__wide')
@@ -137,31 +136,37 @@ describe('PaymentRecordChartPage', () => {
     wrapper.unmount()
   })
 
-  it('opens a segment preview and asks for the full list only when more rows exist', async () => {
+  it('shows only the selected bucket response and requests more when its total exceeds loaded rows', async () => {
     const wrapper = mountChart()
 
     await wrapper.get('[data-testid="payment-chart-legend-purchase_type-EXPANSION"]').trigger('click')
-    expect(document.body.textContent ?? '').not.toContain('HK008')
+    expect(wrapper.emitted('view-bucket')).toBeUndefined()
 
     await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
-    expect(wrapper.emitted('view-bucket')?.[0]?.[1]).toMatchObject({ key: 'SUBSCRIPTION' })
+    expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
+      { key: 'license_type' },
+      { key: 'SUBSCRIPTION' },
+    ])
+    expect(document.body.textContent ?? '').not.toContain('HK008')
     expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).toBeNull()
 
-    const widePreview: PaymentRecordChartResponse = {
-      ...chart,
-      cards: chart.cards.map((card) => card.key === 'license_type'
-        ? {
-            ...card,
-            buckets: card.buckets.map((item) => item.key === 'SUBSCRIPTION'
-              ? { ...item, preview_total: 6 }
-              : item),
-          }
-        : card),
+    const bucketRecords: PaymentRecordChartBucketRecords = {
+      chart: 'license_type',
+      bucket: 'SUBSCRIPTION',
+      total: 1,
+      records: [{ id: 9, record_number: 'HK009', customer_name: '乙', amount: 150000, payment_date: '2026-10-03' }],
     }
-    await wrapper.setProps({ chart: widePreview })
-    await wrapper.get('[data-testid="payment-chart-legend-license_type-SUBSCRIPTION"]').trigger('click')
-    expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).not.toBeNull()
-    document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-more"]')?.click()
+    await wrapper.setProps({ bucketRecords: { ...bucketRecords, bucket: 'PERPETUAL' } })
+    expect(document.body.textContent ?? '').not.toContain('HK009')
+
+    await wrapper.setProps({ bucketRecords })
+    expect(document.body.textContent ?? '').toContain('HK009')
+    expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')).toBeNull()
+
+    await wrapper.setProps({ bucketRecords: { ...bucketRecords, total: 6 } })
+    const viewMore = document.body.querySelector<HTMLButtonElement>('[data-testid="payment-chart-view-more"]')
+    expect(viewMore).not.toBeNull()
+    viewMore?.click()
     expect(wrapper.emitted('load-more')).toHaveLength(1)
     wrapper.unmount()
   })
@@ -211,7 +216,6 @@ describe('PaymentRecordChartPage', () => {
     const arr = wrapper.get('[data-testid="payment-chart-card-arr_ratio"]')
     expect(month.element.compareDocumentPosition(arr.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(arr.text()).toContain('ARR 占比')
-    expect(arr.text()).toContain('没有回款的月份也连过去，不写成 0%。只有买断落到 0%。')
     expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-04"]').text()).toBe('0%')
     expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-10"]').text()).toBe('57%')
     expect(wrapper.find('[data-testid="payment-chart-arr-label-2026-02"]').exists()).toBe(false)

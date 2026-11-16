@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 
 const { getRoles } = mocks
 
+let pinia = createPinia()
+
 vi.mock('@/api/role', () => ({
   default: {
     getRoles: mocks.getRoles,
@@ -78,7 +80,8 @@ describe('SettingsRolesPage', () => {
   })
 
   it('loads roles into a DataTable without a sheet title', async () => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     const teamStore = useTeamStore()
     const userStore = useUserStore()
     const permissionStore = usePermissionStore()
@@ -109,6 +112,7 @@ describe('SettingsRolesPage', () => {
 
     const wrapper = mount(SettingsRolesPage, {
       global: {
+        plugins: [pinia],
         stubs: {
           DataTable: DataTableStub,
           TableRowActions: true,
@@ -127,7 +131,8 @@ describe('SettingsRolesPage', () => {
     wrapper.unmount()
   })
   it('shows one payment group containing the record export permission', async () => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     const teamStore = useTeamStore()
     const userStore = useUserStore()
     const permissionStore = usePermissionStore()
@@ -155,6 +160,7 @@ describe('SettingsRolesPage', () => {
 
     const wrapper = mount(SettingsRolesPage, {
       global: {
+        plugins: [pinia],
         stubs: {
           DataTable: DataTableStub,
           TableRowActions: true,

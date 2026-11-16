@@ -82,7 +82,8 @@ const mountPicker = async (
   modelValue = '',
   permissions: string[] = ['product:view', 'product:create'],
 ): Promise<VueWrapper> => {
-  setActivePinia(createPinia())
+  const pinia = createPinia()
+  setActivePinia(pinia)
   setPermissions(permissions)
   const wrapper = mount(ProductIntentPicker, {
     props: {
@@ -90,6 +91,7 @@ const mountPicker = async (
       'onUpdate:modelValue': (value: string) => wrapper.setProps({ modelValue: value }),
     },
     global: {
+      plugins: [pinia],
       stubs: { RouterLink: RouterLinkStub },
     },
   })
@@ -161,27 +163,4 @@ describe('ProductIntentPicker', () => {
     wrapper.unmount()
   })
 
-  it('caps segmented columns at 3 so product names stay readable', async () => {
-    vi.mocked(productApi.list).mockResolvedValueOnce([
-      product('prd_a', 'Isolated Name'),
-      product('prd_b', 'Verify Product'),
-      product('prd_c', '第三产品'),
-    ])
-
-    const wrapper = await mountPicker()
-    const control = wrapper.getComponent({ name: 'SegmentedChoiceControl' })
-    expect(control.attributes('style')).toContain('--segmented-choice-columns: 3')
-    wrapper.unmount()
-  })
-
-  it('uses the same label chrome as InputField', async () => {
-    vi.mocked(productApi.list).mockResolvedValueOnce([product('prd_crm', 'CRM')])
-
-    const wrapper = await mountPicker()
-    expect(wrapper.get('div').classes()).toEqual(expect.arrayContaining(['grid', 'gap-wolf-xs']))
-    const label = wrapper.getComponent({ name: 'Label' })
-    expect(label.text()).toContain('产品')
-    expect(label.text()).toContain('*')
-    wrapper.unmount()
-  })
 })

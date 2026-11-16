@@ -143,9 +143,9 @@ const stateLabel = computed(() => {
 })
 
 const stateLabelClass = computed(() => {
-  if (props.notice?.kind === 'failed') return 'border-[#fecaca] bg-[#fef2f2] text-[#b91c1c]'
-  if (props.notice?.kind === 'expired') return 'border-border bg-muted text-muted-foreground'
-  return 'border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]'
+  if (props.notice?.kind === 'failed') return 'border-wolf-danger-text/30 bg-wolf-danger-bg text-foreground'
+  if (props.notice?.kind === 'expired') return 'border-border bg-muted text-foreground'
+  return 'border-primary/30 bg-primary/10 text-foreground'
 })
 
 const controlsDisabled = computed(() => (
@@ -468,9 +468,6 @@ const submit = async (): Promise<void> => {
     const field = props.block.fields[0]
     submitting.value = true
     emit('submit', actionId, { text: field === undefined ? '' : textValue(field) })
-    void nextTick(() => {
-      if (props.locked !== true && props.block.state === 'ACTIVE') submitting.value = false
-    })
     return
   }
   submitting.value = true
@@ -482,12 +479,12 @@ const submit = async (): Promise<void> => {
   <section
     v-if="isCompactTaskCompletion"
     ref="interactionRef"
-    class="agent-ui-interaction flex min-h-11 items-center gap-2 px-3 py-2 text-sm transition-colors"
+    class="agent-ui-interaction flex min-h-touch-target items-center gap-2 px-3 py-2 text-sm transition-colors"
     :class="[
       grouped ? '' : 'rounded-wolf-surface border border-border',
       compactCompletionSucceeded
-        ? (grouped ? 'bg-emerald-50/70 dark:bg-emerald-950/25' : 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/25')
-        : (grouped ? 'bg-transparent' : 'border-border/70 bg-muted/25')
+        ? (grouped ? 'bg-card' : 'border-wolf-success-text/30 bg-card')
+        : (grouped ? 'bg-card' : 'border-border/70 bg-card')
     ]"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
@@ -495,22 +492,22 @@ const submit = async (): Promise<void> => {
     <button
       v-if="isActive"
       type="button"
-      class="-my-2 grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-70"
+      class="-my-2 grid h-touch-target min-w-touch-target shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-wolf-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-70"
       aria-label="标记完成"
       :disabled="controlsDisabled"
       @click="completeCompactTask"
     >
       <Loader2
         v-if="submitting"
-        class="h-5 w-5 animate-spin text-primary motion-reduce:animate-none"
+        class="h-5 w-5 animate-spin text-wolf-primary motion-reduce:animate-none"
         aria-hidden="true"
       />
       <Circle v-else class="h-5 w-5" aria-hidden="true" />
     </button>
     <span
       v-else
-      class="-my-2 grid h-11 w-11 shrink-0 place-items-center rounded-full"
-      :class="compactCompletionSucceeded ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
+      class="-my-2 grid h-touch-target min-w-touch-target shrink-0 place-items-center rounded-full"
+      :class="compactCompletionSucceeded ? 'text-wolf-success-text' : 'text-muted-foreground'"
       :aria-label="compactStateLabel"
       role="img"
     >
@@ -523,7 +520,7 @@ const submit = async (): Promise<void> => {
     <span
       class="shrink-0 text-xs"
       :class="compactCompletionSucceeded
-        ? 'text-emerald-700 dark:text-emerald-300'
+        ? 'text-foreground'
         : 'text-muted-foreground'"
     >
       {{ compactStateLabel }}
@@ -533,41 +530,41 @@ const submit = async (): Promise<void> => {
   <section
     v-else-if="isOpenFollowUpDisposition"
     ref="interactionRef"
-    class="agent-ui-interaction grid gap-0 rounded-wolf-surface border border-[#bfdbfe] bg-[#f8fbff] px-4 py-3.5"
+    class="agent-ui-interaction grid gap-0 rounded-wolf-surface border border-border bg-card px-4 py-3.5 text-card-foreground"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
     <header class="flex items-start justify-between gap-3">
       <h4 :id="`${block.id}-prompt`" class="m-0 text-sm font-semibold text-foreground">历史跟进任务</h4>
-      <span class="shrink-0 rounded-wolf-full border border-[#bfdbfe] bg-[#eff6ff] px-2 text-xs font-semibold leading-5 text-[#1d4ed8]" :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`">{{ dispositionProgress }}</span>
+      <span class="shrink-0 rounded-wolf-full border border-primary/30 bg-primary/10 px-2 text-xs font-semibold leading-5 text-foreground" :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`">{{ dispositionProgress }}</span>
     </header>
-    <p v-if="block.hint" class="m-0 mt-2 text-[13px] leading-5 text-[#334155]" data-agent-ui-disposition-summary>{{ block.hint }}</p>
-    <ol class="m-0 mt-2.5 grid list-none gap-0 border-t border-[#e5eaf0] p-0">
+    <p v-if="block.hint" class="m-0 mt-2 text-[13px] leading-5 text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
+    <ol class="m-0 mt-2.5 grid list-none gap-0 border-t border-border p-0">
       <li
         v-for="(item, index) in dispositionItems"
         :key="item.item_id"
-        class="grid gap-1.5 border-b border-[#eef1f4] py-2.5 last:border-b-0"
+        class="grid gap-1.5 border-b border-border py-2.5 last:border-b-0"
       >
         <div class="flex items-start justify-between gap-2.5">
           <p class="m-0 min-w-0 text-sm text-foreground"><span class="mr-1.5 text-muted-foreground">{{ index + 1 }}</span>{{ item.title }}</p>
           <span
             class="shrink-0 rounded-wolf-full border px-2 text-xs leading-5"
             :class="item.state === 'current'
-              ? 'border-[#bfdbfe] bg-[#eff6ff] text-[#1d4ed8]'
+              ? 'border-primary/30 bg-primary/10 text-foreground'
               : item.state === 'complete'
-                ? 'border-[#d1fae5] bg-[#ecfdf5] text-[#22745e]'
+                ? 'border-wolf-success-text/30 bg-wolf-success-bg text-foreground'
                 : item.state === 'unknown'
-                  ? 'border-[#fed7aa] bg-[#fff7ed] text-[#b45309]'
+                  ? 'border-wolf-warning-text/40 bg-wolf-warning-bg text-foreground'
                   : item.state === 'failed'
-                    ? 'border-[#fecaca] bg-[#fef2f2] text-[#b91c1c]'
-                    : 'border-[#e2e6eb] bg-[#f3f6f8] text-[#667180]'"
+                    ? 'border-wolf-danger-text/30 bg-wolf-danger-bg text-foreground'
+                    : 'border-border bg-muted text-foreground'"
           >{{ item.state === 'current' ? '当前' : item.state === 'waiting' ? '待处理' : item.result_title }}</span>
         </div>
         <p v-if="item.owner_line" class="m-0 text-xs text-muted-foreground">{{ item.owner_line }}</p>
         <div v-if="item.related && item.evidence_quote" class="grid gap-1">
           <button
             type="button"
-            class="inline-flex w-fit items-center text-xs text-[#1d4ed8] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2563eb]"
+            class="inline-flex min-h-touch-target w-fit items-center text-xs text-wolf-text-link underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             :aria-expanded="evidenceOpenId === item.item_id"
             :aria-controls="`${block.id}-evidence-${item.item_id}`"
             data-agent-ui-related-toggle
@@ -578,25 +575,27 @@ const submit = async (): Promise<void> => {
           <p
             v-if="evidenceOpenId === item.item_id"
             :id="`${block.id}-evidence-${item.item_id}`"
-            class="m-0 rounded-wolf border border-[#e2e6eb] bg-white px-2.5 py-2 text-xs leading-5 text-[#334155]"
+            class="m-0 rounded-wolf border border-border bg-background px-2.5 py-2 text-xs leading-5 text-foreground"
             data-agent-ui-related-line
           >
             本次跟进：“{{ item.evidence_quote }}”
           </p>
         </div>
-        <div v-if="item.state === 'current' && isActive" class="grid grid-cols-3 gap-2">
+        <div v-if="item.state === 'current' && isActive" class="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <button
             v-for="option in block.options"
             :key="option.value"
             type="button"
-            class="rounded-wolf border border-[#cbd5e1] bg-white px-2.5 py-1.5 text-center text-[13px] text-foreground disabled:bg-[#f3f4f6] disabled:text-[#a0a7b0]"
+            :class="optionSelected(option.value) ? 'border-primary bg-accent text-accent-foreground' : 'border-input bg-background text-foreground disabled:bg-muted disabled:text-muted-foreground'"
+            class="min-h-touch-target h-auto whitespace-normal break-words rounded-wolf border px-2.5 py-1.5 text-center text-[13px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
             :disabled="controlsDisabled || option.disabled"
+            :aria-pressed="optionSelected(option.value)"
             @click="handleOptionClick(option.value)"
           >
             {{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}
           </button>
         </div>
-        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-xs" :class="item.state === 'failed' ? 'text-[#b91c1c]' : item.state === 'unknown' ? 'text-[#b45309]' : item.state === 'complete' ? 'text-[#22745e]' : 'text-muted-foreground'">{{ item.result_message }}</p>
+        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-xs text-foreground">{{ item.result_message }}</p>
       </li>
     </ol>
   </section>
@@ -607,7 +606,7 @@ const submit = async (): Promise<void> => {
     class="agent-ui-interaction grid rounded-wolf-surface p-3"
     :class="isActivityConfirmation
       ? (block.state === 'READ_ONLY' ? 'activity-card gap-0 overflow-hidden border border-dashed border-border bg-card p-0' : 'activity-card gap-0 overflow-hidden border border-border bg-card p-0')
-      : (block.state === 'READ_ONLY' ? 'gap-3 border border-dashed border-border bg-muted/40' : 'gap-3 border border-[#bfdbfe] bg-[#f8fbff]')"
+      : (block.state === 'READ_ONLY' ? 'gap-3 border border-dashed border-border bg-card text-card-foreground' : 'gap-3 border border-primary/20 bg-card text-card-foreground')"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
@@ -723,7 +722,7 @@ const submit = async (): Promise<void> => {
     </template>
     <header v-if="!isActivityConfirmation" class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-2">
-        <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]" aria-hidden="true">?</span>
+        <span class="grid size-5 shrink-0 place-items-center rounded-wolf-sm bg-primary/10 text-[11px] font-semibold text-foreground" aria-hidden="true">?</span>
         <p :id="`${block.id}-prompt`" class="m-0 text-[13px] font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
       </div>
       <span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium" :class="stateLabelClass">{{ stateLabel }}</span>
@@ -736,11 +735,11 @@ const submit = async (): Promise<void> => {
             <div
               v-for="fact in block.facts.filter(item => (item.group ?? 'write') === group)"
               :key="fact.key"
-              class="min-w-0 rounded-wolf border border-border bg-white px-2.5 py-2"
+              class="min-w-0 rounded-wolf border border-border bg-card px-2.5 py-2"
             >
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <dt class="text-[11px] text-muted-foreground">{{ fact.label }}</dt>
-                <span v-if="fact.status_label" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] text-[#1d4ed8]">{{ fact.status_label }}</span>
+                <span v-if="fact.status_label" class="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] text-foreground">{{ fact.status_label }}</span>
               </div>
               <dd class="m-0 mt-0.5 text-xs font-semibold text-foreground" :class="group === 'activity_kind' ? '' : 'truncate'" :title="fact.value">{{ fact.value }}</dd>
               <p v-if="fact.source" class="m-0 mt-1 text-[11px] leading-5 text-muted-foreground">{{ fact.source }}</p>
@@ -748,7 +747,7 @@ const submit = async (): Promise<void> => {
                 <button
                   v-if="fact.status_label !== '未识别 · 需要确认'"
                   type="button"
-                  class="w-fit text-xs text-primary underline-offset-2 hover:underline"
+                  class="min-h-touch-target w-fit text-xs text-wolf-text-link underline-offset-2 hover:underline"
                   @click="kindEditorOpen = !kindEditorOpen"
                 >
                   {{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}
@@ -758,8 +757,8 @@ const submit = async (): Promise<void> => {
                     v-for="option in fact.options ?? []"
                     :key="option.value"
                     type="button"
-                    class="min-h-11 rounded-wolf border px-3 text-xs"
-                    :class="option.value === fact.value || option.label === fact.value ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-white'"
+                    class="min-h-touch-target rounded-wolf border px-3 text-xs"
+                    :class="option.value === fact.value || option.label === fact.value ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-background'"
                     :disabled="controlsDisabled || option.disabled"
                     @click="reviseActivityKind(option.value)"
                   >
@@ -775,15 +774,15 @@ const submit = async (): Promise<void> => {
 
     <div
       v-if="notice?.kind === 'failed'"
-      class="rounded-wolf border border-[#fecaca] bg-[#fef2f2] px-3 py-2"
+      class="rounded-wolf border border-wolf-danger-text/30 bg-wolf-danger-bg px-3 py-2"
       data-agent-ui-card-notice="failed"
     >
-      <p class="m-0 text-xs leading-5 text-[#b91c1c]">选择没有提交成功，请重新选择</p>
+      <p class="m-0 text-xs leading-5 text-foreground">选择没有提交成功，请重新选择</p>
       <Button
         type="button"
         variant="outline"
         size="sm"
-        class="mt-2 min-h-9 border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fef2f2]"
+        class="mt-2 min-h-touch-target border-destructive/30 bg-background text-foreground hover:bg-destructive/10"
         :disabled="disabled === true || locked === true || submitting"
         @click="retryNoticeChoice"
       >
@@ -792,7 +791,7 @@ const submit = async (): Promise<void> => {
     </div>
     <p
       v-else-if="notice?.kind === 'invalid'"
-      class="m-0 rounded-wolf border border-[#fecaca] bg-[#fef2f2] px-3 py-2 text-xs leading-5 text-[#b91c1c]"
+      class="m-0 rounded-wolf border border-wolf-danger-text/30 bg-wolf-danger-bg px-3 py-2 text-xs leading-5 text-foreground"
       data-agent-ui-card-notice="invalid"
     >
       请从卡片给出的活动类型中选择。
@@ -829,7 +828,7 @@ const submit = async (): Promise<void> => {
       </p>
       <div
         v-if="block.hint"
-        class="col-span-full rounded-wolf border border-[#e2e8f0] bg-white px-3 py-2"
+        class="col-span-full rounded-wolf border border-border bg-muted px-3 py-2"
         data-agent-ui-kind-hint
       >
         <p class="m-0 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -837,7 +836,7 @@ const submit = async (): Promise<void> => {
           <span
             v-for="channel in kindHintChannels"
             :key="channel"
-            class="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[11px] text-foreground"
+            class="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
           >{{ channel }}</span>
           <span v-if="kindHintChannels.length === 0">{{ block.hint }}</span>
         </p>
@@ -852,12 +851,12 @@ const submit = async (): Promise<void> => {
           :key="entry.option.value"
           type="button"
           :variant="block.interaction_type === 'confirmation' && entry.option.value === 'confirm' ? 'default' : 'outline'"
-          class="min-h-11 h-auto justify-start gap-0.5 px-3 py-2 text-left"
+          class="min-h-touch-target h-auto justify-start gap-0.5 px-3 py-2 text-left"
           :class="[
-            block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-white',
+            block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-background',
             block.business_action === 'resolve_temporal_choice' ? 'min-w-0 grid-cols-1 whitespace-normal [overflow-wrap:anywhere]' : '',
             optionSelected(entry.option.value) ? 'border-primary bg-accent text-accent-foreground' : '',
-            isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && entry.option.disabled ? 'border-[#cbd5e1] bg-[#e2e8f0] text-[#94a3b8] opacity-100' : ''
+            isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && entry.option.disabled ? 'border-border bg-muted text-muted-foreground opacity-100' : ''
           ]"
           :aria-pressed="optionSelected(entry.option.value)"
           :disabled="controlsDisabled || entry.option.disabled"
@@ -879,7 +878,7 @@ const submit = async (): Promise<void> => {
         <p
           v-if="selectionError !== null"
           :id="`${block.id}-selection-error`"
-          class="m-0 text-sm text-destructive"
+          class="m-0 text-sm text-foreground"
           role="alert"
         >
           {{ selectionError }}
@@ -891,7 +890,7 @@ const submit = async (): Promise<void> => {
           :id="`${block.id}-manual-date`"
           v-model="manualDate"
           type="text"
-          class="min-h-11 rounded-wolf border border-border bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          class="min-h-touch-target rounded-wolf border border-border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           placeholder="例如：2026-10-30"
           :disabled="controlsDisabled"
           @keydown.enter.prevent="submitManualDate"
@@ -935,7 +934,7 @@ const submit = async (): Promise<void> => {
         <Input
           v-else-if="field.field_type === 'text' || field.field_type === 'date' || field.field_type === 'datetime'"
           :id="`${block.id}-${field.key}`"
-          class="min-h-11"
+          class="min-h-touch-target"
           :type="field.field_type === 'datetime' ? 'datetime-local' : field.field_type"
           :model-value="textValue(field)"
           :placeholder="field.placeholder ?? undefined"
@@ -952,7 +951,7 @@ const submit = async (): Promise<void> => {
         <Input
           v-else-if="field.field_type === 'number'"
           :id="`${block.id}-${field.key}`"
-          class="min-h-11"
+          class="min-h-touch-target"
           type="number"
           :model-value="numberValue(field)"
           :min="field.minimum ?? undefined"
@@ -973,7 +972,7 @@ const submit = async (): Promise<void> => {
         >
           <SelectTrigger
             :id="`${block.id}-${field.key}`"
-            class="min-h-11"
+            class="min-h-touch-target"
             :aria-required="field.required"
             :aria-invalid="visibleFieldError(field) !== null"
             :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
@@ -1002,7 +1001,7 @@ const submit = async (): Promise<void> => {
         >
           <SelectTrigger
             :id="`${block.id}-${field.key}`"
-            class="min-h-11"
+            class="min-h-touch-target"
             :aria-required="field.required"
             :aria-invalid="visibleFieldError(field) !== null"
             :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
@@ -1041,7 +1040,7 @@ const submit = async (): Promise<void> => {
         <p
           v-if="visibleFieldError(field) !== null"
           :id="fieldErrorId(field)"
-          class="m-0 text-sm text-destructive"
+          class="m-0 text-sm text-foreground"
           role="alert"
         >
           {{ visibleFieldError(field) }}
@@ -1054,7 +1053,7 @@ const submit = async (): Promise<void> => {
       type="button"
       variant="outline"
       size="sm"
-      class="min-h-11"
+      class="min-h-touch-target"
       :disabled="controlsDisabled"
       @click="cancel"
     >
@@ -1065,7 +1064,7 @@ const submit = async (): Promise<void> => {
       v-if="isActive && !submitsOnOptionClick"
       type="button"
       size="sm"
-      class="min-h-11"
+      class="min-h-touch-target"
       :disabled="controlsDisabled"
       @click="submit"
     >

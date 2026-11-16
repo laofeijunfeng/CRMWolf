@@ -5,10 +5,10 @@ const permissionStore = vi.hoisted(() => ({ clearPermissions: vi.fn() }))
 const teamStore = vi.hoisted(() => ({ clearTeam: vi.fn() }))
 
 vi.mock('@/stores/permissions', () => ({
-  usePermissionStore: () => permissionStore,
+  usePermissionStore: (): typeof permissionStore => permissionStore,
 }))
 vi.mock('@/stores/team', () => ({
-  useTeamStore: () => teamStore,
+  useTeamStore: (): typeof teamStore => teamStore,
 }))
 
 import { useUserStore } from '@/stores/user'

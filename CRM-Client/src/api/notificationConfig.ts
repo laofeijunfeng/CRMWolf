@@ -1,22 +1,14 @@
-/**
- * 通知配置 API
- */
 import type { AxiosRequestConfig } from 'axios'
 import request from '@/utils/request'
+import {
+  NotificationConfigResponseSchema,
+  NotificationTestResponseSchema,
+  type NotificationConfigResponse as SchemaNotificationConfigResponse,
+  type NotificationTestResponse as SchemaNotificationTestResponse
+} from '@/schemas/notificationConfig'
 
-export interface NotificationConfigResponse {
-  id: number
-  team_id: number
-  notification_method: string
-  feishu_webhook_url: string | null
-  feishu_webhook_enabled: boolean | null
-  notification_group_name: string | null
-  feishu_app_id: string | null
-  feishu_app_secret: string | null
-  feishu_api_enabled: boolean | null
-  created_time: string
-  updated_time: string
-}
+export type NotificationConfigResponse = SchemaNotificationConfigResponse
+export type NotificationTestResponse = SchemaNotificationTestResponse
 
 export interface NotificationConfigUpdate {
   notification_method?: string
@@ -28,11 +20,6 @@ export interface NotificationConfigUpdate {
   feishu_api_enabled?: boolean
 }
 
-export interface NotificationTestResponse {
-  success: boolean
-  message: string
-}
-
 export const notificationConfigApi = {
   /**
    * 获取通知配置
@@ -40,21 +27,12 @@ export const notificationConfigApi = {
    * 支持通过 config.skipErrorNotification 抑制拦截器的错误 toast，
    * 用于首次访问时后端返回 404（配置不存在）的正常首态场景。
    */
-  getConfig: (config?: AxiosRequestConfig & { skipErrorNotification?: boolean }) => {
-    return request.get<NotificationConfigResponse>('/v1/system/configs/notification', config)
-  },
+  getConfig: async (config?: AxiosRequestConfig & { skipErrorNotification?: boolean }): Promise<NotificationConfigResponse> =>
+    NotificationConfigResponseSchema.parse(await request.get('/v1/system/configs/notification', config)),
 
-  /**
-   * 更新通知配置
-   */
-  updateConfig: (data: NotificationConfigUpdate) => {
-    return request.put<NotificationConfigResponse>('/v1/system/configs/notification', data)
-  },
+  updateConfig: async (data: NotificationConfigUpdate): Promise<NotificationConfigResponse> =>
+    NotificationConfigResponseSchema.parse(await request.put('/v1/system/configs/notification', data)),
 
-  /**
-   * 测试通知发送
-   */
-  testNotification: () => {
-    return request.post<NotificationTestResponse>('/v1/system/configs/notification/test')
-  }
+  testNotification: async (): Promise<NotificationTestResponse> =>
+    NotificationTestResponseSchema.parse(await request.post('/v1/system/configs/notification/test'))
 }

@@ -1,3 +1,5 @@
+import { logger } from '@/utils/logger'
+
 /**
  * SSE 流解析器
  *
@@ -149,7 +151,7 @@ export async function parseSSEStream(
 
       // SSE 标准格式：事件之间用 \n\n 分隔
       const events = buffer.split('\n\n')
-      buffer = events.pop() || '' // 保留未完成的部分
+      buffer = events.pop() ?? '' // 保留未完成的部分
 
       for (const eventStr of events) {
         const event = parseSSEEvent(eventStr)
@@ -194,27 +196,27 @@ function parseSSEEvent(eventStr: string): SSEEvent | null {
   if (trimmed.startsWith('data: ')) {
     try {
       return JSON.parse(trimmed.slice(6)) as SSEEvent
-    } catch (e) {
-      console.warn('[SSE Parser] Failed to parse event:', trimmed)
+    } catch (error) {
+      logger.warn('[SSE Parser]', 'Failed to parse event', { event: trimmed, error })
       return null
     }
   }
 
   // 格式 2: event: xxx\ndata: {...}
   const eventMatch = trimmed.match(/^event: (\S+)\ndata: (.+)$/s)
-  if (eventMatch && eventMatch[1] && eventMatch[2]) {
+  if (eventMatch !== null && eventMatch[1] !== undefined && eventMatch[2] !== undefined) {
     try {
       const data = JSON.parse(eventMatch[2]) as SSEEvent
       data.event = eventMatch[1]
       return data
-    } catch (e) {
-      console.warn('[SSE Parser] Failed to parse event:', trimmed)
+    } catch (error) {
+      logger.warn('[SSE Parser]', 'Failed to parse event', { event: trimmed, error })
       return null
     }
   }
 
   // 无法识别的格式
-  console.warn('[SSE Parser] Unknown event format:', trimmed)
+  logger.warn('[SSE Parser]', 'Unknown event format', { event: trimmed })
   return null
 }
 
@@ -230,10 +232,9 @@ export function createSSEParser(
   onError?: (error: Error) => void
 ): (reader: ReadableStreamDefaultReader<Uint8Array>) => Promise<void> {
   return (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-    const options: SSEParseOptions = {
-      onEvent,
-      onError: onError ?? (() => {})
-    }
+    const options: SSEParseOptions = onError === undefined
+      ? { onEvent }
+      : { onEvent, onError }
     return parseSSEStream(reader, options)
   }
 }

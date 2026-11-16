@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentAsyncOperation, AgentAsyncOperationStatus } from '@/api/agent'
 
 import AgentAsyncOperationCard from '../AgentAsyncOperationCard.vue'
+import { getAgentAsyncOperationStatusMeta } from '../agentAsyncOperations'
 
 const makeOperation = (
   status: AgentAsyncOperationStatus,
@@ -37,54 +38,72 @@ const makeOperation = (
 })
 
 describe('AgentAsyncOperationCard', () => {
-  it('distinguishes a completed operation that needs verification', async () => {
+  it('updates accessible status when an active operation completes with verification needed', async () => {
     const wrapper = mount(AgentAsyncOperationCard, {
-      props: {
-        operation: makeOperation('DEGRADED', {
-          summary: '客户智能处理已更新',
-        }),
-      },
+      props: { operation: makeOperation('RUNNING') },
+    })
+    const trigger = wrapper.get('button')
+    expect(trigger.attributes('aria-label')).toContain(getAgentAsyncOperationStatusMeta('RUNNING').label)
+
+    await wrapper.setProps({
+      operation: makeOperation('DEGRADED', { summary: '客户智能处理已更新' }),
     })
 
-    expect(wrapper.text()).toContain('已完成，待核查')
-
-    await wrapper.get('button').trigger('click')
-
-    expect(wrapper.text()).toContain('已完成，但部分结果待核查')
-    expect(wrapper.text()).toContain('客户智能处理已更新，部分结果待核查。')
+    expect(trigger.attributes('aria-label')).toContain(getAgentAsyncOperationStatusMeta('DEGRADED').label)
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.text()).not.toContain('客户智能处理已更新')
+    await trigger.trigger('click')
+    expect(wrapper.get('.agent-async-operation__details').text()).toBe('客户智能处理已更新')
+    wrapper.unmount()
   })
 
-  it('shows the current step and finished time without runtime internals', async () => {
+  it('discloses only public progress messages instead of internal steps and lifecycle events', async () => {
     const wrapper = mount(AgentAsyncOperationCard, {
       props: {
         operation: makeOperation('SUCCEEDED', {
-          current_step: '同步客户画像',
-          finished_time: '2026-09-05T12:34:56Z',
+          summary: '后台摘要',
+          current_step: 'refresh_customer_brief',
+          graph_thread_id: 'private-thread-id',
+          events: [
+            {
+              sequence: 1, event_key: 'started', event_type: 'STARTED',
+              status: 'RUNNING',
+              step: 'private-step', message: '内部生命周期事件', payload: {},
+              occurred_at: '2026-09-05T10:00:00Z',
+            },
+            {
+              sequence: 2, event_key: 'progress', event_type: 'PROGRESS',
+              status: 'RUNNING',
+              step: 'private-step', message: '客户画像同步完成', payload: {},
+              occurred_at: '2026-09-05T10:00:01Z',
+            },
+          ],
         }),
       },
     })
 
     await wrapper.get('button').trigger('click')
-
-    expect(wrapper.text()).toContain('当前阶段')
-    expect(wrapper.text()).toContain('同步客户画像')
-    expect(wrapper.text()).toContain('完成时间：')
-    expect(wrapper.text()).not.toContain('graph_thread_id')
-    expect(wrapper.text()).not.toContain('checkpoint')
+    expect(wrapper.findAll('ol li').map(event => event.text())).toEqual(['客户画像同步完成'])
+    expect(wrapper.text()).not.toContain('内部生命周期事件')
+    expect(wrapper.text()).not.toContain('refresh_customer_brief')
+    expect(wrapper.text()).not.toContain('private-thread-id')
+    expect(wrapper.text()).not.toContain('后台摘要')
+    wrapper.unmount()
   })
 
-  it('explains that a failed operation was not completed', async () => {
+  it('reveals a failure reason only on disclosure and updates when the operation is cancelled', async () => {
     const wrapper = mount(AgentAsyncOperationCard, {
-      props: {
-        operation: makeOperation('FAILED', {
-          error_message: '客户数据暂时不可用',
-        }),
-      },
+      props: { operation: makeOperation('FAILED', { error_message: '客户数据暂时不可用' }) },
     })
 
+    expect(wrapper.text()).not.toContain('客户数据暂时不可用')
     await wrapper.get('button').trigger('click')
+    expect(wrapper.get('.agent-async-operation__notice').text()).toBe('客户数据暂时不可用')
 
-    expect(wrapper.text()).toContain('未完成，请根据原因处理')
-    expect(wrapper.text()).toContain('客户数据暂时不可用')
+    await wrapper.setProps({ operation: makeOperation('CANCELLED', { summary: '用户取消了任务' }) })
+    expect(wrapper.get('button').attributes('aria-label')).toContain(getAgentAsyncOperationStatusMeta('CANCELLED').label)
+    expect(wrapper.get('.agent-async-operation__details').text()).toBe('用户取消了任务')
+    expect(wrapper.find('.agent-async-operation__notice').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

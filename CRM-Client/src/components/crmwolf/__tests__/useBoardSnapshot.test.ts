@@ -64,7 +64,7 @@ function createHarness(initial?: Partial<BoardQueryScopeKey>): Harness {
   return {
     query,
     scope,
-    get permissionReady() {
+    get permissionReady(): boolean {
       return permissionReady.value
     },
     set permissionReady(value: boolean) {

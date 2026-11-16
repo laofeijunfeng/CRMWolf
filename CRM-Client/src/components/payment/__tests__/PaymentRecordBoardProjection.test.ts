@@ -1,7 +1,8 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import PaymentRecordBoardProjection from '../PaymentRecordBoardProjection.vue'
 import type { PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
+import AmountText from '@/components/crmwolf/AmountText.vue'
 
 const response: PaymentRecordBoardResponse = {
   summary: [
@@ -111,7 +112,7 @@ const response: PaymentRecordBoardResponse = {
   ],
 }
 
-function mountProjection() {
+function mountProjection(): VueWrapper<InstanceType<typeof PaymentRecordBoardProjection>> {
   return mount(PaymentRecordBoardProjection, {
     props: { response },
     global: {
@@ -145,7 +146,7 @@ describe('PaymentRecordBoardProjection', () => {
     expect(approved.text()).toContain('已确认')
     expect(approved.text()).toContain('91')
     expect(approved.text()).not.toContain('confirmed')
-    expect(approved.findAllComponents({ name: 'AmountText' }).map((amount: { props: (name: string) => unknown }) => amount.props('value'))).toEqual([
+    expect(wrapper.findAllComponents(AmountText).filter((amount) => approved.element.contains(amount.element)).map((amount): unknown => amount.props('value'))).toEqual([
       '6400.00',
       '6400.00',
     ])

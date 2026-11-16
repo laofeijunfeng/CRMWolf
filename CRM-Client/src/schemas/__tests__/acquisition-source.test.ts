@@ -7,6 +7,7 @@ describe('acquisition source form schemas', () => {
   it('requires source_public_id and rejects the old 线索转化 enum', () => {
     const customerResult = customerFormSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '北京',
       company_scale: '1-50人',
       source: '线索转化',
@@ -15,6 +16,7 @@ describe('acquisition source form schemas', () => {
     const createResult = customerCreateSchema.safeParse({
       account_name: '示例客户',
       city: '北京',
+      product_public_id: 'prd_crm',
       company_scale: '1-50人',
       source: '线索转化',
       default_procurement_method_id: 1,
@@ -25,6 +27,7 @@ describe('acquisition source form schemas', () => {
     })
     const leadResult = leadSchema.safeParse({
       lead_name: '示例线索',
+      product_public_id: 'prd_crm',
       source: '线上注册',
       city: '上海',
       contact_name: '李四',
@@ -39,6 +42,7 @@ describe('acquisition source form schemas', () => {
   it('accepts source_public_id for customer and lead forms', () => {
     const customerResult = customerFormSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '北京',
       company_scale: '1-50人',
       source_public_id: 'acq_referral',
@@ -46,6 +50,7 @@ describe('acquisition source form schemas', () => {
     })
     const leadResult = leadSchema.safeParse({
       lead_name: '示例线索',
+      product_public_id: 'prd_crm',
       source_public_id: 'acq_website',
       city: '上海',
       contact_name: '李四',
@@ -59,6 +64,7 @@ describe('acquisition source form schemas', () => {
   it('keeps standard scale validation strict while accepting legacy values only for edit', () => {
     const legacyValues = {
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '北京',
       company_scale: 'small',
     }
@@ -83,6 +89,7 @@ describe('acquisition source form schemas', () => {
   it('accepts optional more-information values on create', () => {
     const result = customerCreateSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '上海',
       company_scale: '1-50人',
       source_public_id: 'acq_referral',
@@ -102,6 +109,7 @@ describe('acquisition source form schemas', () => {
   it('accepts optional more-information values on edit', () => {
     const result = customerEditSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '上海',
       company_scale: '1-50人',
       source_public_id: 'acq_referral',
@@ -117,6 +125,7 @@ describe('acquisition source form schemas', () => {
   it('rejects a non-empty expiry date without a license type on edit', () => {
     const result = customerEditSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '上海',
       company_scale: '1-50人',
       source_public_id: 'acq_referral',
@@ -129,6 +138,7 @@ describe('acquisition source form schemas', () => {
   it('rejects a non-empty expiry date without a license type', () => {
     const result = customerCreateSchema.safeParse({
       account_name: '示例客户',
+      product_public_id: 'prd_crm',
       city: '上海',
       company_scale: '1-50人',
       source_public_id: 'acq_referral',

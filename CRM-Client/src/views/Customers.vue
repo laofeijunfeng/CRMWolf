@@ -303,7 +303,7 @@ const fields = computed<ListFieldDefinition[]>(() => [
     type: 'enum',
     options: customerStatusFilterOptions,
     column: { width: '200px' },
-    filter: true,
+    filter: { operators: ['eq', 'neq', 'in', 'not_in'] },
     sort: true
   },
   {
