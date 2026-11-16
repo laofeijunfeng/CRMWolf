@@ -6,6 +6,7 @@ import PaymentCompositionFields from '@/components/dialogs/PaymentCompositionFie
 import {
   emptyCompositionForm,
   validatePaymentComposition,
+  type PaymentCompositionForm,
 } from '@/components/dialogs/paymentComposition'
 import paymentApi from '@/api/payment'
 import customerApi, {
@@ -274,6 +275,10 @@ function parseLocalDateString(value: string): Date | null {
 
 function handlePaymentDateChange(date: Date | null): void {
   form.paymentDate = date !== null ? getLocalDateString(date) : ''
+}
+
+function handleCompositionUpdate(value: PaymentCompositionForm): void {
+  Object.assign(form, value)
 }
 
 function formatDefaultAmount(defaultAmount: number | null): string {
@@ -786,6 +791,7 @@ watch(
                 :form="form"
                 :actual-amount="form.actualAmount"
                 :disabled="isSubmitting"
+                @update:form="handleCompositionUpdate"
               />
               <div class="payment-record-dialog__optional-grid">
                 <InputField

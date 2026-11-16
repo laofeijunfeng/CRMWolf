@@ -37,7 +37,7 @@ import {
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
-import { licenseStatusLabel } from '@/utils/licenseStatus'
+import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 import { productPublicIdFromIntent } from '@/utils/productIntent'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import customerApi, {
@@ -86,8 +86,8 @@ const { handleSubmit, resetForm, setValues, setFieldValue, setFieldError, setErr
 const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 const genderOptions = [{ value: '男', label: '男', tone: 'primary' as const }, { value: '女', label: '女', tone: 'success' as const }]
 const customerLicenseTypeOptions = [
-  { value: 'TRIAL', label: '试用', tone: 'success' as const },
-  { value: 'OFFICIAL', label: '正式', tone: 'primary' as const },
+  { value: 'TRIAL', label: LICENSE_STATUS_LABELS.trial, tone: 'warning' as const },
+  { value: 'OFFICIAL', label: LICENSE_STATUS_LABELS.official, tone: 'success' as const },
 ]
 const submitting = ref(false)
 const loading = ref(false)
@@ -1009,6 +1009,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 <p id="customer-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">授权类型</p>
                 <SegmentedChoiceControl
                   id="customer-license-type"
+                  class="customer-license-type"
                   :model-value="licenseTypeValue ?? ''"
                   :options="customerLicenseTypeOptions"
                   :disabled="writeSubmitting"
@@ -1038,7 +1039,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
               />
             </div>
             <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
-            <p class="text-sm text-slate-700"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
+            <p class="customer-license-status text-sm" :class="licenseStatusClass(licenseExpiryDateValue, licenseTypeValue)"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -1104,4 +1105,31 @@ function continueEditing(): void { closeGuard.continueEditing() }
   padding-top: $wolf-space-lg-v2;
   border-top: 1px solid $wolf-border-divider-v2;
 }
+
+.customer-form-dialog .customer-license-type {
+  .segmented-choice__option--warning {
+    --license-type-foreground: var(--status-warning-foreground);
+    --license-type-background: var(--status-warning-background);
+  }
+
+  .segmented-choice__option--success {
+    --license-type-foreground: var(--status-success-foreground);
+    --license-type-background: var(--status-success-background);
+  }
+
+  .segmented-choice__radio:not(:disabled) + .segmented-choice__option {
+    color: var(--license-type-foreground);
+  }
+
+  .segmented-choice__option--active {
+    border-color: var(--license-type-foreground);
+    background: var(--license-type-background);
+    box-shadow: inset 0 0 0 1px var(--license-type-foreground);
+  }
+}
+
+.customer-license-status.license-badge--official { color: var(--status-success-foreground); }
+.customer-license-status.license-badge--trial { color: var(--status-warning-foreground); }
+.customer-license-status.license-badge--expired { color: var(--status-danger-foreground); }
+.customer-license-status.license-badge--none { color: var(--status-neutral-foreground); }
 </style>

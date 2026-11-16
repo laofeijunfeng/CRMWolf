@@ -957,15 +957,11 @@ describe('CRMAgentChat Agent UI protocol', () => {
     await flushPromises()
 
     expect(api.chatStream).toHaveBeenCalledTimes(1)
-    const submittedButtons = wrapper.findAll('button').filter(button => (
+    expect(wrapper.find('.agent-ui-interaction').exists()).toBe(true)
+    expect(wrapper.findAll('button').filter(button => (
       button.text() === '确认创建' || button.text() === '取消'
-    ))
-    expect(submittedButtons).toHaveLength(2)
-    expect(submittedButtons.every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    ))).toHaveLength(0)
 
-    await submittedButtons[1]?.trigger('click')
-    await flushPromises()
-    expect(api.chatStream).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

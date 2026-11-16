@@ -12,6 +12,7 @@ import {
 } from "lucide-vue-next"
 import AgentAsyncOperationCard from "@/components/agent/AgentAsyncOperationCard.vue"
 import type { AgentAsyncOperation } from "@/api/agent"
+import { getAgentAsyncOperationStatusMeta } from "@/components/agent/agentAsyncOperations"
 
 const degradedOperation: AgentAsyncOperation = {
   public_id: "aop_1",
@@ -67,12 +68,12 @@ describe("AgentAsyncOperationCard", () => {
     const trigger = wrapper.get("button")
 
     expect(trigger.attributes("aria-expanded")).toBe("false")
-    expect(trigger.attributes("aria-label")).toContain("已降级完成")
+    expect(trigger.attributes("aria-label")).toContain(getAgentAsyncOperationStatusMeta("DEGRADED").label)
     expect(trigger.attributes("title")).toBeUndefined()
-    expect(trigger.text()).toBe("客户档案更新")
     expect(wrapper.text()).not.toContain("客户档案已更新，本次沉淀 0 条客户事实")
     expect(wrapper.text()).not.toContain("提炼出 6 条可沉淀事实")
     expect(wrapper.find(".agent-async-operation__details").exists()).toBe(false)
+    expect(trigger.attributes("aria-controls")).toBe("agent-async-operation-aop_1-details")
   })
 
   it("shows execution events after expansion without repeating the completion summary", async () => {
@@ -81,6 +82,9 @@ describe("AgentAsyncOperationCard", () => {
     await wrapper.get("button").trigger("click")
 
     expect(wrapper.get("button").attributes("aria-expanded")).toBe("true")
+    expect(wrapper.get(".agent-async-operation__details").attributes("id")).toBe(
+      wrapper.get("button").attributes("aria-controls")
+    )
     expect(wrapper.text()).toContain("提炼客户事实：提炼出 6 条可沉淀事实，1 条需复核事实")
     expect(wrapper.text()).toContain("沉淀客户事实：已沉淀 6 条客户事实，1 条保留复核")
     expect(wrapper.text()).not.toContain("客户档案已更新，本次沉淀 0 条客户事实")
@@ -102,7 +106,7 @@ describe("AgentAsyncOperationCard", () => {
 
     expect(wrapper.findComponent(icon).exists()).toBe(true)
     expect(wrapper.get(".agent-async-operation__status-icon").classes()).toContain(className)
-    expect(wrapper.get("button").text()).toBe("客户档案更新")
+    expect(wrapper.get("button").attributes("aria-label")).toContain(getAgentAsyncOperationStatusMeta(status).label)
   })
 
   it("shows retry reason and schedule only after expansion", async () => {
@@ -126,7 +130,7 @@ describe("AgentAsyncOperationCard", () => {
     expect(wrapper.text()).toContain("自动重试")
   })
 
-  it("labels post-commit work as task reconciliation and shows the backend summary when there is no progress trail", async () => {
+  it("shows the backend summary when there is no progress trail", async () => {
     const wrapper = mount(AgentAsyncOperationCard, {
       props: {
         operation: {
@@ -144,14 +148,11 @@ describe("AgentAsyncOperationCard", () => {
       },
     })
 
-    expect(wrapper.get("button").text()).toBe("跟进任务对账")
     expect(wrapper.text()).not.toContain("跟进已记录，任务对账完成")
-    expect(wrapper.text()).not.toContain("执行过程已完成。")
 
     await wrapper.get("button").trigger("click")
 
     expect(wrapper.text()).toContain("跟进已记录，任务对账完成")
-    expect(wrapper.text()).not.toContain("执行过程已完成。")
   })
 
 

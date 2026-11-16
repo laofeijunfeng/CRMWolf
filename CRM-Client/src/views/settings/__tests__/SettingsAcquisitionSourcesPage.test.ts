@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 
 const { listSources } = mocks
 
+let pinia = createPinia()
+
 vi.mock('@/api/acquisition-source', () => ({
   default: {
     list: mocks.listSources,
@@ -44,7 +46,8 @@ const pageStubs = {
 }
 
 function seedOwnerPinia(): void {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   const teamStore = useTeamStore()
   const userStore = useUserStore()
   const permissionStore = usePermissionStore()
@@ -80,7 +83,7 @@ describe('SettingsAcquisitionSourcesPage', () => {
     seedOwnerPinia()
     listSources.mockResolvedValue([{ public_id: 'src_1', name: '官网咨询', is_active: true, reference_count: 24, sort_order: 1 }])
     const wrapper = mount(SettingsAcquisitionSourcesPage, {
-      global: { stubs: { DataTable: { props: ['data'], template: '<div>{{ data[0]?.name }}</div>' }, TableRowActions: true, SettingsContent: { template: '<main><slot /></main>' }, Dialog: true } },
+      global: { plugins: [pinia], stubs: { DataTable: { props: ['data'], template: '<div>{{ data[0]?.name }}</div>' }, TableRowActions: true, SettingsContent: { template: '<main><slot /></main>' }, Dialog: true } },
     })
     await vi.waitFor(() => expect(listSources).toHaveBeenCalled())
     expect(wrapper.text()).toContain('官网咨询')
@@ -97,7 +100,7 @@ describe('SettingsAcquisitionSourcesPage', () => {
     }))
 
     const wrapper = mount(SettingsAcquisitionSourcesPage, {
-      global: { stubs: pageStubs },
+      global: { plugins: [pinia], stubs: pageStubs },
     })
     await nextTick()
     expect(wrapper.find('[data-testid="source-dialog"]').exists()).toBe(true)

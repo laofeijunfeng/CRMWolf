@@ -96,6 +96,7 @@ vi.mock('@/components/crmwolf', () => {
   return {
     InputField: field('input'),
     SelectField: field('select'),
+    ProductIntentPicker: field('select'),
   }
 })
 

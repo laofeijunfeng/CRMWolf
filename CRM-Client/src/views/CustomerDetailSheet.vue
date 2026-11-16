@@ -44,6 +44,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatProductIntentName } from '@/utils/productIntent'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
+import { licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
@@ -266,30 +267,6 @@ const formatDate = (dateStr: string | null | undefined): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
-}
-
-const isDateBeforeToday = (dateStr: string | null | undefined): boolean => {
-  if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return false
-  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return date < today
-}
-
-const getLicenseStatusLabel = (licenseType: string | null | undefined, expiryDate: string | null | undefined): string => {
-  if (expiryDate === undefined || expiryDate === null || expiryDate.trim() === '') return '未授权'
-  if (isDateBeforeToday(expiryDate)) return '已过期'
-  if (licenseType === 'TRIAL') return '试用'
-  if (licenseType === 'OFFICIAL') return '正式'
-  return '已授权'
-}
-
-const getLicenseStatusClass = (licenseType: string | null | undefined, expiryDate: string | null | undefined): string => {
-  if (expiryDate === undefined || expiryDate === null || expiryDate.trim() === '') return 'license-badge--none'
-  if (isDateBeforeToday(expiryDate)) return 'license-badge--expired'
-  if (licenseType === 'TRIAL') return 'license-badge--trial'
-  return 'license-badge--official'
 }
 
 const canManageCustomerMembers = computed(() => {
@@ -952,9 +929,9 @@ watch(() => props.targetPanel, (panel): void => {
                         <div class="attribute-value">
                           <span
                             class="license-badge"
-                            :class="getLicenseStatusClass(customer?.license_type, customer?.license_expiry_date)"
+                            :class="licenseStatusClass(customer?.license_expiry_date, customer?.license_type)"
                           >
-                            {{ getLicenseStatusLabel(customer?.license_type, customer?.license_expiry_date) }}
+                            {{ licenseStatusLabel(customer?.license_expiry_date, customer?.license_type) }}
                           </span>
                         </div>
                       </div>
@@ -1384,27 +1361,27 @@ watch(() => props.targetPanel, (panel): void => {
 }
 
 .license-badge--official {
-  color: $wolf-success-text-v2;
-  background: $wolf-success-bg-v2;
-  border-color: $wolf-success-bg-v2;
+  color: var(--status-success-foreground);
+  background: var(--status-success-background);
+  border-color: var(--status-success-background);
 }
 
 .license-badge--trial {
-  color: $wolf-warning-text-v2;
-  background: $wolf-warning-bg-v2;
-  border-color: $wolf-warning-bg-v2;
+  color: var(--status-warning-foreground);
+  background: var(--status-warning-background);
+  border-color: var(--status-warning-background);
 }
 
 .license-badge--expired {
-  color: $wolf-danger-text-v2;
-  background: $wolf-danger-bg-v2;
-  border-color: $wolf-danger-bg-v2;
+  color: var(--status-danger-foreground);
+  background: var(--status-danger-background);
+  border-color: var(--status-danger-background);
 }
 
 .license-badge--none {
-  color: $wolf-text-tertiary-v2;
-  background: $wolf-bg-muted-v2;
-  border-color: $wolf-border-light-v2;
+  color: var(--status-neutral-foreground);
+  background: var(--status-neutral-background);
+  border-color: var(--status-neutral-background);
 }
 
 </style>

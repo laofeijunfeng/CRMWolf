@@ -13,9 +13,8 @@ const requestGet = vi.mocked(request.get)
 
 beforeEach(() => {
   requestGet.mockReset()
-  vi.stubGlobal('URL', {
-    ...URL,
-    createObjectURL: vi.fn(() => 'blob:invoice-preview'),
+  vi.stubGlobal('URL', class extends URL {
+    static override createObjectURL = vi.fn(() => 'blob:invoice-preview')
   })
 })
 

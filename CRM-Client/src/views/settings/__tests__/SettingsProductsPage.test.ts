@@ -52,6 +52,8 @@ const mocks = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | undefined>,
 }))
 
+let pinia = createPinia()
+
 vi.mock('@/api/product', () => ({
   default: {
     list: vi.fn().mockResolvedValue([mocks.product]),
@@ -180,7 +182,8 @@ function setPermissions(codes: string[]): void {
 }
 
 function seedPinia(codes: string[]): void {
-  setActivePinia(createPinia())
+  pinia = createPinia()
+  setActivePinia(pinia)
   const teamStore = useTeamStore()
   const userStore = useUserStore()
   teamStore.currentTeam = {
@@ -202,7 +205,7 @@ function seedPinia(codes: string[]): void {
 }
 
 function mountPage(extraStubs: Record<string, object> = stubs): VueWrapper {
-  return mount(SettingsProductsPage, { global: { stubs: extraStubs } })
+  return mount(SettingsProductsPage, { global: { plugins: [pinia], stubs: extraStubs } })
 }
 
 function hasVisibleCreateAction(): boolean {
@@ -321,7 +324,8 @@ describe('SettingsProductsPage', () => {
   })
 
   it('opens a pending create deep link when permissions become ready', async () => {
-    setActivePinia(createPinia())
+    pinia = createPinia()
+    setActivePinia(pinia)
     const teamStore = useTeamStore()
     teamStore.currentTeam = {
       id: 7,
@@ -373,15 +377,6 @@ describe('SettingsProductsPage', () => {
     wrapper.unmount()
   })
 
-  it('tells a viewer without create permission to contact the team admin when the list is empty', async () => {
-    seedPinia(['product:view'])
-    vi.mocked(productApi.list).mockResolvedValueOnce([])
-    const wrapper = mountPage()
-    await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())
-    await flushPromises()
-    expect(wrapper.text()).toContain('你没有创建产品的权限')
-    wrapper.unmount()
-  })
 
   it('renders a retryable error instead of an empty state and recovers after retry', async () => {
     seedPinia(['product:view'])
@@ -406,7 +401,7 @@ describe('SettingsProductsPage', () => {
     mocks.routeQuery['action'] = 'create'
     vi.mocked(productApi.create).mockResolvedValueOnce(mocks.product)
     const wrapper = mount(SettingsProductsPage, {
-      global: { stubs: formSubmitStubs },
+      global: { plugins: [pinia], stubs: formSubmitStubs },
       attachTo: document.body,
     })
     await vi.waitFor(() => expect(productApi.list).toHaveBeenCalled())

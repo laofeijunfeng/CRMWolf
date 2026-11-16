@@ -26,6 +26,8 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
+import { Badge } from '@/components/ui/badge'
+import { getStatusOptions, getStatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
@@ -82,9 +84,9 @@ const pagination = reactive({
 // ==================== ContextTabs 配置 ====================
 const tabs = [
   { key: 'all', label: '全部申请' },
-  { key: 'pending', label: '待审批' },
-  { key: 'approved', label: '已批准' },
-  { key: 'invoiced', label: '已开票' }
+  { key: 'pending', label: getStatusPresentation('invoiceApplication', 'PENDING_REVIEW').label },
+  { key: 'approved', label: getStatusPresentation('invoiceApplication', 'APPROVED').label },
+  { key: 'invoiced', label: getStatusPresentation('invoiceApplication', 'ISSUED').label }
 ]
 
 const activeTab = ref('all')
@@ -100,14 +102,7 @@ const invoiceTypeOptions = [
   { value: 'VAT_SPECIAL', label: '增值税专用发票' },
   { value: 'VAT_NORMAL', label: '增值税普通发票' }
 ]
-const invoiceStatusOptions = [
-  { value: 'DRAFT', label: '草稿' },
-  { value: 'PENDING_REVIEW', label: '待审批' },
-  { value: 'APPROVED', label: '已批准' },
-  { value: 'REJECTED', label: '已驳回' },
-  { value: 'ISSUED', label: '已开票' },
-  { value: 'CANCELLED', label: '已取消' }
-]
+const invoiceStatusOptions = getStatusOptions('invoiceApplication')
 const invoiceEffectiveStatusOptions = [
   { value: 'ACTIVE', label: '有效' },
   { value: 'REISSUE_PENDING', label: '重开中' },
@@ -611,17 +606,6 @@ const downloadInvoiceFile = async (row: InvoiceApplicationResponse): Promise<voi
 }
 
 // ==================== 格式化函数 ====================
-const mapInvoiceStatus = (status: string): 'draft' | 'pending_review' | 'approved' | 'rejected' | 'issued' | 'cancelled' => {
-  const map: Record<string, 'draft' | 'pending_review' | 'approved' | 'rejected' | 'issued' | 'cancelled'> = {
-    'DRAFT': 'draft',
-    'PENDING_REVIEW': 'pending_review',
-    'APPROVED': 'approved',
-    'REJECTED': 'rejected',
-    'ISSUED': 'issued',
-    'CANCELLED': 'cancelled'
-  }
-  return map[status] || 'draft'
-}
 
 const getInvoiceTypeText = (type: string): string => {
   const map: Record<string, string> = {
@@ -633,14 +617,14 @@ const getInvoiceTypeText = (type: string): string => {
   return map[type] ?? type
 }
 
-const getInvoiceTypeClass = (type: string): string => {
-  const map: Record<string, string> = {
-    'VAT_SPECIAL': 'status-primary',
-    'VAT_NORMAL': 'status-success',
-    'VAT_GENERAL': 'status-success',
-    'COMMON': 'status-default'
+const getInvoiceTypeTone = (type: string): StatusTone => {
+  const map: Record<string, StatusTone> = {
+    'VAT_SPECIAL': 'info',
+    'VAT_NORMAL': 'success',
+    'VAT_GENERAL': 'success',
+    'COMMON': 'neutral'
   }
-  return map[type] ?? 'status-default'
+  return Object.prototype.hasOwnProperty.call(map, type) ? map[type] ?? 'neutral' : 'neutral'
 }
 
 const getInvoiceEffectiveStatusText = (status: InvoiceEffectiveStatus | null | undefined): string => {
@@ -653,14 +637,14 @@ const getInvoiceEffectiveStatusText = (status: InvoiceEffectiveStatus | null | u
   return status === null || status === undefined ? '有效' : map[status] ?? '有效'
 }
 
-const getInvoiceEffectiveStatusClass = (status: InvoiceEffectiveStatus | null | undefined): string => {
-  const map: Record<InvoiceEffectiveStatus, string> = {
-    ACTIVE: 'status-success',
-    REISSUE_PENDING: 'status-warning',
-    RED_OFFSET: 'status-danger',
-    REISSUED: 'status-muted'
+const getInvoiceEffectiveStatusTone = (status: InvoiceEffectiveStatus | null | undefined): StatusTone => {
+  const map: Record<InvoiceEffectiveStatus, StatusTone> = {
+    ACTIVE: 'success',
+    REISSUE_PENDING: 'warning',
+    RED_OFFSET: 'danger',
+    REISSUED: 'neutral'
   }
-  return status === null || status === undefined ? 'status-success' : map[status] ?? 'status-success'
+  return status === null || status === undefined ? 'success' : map[status] ?? 'success'
 }
 
 
@@ -785,7 +769,7 @@ watchEffect(() => {
           <div class="invoice-mobile-card-number">
             {{ row.application_number }}
           </div>
-          <StatusBadge :status="mapInvoiceStatus(row.status)" type="invoice" />
+          <StatusBadge :status="row.status" type="invoiceApplication" />
         </div>
         <div class="invoice-mobile-card-customer">
           {{ row.customer_name || '-' }}
@@ -795,12 +779,12 @@ watchEffect(() => {
         </div>
         <AmountText class="invoice-mobile-card-amount" :value="row.invoice_amount" size="lg" tone="warning" />
         <div class="invoice-mobile-card-meta">
-          <span :class="['status-badge', getInvoiceTypeClass(row.invoice_type)]">
+          <Badge variant="status" :data-status-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
             {{ getInvoiceTypeText(row.invoice_type) }}
-          </span>
-          <span :class="['status-badge', getInvoiceEffectiveStatusClass(row.invoice_effective_status)]">
+          </Badge>
+          <Badge variant="status" :data-status-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
             {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
-          </span>
+          </Badge>
           <span>申请人：{{ row.applicant_name || '-' }}</span>
           <span>{{ formatDateTime(row.created_time) }}</span>
         </div>
@@ -831,9 +815,9 @@ watchEffect(() => {
 
       <!-- 发票类型 -->
       <template #cell-invoice_type="{ row }">
-        <span :class="['status-badge', getInvoiceTypeClass(row.invoice_type)]">
+        <Badge variant="status" :data-status-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
           {{ getInvoiceTypeText(row.invoice_type) }}
-        </span>
+        </Badge>
       </template>
 
       <!-- 开票金额 -->
@@ -848,14 +832,14 @@ watchEffect(() => {
 
       <!-- 状态 -->
       <template #cell-status="{ row }">
-        <StatusBadge :status="mapInvoiceStatus(row.status)" type="invoice" />
+        <StatusBadge :status="row.status" type="invoiceApplication" />
       </template>
 
       <!-- 发票状态 -->
       <template #cell-invoice_effective_status="{ row }">
-        <span :class="['status-badge', getInvoiceEffectiveStatusClass(row.invoice_effective_status)]">
+        <Badge variant="status" :data-status-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
           {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
-        </span>
+        </Badge>
       </template>
 
       <!-- 申请人 -->
@@ -929,44 +913,6 @@ watchEffect(() => {
   gap: $wolf-space-sm-v2;
 }
 
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 24px;
-  padding: 0 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-sm-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
-  white-space: nowrap;
-}
-
-.status-primary {
-  background: rgba($wolf-primary-v2, 0.1);
-  color: $wolf-primary-v2;
-}
-
-.status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-}
-
-.status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-}
-
-.status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
-}
-
-.status-muted,
-.status-default {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-secondary-v2;
-}
 
 .invoice-mobile-card-header {
   display: flex;

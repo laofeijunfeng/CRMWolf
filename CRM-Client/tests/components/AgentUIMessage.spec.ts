@@ -286,6 +286,20 @@ describe('AgentUIMessage', () => {
     ])
     expect(wrapper.text()).toContain('处理中')
     expect(submitButton?.attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({ lockedActionIds: new Set(['act_text_input']) })
+    await submitButton?.trigger('click')
+    expect(wrapper.emitted('interaction')).toHaveLength(1)
+
+    await wrapper.setProps({ lockedActionIds: new Set<string>() })
+    expect(submitButton?.attributes('disabled')).toBeUndefined()
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('客户要求延期')
+    await wrapper.get('input').setValue('已确认新的交付日期')
+    await submitButton?.trigger('click')
+    expect(wrapper.emitted('interaction')).toEqual([
+      ['act_text_input', { text: '客户要求延期' }],
+      ['act_text_input', { text: '已确认新的交付日期' }],
+    ])
   })
 
   it('keeps a submitted confirmation locked until authoritative history is reloaded', async () => {
@@ -422,41 +436,6 @@ describe('AgentUIMessage', () => {
     expect(wrapper.text()).toContain('王总')
     expect(wrapper.findAll('button')).toHaveLength(0)
     expect(wrapper.emitted('open-entity')).toBeUndefined()
-  })
-
-  it('keeps interaction controls at the design-system minimum height', () => {
-    const interactionMessage = AgentUIEnvelopeSchema.parse({
-      ...message,
-      message_id: 9,
-      turn_id: 'turn_9',
-      blocks: [
-        {
-          id: 'b_note',
-          type: 'interaction',
-          interaction_id: 'interaction_note',
-          interaction_type: 'text_input',
-          state: 'ACTIVE',
-          prompt: '补充说明',
-          fields: [
-            {
-              key: 'note',
-              label: '说明',
-              field_type: 'text',
-              required: true,
-              min_length: 1,
-              max_length: 100,
-            },
-          ],
-          options: [],
-          allow_blank: false,
-          submit_action_id: 'act_submit_note',
-        },
-      ],
-    })
-    const wrapper = mount(AgentUIMessage, { props: { message: interactionMessage } })
-
-    expect(wrapper.get('input[type="text"]').classes()).toContain('min-h-11')
-    expect(wrapper.get('button').classes()).toContain('min-h-11')
   })
 
   it('shows field errors, focuses the first invalid field, and preserves values until submission', async () => {

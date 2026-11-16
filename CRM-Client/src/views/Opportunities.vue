@@ -969,13 +969,13 @@ const formatDate = (dateStr: string): string => {
   return `${year}-${month}-${day}`
 }
 
-const mapOpportunityStatus = (status: number): 'active' | 'won' | 'lost' => {
+const mapOpportunityStatus = (status: number): string => {
   const map: Record<number, 'active' | 'won' | 'lost'> = {
     0: 'active',
     1: 'won',
     2: 'lost'
   }
-  return map[status] || 'active'
+  return map[status] ?? String(status)
 }
 
 const getStageClass = (winProbability: number | undefined): string => {

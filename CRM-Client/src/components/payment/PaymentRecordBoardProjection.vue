@@ -104,7 +104,7 @@ function confirmationLabel(item: PaymentRecordItem): string | null {
 
 function metadataRows(item: PaymentRecordItem): BoardMetadataRow[] {
   const confirmation = confirmationLabel(item)
-  const rows: Array<[string, string, string | null]> = [
+  const rows: [string, string, string | null][] = [
     ['customer_name', '客户', item.metadata.customer_name],
     ['contract_name', '合同', item.metadata.contract_name],
     ['actual_payer_name', '付款方', item.metadata.actual_payer_name],
@@ -180,13 +180,13 @@ const projection = computed<BoardProjection | null>(() => {
   }
 })
 
-function recordActions(cardId: string | number): Array<{ action: 'edit' | 'delete' | 'resubmit', label: string }> {
+function recordActions(cardId: string | number): { action: 'edit' | 'delete' | 'resubmit', label: string }[] {
   const response = props.response
   if (response === null || typeof cardId !== 'number') return []
   for (const column of response.columns) {
     const item = column.items.find((candidate) => candidate.id === cardId)
     if (item === undefined) continue
-    const actions: Array<{ action: 'edit' | 'delete' | 'resubmit', label: string }> = []
+    const actions: { action: 'edit' | 'delete' | 'resubmit', label: string }[] = []
     if (item.action_state.can_edit) actions.push({ action: 'edit', label: '编辑' })
     if (item.action_state.can_delete) actions.push({ action: 'delete', label: '删除' })
     if (item.action_state.can_resubmit) actions.push({ action: 'resubmit', label: '重新提交' })

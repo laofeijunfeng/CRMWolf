@@ -2,6 +2,7 @@ import { mount } from "@vue/test-utils"
 import { describe, expect, it } from "vitest"
 import { CheckCircle2, Loader2 } from "lucide-vue-next"
 import AgentAsyncOperationList from "@/components/agent/AgentAsyncOperationList.vue"
+import AgentAsyncOperationCard from "@/components/agent/AgentAsyncOperationCard.vue"
 import type { AgentAsyncOperation } from "@/api/agent"
 
 const intelligenceOperation: AgentAsyncOperation = {
@@ -53,12 +54,9 @@ describe("AgentAsyncOperationList", () => {
       },
     })
 
-    expect(wrapper.get("button").text()).toBe("后台任务")
+    expect(wrapper.get("button").attributes("aria-expanded")).toBe("false")
     expect(wrapper.findComponent(Loader2).exists()).toBe(true)
-    expect(wrapper.text()).not.toContain("客户档案更新")
-    expect(wrapper.text()).not.toContain("跟进任务对账")
-    expect(wrapper.text()).not.toContain("客户档案已更新")
-    expect(wrapper.text()).not.toContain("跟进已记录，任务对账处理中")
+    expect(wrapper.findComponent(AgentAsyncOperationCard).exists()).toBe(false)
   })
 
   it("uses the same full-width process-row sizing for automatic task results", () => {
@@ -106,10 +104,12 @@ describe("AgentAsyncOperationList", () => {
 
     await wrapper.get("button").trigger("click")
 
-    expect(wrapper.text()).toContain("客户档案更新")
-    expect(wrapper.text()).toContain("跟进任务对账")
+    expect(wrapper.get("button").attributes("aria-expanded")).toBe("true")
+    expect(wrapper.findAllComponents(AgentAsyncOperationCard).map(card => card.props("operation").public_id))
+      .toEqual([intelligenceOperation.public_id, postCommitOperation.public_id])
     expect(wrapper.findComponent(CheckCircle2).exists()).toBe(true)
-    expect(wrapper.text()).not.toContain("客户档案已更新")
-    expect(wrapper.text()).not.toContain("跟进已记录，任务对账处理中")
+
+    await wrapper.get("button").trigger("click")
+    expect(wrapper.findComponent(AgentAsyncOperationCard).exists()).toBe(false)
   })
 })

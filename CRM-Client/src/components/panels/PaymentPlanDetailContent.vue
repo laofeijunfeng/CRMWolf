@@ -25,10 +25,10 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import StatusBadge, { type PaymentPlanStatus as PaymentPlanBadgeStatus } from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
+import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
@@ -44,7 +44,6 @@ import {
 } from '@/api/command'
 import paymentApi, {
   type ApprovalInfo,
-  type ApprovalStatus,
   type PaymentPlanResponse,
   type PaymentPlanStatus,
   type PaymentRecordInfo,
@@ -458,35 +457,16 @@ const handleResubmitApproval = (): void => {
   editDialogOpen.value = true
 }
 
-const mapPaymentPlanStatus = (status: PaymentPlanStatus): PaymentPlanBadgeStatus => {
-  const statusMap: Record<PaymentPlanStatus, PaymentPlanBadgeStatus> = {
+const mapPaymentPlanStatus = (status: string): string => {
+  const statusMap: Record<PaymentPlanStatus, string> = {
     PENDING: 'pending',
     OVERDUE: 'overdue',
     PARTIAL: 'partial',
     COMPLETED: 'completed'
   }
-  return statusMap[status]
+  return Object.prototype.hasOwnProperty.call(statusMap, status) ? statusMap[status as PaymentPlanStatus] : status
 }
 
-const getApprovalStatusLabel = (status: ApprovalStatus): string => {
-  const statusMap: Record<ApprovalStatus, string> = {
-    PENDING: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回',
-    CANCELLED: '已撤回'
-  }
-  return statusMap[status]
-}
-
-const getApprovalBadgeClass = (status: ApprovalStatus): string => {
-  const statusMap: Record<ApprovalStatus, string> = {
-    PENDING: 'approval-status-warning',
-    APPROVED: 'approval-status-success',
-    REJECTED: 'approval-status-danger',
-    CANCELLED: 'approval-status-muted'
-  }
-  return statusMap[status]
-}
 
 const formatDate = (dateStr: string | undefined): string => {
   if (dateStr === undefined || dateStr.trim() === '') return '-'
@@ -699,9 +679,7 @@ watch(
                       <CardTitle class="section-title">审批进度</CardTitle>
                       <CardDescription>最新回款记录的审批状态。</CardDescription>
                     </div>
-                    <Badge :class="['approval-status-badge', getApprovalBadgeClass(latestApproval.status)]">
-                      {{ getApprovalStatusLabel(latestApproval.status) }}
-                    </Badge>
+                    <ApprovalStatusBadge :status="latestApproval.status" />
                   </CardHeader>
                   <CardContent class="section-content approval-content">
                     <Alert v-if="hasRejectedApproval" variant="destructive">
@@ -1070,33 +1048,6 @@ $payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   gap: $wolf-space-lg-v2;
 }
 
-.approval-status-badge {
-  white-space: nowrap;
-}
-
-.approval-status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-  border-color: transparent;
-}
-
-.approval-status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-  border-color: transparent;
-}
-
-.approval-status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
-  border-color: transparent;
-}
-
-.approval-status-muted {
-  background: rgba(#64748B, 0.1);
-  color: $wolf-disabled-text-v2;
-  border-color: transparent;
-}
 
 .state-card-content {
   min-height: $payment-empty-min-height;

@@ -84,25 +84,11 @@ const send = async (): Promise<VueWrapper> => {
 const click = async (mounted: VueWrapper, label: string): Promise<void> => {
   const button = mounted.findAll('button').find((item) => item.text() === label)
   expect(button).toBeDefined()
-  ensureDomEventConstructor()
   await button?.trigger('click')
   await flushPromises()
 }
-const ensureDomEventConstructor = (): void => {
-  const constructors: Record<string, unknown> = {
-    Event: globalThis.Event,
-    MouseEvent: globalThis.MouseEvent,
-    KeyboardEvent: globalThis.KeyboardEvent,
-    FocusEvent: globalThis.FocusEvent,
-    CustomEvent: globalThis.CustomEvent,
-  }
-  for (const [name, constructor] of Object.entries(constructors)) {
-    if (typeof constructor === 'function') Object.defineProperty(window, name, { configurable: true, value: constructor })
-  }
-}
 
 beforeEach(() => {
-  ensureDomEventConstructor()
   vi.useFakeTimers()
   Object.values(api).forEach((mock) => mock.mockReset())
   stream.mockReset()

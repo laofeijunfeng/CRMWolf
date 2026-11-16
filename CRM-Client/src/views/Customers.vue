@@ -303,7 +303,7 @@ const fields = computed<ListFieldDefinition[]>(() => [
     type: 'enum',
     options: customerStatusFilterOptions,
     column: { width: '200px' },
-    filter: true,
+    filter: { operators: ['eq', 'neq', 'in', 'not_in'] },
     sort: true
   },
   {
@@ -716,6 +716,7 @@ const chartBucketError = ref('')
 const chartBucketRequest = ref<{ card: CustomerChartCard, bucket: CustomerChartBucket } | null>(null)
 let chartRequestId = 0
 let chartBucketRequestId = 0
+const chartBucketResetToken = ref(0)
 const CHART_PAGE_SIZE = 10
 
 const chartQuery = (): CustomerQueryParams => {
@@ -747,7 +748,10 @@ const fetchCustomerChart = async (): Promise<boolean> => {
 }
 
 const refreshVisibleCustomers = (): Promise<boolean> => {
-  if (displayMode.value === 'chart') return fetchCustomerChart()
+  if (displayMode.value === 'chart') {
+    closeChartBucket()
+    return fetchCustomerChart()
+  }
   if (boardEligible.value) return customerBoard.refresh(boardParams.value).then(() => true, () => false)
   return fetchCustomerList()
 }
@@ -755,13 +759,13 @@ const refreshVisibleCustomers = (): Promise<boolean> => {
 const setCustomerDisplayMode = (value: string): void => {
   if (value !== 'table' && value !== 'board' && value !== 'chart') return
   if (activeTab.value === 'public' && value !== 'table') {
+    closeChartBucket()
     displayMode.value = 'table'
     return
   }
   if (displayMode.value === value) return
   displayMode.value = value
-  chartBucket.value = null
-  chartBucketError.value = ''
+  if (value !== 'chart') closeChartBucket()
   void refreshVisibleCustomers()
 }
 
@@ -804,6 +808,7 @@ const loadMoreChartBucket = (): Promise<void> => {
 
 const closeChartBucket = (): void => {
   chartBucketRequestId += 1
+  chartBucketResetToken.value += 1
   chartBucketRequest.value = null
   chartBucket.value = null
   chartBucketError.value = ''
@@ -890,8 +895,12 @@ const customerBoard = useBoardSnapshot<CustomerBoardParams, CustomerBoardRespons
 
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
+  if (displayMode.value === 'chart' || chartBucketRequest.value !== null) closeChartBucket()
+}, { flush: 'sync' })
+
+watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'board' && activeTab.value !== 'public') void refreshVisibleCustomers()
-  if (displayMode.value === 'chart') void refreshVisibleCustomers()
+  if (displayMode.value === 'chart') void fetchCustomerChart()
 })
 
 const handleBoardCardActivate = (payload: BoardCardActivation): void => {
@@ -1531,6 +1540,7 @@ defineExpose({
           :bucket-customers="chartBucket"
           :bucket-loading="chartBucketLoading"
           :bucket-error="chartBucketError"
+          :bucket-reset-token="chartBucketResetToken"
           @retry="fetchCustomerChart"
           @open-customer="openCustomerDetail"
           @view-bucket="openChartBucket"
@@ -1914,12 +1924,20 @@ defineExpose({
   line-height: 18px;
 }
 
+.license-summary__primary.is-soon,
+.license-summary__primary.is-urgent {
+  padding-inline: 4px;
+  border-radius: 4px;
+}
+
 .license-summary__primary.is-soon {
-  color: $wolf-warning-text-v2;
+  color: var(--status-warning-foreground);
+  background-color: var(--status-warning-background);
 }
 
 .license-summary__primary.is-urgent {
-  color: $wolf-danger-text-v2;
+  color: var(--status-danger-foreground);
+  background-color: var(--status-danger-background);
 }
 
 .license-summary__secondary {
@@ -1928,10 +1946,10 @@ defineExpose({
   line-height: 16px;
 }
 
-.license-badge--official { color: $wolf-success-v2; }
-.license-badge--trial { color: $wolf-warning-v2; }
-.license-badge--expired { color: $wolf-danger-v2; }
-.license-badge--none { color: $wolf-text-tertiary-v2; }
+.license-badge--official { color: var(--status-success-foreground); }
+.license-badge--trial { color: var(--status-warning-foreground); }
+.license-badge--expired { color: var(--status-danger-foreground); }
+.license-badge--none { color: var(--status-neutral-foreground); }
 
 .customer-mobile-card-header {
   display: flex;

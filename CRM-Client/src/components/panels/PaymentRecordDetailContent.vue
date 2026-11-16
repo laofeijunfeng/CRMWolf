@@ -49,6 +49,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
+import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
 import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
@@ -56,7 +57,6 @@ import type { FileAttachmentItem } from '@/types/fileAttachment'
 import paymentApi, {
   type ApprovalInfo,
   type ApprovalInfoLite,
-  type ApprovalStatus,
   type PaymentConfirmationStatus,
   type PaymentPlanStatusSummary,
   type PaymentRecordDetailResponse,
@@ -207,37 +207,21 @@ const confirmationStatusClass = computed<string>(() => {
   return getConfirmationStatusClass(detailRecord.value?.confirmation_status)
 })
 
-const approvalStatus = computed<ApprovalStatus | 'DRAFT' | undefined>(() => {
+const approvalStatus = computed<string | undefined>(() => {
   const approval = detailApproval.value
   if (approval?.status !== undefined) return approval.status
 
   const phase = detailRecord.value?.approval_phase
-  if (phase === 'draft') return 'DRAFT'
   if (phase === 'pending_review') return 'PENDING'
   if (phase === 'approved') return 'APPROVED'
   if (phase === 'rejected') return 'REJECTED'
-  return undefined
+  return phase
 })
 
-const approvalStatusLabel = computed<string>(() => {
-  const labels: Record<ApprovalStatus | 'DRAFT', string> = {
-    DRAFT: '待提交',
-    PENDING: '审批中',
-    APPROVED: '已通过',
-    REJECTED: '已驳回',
-    CANCELLED: '已撤回',
-  }
-  const status = approvalStatus.value
-  return status === undefined ? '审批状态未知' : labels[status]
-})
-
-const approvalStatusClass = computed<string>(() => {
-  const status = approvalStatus.value
-  if (status === 'APPROVED') return 'status-success'
-  if (status === 'REJECTED' || status === 'CANCELLED') return 'status-danger'
-  if (status === 'PENDING') return 'status-warning'
-  return 'status-neutral'
-})
+// A record awaiting submission is not a generic approval instance.
+const isDraftApprovalPhase = computed<boolean>(() =>
+  detailApproval.value?.status === undefined && detailRecord.value?.approval_phase === 'draft'
+)
 
 const rejectionReason = computed<string>(() => {
   const approval = detailApproval.value
@@ -429,13 +413,21 @@ watch(
                 {{ confirmationStatusLabel }}
               </Badge>
               <Badge
-                v-if="hasRecord && approvalStatus"
-                :class="['record-status-badge', approvalStatusClass]"
+                v-if="hasRecord && isDraftApprovalPhase"
+                variant="status"
+                data-status-tone="neutral"
+                data-status-domain="paymentApprovalPhase"
+                data-status-value="draft"
                 role="status"
-                :aria-label="`审批状态：${approvalStatusLabel}`"
+                aria-label="审批状态：待提交"
               >
-                {{ approvalStatusLabel }}
+                待提交
               </Badge>
+              <ApprovalStatusBadge
+                v-else-if="hasRecord && approvalStatus"
+                :status="approvalStatus ?? ''"
+                size="small"
+              />
               <span v-if="detailRecord?.stage_name ?? props.stageName" class="stage-name">{{ detailRecord?.stage_name ?? props.stageName }}</span>
               <span v-else>{{ loading ? '正在加载回款记录' : '查看回款详情与审批进度' }}</span>
             </SheetDescription>
@@ -1048,8 +1040,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   gap: $wolf-space-lg-v2;
 }
 
-.record-status-badge,
-.approval-status-badge {
+.record-status-badge {
   white-space: nowrap;
 }
 
@@ -1069,23 +1060,6 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   color: $wolf-danger-text-v2;
 }
 
-.approval-status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-  border-color: transparent;
-}
-
-.approval-status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-  border-color: transparent;
-}
-
-.approval-status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
-  border-color: transparent;
-}
 
 .state-card-content {
   min-height: $record-empty-min-height;

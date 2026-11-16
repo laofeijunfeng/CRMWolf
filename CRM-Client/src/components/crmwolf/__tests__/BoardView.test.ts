@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import BoardView from '../BoardView.vue'
 import type { BoardProjection } from '../boardTypes'
@@ -61,7 +61,7 @@ const projection: BoardProjection = {
   },
 }
 
-function mountBoard(props: Record<string, unknown> = {}, slots: Record<string, string> = {}) {
+function mountBoard(props: Record<string, unknown> = {}, slots: Record<string, string> = {}): VueWrapper<InstanceType<typeof BoardView>> {
   return mount(BoardView, {
     props: {
       projection,
@@ -171,7 +171,7 @@ describe('BoardView', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 
-  it('selects one narrow-screen column', async () => {
+  it('shows all desktop columns and selects one narrow-screen column', async () => {
     let width = 1280
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: query.includes('max-width: 767px') && width <= 767,
@@ -182,7 +182,8 @@ describe('BoardView', () => {
     })))
 
     const desktop = mountBoard()
-    expect(desktop.findAll('[data-column-key]')).toHaveLength(2)
+    expect(desktop.get('[data-column-key="following"]').text()).toContain('星河科技')
+    expect(desktop.get('[data-column-key="won"]').text()).toContain('已成交')
     desktop.unmount()
 
     width = 390

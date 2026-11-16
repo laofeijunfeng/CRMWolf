@@ -91,7 +91,7 @@ const mapStatus = (status: ContractStatus): string => {
     'EXPIRED': 'expired',
     'TERMINATED': 'terminated'
   }
-  return statusMap[status]
+  return Object.prototype.hasOwnProperty.call(statusMap, status) ? statusMap[status] : status
 }
 
 const formatDate = (dateStr: string | null): string => {

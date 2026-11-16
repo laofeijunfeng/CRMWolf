@@ -1000,10 +1000,11 @@ function formatDateTime(dateStr: string | undefined | null): string {
 }
 
 
-function mapOpportunityStatus(status: number): 'active' | 'won' | 'lost' {
+function mapOpportunityStatus(status: number): string {
+  if (status === 0) return 'active'
   if (status === 1) return 'won'
   if (status === 2) return 'lost'
-  return 'active'
+  return String(status)
 }
 
 function getBoardStageClass(label: string): string {

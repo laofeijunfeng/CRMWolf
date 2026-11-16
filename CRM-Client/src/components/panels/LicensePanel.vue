@@ -12,11 +12,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import { HoverInfo } from '@/components/crmwolf'
-import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseApplicationStatus, type LicenseType } from '@/api/licenseApplication'
+import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseType } from '@/api/licenseApplication'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { getTodayLocalDate } from '@/utils/format'
+import { getStatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -125,26 +126,12 @@ const formatDate = (dateStr: string): string => {
   return date.toLocaleDateString('zh-CN')
 }
 
-// Get status label and color
-const getStatusInfo = (status: LicenseApplicationStatus): { label: string; color: string } => {
-  const statusMap: Record<string, { label: string; color: string }> = {
-    DRAFT: { label: '草稿', color: 'bg-slate-100 text-slate-700' },
-    PENDING: { label: '待审批', color: 'bg-amber-100 text-amber-700' },
-    PENDING_REVIEW: { label: '待审批', color: 'bg-amber-100 text-amber-700' },
-    APPROVED: { label: '已批准', color: 'bg-emerald-100 text-emerald-700' },
-    REJECTED: { label: '已拒绝', color: 'bg-red-100 text-red-700' },
-    ISSUED: { label: '已签发', color: 'bg-blue-100 text-blue-700' }
-  }
-  return statusMap[status] ?? { label: status, color: 'bg-gray-100 text-gray-700' }
-}
 
-// Get license type label and color
-const getLicenseTypeInfo = (type: LicenseType | string): { label: string; color: string } => {
-  const typeMap: Record<string, { label: string; color: string }> = {
-    TRIAL: { label: '试用', color: 'bg-purple-100 text-purple-700' },
-    OFFICIAL: { label: '正式', color: 'bg-blue-100 text-blue-700' }
-  }
-  return typeMap[type] ?? { label: type, color: 'bg-gray-100 text-gray-700' }
+// License types are categories, separate from the application workflow.
+const getLicenseTypeInfo = (type: LicenseType | string): { label: string; tone: StatusTone } => {
+  if (type === 'TRIAL') return { label: '试用', tone: 'info' }
+  if (type === 'OFFICIAL') return { label: '正式', tone: 'info' }
+  return { label: type, tone: 'neutral' }
 }
 
 // Get deployment name by ID
@@ -260,15 +247,25 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemBadges="{ item }">
-        <Badge :class="getLicenseTypeInfo(item.license_type).color" class="text-xs">
+        <Badge variant="status" :data-status-tone="getLicenseTypeInfo(item.license_type).tone" class="text-xs">
           {{ getLicenseTypeInfo(item.license_type).label }}
         </Badge>
-        <Badge :class="getStatusInfo(item.status).color" class="text-xs">
-          {{ getStatusInfo(item.status).label }}
+        <Badge
+          variant="status"
+          :data-status-tone="getStatusPresentation('licenseApplication', item.status).tone"
+          data-status-domain="licenseApplication"
+          :data-status-value="item.status"
+          :title="item.status == null || getStatusPresentation('licenseApplication', item.status).traceValue !== undefined ? `licenseApplication: ${String(item.status)}` : undefined"
+          class="text-xs"
+          role="status"
+        >
+          {{ getStatusPresentation('licenseApplication', item.status).label }}
         </Badge>
         <Badge
           v-if="isExpired(item.expiry_date)"
-          class="text-xs bg-red-100 text-red-700"
+          variant="status"
+          data-status-tone="danger"
+          class="text-xs"
         >
           已过期
         </Badge>

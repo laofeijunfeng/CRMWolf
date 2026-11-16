@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { config, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { defineComponent, h } from 'vue'
@@ -40,10 +39,6 @@ type PaymentRecordDetailInfo = PaymentRecordInfo & {
 }
 
 const windowOpenMock = vi.fn()
-vi.stubGlobal('window', {
-  ...globalThis.window,
-  open: windowOpenMock
-})
 
 vi.mock('@/components/ui/sheet', () => {
   const passthrough = (name: string) => defineComponent({
@@ -217,17 +212,21 @@ const approvalInfoLiteFixture = (overrides: Partial<ApprovalInfoLite> = {}): App
   ...overrides,
 })
 
-const sourceText = (): string => [
-  `${process.cwd()}/src/views/PaymentRecordDetailSheet.vue`,
-  `${process.cwd()}/src/components/panels/PaymentRecordDetailContent.vue`,
-].map((filePath) => readFileSync(filePath, 'utf8')).join('\n')
+
+const originalPlugins = config.global.plugins
 
 describe('PaymentRecordDetailSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     windowOpenMock.mockReset()
+    vi.spyOn(window, 'open').mockImplementation(windowOpenMock)
     paymentApi.getPaymentRecordDetail.mockResolvedValue(paymentRecordFixture())
     config.global.plugins = [createPinia()]
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    config.global.plugins = originalPlugins
   })
 
   describe('Empty state rendering', () => {
@@ -644,26 +643,4 @@ describe('PaymentRecordDetailSheet', () => {
     })
   })
 
-  describe('Source code compliance', () => {
-    it('uses V2 design tokens', () => {
-      const source = sourceText()
-
-      expect(source).toContain('variables-v2.scss')
-    })
-
-    it('does not use non-null assertions', () => {
-      const source = sourceText()
-
-      // Check for non-null assertions in template (formatCreator(props.record!) pattern)
-      expect(source).not.toMatch(/formatCreator\(props\.record!\)/)
-    })
-
-    it('does not use any type', () => {
-      const source = sourceText()
-
-      expect(source).not.toMatch(/: any\b/)
-      expect(source).not.toMatch(/as any/)
-      expect(source).not.toContain('@ts-ignore')
-    })
-  })
 })

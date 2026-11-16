@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h, type PropType } from 'vue'
 import Customers from '@/views/Customers.vue'
 import type { CustomerResponse } from '@/api/customer'
+import type * as ViewPreferenceModule from '@/api/viewPreference'
 
 const routeState = vi.hoisted(() => ({
   path: '/customers',
@@ -13,6 +15,8 @@ const customerApi = vi.hoisted(() => ({
   getCustomers: vi.fn(),
   getPublicCustomers: vi.fn(),
   getCustomerDetail: vi.fn(),
+  getOwnerFilterOptions: vi.fn().mockResolvedValue({ data: [] }),
+  getIndustryOptions: vi.fn().mockResolvedValue([]),
   claimCustomer: vi.fn(),
   updateCustomerStatus: vi.fn(),
   markAsLost: vi.fn(),
@@ -21,6 +25,8 @@ const customerApi = vi.hoisted(() => ({
 }))
 const userStore = vi.hoisted(() => ({ userInfo: { id: 9 } }))
 const permissionStore = vi.hoisted(() => ({
+  permissions: [] as Array<{ code: string }>,
+  loadState: 'ready',
   hasPermission: vi.fn(() => true),
   hasAnyPermission: vi.fn(() => true),
 }))
@@ -51,6 +57,10 @@ vi.mock('@/stores/header', () => ({ useHeaderStore: () => headerStore }))
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/errorHandler', () => ({ handleApiError }))
 vi.mock('@/utils/confirmDialog', () => ({ confirmDelete, confirmDialog }))
+vi.mock('@/api/viewPreference', async (importOriginal) => ({
+  ...(await importOriginal<typeof ViewPreferenceModule>()),
+  viewPreferenceApi: { list: vi.fn().mockResolvedValue([]) },
+}))
 vi.mock('vue-sonner', () => ({ toast }))
 
 vi.mock('@/components/crmwolf', () => ({
@@ -71,6 +81,7 @@ vi.mock('@/components/crmwolf', () => ({
       const editAction = props.getRowActions(row).primaryActions?.find(action => action.id === 'edit')
       return h('div', { key: row.id }, [
         slots['cell-account_name']?.({ row }),
+        slots['cell-status']?.({ row }),
         slots['cell-primary_contact']?.({ row }),
         slots['cell-owner']?.({ row }),
         editAction?.handler
@@ -188,6 +199,7 @@ const customerFixture = (): CustomerResponse => ({
 describe('Customers local detail sheet state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
     routeState.path = '/customers'
     routeState.query = {}
     headerStore.activeTab = ''
@@ -202,7 +214,7 @@ describe('Customers local detail sheet state', () => {
     const wrapper = mount(Customers)
     await flushPromises()
 
-    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="customer-account-name"]').trigger('click')
 
     const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
     expect(sheet.attributes('data-visible')).toBe('true')
@@ -277,7 +289,7 @@ describe('Customers local detail sheet state', () => {
     const wrapper = mount(Customers)
     await flushPromises()
 
-    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="customer-account-name"]').trigger('click')
 
     const sheet = wrapper.get('[data-testid="customer-detail-sheet"]')
     expect(sheet.attributes('data-visible')).toBe('true')
@@ -332,7 +344,7 @@ describe('Customers local detail sheet state', () => {
     const wrapper = mount(Customers)
     await flushPromises()
 
-    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="customer-account-name"]').trigger('click')
     await wrapper.get('[data-testid="edit-customer-cus_test_19"]').trigger('click')
     await flushPromises()
 
@@ -349,7 +361,7 @@ describe('Customers local detail sheet state', () => {
     const wrapper = mount(Customers)
     await flushPromises()
 
-    await wrapper.get('.link-text').trigger('click')
+    await wrapper.get('[data-testid="customer-account-name"]').trigger('click')
     await wrapper.get('[data-testid="edit-customer-cus_test_19"]').trigger('click')
     await flushPromises()
 

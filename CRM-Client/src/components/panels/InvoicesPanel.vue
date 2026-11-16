@@ -13,6 +13,7 @@ import ListCard from '@/components/crmwolf/ListCard.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import type { InvoiceApplicationResponse, InvoiceApplicationStatus, InvoiceTitleResponse, InvoiceType, TitleType } from '@/api/invoice'
 import { hasDownloadableInvoiceFile } from '@/utils/invoiceDownload'
+import { getStatusPresentation, type StatusPresentation } from '@/utils/statusPresentation'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -106,17 +107,7 @@ const getInvoiceTypeLabel = (type: InvoiceType): string => {
   return typeMap[type] ?? type
 }
 
-const getStatusInfo = (status: InvoiceApplicationStatus): { label: string; className: string } => {
-  const statusMap: Record<InvoiceApplicationStatus, { label: string; className: string }> = {
-    DRAFT: { label: '草稿', className: 'invoice-status invoice-status--draft' },
-    PENDING_REVIEW: { label: '审批中', className: 'invoice-status invoice-status--pending' },
-    APPROVED: { label: '已审批', className: 'invoice-status invoice-status--approved' },
-    REJECTED: { label: '已驳回', className: 'invoice-status invoice-status--rejected' },
-    ISSUED: { label: '已开票', className: 'invoice-status invoice-status--issued' },
-    CANCELLED: { label: '已取消', className: 'invoice-status invoice-status--cancelled' }
-  }
-  return statusMap[status] ?? { label: status, className: 'invoice-status invoice-status--draft' }
-}
+const getStatusInfo = (status: InvoiceApplicationStatus): StatusPresentation => getStatusPresentation('invoiceApplication', status)
 
 const canDownloadApplication = hasDownloadableInvoiceFile
 
@@ -264,7 +255,14 @@ const formatDate = (value: string | null): string => {
       </template>
 
       <template #itemBadges="{ item }">
-        <Badge :class="getStatusInfo(item.status).className" class="text-xs">
+        <Badge
+          variant="status"
+          :data-status-tone="getStatusInfo(item.status).tone"
+          data-status-domain="invoiceApplication"
+          :data-status-value="item.status"
+          :title="getStatusInfo(item.status).traceValue === undefined ? undefined : `invoiceApplication: ${item.status}`"
+          class="text-xs"
+        >
           {{ getStatusInfo(item.status).label }}
         </Badge>
       </template>
@@ -325,31 +323,6 @@ const formatDate = (value: string | null): string => {
   white-space: nowrap;
 }
 
-.invoice-status {
-  border: 1px solid transparent;
-}
-
-.invoice-status--draft {
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-}
-
-.invoice-status--pending {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-}
-
-.invoice-status--approved,
-.invoice-status--issued {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-}
-
-.invoice-status--rejected,
-.invoice-status--cancelled {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
-}
 
 .invoice-action-button {
   width: 32px;

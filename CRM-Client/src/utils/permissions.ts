@@ -21,7 +21,7 @@ export const checkResourcePermission = (
   scope?: string
 ): boolean => {
   const permissionStore = usePermissionStore()
-  const code = scope ? `${resource}:${action}:${scope}` : `${resource}:${action}`
+  const code = scope !== undefined && scope !== '' ? `${resource}:${action}:${scope}` : `${resource}:${action}`
   return permissionStore.hasPermission(code)
 }
 

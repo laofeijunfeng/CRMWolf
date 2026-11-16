@@ -642,14 +642,14 @@ const formatDateTime = (dateStr?: string): string => {
   })
 }
 
-const mapLeadStatus = (status: number): 'new' | 'following' | 'converted' | 'invalid' => {
+const mapLeadStatus = (status: number): string => {
   const map: Record<number, 'new' | 'following' | 'converted' | 'invalid'> = {
     0: 'new',
     1: 'following',
     2: 'converted',
     3: 'invalid'
   }
-  return map[status] || 'new'
+  return map[status] ?? String(status)
 }
 
 // ==================== Lifecycle ====================

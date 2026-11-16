@@ -7,7 +7,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import AmountText from './AmountText.vue'
 import AreaTrendChart from './AreaTrendChart.vue'
-import type { AreaTrendDatum, AreaTrendSeries } from './AreaTrendChart.vue'
 import type {
   BoardCardActivation,
   BoardCardPresentation,
@@ -15,6 +14,7 @@ import type {
   BoardProjection,
   BoardTrendPointPresentation,
   BoardValueType,
+  BoardTrendSeriesPresentation,
 } from './boardTypes'
 
 interface Props {
@@ -107,10 +107,10 @@ function viewAll(column: BoardColumnPresentation): void {
 function chartPoints(
   points: readonly BoardTrendPointPresentation[],
   series: BoardProjection['trend'],
-): AreaTrendDatum[] {
+): Record<string, unknown>[] {
   const seriesKeys = new Set(series?.series.map((item) => item.key) ?? [])
   return points.map((point) => {
-    const datum: AreaTrendDatum = { month: point.month }
+    const datum: Record<string, unknown> = { month: point.month }
     for (const key of seriesKeys) {
       if (!Object.prototype.hasOwnProperty.call(point.values, key)) continue
       datum[key] = point.values[key]
@@ -119,7 +119,7 @@ function chartPoints(
   })
 }
 
-function chartSeries(series: BoardProjection['trend']): AreaTrendSeries[] {
+function chartSeries(series: BoardProjection['trend']): BoardTrendSeriesPresentation[] {
   return series === null
     ? []
     : series.series.map((item) => ({

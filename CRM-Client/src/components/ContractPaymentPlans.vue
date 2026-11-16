@@ -163,14 +163,14 @@ const registerDefaultPayerName = computed<string>(() => {
   return currentPlan.value?.customer_name?.trim() ?? props.contractInfo?.customer_info?.account_name?.trim() ?? ''
 })
 
-function mapStatus(status: PaymentPlanStatus): 'pending' | 'overdue' | 'partial' | 'completed' {
+function mapStatus(status: PaymentPlanStatus): string {
   const statusMap: Record<PaymentPlanStatus, 'pending' | 'overdue' | 'partial' | 'completed'> = {
     PENDING: 'pending',
     OVERDUE: 'overdue',
     PARTIAL: 'partial',
     COMPLETED: 'completed',
   }
-  return statusMap[status]
+  return Object.prototype.hasOwnProperty.call(statusMap, status) ? statusMap[status] : status
 }
 
 function getStatusToneClass(status: PaymentPlanStatus): string {

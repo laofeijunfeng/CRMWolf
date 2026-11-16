@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { usePermissionStore } from '@/stores/permissions'
 import BottomNav from '@/components/crmwolf/BottomNav.vue'
+import appRouter from '@/router'
 
 enableAutoUnmount(afterEach)
 
@@ -36,7 +37,6 @@ describe('BottomNav account affordances', () => {
       updated_at: '2026-07-24T00:00:00Z',
     }]
   })
-
 
   it('offers primary destinations as links followed by the More disclosure', async () => {
     const { wrapper } = await mountNavigation()
@@ -82,5 +82,14 @@ describe('BottomNav account affordances', () => {
 
     expect(wrapper.emitted('logout')).toEqual([[]])
     expect(router.currentRoute.value.path).toBe('/customers')
+  })
+})
+
+describe('account settings route', () => {
+  it('requires authentication and has the account settings title', () => {
+    const accountRoute = appRouter.resolve('/settings/account')
+
+    expect(accountRoute?.meta.requiresAuth).toBe(true)
+    expect(accountRoute?.meta.title).toBe('账户设置')
   })
 })

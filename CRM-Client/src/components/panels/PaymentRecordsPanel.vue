@@ -30,10 +30,11 @@ const formatDate = (value: string | null | undefined): string => {
   return date.toLocaleDateString('zh-CN')
 }
 
-const mapStatus = (status: PaymentConfirmationStatus | undefined): 'pending' | 'confirmed' | 'rejected' => {
+const mapStatus = (status: PaymentConfirmationStatus | undefined): string => {
   if (status === 'CONFIRMED') return 'confirmed'
   if (status === 'DISPUTED') return 'rejected'
-  return 'pending'
+  if (status === undefined || status === 'PENDING') return 'pending'
+  return status
 }
 </script>
 
