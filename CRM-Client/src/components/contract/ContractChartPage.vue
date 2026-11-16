@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { Donut, GroupedBar } from '@unovis/ts'
 import { VisAxis, VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { Button } from '@/components/ui/button'
@@ -31,7 +32,8 @@ interface PieDatum { key: string, label: string, amount: number, fill: string }
 interface MonthDatum { index: number, label: string, count: number, amount: number, key: string }
 interface ContractBucketAction extends ChartBucketAction { card: ContractChartCard, bucket: ContractChartBucket }
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))']
-const MONTH_COLOR = 'hsl(var(--chart-1))'
+const MONTH_COLOR = 'hsl(var(--primary))'
+const isNarrow = useMediaQuery('(max-width: 720px)')
 const population = computed(() => props.chart?.population ?? 0)
 const totalAmount = computed(() => props.chart?.total_amount ?? 0)
 const donutCards = computed(() => (props.chart?.cards ?? []).filter((card) => card.key === 'license_type' || card.key === 'purchase_type'))
@@ -54,9 +56,11 @@ function pieData(card: ContractChartCard): PieDatum[] { return card.buckets.filt
 function pieConfig(card: ContractChartCard): ChartConfig { return Object.fromEntries(card.buckets.map((bucket, index) => [bucket.key, { label: bucket.label, color: sliceColor(index, bucket) }])) }
 function maxCount(card: ContractChartCard): number { return Math.max(...card.buckets.map((bucket) => bucket.count), 1) }
 function barWidth(card: ContractChartCard, bucket: ContractChartBucket): string { return `${Math.round((bucket.count / maxCount(card)) * 100)}%` }
-function monthData(card: ContractChartCard): MonthDatum[] { return card.buckets.map((bucket, index) => ({ index, key: bucket.key, label: bucket.label, count: bucket.count, amount: bucket.amount, [bucket.key]: countText(bucket) })) }
-function monthConfig(card: ContractChartCard): ChartConfig { return Object.fromEntries(card.buckets.map((bucket) => [bucket.key, { label: bucket.label, color: bucket.key === 'earlier' || bucket.key === 'unsigned' || bucket.key === 'future' ? 'hsl(var(--muted-foreground))' : MONTH_COLOR }])) }
+function monthLabel(value: number, narrow: boolean, card: ContractChartCard | null): string { const label = card?.buckets[Math.round(value)]?.label ?? ''; if (!narrow) return label; if (label === '未到期签署') return '未到\n期签\n署'; if (label === '未签署') return '未签\n署'; return label }
+function monthData(card: ContractChartCard | null): MonthDatum[] { return card?.buckets.map((bucket, index) => ({ index, key: bucket.key, label: bucket.label, count: bucket.count, amount: bucket.amount, [bucket.key]: countText(bucket) })) ?? [] }
+function monthConfig(card: ContractChartCard | null): ChartConfig { return Object.fromEntries((card?.buckets ?? []).map((bucket) => [bucket.key, { label: bucket.label, color: MONTH_COLOR }])) }
 function bucketActions(card: ContractChartCard): ContractBucketAction[] { return card.buckets.map((bucket) => ({ key: bucket.key, label: bucket.label, ariaLabel: `${bucket.label}，${countText(bucket)}`, value: countText(bucket), disabled: bucket.count === 0, card, bucket })) }
+function monthBucketActions(card: ContractChartCard | null): ContractBucketAction[] { return card ? bucketActions(card) : [] }
 function openBucket(card: ContractChartCard, bucket: ContractChartBucket): void {
   if (bucket.count === 0) return
   selectedCard.value = card
@@ -87,7 +91,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
         <template #content><ChartBucketActionList :actions="bucketActions(amountCard)" :aria-label="amountCard.title" test-id-prefix="contract-amount-bucket" @activate="activate"><template #default="{ action }"><span class="grid w-full grid-cols-[minmax(0,88px)_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm"><span class="truncate">{{ action.label }}</span><span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-primary" :style="{ width: barWidth(amountCard, action.bucket) }" /></span><span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ countText(action.bucket) }}</span></span></template></ChartBucketActionList></template>
       </ChartCardFrame>
       <ChartCardFrame v-if="monthCard" :card-key="monthCard.key" :title="monthCard.title" :description="monthCard.description" wide>
-        <template #content><ChartContainer :config="monthConfig(monthCard)" class="aspect-auto h-[240px] w-full"><VisXYContainer :data="monthData(monthCard)" :height="220"><VisGroupedBar :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.count" :color="(datum: MonthDatum) => datum.key === 'earlier' || datum.key === 'unsigned' || datum.key === 'future' ? 'hsl(var(--muted-foreground))' : MONTH_COLOR" :rounded-corners="4" :bar-padding="0.35" :events="{ [GroupedBar.selectors.bar]: { click: (datum: MonthDatum) => openMonthFromDatum(datum) } }" /><VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :tick-values="monthData(monthCard).map((datum) => datum.index)" :tick-format="() => ''" /><VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" /><ChartTooltip :triggers="chartTriggers(GroupedBar.selectors.bar, monthConfig(monthCard))" /></VisXYContainer></ChartContainer><ChartBucketActionList :actions="bucketActions(monthCard)" :aria-label="monthCard.title" test-id-prefix="contract-month-bucket" @activate="activate" /></template>
+        <template #content><ChartContainer :config="monthConfig(monthCard)" class="contract-chart-page__month-chart aspect-auto h-[240px] w-full"><VisXYContainer :data="monthData(monthCard)" :height="220" :margin="{ top: 20, right: 12, bottom: isNarrow ? 52 : 36, left: 56 }" :auto-margin="false"><VisGroupedBar :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.count" :color="() => MONTH_COLOR" :group-max-width="64" :bar-min-height="1" :rounded-corners="4" :events="{ [GroupedBar.selectors.bar]: { click: (datum: MonthDatum) => openMonthFromDatum(datum) } }" /><VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :tick-values="monthData(monthCard).map((datum) => datum.index)" :tick-format="(value: number) => monthLabel(value, isNarrow, monthCard)" :tick-text-width="isNarrow ? 20 : undefined" :tick-text-font-size="isNarrow ? '10px' : undefined" :tick-text-separator="isNarrow ? '' : undefined" :tick-text-force-word-break="isNarrow" /><VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" /><ChartTooltip :triggers="chartTriggers(GroupedBar.selectors.bar, monthConfig(monthCard))" /></VisXYContainer></ChartContainer><ChartBucketActionList class="contract-chart-page__month-actions sr-only" :actions="monthBucketActions(monthCard)" :aria-label="monthCard.title" test-id-prefix="contract-month-bucket" @activate="activate" /></template>
       </ChartCardFrame>
     </div>
     <template #overlays><ChartBucketDialog class="contract-chart-dialog" :open="dialogOpen" :title="selectedBucket?.label ?? '合同'" :description="bucketLoading && !bucketContracts ? '正在读取这一段合同…' : bucketError && !bucketContracts ? bucketError : `${selectedCard?.title ?? ''} · 共 ${bucketContracts?.total ?? selectedBucket?.count ?? 0} 份`" :loading="bucketLoading" :error="bucketError || null" :has-items="Boolean(bucketContracts)" :has-more="Boolean(bucketContracts && bucketContracts.contracts.length < bucketContracts.total)" :reset-key="bucketResetToken" test-id-prefix="contract-chart" @update:open="(open) => { if (!open) { dialogOpen = false; selectedCard = null; selectedBucket = null; emit('close-bucket') } }" @retry="emit('retry-bucket')" @load-more="emit('load-more')"><template #load-more-label>{{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}</template><template #items><div class="contract-chart-dialog-list"><button v-for="contract in bucketContracts?.contracts ?? []" :key="contract.id" type="button" @click="emit('open-contract', contract.id)"><span>{{ contract.name }}</span><small>{{ contract.customer_name || '无客户' }} · {{ moneyText(contract.amount) }}</small></button></div></template></ChartBucketDialog></template>
@@ -108,4 +112,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
 :deep(.contract-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; }
 .contract-chart-dialog { max-width: 32rem; }
 @media (max-width: 720px) { .contract-chart-page__grid { grid-template-columns: minmax(0, 1fr); } :deep(.contract-chart-page__donut-content) { grid-template-columns: minmax(0, 1fr); } }
+.contract-chart-page__month-actions:focus-within { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; clip-path: none; white-space: normal; }
+.contract-chart-page__month-actions:focus-within .chart-bucket-actions { gap: $wolf-space-xs-v2; }
+.contract-chart-page__month-actions:focus-within .chart-bucket-actions__action { min-height: $wolf-touch-target-min-v2; }
 </style>

@@ -4,7 +4,13 @@ import ContractChartPage from '../ContractChartPage.vue'
 import type { ContractChartResponse } from '@/api/contract'
 
 vi.mock('@unovis/ts', () => ({ Donut: { selectors: { segment: 'segment' } }, GroupedBar: { selectors: { bar: 'bar' } } }))
-vi.mock('@unovis/vue', () => Object.fromEntries(['VisAxis', 'VisDonut', 'VisGroupedBar', 'VisSingleContainer', 'VisXYContainer', 'VisTooltip', 'VisCrosshair'].map(name => [name, { template: '<div><slot /></div>' }])))
+vi.mock('@unovis/vue', () => ({
+  VisAxis: {
+    props: ['tickValues', 'tickFormat'],
+    template: '<div class="vis-axis"><span v-for="value in tickValues" :key="value">{{ tickFormat ? tickFormat(value) : value }}</span></div>',
+  },
+  ...Object.fromEntries(['VisDonut', 'VisGroupedBar', 'VisSingleContainer', 'VisXYContainer', 'VisTooltip', 'VisCrosshair'].map(name => [name, { template: '<div><slot /></div>' }])),
+}))
 
 const chart: ContractChartResponse = {
   population: 3,
@@ -12,7 +18,7 @@ const chart: ContractChartResponse = {
   cards: [
     { key: 'license_type', title: '许可类型', description: '合同许可', buckets: [{ key: 'annual', label: '年度', count: 2, amount: 80000, ratio: 0, amount_ratio: 67, preview: [], preview_total: 2 }, { key: 'blank', label: '未填写', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }] },
     { key: 'amount_band', title: '金额区间', description: '合同金额', buckets: [{ key: 'small', label: '小额', count: 2, amount: 20000, ratio: 0, amount_ratio: 17, preview: [], preview_total: 2 }] },
-    { key: 'signing_month', title: '签约月份', description: '签约趋势', buckets: [{ key: '2026-10', label: '10月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-11', label: '11月', count: 1, amount: 100000, ratio: 0, amount_ratio: 83, preview: [], preview_total: 1 }] },
+    { key: 'signing_month', title: '签约月份', description: '签约趋势', buckets: [{ key: 'earlier', label: '更早', count: 1, amount: 50000, ratio: 0, amount_ratio: 0, preview: [], preview_total: 1 }, { key: '2026-06', label: '6月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-07', label: '7月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-08', label: '8月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-09', label: '9月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-10', label: '10月', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: '2026-11', label: '11月', count: 1, amount: 100000, ratio: 0, amount_ratio: 83, preview: [], preview_total: 1 }, { key: 'future', label: '未到期签署', count: 0, amount: 0, ratio: 0, amount_ratio: 0, preview: [], preview_total: 0 }, { key: 'unsigned', label: '未签署', count: 1, amount: 20000, ratio: 0, amount_ratio: 17, preview: [], preview_total: 1 }] },
   ],
 }
 const wrappers: VueWrapper[] = []
@@ -31,6 +37,18 @@ describe('Contract chart bucket controls', () => {
     expect(wrapper.text()).toContain('许可类型')
     await wrapper.get('button[aria-label="年度，2 份 · ¥ 8 万"]').trigger('click')
     expect(wrapper.emitted('view-bucket')?.[0]).toEqual([chart.cards[0], chart.cards[0]?.buckets[0]])
+  })
+  it('maps every signing month bucket to an x-axis label without a visible duplicate list', () => {
+    const wrapper = render()
+    expect(wrapper.findAll('.vis-axis span').map((label) => label.text())).toEqual(['更早', '6月', '7月', '8月', '9月', '10月', '11月', '未到期签署', '未签署'])
+    expect(wrapper.find('.contract-chart-page__month-actions').classes()).toContain('sr-only')
+    expect(wrapper.get('button[aria-label="未到期签署，0 份 · ¥ 0"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('keeps non-empty special month buckets keyboard activatable', async () => {
+    const wrapper = render()
+    await wrapper.get('button[aria-label="未签署，1 份 · ¥ 2 万"]').trigger('click')
+    expect(wrapper.emitted('view-bucket')?.[0]?.[1]).toMatchObject({ key: 'unsigned' })
   })
 
   it('keeps month bucket actions and resets the dialog without a close loop', async () => {
