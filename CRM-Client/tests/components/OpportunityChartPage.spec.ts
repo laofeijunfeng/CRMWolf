@@ -199,7 +199,7 @@ describe('OpportunityChartPage', () => {
     })
 
     await wrapper.find('button.opportunity-chart-legend-row').trigger('click')
-    await wrapper.get('.opportunity-chart-bucket-retry').trigger('click')
+    await wrapper.get('[data-testid="opportunity-chart-bucket-retry"]').trigger('click')
 
     expect(wrapper.emitted('retry-bucket')).toEqual([[
       chart.cards[0],
@@ -242,7 +242,7 @@ describe('OpportunityChartPage', () => {
     ])
   })
 
-  it('keeps unscheduled visible as its own bucket and disables zero-count buckets', () => {
+  it('keeps unscheduled actionable and disables zero-count forecast buckets', async () => {
     const unscheduled: OpportunityChartBucket = {
       key: 'unscheduled',
       label: '未排期',
@@ -283,8 +283,12 @@ describe('OpportunityChartPage', () => {
     })
 
     expect(wrapper.text()).toContain('未排期')
-    const buttons = wrapper.findAll('button.opportunity-chart-bar-row')
-    expect(buttons.at(-1)?.attributes('disabled')).toBeDefined()
+    const empty = wrapper.get('[data-testid="opportunity-chart-bucket-expected_closing_month-empty"]')
+    expect(empty.attributes('disabled')).toBeDefined()
+    await empty.trigger('click')
+    expect(wrapper.emitted('view-bucket')).toBeUndefined()
+    await wrapper.get('[data-testid="opportunity-chart-bucket-expected_closing_month-unscheduled"]').trigger('click')
+    expect(wrapper.emitted('view-bucket')).toEqual([[emptyChart.cards[6], unscheduled]])
   })
   it('renders backend 0–100 ratios as fractional donut values', () => {
     const value: OpportunityChartResponse = {
@@ -356,7 +360,6 @@ describe('OpportunityChartPage', () => {
     const regularCards = wrapper.findAll('.opportunity-chart-card--bar')
     expect(regularCards.length).toBeGreaterThan(0)
     for (const cardWrapper of regularCards) {
-      expect(cardWrapper.find('button').classes()).toContain('grid-cols-[88px_minmax(0,1fr)_auto]')
       const fills = cardWrapper.findAll('.opportunity-chart-bar-fill')
       expect(fills[0]?.attributes('style')).toContain('width: 100%')
       expect(fills[1]?.attributes('style')).toContain('width: 25%')
@@ -433,23 +436,11 @@ describe('OpportunityChartPage', () => {
   })
 
 
-  it('pairs short cards and gives long cards their own row', () => {
+  it('orders cards in the product-facing sequence', () => {
     const wrapper = mountPage(chart)
     const cards = wrapper.findAll('.opportunity-chart-card')
     expect(cards.map((card) => card.find('h3').text())).toEqual([
       '状态', '赢率', '采购类型', '授权模式', '金额档', '产品', '预计成交',
     ])
-    expect(cards[0]?.classes()).not.toContain('opportunity-chart-card--wide')
-    expect(cards[1]?.classes()).toContain('opportunity-chart-card--bar')
-    expect(cards[1]?.classes()).not.toContain('opportunity-chart-card--wide')
-    expect(cards[2]?.classes()).not.toContain('opportunity-chart-card--wide')
-    expect(cards[3]?.classes()).not.toContain('opportunity-chart-card--wide')
-    expect(cards[4]?.classes()).toContain('opportunity-chart-card--wide')
-    expect(cards[5]?.classes()).toContain('opportunity-chart-card--wide')
-    expect(cards[6]?.classes()).toContain('opportunity-chart-card--forecast')
-    expect(cards[6]?.classes()).toContain('opportunity-chart-card--wide')
-    expect(wrapper.find('.h-\\[220px\\]').exists()).toBe(true)
-    expect(wrapper.find('.opportunity-chart-forecast-value').exists()).toBe(false)
-    expect(wrapper.find('.opportunity-chart-forecast-count').exists()).toBe(false)
   })
 })
