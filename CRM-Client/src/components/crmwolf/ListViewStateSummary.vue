@@ -216,6 +216,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 }
 
 .list-view-state-summary-remove {
+  position: relative;
   display: inline-flex;
   width: $wolf-touch-target-min-v2;
   height: $wolf-touch-target-min-v2;
@@ -225,22 +226,46 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   justify-content: center;
   flex-shrink: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: $wolf-radius-sm-v2;
   background: transparent;
   color: $wolf-text-tertiary-v2;
   cursor: pointer;
+  transition: $wolf-transition-hover-v2;
+}
+
+.list-view-state-summary-remove::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: $wolf-radius-sm-v2;
+  background: transparent;
+  content: '';
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: $wolf-transition-hover-v2;
+}
+.list-view-state-summary-remove > * {
+  position: relative;
+  z-index: 1;
 }
 
 .list-view-state-summary-remove:hover,
 .list-view-state-summary-remove:focus-visible {
-  background: $wolf-bg-hover-v2;
   color: $wolf-text-primary-v2;
+}
+
+.list-view-state-summary-remove:hover::before,
+.list-view-state-summary-remove:focus-visible::before {
+  background: $wolf-bg-hover-v2;
 }
 
 .list-view-state-summary-remove:focus-visible {
   outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
   outline-offset: $wolf-focus-ring-offset-v2;
 }
+
 
 .list-view-state-summary-clear,
 .list-view-state-summary-save {
