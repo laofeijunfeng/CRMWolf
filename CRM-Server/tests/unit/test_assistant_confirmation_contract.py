@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
+from app.models.assistant_follow_up_projection_job import AssistantFollowUpProjectionJob
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
@@ -67,6 +69,7 @@ def db(tmp_path, monkeypatch):
             Team.__table__,
             UserTeam.__table__,
             FollowUpTask.__table__,
+            AssistantFollowUpProjectionJob.__table__,
             FollowUpTaskEvent.__table__,
         ],
     )
@@ -199,8 +202,198 @@ async def test_confirmation_records_choice_and_receipt_once_for_the_same_request
     )
     visible = [(event.event_type, event.result_json.get("label")) for event in events]
     assert ("user_choice", "确认") in visible
-    assert ("receipt", "活动已写入") in visible
-    assert first.reply.message == "活动已写入"
+    assert ("receipt", "活动已写入，跟进任务待生成") in visible
+    assert first.reply.message == "活动已写入，跟进任务待生成"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "task_public_id", "expected_message"),
+    [
+        ("QUEUED", None, "活动已写入，跟进任务待生成"),
+        ("COMPLETED", "fut_created", "活动已写入，跟进任务已生成"),
+        ("COMPLETED", None, "活动已写入，无需生成跟进任务"),
+        ("SKIPPED", None, "活动已写入，无需生成跟进任务"),
+        ("FAILED", None, "活动已写入，跟进任务投影失败"),
+        ("EXHAUSTED", None, "活动已写入，跟进任务投影失败"),
+    ],
+)
+async def test_confirmation_receipt_preserves_activity_and_distinguishes_projection_outcome(
+    db, status, task_public_id, expected_message
+):
+    from app.services.assistant.confirmation import FollowUpProjectionReceipt, WriteActivityResult, execute_confirmation
+
+    session, _, _ = db
+    outcome, customer, _ = await freeze(db)
+    session.commit()
+
+    class Writer:
+        async def write_activity(self, db, *, task, command):
+            return WriteActivityResult(
+                success=True,
+                activity_public_id="act_confirmed",
+                error_code=None,
+                customer_id=customer.id,
+                follow_up_projection=FollowUpProjectionReceipt(
+                    status=status,
+                    job_public_id="afpj_confirmed",
+                    projection_run_id=17 if status != "QUEUED" else None,
+                    task_public_id=task_public_id,
+                    skip_reason="NO_VALID_ACTION" if status == "SKIPPED" else None,
+                    error_message="projection unavailable" if status in {"FAILED", "EXHAUSTED"} else None,
+                ),
+            )
+
+    confirmed, message = await execute_confirmation(session, outcome.task, writer=Writer())
+    assert message == expected_message
+    assert confirmed.committed_json == [
+        {"kind": "customer_activity", "public_id": "act_confirmed", "customer_id": customer.id}
+    ]
+    actions = session.query(AssistantAction).filter(AssistantAction.event_type.in_(["user_choice", "receipt"])).all()
+    assert len(actions) == 2
+    for action in actions:
+        assert action.result_json["activity_public_id"] == "act_confirmed"
+        assert action.result_json["follow_up_projection_status"] == status
+        assert action.result_json["follow_up_projection_job_public_id"] == "afpj_confirmed"
+        assert action.result_json["follow_up_projection_run_id"] == (17 if status != "QUEUED" else None)
+        assert action.result_json["follow_up_projection_task_public_id"] == task_public_id
+        if action.event_type == "receipt":
+            assert action.result_json["label"] == expected_message
+
+
+@pytest.mark.asyncio
+async def test_confirmation_without_projection_result_does_not_claim_a_generated_task(db):
+    from app.services.assistant.confirmation import WriteActivityResult, execute_confirmation
+
+    session, _, _ = db
+    outcome, _, _ = await freeze(db)
+
+    class OldWriter:
+        async def write_activity(self, db, *, task, command):
+            return WriteActivityResult(True, "act_legacy", None)
+
+    _, message = await execute_confirmation(session, outcome.task, writer=OldWriter())
+    assert message == "活动已写入"
+    receipt = session.query(AssistantAction).filter_by(event_type="receipt").one()
+    assert receipt.result_json["activity_public_id"] == "act_legacy"
+    assert receipt.result_json["label"] == message
+    assert receipt.result_json["follow_up_projection_status"] is None
+
+
+@pytest.mark.asyncio
+async def test_real_writer_receipt_reports_persisted_projection_outcome_on_replay(db):
+    from app.models.assistant_follow_up_projection_job import AssistantFollowUpProjectionJobStatus
+    from app.services.assistant.confirmation import execute_confirmation
+
+    session, _, _ = db
+    outcome, _, _ = await freeze(db)
+    session.commit()
+    command = outcome.task.authority_json["frozen_activity_command"]
+    first = await RealActivityWriter().write_activity(session, task=outcome.task, command=command)
+    session.commit()
+    session.add(
+        FollowUpTask(
+            id=42,
+            public_id="fut_receipt",
+            team_id=1,
+            customer_id=1,
+            owner_id="2",
+            creator_id="2",
+            title="生成的跟进任务",
+            due_at=datetime(2026, 8, 12, 10, 0, 0),
+            source_type="CUSTOMER_ACTIVITY",
+            source_key=f"activity:{first.activity_public_id}",
+            confidence=1.0,
+            task_hash="receipt-task-hash",
+        )
+    )
+    session.commit()
+    job = session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.COMPLETED
+    job.result_json = {"projection_run_id": 19, "created_task_ids": [42]}
+    session.commit()
+
+    _, message = await execute_confirmation(session, outcome.task, writer=RealActivityWriter())
+    assert first.follow_up_projection.status == "QUEUED"
+    assert message == "活动已写入，跟进任务已生成"
+    receipt = session.query(AssistantAction).filter_by(event_type="receipt").one()
+    assert receipt.result_json["follow_up_projection_status"] == "COMPLETED"
+    assert receipt.result_json["follow_up_projection_run_id"] == 19
+    assert receipt.result_json["follow_up_projection_task_public_id"] == "fut_receipt"
+
+
+@pytest.mark.asyncio
+async def test_durable_confirmation_kicks_projection_only_after_activity_receipt_commit(db, monkeypatch):
+    from app.services.assistant import turns
+    from app.services.assistant.task_state import load_waiting
+    from app.services.assistant_follow_up_projection_job_service import assistant_follow_up_projection_job_service
+
+    session, factory, _ = db
+    outcome, _, _ = await freeze(db)
+    session.commit()
+    monkeypatch.setattr(
+        "app.api.assistant._coordinator", AssistantCoordinator(NoChooser(), writer=RealActivityWriter())
+    )
+    monkeypatch.setattr(turns.DurableProgressReporter, "_record", lambda self, payload: None)
+    monkeypatch.setattr(turns, "schedule_turn", lambda *args, **kwargs: None)
+    observed = []
+
+    def kick(request):
+        with factory() as independent:
+            assert independent.query(CustomerActivity).count() == 1
+            assert independent.query(AssistantAction).filter_by(event_type="receipt").count() == 1
+            job = independent.query(AssistantFollowUpProjectionJob).one()
+            assert job.public_id == request.job_public_id
+            assert job.team_id == request.team_id == 1
+            observed.append(request.job_public_id)
+
+    monkeypatch.setattr(assistant_follow_up_projection_job_service, "kick", kick)
+    waiting = load_waiting(outcome.task)
+    turn, accepted = turns.accept_submit(
+        session, task=outcome.task, key="confirm-kick",
+        input_data={"kind": "confirm", "text": None, "choice": "confirm"},
+        action_id=waiting.action_id, expected_version=waiting.expected_version,
+    )
+    assert accepted
+    await turns.execute_turn(turn.id, factory=factory)
+    assert len(observed) == 1
+    await turns.execute_turn(turn.id, factory=factory)
+    assert len(observed) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_confirmation_never_kicks_uncommitted_projection(db, monkeypatch):
+    from app.services.assistant import turns
+    from app.services.assistant.task_state import load_waiting
+    from app.services.assistant_follow_up_projection_job_service import assistant_follow_up_projection_job_service
+
+    session, factory, _ = db
+    outcome, _, _ = await freeze(db)
+    session.commit()
+    monkeypatch.setattr(
+        "app.api.assistant._coordinator", AssistantCoordinator(NoChooser(), writer=RealActivityWriter())
+    )
+    monkeypatch.setattr(turns.DurableProgressReporter, "_record", lambda self, payload: None)
+    monkeypatch.setattr(
+        assistant_follow_up_projection_job_service,
+        "kick",
+        lambda request: pytest.fail("kicked rollback"),
+    )
+    monkeypatch.setattr(
+        "app.services.assistant.confirmation.apply_task_update",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("receipt failure")),
+    )
+    waiting = load_waiting(outcome.task)
+    turn, accepted = turns.accept_submit(
+        session, task=outcome.task, key="confirm-rollback",
+        input_data={"kind": "confirm", "text": None, "choice": "confirm"},
+        action_id=waiting.action_id, expected_version=waiting.expected_version,
+    )
+    assert accepted
+    await turns.execute_turn(turn.id, factory=factory)
+    with factory() as independent:
+        assert independent.query(CustomerActivity).count() == 0
+        assert independent.query(AssistantFollowUpProjectionJob).count() == 0
 
 
 @pytest.mark.asyncio

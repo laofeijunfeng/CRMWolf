@@ -16,20 +16,24 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from app.crud.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJobCRUD,
+    assistant_follow_up_projection_job_crud,
+)
 from app.crud.customer_activity import CustomerActivityCRUD, customer_activity_crud
 from app.crud.customer_activity_ai_job import CustomerActivityAIJobCRUD, customer_activity_ai_job_crud
+from app.crud.customer_activity_post_commit_job import (
+    CustomerActivityPostCommitJobCRUD,
+    customer_activity_post_commit_job_crud,
+)
 from app.crud.customer_opportunity_suggestion_job import (
     CustomerOpportunitySuggestionJobCRUD,
     customer_opportunity_suggestion_job_crud,
 )
-from app.services.customer_opportunity_suggestion_job_service import (
-    CustomerOpportunitySuggestionJobRequest,
-    CustomerOpportunitySuggestionJobService,
-    customer_opportunity_suggestion_job_service,
-)
-from app.crud.customer_activity_post_commit_job import (
-    CustomerActivityPostCommitJobCRUD,
-    customer_activity_post_commit_job_crud,
+from app.services.assistant_follow_up_projection_job_service import (
+    AssistantFollowUpProjectionJobRequest,
+    AssistantFollowUpProjectionJobService,
+    assistant_follow_up_projection_job_service,
 )
 from app.services.customer_activity_ai_job_service import (
     CustomerActivityAIJobRequest,
@@ -41,9 +45,7 @@ from app.services.customer_activity_contracts import (
     CustomerActivityProcessingStatus,
     CustomerActivitySubmissionSource,
 )
-from app.services.customer_activity_field_provenance import (
-    can_apply_ai_extracted_value,
-)
+from app.services.customer_activity_field_provenance import can_apply_ai_extracted_value
 from app.services.customer_activity_post_commit_job_service import (
     CustomerActivityPostCommitJobRequest,
     CustomerActivityPostCommitJobService,
@@ -57,6 +59,11 @@ from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceCommittedEventRequest,
     CustomerIntelligenceRefreshService,
     customer_intelligence_refresh_service,
+)
+from app.services.customer_opportunity_suggestion_job_service import (
+    CustomerOpportunitySuggestionJobRequest,
+    CustomerOpportunitySuggestionJobService,
+    customer_opportunity_suggestion_job_service,
 )
 from app.services.follow_up_task_confirmation_cleanup_service import (
     FollowUpTaskConfirmationCancelReason,
@@ -100,6 +107,7 @@ class CustomerActivityWriteResult:
     customer_intelligence_request: CustomerIntelligenceCommittedEventRequest | None
     ai_job: CustomerActivityAIJobRequest | None = None
     opportunity_suggestion_job: CustomerOpportunitySuggestionJobRequest | None = None
+    follow_up_projection_job: AssistantFollowUpProjectionJobRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -157,18 +165,23 @@ class CustomerActivityWriteService:
         ai_job_crud: CustomerActivityAIJobCRUD | None = None,
         post_commit_job_crud: CustomerActivityPostCommitJobCRUD | None = None,
         opportunity_suggestion_job_crud: CustomerOpportunitySuggestionJobCRUD | None = None,
+        follow_up_projection_job_crud: AssistantFollowUpProjectionJobCRUD | None = None,
         opportunity_suggestion_job_service: CustomerOpportunitySuggestionJobService | None = None,
         ai_job_service: CustomerActivityAIJobService | None = None,
         post_commit_job_service: CustomerActivityPostCommitJobService | None = None,
         intelligence_event_service: CustomerIntelligenceEventService | None = None,
         intelligence_refresh_service: CustomerIntelligenceRefreshService | None = None,
         confirmation_cleanup_service: FollowUpTaskConfirmationCleanupService | None = None,
+        follow_up_projection_job_service: AssistantFollowUpProjectionJobService | None = None,
     ) -> None:
         self.activity_crud = activity_crud or customer_activity_crud
         self.ai_job_crud = ai_job_crud or customer_activity_ai_job_crud
         self.post_commit_job_crud = post_commit_job_crud or customer_activity_post_commit_job_crud
         self.opportunity_suggestion_job_crud = (
             opportunity_suggestion_job_crud or customer_opportunity_suggestion_job_crud
+        )
+        self.follow_up_projection_job_crud = (
+            follow_up_projection_job_crud or assistant_follow_up_projection_job_crud
         )
         self.opportunity_suggestion_job_service = (
             opportunity_suggestion_job_service or customer_opportunity_suggestion_job_service
@@ -178,6 +191,9 @@ class CustomerActivityWriteService:
         self.intelligence_event_service = intelligence_event_service or customer_intelligence_event_service
         self.intelligence_refresh_service = intelligence_refresh_service or customer_intelligence_refresh_service
         self.confirmation_cleanup_service = confirmation_cleanup_service or follow_up_task_confirmation_cleanup_service
+        self.follow_up_projection_job_service = (
+            follow_up_projection_job_service or assistant_follow_up_projection_job_service
+        )
 
     def create_pending_from_form(
         self,
@@ -365,11 +381,15 @@ class CustomerActivityWriteService:
                 or int(existing.customer_id) != customer_id
             ):
                 raise CustomerActivitySubmissionConflictError("submission_id 已由其他提交使用")
+            request = self.follow_up_projection_job_service.enqueue_in_transaction(
+                db, activity=existing, actor_id=actor_id
+            )
             result = CustomerActivityWriteResult(
                 activity=existing,
                 activity_revision=int(existing.activity_revision or 1),
                 post_commit_job=None,
                 customer_intelligence_request=None,
+                follow_up_projection_job=request,
             )
         else:
             activity = self.activity_crud.create(
@@ -386,11 +406,15 @@ class CustomerActivityWriteService:
             activity = self._apply_finalization(
                 db, activity=activity, finalization=finalization, increment_revision=False
             )
+            request = self.follow_up_projection_job_service.enqueue_in_transaction(
+                db, activity=activity, actor_id=actor_id
+            )
             result = CustomerActivityWriteResult(
                 activity=activity,
                 activity_revision=int(activity.activity_revision or 1),
                 post_commit_job=None,
                 customer_intelligence_request=None,
+                follow_up_projection_job=request,
             )
         if before_commit is not None:
             before_commit(result)
@@ -572,6 +596,13 @@ class CustomerActivityWriteService:
                 reason="SOURCE_ACTIVITY_DELETED",
                 commit=False,
             )
+            self.follow_up_projection_job_crud.mark_unfinished_skipped_for_activity(
+                db,
+                team_id=int(activity.team_id),
+                activity_id=activity_id,
+                reason="SOURCE_ACTIVITY_DELETED",
+                commit=False,
+            )
             self.activity_crud.delete(
                 db,
                 activity,
@@ -606,6 +637,8 @@ class CustomerActivityWriteService:
             self.post_commit_job_service.kick(result.post_commit_job)
         if result.customer_intelligence_request is not None:
             self.intelligence_refresh_service.kick_committed_event_refresh(result.customer_intelligence_request)
+        if result.follow_up_projection_job is not None:
+            self.follow_up_projection_job_service.kick(result.follow_up_projection_job)
 
     def _write(
         self,
@@ -652,7 +685,11 @@ class CustomerActivityWriteService:
                     activity=activity,
                     trigger_type=intelligence_trigger_type,
                 )
-            if enqueue_opportunity_suggestion and str(getattr(activity, "submission_source", "")) == CustomerActivitySubmissionSource.AGENT.value:
+            if (
+                enqueue_opportunity_suggestion
+                and str(getattr(activity, "submission_source", ""))
+                == CustomerActivitySubmissionSource.AGENT.value
+            ):
                 opportunity_suggestion_job = self._enqueue_opportunity_suggestion_safely(db, activity)
             result = CustomerActivityWriteResult(
                 activity=activity,

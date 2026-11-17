@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any
 
 from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTaskProjectionTrigger
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.follow_up_task_projection_service import (
     FollowUpTaskProjectionResult,
     FollowUpTaskProjectionSkipReason,
     follow_up_task_projection_service,
 )
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,7 @@ class FollowUpTaskBackfillService:
         actor_id: str | None = None,
         now: datetime | None = None,
         commit: bool = True,
+        assistant_only: bool = False,
     ) -> FollowUpTaskBackfillResult:
         if days <= 0:
             raise ValueError("days 必须大于 0")
@@ -89,10 +92,21 @@ class FollowUpTaskBackfillService:
             team_id=team_id,
             cutoff=cutoff,
             limit=limit,
+            assistant_only=assistant_only,
         )
-        selected, duplicate_group_count, missing_owner_count, skipped_no_owner_count = self._select_latest_per_group(activities)
+        (
+            selected,
+            duplicate_group_count,
+            missing_owner_count,
+            skipped_no_owner_count,
+        ) = self._select_latest_per_group(activities)
         skipped_no_due_at_count = sum(1 for activity in selected if activity.next_follow_time is None)
-        projectable = [activity for activity in selected if activity.next_follow_time is not None]
+        projectable = [
+            activity
+            for activity in selected
+            if activity.next_follow_time is not None
+            and (not assistant_only or bool(activity.next_action and activity.next_action.strip()))
+        ]
 
         if dry_run:
             return FollowUpTaskBackfillResult(
@@ -149,11 +163,16 @@ class FollowUpTaskBackfillService:
         team_id: int | None,
         cutoff: datetime,
         limit: int,
+        assistant_only: bool = False,
     ) -> list[CustomerActivity]:
         query = db.query(CustomerActivity).filter(
             CustomerActivity.customer_id.isnot(None),
             CustomerActivity.occurred_at >= cutoff,
         )
+        if assistant_only:
+            query = query.filter(
+                CustomerActivity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+            )
         if team_id is not None:
             query = query.filter(CustomerActivity.team_id == team_id)
         return (

@@ -132,6 +132,22 @@ class _FakeConfirmationCleanup:
         return SimpleNamespace(cancelled_count=1)
 
 
+class _FakeFollowUpProjectionJobs:
+    def __init__(self) -> None:
+        self.calls = []
+        self.kick_calls = []
+
+    def enqueue_in_transaction(self, db, *, activity, actor_id):
+        self.calls.append((activity.id, activity.team_id, activity.activity_revision, actor_id))
+        from app.services.assistant_follow_up_projection_job_service import (
+            AssistantFollowUpProjectionJobRequest,
+        )
+
+        return AssistantFollowUpProjectionJobRequest(job_public_id="afpj_212", team_id=activity.team_id)
+
+    def kick(self, request):
+        self.kick_calls.append(request)
+
 def _activity_create():
     return SimpleNamespace(activity_kind="WECHAT_FOLLOW_UP", source_content="跟进内容")
 
@@ -281,12 +297,69 @@ def test_create_final_from_agent_persists_final_score_without_ai_job():
     assert opportunity_suggestion_jobs.kick_calls == [result.opportunity_suggestion_job]
 
 
+def test_assistant2_final_write_registers_durable_follow_up_projection_job():
+    db = _FakeSession()
+    activity_crud = _FakeActivityCRUD()
+    projection_jobs = _FakeFollowUpProjectionJobs()
+    service = CustomerActivityWriteService(
+        activity_crud=activity_crud,
+        ai_job_service=_FakeAIJobs(),
+        post_commit_job_service=_FakePostCommitJobs(),
+        opportunity_suggestion_job_service=_FakeOpportunitySuggestionJobs(),
+        intelligence_event_service=CustomerIntelligenceEventService(),
+        intelligence_refresh_service=_FakeIntelligenceRefresh(),
+        follow_up_projection_job_service=projection_jobs,
+    )
+    obj_in = SimpleNamespace(
+        activity_kind="WECHAT_FOLLOW_UP", source_content="跟进内容",
+        submission_id="assistant-command-1", submission_fingerprint="a" * 64,
+    )
+
+    result = service.create_final_from_assistant2(
+        db, obj_in=obj_in, finalization=_finalization(), customer_id=10,
+        creator_id="1", team_id=1, actor_id="1",
+    )
+
+    assert result.follow_up_projection_job.job_public_id == "afpj_212"
+    assert projection_jobs.calls == [(212, 1, 1, "1")]
+    assert db.commits == db.rollbacks == 0
+
+
+def test_assistant2_replay_reuses_durable_follow_up_projection_job():
+    db = _FakeSession()
+    activity_crud = _FakeActivityCRUD()
+    projection_jobs = _FakeFollowUpProjectionJobs()
+    existing = SimpleNamespace(
+        id=212, team_id=1, customer_id=10, creator_id="1", activity_revision=1,
+        submission_source="ASSISTANT_2", submission_fingerprint="a" * 64,
+    )
+    activity_crud.get_by_submission_id = lambda db, *, team_id, submission_id: existing
+    service = CustomerActivityWriteService(
+        activity_crud=activity_crud,
+        follow_up_projection_job_service=projection_jobs,
+    )
+    obj_in = SimpleNamespace(
+        activity_kind="WECHAT_FOLLOW_UP", source_content="跟进内容",
+        submission_id="assistant-command-1", submission_fingerprint="a" * 64,
+    )
+
+    result = service.create_final_from_assistant2(
+        db, obj_in=obj_in, finalization=_finalization(), customer_id=10,
+        creator_id="1", team_id=1, actor_id="1",
+    )
+
+    assert result.activity is existing
+    assert result.follow_up_projection_job.job_public_id == "afpj_212"
+    assert projection_jobs.calls == [(212, 1, 1, "1")]
+    assert db.commits == db.rollbacks == 0
+
 def test_assistant2_final_write_is_uncommitted_and_creates_no_legacy_work():
     db = _FakeSession()
     activity_crud = _FakeActivityCRUD()
     post_commit_jobs = _FakePostCommitJobs()
     suggestion_jobs = _FakeOpportunitySuggestionJobs()
     intelligence = _FakeIntelligenceRefresh()
+    projection_jobs = _FakeFollowUpProjectionJobs()
     service = CustomerActivityWriteService(
         activity_crud=activity_crud,
         ai_job_service=_FakeAIJobs(),
@@ -294,12 +367,11 @@ def test_assistant2_final_write_is_uncommitted_and_creates_no_legacy_work():
         opportunity_suggestion_job_service=suggestion_jobs,
         intelligence_event_service=CustomerIntelligenceEventService(),
         intelligence_refresh_service=intelligence,
+        follow_up_projection_job_service=projection_jobs,
     )
     obj_in = SimpleNamespace(
-        activity_kind="WECHAT_FOLLOW_UP",
-        source_content="跟进内容",
-        submission_id="assistant-command-1",
-        submission_fingerprint="a" * 64,
+        activity_kind="WECHAT_FOLLOW_UP", source_content="跟进内容",
+        submission_id="assistant-command-1", submission_fingerprint="a" * 64,
     )
 
     result = service.create_final_from_assistant2(
@@ -309,8 +381,8 @@ def test_assistant2_final_write_is_uncommitted_and_creates_no_legacy_work():
 
     assert result.activity.submission_source == "ASSISTANT_2"
     assert activity_crud.calls[0]["submission_id"] == "assistant-command-1"
-    assert activity_crud.calls[0]["submission_fingerprint"] == "a" * 64
     assert result.activity.effectiveness_score == 82
+    assert result.follow_up_projection_job is not None
     assert (result.post_commit_job, result.customer_intelligence_request,
             result.ai_job, result.opportunity_suggestion_job) == (None, None, None, None)
     assert not post_commit_jobs.calls and not suggestion_jobs.enqueue_calls and not intelligence.calls
@@ -327,6 +399,7 @@ def test_assistant2_writer_replays_persisted_activity_and_rejects_conflicting_id
     from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
     from app.schemas.customer_activity import CustomerActivityCreate
     from app.services.customer_activity_write_service import CustomerActivitySubmissionConflictError
+    from app.models.assistant_follow_up_projection_job import AssistantFollowUpProjectionJob
 
     @compiles(BigInteger, "sqlite")
     def bigint_as_integer(element, compiler, **kwargs):
@@ -339,6 +412,7 @@ def test_assistant2_writer_replays_persisted_activity_and_rejects_conflicting_id
 
     Base.metadata.create_all(engine, tables=[
         Customer.__table__, CustomerActivity.__table__, CustomerActivityDeletionTombstone.__table__,
+        AssistantFollowUpProjectionJob.__table__,
     ])
     monkeypatch.setattr("app.services.deal_journey_service.deal_journey_service.infer_for_customer", lambda *args: None)
     monkeypatch.setattr("app.services.operation_log_service.operation_log_service.log_customer_activity", lambda **kwargs: None)

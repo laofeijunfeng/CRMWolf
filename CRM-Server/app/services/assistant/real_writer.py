@@ -9,8 +9,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.crud.permission import permission_crud
+from app.crud.sales_commitment import follow_up_task_crud
 from app.schemas.customer_activity import CustomerActivityCreate
-from app.services.assistant.confirmation import WriteActivityResult, command_fingerprint
+from app.services.assistant.confirmation import (
+    FollowUpProjectionReceipt,
+    WriteActivityResult,
+    command_fingerprint,
+)
 from app.services.customer_activity_access_policy import (
     CustomerActivityAccessDeniedError,
     CustomerActivityCustomerNotFoundError,
@@ -92,4 +97,35 @@ class RealActivityWriter:
             )
         except (CustomerActivitySubmissionConflictError, SQLAlchemyError) as exc:
             raise AssistantActivityCommitUnknownError() from exc
-        return WriteActivityResult(True, str(result.activity.id), None, int(customer.id))
+        projection_receipt = None
+        if result.follow_up_projection_job is not None:
+            job = result.follow_up_projection_job
+            details = job.result_json or {}
+            task_ids = [
+                value
+                for key in ("created_task_ids", "updated_task_ids")
+                for value in details.get(key, [])
+                if isinstance(value, int)
+            ]
+            public_task_ids = follow_up_task_crud.list_public_ids_by_ids(
+                db, team_id=task.team_id, task_ids=task_ids
+            )
+            projection_receipt = FollowUpProjectionReceipt(
+                status=job.status if job.status != "RUNNING" else "QUEUED",
+                job_public_id=job.job_public_id,
+                projection_run_id=(
+                    details.get("projection_run_id")
+                    if isinstance(details.get("projection_run_id"), int)
+                    else None
+                ),
+                task_public_id=public_task_ids[0] if public_task_ids else None,
+                skip_reason=details.get("skip_reason") if isinstance(details.get("skip_reason"), str) else None,
+                error_message=details.get("error") if isinstance(details.get("error"), str) else None,
+            )
+        return WriteActivityResult(
+            True,
+            str(result.activity.id),
+            None,
+            int(customer.id),
+            projection_receipt,
+        )

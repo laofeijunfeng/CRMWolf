@@ -105,10 +105,31 @@ class FollowUpTaskProjectionService:
         activity_snapshot: CustomerActivity | None = None,
         team_id: int | None = None,
         attempt_count: int = 1,
+        expected_activity_revision: int | None = None,
+        expected_submission_source: str | None = None,
         commit: bool = True,
     ) -> FollowUpTaskProjectionResult:
         self._validate_trigger_type(trigger_type)
-        activity = activity_snapshot or customer_activity_crud.get_by_id(db, activity_id)
+        if activity_snapshot is not None:
+            activity = activity_snapshot
+        else:
+            query = db.query(CustomerActivity).filter(CustomerActivity.id == activity_id)
+            if expected_activity_revision is not None or expected_submission_source is not None:
+                query = query.with_for_update()
+            activity = query.one_or_none()
+        if activity is not None:
+            if team_id is not None and int(activity.team_id) != int(team_id):
+                raise ValueError("活动租户与投影任务不匹配")
+            if (
+                expected_activity_revision is not None
+                and int(activity.activity_revision or 1) != int(expected_activity_revision)
+            ):
+                raise ValueError("活动版本在投影期间已变化")
+            if (
+                expected_submission_source is not None
+                and activity.submission_source != expected_submission_source
+            ):
+                raise ValueError("活动提交来源在投影期间已变化")
         if activity is None:
             if team_id is None:
                 raise ValueError("活动不存在时必须提供 team_id 才能记录投影运行")

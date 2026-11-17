@@ -17,7 +17,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal
-from app.models.assistant import AssistantTask, AssistantTaskStatus
+from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.coordinator import AssistantInput
@@ -35,6 +35,10 @@ from app.services.assistant.failure_contract import (
 )
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_state import InvalidTaskTransitionError, TaskStateConflictError, load_waiting
+from app.services.assistant_follow_up_projection_job_service import (
+    AssistantFollowUpProjectionJobRequest,
+    assistant_follow_up_projection_job_service,
+)
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -790,6 +794,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
     from app.services.assistant.presentation import task_view
 
     followup_turn_id: int | None = None
+    projection_request: AssistantFollowUpProjectionJobRequest | None = None
 
     factory = factory or SessionLocal
     owner = uuid.uuid4().hex
@@ -913,12 +918,27 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             db.refresh(turn)
             db.refresh(outcome.task)
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
-            if outcome.reply.card:
-                data["card"] = outcome.reply.card
+            card = getattr(outcome.reply, "card", None)
+            if card:
+                data["card"] = card
             if followup is not None:
                 data["next_turn_id"] = followup.public_id
             add_event(db, turn, "waiting", data)
+            if turn.input_json.get("kind") == "confirm" and turn.input_json.get("choice") == "confirm":
+                receipt_id = (outcome.task.authority_json or {}).get("confirmation_receipt")
+                if isinstance(receipt_id, str):
+                    receipt = db.query(AssistantAction).filter_by(
+                        team_id=turn.team_id, task_id=turn.task_id, event_key=f"receipt:{receipt_id}"
+                    ).one_or_none()
+                    fields = receipt.result_json if receipt is not None else {}
+                    job_id = fields.get("follow_up_projection_job_public_id")
+                    if fields.get("follow_up_projection_status") == "QUEUED" and isinstance(job_id, str):
+                        projection_request = AssistantFollowUpProjectionJobRequest(
+                            job_public_id=job_id, team_id=turn.team_id
+                        )
             db.commit()
+            if projection_request is not None:
+                assistant_follow_up_projection_job_service.kick(projection_request)
             logger.info(
                 "assistant_turn_terminal result=succeeded task=%s turn=%s lease_version=%s attempts=%s "
                 "last_seq=%s event_name=waiting",

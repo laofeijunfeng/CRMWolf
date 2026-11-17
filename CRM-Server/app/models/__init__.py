@@ -38,6 +38,10 @@ from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
 )
+from app.models.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJob,
+    AssistantFollowUpProjectionJobStatus,
+)
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
 from app.models.customer_fact import (
     CustomerFact,

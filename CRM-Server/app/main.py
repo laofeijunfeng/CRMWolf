@@ -216,6 +216,11 @@ async def startup_event():
         start_customer_activity_post_commit_recovery_scheduler,
     )
     start_customer_activity_post_commit_recovery_scheduler()
+    logger.info("启动 Assistant 2.0 跟进任务投影恢复扫描...")
+    from app.tasks.assistant_follow_up_projection_recovery import (
+        start_assistant_follow_up_projection_recovery_scheduler,
+    )
+    start_assistant_follow_up_projection_recovery_scheduler()
 
     logger.info("启动出站通知持久任务恢复扫描...")
     from app.tasks.outbound_notification_recovery import (
@@ -260,6 +265,10 @@ async def shutdown_event():
     from app.tasks.customer_activity_post_commit_recovery import (
         stop_customer_activity_post_commit_recovery_scheduler,
     )
+    from app.tasks.assistant_follow_up_projection_recovery import (
+        stop_assistant_follow_up_projection_recovery_scheduler,
+    )
+    stop_assistant_follow_up_projection_recovery_scheduler()
     from app.tasks.outbound_notification_recovery import (
         stop_outbound_notification_recovery_scheduler,
     )

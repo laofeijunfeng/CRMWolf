@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from app.models.assistant import AssistantTask, AssistantWaitingType
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
@@ -23,11 +23,22 @@ CONFIRM_PROMPT = "确认后写入这条客户活动？"
 
 
 @dataclass(frozen=True)
+class FollowUpProjectionReceipt:
+    status: Literal["QUEUED", "COMPLETED", "SKIPPED", "FAILED", "EXHAUSTED"]
+    job_public_id: str | None = None
+    projection_run_id: int | None = None
+    task_public_id: str | None = None
+    skip_reason: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
 class WriteActivityResult:
     success: bool
     activity_public_id: str | None
     error_code: str | None
     customer_id: int | None = None
+    follow_up_projection: FollowUpProjectionReceipt | None = None
 
 
 class ActivityWriter(Protocol):
@@ -183,6 +194,31 @@ def freeze_confirmation(
     )
 
 
+def _projection_receipt_fields(projection: FollowUpProjectionReceipt | None) -> dict[str, object]:
+    return {
+        "follow_up_projection_status": projection.status if projection else None,
+        "follow_up_projection_job_public_id": projection.job_public_id if projection else None,
+        "follow_up_projection_run_id": projection.projection_run_id if projection else None,
+        "follow_up_projection_task_public_id": projection.task_public_id if projection else None,
+        "follow_up_projection_skip_reason": projection.skip_reason if projection else None,
+        "follow_up_projection_error_message": projection.error_message if projection else None,
+    }
+
+
+def _confirmation_receipt_message(projection: FollowUpProjectionReceipt | None) -> str:
+    if projection is None:
+        return "活动已写入"
+    if projection.status == "QUEUED":
+        return "活动已写入，跟进任务待生成"
+    if projection.status == "COMPLETED":
+        return "活动已写入，跟进任务已生成" if projection.task_public_id else "活动已写入，无需生成跟进任务"
+    if projection.status == "SKIPPED":
+        return "活动已写入，无需生成跟进任务"
+    if projection.status in {"FAILED", "EXHAUSTED"}:
+        return "活动已写入，跟进任务投影失败"
+    return "活动已写入"
+
+
 async def execute_confirmation(
     db: Session, task: AssistantTask, *, writer: ActivityWriter
 ) -> tuple[AssistantTask, str]:
@@ -244,25 +280,31 @@ async def execute_confirmation(
                 "confirmation": waiting,
                 "draft": task.draft_json or {},
                 "activity_kind": task.activity_kind,
+                **_projection_receipt_fields(write.follow_up_projection),
             },
             event_type="user_choice",
             event_key=f"choice:{command['submission_id']}",
             correlation_id=str(waiting.get("action_id") or ""),
         ),
     )
+    receipt_message = _confirmation_receipt_message(write.follow_up_projection)
     apply_task_update(
         db,
         result.task,
         TaskUpdate(
             action_actor="SYSTEM",
             action_name="show_write_receipt",
-            action_result={"label": "活动已写入", "activity_public_id": write.activity_public_id},
+            action_result={
+                "label": receipt_message,
+                "activity_public_id": write.activity_public_id,
+                **_projection_receipt_fields(write.follow_up_projection),
+            },
             event_type="receipt",
             event_key=f"receipt:{command['submission_id']}",
             correlation_id=str(waiting.get("action_id") or ""),
         ),
     )
-    return result.task, "活动已写入"
+    return result.task, receipt_message
 
 
 def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> tuple[AssistantTask, TaskWaiting]:
