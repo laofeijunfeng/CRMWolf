@@ -407,7 +407,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-bar-fill { display: block; min-width: 0; }
 .opportunity-chart-card-empty { padding: 12px 0; color: $wolf-text-tertiary-v2; font-size: 13px; text-align: center; }
 .opportunity-chart-dialog-state { min-height: 120px; }
-.opportunity-chart-opportunity-list { display: grid; max-height: min(55vh, 440px); gap: 2px; overflow-y: auto; }
+.opportunity-chart-opportunity-list { display: grid; gap: 2px; }
 .opportunity-chart-opportunity { display: flex; width: 100%; min-height: 52px; justify-content: space-between; gap: 16px; padding: 8px 10px; text-align: left; }
 .opportunity-chart-opportunity > span:first-child { min-width: 0; }
 .opportunity-chart-opportunity strong, .opportunity-chart-opportunity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

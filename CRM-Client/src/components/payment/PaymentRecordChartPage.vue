@@ -745,8 +745,6 @@ function retryBucket(): void {
 .payment-record-chart__dialog-list {
   display: flex;
   flex-direction: column;
-  max-height: 24rem;
-  overflow: auto;
   gap: $wolf-space-sm-v2;
 }
 

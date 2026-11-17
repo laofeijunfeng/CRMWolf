@@ -104,7 +104,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
 .contract-chart-page__heading h2 { margin: 0; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
 .contract-chart-page__heading p,.contract-chart-page__refresh-error { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; font-size: $wolf-font-size-body-v2; }
 .contract-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
-.contract-chart-dialog-list { display: flex; max-height: 24rem; flex-direction: column; overflow: auto; }
+.contract-chart-dialog-list { display: flex; flex-direction: column; }
 .contract-chart-dialog-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; border-bottom: 1px solid $wolf-border-default-v2; background: transparent; padding: $wolf-space-sm-v2 0; text-align: left; }
 .contract-chart-dialog-list small { color: $wolf-text-tertiary-v2; }
 .contract-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }
