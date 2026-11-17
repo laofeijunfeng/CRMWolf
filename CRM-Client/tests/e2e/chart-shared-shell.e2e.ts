@@ -110,7 +110,15 @@ const opportunityChart = {
     { key: 'license_type', buckets: [bucket('SUBSCRIPTION', '订阅', 11, previewOpportunity('opp_5', '订阅商机'))] },
     { key: 'amount_band', buckets: [bucket('100000_500000', '10万-50万', 11, previewOpportunity('opp_6', '金额商机'))] },
     { key: 'product', buckets: [bucket('crm', 'CRM', 11, previewOpportunity('opp_7', 'CRM商机'))] },
-    { key: 'expected_closing_month', buckets: [bucket('2026-12', '2026年12月', 11, previewOpportunity('opp_8', '十二月商机'))] },
+    { key: 'expected_closing_month', buckets: [
+      bucket('2026-11', '11月', 2, previewOpportunity('opp_8', '十一月商机'), 400000),
+      bucket('2026-12', '12月', 6, previewOpportunity('opp_9', '十二月商机'), 1200000),
+      bucket('2027-01', '1月', 1, previewOpportunity('opp_10', '一月商机'), 200000),
+      bucket('2027-02', '2月', 0, previewOpportunity('opp_11', '空二月商机'), 0),
+      bucket('2027-03', '3月', 1, previewOpportunity('opp_12', '三月商机'), 100000),
+      bucket('2027-04', '4月', 0, previewOpportunity('opp_13', '空四月商机'), 0),
+      bucket('unscheduled', '未排期', 1, previewOpportunity('opp_14', '未排期商机'), 80000),
+    ] },
   ],
 }
 
@@ -272,9 +280,9 @@ test.describe('fixture-backed chart shared shell regression', () => {
       await expect(disabled).toBeDisabled()
       await expect(page.getByRole('dialog')).toHaveCount(0)
       const enabled = chartSection.getByRole('button', { name: config.enabled }).first()
+      const dialog = page.getByRole('dialog')
       await enabled.focus()
       await enabled.press('Enter')
-      const dialog = page.getByRole('dialog')
       await expect(dialog).toBeVisible()
       await expect(dialog.getByText(config.firstRecord, { exact: true })).toBeVisible()
       expect(state.requests.find((request) => request.pathname === config.endpoint)?.query).toMatchObject({
@@ -312,6 +320,83 @@ test.describe('fixture-backed chart shared shell regression', () => {
       expect(widths.scroll).toBeLessThanOrEqual(widths.client + 1)
     })
   }
+
+  test('opportunities: forecast preserves seven buckets and amount heights at narrow widths', async ({ page }) => {
+    const state: FixtureState = { requests: [], chartFailures: {}, bucketFailures: {} }
+    await installApi(page, state)
+    await page.setViewportSize({ width: 1440, height: 1200 })
+    await page.goto('/opportunities')
+    await page.getByRole('tab', { name: '图表', exact: true }).click()
+    const card = page.locator('.opportunity-chart-card--forecast')
+    const month = card.getByTestId('opportunity-chart-bucket-expected_closing_month-2026-11')
+    const peak = card.getByTestId('opportunity-chart-bucket-expected_closing_month-2026-12')
+    const unscheduled = card.getByTestId('opportunity-chart-bucket-expected_closing_month-unscheduled')
+    const dialog = page.getByRole('dialog')
+    await expect(card.getByRole('heading', { name: '预计成交', exact: true })).toBeVisible()
+    await expect(card.getByTestId('opportunity-chart-bucket-expected_closing_month-2027-02')).toBeDisabled()
+    await expect(card.getByTestId('opportunity-chart-bucket-expected_closing_month-2027-04')).toBeDisabled()
+    await expect(unscheduled).toBeEnabled()
+    await expect(month.locator('.opportunity-chart-forecast-fill')).toHaveCSS('background-color', 'rgb(37, 99, 235)')
+    await expect(unscheduled.locator('.opportunity-chart-forecast-fill')).toHaveCSS('background-color', 'rgb(100, 116, 139)')
+    await expect(unscheduled).toHaveCSS('border-left-style', 'dashed')
+    const barWidths = await card.locator('.opportunity-chart-forecast-fill').evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().width)))
+    expect(barWidths).toEqual([42, 42, 42, 42, 42, 42, 42])
+    await card.scrollIntoViewIfNeeded()
+    await card.screenshot({ path: path.join(evidence, 'crm118-forecast-desktop.png') })
+
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await card.scrollIntoViewIfNeeded()
+      for (const label of ['11月', '12月', '1月', '2月', '3月', '4月', '未排期']) {
+        const text = card.getByText(label, { exact: true })
+        await expect(text).toBeVisible()
+        const geometry = await text.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return { left: rect.left, right: rect.right, scroll: element.scrollWidth, client: element.clientWidth }
+        })
+        expect(geometry.left).toBeGreaterThanOrEqual(0)
+        expect(geometry.right).toBeLessThanOrEqual(width)
+        expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1)
+      }
+      const geometry = await card.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, scroll: element.scrollWidth, client: element.clientWidth }
+      })
+      expect(geometry.left).toBeGreaterThanOrEqual(0)
+      expect(geometry.right).toBeLessThanOrEqual(width)
+      expect(geometry.scroll).toBeLessThanOrEqual(geometry.client + 1)
+      const height = await month.locator('.opportunity-chart-forecast-fill').evaluate((element) => element.getBoundingClientRect().height)
+      const peakHeight = await peak.locator('.opportunity-chart-forecast-fill').evaluate((element) => element.getBoundingClientRect().height)
+      expect(height / peakHeight).toBeCloseTo(1 / 3, 1)
+      await card.screenshot({ path: path.join(evidence, `crm118-forecast-${width}.png`) })
+    }
+
+    await page.setViewportSize({ width: 375, height: 900 })
+    await month.focus()
+    await page.keyboard.press('Tab')
+    await page.keyboard.press('Shift+Tab')
+    await expect(month).toHaveCSS('outline-style', 'solid')
+    await expect(month).toBeFocused()
+    await card.screenshot({ path: path.join(evidence, 'crm118-forecast-focus.png') })
+    await month.press('Enter')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: '11月', exact: true })).toBeVisible()
+    expect(state.requests.filter((request) => request.pathname.endsWith('/chart/opportunities')).at(-1)?.query).toMatchObject({ chart: 'expected_closing_month', bucket: '2026-11' })
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(month).toBeFocused()
+    await unscheduled.click()
+    await expect(dialog.getByRole('heading', { name: '未排期', exact: true })).toBeVisible()
+    await expect(dialog).toHaveCSS('opacity', '1')
+    expect(state.requests.filter((request) => request.pathname.endsWith('/chart/opportunities')).at(-1)?.query).toMatchObject({ chart: 'expected_closing_month', bucket: 'unscheduled' })
+    const bounds = await dialog.boundingBox()
+    expect(bounds?.x).toBeGreaterThanOrEqual(0)
+    expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(375)
+    await page.screenshot({ path: path.join(evidence, 'crm118-forecast-dialog.png') })
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(unscheduled).toBeFocused()
+  })
 
   test('payments: zero-count month opens while ARR null cannot open and zero percent can', async ({ page }) => {
     const state: FixtureState = { requests: [], chartFailures: {}, bucketFailures: {} }

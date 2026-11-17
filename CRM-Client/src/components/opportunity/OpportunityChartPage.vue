@@ -332,7 +332,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                     >
                       <template #default="{ action }">
                         <span class="opportunity-chart-forecast-track">
-                          <span class="opportunity-chart-bar-fill opportunity-chart-forecast-fill" :style="{ backgroundColor: action.color, ...forecastBarStyle(action.card, action.bucket) }" />
+                          <span class="opportunity-chart-bar-fill opportunity-chart-forecast-fill" :class="isMutedBucket(action.bucket) ? 'bg-muted-foreground' : 'bg-primary'" :style="forecastBarStyle(action.card, action.bucket)" />
                         </span>
                         <span class="opportunity-chart-forecast-label">{{ action.label }}</span>
                       </template>
@@ -422,12 +422,12 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-forecast-grid { position: absolute; inset: 4px 0 18px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .opportunity-chart-forecast-grid span { border-top: 1px solid $wolf-border-light-v2; }
 .opportunity-chart-forecast-columns { position: relative; z-index: 1; display: flex; height: 220px; align-items: flex-end; gap: $wolf-space-sm-v2; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { display: grid; height: 100%; min-width: 0; flex: 1 1 0; grid-template-rows: minmax(0, 1fr) 16px; align-items: stretch; gap: 2px; padding: 0 4px; text-align: center; }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { display: grid; height: 100%; min-width: 0; flex: 1 1 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; gap: 2px; padding: 0 4px; text-align: center; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: $wolf-space-sm-v2; border-left: 1px dashed $wolf-border-default-v2; border-radius: 0; padding-left: $wolf-space-md-v2; }
-.opportunity-chart-forecast-track { display: flex; min-height: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
+.opportunity-chart-forecast-track { display: flex; width: 100%; min-height: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
 .opportunity-chart-forecast-fill { display: block; width: min(42px, 72%); min-width: 0; min-height: 0; border-radius: $wolf-radius-sm-v2 $wolf-radius-sm-v2 0 0; transition: height .2s ease; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column:disabled .opportunity-chart-forecast-fill) { background: $wolf-bg-muted-v2 !important; }
-.opportunity-chart-forecast-label { overflow: hidden; color: $wolf-text-primary-v2; font-size: 12px; font-weight: 500; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.opportunity-chart-forecast-label { min-height: 16px; overflow-wrap: anywhere; color: $wolf-text-primary-v2; font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center; }
 .opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 18px; left: 0; z-index: 2; border-top: 1px solid $wolf-border-default-v2; pointer-events: none; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:not(:disabled):hover) { background: $wolf-bg-muted-v2; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:focus-visible) { outline: 2px solid $wolf-focus-ring-color-v2; outline-offset: 2px; }
@@ -439,7 +439,9 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 @media (max-width: 600px) {
   .opportunity-chart-forecast-plot { grid-template-columns: 44px minmax(0, 1fr); }
   .opportunity-chart-forecast-y-axis { padding-right: 6px; font-size: 10px; }
-  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { padding-right: 2px; padding-left: 2px; }
-  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: 0; padding-left: $wolf-space-sm-v2; }
+  .opportunity-chart-forecast-columns { gap: $wolf-space-xs-v2; }
+  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { padding-right: 1px; padding-left: 1px; }
+  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: 0; padding-left: $wolf-space-xs-v2; }
+  .opportunity-chart-forecast-label { font-size: 11px; }
 }
 </style>
