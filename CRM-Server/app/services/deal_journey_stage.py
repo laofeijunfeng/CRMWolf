@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app.constants.approval_phase import ApprovalPhase
 from app.models.contract import Contract
 from app.models.deal_journey import CustomerDealJourney, DealJourneyStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
@@ -20,6 +21,7 @@ BoardStageKey = Literal[
     "contract_processing",
     "payment_processing",
     "invoice_processing",
+    "approval_rejected",
     "completed",
     "lost",
 ]
@@ -31,6 +33,7 @@ BOARD_STAGE_LABELS: dict[BoardStageKey, str] = {
     "contract_processing": "签约中",
     "payment_processing": "回款中",
     "invoice_processing": "开票中",
+    "approval_rejected": "审批未通过",
     "completed": "已完成",
     "lost": "已输单",
 }
@@ -43,6 +46,7 @@ BOARD_COLUMNS: list[tuple[BoardStageKey, str, str]] = [
     ("contract_processing", "签约中", "已创建合同，正在签约或合同履约前置处理"),
     ("payment_processing", "回款中", "已有回款计划或回款记录，合同尚未完成回款"),
     ("invoice_processing", "开票中", "已有发票申请，仍有发票未完成开具"),
+    ("approval_rejected", "审批未通过", "商机审批未通过"),
     ("completed", "已完成", "旅程已完成闭环"),
     ("lost", "已输单", "商机或旅程已输单"),
 ]
@@ -88,6 +92,8 @@ def infer_board_stage(
         return "lost"
     if journey.status == DealJourneyStatus.COMPLETED:
         return "completed"
+    if opportunity is not None and opportunity.approval_phase == ApprovalPhase.REJECTED.value:
+        return "approval_rejected"
     if invoice_summary.application_count > invoice_summary.issued_count:
         return "invoice_processing"
     if payment_summary.plan_count > 0 or payment_summary.record_count > 0:

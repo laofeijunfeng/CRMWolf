@@ -10,6 +10,7 @@ import {
   dealJourneyProgressPercent,
   type DealJourneyBoardStage
 } from '@/utils/dealJourney'
+import { getStatusPresentation } from '@/utils/statusPresentation'
 
 const PREVIEW_LIMIT = 3
 const HIDDEN_JOURNEY_STATUSES = new Set(['LOST', 'ARCHIVED'])
@@ -49,6 +50,7 @@ const getJourneyProgressLabel = (journey: DealJourney): string =>
 const boardStageBadgeClass = (stage: DealJourneyBoardStage): string => {
   if (stage === 'lost') return 'status-danger'
   if (stage === 'completed') return 'status-success'
+  if (stage === 'approval_rejected') return `status-${getStatusPresentation('businessJourney', stage).tone}`
   if (
     stage === 'closing_soon'
     || stage === 'contract_processing'

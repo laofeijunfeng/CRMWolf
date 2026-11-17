@@ -177,6 +177,13 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
                     <div class="journey-tag-row">
                       <Badge
+                        v-if="card.current_board_stage === 'approval_rejected'"
+                        variant="outline"
+                        class="journey-info-tag status-warning"
+                      >
+                        审批未通过 · 0%
+                      </Badge>
+                      <Badge
                         v-if="shouldShowOpportunityStage(card)"
                         variant="outline"
                         class="journey-info-tag bg-emerald-50 text-emerald-700 border-emerald-100"
@@ -486,6 +493,13 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 .business-board-stage--emerald { --column-bg: rgb(236 253 245); }
 .business-board-stage--slate { --column-bg: rgb(248 250 252); }
 .business-board-stage--rose { --column-bg: rgb(255 241 242); }
+.business-board-stage--warning { --column-bg: var(--status-warning-background); }
+
+.status-warning {
+  color: var(--status-warning-foreground);
+  background-color: var(--status-warning-background);
+  border-color: var(--status-warning-background);
+}
 
 .spinning {
   animation: business-board-spin 0.8s linear infinite;

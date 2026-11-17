@@ -5,6 +5,7 @@ export type StatusDomain =
   | 'customer'
   | 'customerDerived'
   | 'opportunity'
+  | 'businessJourney'
   | 'contract'
   | 'invoice'
   | 'invoiceApplication'
@@ -67,6 +68,9 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     active: { label: '跟进中', tone: 'warning' },
     won: { label: '已赢单', tone: 'success' },
     lost: { label: '已输单', tone: 'danger' },
+  },
+  businessJourney: {
+    approval_rejected: { label: '审批未通过', tone: 'warning' },
   },
   contract: {
     draft: { label: '草稿', tone: 'neutral' },

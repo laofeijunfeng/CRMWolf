@@ -47,6 +47,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
+vi.mock('@/utils/renameDialog', () => ({ renameDialog: vi.fn().mockResolvedValue('审批未通过视图') }))
 vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'DealJourneyDetailSheet',
@@ -181,7 +182,7 @@ const TableStub = defineComponent({
     contentHidden: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
   },
-  emits: ['update:view-display-mode', 'row-click', 'retry-view-apply'],
+  emits: ['update:view-display-mode', 'row-click', 'retry-view-apply', 'filter-apply', 'save-current-view'],
   setup: (props, { emit, slots }) => () => h('section', {
     'data-testid': 'table-projection',
     'data-display-mode': props.displayMode,
@@ -403,6 +404,29 @@ describe('BusinessJourneys', () => {
       { field: 'status', op: 'eq', value: 'LOST' },
     ])
     expect(wrapper.findComponent(BusinessJourneyBoardView).exists()).toBe(true)
+  })
+
+  it('retains approval rejected scope after saving and switching to a custom view', async () => {
+    viewPreferenceMocks.createCustomView.mockImplementation(async (_key, payload) => ({
+      ...customLostBoardViewResponse.items[0],
+      config: payload.config,
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    useHeaderStore().setActiveTab('approval_rejected')
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('filter-apply', [
+      { field: 'owner_id', op: 'eq', value: '7' },
+    ])
+    await flushPromises()
+    wrapper.getComponent(BusinessJourneyTableView).vm.$emit('save-current-view')
+    await flushPromises()
+
+    const params = journeyApiMocks.list.mock.calls.at(-1)?.[0]
+    expect(params?.tab).toBe('all')
+    expect(JSON.parse(params?.filters ?? '[]')).toContainEqual({
+      field: 'stage', op: 'eq', value: 'approval_rejected',
+    })
   })
 
   it('keeps a failed custom view apply stable until explicit retry', async () => {

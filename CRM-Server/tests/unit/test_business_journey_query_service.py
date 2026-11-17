@@ -286,6 +286,52 @@ def _seed_query_case(db: Session) -> dict[str, CustomerDealJourney]:
     return seeded
 
 
+def _seed_rejected_query_case(db: Session) -> dict[str, CustomerDealJourney]:
+    seeded = _seed_query_case(db)
+    for key in ("opportunity_owned", "foreign", "completed", "lost"):
+        opportunity = db.get(Opportunity, seeded[key].primary_opportunity_id)
+        opportunity.approval_phase = ApprovalPhase.REJECTED.value
+
+    other_customer = Customer(
+        team_id=2,
+        account_name="Other team customer",
+        city="Shanghai",
+        owner_id="1",
+        creator_id="1",
+    )
+    db.add(other_customer)
+    db.flush()
+    other_opportunity = Opportunity(
+        team_id=2,
+        opportunity_number="OPP-OTHER-TEAM",
+        opportunity_name="Other team rejected opportunity",
+        customer_id=other_customer.id,
+        total_amount=Decimal("100"),
+        user_count=1,
+        unit_price=Decimal("100"),
+        license_type="SUBSCRIPTION",
+        subscription_years=1,
+        purchase_type="NEW",
+        expected_closing_date=date(2026, 12, 31),
+        win_probability=50,
+        owner_id="1",
+        creator_id="1",
+        approval_phase=ApprovalPhase.REJECTED.value,
+    )
+    db.add(other_opportunity)
+    db.flush()
+    other_journey = CustomerDealJourney(
+        team_id=2,
+        customer_id=other_customer.id,
+        primary_opportunity_id=other_opportunity.id,
+        name="Other team rejected journey",
+        status=DealJourneyStatus.ACTIVE,
+    )
+    db.add(other_journey)
+    db.commit()
+    seeded["other_team"] = other_journey
+    return seeded
+
 def test_own_scope_unions_customer_owner_opportunity_owner_and_member(db):
     seeded = _seed_query_case(db)
 
@@ -363,6 +409,57 @@ def test_tabs_active_completed_lost_are_mutually_correct(db):
     }
     assert {row.journey.id for row in completed_rows} == {seeded["completed"].id}
     assert {row.journey.id for row in lost_rows} == {seeded["lost"].id}
+
+
+@pytest.mark.parametrize(
+    ("tab", "expected_keys"),
+    [
+        ("all", {"customer_owned", "opportunity_owned", "member_visible", "no_opportunity", "completed", "lost"}),
+        ("active", {"customer_owned", "member_visible", "no_opportunity"}),
+        ("approval_rejected", {"opportunity_owned"}),
+        ("completed", {"completed"}),
+        ("lost", {"lost"}),
+    ],
+)
+def test_rejected_journey_tabs_preserve_lifecycle_visibility_and_team_scope(db, tab, expected_keys):
+    seeded = _seed_rejected_query_case(db)
+
+    rows, total = service.paginate(db, request=_request(tab=tab), skip=0, limit=50)
+
+    assert {row.journey.id for row in rows} == {seeded[key].id for key in expected_keys}
+    assert total == len(expected_keys)
+
+
+def test_rejected_tab_all_permission_still_requires_same_team_opportunity(db):
+    seeded = _seed_rejected_query_case(db)
+
+    rows, total = service.paginate(
+        db,
+        request=_request(tab="approval_rejected", permission_codes=frozenset({"customer:view:all"})),
+        skip=0,
+        limit=50,
+    )
+
+    assert {row.journey.id for row in rows} == {
+        seeded["opportunity_owned"].id,
+        seeded["foreign"].id,
+    }
+    assert total == 2
+
+
+def test_rejected_stage_filter_preserves_visibility_and_team_scope(db):
+    seeded = _seed_rejected_query_case(db)
+
+    rows, total = service.paginate(
+        db,
+        request=_request(filters=[FilterCondition(field="stage", op="eq", value="approval_rejected")]),
+        skip=0,
+        limit=50,
+    )
+
+    assert [row.journey.id for row in rows] == [seeded["opportunity_owned"].id]
+    assert rows[0].stage == "approval_rejected"
+    assert total == 1
 
 
 def test_search_and_filters_apply_before_count(db):

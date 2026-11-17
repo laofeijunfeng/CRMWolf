@@ -50,4 +50,10 @@ describe('status presentation', () => {
       })
     }
   })
+  it('presents approval-rejected journeys with explicit business wording', () => {
+    expect(getStatusPresentation('businessJourney', 'approval_rejected')).toEqual({
+      label: '审批未通过',
+      tone: 'warning',
+    })
+  })
 })

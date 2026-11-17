@@ -31,7 +31,7 @@ export type {
   DealJourneyOpportunitySummary
 } from '@/schemas/dealJourney'
 
-export type BusinessJourneyTab = 'all' | 'active' | 'completed' | 'lost'
+export type BusinessJourneyTab = 'all' | 'active' | 'completed' | 'lost' | 'approval_rejected'
 
 export interface BusinessJourneyListParams {
   skip: number

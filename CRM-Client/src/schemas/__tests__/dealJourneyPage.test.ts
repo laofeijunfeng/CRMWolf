@@ -12,10 +12,10 @@ import { dealJourneyApi } from '@/api/dealJourney'
 import type { Opportunity } from '@/api/opportunity'
 import {
   BusinessJourneyBoardResponseSchema,
+  DealJourneyBoardStageSchema,
   BusinessJourneyDetailResponseSchema,
   BusinessJourneyListResponseSchema,
 } from '@/schemas/dealJourney'
-
 const journeyPublicId = `djy_${'a'.repeat(32)}`
 const opportunityPublicId = `opp_${'b'.repeat(32)}`
 
@@ -197,6 +197,28 @@ describe('business journey page schemas', () => {
         cards: [{ ...boardCard, public_id: undefined, journey_id: 12 }],
       }],
     })).toThrow()
+  })
+  it('accepts approval-rejected board stages from list and board contracts', () => {
+    expect(DealJourneyBoardStageSchema.parse('approval_rejected')).toBe('approval_rejected')
+    expect(BusinessJourneyListResponseSchema.parse({
+      items: [{ ...listItem, current_board_stage: 'approval_rejected', current_board_stage_label: '审批未通过' }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      total_pages: 1,
+    }).items[0]?.current_board_stage).toBe('approval_rejected')
+    expect(BusinessJourneyBoardResponseSchema.parse({
+      columns: [{
+        key: 'approval_rejected',
+        title: '审批未通过',
+        description: '主商机审批未通过的旅程',
+        count: 1,
+        amount: 168000,
+        cards: [{ ...boardCard, current_board_stage: 'approval_rejected' }],
+      }],
+      summary: { total_count: 1, total_amount: 168000, active_count: 0, completed_count: 0, lost_count: 0 },
+      truncated: false,
+    }).columns[0]?.cards[0]?.current_board_stage).toBe('approval_rejected')
   })
 })
 

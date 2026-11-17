@@ -106,6 +106,11 @@ describe('BusinessJourneyBoardView', () => {
         badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-100',
         emphasisBadgeClass: 'bg-cyan-600 text-white border-transparent',
       },
+      approval_rejected: {
+        columnClass: 'business-board-stage--warning',
+        badgeClass: 'status-warning',
+        emphasisBadgeClass: 'status-warning',
+      },
       completed: {
         columnClass: 'business-board-stage--slate',
         badgeClass: 'bg-slate-50 text-slate-700 border-slate-100',

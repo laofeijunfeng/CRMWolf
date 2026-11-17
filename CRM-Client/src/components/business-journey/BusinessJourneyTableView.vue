@@ -9,6 +9,7 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
 import type { FeedbackError } from '@/types/feedback'
 import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
+import { getStatusPresentation } from '@/utils/statusPresentation'
 import {
   dealJourneyProgressColorClass,
   dealJourneyProgressPercent
@@ -78,9 +79,13 @@ const stageLabels = new Map([
   ['payment_processing', '回款处理中'],
   ['invoice_processing', '开票处理中'],
   ['completed', '已完成'],
-  ['lost', '已流失']
+  ['lost', '已流失'],
+  ['approval_rejected', '审批未通过']
 ])
-
+const getStageLabel = (stage: BusinessJourneyListItem['current_board_stage'], serverLabel?: string): string =>
+  serverLabel
+    || (stage === 'approval_rejected' ? getStatusPresentation('businessJourney', stage).label : stageLabels.get(stage))
+    || '-'
 const formatDate = (value: string | null | undefined): string => value?.slice(0, 10) ?? '-'
 const handleRowClick = (row: BusinessJourneyListItem): void => {
   emit('row-click', { customerId: row.customer_id, journeyPublicId: row.public_id })
@@ -194,7 +199,7 @@ function setDisplayMode(value: string): void {
           data-testid="business-journey-mobile-stage-badge"
           :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
         >
-          {{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+          {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
         </Badge>
       </div>
       <div class="business-journey-mobile-card-customer">
@@ -218,7 +223,7 @@ function setDisplayMode(value: string): void {
       </div>
       <div class="business-journey-mobile-card-meta">
         <span class="business-journey-mobile-card-meta-item">
-          当前阶段：{{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+          当前阶段：{{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
         </span>
         <span class="business-journey-mobile-card-meta-item">
           主商机：{{ row.primary_opportunity_name || '-' }}
@@ -240,7 +245,7 @@ function setDisplayMode(value: string): void {
         data-testid="business-journey-stage-badge"
         :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
       >
-        {{ row.current_board_stage_label || stageLabels.get(row.current_board_stage) || '-' }}
+        {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
       </Badge>
     </template>
     <template #cell-progress="{ row }">
@@ -284,6 +289,7 @@ function setDisplayMode(value: string): void {
       {{ formatDate(row.expected_closing_date) }}
     </template>
   </DataTable>
+
 </template>
 
 <style scoped lang="scss">
@@ -334,5 +340,10 @@ function setDisplayMode(value: string): void {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+.status-warning {
+  color: var(--status-warning-foreground);
+  background-color: var(--status-warning-background);
+  border-color: var(--status-warning-background);
 }
 </style>

@@ -12,6 +12,7 @@ import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/
 import { formatLocalDate } from '@/utils/format'
 import { confirmDelete } from '@/utils/confirmDialog'
 import { formatOpportunityProductSummary } from '@/utils/opportunityProduct'
+import { getStatusPresentation } from '@/utils/statusPresentation'
 import { AmountText, HoverInfo } from '@/components/crmwolf'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -264,6 +265,7 @@ const displayJourneyName = computed(() => journeyDetail.value?.name ?? '业务�
 const displayJourneyAmount = computed(() => journeyDetail.value?.amount ?? opportunity.value?.total_amount ?? 0)
 const displayPurchaseType = computed(() => journeyDetail.value?.purchase_type ?? opportunity.value?.purchase_type)
 const displayBoardStageLabel = computed(() => journeyDetail.value?.current_board_stage_label ?? '')
+const isJourneyApprovalRejected = computed(() => journeyDetail.value?.current_board_stage === 'approval_rejected')
 const NO_PRIMARY_OPPORTUNITY_COPY = emptyPrimaryOpportunityText
 
 const stageProgressText = computed(() => `${Math.round(stageWinProbability.value)}%`)
@@ -1020,7 +1022,7 @@ function getApprovalPhaseText(phase: string | undefined): string {
     draft: '待提交',
     pending_review: '审批中',
     approved: '审批通过',
-    rejected: '审批拒绝'
+    rejected: getStatusPresentation('businessJourney', 'approval_rejected').label
   }
   return phase === undefined ? '-' : (map[phase] ?? phase)
 }
@@ -1030,7 +1032,7 @@ function getApprovalPhaseClass(phase: string | undefined): string {
     draft: 'status-default',
     pending_review: 'status-warning',
     approved: 'status-success',
-    rejected: 'status-danger'
+    rejected: `status-${getStatusPresentation('businessJourney', 'approval_rejected').tone}`
   }
   return phase === undefined ? '' : (map[phase] ?? '')
 }
@@ -1121,7 +1123,8 @@ watch(approvalPhase, phase => {
             {{ displayJourneyName }}
           </h2>
           <div class="flex flex-wrap items-center gap-2 mt-1">
-            <Badge v-if="displayBoardStageLabel" :class="['status-badge', getBoardStageClass(displayBoardStageLabel)]">
+            <StatusBadge v-if="isJourneyApprovalRejected" type="businessJourney" status="approval_rejected" />
+            <Badge v-else-if="displayBoardStageLabel" :class="['status-badge', getBoardStageClass(displayBoardStageLabel)]">
               {{ displayBoardStageLabel }}
             </Badge>
             <Badge v-if="displayPurchaseType" :class="['status-badge', getPurchaseTypeClass(displayPurchaseType)]">
@@ -1312,6 +1315,16 @@ watch(approvalPhase, phase => {
               </AccordionContent>
             </AccordionItem>
           </Accordion>
+
+          <Card v-if="isJourneyApprovalRejected" class="info-card">
+            <CardContent class="p-4">
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-semibold text-wolf-text-primary-v2">商机进度</h3>
+                <Badge variant="status" :data-status-tone="getStatusPresentation('businessJourney', 'approval_rejected').tone">0%</Badge>
+              </div>
+              <p class="mt-2 text-sm text-wolf-text-secondary-v2">暂停销售推进，修改并重新提交审批通过后继续。</p>
+            </CardContent>
+          </Card>
 
           <Card v-if="!hasPrimaryOpportunity" class="info-card">
             <CardContent class="p-4">

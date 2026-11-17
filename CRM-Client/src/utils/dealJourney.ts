@@ -7,6 +7,7 @@ export type DealJourneyBoardStage =
   | 'invoice_processing'
   | 'completed'
   | 'lost'
+  | 'approval_rejected'
 
 const DEAL_JOURNEY_PUBLIC_ID_PATTERN = /^djy_[0-9a-f]{32}$/
 
@@ -18,7 +19,8 @@ const DEAL_JOURNEY_PROGRESS_PERCENT: Record<DealJourneyBoardStage, number> = {
   payment_processing: 71,
   invoice_processing: 86,
   completed: 100,
-  lost: 0
+  lost: 0,
+  approval_rejected: 0
 }
 
 export const DEAL_JOURNEY_BOARD_STAGE_LABELS: Record<DealJourneyBoardStage, string> = {
@@ -29,7 +31,8 @@ export const DEAL_JOURNEY_BOARD_STAGE_LABELS: Record<DealJourneyBoardStage, stri
   payment_processing: '回款中',
   invoice_processing: '开票中',
   completed: '已完成',
-  lost: '已输单'
+  lost: '已输单',
+  approval_rejected: '审批未通过'
 }
 
 export function isDealJourneyPublicId(value: string): boolean {

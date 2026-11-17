@@ -9,7 +9,8 @@ export const businessJourneyStageOptions: ListFieldOption[] = [
   { value: 'payment_processing', label: '回款处理中' },
   { value: 'invoice_processing', label: '开票处理中' },
   { value: 'completed', label: '已完成' },
-  { value: 'lost', label: '已流失' }
+  { value: 'lost', label: '已流失' },
+  { value: 'approval_rejected', label: '审批未通过' }
 ]
 
 export const businessJourneyPurchaseTypeOptions: ListFieldOption[] = [

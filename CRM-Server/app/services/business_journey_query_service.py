@@ -15,6 +15,7 @@ from app.core.list_query.errors import ListQueryError
 from app.core.list_query.types import FilterCondition, ListQueryContext, SortCondition
 from app.crud.customer_member import ACCESS_LEVEL_RANK
 from app.models.customer import Customer, CustomerMember
+from app.constants.approval_phase import ApprovalPhase
 from app.models.deal_journey import CustomerDealJourney, DealJourneyStatus
 from app.models.opportunity import Opportunity
 from app.models.product import Product
@@ -42,7 +43,7 @@ from app.services.deal_journey_stage import (
     load_payment_summaries,
 )
 
-JourneyScopeTab = Literal["all", "active", "completed", "lost"]
+JourneyScopeTab = Literal["all", "active", "completed", "lost", "approval_rejected"]
 _STAGE_FILTER_OPS = frozenset({"eq", "neq", "in", "not_in"})
 _VIEW_ACCESS_LEVELS = tuple(
     level for level, rank in ACCESS_LEVEL_RANK.items() if rank >= ACCESS_LEVEL_RANK["VIEW"]
@@ -571,9 +572,16 @@ class BusinessJourneyQueryService:
     def _apply_tab(query: Query, *, tab: JourneyScopeTab) -> Query:
         if tab == "active":
             return query.filter(
-                CustomerDealJourney.status.in_(
-                    [DealJourneyStatus.ACTIVE, DealJourneyStatus.WON]
-                )
+                CustomerDealJourney.status.in_([DealJourneyStatus.ACTIVE, DealJourneyStatus.WON]),
+                or_(
+                    Opportunity.id.is_(None),
+                    Opportunity.approval_phase != ApprovalPhase.REJECTED.value,
+                ),
+            )
+        if tab == "approval_rejected":
+            return query.filter(
+                CustomerDealJourney.status.in_([DealJourneyStatus.ACTIVE, DealJourneyStatus.WON]),
+                Opportunity.approval_phase == ApprovalPhase.REJECTED.value,
             )
         if tab == "completed":
             return query.filter(CustomerDealJourney.status == DealJourneyStatus.COMPLETED)
