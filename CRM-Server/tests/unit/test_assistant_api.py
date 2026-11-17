@@ -289,6 +289,7 @@ def test_stage_is_replayable_while_worker_is_still_running(db_session, monkeypat
             assert running.status == "RUNNING"
             assert [(event.event, event.data_json.get("phase")) for event in events] == [
                 ("accepted", None),
+                ("attempt", None),
                 ("stage", "start"),
             ]
         finally:
@@ -514,7 +515,7 @@ def test_orphaned_task_turn_fails_with_replayable_error(db_session):
     db_session.expire_all()
     assert db_session.get(AssistantTurn, turn.id).status == "FAILED"
     events = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id).order_by(AssistantTurnEvent.seq).all()
-    assert [event.event for event in events] == ["accepted", "error"]
+    assert [event.event for event in events] == ["accepted", "attempt", "error"]
 
 
 def test_submit_after_terminal_is_rejected(client):
@@ -1143,7 +1144,7 @@ def test_expired_worker_error_cannot_fail_a_reclaimable_turn(db_session, monkeyp
     assert final.lease_expires_at < business_now()
     assert db_session.get(AssistantTask, task.id).active_turn_id == turn.id
     events = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id).order_by(AssistantTurnEvent.seq).all()
-    assert [event.event for event in events] == ["accepted"]
+    assert [event.event for event in events] == ["accepted", "attempt"]
 
 
 def test_task_waiting_validates_command_discriminators_without_changing_proposal_identity():

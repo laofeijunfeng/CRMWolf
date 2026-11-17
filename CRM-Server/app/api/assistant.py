@@ -109,8 +109,9 @@ def _list_view(task: AssistantTask, db: Session) -> dict[str, object]:
             "last_modified_time": task.last_modified_time.isoformat() if task.last_modified_time else None,
             "processing_turn_id": None,
             "processing_turn_status": None,
+            "reprocess_turn_id": None,
+            "follow_up_disposition": None,
         }
-
 
 def _owned_task(db: Session, *, team_id: int, user_id: int, public_id: str) -> AssistantTask:
     task = db.query(AssistantTask).filter_by(public_id=public_id).one_or_none()

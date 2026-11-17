@@ -8,6 +8,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.crud.customer_activity import CustomerActivityCRUD
+from app.models.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJob,
+    AssistantFollowUpProjectionJobStatus,
+)
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
@@ -109,6 +113,7 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
             CustomerActivityAIJob.__table__,
             CustomerActivityPostCommitJob.__table__,
             CustomerOpportunitySuggestionJob.__table__,
+            AssistantFollowUpProjectionJob.__table__,
         ],
     )
     Session = sessionmaker(bind=engine)
@@ -202,8 +207,27 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
             graph_thread_id="opp-thread-completed",
             result_json={"decision": "NO_ACTION"},
         )
+        projection_job = AssistantFollowUpProjectionJob(
+            public_id="afpj_delete_evidence",
+            team_id=2,
+            activity_id=activity.id,
+            activity_revision=1,
+            trigger_type="ACTIVITY_CREATED_DETERMINISTIC",
+            actor_id="u1",
+            status=AssistantFollowUpProjectionJobStatus.RUNNING,
+            attempt_count=1,
+            lease_token="projection-lease",
+            lease_expires_at=datetime(2026, 9, 2, 12, 0),
+            result_json={"partial": "保留"},
+            error_message="projection still running",
+        )
         db.add_all([
-            ai_job, ai_completed, post_commit_job, opportunity_suggestion_job, opportunity_suggestion_completed
+            ai_job,
+            ai_completed,
+            post_commit_job,
+            opportunity_suggestion_job,
+            opportunity_suggestion_completed,
+            projection_job,
         ])
         db.commit()
 
@@ -254,6 +278,17 @@ def test_delete_preserves_unfinished_job_evidence_and_marks_it_skipped(monkeypat
         assert skipped_post_commit.error_message == "SOURCE_ACTIVITY_DELETED"
         assert skipped_post_commit.next_attempt_at is None
         assert skipped_post_commit.finished_at is not None
+        skipped_projection = db.query(AssistantFollowUpProjectionJob).filter_by(public_id="afpj_delete_evidence").one()
+        assert skipped_projection.status == AssistantFollowUpProjectionJobStatus.SKIPPED
+        assert skipped_projection.result_json == {
+            "partial": "保留",
+            "skip_reason": "SOURCE_ACTIVITY_DELETED",
+            "source_activity_deleted": True,
+            "previous_error": "projection still running",
+        }
+        assert skipped_projection.error_message == "SOURCE_ACTIVITY_DELETED"
+        assert skipped_projection.lease_token is None and skipped_projection.lease_expires_at is None
+        assert skipped_projection.next_attempt_at is None and skipped_projection.finished_at is not None
 
         skipped_opportunity_suggestion = (
             db.query(CustomerOpportunitySuggestionJob).filter_by(public_id="cosj_delete_evidence").one()

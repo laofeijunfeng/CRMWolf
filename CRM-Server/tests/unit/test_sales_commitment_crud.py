@@ -10,11 +10,12 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
+
 from tests.unit.support.reconciliation_decisions import single_task_reconciliation_decision
 
 
 @compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+def _bigint_to_sqlite_int(element, compiler, **kw):
     return "INTEGER"
 
 
@@ -33,6 +34,10 @@ from app.crud.sales_commitment import (
 )
 from app.models.agent import AgentMessage, AgentSession
 from app.models.agent_persistence import AgentUIAction
+from app.models.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJob,
+    AssistantFollowUpProjectionJobStatus,
+)
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
@@ -74,6 +79,10 @@ from app.schemas.sales_commitment import (
     SalesCommitmentInternalCreate,
     SalesCommitmentResponse,
 )
+from app.services.assistant_follow_up_projection_job_service import (
+    assistant_follow_up_projection_job_service,
+)
+from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 from app.services.follow_up_task_backfill_service import follow_up_task_backfill_service
 from app.services.follow_up_task_projection_service import (
     FollowUpTaskProjectionSkipReason,
@@ -101,7 +110,7 @@ def db_session():
     )
 
     @event.listens_for(engine, "before_cursor_execute", retval=True)
-    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):  # noqa: ARG001
+    def _skip_sqlite_indexes(conn, cursor, statement, parameters, context, executemany):
         if statement.startswith("CREATE INDEX"):
             return "SELECT 1", ()
         return statement, parameters
@@ -121,6 +130,7 @@ def db_session():
             CustomerVectorDocument.__table__,
             SalesCommitment.__table__,
             FollowUpTask.__table__,
+            AssistantFollowUpProjectionJob.__table__,
             FollowUpTaskConfirmationCase.__table__,
             FollowUpTaskEvent.__table__,
             FollowUpTaskProjectionRun.__table__,
@@ -164,6 +174,316 @@ def _seed_customer_and_activity(db_session, *, customer_owner_id: str = "1") -> 
     )
     db_session.commit()
 
+
+@pytest.mark.asyncio
+async def test_assistant_committed_job_projects_open_task_once_and_preserves_owner(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-job-10"
+    activity.submission_fingerprint = "a" * 64
+    db_session.commit()
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", sessionmaker(bind=db_session.bind))
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    db_session.commit()
+
+    first = await assistant_follow_up_projection_job_service.run(request)
+    second = await assistant_follow_up_projection_job_service.run(request)
+    with sessionmaker(bind=db_session.bind)() as independent:
+        tasks, total = follow_up_task_crud.list_for_owner(
+            independent, team_id=1, owner_id="2", statuses=[FollowUpTaskStatus.OPEN]
+        )
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert total == 1
+        assert tasks[0].source_activity_id == activity.id
+        assert tasks[0].source_key == "activity:10"
+        assert job.status == AssistantFollowUpProjectionJobStatus.COMPLETED
+        assert job.attempt_count == 1
+        assert first == second
+        assert first["projection_run_status"] == FollowUpTaskProjectionStatus.SUCCESS
+
+@pytest.mark.asyncio
+async def test_assistant_job_rejects_source_changed_between_claim_and_projection(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-source-fence"
+    activity.submission_fingerprint = "f" * 64
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind)
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", factory)
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(db_session, activity=activity, actor_id="2")
+    db_session.commit()
+    original = follow_up_task_projection_service.run_activity_projection
+
+    def change_source(db, **kwargs):
+        with factory() as concurrent:
+            concurrent_activity = concurrent.query(CustomerActivity).filter_by(id=10).one()
+            concurrent_activity.submission_source = CustomerActivitySubmissionSource.FORM.value
+            concurrent_activity.submission_id = None
+            concurrent_activity.submission_fingerprint = None
+            concurrent.commit()
+        return original(db, **kwargs)
+
+    monkeypatch.setattr(follow_up_task_projection_service, "run_activity_projection", change_source)
+    result = await assistant_follow_up_projection_job_service.run(request)
+    with factory() as independent:
+        assert result["success"] is False
+        assert independent.query(FollowUpTask).count() == 0
+
+@pytest.mark.asyncio
+async def test_assistant_validation_failure_consumes_claimed_attempt(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-validation-failure"
+    activity.submission_fingerprint = "g" * 64
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind)
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", factory)
+    monkeypatch.setattr(
+        "app.services.assistant_follow_up_projection_job_service.get_settings",
+        lambda: SimpleNamespace(
+            CUSTOMER_ACTIVITY_POST_COMMIT_MAX_ATTEMPTS=1,
+            CUSTOMER_ACTIVITY_POST_COMMIT_LEASE_SECONDS=60,
+            CUSTOMER_ACTIVITY_POST_COMMIT_RETRY_BASE_SECONDS=1,
+        ),
+    )
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(db_session, activity=activity, actor_id="2")
+    db_session.commit()
+    activity.submission_source = CustomerActivitySubmissionSource.FORM.value
+    activity.submission_id = None
+    activity.submission_fingerprint = None
+    db_session.commit()
+    result = await assistant_follow_up_projection_job_service.run(request)
+    with factory() as independent:
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert result["execution_status"] == "RETRIES_EXHAUSTED"
+        assert job.status == AssistantFollowUpProjectionJobStatus.EXHAUSTED
+        assert job.attempt_count == 1
+
+def test_expired_projection_lease_cannot_finalize_job(db_session):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-expired-lease"
+    activity.submission_fingerprint = "h" * 64
+    db_session.commit()
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(db_session, activity=activity, actor_id="2")
+    job = db_session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+    job.lease_token = "expired-owner"
+    job.lease_expires_at = datetime(2020, 1, 1)
+    db_session.commit()
+    from app.crud.assistant_follow_up_projection_job import assistant_follow_up_projection_job_crud
+
+    completed = assistant_follow_up_projection_job_crud.mark_completed_if_lease_owner(
+        db_session, team_id=1, public_id=request.job_public_id,
+        lease_token="expired-owner", result_json={"success": True},
+    )
+    assert completed is None
+    assert db_session.query(AssistantFollowUpProjectionJob).one().status == AssistantFollowUpProjectionJobStatus.RUNNING
+
+@pytest.mark.asyncio
+async def test_expired_projection_worker_cannot_commit_task_side_effects(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-lease-fence"
+    activity.submission_fingerprint = "e" * 64
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind)
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", factory)
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    db_session.commit()
+    original = follow_up_task_projection_service.run_activity_projection
+
+    def transfer_lease_before_projection(db, **kwargs):
+        with factory() as concurrent:
+            job = concurrent.query(AssistantFollowUpProjectionJob).one()
+            job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+            job.lease_token = "new-owner"
+            job.lease_expires_at = datetime.now() + timedelta(minutes=5)
+            concurrent.commit()
+        return original(db, **kwargs)
+
+    monkeypatch.setattr(
+        follow_up_task_projection_service,
+        "run_activity_projection",
+        transfer_lease_before_projection,
+    )
+    result = await assistant_follow_up_projection_job_service.run(request)
+
+    with factory() as independent:
+        assert result["execution_status"] == "BUSY"
+        assert independent.query(FollowUpTask).count() == 0
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert job.status == AssistantFollowUpProjectionJobStatus.RUNNING
+        assert job.lease_token == "new-owner"
+
+def test_exhaustion_does_not_overwrite_new_active_lease(db_session):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-exhaustion-race"
+    activity.submission_fingerprint = "r" * 64
+    db_session.commit()
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    job = db_session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+    job.attempt_count = 1
+    job.lease_token = "new-owner"
+    job.lease_expires_at = datetime.now() + timedelta(minutes=5)
+    db_session.commit()
+
+    from app.crud.assistant_follow_up_projection_job import assistant_follow_up_projection_job_crud
+
+    exhausted = assistant_follow_up_projection_job_crud.mark_exhausted_without_lease(
+        db_session,
+        team_id=1,
+        public_id=request.job_public_id,
+        result_json={"execution_status": "RETRIES_EXHAUSTED"},
+        error_message="stale worker",
+    )
+
+    assert exhausted is None
+    current = db_session.query(AssistantFollowUpProjectionJob).one()
+    assert current.status == AssistantFollowUpProjectionJobStatus.RUNNING
+    assert current.lease_token == "new-owner"
+
+@pytest.mark.asyncio
+async def test_assistant_projection_failure_keeps_activity_and_retries_once(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-job-failed"
+    activity.submission_fingerprint = "b" * 64
+    db_session.commit()
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", sessionmaker(bind=db_session.bind))
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    db_session.commit()
+    original = follow_up_task_projection_service.project_activity
+
+    def fail_once(*args, **kwargs):
+        monkeypatch.setattr(follow_up_task_projection_service, "project_activity", original)
+        raise RuntimeError("projection unavailable")
+
+    monkeypatch.setattr(follow_up_task_projection_service, "project_activity", fail_once)
+    failed = await assistant_follow_up_projection_job_service.run(request)
+    with sessionmaker(bind=db_session.bind)() as independent:
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert job.status == AssistantFollowUpProjectionJobStatus.FAILED
+        assert independent.query(CustomerActivity).filter_by(id=10).count() == 1
+        assert independent.query(FollowUpTask).count() == 0
+        runs = independent.query(FollowUpTaskProjectionRun).all()
+        assert len(runs) == 1 and runs[0].status == FollowUpTaskProjectionStatus.FAILED
+        assert failed["execution_status"] == "FAILED"
+        job.next_attempt_at = datetime(2020, 1, 1)
+        independent.commit()
+
+    recovered = await assistant_follow_up_projection_job_service.run(request)
+    with sessionmaker(bind=db_session.bind)() as independent:
+        assert recovered["projection_run_status"] == FollowUpTaskProjectionStatus.SUCCESS
+        assert independent.query(FollowUpTask).count() == 1
+        assert independent.query(AssistantFollowUpProjectionJob).one().status == AssistantFollowUpProjectionJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_assistant_expired_last_lease_is_exhausted_without_projecting(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-job-exhausted"
+    activity.submission_fingerprint = "c" * 64
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.assistant_follow_up_projection_job_service.SessionLocal",
+        sessionmaker(bind=db_session.bind),
+    )
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    job = db_session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+    job.attempt_count = 5
+    job.lease_token = "expired"
+    job.lease_expires_at = datetime(2020, 1, 1)
+    db_session.commit()
+
+    result = await assistant_follow_up_projection_job_service.run(request)
+    with sessionmaker(bind=db_session.bind)() as independent:
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert result["execution_status"] == "RETRIES_EXHAUSTED"
+        assert job.status == AssistantFollowUpProjectionJobStatus.EXHAUSTED
+        assert job.lease_token is None and job.lease_expires_at is None
+        assert independent.query(CustomerActivity).filter_by(id=10).count() == 1
+        assert independent.query(FollowUpTask).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_assistant_recovery_sweeps_expired_max_attempt_job(db_session, monkeypatch):
+    from app.tasks.assistant_follow_up_projection_recovery import assistant_follow_up_projection_recovery_scheduler
+
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-recovery-exhausted"
+    activity.submission_fingerprint = "d" * 64
+    db_session.commit()
+    factory = sessionmaker(bind=db_session.bind)
+    monkeypatch.setattr("app.services.assistant_follow_up_projection_job_service.SessionLocal", factory)
+    monkeypatch.setattr("app.tasks.assistant_follow_up_projection_recovery.SessionLocal", factory)
+    assistant_follow_up_projection_job_service.enqueue_in_transaction(db_session, activity=activity, actor_id="2")
+    job = db_session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+    job.attempt_count = 5
+    job.lease_expires_at = datetime(2020, 1, 1)
+    db_session.commit()
+
+    summary = await assistant_follow_up_projection_recovery_scheduler.recover_once()
+    with factory() as independent:
+        assert summary["scanned"] == 1
+        assert independent.query(AssistantFollowUpProjectionJob).one().status == AssistantFollowUpProjectionJobStatus.EXHAUSTED
+
+
+
+@pytest.mark.asyncio
+async def test_assistant_active_final_lease_is_not_exhausted_by_duplicate_run(db_session, monkeypatch):
+    _seed_customer_and_activity(db_session)
+    activity = db_session.query(CustomerActivity).filter_by(id=10).one()
+    activity.submission_source = CustomerActivitySubmissionSource.ASSISTANT_2.value
+    activity.submission_id = "assistant-active-lease"
+    activity.submission_fingerprint = "e" * 64
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.assistant_follow_up_projection_job_service.SessionLocal",
+        sessionmaker(bind=db_session.bind),
+    )
+    request = assistant_follow_up_projection_job_service.enqueue_in_transaction(
+        db_session, activity=activity, actor_id="2"
+    )
+    job = db_session.query(AssistantFollowUpProjectionJob).one()
+    job.status = AssistantFollowUpProjectionJobStatus.RUNNING
+    job.attempt_count = 5
+    job.lease_token = "active"
+    job.lease_expires_at = datetime(2099, 1, 1)
+    db_session.commit()
+
+    duplicate = await assistant_follow_up_projection_job_service.run(request)
+    with sessionmaker(bind=db_session.bind)() as independent:
+        job = independent.query(AssistantFollowUpProjectionJob).one()
+        assert duplicate["execution_status"] == "BUSY"
+        assert job.status == AssistantFollowUpProjectionJobStatus.RUNNING
+        assert job.lease_token == "active"
+        assert independent.query(FollowUpTask).count() == 0
 
 def _task_create(
     *,
@@ -810,7 +1130,7 @@ def test_task_view_permission_can_use_customer_access_but_operation_requires_tas
     task = follow_up_task_crud.create(db_session, _task_create(owner_id="2", task_hash="permission-task"))
     permission_codes = ["customer:view:own"]
 
-    def _fake_get_user_permissions(db, user_id, team_id=None):  # noqa: ARG001
+    def _fake_get_user_permissions(db, user_id, team_id=None):
         return [SimpleNamespace(code=code) for code in permission_codes]
 
     monkeypatch.setattr(deps.permission_crud, "get_user_permissions", _fake_get_user_permissions)
@@ -1027,7 +1347,7 @@ def test_projection_run_records_commitment_only_skip_reason(db_session):
 def test_projection_run_records_failed_and_truncates_error(db_session, monkeypatch):
     _seed_customer_and_activity(db_session)
 
-    def _raise_projection(*args, **kwargs):  # noqa: ARG001
+    def _raise_projection(*args, **kwargs):
         raise RuntimeError("x" * 5000)
 
     monkeypatch.setattr(follow_up_task_projection_service, "project_activity", _raise_projection)
@@ -1587,6 +1907,155 @@ def test_historical_backfill_projects_only_latest_due_activity_per_customer_owne
     assert total == 1
     assert rows[0].source_activity_id == 11
     assert rows[0].title == "下周五确认预算"
+
+
+def test_assistant_only_historical_backfill_filters_groups_and_is_idempotent(db_session):
+    _seed_customer_and_activity(db_session)
+    db_session.add(Customer(id=2, team_id=1, account_name="无下一步客户", city="上海", creator_id="1"))
+    db_session.add(
+        CustomerActivity(
+            id=11,
+            team_id=1,
+            customer_id=1,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="Assistant 较早的预算跟进",
+            summary="Assistant 较早的预算跟进",
+            next_action="较早确认预算",
+            next_follow_time=datetime(2026, 8, 21, 10, 0, 0),
+            occurred_at=datetime(2026, 8, 7, 9, 0, 0),
+            creator_id="4",
+            owner_id="",
+            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2,
+            submission_id="assistant-backfill-11",
+            submission_fingerprint="a" * 64,
+        )
+    )
+    db_session.add(
+        CustomerActivity(
+            id=12,
+            team_id=1,
+            customer_id=1,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="Assistant 最新的预算跟进",
+            summary="Assistant 最新的预算跟进",
+            next_action="最新确认预算",
+            next_follow_time=datetime(2026, 8, 22, 10, 0, 0),
+            occurred_at=datetime(2026, 8, 8, 9, 0, 0),
+            creator_id="4",
+            owner_id="",
+            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2,
+            submission_id="assistant-backfill-12",
+            submission_fingerprint="b" * 64,
+        )
+    )
+    db_session.add(
+        CustomerActivity(
+            id=13,
+            team_id=1,
+            customer_id=2,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="Assistant 有动作但没有时间",
+            next_action="下次联系客户",
+            next_follow_time=None,
+            occurred_at=datetime(2026, 8, 9, 9, 0, 0),
+            creator_id="4",
+            owner_id="",
+            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2,
+            submission_id="assistant-backfill-13",
+            submission_fingerprint="c" * 64,
+        )
+    )
+    db_session.add(
+        CustomerActivity(
+            id=14,
+            team_id=2,
+            customer_id=1,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="Assistant 其他团队活动",
+            next_action="其他团队确认预算",
+            next_follow_time=datetime(2026, 8, 23, 10, 0, 0),
+            occurred_at=datetime(2026, 8, 9, 10, 0, 0),
+            creator_id="5",
+            owner_id="5",
+            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2,
+            submission_id="assistant-backfill-14",
+            submission_fingerprint="d" * 64,
+        )
+    )
+    db_session.add(
+        CustomerActivity(
+            id=15,
+            team_id=1,
+            customer_id=2,
+            activity_kind="PHONE_FOLLOW_UP",
+            source_content="Assistant 仅有到期时间",
+            next_action="   ",
+            next_follow_time=datetime(2026, 8, 24, 10, 0, 0),
+            occurred_at=datetime(2026, 8, 10, 9, 0, 0),
+            creator_id="5",
+            owner_id="5",
+            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2,
+            submission_id="assistant-backfill-15",
+            submission_fingerprint="e" * 64,
+        )
+    )
+    db_session.commit()
+    legacy = follow_up_task_backfill_service.backfill_customer_activities(
+        db_session,
+        team_id=1,
+        days=90,
+        dry_run=True,
+        now=datetime(2026, 8, 20, 10, 0, 0),
+    )
+    assert legacy.scanned_activity_count == 5
+    assert legacy.selected_group_count == 4
+    assert legacy.duplicate_group_activity_count == 1
+    assert legacy.would_project_count == 3
+    assert db_session.query(FollowUpTaskProjectionRun).count() == 0
+
+
+    first = follow_up_task_backfill_service.backfill_customer_activities(
+        db_session,
+        team_id=1,
+        days=90,
+        dry_run=False,
+        assistant_only=True,
+        now=datetime(2026, 8, 20, 10, 0, 0),
+    )
+    second = follow_up_task_backfill_service.backfill_customer_activities(
+        db_session,
+        team_id=1,
+        days=90,
+        dry_run=False,
+        assistant_only=True,
+        now=datetime(2026, 8, 20, 10, 0, 0),
+    )
+
+    assert first.scanned_activity_count == 4
+    assert first.selected_group_count == 3
+    assert first.duplicate_group_activity_count == 1
+    assert first.missing_owner_count == 3
+    assert first.skipped_no_owner_count == 0
+    assert first.skipped_no_due_at_count == 1
+    assert first.would_project_count == 1
+    assert first.created_task_count == 1
+    assert len(first.projection_run_ids) == 1
+    assert second.created_task_count == 0
+    assert second.skipped_projection_count == 1
+    assert len(second.projection_run_ids) == 1
+    assert db_session.query(FollowUpTaskProjectionRun).count() == 2
+
+    rows, total = follow_up_task_crud.list_for_owner(
+        db_session,
+        team_id=1,
+        owner_id="4",
+        statuses=[FollowUpTaskStatus.OPEN],
+    )
+    assert total == 1
+    assert rows[0].source_activity_id == 12
+    assert rows[0].source_key == "activity:12"
+    assert rows[0].owner_id == "4"
+    assert db_session.query(FollowUpTask).count() == 1
 
 
 def test_sales_commitment_revision_is_monotonic_and_ignores_noop_updates(db_session):
