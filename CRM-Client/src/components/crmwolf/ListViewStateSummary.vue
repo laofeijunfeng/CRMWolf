@@ -142,7 +142,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   min-width: 0;
   flex-direction: column;
   gap: $wolf-space-xs-v2;
-  padding: 8px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid $wolf-border-light-v2;
   background: $wolf-bg-card-v2;
   color: $wolf-text-secondary-v2;
@@ -153,6 +153,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 .list-view-state-summary-main {
   display: flex;
   min-width: 0;
+  min-height: $wolf-touch-target-min-v2;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 12px;
@@ -169,11 +170,13 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   gap: 6px;
 }
 
+.list-view-state-summary-filters {
+  min-height: $wolf-touch-target-min-v2;
+}
 
 .list-view-state-summary-muted {
   color: $wolf-text-tertiary-v2;
 }
-
 
 .list-view-state-summary-filter {
   position: relative;
@@ -181,24 +184,24 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   min-height: $wolf-touch-target-min-v2;
   max-width: min(360px, 100%);
   align-items: center;
-  gap: 4px;
-  padding: 0 5px 0 8px;
+  gap: 0;
+  padding: 0 8px;
   color: $wolf-text-secondary-v2;
   white-space: nowrap;
+}
 
-  &::before {
-    position: absolute;
-    inset: 7px 0;
-    border: 1px solid $wolf-border-light-v2;
-    border-radius: $wolf-radius-control-v2;
-    background: $wolf-bg-muted-v2;
-    pointer-events: none;
-    content: '';
-  }
+.list-view-state-summary-filter::before {
+  position: absolute;
+  inset: 7px 0;
+  border: 1px solid $wolf-border-light-v2;
+  border-radius: $wolf-radius-control-v2;
+  background: $wolf-bg-muted-v2;
+  pointer-events: none;
+  content: '';
+}
 
-  > * {
-    position: relative;
-  }
+.list-view-state-summary-filter > * {
+  position: relative;
 }
 
 .list-view-state-summary-filter > span {
@@ -216,11 +219,13 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 }
 
 .list-view-state-summary-remove {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  right: 0;
   display: inline-flex;
-  width: $wolf-touch-target-min-v2;
+  width: 0;
   height: $wolf-touch-target-min-v2;
-  min-width: $wolf-touch-target-min-v2;
+  min-width: 0;
   min-height: $wolf-touch-target-min-v2;
   align-items: center;
   justify-content: center;
@@ -230,9 +235,20 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   background: transparent;
   color: $wolf-text-tertiary-v2;
   cursor: pointer;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-50%);
   transition: $wolf-transition-hover-v2;
 }
 
+.list-view-state-summary-filter:hover .list-view-state-summary-remove,
+.list-view-state-summary-filter:focus-within .list-view-state-summary-remove {
+  width: $wolf-touch-target-min-v2;
+  min-width: $wolf-touch-target-min-v2;
+  opacity: 1;
+  pointer-events: auto;
+}
 .list-view-state-summary-remove::before {
   position: absolute;
   top: 50%;
@@ -246,6 +262,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   transform: translate(-50%, -50%);
   transition: $wolf-transition-hover-v2;
 }
+
 .list-view-state-summary-remove > * {
   position: relative;
   z-index: 1;
@@ -265,7 +282,6 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
   outline-offset: $wolf-focus-ring-offset-v2;
 }
-
 
 .list-view-state-summary-clear,
 .list-view-state-summary-save {
@@ -329,6 +345,13 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 
   .list-view-state-summary-filter {
     max-width: 100%;
+  }
+
+  .list-view-state-summary-filter .list-view-state-summary-remove {
+    width: $wolf-touch-target-min-v2;
+    min-width: $wolf-touch-target-min-v2;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

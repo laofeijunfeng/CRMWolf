@@ -36,6 +36,34 @@ describe('ListViewStateSummary', () => {
     expect(wrapper.get('.list-view-state-summary-filter').attributes('aria-label')).toBe('客户名称 包含 “Acme”')
     expect(wrapper.get('.list-view-state-summary-filter').attributes('tabindex')).toBe('0')
   })
+  it('scopes each removable delete control to its filter chip', () => {
+    const wrapper = mount(ListViewStateSummary, {
+      props: {
+        ...baseProps,
+        filters: [
+          ...baseProps.filters,
+          {
+            id: 'filter:stage:not_in:1',
+            field: 'stage',
+            fieldLabel: '当前阶段',
+            operator: 'not_in' as const,
+            operatorLabel: '不属于',
+            valueLabel: '已完成',
+            removable: true,
+          },
+        ],
+      },
+    })
+
+    const chips = wrapper.findAll('.list-view-state-summary-filter')
+
+    expect(chips).toHaveLength(2)
+    expect(chips.map(chip => chip.find('button').attributes('aria-label'))).toEqual([
+      '移除筛选：客户名称',
+      '移除筛选：当前阶段',
+    ])
+  })
+
 
   it('emits a single-filter removal and clear-filters actions', async () => {
     const wrapper = mount(ListViewStateSummary, { props: baseProps })
