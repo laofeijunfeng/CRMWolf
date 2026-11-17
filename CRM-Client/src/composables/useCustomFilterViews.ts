@@ -4,6 +4,7 @@ import { viewPreferenceApi, type ViewDisplayMode, type ViewPreferenceConfig, typ
 import type { TabItem } from '@/stores/header'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
+
 import { confirmDelete } from '@/utils/confirmDialog'
 import { renameDialog } from '@/utils/renameDialog'
 import type { FeedbackError } from '@/types/feedback'
@@ -94,11 +95,20 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
     previous: ViewApplySnapshot
   }
 
+  const retiredDatePresetOperators: Record<string, true> = {
+    past_1_day: true,
+    past_3_months: true,
+    past_6_months: true,
+    past_1_year: true,
+  }
+
   function cloneFilters(filters: ListFilterCondition[]): ListFilterCondition[] {
-    return filters.map((filter) => ({
-      ...filter,
-      ...(Array.isArray(filter.value) ? { value: [...filter.value] } : {}),
-    }))
+    return filters
+      .filter((filter) => retiredDatePresetOperators[String(filter.op)] !== true)
+      .map((filter) => ({
+        ...filter,
+        ...(Array.isArray(filter.value) ? { value: [...filter.value] } : {}),
+      }))
   }
 
   function cloneSnapshot(snapshot: ViewApplySnapshot): ViewApplySnapshot {
@@ -266,7 +276,7 @@ export function useCustomFilterViews(options: UseCustomFilterViewsOptions): UseC
         builtInViewSnapshot.value = cloneSnapshot(source)
       }
       customViews.value = [...customViews.value, view]
-      options.activeFilters.value = (view.config.filters ?? []) as unknown as ListFilterCondition[]
+      options.activeFilters.value = cloneFilters((view.config.filters ?? []) as unknown as ListFilterCondition[])
       options.activeSorts.value = (view.config.sorts ?? []) as unknown as ListSortCondition[]
       options.activeColumns.value = view.config.columns ?? []
       if (

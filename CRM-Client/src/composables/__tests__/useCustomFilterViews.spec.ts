@@ -60,6 +60,54 @@ describe('useCustomFilterViews', () => {
     vi.mocked(renameDialog).mockResolvedValue('跟进中的我的客户')
   })
 
+  it('loads saved views without sending retired date operators or losing remaining filters', async () => {
+    const activeTab = ref('all')
+    const activeFilters = ref<ListFilterCondition[]>([])
+    const survivingFilters: ListFilterCondition[] = [
+      { field: 'owner_id', op: 'eq', value: 'me' },
+      { field: 'created_time', op: 'current_quarter', value: null },
+    ]
+    const sentFilters: string[] = []
+    const views = useCustomFilterViews({
+      viewKey: 'customers.list',
+      activeTab,
+      activeFilters,
+      activeSorts: ref([]),
+      activeColumns: ref([]),
+      refresh: () => {
+        sentFilters.push(JSON.stringify(activeFilters.value))
+        return true
+      },
+    })
+    views.customViews.value = [{
+      ...customView,
+      config: {
+        ...customView.config,
+        filters: [
+          ...survivingFilters.map((filter) => ({ ...filter })),
+          ...['past_1_day', 'past_3_months', 'past_6_months', 'past_1_year'].map((op) => ({
+            field: 'created_time', op, value: null,
+          })),
+        ],
+      },
+    }]
+
+    views.applyCustomViewTab('custom-view:1')
+    await flushPromises()
+
+    expect(sentFilters).toEqual([JSON.stringify(survivingFilters)])
+    vi.mocked(viewPreferenceApi.createCustomView).mockResolvedValue({
+      ...customView,
+      config: { ...customView.config, filters: survivingFilters.map((filter) => ({ ...filter })) },
+    })
+    await views.saveCurrentAsCustomView()
+    expect(sentFilters).toEqual([
+      JSON.stringify(survivingFilters),
+      JSON.stringify(survivingFilters),
+    ])
+    expect(views.applyError.value).toBeNull()
+  })
+
   it('applies the first moved custom view after loading custom views', async () => {
     const activeTab = ref('all')
     const activeFilters = ref<ListFilterCondition[]>([])

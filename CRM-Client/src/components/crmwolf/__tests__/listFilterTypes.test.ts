@@ -31,12 +31,43 @@ describe('list filter operator catalog', () => {
     ])
   })
 
-  it('places between after before and before empty for date filters', () => {
+  it('exposes only the approved date preset operators', () => {
+    expect(listFilterOperatorsByType.date.map((operator) => operator.value)).toEqual([
+      'past_3_days',
+      'past_1_week',
+      'past_1_month',
+      'current_quarter',
+      'previous_quarter',
+      'current_year',
+      'previous_year',
+      'eq',
+      'after',
+      'before',
+      'between',
+      'is_empty',
+      'is_not_empty'
+    ])
+    expect(listFilterOperatorsByType.date.map((operator) => operator.label)).toEqual([
+      '过去 3 天',
+      '过去 1 周',
+      '过去 1 个月',
+      '本季度',
+      '上季度',
+      '本年',
+      '去年',
+      '等于',
+      '晚于',
+      '早于',
+      '介于',
+      '为空',
+      '不为空'
+    ])
+  })
+
+  it('keeps between before empty for date filters', () => {
     const labels = listFilterOperatorsByType.date.map((operator) => operator.label)
     expect(labels.indexOf('介于')).toBe(labels.indexOf('早于') + 1)
     expect(labels.indexOf('为空')).toBe(labels.indexOf('介于') + 1)
-    expect(labels).toContain('过去 1 年')
-    expect(labels).toContain('晚于')
     expect(listFilterOperatorsByType.date.some((operator) => operator.value === 'between')).toBe(true)
   })
 })

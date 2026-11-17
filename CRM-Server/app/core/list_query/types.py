@@ -32,13 +32,13 @@ VALUE_REQUIRED_OPS = frozenset(
 EMPTY_OPS = frozenset({"is_empty", "is_not_empty"})
 DATE_PRESET_OPS = frozenset(
     {
-        "past_1_day",
         "past_3_days",
         "past_1_week",
         "past_1_month",
-        "past_3_months",
-        "past_6_months",
-        "past_1_year",
+        "current_quarter",
+        "previous_quarter",
+        "current_year",
+        "previous_year",
     }
 )
 DEFAULT_OPS: dict[str, frozenset[str]] = {

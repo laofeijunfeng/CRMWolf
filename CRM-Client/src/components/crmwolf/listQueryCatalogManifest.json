@@ -36,16 +36,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "entity_amount": {
@@ -144,16 +144,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "customer_name": {
@@ -177,16 +177,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "journey_name": {
@@ -210,16 +210,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "owner_id": {
@@ -284,16 +284,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "status": {
@@ -347,16 +347,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "customer_name": {
@@ -380,16 +380,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "expiry_date": {
@@ -400,16 +400,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "license_authorized_users": {
@@ -435,16 +435,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "license_type": {
@@ -513,16 +513,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "standard_unit_price": {
@@ -650,16 +650,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "creator": {
@@ -711,16 +711,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "license_authorized_users": {
@@ -746,16 +746,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "license_status": {
@@ -835,16 +835,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "source": {
@@ -937,16 +937,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     }
   },
@@ -998,16 +998,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "customer_name": {
@@ -1089,16 +1089,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "keyword": {
@@ -1193,16 +1193,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "last_modified_time": {
@@ -1213,16 +1213,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "lead_name": {
@@ -1321,16 +1321,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "customer_name": {
@@ -1354,16 +1354,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "last_modified_time": {
@@ -1374,16 +1374,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "license_type": {
@@ -1566,16 +1566,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "keyword": {
@@ -1741,16 +1741,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "customer_name": {
@@ -1828,16 +1828,16 @@
         "after",
         "before",
         "between",
+        "current_quarter",
+        "current_year",
         "eq",
         "is_empty",
         "is_not_empty",
-        "past_1_day",
         "past_1_month",
         "past_1_week",
-        "past_1_year",
         "past_3_days",
-        "past_3_months",
-        "past_6_months"
+        "previous_quarter",
+        "previous_year"
       ]
     },
     "purchase_type": {

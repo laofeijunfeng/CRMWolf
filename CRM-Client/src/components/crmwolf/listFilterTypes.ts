@@ -16,13 +16,14 @@ export type ListFilterOperator =
   | 'before'
   | 'after'
   | 'between'
-  | 'past_1_day'
   | 'past_3_days'
   | 'past_1_week'
   | 'past_1_month'
-  | 'past_3_months'
-  | 'past_6_months'
-  | 'past_1_year'
+  | 'current_quarter'
+  | 'previous_quarter'
+  | 'current_year'
+  | 'previous_year'
+
 export interface ListFilterOperatorOption {
   value: ListFilterOperator
   label: string
@@ -47,13 +48,13 @@ export const listFilterOperatorsByType: Record<
     { value: 'is_not_empty', label: '不为空' }
   ],
   date: [
-    { value: 'past_1_day', label: '过去 1 天' },
     { value: 'past_3_days', label: '过去 3 天' },
     { value: 'past_1_week', label: '过去 1 周' },
     { value: 'past_1_month', label: '过去 1 个月' },
-    { value: 'past_3_months', label: '过去 3 个月' },
-    { value: 'past_6_months', label: '过去 6 个月' },
-    { value: 'past_1_year', label: '过去 1 年' },
+    { value: 'current_quarter', label: '本季度' },
+    { value: 'previous_quarter', label: '上季度' },
+    { value: 'current_year', label: '本年' },
+    { value: 'previous_year', label: '去年' },
     { value: 'eq', label: '等于' },
     { value: 'after', label: '晚于' },
     { value: 'before', label: '早于' },
@@ -87,13 +88,13 @@ export function normalizeListFilterOperator(
 }
 
 const DATE_PRESET_OPERATORS: Record<string, true> = {
-  past_1_day: true,
   past_3_days: true,
   past_1_week: true,
   past_1_month: true,
-  past_3_months: true,
-  past_6_months: true,
-  past_1_year: true
+  current_quarter: true,
+  previous_quarter: true,
+  current_year: true,
+  previous_year: true
 }
 
 export function isDatePresetOperator(operator: ListFilterOperator): boolean {

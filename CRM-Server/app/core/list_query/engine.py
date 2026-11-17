@@ -459,21 +459,22 @@ def _shift_months(day: date, months: int) -> date:
     return date(year, month, min(day.day, last_day))
 
 
-def _date_preset_start(op: str, today: date) -> date:
-    if op == "past_1_day":
-        return today
+def _date_preset_bounds(op: str, today: date) -> tuple[date, date]:
     if op == "past_3_days":
-        return today - timedelta(days=2)
+        return today - timedelta(days=2), today
     if op == "past_1_week":
-        return today - timedelta(days=6)
+        return today - timedelta(days=6), today
     if op == "past_1_month":
-        return _shift_months(today, -1)
-    if op == "past_3_months":
-        return _shift_months(today, -3)
-    if op == "past_6_months":
-        return _shift_months(today, -6)
-    if op == "past_1_year":
-        return _shift_months(today, -12)
+        return _shift_months(today, -1), today
+    quarter_start = date(today.year, (today.month - 1) // 3 * 3 + 1, 1)
+    if op == "current_quarter":
+        return quarter_start, today
+    if op == "previous_quarter":
+        return _shift_months(quarter_start, -3), quarter_start - timedelta(days=1)
+    if op == "current_year":
+        return date(today.year, 1, 1), today
+    if op == "previous_year":
+        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
     raise ListQueryError(f"不支持的日期快捷项 {op}")
 
 
@@ -483,10 +484,9 @@ def _date_preset_clause(
     op: str,
     context: ListQueryContext,
 ) -> ColumnElement[bool]:
-    today = context.business_today()
-    start_day = _date_preset_start(op, today)
+    start_day, end_day = _date_preset_bounds(op, context.business_today())
     if field.date_kind == "date":
-        return and_(expression >= start_day, expression <= today)
+        return and_(expression >= start_day, expression <= end_day)
     start = datetime.combine(start_day, time.min)
-    end = datetime.combine(today, time.max)
+    end = datetime.combine(end_day, time.max)
     return and_(expression >= start, expression <= end)

@@ -60,14 +60,19 @@ function formatDate(day: Date): string {
   return `${day.getFullYear()}-${month}-${date}`
 }
 
-function presetStart(operator: ListFilterOperator, today: Date): Date | null {
-  if (operator === 'past_1_day') return today
-  if (operator === 'past_3_days') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2)
-  if (operator === 'past_1_week') return new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
-  if (operator === 'past_1_month') return shiftMonths(today, -1)
-  if (operator === 'past_3_months') return shiftMonths(today, -3)
-  if (operator === 'past_6_months') return shiftMonths(today, -6)
-  if (operator === 'past_1_year') return shiftMonths(today, -12)
+function presetBounds(operator: ListFilterOperator, today: Date): [Date, Date] | null {
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  if (operator === 'past_3_days') return [new Date(year, month, today.getDate() - 2), today]
+  if (operator === 'past_1_week') return [new Date(year, month, today.getDate() - 6), today]
+  if (operator === 'past_1_month') return [shiftMonths(today, -1), today]
+  const quarterMonth = Math.floor(month / 3) * 3
+  if (operator === 'current_quarter') return [new Date(year, quarterMonth, 1), today]
+  if (operator === 'previous_quarter') {
+    return [new Date(year, quarterMonth - 3, 1), new Date(year, quarterMonth, 0)]
+  }
+  if (operator === 'current_year') return [new Date(year, 0, 1), today]
+  if (operator === 'previous_year') return [new Date(year - 1, 0, 1), new Date(year - 1, 11, 31)]
   return null
 }
 
@@ -82,10 +87,10 @@ export function getDateBounds(
   for (const condition of filters) {
     if (condition.field !== field) continue
     if (isDatePresetOperator(condition.op)) {
-      const start = presetStart(condition.op, currentDay)
-      if (start === null) continue
-      bounds.start = formatDate(start)
-      bounds.end = formatDate(currentDay)
+      const range = presetBounds(condition.op, currentDay)
+      if (range === null) continue
+      bounds.start = formatDate(range[0])
+      bounds.end = formatDate(range[1])
       continue
     }
     if (condition.op === 'between' && Array.isArray(condition.value) && condition.value.length === 2) {
