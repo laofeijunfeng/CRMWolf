@@ -78,9 +78,27 @@ describe('approval invoice billing', () => {
     expect(changed.slice(-2)).toEqual([['发票抬头', false, true], ['地址', true, true]])
   })
 
-  it('keeps the invoice billing layout as defined', () => {
+  it('lays first-application billing out in two columns with the address last and full width', () => {
     const fields = orderApprovalInvoiceBillingDisplay('INVOICE', buildApprovalInvoiceBillingFields('INVOICE', snapshot))
-    expect(fields.filter(field => field.wide).map(field => field.label)).toEqual(['发票抬头', '地址', '备注'])
-    expect(fields.map(field => field.label)).toEqual(['发票类型', '抬头类型', '发票抬头', '纳税人识别号', '地址', '电话', '开户银行', '银行账号', '备注'])
+    expect(fields.filter(field => field.wide).map(field => field.label)).toEqual(['地址'])
+    expect(fields.map(field => field.label)).toEqual([
+      '发票类型', '抬头类型', '发票抬头', '纳税人识别号',
+      '电话', '开户银行', '银行账号', '备注', '地址'
+    ])
+  })
+
+  it('keeps invoice copy order independent from the display order', () => {
+    const fields = buildApprovalInvoiceBillingFields('INVOICE', { ...snapshot, remark: '审批备注' })
+    expect(formatApprovalInvoiceBillingCopy(fields)).toBe([
+      '发票类型：增值税专用发票',
+      '抬头类型：企业',
+      '发票抬头：原始抬头',
+      '纳税人识别号：00123456789',
+      '地址：',
+      '电话：',
+      '开户银行：开户银行',
+      '银行账号：000123456789',
+      '备注：审批备注',
+    ].join('\n'))
   })
 })

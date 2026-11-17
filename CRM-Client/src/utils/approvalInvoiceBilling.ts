@@ -24,7 +24,7 @@ interface BillingFieldDefinition {
 const BILLING_FIELDS: readonly BillingFieldDefinition[] = [
   { key: 'invoice_type', label: '发票类型' },
   { key: 'invoice_title_type', label: '抬头类型' },
-  { key: 'invoice_title_text', label: '发票抬头', wide: true },
+  { key: 'invoice_title_text', label: '发票抬头' },
   { key: 'invoice_taxpayer_id', label: '纳税人识别号' },
   { key: 'invoice_address', label: '地址', wide: true },
   { key: 'invoice_phone', label: '电话' },
@@ -32,9 +32,9 @@ const BILLING_FIELDS: readonly BillingFieldDefinition[] = [
   { key: 'invoice_bank_account', label: '银行账号' },
 ]
 
-const REMARK_FIELD: BillingFieldDefinition = { key: 'remark', label: '备注', wide: true }
+const REMARK_FIELD: BillingFieldDefinition = { key: 'remark', label: '备注' }
 const AMOUNT_FIELD: BillingFieldDefinition = { key: 'invoice_amount', label: '开票金额' }
-// 重开「新开票信息」：地址置底通栏，其余字段两列；发票申请沿用定义里的 wide。
+// 重开「新开票信息」：地址置底通栏，其余字段两列；首次申请使用同样布局。
 const REISSUE_TRAILING_KEY: BillingFieldKey = 'invoice_address'
 
 const numericAmount = (value: BillingValue): number | undefined => {
@@ -92,12 +92,18 @@ export const buildApprovalInvoiceBillingFields = (
   })
 }
 
-/** 展示顺序：未改字段 → 已改字段 → 重开地址置底。复制顺序不受影响，仍按字段定义。 */
+/** 展示顺序：未改字段 → 已改字段 → 地址置底。复制顺序不受影响，仍按字段定义。 */
 export const orderApprovalInvoiceBillingDisplay = (
   type: 'INVOICE' | 'INVOICE_REISSUE',
   fields: ApprovalInvoiceBillingField[],
 ): ApprovalInvoiceBillingField[] => {
-  const isTrailing = (field: ApprovalInvoiceBillingField): boolean => type === 'INVOICE_REISSUE' && field.key === REISSUE_TRAILING_KEY
+  if (type === 'INVOICE') {
+    return [
+      ...fields.filter(field => field.key !== REISSUE_TRAILING_KEY),
+      ...fields.filter(field => field.key === REISSUE_TRAILING_KEY),
+    ]
+  }
+  const isTrailing = (field: ApprovalInvoiceBillingField): boolean => field.key === REISSUE_TRAILING_KEY
   return [
     ...fields.filter(field => !field.changed && !isTrailing(field)),
     ...fields.filter(field => field.changed && !isTrailing(field)),
