@@ -467,12 +467,13 @@ def _date_preset_bounds(op: str, today: date) -> tuple[date, date]:
     if op == "past_1_month":
         return _shift_months(today, -1), today
     quarter_start = date(today.year, (today.month - 1) // 3 * 3 + 1, 1)
+    quarter_end = _shift_months(quarter_start, 3) - timedelta(days=1)
     if op == "current_quarter":
-        return quarter_start, today
+        return quarter_start, quarter_end
     if op == "previous_quarter":
         return _shift_months(quarter_start, -3), quarter_start - timedelta(days=1)
     if op == "current_year":
-        return date(today.year, 1, 1), today
+        return date(today.year, 1, 1), date(today.year + 1, 1, 1) - timedelta(days=1)
     if op == "previous_year":
         return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
     raise ListQueryError(f"不支持的日期快捷项 {op}")
