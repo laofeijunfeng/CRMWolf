@@ -345,103 +345,192 @@ def test_past_month_clamps_start_to_last_valid_day(date_preset_session):
     assert names == ["Month Clamp Start", "Month Today"]
 
 def test_date_preset_ops_expose_only_the_approved_short_and_natural_ranges():
-    assert DATE_PRESET_OPS == frozenset({
-        'past_3_days',
-        'past_1_week',
-        'past_1_month',
-        'current_quarter',
-        'previous_quarter',
-        'current_year',
-        'previous_year',
-    })
+    assert frozenset(
+        {
+            "past_3_days",
+            "past_1_week",
+            "past_1_month",
+            "current_quarter",
+            "previous_quarter",
+            "current_year",
+            "previous_year",
+        }
+    ) == DATE_PRESET_OPS
 
 
 @pytest.fixture
 def natural_date_preset_session(db_session):
     db_session.add_all(
         [
-            Item(name='Before Previous Year', created_on=date(2024, 12, 31), created_at=datetime(2024, 12, 31, 23, 59, 59, 999999)),
-            Item(name='Previous Year Start', created_on=date(2025, 1, 1), created_at=datetime(2025, 1, 1)),
-            Item(name='Previous Year End', created_on=date(2025, 12, 31), created_at=datetime(2025, 12, 31, 23, 59, 59, 999999)),
-            Item(name='Current Year Start', created_on=date(2026, 1, 1), created_at=datetime(2026, 1, 1)),
-            Item(name='Previous Quarter Start', created_on=date(2026, 4, 1), created_at=datetime(2026, 4, 1)),
-            Item(name='Previous Quarter End', created_on=date(2026, 6, 30), created_at=datetime(2026, 6, 30, 23, 59, 59, 999999)),
-            Item(name='Current Quarter Start', created_on=date(2026, 7, 1), created_at=datetime(2026, 7, 1)),
-            Item(name='Current Quarter Today', created_on=date(2026, 8, 19), created_at=datetime(2026, 8, 19, 23, 59, 59, 999999)),
-            Item(name='After Current Quarter Today', created_on=date(2026, 8, 20), created_at=datetime(2026, 8, 20)),
-            Item(name='Current Quarter End', created_on=date(2026, 9, 30), created_at=datetime(2026, 9, 30, 23, 59, 59, 999999)),
+            Item(
+                name="Before Previous Year",
+                created_on=date(2024, 12, 31),
+                created_at=datetime(2024, 12, 31, 23, 59, 59, 999999),
+            ),
+            Item(name="Previous Year Start", created_on=date(2025, 1, 1), created_at=datetime(2025, 1, 1)),
+            Item(
+                name="Previous Year End",
+                created_on=date(2025, 12, 31),
+                created_at=datetime(2025, 12, 31, 23, 59, 59, 999999),
+            ),
+            Item(name="Current Year Start", created_on=date(2026, 1, 1), created_at=datetime(2026, 1, 1)),
+            Item(name="Previous Quarter Start", created_on=date(2026, 4, 1), created_at=datetime(2026, 4, 1)),
+            Item(
+                name="Previous Quarter End",
+                created_on=date(2026, 6, 30),
+                created_at=datetime(2026, 6, 30, 23, 59, 59, 999999),
+            ),
+            Item(name="Current Quarter Start", created_on=date(2026, 7, 1), created_at=datetime(2026, 7, 1)),
+            Item(
+                name="Current Quarter Today",
+                created_on=date(2026, 8, 19),
+                created_at=datetime(2026, 8, 19, 23, 59, 59, 999999),
+            ),
+            Item(name="After Current Quarter Today", created_on=date(2026, 8, 20), created_at=datetime(2026, 8, 20)),
+            Item(
+                name="Current Quarter End",
+                created_on=date(2026, 9, 30),
+                created_at=datetime(2026, 9, 30, 23, 59, 59, 999999),
+            ),
+            Item(
+                name="Current Year End",
+                created_on=date(2026, 12, 31),
+                created_at=datetime(2026, 12, 31, 23, 59, 59, 999999),
+            ),
+            Item(name="After Current Year End", created_on=date(2027, 1, 1), created_at=datetime(2027, 1, 1)),
         ]
     )
     db_session.flush()
     return db_session
 
 
-def test_current_quarter_is_limited_to_today_for_date_and_datetime(natural_date_preset_session):
+def test_current_quarter_covers_complete_period_for_date_and_datetime(natural_date_preset_session):
     context = ListQueryContext(today=date(2026, 8, 19))
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_on', 'op': 'current_quarter'}], context=context)) == [
-        'Acme',
-        'Beta Co',
-        'Current Quarter Start',
-        'Current Quarter Today',
-        'Trial Co',
+    expected = [
+        "Acme",
+        "After Current Quarter Today",
+        "Beta Co",
+        "Current Quarter End",
+        "Current Quarter Start",
+        "Current Quarter Today",
+        "Trial Co",
     ]
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_at', 'op': 'current_quarter'}], context=context)) == [
-        'Acme',
-        'Beta Co',
-        'Current Quarter Start',
-        'Current Quarter Today',
-        'Trial Co',
-    ]
+    assert (
+        sorted(
+            _names(natural_date_preset_session, [{"field": "created_on", "op": "current_quarter"}], context=context)
+        )
+        == expected
+    )
+    assert (
+        sorted(
+            _names(natural_date_preset_session, [{"field": "created_at", "op": "current_quarter"}], context=context)
+        )
+        == expected
+    )
 
 
 def test_previous_quarter_covers_the_complete_previous_calendar_quarter(natural_date_preset_session):
     context = ListQueryContext(today=date(2026, 8, 19))
-    expected = ['Previous Quarter End', 'Previous Quarter Start']
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_on', 'op': 'previous_quarter'}], context=context)) == expected
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_at', 'op': 'previous_quarter'}], context=context)) == expected
+    expected = ["Previous Quarter End", "Previous Quarter Start"]
+    assert (
+        sorted(
+            _names(natural_date_preset_session, [{"field": "created_on", "op": "previous_quarter"}], context=context)
+        )
+        == expected
+    )
+    assert (
+        sorted(
+            _names(natural_date_preset_session, [{"field": "created_at", "op": "previous_quarter"}], context=context)
+        )
+        == expected
+    )
 
 
-def test_natural_year_presets_cover_complete_previous_year_and_current_year_to_today(natural_date_preset_session):
+def test_natural_year_presets_cover_complete_current_and_previous_year(natural_date_preset_session):
     context = ListQueryContext(today=date(2026, 8, 19))
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_on', 'op': 'current_year'}], context=context)) == [
-        'Acme',
-        'Beta Co',
-        'Current Quarter Start',
-        'Current Quarter Today',
-        'Current Year Start',
-        'Previous Quarter End',
-        'Previous Quarter Start',
-        'Trial Co',
+    current_year_expected = [
+        "Acme",
+        "After Current Quarter Today",
+        "Beta Co",
+        "Current Quarter End",
+        "Current Quarter Start",
+        "Current Quarter Today",
+        "Current Year End",
+        "Current Year Start",
+        "Previous Quarter End",
+        "Previous Quarter Start",
+        "Trial Co",
     ]
-    assert sorted(_names(natural_date_preset_session, [{'field': 'created_at', 'op': 'previous_year'}], context=context)) == [
-        'Previous Year End',
-        'Previous Year Start',
-    ]
+    assert (
+        sorted(_names(natural_date_preset_session, [{"field": "created_on", "op": "current_year"}], context=context))
+        == current_year_expected
+    )
+    assert (
+        sorted(_names(natural_date_preset_session, [{"field": "created_at", "op": "current_year"}], context=context))
+        == current_year_expected
+    )
+    previous_year_expected = ["Previous Year End", "Previous Year Start"]
+    assert (
+        sorted(_names(natural_date_preset_session, [{"field": "created_on", "op": "previous_year"}], context=context))
+        == previous_year_expected
+    )
+    assert (
+        sorted(_names(natural_date_preset_session, [{"field": "created_at", "op": "previous_year"}], context=context))
+        == previous_year_expected
+    )
 
 
-def test_natural_periods_handle_year_boundary_and_leap_day(db_session):
-    db_session.add_all([
-        Item(name='Before Previous Quarter', created_on=date(2025, 9, 30), created_at=datetime(2025, 9, 30, 23, 59, 59, 999999)),
-        Item(name='Previous Quarter Year Boundary Start', created_on=date(2025, 10, 1), created_at=datetime(2025, 10, 1)),
-        Item(name='Previous Quarter Year Boundary End', created_on=date(2025, 12, 31), created_at=datetime(2025, 12, 31, 23, 59, 59, 999999)),
-        Item(name='Current Year Leap Day', created_on=date(2024, 2, 29), created_at=datetime(2024, 2, 29, 23, 59, 59, 999999)),
-        Item(name='After Current Year Leap Day', created_on=date(2024, 3, 1), created_at=datetime(2024, 3, 1)),
-    ])
+def test_natural_periods_handle_year_boundary_and_leap_year(db_session):
+    db_session.add_all(
+        [
+            Item(
+                name="Before Previous Quarter",
+                created_on=date(2025, 9, 30),
+                created_at=datetime(2025, 9, 30, 23, 59, 59, 999999),
+            ),
+            Item(
+                name="Previous Quarter Year Boundary Start",
+                created_on=date(2025, 10, 1),
+                created_at=datetime(2025, 10, 1),
+            ),
+            Item(
+                name="Previous Quarter Year Boundary End",
+                created_on=date(2025, 12, 31),
+                created_at=datetime(2025, 12, 31, 23, 59, 59, 999999),
+            ),
+            Item(
+                name="Current Year Leap Day",
+                created_on=date(2024, 2, 29),
+                created_at=datetime(2024, 2, 29, 23, 59, 59, 999999),
+            ),
+            Item(
+                name="Current Year End",
+                created_on=date(2024, 12, 31),
+                created_at=datetime(2024, 12, 31, 23, 59, 59, 999999),
+            ),
+            Item(name="After Current Year End", created_on=date(2025, 1, 1), created_at=datetime(2025, 1, 1)),
+        ]
+    )
     db_session.flush()
 
     year_boundary = ListQueryContext(today=date(2026, 1, 15))
-    assert sorted(_names(db_session, [{'field': 'created_on', 'op': 'previous_quarter'}], context=year_boundary)) == [
-        'Previous Quarter Year Boundary End',
-        'Previous Quarter Year Boundary Start',
+    assert sorted(_names(db_session, [{"field": "created_on", "op": "previous_quarter"}], context=year_boundary)) == [
+        "Previous Quarter Year Boundary End",
+        "Previous Quarter Year Boundary Start",
     ]
-    assert sorted(_names(db_session, [{'field': 'created_at', 'op': 'previous_quarter'}], context=year_boundary)) == [
-        'Previous Quarter Year Boundary End',
-        'Previous Quarter Year Boundary Start',
+    assert sorted(_names(db_session, [{"field": "created_at", "op": "previous_quarter"}], context=year_boundary)) == [
+        "Previous Quarter Year Boundary End",
+        "Previous Quarter Year Boundary Start",
     ]
 
     leap_year = ListQueryContext(today=date(2024, 2, 29))
-    assert _names(db_session, [{'field': 'created_on', 'op': 'current_year'}], context=leap_year) == ['Current Year Leap Day']
-    assert _names(db_session, [{'field': 'created_at', 'op': 'current_year'}], context=leap_year) == ['Current Year Leap Day']
+    expected = ["Current Year End", "Current Year Leap Day"]
+    assert _names(db_session, [{"field": "created_on", "op": "current_year"}], context=leap_year) == expected
+    assert _names(db_session, [{"field": "created_at", "op": "current_year"}], context=leap_year) == expected
+
+
+
+
 def test_person_alias_resolves_to_current_user(db_session):
     names = _names(
         db_session,

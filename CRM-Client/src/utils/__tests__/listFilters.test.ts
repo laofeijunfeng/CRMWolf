@@ -33,38 +33,37 @@ describe('getDateBounds', () => {
     })
   })
 
-  it('turns natural quarter presets into calendar quarter bounds', () => {
-
+  it('turns natural quarter presets into complete calendar quarter bounds', () => {
     expect(getDateBounds([
       { field: 'created_time', op: 'current_quarter', value: null }
-    ], 'created_time', new Date(2026, 7, 19))).toEqual({
-      start: '2026-07-01',
-      end: '2026-08-19'
+    ], 'created_time', new Date(2026, 10, 17))).toEqual({
+      start: '2026-10-01',
+      end: '2026-12-31'
     })
     expect(getDateBounds([
       { field: 'created_time', op: 'previous_quarter', value: null }
-    ], 'created_time', new Date(2026, 7, 19))).toEqual({
-      start: '2026-04-01',
-      end: '2026-06-30'
+    ], 'created_time', new Date(2026, 10, 17))).toEqual({
+      start: '2026-07-01',
+      end: '2026-09-30'
     })
   })
 
-  it('turns natural year presets into year bounds across a year boundary', () => {
+  it('turns natural year presets into complete year bounds across a year boundary', () => {
     expect(getDateBounds([
       { field: 'created_time', op: 'current_year', value: null }
-    ], 'created_time', new Date(2026, 0, 1))).toEqual({
+    ], 'created_time', new Date(2026, 10, 17))).toEqual({
       start: '2026-01-01',
-      end: '2026-01-01'
+      end: '2026-12-31'
     })
     expect(getDateBounds([
       { field: 'created_time', op: 'previous_year', value: null }
-    ], 'created_time', new Date(2026, 0, 1))).toEqual({
+    ], 'created_time', new Date(2026, 10, 17))).toEqual({
       start: '2025-01-01',
       end: '2025-12-31'
     })
   })
 
-  it('handles a first-quarter year boundary and leap-day current year', () => {
+  it('handles a first-quarter year boundary and leap-year end date', () => {
     expect(getDateBounds([
       { field: 'created_time', op: 'previous_quarter', value: null }
     ], 'created_time', new Date(2026, 0, 15))).toEqual({
@@ -75,7 +74,7 @@ describe('getDateBounds', () => {
       { field: 'created_time', op: 'current_year', value: null }
     ], 'created_time', new Date(2024, 1, 29))).toEqual({
       start: '2024-01-01',
-      end: '2024-02-29'
+      end: '2024-12-31'
     })
   })
- })
+})

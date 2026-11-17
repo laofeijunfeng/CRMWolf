@@ -67,11 +67,11 @@ function presetBounds(operator: ListFilterOperator, today: Date): [Date, Date] |
   if (operator === 'past_1_week') return [new Date(year, month, today.getDate() - 6), today]
   if (operator === 'past_1_month') return [shiftMonths(today, -1), today]
   const quarterMonth = Math.floor(month / 3) * 3
-  if (operator === 'current_quarter') return [new Date(year, quarterMonth, 1), today]
+  if (operator === 'current_quarter') return [new Date(year, quarterMonth, 1), new Date(year, quarterMonth + 3, 0)]
   if (operator === 'previous_quarter') {
     return [new Date(year, quarterMonth - 3, 1), new Date(year, quarterMonth, 0)]
   }
-  if (operator === 'current_year') return [new Date(year, 0, 1), today]
+  if (operator === 'current_year') return [new Date(year, 0, 1), new Date(year + 1, 0, 0)]
   if (operator === 'previous_year') return [new Date(year - 1, 0, 1), new Date(year - 1, 11, 31)]
   return null
 }
