@@ -72,6 +72,7 @@ _STAGE_RANK: dict[BoardStageKey, int] = {
     stage: rank
     for rank, stage in enumerate(
         [
+            "approval_rejected",
             "early_communication",
             "active_progress",
             "closing_soon",

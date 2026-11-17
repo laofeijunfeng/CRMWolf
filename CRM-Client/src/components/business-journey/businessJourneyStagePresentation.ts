@@ -49,5 +49,10 @@ export const businessJourneyStagePresentation: Record<
     columnClass: 'business-board-stage--rose',
     badgeClass: 'bg-rose-50 text-rose-700 border-rose-100',
     emphasisBadgeClass: 'bg-rose-600 text-white border-transparent'
+  },
+  approval_rejected: {
+    columnClass: 'business-board-stage--warning',
+    badgeClass: 'status-warning',
+    emphasisBadgeClass: 'status-warning'
   }
 }

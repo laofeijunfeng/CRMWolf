@@ -22,6 +22,7 @@ describe('dealJourney', () => {
     expect(dealJourneyProgressPercent('invoice_processing')).toBe(86)
     expect(dealJourneyProgressPercent('completed')).toBe(100)
     expect(dealJourneyProgressPercent('lost')).toBe(0)
+    expect(dealJourneyProgressPercent('approval_rejected')).toBe(0)
   })
 
   it.each([
@@ -58,7 +59,8 @@ describe('dealJourney', () => {
       payment_processing: '回款中',
       invoice_processing: '开票中',
       completed: '已完成',
-      lost: '已输单'
+      lost: '已输单',
+      approval_rejected: '审批未通过'
     })
   })
 })

@@ -135,7 +135,7 @@ def _authorized_request(
 def list_business_journeys(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=1000),
-    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    tab: Literal["all", "active", "completed", "lost", "approval_rejected"] = Query("all"),
     search: str | None = Query(None),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
@@ -171,7 +171,7 @@ def list_business_journeys(
 
 @router.get("/board", response_model=BusinessJourneyBoardResponse)
 def get_business_journey_board(
-    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    tab: Literal["all", "active", "completed", "lost", "approval_rejected"] = Query("all"),
     search: str | None = Query(None),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
@@ -207,7 +207,7 @@ def get_business_journey_board(
 
 @router.get("/owner-options", response_model=OwnerListResponse)
 def get_business_journey_owner_options(
-    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    tab: Literal["all", "active", "completed", "lost", "approval_rejected"] = Query("all"),
     search: str | None = Query(None),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
@@ -233,7 +233,7 @@ def get_business_journey_owner_options(
 
 @router.get("/chart", response_model=BusinessJourneyChartResponse)
 def get_business_journey_chart(
-    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    tab: Literal["all", "active", "completed", "lost", "approval_rejected"] = Query("all"),
     search: str | None = Query(None),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
@@ -259,7 +259,7 @@ def get_business_journey_chart(
 def get_business_journey_chart_segment(
     card: ChartCardKey,
     segment: str = Query(min_length=1, max_length=100),
-    tab: Literal["all", "active", "completed", "lost"] = Query("all"),
+    tab: Literal["all", "active", "completed", "lost", "approval_rejected"] = Query("all"),
     search: str | None = Query(None),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),

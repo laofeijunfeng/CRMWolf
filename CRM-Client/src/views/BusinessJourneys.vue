@@ -78,14 +78,16 @@ const builtInFilters: Record<string, ListFilterCondition[]> = {
   all: [],
   active: [{ field: 'status', op: 'in', value: ['ACTIVE', 'WON'] }],
   completed: [{ field: 'status', op: 'eq', value: 'COMPLETED' }],
-  lost: [{ field: 'status', op: 'eq', value: 'LOST' }]
+  lost: [{ field: 'status', op: 'eq', value: 'LOST' }],
+  approval_rejected: [{ field: 'stage', op: 'eq', value: 'approval_rejected' }]
 }
 
 const builtInTabs = [
   { key: 'all', label: '全部旅程' },
   { key: 'active', label: '进行中' },
   { key: 'completed', label: '已完成' },
-  { key: 'lost', label: '已流失' }
+  { key: 'lost', label: '已流失' },
+  { key: 'approval_rejected', label: '审批未通过' }
 ]
 
 const fields = computed(() => createBusinessJourneyListFields(ownerOptions.value))

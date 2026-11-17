@@ -387,6 +387,22 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
     expect(root.text()).not.toContain('审批流程')
     expect(root.text()).not.toContain('采购阶段')
   })
+  it('shows paused zero progress while the journey approval is rejected', async () => {
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
+      journeyFixture({
+        current_board_stage: 'approval_rejected',
+        current_board_stage_label: '审批未通过',
+      }),
+      opportunityFixture({ approval_phase: 'rejected', win_probability: 80 }),
+    ))
+
+    const wrapper = await mountDetail()
+
+    expect(wrapper.text()).toContain('审批未通过')
+    expect(wrapper.text()).toContain('暂停销售推进')
+    expect(wrapper.text()).toContain('0%')
+    expect(wrapper.text()).not.toContain('80%')
+  })
 
   it('renders opportunity row action icons when approved and following', async () => {
     const wrapper = await mountDetail()

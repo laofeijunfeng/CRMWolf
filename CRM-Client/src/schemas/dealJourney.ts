@@ -10,7 +10,8 @@ export const DealJourneyBoardStageSchema = z.enum([
   'payment_processing',
   'invoice_processing',
   'completed',
-  'lost'
+  'lost',
+  'approval_rejected'
 ])
 
 export const DealJourneyOpportunitySummarySchema = z.object({

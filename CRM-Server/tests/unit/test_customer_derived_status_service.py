@@ -93,6 +93,9 @@ def test_stage_rank_orders_by_depth():
     assert stage_rank("payment_processing") < stage_rank("invoice_processing")
 
 
+def test_rejected_stage_rank_is_before_active_sales_stages():
+    assert stage_rank("approval_rejected") < stage_rank("early_communication")
+
 # ---------- 优先级 3:闭环 → 已成交 ----------
 
 def test_all_completed_journeys_is_won():
