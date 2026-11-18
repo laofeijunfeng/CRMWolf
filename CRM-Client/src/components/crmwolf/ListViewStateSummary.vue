@@ -222,10 +222,11 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   position: absolute;
   top: 50%;
   right: 0;
+  z-index: 1;
   display: inline-flex;
-  width: 0;
+  width: $wolf-touch-target-min-v2;
   height: $wolf-touch-target-min-v2;
-  min-width: 0;
+  min-width: $wolf-touch-target-min-v2;
   min-height: $wolf-touch-target-min-v2;
   align-items: center;
   justify-content: center;
@@ -235,32 +236,28 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   background: transparent;
   color: $wolf-text-tertiary-v2;
   cursor: pointer;
+  transition: none;
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
   transform: translateY(-50%);
-  transition: $wolf-transition-hover-v2;
+  visibility: visible;
 }
 
 .list-view-state-summary-filter:hover .list-view-state-summary-remove,
 .list-view-state-summary-filter:focus-within .list-view-state-summary-remove {
-  width: $wolf-touch-target-min-v2;
-  min-width: $wolf-touch-target-min-v2;
   opacity: 1;
   pointer-events: auto;
+  visibility: visible;
 }
+
 .list-view-state-summary-remove::before {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 24px;
-  height: 24px;
-  border-radius: $wolf-radius-sm-v2;
-  background: transparent;
+  inset: 7px 1px 7px 0;
+  border-radius: 0 $wolf-radius-control-v2 $wolf-radius-control-v2 0;
+  background: $wolf-bg-muted-v2;
   content: '';
   pointer-events: none;
-  transform: translate(-50%, -50%);
-  transition: $wolf-transition-hover-v2;
 }
 
 .list-view-state-summary-remove > * {
@@ -352,6 +349,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
     min-width: $wolf-touch-target-min-v2;
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
   }
 }
 
