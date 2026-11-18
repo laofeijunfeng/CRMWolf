@@ -83,20 +83,19 @@ describe('overlay panel chrome', () => {
 
 
 
-  it('clears cascade filters from the footer without an apply button', async () => {
+  it('has no bulk-clear action inside the active filter panel', async () => {
     const wrapper = mountAttached(ListFilterPopover, {
       fields: [{ key: 'name', label: '名称', type: 'text' }],
       modelValue: [{ field: 'name', op: 'contains', value: '测试' }]
     })
-
     await openToolbarPopover(wrapper, '筛选')
-    expect(document.body.textContent).not.toContain('应用')
-    expect(document.body.textContent).not.toContain('添加条件')
-    findButton('清空').click()
-    await flushPromises()
-    expect(wrapper.emitted('reset')).toHaveLength(1)
-    expect(wrapper.emitted('apply')).toBeUndefined()
-    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    const fieldButton = document.querySelector<HTMLButtonElement>('[data-field-key="name"] button')
+    if (fieldButton === null) throw new Error('Filter field button not found')
+    await new DOMWrapper(fieldButton).trigger('focus')
+    const panel = document.querySelector('section[aria-label="名称"]')
+    expect(panel?.querySelector('input[aria-label="名称"]')).toBeTruthy()
+    expect(panel?.textContent).not.toContain('清空')
+    expect(document.querySelectorAll('.filter-footer')).toHaveLength(0)
   })
 
   it('applies enum choices immediately while keeping the field panel open', async () => {

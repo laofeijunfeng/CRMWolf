@@ -36,7 +36,6 @@ const emit = defineEmits<{
   'search-clear': []
   'update:filters': [value: ListFilterCondition[]]
   'filter-apply': [value: ListFilterCondition[]]
-  'filter-reset': []
   'update:sorts': [value: ListSortCondition[]]
   'sort-apply': [value: ListSortCondition[]]
   'sort-reset': []
@@ -92,7 +91,6 @@ function handleColumnConfigSave(): void {
       :fields="projected.filterFields"
       @update:model-value="emit('update:filters', $event)"
       @apply="emit('filter-apply', $event)"
-      @reset="emit('filter-reset')"
     />
     <ListAdvancedTools
       :sorts="sorts"
