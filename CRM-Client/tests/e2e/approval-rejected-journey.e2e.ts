@@ -36,7 +36,7 @@ test('rejected journey has paused progress across list, board and detail', async
   test.setTimeout(90000)
   let approved = false
   const requests: Array<{ path: string, tab: string | null }> = []
-  const journey = () => ({ id: journeyId, public_id: journeyId, name: '星河 CRM 升级', status: 'ACTIVE', current_board_stage: approved ? 'closing_soon' : 'approval_rejected', current_board_stage_label: approved ? '即将签约' : '审批未通过', amount: 320000, purchase_type: 'NEW', started_at: date, closed_at: null, last_event_at: date, primary_opportunity: { public_id: opportunityId, opportunity_name: '星河 CRM 升级', status: 0, approval_phase: approved ? 'approved' : 'rejected', win_probability: 80, expected_closing_date: '2026-12-30', product_name: 'CRM' } })
+  const journey = () => ({ id: journeyId, public_id: journeyId, name: '星河 CRM 升级', status: 'ACTIVE', current_board_stage: approved ? 'closing_soon' : 'approval_rejected', current_board_stage_label: approved ? '即将签约' : '审批未通过', cumulative_progress_percent: approved ? 75 : 0, amount: 320000, purchase_type: 'NEW', started_at: date, closed_at: null, last_event_at: date, primary_opportunity: { public_id: opportunityId, opportunity_name: '星河 CRM 升级', status: 0, approval_phase: approved ? 'approved' : 'rejected', win_probability: 80, expected_closing_date: '2026-12-30', product_name: 'CRM' } })
   const row = () => ({ ...journey(), customer_id: customerId, customer_name: '星河科技', owner: { id: '7', name: '李娜' }, primary_opportunity_name: '星河 CRM 升级', product_name: 'CRM', created_time: date, expected_closing_date: '2026-12-30' })
   const lostRow = () => ({ ...row(), id: `djy_${'d'.repeat(32)}`, public_id: `djy_${'d'.repeat(32)}`, name: '已明确输单项目', status: 'LOST', current_board_stage: 'lost', current_board_stage_label: '已流失' })
   await page.addInitScript(() => localStorage.setItem('token', 'eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDAwMDAwMDB9.sig'))
@@ -105,7 +105,7 @@ test('rejected journey has paused progress across list, board and detail', async
     has: page.getByTestId('business-journey-name-link').filter({ hasText: '星河 CRM 升级' }),
   })
   await expect(restoredRow).toContainText('即将签约')
-  await expect(restoredRow.getByTestId('business-journey-progress')).toContainText('43%')
+  await expect(restoredRow.getByTestId('business-journey-progress')).toContainText('75%')
   await expect(restoredRow).not.toContainText('审批未通过')
   await page.screenshot({ path: path.join(evidence, 'crm123-approved-restored.png'), fullPage: true })
 })

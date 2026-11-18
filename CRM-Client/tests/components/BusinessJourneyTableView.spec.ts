@@ -23,6 +23,7 @@ const journeyFixture: BusinessJourneyListItem = {
   status: 'ACTIVE',
   current_board_stage: 'active_progress',
   current_board_stage_label: '持续推进',
+  cumulative_progress_percent: 75,
   amount: 168000,
   purchase_type: 'RENEWAL',
   started_at: '2026-09-01T00:00:00',
@@ -138,13 +139,13 @@ describe('BusinessJourneyTableView layout', () => {
 
     expect(fields[3]).toMatchObject({
       key: 'progress',
-      label: '当前进度',
+      label: '累计进度',
       role: 'decoration',
       column: { width: '96px' },
       filter: false,
-      filterDisabledReason: '当前进度由当前阶段派生，不支持筛选',
+      filterDisabledReason: '累计进度由当前有效里程碑即时计算，不支持筛选',
       sort: false,
-      sortDisabledReason: '当前进度由当前阶段派生，不支持排序',
+      sortDisabledReason: '累计进度由当前有效里程碑即时计算，不支持排序',
       export: false
     })
 
@@ -154,20 +155,20 @@ describe('BusinessJourneyTableView layout', () => {
     expect(projected.sortFields.map(field => field.key)).not.toContain('progress')
     expect(projected.exportFields.map(field => field.fieldKey)).not.toContain('progress')
   })
-  it('renders the derived percentage, shared color, compact bar, and accessible label', () => {
+  it('renders API cumulative progress independently from the current stage', () => {
     const wrapper = mountJourneyTable([journeyFixture])
     const progressCell = wrapper.get('.data-table tbody [data-testid="business-journey-progress"]')
     const progress = progressCell.get('[role="progressbar"]')
     const indicator = progressCell.get('[role="progressbar"] > div')
 
-    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
-    expect(progress.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
-    expect(progressCell.text()).toContain('29%')
+    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
+    expect(progress.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
+    expect(progressCell.text()).toContain('75%')
     expect(progressCell.classes()).toContain('items-center')
     expect(progress.classes()).toContain('h-1.5')
-    expect(indicator.classes()).toContain('bg-yellow-500')
+    expect(indicator.classes()).toContain('bg-cyan-500')
   })
-  it('renders derived progress in mobile cards with the shared color and accessible label', () => {
+  it('renders API cumulative progress in mobile cards without changing the current stage', () => {
     const wrapper = mountJourneyTable([journeyFixture])
     const card = wrapper.get('.data-table-mobile-card')
     const progressCell = card.get('[data-testid="business-journey-progress"]')
@@ -177,10 +178,10 @@ describe('BusinessJourneyTableView layout', () => {
     expect(card.text()).toContain('华东续约旅程')
     expect(card.text()).toContain('示例科技')
     expect(card.text()).toContain('当前阶段：持续推进')
-    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
-    expect(progressCell.text()).toContain('29%')
-    expect(progress.attributes('aria-label')).toBe('华东续约旅程 当前进度 29%')
-    expect(indicator.classes()).toContain('bg-yellow-500')
+    expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
+    expect(progressCell.text()).toContain('75%')
+    expect(progress.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
+    expect(indicator.classes()).toContain('bg-cyan-500')
   })
 
   it.each([

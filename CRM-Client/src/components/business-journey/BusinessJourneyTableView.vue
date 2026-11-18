@@ -10,10 +10,7 @@ import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
 import type { FeedbackError } from '@/types/feedback'
 import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
 import { getStatusPresentation } from '@/utils/statusPresentation'
-import {
-  dealJourneyProgressColorClass,
-  dealJourneyProgressPercent
-} from '@/utils/dealJourney'
+import { dealJourneyProgressColorClass } from '@/utils/dealJourney'
 
 interface Props {
   fields: ListFieldDefinition[]
@@ -94,7 +91,7 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
   emit('row-click', { customerId: row.customer_id, journeyPublicId: row.public_id })
 }
 const getJourneyProgressPercent = (row: BusinessJourneyListItem): number =>
-  dealJourneyProgressPercent(row.current_board_stage)
+  row.cumulative_progress_percent
 
 const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
   dealJourneyProgressColorClass(getJourneyProgressPercent(row))
@@ -112,7 +109,7 @@ const summaryClearScope = computed(() => {
 })
 
 const getJourneyProgressLabel = (row: BusinessJourneyListItem): string =>
-  `${row.name} 当前进度 ${getJourneyProgressPercent(row)}%`
+  `${row.name} 累计进度 ${getJourneyProgressPercent(row)}%`
 
 function setDisplayMode(value: string): void {
   if (value !== 'table' && value !== 'board' && value !== 'chart') return

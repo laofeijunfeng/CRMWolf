@@ -121,8 +121,9 @@ const journeyFixture = (overrides: Partial<DealJourney> = {}): DealJourney => ({
   public_id: JOURNEY_IDS.first,
   name: '企业 CRM 升级项目',
   status: 'ACTIVE',
-  current_board_stage: 'closing_soon',
-  current_board_stage_label: '即将签约',
+  current_board_stage: 'invoice_processing',
+  current_board_stage_label: '开票中',
+  cumulative_progress_percent: 75,
   amount: 320000,
   purchase_type: 'NEW',
   started_at: '2026-07-15T00:00:00',
@@ -234,13 +235,12 @@ describe('CustomerDealJourneyHoverCard', () => {
     const html = item.html()
     expect(html.indexOf('企业 CRM 升级项目')).toBeLessThan(html.indexOf('金额 320000'))
     expect(html.indexOf('金额 320000')).toBeLessThan(html.indexOf('data-progress'))
-    expect(html.indexOf('data-progress')).toBeLessThan(html.indexOf('即将签约'))
-    expect(item.get('[data-progress="43"]').exists()).toBe(true)
-    const firstProgress = item.get('[data-progress="43"]')
-    expect(firstProgress.attributes('data-indicator-class')).toBe('bg-green-500')
-    expect(item.text()).toContain('43%')
-    expect(firstProgress.attributes('aria-label')).toBe('企业 CRM 升级项目 旅程进度 43%')
-    expect(wrapper.get(`[data-testid="customer-deal-journey-stage-${JOURNEY_IDS.first}"]`).text()).toBe('即将签约')
+    expect(html.indexOf('data-progress')).toBeLessThan(html.indexOf('开票中'))
+    const firstProgress = item.get('[data-progress="75"]')
+    expect(firstProgress.attributes('data-indicator-class')).toBe('bg-cyan-500')
+    expect(item.text()).toContain('75%')
+    expect(firstProgress.attributes('aria-label')).toBe('企业 CRM 升级项目 累计进度 75%')
+    expect(wrapper.get(`[data-testid="customer-deal-journey-stage-${JOURNEY_IDS.first}"]`).text()).toBe('开票中')
 
     await item.trigger('click')
     expect(wrapper.emitted('select-journey')).toEqual([[JOURNEY_IDS.first]])
@@ -287,6 +287,7 @@ describe('CustomerDealJourneyHoverCard', () => {
         status: 'COMPLETED',
         current_board_stage: 'completed',
         current_board_stage_label: '已完成',
+        cumulative_progress_percent: 100,
         amount: 50000,
       }),
     ])
@@ -295,7 +296,7 @@ describe('CustomerDealJourneyHoverCard', () => {
     await openHoverCard(wrapper)
 
     const progress = wrapper.get('[data-progress="100"]')
-    expect(progress.attributes('aria-label')).toBe('已完成项目 旅程进度 100%')
+    expect(progress.attributes('aria-label')).toBe('已完成项目 累计进度 100%')
     expect(progress.attributes('data-indicator-class')).toBe('bg-blue-500')
     expect(wrapper.text()).toContain('100%')
     expect(wrapper.text()).not.toContain('赢率')

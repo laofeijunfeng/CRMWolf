@@ -38,6 +38,7 @@ class CustomerDealJourneyResponse(BaseModel):
     closed_at: datetime | None
     last_event_at: datetime | None
     primary_opportunity: CustomerDealJourneyOpportunitySummary | None
+    cumulative_progress_percent: int
 
 
 class BusinessJourneyOwner(BaseModel):

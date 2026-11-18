@@ -26,6 +26,7 @@ const listItem = {
   status: 'ACTIVE',
   current_board_stage: 'active_progress',
   current_board_stage_label: '积极推进',
+  cumulative_progress_percent: 75,
   amount: 168000,
   purchase_type: 'RENEWAL',
   started_at: '2026-09-01T09:00:00',
@@ -154,6 +155,24 @@ describe('business journey page schemas', () => {
     expect(parsed.items[0]?.public_id).toBe(journeyPublicId)
     expect(parsed.page_size).toBe(20)
     expect(parsed.total_pages).toBe(1)
+  })
+  it('requires cumulative progress percentages in the shared journey schema', () => {
+    const withoutProgress: Partial<typeof listItem> = { ...listItem }
+    delete withoutProgress.cumulative_progress_percent
+    expect(() => BusinessJourneyListResponseSchema.parse({
+      items: [withoutProgress],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      total_pages: 1,
+    })).toThrow()
+    expect(BusinessJourneyListResponseSchema.parse({
+      items: [{ ...listItem, cumulative_progress_percent: 100 }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      total_pages: 1,
+    }).items[0]?.cumulative_progress_percent).toBe(100)
   })
 
   it('requires public journey IDs for list rows', () => {

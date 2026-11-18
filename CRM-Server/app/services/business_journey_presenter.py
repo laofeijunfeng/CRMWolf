@@ -13,14 +13,14 @@ from app.schemas.deal_journey import (
     BusinessJourneyBoardOpportunitySummary,
     BusinessJourneyBoardResponse,
     BusinessJourneyBoardSummary,
-    BusinessJourneyListItem,
     BusinessJourneyDetailResponse,
+    BusinessJourneyListItem,
     BusinessJourneyOwner,
     CustomerDealJourneyOpportunitySummary,
     CustomerDealJourneyResponse,
 )
-from app.services.opportunity_presenter import opportunity_detail_response
 from app.services.business_journey_query_service import BusinessJourneyQueryRow
+from app.services.deal_journey_progress import load_cumulative_progress_percentages
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
     BOARD_STAGE_LABELS,
@@ -32,6 +32,7 @@ from app.services.deal_journey_stage import (
     load_invoice_summaries,
     load_payment_summaries,
 )
+from app.services.opportunity_presenter import opportunity_detail_response
 
 _EMPTY_CONTRACT = BusinessJourneyContractSummary(count=0, signed_count=0, amount=0)
 _EMPTY_PAYMENT = BusinessJourneyPaymentSummary(
@@ -98,6 +99,7 @@ def customer_journey_response(
     contract_summary: BusinessJourneyContractSummary,
     payment_summary: BusinessJourneyPaymentSummary,
     invoice_summary: BusinessJourneyInvoiceSummary,
+    cumulative_progress_percent: int,
 ) -> CustomerDealJourneyResponse:
     stage = infer_board_stage(
         journey,
@@ -119,6 +121,7 @@ def customer_journey_response(
         closed_at=journey.closed_at,
         last_event_at=journey.last_event_at,
         primary_opportunity=customer_opportunity_summary(opportunity),
+        cumulative_progress_percent=cumulative_progress_percent,
     )
 
 
@@ -145,6 +148,18 @@ def customer_journey_responses(
             .all()
         )
         opportunity_map = {int(opportunity.id): opportunity for opportunity in opportunities}
+    opportunity_won_by_journey: dict[int, bool] = {}
+    for journey in journeys:
+        opportunity_id = journey.primary_opportunity_id
+        opportunity = opportunity_map.get(int(opportunity_id)) if opportunity_id is not None else None
+        if opportunity_id is not None and opportunity is not None:
+            opportunity_won_by_journey[int(journey.id)] = opportunity.status == 1
+    progress_map = load_cumulative_progress_percentages(
+        db,
+        team_id,
+        journeys,
+        opportunity_won_by_journey=opportunity_won_by_journey,
+    )
 
     return [
         customer_journey_response(
@@ -157,6 +172,7 @@ def customer_journey_responses(
             contract_summary=contract_map.get(int(journey.id), _EMPTY_CONTRACT),
             payment_summary=payment_map.get(int(journey.id), _EMPTY_PAYMENT),
             invoice_summary=invoice_map.get(int(journey.id), _EMPTY_INVOICE),
+            cumulative_progress_percent=progress_map.get(int(journey.id), 0),
         )
         for journey in journeys
     ]
@@ -218,6 +234,7 @@ def list_items(
             contract_summary=row.contract_summary,
             payment_summary=row.payment_summary,
             invoice_summary=row.invoice_summary,
+            cumulative_progress_percent=row.cumulative_progress_percent,
         )
         base_data = base.model_dump()
         base_data["amount"] = opportunity_amount(row.opportunity)
@@ -253,6 +270,7 @@ def detail_response(
         contract_summary=row.contract_summary,
         payment_summary=row.payment_summary,
         invoice_summary=row.invoice_summary,
+        cumulative_progress_percent=row.cumulative_progress_percent,
     )
     primary_opportunity = (
         opportunity_detail_response(

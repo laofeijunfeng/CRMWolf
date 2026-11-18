@@ -31,6 +31,7 @@ export const DealJourneySchema = z.object({
   status: z.string(),
   current_board_stage: DealJourneyBoardStageSchema,
   current_board_stage_label: z.string(),
+  cumulative_progress_percent: z.number().int().min(0).max(100),
   amount: z.number(),
   purchase_type: z.string().nullable(),
   started_at: BusinessDateTimeStringSchema.nullable(),

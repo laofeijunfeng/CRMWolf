@@ -18,9 +18,9 @@ from app.constants.approval_phase import ApprovalPhase
 from app.core import database, deps
 from app.core.database import Base
 from app.models.contract import Contract
-from app.models.customer import Contact, Customer
+from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
-from app.models.invoice import InvoiceApplication, InvoiceTitle
+from app.models.invoice import InvoiceApplication, InvoiceRedOffset, InvoiceReissueApplication, InvoiceTitle
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.product import Product
@@ -43,6 +43,7 @@ def api_env(monkeypatch):
         User.__table__,
         Customer.__table__,
         Contact.__table__,
+        CustomerProduct.__table__,
         Product.__table__,
         Opportunity.__table__,
         CustomerDealJourney.__table__,
@@ -52,6 +53,8 @@ def api_env(monkeypatch):
         PaymentRecord.__table__,
         InvoiceTitle.__table__,
         InvoiceApplication.__table__,
+        InvoiceReissueApplication.__table__,
+        InvoiceRedOffset.__table__,
     ]
     renamed_indexes = []
     for table in tables:
@@ -203,6 +206,30 @@ def test_customer_journey_amount_preserves_total_amount_contract(api_env):
 
     assert response.status_code == 200
     assert response.json()[0]["amount"] == 10000.0
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_progress", "expected_stage"),
+    [
+        (DealJourneyStatus.ACTIVE, 0, "early_communication"),
+        (DealJourneyStatus.COMPLETED, 100, "completed"),
+    ],
+)
+def test_list_and_detail_progress_without_milestone_facts(api_env, status, expected_progress, expected_stage):
+    journey = seed_journey(api_env, api_env.customer, suffix="empty", status=status)
+
+    list_response = api_env.client.get(f"/v1/customers/{api_env.customer.public_id}/deal-journeys")
+    detail_response = api_env.client.get(
+        f"/v1/customers/{api_env.customer.public_id}/deal-journeys/{journey.public_id}"
+    )
+
+    assert list_response.status_code == 200, list_response.text
+    assert detail_response.status_code == 200, detail_response.text
+    for item in (list_response.json()[0], detail_response.json()):
+        assert item["public_id"] == journey.public_id
+        assert type(item["cumulative_progress_percent"]) is int
+        assert item["cumulative_progress_percent"] == expected_progress
+        assert item["current_board_stage"] == expected_stage
 
 
 def test_list_excludes_archived(api_env):

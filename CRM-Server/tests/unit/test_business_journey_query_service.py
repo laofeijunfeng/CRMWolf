@@ -23,7 +23,13 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermType,
 )
 from app.models.deal_journey import CustomerDealJourney, DealJourneyStatus
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceReissueApplication,
+    InvoiceTitle,
+)
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.product import Product
@@ -66,6 +72,8 @@ def db() -> Session:
         PaymentRecord.__table__,
         InvoiceTitle.__table__,
         InvoiceApplication.__table__,
+        InvoiceReissueApplication.__table__,
+        InvoiceRedOffset.__table__,
     ]
     renamed_indexes = []
     for table in tables:

@@ -19,10 +19,16 @@ from app.constants.approval_phase import ApprovalPhase
 from app.core import database, deps
 from app.core.database import Base
 from app.crud.permission import permission_crud
-from app.models.contract import Contract
-from app.models.customer import Contact, Customer, CustomerMember
+from app.models.contract import Contract, ContractStatus, PaymentStatus
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyStatus
-from app.models.invoice import InvoiceApplication, InvoiceTitle
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceReissueApplication,
+    InvoiceTitle,
+)
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.payment import PaymentPlan, PaymentRecord
 from app.models.product import Product, ProductModule
@@ -46,6 +52,7 @@ def api_env(monkeypatch):
         Customer.__table__,
         Contact.__table__,
         CustomerMember.__table__,
+        CustomerProduct.__table__,
         Product.__table__,
         Opportunity.__table__,
         ProductModule.__table__,
@@ -57,6 +64,8 @@ def api_env(monkeypatch):
         PaymentRecord.__table__,
         InvoiceTitle.__table__,
         InvoiceApplication.__table__,
+        InvoiceReissueApplication.__table__,
+        InvoiceRedOffset.__table__,
     ]
     renamed_indexes = []
     for table in tables:
@@ -237,6 +246,139 @@ def test_detail_returns_null_primary_opportunity(api_env):
     assert response.json()["journey"]["public_id"] == journey.public_id
     assert response.json()["journey"]["primary_opportunity"] is None
     assert response.json()["primary_opportunity"] is None
+
+
+def test_progress_agrees_across_business_and_customer_reads_without_changing_stage(api_env):
+    journey = seed_journey(api_env)
+    opportunity = api_env.db.get(Opportunity, journey.primary_opportunity_id)
+    opportunity.status = 1
+    customer = api_env.db.get(Customer, journey.customer_id)
+    contract = Contract(
+        team_id=1,
+        contract_number="CONTRACT-PROGRESS",
+        contract_name="已签署合同",
+        customer_id=customer.id,
+        opportunity_id=opportunity.id,
+        deal_journey_id=journey.id,
+        user_count=10,
+        total_amount=Decimal("10000"),
+        license_type="SUBSCRIPTION",
+        subscription_years=1,
+        standard_unit_price=Decimal("1000"),
+        status=ContractStatus.SIGNED,
+        payment_status=PaymentStatus.COMPLETED,
+        total_paid_amount=Decimal("10000"),
+        owner_id="1",
+        creator_id="1",
+    )
+    api_env.db.add(contract)
+    api_env.db.flush()
+    plan = PaymentPlan(
+        team_id=1,
+        contract_id=contract.id,
+        deal_journey_id=journey.id,
+        plan_number="PLAN-PROGRESS",
+        stage_name="全款",
+        planned_amount=Decimal("10000"),
+        due_date=date(2026, 9, 1),
+        status="COMPLETED",
+    )
+    api_env.db.add(plan)
+    api_env.db.flush()
+    application = InvoiceApplication(
+        team_id=1,
+        application_number="INVOICE-PROGRESS",
+        customer_id=customer.id,
+        contract_id=contract.id,
+        opportunity_id=opportunity.id,
+        payment_plan_id=plan.id,
+        deal_journey_id=journey.id,
+        invoice_amount=Decimal("10000"),
+        invoice_type="VAT_NORMAL",
+        status=InvoiceApplicationStatus.ISSUED,
+        applicant_id="1",
+        invoice_title_type="COMPANY",
+        invoice_title_text=customer.account_name,
+        invoice_taxpayer_id="TAX-PROGRESS",
+        invoice_file_path="invoices/progress.pdf",
+    )
+    api_env.db.add(application)
+    api_env.db.commit()
+
+    def assert_progress(expected, expected_stage="payment_processing"):
+        paths = (
+            "/v1/business-journeys",
+            f"/v1/business-journeys/{journey.public_id}",
+            f"/v1/customers/{customer.public_id}/deal-journeys",
+            f"/v1/customers/{customer.public_id}/deal-journeys/{journey.public_id}",
+        )
+        bodies = []
+        for path in paths:
+            response = api_env.client.get(path)
+            assert response.status_code == 200, response.text
+            bodies.append(response.json())
+        items = (bodies[0]["items"][0], bodies[1]["journey"], bodies[2][0], bodies[3])
+        for item in items:
+            assert item["public_id"] == journey.public_id
+            assert type(item["cumulative_progress_percent"]) is int
+            assert item["cumulative_progress_percent"] == expected
+            assert item["current_board_stage"] == expected_stage
+
+    assert_progress(100)
+
+    api_env.db.add(InvoiceRedOffset(
+        team_id=1,
+        invoice_application_id=application.id,
+        source_type="MANUAL",
+        red_invoice_file_path="invoices/progress-red.pdf",
+        created_by="1",
+    ))
+    api_env.db.commit()
+    assert_progress(75)
+
+    contract.status = ContractStatus.DRAFT
+    contract.payment_status = PaymentStatus.UNPAID
+    api_env.db.commit()
+    assert_progress(25)
+    reissue = InvoiceReissueApplication(
+        team_id=1,
+        application_number="REISSUE-PROGRESS",
+        original_invoice_application_id=application.id,
+        applicant_id="1",
+        reason="替换发票",
+        status="COMPLETED",
+        approval_phase=ApprovalPhase.APPROVED.value,
+        new_invoice_file_path="invoices/progress-replacement.pdf",
+        invoice_title_type="COMPANY",
+        invoice_title_text=customer.account_name,
+        invoice_taxpayer_id="TAX-PROGRESS",
+        invoice_amount=Decimal("10000"),
+        invoice_type="VAT_NORMAL",
+    )
+    api_env.db.add(reissue)
+    api_env.db.commit()
+    assert_progress(50)
+
+    reissue.status = "DRAFT"
+    api_env.db.commit()
+    assert_progress(25)
+
+    reissue.status = "COMPLETED"
+    api_env.db.commit()
+    assert_progress(50)
+
+    contract.status = ContractStatus.SIGNED
+    api_env.db.commit()
+    assert_progress(75)
+
+    opportunity.status = 0
+    api_env.db.commit()
+    assert_progress(50)
+
+    journey.status = DealJourneyStatus.COMPLETED
+    api_env.db.commit()
+    assert_progress(100, "completed")
+
 
 
 def test_detail_requires_public_journey_id(api_env):

@@ -26,13 +26,13 @@ export function createBusinessJourneyListFields(ownerOptions: ListFieldOption[])
     { key: 'current_board_stage', label: '当前阶段', type: 'enum', options: businessJourneyStageOptions, column: { width: '120px' }, filter: { apiKey: 'stage' }, sort: false, sortDisabledReason: '阶段由跨对象状态动态推断，请使用看板查看阶段顺序' },
     {
       key: 'progress',
-      label: '当前进度',
+      label: '累计进度',
       role: 'decoration',
       column: { width: '96px' },
       filter: false,
-      filterDisabledReason: '当前进度由当前阶段派生，不支持筛选',
+      filterDisabledReason: '累计进度由当前有效里程碑即时计算，不支持筛选',
       sort: false,
-      sortDisabledReason: '当前进度由当前阶段派生，不支持排序',
+      sortDisabledReason: '累计进度由当前有效里程碑即时计算，不支持排序',
       export: false
     },
     { key: 'primary_opportunity_name', label: '主商机', type: 'text', column: { width: '200px' }, filter: false, filterDisabledReason: '主商机仅作关联摘要', sort: false, sortDisabledReason: '主商机仅作关联摘要' },

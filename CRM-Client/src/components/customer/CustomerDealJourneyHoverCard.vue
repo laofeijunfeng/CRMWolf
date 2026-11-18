@@ -7,7 +7,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import {
   dealJourneyProgressColorClass,
-  dealJourneyProgressPercent,
   type DealJourneyBoardStage
 } from '@/utils/dealJourney'
 import { getStatusPresentation } from '@/utils/statusPresentation'
@@ -39,13 +38,13 @@ const isPreviewable = (journey: DealJourney): boolean =>
 const getProductName = (journey: DealJourney): string =>
   journey.primary_opportunity?.product_name ?? ''
 const getJourneyProgressPercent = (journey: DealJourney): number =>
-  dealJourneyProgressPercent(journey.current_board_stage)
+  journey.cumulative_progress_percent
 
 const getJourneyProgressColorClass = (journey: DealJourney): string =>
   dealJourneyProgressColorClass(getJourneyProgressPercent(journey))
 
 const getJourneyProgressLabel = (journey: DealJourney): string =>
-  `${journey.name} 旅程进度 ${getJourneyProgressPercent(journey)}%`
+  `${journey.name} 累计进度 ${getJourneyProgressPercent(journey)}%`
 
 const boardStageBadgeClass = (stage: DealJourneyBoardStage): string => {
   if (stage === 'lost') return 'status-danger'

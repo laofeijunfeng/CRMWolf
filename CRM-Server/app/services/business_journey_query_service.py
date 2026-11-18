@@ -7,6 +7,7 @@ from typing import Literal
 from sqlalchemy import and_, case, exists, false, func, or_
 from sqlalchemy.orm import Query, Session
 
+from app.constants.approval_phase import ApprovalPhase
 from app.core.list_query.catalogs.business_journeys import (
     BUSINESS_JOURNEYS_LIST_QUERY_CATALOG,
 )
@@ -15,7 +16,6 @@ from app.core.list_query.errors import ListQueryError
 from app.core.list_query.types import FilterCondition, ListQueryContext, SortCondition
 from app.crud.customer_member import ACCESS_LEVEL_RANK
 from app.models.customer import Customer, CustomerMember
-from app.constants.approval_phase import ApprovalPhase
 from app.models.deal_journey import CustomerDealJourney, DealJourneyStatus
 from app.models.opportunity import Opportunity
 from app.models.product import Product
@@ -31,6 +31,7 @@ from app.schemas.deal_journey import (
     BusinessJourneyChartSummary,
     ChartCardKey,
 )
+from app.services.deal_journey_progress import load_cumulative_progress_percentages
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
     BoardStageKey,
@@ -68,6 +69,7 @@ class BusinessJourneyQueryRow:
     opportunity: Opportunity | None
     owner_id: str | None
     stage: BoardStageKey
+    cumulative_progress_percent: int
     contract_summary: BusinessJourneyContractSummary
     payment_summary: BusinessJourneyPaymentSummary
     invoice_summary: BusinessJourneyInvoiceSummary
@@ -709,6 +711,16 @@ class BusinessJourneyQueryService:
         contract_map = load_contract_summaries(db, team_id, journey_ids)
         payment_map = load_payment_summaries(db, team_id, journey_ids)
         invoice_map = load_invoice_summaries(db, team_id, journey_ids)
+        opportunity_won_by_journey = {
+            int(journey.id): bool(opportunity is not None and opportunity.status == 1)
+            for journey, _, opportunity in raw_rows
+        }
+        progress_map = load_cumulative_progress_percentages(
+            db,
+            team_id,
+            [journey for journey, _, _ in raw_rows],
+            opportunity_won_by_journey=opportunity_won_by_journey,
+        )
         rows: list[BusinessJourneyQueryRow] = []
         for journey, customer, opportunity in raw_rows:
             journey_id = int(journey.id)
@@ -732,6 +744,7 @@ class BusinessJourneyQueryService:
                         payment_summary,
                         invoice_summary,
                     ),
+                    cumulative_progress_percent=progress_map.get(journey_id, 0),
                     contract_summary=contract_summary,
                     payment_summary=payment_summary,
                     invoice_summary=invoice_summary,

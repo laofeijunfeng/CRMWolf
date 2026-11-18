@@ -277,6 +277,7 @@ const journeyFixture = (overrides: Partial<DealJourney> = {}): DealJourney => ({
   status: 'OPEN',
   current_board_stage: 'closing_soon',
   current_board_stage_label: '即将签约',
+  cumulative_progress_percent: 75,
   amount: 320000,
   purchase_type: 'NEW',
   started_at: '2026-07-15T00:00:00',
