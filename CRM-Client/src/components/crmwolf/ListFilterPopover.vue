@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { CalendarDate, getLocalTimeZone, today, type DateValue } from '@internationalized/date'
 import { CalendarDays, Circle, Filter, Hash, MapPin, Type, UserRound } from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import Calendar from '@/components/ui/calendar/Calendar.vue'
@@ -37,7 +36,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: ListFilterCondition[]]
   apply: [value: ListFilterCondition[]]
-  reset: []
 }>()
 
 const open = ref(false)
@@ -386,13 +384,6 @@ function handleDateSelect(field: ListFilterField, value: DateValue | undefined):
   })
 }
 
-function resetFilters(): void {
-  pendingRangeStart.value = ''
-  draftOperator.value = ''
-  activeFieldKey.value = ''
-  emit('reset')
-}
-
 function handlePlaceholderChange(value: DateValue | undefined): void {
   calendarPlaceholder.value = value ?? today(getLocalTimeZone())
 }
@@ -550,12 +541,6 @@ watch(open, (isOpen) => {
             @update:model-value="handleDateSelect(activeField, $event)"
             @update:placeholder="handlePlaceholderChange"
           />
-
-          <div v-if="activeFilterCount > 0" class="filter-footer">
-            <Button type="button" variant="ghost" size="sm" @click="resetFilters">
-              清空
-            </Button>
-          </div>
         </section>
         </div>
       </div>
@@ -717,14 +702,6 @@ watch(open, (isOpen) => {
 
 .filter-option-empty {
   color: $wolf-text-tertiary-v2;
-}
-
-.filter-footer {
-  display: flex;
-  justify-content: space-between;
-  margin: $wolf-space-sm-v2 (-$wolf-space-sm-v2) (-$wolf-space-sm-v2);
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border-top: 1px solid $wolf-border-light-v2;
 }
 
 @media (max-width: 767px) {

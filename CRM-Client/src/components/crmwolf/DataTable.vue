@@ -777,10 +777,6 @@ function handleFilterApply(filters: ListFilterCondition[]): void {
   emit('filter-apply', filters)
 }
 
-function handleFilterReset(): void {
-  emit('filter-reset')
-}
-
 function areFilterValuesEqual(
   left: ListFilterCondition['value'],
   right: ListFilterCondition['value'],
@@ -1079,7 +1075,6 @@ onBeforeUnmount(() => {
           :fields="normalizedFilterFields"
           @update:model-value="handleFilterUpdate"
           @apply="handleFilterApply"
-          @reset="handleFilterReset"
         />
         <ListAdvancedTools
           v-if="hasAdvancedTools"

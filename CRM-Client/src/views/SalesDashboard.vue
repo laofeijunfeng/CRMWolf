@@ -274,11 +274,6 @@ const handleFilterApply = (filters: ListFilterCondition[]): void => {
   void loadDashboard()
 }
 
-const handleFilterReset = (): void => {
-  activeFilters.value = []
-  void loadDashboard()
-}
-
 const handleTrendRangeChange = (): void => {
   void loadDashboard()
 }
@@ -298,7 +293,6 @@ onMounted(() => {
         :fields="filterFields"
         @update:model-value="activeFilters = $event"
         @apply="handleFilterApply"
-        @reset="handleFilterReset"
       />
       <TableToolbarButton
         class="refresh-button"
