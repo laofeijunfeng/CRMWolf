@@ -1,7 +1,7 @@
 {
   "$schema": "./inventory.schema.json",
   "version": "2.0",
-  "lastVerified": "2026-11-19",
+  "lastVerified": "2026-11-20",
   "entries": [
     {
       "id": "GOV-001",
@@ -1105,13 +1105,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-002 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-002"
     },
     {
       "id": "GOV-075",
@@ -1124,9 +1125,9 @@
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 对该文件无 page-form-primitive 命中",
+      "status": "fixed",
+      "lastVerified": "2026-11-20"
     },
     {
       "id": "GOV-076",
@@ -1135,13 +1136,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/input、ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-001 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-001"
     },
     {
       "id": "GOV-077",
@@ -1154,9 +1156,9 @@
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 对该文件无 page-form-primitive 命中",
+      "status": "fixed",
+      "lastVerified": "2026-11-20"
     },
     {
       "id": "GOV-078",
@@ -1165,13 +1167,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/input、ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-004 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-004"
     },
     {
       "id": "GOV-079",
@@ -1180,13 +1183,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-007 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-007"
     },
     {
       "id": "GOV-080",
@@ -1195,13 +1199,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/input、ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-003 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-003"
     },
     {
       "id": "GOV-081",
@@ -1210,13 +1215,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-005 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-005"
     },
     {
       "id": "GOV-082",
@@ -1229,9 +1235,9 @@
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 对该文件无 page-form-primitive 命中",
+      "status": "fixed",
+      "lastVerified": "2026-11-20"
     },
     {
       "id": "GOV-083",
@@ -1240,13 +1246,14 @@
       "category": "page-form-primitive",
       "current": "直接引用 ui/input、ui/label",
       "target": "表单字段改用 crmwolf *Field；内联按钮等无法封装处保留并说明（GATE-10 只减不增）",
-      "exception": false,
+      "exception": true,
       "owner": "frontend-platform",
       "batch": "阶段3",
       "risk": "表单校验与布局回归",
-      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-form-primitive 命中",
-      "status": "open",
-      "lastVerified": "2026-11-19"
+      "verification": "npm run lint:design-system -- --all 通过；剩余引用由 exceptions.json PFP-006 覆盖",
+      "status": "exception",
+      "lastVerified": "2026-11-20",
+      "exceptionId": "PFP-006"
     }
   ]
 }

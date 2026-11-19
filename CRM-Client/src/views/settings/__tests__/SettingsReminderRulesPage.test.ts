@@ -59,11 +59,15 @@ const slot = { template: '<div><slot /></div>' }
 const Select = defineComponent({ props: { modelValue: { type: String, default: '' } }, emits: ['update:modelValue'], template: '<select :value="modelValue" @change="$emit(\'update:modelValue\', $event.target.value)"><slot /></select>' })
 const SelectItem = defineComponent({ props: { value: { type: String, required: true }, disabled: { type: Boolean, default: false } }, template: '<option :value="value" :disabled="disabled"><slot /></option>' })
 const MultiSelect = defineComponent({ props: { modelValue: { type: Array as PropType<string[]>, required: true }, options: { type: Array as PropType<{ value: string, label: string }[]>, required: true } }, emits: ['update:modelValue'], template: '<div class="multi-select"><button v-for="option in options" :key="option.value" type="button" @click="$emit(\'update:modelValue\', modelValue.includes(option.value) ? modelValue.filter(value => value !== option.value) : [...modelValue, option.value])">{{ option.label }}</button></div>' })
+const SelectField = defineComponent({ props: { modelValue: { type: [String, Number], default: '' }, options: { type: Array as PropType<readonly { value: string, label: string, disabled?: boolean }[]>, default: () => [] }, helperText: { type: String, default: '' } }, emits: ['update:modelValue'], template: '<div><p v-if="helperText">{{ helperText }}</p><Select :model-value="String(modelValue)" @update:model-value="$emit(\'update:modelValue\', $event)"><SelectItem v-for="option in options" :key="option.value" :value="option.value" :disabled="option.disabled">{{ option.label }}</SelectItem></Select></div>' })
+const InputField = defineComponent({ props: { modelValue: { type: [String, Number], default: '' }, type: { type: String, default: 'text' } }, emits: ['update:modelValue'], template: '<input :value="modelValue" :type="type" @input="$emit(\'update:modelValue\', $event.target.value)" />' })
+// 业务对象与检查时间是 SelectField，条件行仍是 Select；按页面顺序合并。
+const allSelects = (wrapper: VueWrapper): { vm: { $emit: (event: string, value: string) => void }, findAll: VueWrapper['findAll'] }[] => [...wrapper.findAllComponents(SelectField), ...wrapper.findAllComponents(Select)]
 async function mountEditor(catalogResponse: Promise<ReminderObjectCatalog[]> = Promise.resolve(catalog)): Promise<VueWrapper> {
   vi.mocked(reminderRuleApi.catalog).mockImplementation(() => catalogResponse)
-  const wrapper = shallowMount(SettingsReminderRulesPage, { global: { stubs: {
+  const wrapper = shallowMount(SettingsReminderRulesPage, { global: { components: { Select, SelectItem }, stubs: {
     SettingsContent: slot, Sheet: slot, DetailSheetContent: slot, SheetHeader: slot, SheetFooter: slot, SheetTitle: slot, SheetDescription: slot,
-    Tabs: slot, TabsList: slot, TabsContent: slot, TabsTrigger: slot, Select, SelectContent: slot, SelectItem, SelectTrigger: slot, SelectValue: true,
+    Tabs: slot, TabsList: slot, TabsContent: slot, TabsTrigger: slot, Select, SelectContent: slot, SelectItem, SelectTrigger: slot, SelectValue: true, SelectField, InputField,
     MultiSelect, Input: defineComponent({ props: { modelValue: { type: [String, Number], default: undefined }, value: { type: String, default: undefined }, type: { type: String, default: undefined }, min: { type: String, default: undefined } }, emits: ['update:modelValue'], template: '<input :value="modelValue ?? value" :type="type" :min="min" @input="$emit(\'update:modelValue\', $event.target.value)" />' }),
     Textarea: defineComponent({ props: { modelValue: { type: String, default: '' } }, emits: ['update:modelValue'], template: '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' }),
     Button: defineComponent({ props: { disabled: { type: Boolean, default: false } }, template: '<button :disabled="disabled"><slot /></button>' }),
@@ -87,7 +91,7 @@ describe('reminder catalog editor', () => {
     expect(wrapper.text()).toContain('日期 created_time')
     expect(wrapper.text()).not.toContain('状态发生变化时提醒')
     for (const entry of catalog.slice(1)) {
-      required(wrapper.findAllComponents(Select)[0]).vm.$emit('update:modelValue', entry.object_type)
+      required(allSelects(wrapper)[0]).vm.$emit('update:modelValue', entry.object_type)
       await flushPromises()
       expect(wrapper.text()).toContain(required(entry.fields[1]).label)
       expect(wrapper.text()).not.toContain('业务旅程名称')
@@ -110,14 +114,14 @@ describe('reminder catalog editor', () => {
 
   it('edits deadline operator and days; rejects empty statuses, duplicate fields, and invalid days', async () => {
     const wrapper = await mountEditor()
-    let selects = wrapper.findAllComponents(Select)
+    let selects = allSelects(wrapper)
     let save = required(wrapper.findAll('button').find(button => button.text().includes('保存并启用')))
     required(selects[0]).vm.$emit('update:modelValue', 'opportunity')
     await flushPromises()
-    selects = wrapper.findAllComponents(Select)
+    selects = allSelects(wrapper)
     required(selects[4]).vm.$emit('update:modelValue', 'expected_closing_date')
     await flushPromises()
-    selects = wrapper.findAllComponents(Select)
+    selects = allSelects(wrapper)
     required(selects[5]).vm.$emit('update:modelValue', 'due_in_days')
     await flushPromises()
     save = required(wrapper.findAll('button').find(button => button.text().includes('保存并启用')))
@@ -143,7 +147,7 @@ describe('reminder catalog editor', () => {
     const add = required(wrapper.findAll('button').find(button => button.text().includes('并且')))
     await add.trigger('click')
     expect(save.attributes('disabled')).toBeDefined()
-    selects = wrapper.findAllComponents(Select)
+    selects = allSelects(wrapper)
     const addedField = required(selects[6])
     expect(addedField.findAll('option').find(option => option.attributes('value') === 'status')?.attributes('disabled')).toBeDefined()
     addedField.vm.$emit('update:modelValue', 'owner')
@@ -164,11 +168,11 @@ describe('reminder catalog editor', () => {
 
   it('saves selected journey date and daily time, then supports a status-only rule', async () => {
     const wrapper = await mountEditor()
-    let selects = wrapper.findAllComponents(Select)
+    let selects = allSelects(wrapper)
     required(selects[4]).vm.$emit('update:modelValue', 'started_at')
     await flushPromises()
     await wrapper.find('input[type="number"]').setValue('5')
-    selects = wrapper.findAllComponents(Select)
+    selects = allSelects(wrapper)
     required(selects[1]).vm.$emit('update:modelValue', '16:30')
     await flushPromises()
     await required(wrapper.findAll('button').filter(button => button.attributes('aria-label') === '删除条件')[1]).trigger('click')
@@ -231,7 +235,7 @@ describe('reminder catalog editor', () => {
   it('does not expose a create editor when catalog cannot load', async () => {
     const wrapper = await mountEditor(Promise.reject(new Error('catalog unavailable')))
     expect(topBar.visible()).toBe(false)
-    expect(required(wrapper.findAllComponents(Select)[0]).findAll('option')).toHaveLength(0)
+    expect(required(allSelects(wrapper)[0]).findAll('option')).toHaveLength(0)
     expect(wrapper.findAll('button').find(button => button.text().includes('保存并启用'))?.attributes('disabled')).toBeDefined()
     expect(wrapper.find('[role="alert"]').text()).toContain('提醒字段')
     wrapper.unmount()

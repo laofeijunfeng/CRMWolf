@@ -36,11 +36,7 @@ node CRM-Docs/scripts/check-design-system-docs.js
 | `npm run lint:design-system -- --worktree` | 工作区新增行。 |
 | `npm run lint:design-system:all` | 全量扫描，CI 阻断。 |
 
-| 类别 | 全量 | 增量 |
-| --- | --- | --- |
-| `raw-color`、`dark-mode`、`palette-color` | 是 | 是 |
-| `layer-direction`、`barrel-reexport`、`restricted-primitive`、`page-status-style` | 阶段 3 前跳过 | 是 |
-| `native-dialog`（跳过测试文件） | 阶段 3 前跳过 | 是 |
+三种命令运行同一组逐行规则：`raw-color`、`dark-mode`、`palette-color` 与组件门禁 GATE-01～06、10、11；仓库级规则 GATE-07～09 每次运行都检查全仓。
 
 - [inventory.json](inventory.json)（[schema](inventory.schema.json)）只登记存量违规，不豁免。
 - [exceptions.json](exceptions.json)（[schema](exceptions.schema.json)）是唯一豁免来源，每条必须带 `reviewDate`。

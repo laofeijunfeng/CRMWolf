@@ -4,8 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import InputField from '@/components/crmwolf/InputField.vue'
 import { Skeleton } from '@/components/ui/skeleton'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { teamApi, type TeamResponse } from '@/api/team'
@@ -174,14 +173,8 @@ watch(hasAccess, (ok) => {
           </CardHeader>
           <CardContent>
             <div class="settings-form-grid">
-              <div class="space-y-2">
-                <Label for="team-name">团队名称</Label>
-                <Input id="team-name" v-model="teamName" :disabled="!canUpdateTeam || saving" maxlength="100" />
-              </div>
-              <div class="space-y-2">
-                <Label for="team-created">创建时间</Label>
-                <Input id="team-created" :model-value="team.created_at" disabled />
-              </div>
+              <InputField id="team-name" label="团队名称" v-model="teamName" :disabled="!canUpdateTeam || saving" maxlength="100" />
+              <InputField id="team-created" label="创建时间" :model-value="team.created_at" disabled />
             </div>
           </CardContent>
         </Card>
@@ -192,14 +185,8 @@ watch(hasAccess, (ok) => {
           </CardHeader>
           <CardContent class="space-y-4">
             <div class="settings-form-grid">
-              <div class="space-y-2">
-                <Label for="team-code">当前邀请码</Label>
-                <Input id="team-code" :model-value="team.code" readonly />
-              </div>
-              <div class="space-y-2">
-                <Label for="team-invite-link">邀请链接</Label>
-                <Input id="team-invite-link" :model-value="inviteLink" readonly />
-              </div>
+              <InputField id="team-code" label="当前邀请码" :model-value="team.code" readonly />
+              <InputField id="team-invite-link" label="邀请链接" :model-value="inviteLink" readonly />
             </div>
             <div class="flex flex-wrap gap-2">
               <Button variant="outline" :disabled="inviteLink.length === 0" @click="copyInviteLink">复制邀请链接</Button>

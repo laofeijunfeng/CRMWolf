@@ -6,18 +6,9 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { AlertCircle, Check } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
 import { InputField, SelectField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
@@ -53,6 +44,14 @@ const configInfo = ref<AIConfigResponse | null>(null)
 const streamingContent = ref('')
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const selectedProvider = ref('custom')
+const providerOptions = [
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'zhipu', label: '智谱 AI (GLM)' },
+  { value: 'aliyun', label: '阿里云通义' },
+  { value: 'baidu', label: '百度文心' },
+  { value: 'custom', label: '自定义' },
+] as const
 const verifyingAssistant = ref(false)
 const assistantResult = ref<AssistantCapabilityResult | null>(null)
 let configurationRevision = 0
@@ -333,22 +332,14 @@ watch(hasAccess, (ok) => {
           </CardHeader>
           <CardContent>
             <div class="settings-form-grid">
-              <div class="space-y-2">
-                <Label for="ai-provider">供应商</Label>
-                <Select v-model="selectedProvider" @update:model-value="handleProviderChange">
-                  <SelectTrigger id="ai-provider">
-                    <SelectValue placeholder="选择 AI 供应商" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="deepseek">DeepSeek</SelectItem>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="zhipu">智谱 AI (GLM)</SelectItem>
-                    <SelectItem value="aliyun">阿里云通义</SelectItem>
-                    <SelectItem value="baidu">百度文心</SelectItem>
-                    <SelectItem value="custom">自定义</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <SelectField
+                id="ai-provider"
+                v-model="selectedProvider"
+                label="供应商"
+                placeholder="选择 AI 供应商"
+                :options="providerOptions"
+                @update:model-value="handleProviderChange"
+              />
 
               <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="model_name">
                 <InputField
@@ -449,14 +440,13 @@ watch(hasAccess, (ok) => {
             <CardDescription>普通连接成功只代表服务可连接，不代表销售助手已就绪。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
-            <div class="space-y-2">
-              <Label for="ai-test-message">测试消息</Label>
-              <Input
-                id="ai-test-message"
-                v-model="testData.test_message"
-                placeholder="输入测试消息，如：帮我查询线索列表"
-              />
-            </div>
+            <InputField
+              id="ai-test-message"
+              label="测试消息"
+              :model-value="testData.test_message"
+              placeholder="输入测试消息，如：帮我查询线索列表"
+              @update:model-value="testData.test_message = String($event)"
+            />
             <div class="flex justify-end">
               <Button type="button" variant="outline" class="min-h-11" :loading="testing" :disabled="hasUnsavedChanges || saving || verifyingAssistant" @click="handleTest">
                 {{ testing ? '测试中...' : '测试连接' }}

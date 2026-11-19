@@ -146,12 +146,11 @@ test('GATE-02 rejects ui re-exports only in the crmwolf barrel', () => {
   assert.deepEqual(categories('CRM-Client/src/components/crmwolf/ConfirmDialog.vue', line), [])
 })
 
-test('GATE-03 restricts alert-dialog, sheet and form to ui and crmwolf', () => {
+test('GATE-03 restricts alert-dialog and form to ui and crmwolf', () => {
   assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
     "import { AlertDialog } from '@/components/ui/alert-dialog'",
-    "import { Sheet } from '@/components/ui/sheet'",
     "import { FormField } from '@/components/ui/form'",
-  ]), ['restricted-primitive', 'restricted-primitive', 'restricted-primitive'])
+  ]), ['restricted-primitive', 'restricted-primitive'])
   assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
     "import { DetailSheetContent } from '@/components/ui/detail-sheet'",
   ]), [])
@@ -196,18 +195,6 @@ test('GATE-05 allows the single status source', () => {
   ]), [])
 })
 
-test('full audit mode skips incremental component gates but keeps token rules', () => {
-  const lines = [
-    "import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'",
-    "if (!confirm('确定删除？')) return",
-    '  color: #2563eb;',
-  ]
-  assert.deepEqual(
-    inspectContent('CRM-Client/src/components/agent/Chat.vue', lines, [], { full: true }).map((violation) => violation.category),
-    ['raw-color'],
-  )
-})
-
 test('GATE-06 rejects new geometry literals outside ui and styles', () => {
   assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
     '<span class="text-[13px]">',
@@ -221,10 +208,6 @@ test('GATE-06 rejects new geometry literals outside ui and styles', () => {
     '<div class="h-[var(--control-h-md)] max-w-[600px]">',
   ]), [])
   assert.deepEqual(categories('CRM-Client/src/components/ui/button/Button.vue', ['<span class="text-[13px]">']), [])
-  assert.deepEqual(
-    inspectContent('CRM-Client/src/views/Customers.vue', ['<span class="text-[13px]">'], [], { full: true }).map((violation) => violation.category),
-    [],
-  )
 })
 
 test('GATE-06 rejects pixel max-w inside a multi-line *Content opening tag only', () => {
@@ -244,6 +227,32 @@ test('GATE-06 rejects pixel max-w inside a multi-line *Content opening tag only'
 test('GATE-10 rejects form primitives imported by views only', () => {
   assert.deepEqual(categories('CRM-Client/src/views/Leads.vue', ["import { Input } from '@/components/ui/input'"]), ['page-form-primitive'])
   assert.deepEqual(categories('CRM-Client/src/components/crmwolf/InputField.vue', ["import { Input } from '@/components/ui/input'"]), [])
+})
+
+test('GATE-11 rejects float-layer primitives outside the allowlist in every layer', () => {
+  const imports = ["import { Sheet } from '@/components/ui/sheet'", "const Drawer = () => import('../ui/drawer/Drawer.vue')"]
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', imports.slice(0, 1)), ['float-layer-drift'])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/Panel.vue', imports.slice(1)), ['float-layer-drift'])
+  assert.deepEqual(categories('CRM-Client/src/components/ui/dialog/Dialog.vue', imports.slice(0, 1)), ['float-layer-drift'])
+  assert.deepEqual(categories('CRM-Client/src/components/ui/sheet/index.ts', ["export { default as Sheet } from './Sheet.vue'"]), [])
+})
+
+test('GATE-11 allows allowlisted wrappers only for the matching import', () => {
+  const allowlist = [{
+    id: 'FLT-TEST',
+    category: 'float-layer-drift',
+    files: ['CRM-Client/src/components/ui/detail-sheet/*'],
+    match: "components/ui/sheet['\"]",
+    reason: 'test',
+    owner: 'frontend-platform',
+    reviewDate: '2099-01-01',
+    status: 'active',
+  }]
+  const line = ["import { SheetContent } from '@/components/ui/sheet'"]
+  const found = (filePath, lines) => inspectContent(filePath, lines, allowlist).map((violation) => violation.category)
+  assert.deepEqual(found('CRM-Client/src/components/ui/detail-sheet/DetailSheetContent.vue', line), [])
+  assert.deepEqual(found('CRM-Client/src/components/ui/detail-sheet/DetailSheetContent.vue', ["import { Drawer } from '@/components/ui/drawer'"]), ['float-layer-drift'])
+  assert.deepEqual(found('CRM-Client/src/components/panels/LeadDetailSheet.vue', line), ['float-layer-drift'])
 })
 
 test('GATE-07 reports components without production consumers unless registered', () => {

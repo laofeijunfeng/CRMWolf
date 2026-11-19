@@ -6,7 +6,6 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Search, Plus } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -515,9 +514,10 @@ watch([hasAccess, teamId], (): void => {
 
       <div class="space-y-4">
         <div class="flex gap-2">
-          <Input
+          <InputField
             v-model="inviteEmail"
             placeholder="输入用户邮箱"
+            aria-label="用户邮箱"
             class="flex-1"
           />
           <Button :loading="searchLoading" @click="handleSearchEmail">
@@ -631,17 +631,15 @@ watch([hasAccess, teamId], (): void => {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onUpdateNameSubmit">
-        <div class="space-y-2">
-          <Label for="member-name">用户名 <span class="text-destructive">*</span></Label>
-          <Input
-            id="member-name"
-            v-model="updateNameValue"
-            placeholder="请输入用户名"
-            :aria-invalid="updateNameError ? 'true' : 'false'"
-            @input="updateNameError = ''"
-          />
-          <p v-if="updateNameError" class="text-sm font-medium text-destructive">{{ updateNameError }}</p>
-        </div>
+        <InputField
+          id="member-name"
+          label="用户名"
+          required
+          :model-value="updateNameValue"
+          placeholder="请输入用户名"
+          :error="updateNameError"
+          @update:model-value="updateNameValue = String($event); updateNameError = ''"
+        />
 
         <DialogFooter>
           <Button type="button" variant="outline" @click="updateNameDialogOpen = false">取消</Button>

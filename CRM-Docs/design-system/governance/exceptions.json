@@ -2,5 +2,224 @@
   "$schema": "./exceptions.schema.json",
   "version": "1.0",
   "lastVerified": "2026-11-20",
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "FLT-001",
+      "category": "float-layer-drift",
+      "files": [
+        "CRM-Client/src/components/ui/detail-sheet/*"
+      ],
+      "match": "components/ui/sheet['\\\"]",
+      "reason": "ui/detail-sheet 是 ui/sheet 唯一的业务侧滑封装（GATE-11）。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "FLT-002",
+      "category": "float-layer-drift",
+      "files": [
+        "CRM-Client/src/components/ui/sidebar/Sidebar.vue"
+      ],
+      "match": "components/ui/sheet['\\\"]",
+      "reason": "侧边栏在移动端以 Sheet 抽屉呈现，属 shadcn sidebar 原件内部实现。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-001",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/LeadConvertDialog.vue",
+        "CRM-Client/src/components/panels/ContractDetailContent.vue",
+        "CRM-Client/src/components/panels/CustomerDetailSheet.vue",
+        "CRM-Client/src/components/panels/DealJourneyDetailContent.vue",
+        "CRM-Client/src/components/panels/InvoiceDetailSheet.vue",
+        "CRM-Client/src/components/panels/LeadDetailSheet.vue",
+        "CRM-Client/src/components/panels/OpportunityDetailContent.vue",
+        "CRM-Client/src/components/panels/PaymentPlanDetailContent.vue",
+        "CRM-Client/src/components/panels/PaymentRecordDetailContent.vue"
+      ],
+      "match": "font-size:\\s*20px",
+      "reason": "详情/转化面板圆形头像内的首字母字形，随头像尺寸固定，不属于文字层级。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-002",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/crmwolf/BottomNavItem.vue",
+        "CRM-Client/src/components/crmwolf/BottomNavOverflow.vue"
+      ],
+      "match": "font-size:\\s*20px",
+      "reason": "底部导航图标字形尺寸，与同规则的 20px 宽高一致。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-003",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/views/InviteLogin.vue"
+      ],
+      "match": "font-size:\\s*20px",
+      "reason": "邀请登录独立页标题，介于 title 与 display 令牌之间；不做视觉改版，待令牌评审。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-004",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/crmwolf/MetricCard.vue",
+        "CRM-Client/src/components/payment/PaymentRecordChartPage.vue"
+      ],
+      "match": "font-size:\\s*(?:30|25|22)px",
+      "reason": "指标卡与空环形图的大号数字，超出正文字号令牌范围。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-005",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/business-journey/BusinessJourneyChartView.vue",
+        "CRM-Client/src/components/contract/ContractChartPage.vue",
+        "CRM-Client/src/components/customer/CustomerChartPage.vue",
+        "CRM-Client/src/components/opportunity/OpportunityChartPage.vue",
+        "CRM-Client/src/components/payment/PaymentRecordChartPage.vue"
+      ],
+      "match": "(?<![\\w-])h-\\[(?:220|240)px\\]",
+      "reason": "图表画布高度需与 Vis 容器的 :height 数值同步，不是控件高度。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-006",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/crmwolf/DataTableSearch.vue"
+      ],
+      "match": "(?<![\\w-])h-\\[30px\\]",
+      "reason": "表格工具栏紧凑搜索框，与同排工具按钮对齐；暂无对应控件高度令牌。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-007",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/crmwolf/FilePreviewDialog.vue"
+      ],
+      "match": "h-\\[calc\\(100dvh-48px\\)\\]",
+      "reason": "文件预览弹窗按视口留边计算高度，非固定几何值。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "GEO-008",
+      "category": "geometry-token",
+      "files": [
+        "CRM-Client/src/components/LeadFormDialog.vue"
+      ],
+      "match": "(?<![\\w-])px-\\[28px\\]",
+      "reason": "线索表单弹窗内容区横向留白，不做视觉改版，待弹窗内边距令牌评审。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-001",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/AccountSettings.vue"
+      ],
+      "match": "components/ui/(?:input|label)['\\\"]",
+      "reason": "密码输入框内嵌显隐切换按钮，*Field 无法承载内联按钮。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-002",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/ProcurementStagesSettings.vue"
+      ],
+      "match": "components/ui/label['\\\"]",
+      "reason": "Label 用于 Switch 行标签，不是文本输入字段。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-003",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/settings/SettingsIntegrationsPage.vue"
+      ],
+      "match": "components/ui/(?:input|label)['\\\"]",
+      "reason": "Switch 行标签与带复制按钮的重定向 URL 输入框，*Field 无法承载内联按钮。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-004",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/settings/SettingsMembersPage.vue"
+      ],
+      "match": "components/ui/label['\\\"]",
+      "reason": "Label 用于角色 Checkbox 卡片标签，不是文本输入字段。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-005",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/settings/SettingsNotificationsPage.vue"
+      ],
+      "match": "components/ui/label['\\\"]",
+      "reason": "Label 用于 Switch 行标签，不是文本输入字段。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-006",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/settings/SettingsReminderRulesPage.vue"
+      ],
+      "match": "components/ui/(?:input|label)['\\\"]",
+      "reason": "条件行的天数/不为空内联输入（aria-label）与 MultiSelect、Textarea 标签；文本字段已迁到 *Field。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "PFP-007",
+      "category": "page-form-primitive",
+      "files": [
+        "CRM-Client/src/views/settings/SettingsRolesPage.vue"
+      ],
+      "match": "components/ui/label['\\\"]",
+      "reason": "Label 用于权限 Checkbox 标签，不是文本输入字段。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    }
+  ]
 }

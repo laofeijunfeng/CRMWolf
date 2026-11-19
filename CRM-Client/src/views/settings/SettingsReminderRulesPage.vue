@@ -6,7 +6,9 @@ import reminderRuleApi, { type ReminderRuleWrite } from '@/api/reminderRule'
 import type { ReminderCondition, ReminderObjectCatalog, ReminderRecipient, ReminderRule, ReminderRuleRun } from '@/schemas/reminderRule'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import InputField from '@/components/crmwolf/InputField.vue'
 import MultiSelect from '@/components/crmwolf/MultiSelect.vue'
+import SelectField from '@/components/crmwolf/SelectField.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -49,6 +51,7 @@ const { canAccess, permissionsUnavailable, permissionsPending } = useSettingsAcc
 const settingsItem = getSettingsNavigationItem('reminder-rules')
 const hasAccess = computed(() => settingsItem !== undefined && canAccess(settingsItem))
 const catalog = ref<ReminderObjectCatalog[]>([])
+const objectOptions = computed(() => catalog.value.map((item) => ({ value: item.object_type, label: item.label })))
 const catalogError = ref<FeedbackError | null>(null)
 const canPublish = computed(() => permissionStore.hasPermission('automation:publish'))
 const canCreate = computed(() => hasAccess.value && canPublish.value && permissionStore.hasPermission('automation:create') && catalog.value.length > 0 && catalogError.value === null)
@@ -448,22 +451,17 @@ watch([hasAccess, (): number | undefined => teamStore.currentTeam?.id], (): void
           <h3 class="text-sm font-semibold">当以下情况发生时</h3>
           <div class="space-y-4 rounded-xl border bg-background p-4">
             <p class="text-xs text-muted-foreground">第 1 步</p>
-            <div class="space-y-2"><Label for="reminder-rule-name">规则名称</Label><Input id="reminder-rule-name" :model-value="draft.name" placeholder="规则名称" @update:model-value="draft.name = String($event)" /></div>
-            <div class="space-y-2">
-              <Label>选择业务对象</Label>
-              <Select :model-value="draft.object_type" @update:model-value="selectObject">
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem v-for="item in catalog" :key="item.object_type" :value="item.object_type">{{ item.label }}</SelectItem></SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-2">
-              <Label>每日检查时间</Label>
-              <Select :model-value="draft.trigger_time ?? '09:00'" @update:model-value="draft.trigger_time = String($event)">
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent class="max-h-72"><SelectItem v-for="option in REMINDER_TIME_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</SelectItem></SelectContent>
-              </Select>
-              <p class="text-xs text-muted-foreground">每天到点检查所有条件；日期字段变化后才重新提醒。仅有非日期条件的规则每个对象只提醒一次。</p>
-            </div>
+            <InputField id="reminder-rule-name" label="规则名称" :model-value="draft.name" placeholder="规则名称" @update:model-value="draft.name = String($event)" />
+            <SelectField id="reminder-rule-object" label="选择业务对象" :model-value="draft.object_type" :options="objectOptions" @update:model-value="selectObject" />
+            <SelectField
+              id="reminder-rule-time"
+              label="每日检查时间"
+              :model-value="draft.trigger_time ?? '09:00'"
+              :options="REMINDER_TIME_OPTIONS"
+              content-class="max-h-72"
+              helper-text="每天到点检查所有条件；日期字段变化后才重新提醒。仅有非日期条件的规则每个对象只提醒一次。"
+              @update:model-value="draft.trigger_time = $event"
+            />
           </div>
           <div class="space-y-3 rounded-xl border bg-background p-4">
             <h4 class="text-sm font-medium">同时满足以下条件</h4>
@@ -496,7 +494,7 @@ watch([hasAccess, (): number | undefined => teamStore.currentTeam?.id], (): void
             <Button type="button" variant="secondary" class="justify-start">发送飞书消息</Button>
             <div class="space-y-2"><Label>对象成员</Label><MultiSelect :model-value="draft.recipients.filter(value => !value.startsWith('user:'))" :options="recipientChoices" placeholder="选择对象成员" @update:model-value="updateObjectRecipients" /></div>
             <div class="space-y-2"><Label>指定团队成员</Label><MultiSelect v-model="selectedTeamMembers" :options="teamMemberOptions" placeholder="选择一个或多个团队成员" /></div>
-            <div class="space-y-2"><Label>标题</Label><Input :model-value="draft.message_title ?? ''" placeholder="填写飞书消息标题" @update:model-value="draft.message_title = String($event)" /></div>
+            <InputField id="reminder-rule-title" label="标题" :model-value="draft.message_title ?? ''" placeholder="填写飞书消息标题" @update:model-value="draft.message_title = String($event)" />
             <div class="space-y-2"><Label>内容</Label><Textarea v-model="draft.message_template" class="min-h-40" /></div>
             <p class="rounded-lg bg-muted p-3 text-sm leading-6">{{ sentence }}</p>
           </div>

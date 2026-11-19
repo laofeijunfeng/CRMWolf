@@ -3,7 +3,7 @@
  * 设计系统治理门禁。
  *
  * 默认检查暂存文件的新增行；--worktree 检查工作区改动；--all 全量审计 CRM-Client/src（CI 阻断）。
- * 标记 incremental 的组件门禁只在增量模式生效，存量登记在 governance/inventory.json，阶段 3 去掉标记后进入 --all。
+ * 三种模式运行同一组规则；确需保留的存量登记在 governance/exceptions.json。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -26,9 +26,12 @@ const CRMWOLF = `${SRC}components/crmwolf/`
 const COMPONENTS = `${SRC}components/`
 const VIEWS = `${SRC}views/`
 const IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/g
-const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|sheet|form)(?:\/|$)/
+// ui/sheet 由 float-layer-drift（GATE-11）按白名单拦截。
+const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|form)(?:\/|$)/
 // ui/form 已由 restricted-primitive 拦截，这里只补 input、label。
 const PAGE_FORM_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:input|label)(?:\/|$)/
+// GATE-11：浮层原件只经 ui/detail-sheet、ui/sidebar 封装使用，白名单在 exceptions.json。
+const FLOAT_LAYER_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:sheet|drawer)(?:\/|$)/
 const STYLES = `${SRC}styles/`
 // GATE-06：任意值只允许引用令牌（var(...)）；*Content 上的像素宽度另行拦截。
 const GEOMETRY_LITERALS = [
@@ -89,7 +92,6 @@ const RULES = [
   },
   {
     category: 'layer-direction',
-    incremental: true,
     appliesTo: (filePath) => Boolean(FORBIDDEN_LAYERS[layerOf(filePath)]),
     test: (text, filePath) => {
       const forbidden = FORBIDDEN_LAYERS[layerOf(filePath)]
@@ -99,52 +101,52 @@ const RULES = [
   },
   {
     category: 'barrel-reexport',
-    incremental: true,
     appliesTo: (filePath) => filePath === `${CRMWOLF}index.ts`,
     test: (text, filePath) => resolveImports(filePath, text).some((target) => layerOf(target) === 'ui'),
     message: 'crmwolf/index.ts 不得转出 ui 原件；需要原件能力时在 crmwolf 中封装。',
   },
   {
     category: 'restricted-primitive',
-    incremental: true,
     appliesTo: (filePath) => !filePath.startsWith(UI) && !filePath.startsWith(CRMWOLF),
     test: (text, filePath) => resolveImports(filePath, text).some((target) => RESTRICTED_PRIMITIVE.test(target)),
-    message: 'ui 的 alert-dialog / sheet / form 只能经 crmwolf 组件或 ui/detail-sheet 使用，见 components/registry.md。',
+    message: 'ui 的 alert-dialog / form 只能经 crmwolf 组件使用，见 components/registry.md。',
   },
   {
     category: 'native-dialog',
-    incremental: true,
     appliesTo: (filePath) => !isTestFile(filePath),
     pattern: /(?:\b(?:window|globalThis)\.|(?<![\w$.]|function\s+))(?:confirm|alert|prompt)\s*\(/,
     message: '禁止浏览器原生 confirm / alert / prompt，使用 confirmDialog / confirmDelete。',
   },
   {
     category: 'page-status-style',
-    incremental: true,
     appliesTo: (filePath) => filePath.endsWith('.vue') && filePath !== `${CRMWOLF}StatusBadge.vue`,
     pattern: /\.status-(?:success|warning|danger|info|muted|default)(?![\w-])/,
     message: '页面不得自定义 .status-* 色板，业务状态统一用 StatusBadge。',
   },
   {
     category: 'page-status-style',
-    incremental: true,
     exemptFiles: [`${SRC}utils/statusPresentation.ts`, `${CRMWOLF}StatusBadge.vue`],
     pattern: /\b(?:function\s+|(?:const|let|var)\s+)get\w*Status\w*(?:Class|Color|Tone|Variant)\w*\b/,
     message: '状态映射只在 utils/statusPresentation.ts 定义，页面不得自写 get*Status* 映射函数。',
   },
   {
     category: 'geometry-token',
-    incremental: true,
     appliesTo: (filePath) => /\.(?:vue|s?css)$/.test(filePath) && !filePath.startsWith(UI) && !filePath.startsWith(STYLES),
     test: (text, _filePath, tag) => GEOMETRY_LITERALS.some((pattern) => pattern.test(text)) || ((/Content\b/.test(text) || /Content$/.test(tag)) && CONTENT_PX_WIDTH.test(text)),
     message: '宽度、字号、高度、圆角、内边距走令牌：弹窗用 size，其余用 --control-h-* / --radius-* / 字号令牌，见 foundations/token-values.md。',
   },
   {
     category: 'page-form-primitive',
-    incremental: true,
     appliesTo: (filePath) => filePath.startsWith(VIEWS) && !isTestFile(filePath),
     test: (text, filePath) => resolveImports(filePath, text).some((target) => PAGE_FORM_PRIMITIVE.test(target)),
-    message: '页面表单用 crmwolf *Field 组件，不得直接组合 ui/input、ui/label；存量见 governance/inventory.json。',
+    message: '页面表单用 crmwolf *Field 组件，不得直接组合 ui/input、ui/label；无法封装的内联组合登记在 governance/exceptions.json。',
+  },
+  {
+    category: 'float-layer-drift',
+    // 原件包内部互相引用不算漂移。
+    appliesTo: (filePath) => !isTestFile(filePath) && !FLOAT_LAYER_PRIMITIVE.test(filePath),
+    test: (text, filePath) => resolveImports(filePath, text).some((target) => FLOAT_LAYER_PRIMITIVE.test(target)),
+    message: 'ui/sheet、ui/drawer 只能由 governance/exceptions.json 白名单内的封装引用；侧滑详情用 ui/detail-sheet。',
   },
 ]
 
@@ -213,8 +215,7 @@ function wildcardToRegExp(pattern) {
   return new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
 }
 
-function ruleApplies(rule, filePath, { full }) {
-  if (full && rule.incremental) return false
+function ruleApplies(rule, filePath) {
   if (rule.exemptFiles?.includes(filePath)) return false
   return rule.appliesTo ? rule.appliesTo(filePath) : true
 }
@@ -230,10 +231,10 @@ function enclosingTag(lines, index) {
   return /<([A-Za-z][\w.-]*)\b(?:[^<>"']|"[^"]*"|'[^']*')*$/.exec(before)?.[1] ?? ''
 }
 
-function inspectLine(filePath, line, text, exceptions, options, tag = '') {
+function inspectLine(filePath, line, text, exceptions, tag = '') {
   const violations = []
   for (const rule of RULES) {
-    if (!ruleApplies(rule, filePath, options)) continue
+    if (!ruleApplies(rule, filePath)) continue
     if (!ruleMatches(rule, text, filePath, tag)) continue
     if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
     violations.push({ category: rule.category, file: filePath, line, message: rule.message, text: text.trim() })
@@ -289,24 +290,24 @@ export function inspectLines(files, options = {}) {
     if (added.length === 0) continue
     const source = readSourceLines(filePath, options)
     for (const { line, text } of added) {
-      violations.push(...inspectLine(filePath, line, text, exceptions, { full: false }, enclosingTag(source, line - 1)))
+      violations.push(...inspectLine(filePath, line, text, exceptions, enclosingTag(source, line - 1)))
     }
   }
   return violations
 }
 
 /**
- * 检查给定内容。默认按增量模式运行全部规则；{ full: true } 与 --all 一致，跳过 incremental 规则。
+ * 按全部规则检查给定内容，增量与 --all 共用。
  */
-export function inspectContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? [], { full = false } = {}) {
-  return lines.flatMap((text, index) => inspectLine(filePath, index + 1, text, exceptions, { full }, enclosingTag(lines, index)))
+export function inspectContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? []) {
+  return lines.flatMap((text, index) => inspectLine(filePath, index + 1, text, exceptions, enclosingTag(lines, index)))
 }
 
 export function inspectAll(files) {
   const exceptions = readJson(exceptionsPath).exceptions ?? []
   return files.flatMap((filePath) => {
     const lines = fs.readFileSync(path.join(repoRoot, filePath), 'utf8').split('\n')
-    return inspectContent(filePath, lines, exceptions, { full: true })
+    return inspectContent(filePath, lines, exceptions)
   })
 }
 
@@ -443,7 +444,7 @@ function main() {
     const sourceFiles = runGit(['ls-files', '--cached', '--others', '--exclude-standard', 'CRM-Client/src']).split('\n')
       .filter((file) => sourceExtensions.has(path.extname(file)) && fs.existsSync(path.join(repoRoot, file)))
     const violations = inspectAll(sourceFiles)
-    console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条违规（incremental 组件门禁不参与全量，存量见 governance/inventory.json）。`)
+    console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条违规（例外见 governance/exceptions.json）。`)
     printViolations(violations.slice(0, 40))
     if (violations.length > 40) console.log(`…其余 ${violations.length - 40} 条仅保留在审计统计中。`)
     process.exit(violations.length || blocked ? 1 : 0)

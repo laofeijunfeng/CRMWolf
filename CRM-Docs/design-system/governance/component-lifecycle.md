@@ -33,20 +33,21 @@
 
 ## 组件门禁
 
-由 `CRM-Client/scripts/check-design-system-governance.mjs` 执行。逐行规则只检查增量，阶段 3 前 `--all` 跳过；仓库级规则（GATE-07/08/09）每次运行都检查全仓。
+由 `CRM-Client/scripts/check-design-system-governance.mjs` 执行。逐行规则在增量与 `--all` 中一致执行，`--all` 由 CI 全量阻断；仓库级规则（GATE-07/08/09）每次运行都检查全仓。
 
 | 规则 | 编号 | 禁止 |
 | --- | --- | --- |
 | `layer-direction` | GATE-01 | 违反上文分层方向的导入。 |
 | `barrel-reexport` | GATE-02 | `crmwolf/index.ts` 转导出 `@/components/ui/*`。 |
-| `restricted-primitive` | GATE-03 | `ui` 与 `crmwolf` 之外导入 `ui/alert-dialog`、`ui/sheet`、`ui/form`。 |
+| `restricted-primitive` | GATE-03 | `ui` 与 `crmwolf` 之外导入 `ui/alert-dialog`、`ui/form`；`ui/sheet` 归 GATE-11。 |
 | `native-dialog` | GATE-04 | 调用原生 `confirm`、`alert`、`prompt`；跳过测试文件。 |
 | `page-status-style` | GATE-05 | `.vue` 中的 `.status-*` 状态类与手写 `get*Status(Class/Color/Tone/Variant)` 映射；状态统一用 StatusBadge。 |
 | `geometry-token` | GATE-06 | `ui` 与 `styles` 之外新增像素字号、非令牌高度、圆角、内边距任意值，以及 `*Content` 上的像素宽度；任意值只能写 `var(--*)`，见[令牌数值](../foundations/token-values.md)。 |
 | `orphan-component` | GATE-07 | `components/**`（`ui` 除外）没有生产代码消费方的组件；待删组件在 `exceptions.json` 登记到期日。 |
 | `style-ratchet` | GATE-08 | views 私有样式行数与 `:deep(` 数量超过 [`ratchet.json`](ratchet.json) 基线；降低后同步下调基线。 |
 | `icon-button-label` | GATE-09 | 只有图标的 Button 缺少 `aria-label`；纯图标白名单见[按钮](../components/button.md#变体与内容)。 |
-| `page-form-primitive` | GATE-10 | views 直接导入 `ui/input`、`ui/label` 拼表单；改用 crmwolf `*Field`，存量见 `inventory.json`。 |
+| `page-form-primitive` | GATE-10 | views 直接导入 `ui/input`、`ui/label` 拼表单；改用 crmwolf `*Field`；Switch/Checkbox 标签与带内联按钮的输入登记在 `exceptions.json`。 |
+| `float-layer-drift` | GATE-11 | 导入 `ui/sheet`、`ui/drawer` 的文件必须在 `exceptions.json` 白名单内（原件包内部引用除外）；侧滑详情用 `ui/detail-sheet`。 |
 
 「同排同档」「loading 不改宽」暂无脚本，由代码评审检查。
 

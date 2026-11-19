@@ -21,7 +21,7 @@ import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, ArrowRightLeft, CircleCheck, XCircle, Trash2, Pencil, UserPlus } from 'lucide-vue-next'
-import { DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
+import { DataTable, SelectField, TableRowActions, TextareaField, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
@@ -35,15 +35,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { confirmDelete, confirmDialog } from '@/utils/confirmDialog'
 import { formatProductIntentName } from '@/utils/productIntent'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
@@ -80,6 +71,7 @@ const loadError = ref<FeedbackError | null>(null)
 const listRequestId = ref<number>(0)
 const tableData = ref<Lead[]>([])
 const userOptions = ref<UserResponse[]>([])
+const ownerSelectOptions = computed(() => userOptions.value.map((user) => ({ value: String(user.id), label: user.name })))
 const ownerFilterOptions = ref<LeadOwnerFilterOption[]>([])
 const {
   filterSelectOptions: sourceFilterSelectOptions,
@@ -852,23 +844,14 @@ watchEffect(() => {
           <DialogTitle>分配线索</DialogTitle>
         </DialogHeader>
         <div class="space-y-4 py-4">
-          <div class="space-y-2">
-            <Label>负责人 *</Label>
-            <Select v-model="assignForm.owner_id">
-              <SelectTrigger>
-                <SelectValue placeholder="请选择负责人" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="user in userOptions"
-                  :key="user.id"
-                  :value="String(user.id)"
-                >
-                  {{ user.name }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <SelectField
+            id="lead-assign-owner"
+            v-model="assignForm.owner_id"
+            label="负责人"
+            required
+            placeholder="请选择负责人"
+            :options="ownerSelectOptions"
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" @click="assignModalVisible = false">取消</Button>
@@ -885,15 +868,16 @@ watchEffect(() => {
           <DialogDescription>请输入线索无效的原因说明</DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-4">
-          <div class="space-y-2">
-            <Label>无效原因 *</Label>
-            <Textarea
-              v-model="invalidForm.reason"
-              placeholder="请输入无效原因说明"
-              :rows="4"
-              :maxlength="500"
-            />
-          </div>
+          <TextareaField
+            id="lead-invalid-reason"
+            :model-value="invalidForm.reason"
+            label="无效原因"
+            required
+            placeholder="请输入无效原因说明"
+            :rows="4"
+            :maxlength="500"
+            @update:model-value="invalidForm.reason = String($event ?? '')"
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" @click="invalidModalVisible = false">取消</Button>
