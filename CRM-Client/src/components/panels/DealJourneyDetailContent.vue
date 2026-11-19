@@ -24,15 +24,6 @@ import {
   AccordionTrigger
 } from '@/components/ui/accordion'
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from '@/components/ui/alert-dialog'
-import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
@@ -163,7 +154,6 @@ const paymentRecordDialogOpen = ref(false)
 const paymentRecordIdempotencyKey = ref<string | null>(null)
 const paymentRecordCommandOptions = ref<CommandRequestOptions | null>(null)
 const paymentRecordSubmitting = ref(false)
-const paymentPlanToDelete = ref<PaymentPlanResponse | null>(null)
 const paymentPlanDeleting = ref(false)
 const invoiceApplicationDialogOpen = ref(false)
 const licenseApplicationDialogOpen = ref(false)
@@ -682,24 +672,19 @@ function handleEditPaymentPlan(plan: PaymentPlanResponse): void {
   paymentPlanDialogOpen.value = true
 }
 
-function handleRequestDeletePaymentPlan(plan: PaymentPlanResponse): void {
+async function handleRequestDeletePaymentPlan(plan: PaymentPlanResponse): Promise<void> {
   if (!canDeletePaymentPlan(plan)) {
     if (plan.payment_records.length > 0) {
       toast.warning('存在回款记录的计划不能删除')
     }
     return
   }
-  paymentPlanToDelete.value = plan
-}
-
-async function handleDeletePaymentPlan(): Promise<void> {
-  const plan = paymentPlanToDelete.value
-  if (plan === null) return
+  if (paymentPlanDeleting.value) return
+  if (!(await confirmDelete(`回款计划“${plan.stage_name}”`))) return
 
   paymentPlanDeleting.value = true
   try {
     await paymentApi.deletePaymentPlan(plan.id)
-    paymentPlanToDelete.value = null
     const refreshed = await fetchJourneyDetail()
     toast.success('回款计划删除成功', refreshed ? undefined : {
       description: '回款计划已删除，但旅程详情刷新失败，请稍后重试。',
@@ -820,12 +805,6 @@ async function handlePaymentRecordSubmit(payload: PaymentRecordCreate): Promise<
     handleApiError(error, '登记回款')
   } finally {
     paymentRecordSubmitting.value = false
-  }
-}
-
-function handleDeletePaymentPlanDialogOpenChange(open: boolean): void {
-  if (!open && !paymentPlanDeleting.value) {
-    paymentPlanToDelete.value = null
   }
 }
 
@@ -1597,30 +1576,6 @@ watch(approvalPhase, phase => {
       @success="handleLicenseApplicationSuccess"
     />
 
-    <AlertDialog
-      :open="paymentPlanToDelete !== null"
-      @update:open="handleDeletePaymentPlanDialogOpenChange"
-    >
-      <AlertDialogContent v-bind="elevated ? { elevated: true } : {}">
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除回款计划？</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除回款计划“{{ paymentPlanToDelete?.stage_name }}”吗？此操作不可恢复。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="paymentPlanDeleting">取消</AlertDialogCancel>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="paymentPlanDeleting"
-            @click="handleDeletePaymentPlan"
-          >
-            {{ paymentPlanDeleting ? '删除中...' : '删除' }}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 

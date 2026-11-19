@@ -41,47 +41,22 @@
     </Card>
 
     <!-- 退出登录确认对话框 -->
-    <AlertDialog v-model:open="showLogoutDialog">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认退出</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要退出登录吗？退出后需要重新登录才能继续使用系统。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction @click="confirmLogout">确认退出</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Link, LogOut } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { useUserStore } from '@/stores/user'
+import { confirmLogout } from '@/utils/confirmDialog'
 import { createAuthReturnQuery, getSafeAuthReturnPath } from '@/utils/authRecovery'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const showLogoutDialog = ref(false)
 
 const goToCreateTeam = (): void => {
   router.push({ name: 'TeamCreate', query: createAuthReturnQuery(getSafeAuthReturnPath(route.query['redirect'])) })
@@ -91,11 +66,8 @@ const goToJoinTeam = (): void => {
   router.push({ name: 'TeamJoin', query: createAuthReturnQuery(getSafeAuthReturnPath(route.query['redirect'])) })
 }
 
-const handleLogout = (): void => {
-  showLogoutDialog.value = true
-}
-
-const confirmLogout = (): void => {
+const handleLogout = async (): Promise<void> => {
+  if (!(await confirmLogout())) return
   userStore.logout()
   router.push('/login')
 }

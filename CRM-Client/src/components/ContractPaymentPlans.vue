@@ -19,15 +19,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -64,6 +55,7 @@ import { useUserStore } from '@/stores/user'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatCurrency, formatLocalDate } from '@/utils/format'
 import { logger } from '@/utils/logger'
+import { confirmDelete } from '@/utils/confirmDialog'
 
 interface ContractInfo {
   contract_name: string
@@ -93,8 +85,6 @@ const plans = ref<PaymentPlanResponse[]>([])
 const currentPlan = ref<PaymentPlanResponse | null>(null)
 const editingPlan = ref<PaymentPlanResponse | null>(null)
 const selectedRecord = ref<PaymentRecordInfo | PaymentRecordResponse | null>(null)
-const recordToDelete = ref<PaymentRecordInfo | null>(null)
-const planToDelete = ref<PaymentPlanResponse | null>(null)
 const createdRecord = ref<PaymentRecordResponse | null>(null)
 
 const planFormDialogOpen = ref<boolean>(false)
@@ -358,18 +348,13 @@ async function handleEditRecordSubmit(recordId: number, payload: PaymentRecordUp
   }
 }
 
-function requestDeleteRecord(record: PaymentRecordInfo): void {
-  recordToDelete.value = record
-}
-
-async function handleDeleteRecord(): Promise<void> {
-  const record = recordToDelete.value
-  if (record === null) return
+async function requestDeleteRecord(record: PaymentRecordInfo): Promise<void> {
+  if (deletingRecord.value) return
+  if (!(await confirmDelete(`这条回款记录（金额：${formatCurrency(record.actual_amount ?? 0)}）`))) return
 
   deletingRecord.value = true
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    recordToDelete.value = null
     const refreshed = await fetchPlans()
     notifyUpdated()
     toast.success('回款记录已删除', refreshed ? undefined : {
@@ -383,23 +368,18 @@ async function handleDeleteRecord(): Promise<void> {
   }
 }
 
-function requestDeletePlan(plan: PaymentPlanResponse): void {
+async function requestDeletePlan(plan: PaymentPlanResponse): Promise<void> {
   if (plan.payment_records.length > 0) {
     toast.warning('存在回款记录的计划不能删除')
     return
   }
 
-  planToDelete.value = plan
-}
-
-async function handleDeletePlan(): Promise<void> {
-  const plan = planToDelete.value
-  if (plan === null) return
+  if (deletingPlan.value) return
+  if (!(await confirmDelete(`回款计划“${plan.stage_name}”`))) return
 
   deletingPlan.value = true
   try {
     await paymentApi.deletePaymentPlan(plan.id)
-    planToDelete.value = null
     const refreshed = await fetchPlans()
     notifyUpdated()
     toast.success('回款计划已删除', refreshed ? undefined : {
@@ -441,18 +421,6 @@ function closeEditRecordDialog(open: boolean): void {
   editRecordDialogOpen.value = open
   if (!open) {
     selectedRecord.value = null
-  }
-}
-
-function closeDeletePlanDialog(open: boolean): void {
-  if (!open && !deletingPlan.value) {
-    planToDelete.value = null
-  }
-}
-
-function closeDeleteRecordDialog(open: boolean): void {
-  if (!open && !deletingRecord.value) {
-    recordToDelete.value = null
   }
 }
 
@@ -632,49 +600,6 @@ watch(
       @success="handlePlanFormSuccess"
     />
 
-    <AlertDialog :open="planToDelete !== null" @update:open="closeDeletePlanDialog">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除回款计划？</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除回款计划“{{ planToDelete?.stage_name }}”吗？此操作不可恢复。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="deletingPlan">取消</AlertDialogCancel>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="deletingPlan"
-            @click="handleDeletePlan"
-          >
-            {{ deletingPlan ? '删除中...' : '删除' }}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <AlertDialog :open="recordToDelete !== null" @update:open="closeDeleteRecordDialog">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>删除回款记录？</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要删除这条回款记录吗？金额：{{ formatCurrency(recordToDelete?.actual_amount ?? 0) }}。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel :disabled="deletingRecord">取消</AlertDialogCancel>
-          <Button
-            type="button"
-            variant="destructive"
-            :disabled="deletingRecord"
-            @click="handleDeleteRecord"
-          >
-            {{ deletingRecord ? '删除中...' : '删除' }}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
 
     <PaymentNextStepDialog
       :visible="nextStepDialogOpen"

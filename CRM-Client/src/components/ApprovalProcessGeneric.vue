@@ -20,6 +20,7 @@ import {
 } from 'lucide-vue-next'
 import { useApprovalStore } from '@/stores/approval'
 import { handleApiError } from '@/utils/errorHandler'
+import { confirmDialog } from '@/utils/confirmDialog'
 import type {
   EntityType,
   ApprovalDetail,
@@ -48,16 +49,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from '@/components/ui/alert-dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -116,7 +107,6 @@ const notFound = ref<boolean>(false)
 const forbidden = ref<boolean>(false)
 const actionPending = ref<boolean>(false)
 const rejectDialogVisible = ref<boolean>(false)
-const withdrawDialogVisible = ref<boolean>(false)
 const rejectForm = ref<{ reason: string }>({ reason: '' })
 const rejectReasonError = ref<string>('')
 const rejectReasonInput = ref<{ focus?: () => void } | null>(null)
@@ -295,9 +285,14 @@ const confirmReject = async (): Promise<void> => {
   }
 }
 
-const openWithdrawDialog = (): void => {
+const openWithdrawDialog = async (): Promise<void> => {
   if (isContractChange.value) return
-  withdrawDialogVisible.value = true
+  const confirmed = await confirmDialog(
+    `确定撤回“${approvalObjectLabel.value}”的审批吗？当前状态：${approvalStatusLabel.value}。撤回后审批将终止，需要修改后重新提交。`,
+    '撤回审批',
+    { variant: 'destructive', confirmText: '确定撤回' },
+  )
+  if (confirmed) await confirmWithdraw()
 }
 
 const confirmWithdraw = async (): Promise<void> => {
@@ -308,12 +303,10 @@ const confirmWithdraw = async (): Promise<void> => {
     await store.cancelEntity(props.entityType, props.entityId)
     detail.value = null
     toast.success('已撤回')
-    withdrawDialogVisible.value = false
     emit('withdrawn')
     await loadDetail()
   } catch (error: unknown) {
     if (isAxiosStatus(error, 409)) {
-      withdrawDialogVisible.value = false
       toast.warning('该审批已被他人处理，已为你刷新最新状态')
       await loadDetail()
       if (!isPending.value) {
@@ -550,30 +543,6 @@ watch(
         </DialogContent>
       </Dialog>
 
-      <!-- 撤回确认弹窗 -->
-      <AlertDialog v-model:open="withdrawDialogVisible">
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>撤回审批</AlertDialogTitle>
-            <AlertDialogDescription>
-              确定撤回“{{ approvalObjectLabel }}”的审批吗？当前状态：{{ approvalStatusLabel }}。撤回后审批将终止，需要修改后重新提交。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel @click="withdrawDialogVisible = false">
-              取消
-            </AlertDialogCancel>
-            <AlertDialogAction
-              :disabled="actionPending"
-              :loading="actionPending"
-              @click="confirmWithdraw"
-            >
-              <Loader2 v-if="actionPending" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-              确定撤回
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   </div>
 </template>

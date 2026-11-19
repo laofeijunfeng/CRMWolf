@@ -16,18 +16,9 @@ import {
   FormDescription,
 } from '@/components/ui/form'
 import ErrorMessage from '@/components/ui/form/ErrorMessage.vue'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
+import { confirmLogout } from '@/utils/confirmDialog'
 import { getSafeAuthReturnPath } from '@/utils/authRecovery'
 import { teamJoinSchema, type TeamJoinFormValues } from '@/schemas/team-join.schema'
 import { handleApiError } from '@/utils/errorHandler'
@@ -39,7 +30,6 @@ const teamStore = useTeamStore()
 const userStore = useUserStore()
 
 const loading = ref(false)
-const showLogoutDialog = ref(false)
 
 const { handleSubmit } = useForm<TeamJoinFormValues>({
   validationSchema: toTypedSchema(teamJoinSchema),
@@ -72,11 +62,8 @@ const goBack = (): void => {
   router.push('/onboarding')
 }
 
-const handleLogout = (): void => {
-  showLogoutDialog.value = true
-}
-
-const confirmLogout = (): void => {
+const handleLogout = async (): Promise<void> => {
+  if (!(await confirmLogout())) return
   userStore.logout()
   router.push('/login')
 }
@@ -158,20 +145,6 @@ const confirmLogout = (): void => {
     </Card>
 
     <!-- 退出登录确认对话框 -->
-    <AlertDialog v-model:open="showLogoutDialog">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>确认退出</AlertDialogTitle>
-          <AlertDialogDescription>
-            确定要退出登录吗？退出后需要重新登录才能继续使用系统。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction @click="confirmLogout">确认退出</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </main>
 </template>
 

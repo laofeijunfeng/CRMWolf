@@ -26,6 +26,9 @@ const api = vi.hoisted(() => ({
   bulkApprove: vi.fn()
 }))
 
+const confirmDialog = vi.hoisted(() => vi.fn())
+vi.mock('@/utils/confirmDialog', () => ({ confirmDialog }))
+
 const toast = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
@@ -62,35 +65,6 @@ vi.mock('@/components/ui/dialog', () => {
     DialogTitle: passthrough('DialogTitle'),
     DialogDescription: passthrough('DialogDescription'),
     DialogFooter: passthrough('DialogFooter'),
-  }
-})
-
-vi.mock('@/components/ui/alert-dialog', () => {
-  const passthrough = (name: string) => defineComponent({
-    name,
-    setup: (_, { slots }) => () => h('div', slots.default?.()),
-  })
-
-  return {
-    AlertDialog: defineComponent({
-      name: 'AlertDialog',
-      props: { open: Boolean },
-      emits: ['update:open'],
-      setup: (props, { slots }) => () => props.open ? h('div', slots.default?.()) : null,
-    }),
-    AlertDialogAction: defineComponent({
-      name: 'AlertDialogAction',
-      setup: (_, { slots, attrs }) => () => h('button', { ...attrs, type: 'button' }, slots.default?.()),
-    }),
-    AlertDialogCancel: defineComponent({
-      name: 'AlertDialogCancel',
-      setup: (_, { slots, attrs }) => () => h('button', { ...attrs, type: 'button' }, slots.default?.()),
-    }),
-    AlertDialogContent: passthrough('AlertDialogContent'),
-    AlertDialogDescription: passthrough('AlertDialogDescription'),
-    AlertDialogFooter: passthrough('AlertDialogFooter'),
-    AlertDialogHeader: passthrough('AlertDialogHeader'),
-    AlertDialogTitle: passthrough('AlertDialogTitle'),
   }
 })
 
@@ -240,6 +214,7 @@ describe('ApprovalProcessGeneric', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     api.submitApproval.mockReset()
+    confirmDialog.mockReset()
     api.approveEntity.mockReset()
     api.cancelApproval.mockReset()
     api.getApprovalDetail.mockReset()
@@ -300,10 +275,34 @@ describe('ApprovalProcessGeneric', () => {
     })
     await flushPromises()
 
+    confirmDialog.mockResolvedValueOnce(false)
     await w.find('[data-testid="withdraw-btn"]').trigger('click')
-    expect(w.text()).toContain('Acme 发票申请（INV-001）')
-    expect(w.text()).toContain('当前状态：审批中')
-    expect(w.text()).toContain('需要修改后重新提交')
+    await flushPromises()
+    const [message, title, options] = confirmDialog.mock.calls[0] as [string, string, { variant: string }]
+    expect(title).toBe('撤回审批')
+    expect(message).toContain('Acme 发票申请（INV-001）')
+    expect(message).toContain('当前状态：审批中')
+    expect(message).toContain('需要修改后重新提交')
+    expect(options.variant).toBe('destructive')
+    expect(api.cancelApproval).not.toHaveBeenCalled()
+  })
+
+  it('withdraws only after the confirmation is accepted', async () => {
+    api.getApprovalDetail.mockResolvedValue(buildDetail({ status: 'PENDING' }))
+    api.cancelApproval.mockResolvedValue({ message: 'ok' })
+    const w = mountComp({
+      entityType: 'INVOICE',
+      entityId: 7,
+      canApprove: false,
+      isSubmitter: true
+    })
+    await flushPromises()
+
+    confirmDialog.mockResolvedValueOnce(true)
+    await w.find('[data-testid="withdraw-btn"]').trigger('click')
+    await flushPromises()
+    expect(api.cancelApproval).toHaveBeenCalledTimes(1)
+    expect(w.emitted('withdrawn')).toHaveLength(1)
   })
 
   it('reject confirm stays disabled without a reason', async () => {
