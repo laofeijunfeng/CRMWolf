@@ -174,14 +174,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
               <ChartTooltip :triggers="chartTriggers(Donut.selectors.segment, pieConfig(card))" />
             </VisSingleContainer>
           </ChartContainer>
-          <div class="grid gap-2 text-sm">
-            <div v-for="bucket in card.buckets" :key="bucket.key" class="grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2">
-              <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: sliceColor(card.buckets.indexOf(bucket), bucket.key) }" />
-              <span>{{ bucket.label }}</span>
-              <span class="text-muted-foreground tabular-nums">{{ countText(bucket) }}</span>
-            </div>
-            <ChartBucketActionList :actions="bucketActions(card, true)" :aria-label="`${card.title}可访问分组`" :test-id-prefix="`customer-${card.key}-bucket`" @activate="activate" />
-          </div>
+          <ChartBucketActionList :actions="bucketActions(card, true).map((action, index) => ({ ...action, color: sliceColor(index, action.bucket.key) }))" :aria-label="card.title" :test-id-prefix="`customer-${card.key}-bucket`" @activate="activate" />
         </template>
       </ChartCardFrame>
 
@@ -225,7 +218,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
               <ChartCrosshair :template="componentToString(monthConfig, ChartTooltipContent, { labelKey: 'label' })" :color="monthConfig.count.color" />
             </VisXYContainer>
           </ChartContainer>
-          <ChartBucketActionList :actions="bucketActions(monthCard, true)" :aria-label="monthCard.title" test-id-prefix="customer-month-bucket" @activate="activate" />
+          <ChartBucketActionList class="customer-chart-page__month-actions sr-only" :actions="bucketActions(monthCard, true)" :aria-label="monthCard.title" test-id-prefix="customer-month-bucket" @activate="activate" />
         </template>
       </ChartCardFrame>
     </div>
@@ -274,6 +267,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
 .customer-chart-dialog { max-width: 32rem; }
 .customer-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }
 .customer-chart-page__grid :deep(.chart-bucket-actions__value) { white-space: normal; overflow-wrap: anywhere; }
+.customer-chart-page__month-actions:focus-within { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; clip-path: none; white-space: normal; }
 @media (max-width: 600px) { :deep(.customer-chart-page__donut-content) { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .customer-chart-page__grid { grid-template-columns: 1fr; } }
 </style>

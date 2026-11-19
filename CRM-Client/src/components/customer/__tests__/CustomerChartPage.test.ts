@@ -25,11 +25,11 @@ function render(): VueWrapper {
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = '' })
 
 describe('Customer chart bucket controls', () => {
-  it('keeps the legend static beside enabled bucket actions and disables empty buckets', async () => {
+  it('renders one interactive legend per donut and disables empty buckets', async () => {
     const wrapper = render()
     const action = wrapper.get('button[aria-label="跟进中，2 家 · 100%"]')
     expect(wrapper.get('button[aria-label="已流失，0 家 · 0%"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.findAll('span').some(node => node.text() === '跟进中' && !node.element.closest('button'))).toBe(true)
+    expect(wrapper.findAll('span').filter(node => node.text() === '跟进中' && !node.element.closest('button'))).toHaveLength(0)
     await action.trigger('click')
     expect(wrapper.emitted('view-bucket')?.[0]).toEqual([chart.cards[0], chart.cards[0]?.buckets[0]])
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull()
