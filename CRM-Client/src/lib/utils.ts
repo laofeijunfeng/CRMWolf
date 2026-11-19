@@ -3,12 +3,15 @@ import { extendTailwindMerge } from 'tailwind-merge'
 
 const twMerge = extendTailwindMerge({
   extend: {
+    theme: {
+      spacing: ['space-1', 'space-2', 'space-3', 'space-4', 'space-6', 'space-8']
+    },
     classGroups: {
       'font-size': [{ text: ['display', 'title', 'body-strong', 'body', 'caption', 'control-sm'] }],
       shadow: [{ shadow: ['1', '2', '3'] }],
       h: [{ h: ['touch-target', 'control-xs', 'control-sm', 'control', 'control-lg', 'context-tabs'] }],
-      'min-h': [{ 'min-h': ['touch-target', 'control'] }],
-      'min-w': [{ 'min-w': ['touch-target'] }],
+      'min-h': [{ 'min-h': ['touch-target', 'control-xs', 'control'] }],
+      'min-w': [{ 'min-w': ['touch-target', 'menu'] }],
       size: [{ size: ['control-sm', 'control', 'control-lg', 'icon-xs', 'icon-sm', 'icon-lg'] }],
       px: [{ px: ['control-xs', 'control-sm', 'control', 'control-lg'] }],
       gap: [{ gap: ['control-sm', 'control'] }],
