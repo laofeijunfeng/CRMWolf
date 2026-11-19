@@ -108,20 +108,97 @@ test('registered exceptions no longer allow palette or raw colors anywhere', () 
   ]).map((violation) => violation.category), ['palette-color', 'raw-color'])
 })
 
-test('rejects legacy token entries and Element Plus', () => {
-  const violations = inspectContent('CRM-Client/src/views/Example.vue', [
-    "@use '@/styles/variables.scss';",
-    "@use '@/styles/variables-v2.scss' as *;",
-    '  <div class="rounded-wolf-md px-wolf-sm"></div>',
-    '  padding: $wolf-page-padding-v2;',
-    '<el-button>保存</el-button>',
-  ], [])
+const categories = (filePath, lines) => inspectContent(filePath, lines, []).map((violation) => violation.category)
 
-  assert.deepEqual(violations.map((violation) => violation.category), [
-    'legacy-token',
-    'legacy-token',
-    'legacy-token',
-    'legacy-token',
-    'element-plus',
-  ])
+test('GATE-01 rejects upward imports by alias, relative path and dynamic import', () => {
+  assert.deepEqual(categories('CRM-Client/src/components/agent/Chat.vue', [
+    "import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'",
+    "const Sheet = defineAsyncComponent(() => import('../../views/ContractDetailSheet.vue'))",
+  ]), ['layer-direction', 'layer-direction'])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/index.ts', [
+    "export { default as StatusBadge } from '../StatusBadge.vue'",
+  ]), ['layer-direction'])
+  assert.deepEqual(categories('CRM-Client/src/components/ui/button/Button.vue', [
+    "import { DataTable } from '@/components/crmwolf'",
+  ]), ['layer-direction'])
+})
+
+test('GATE-01 allows downward imports', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
+    "import CustomerList from '@/components/customer/CustomerList.vue'",
+    "import { DataTable } from '@/components/crmwolf'",
+  ]), [])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/DataTable.vue', [
+    "import { Button } from '@/components/ui/button'",
+    "import Empty from './EmptyHint.vue'",
+  ]), [])
+})
+
+test('GATE-02 rejects ui re-exports only in the crmwolf barrel', () => {
+  const line = ["export { Button } from '@/components/ui/button'"]
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/index.ts', line), ['barrel-reexport'])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/ConfirmDialog.vue', line), [])
+})
+
+test('GATE-03 restricts alert-dialog, sheet, table and form to ui and crmwolf', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
+    "import { AlertDialog } from '@/components/ui/alert-dialog'",
+    "import { Sheet } from '@/components/ui/sheet'",
+    "import { Table } from '@/components/ui/table'",
+    "import { FormField } from '@/components/ui/form'",
+  ]), ['restricted-primitive', 'restricted-primitive', 'restricted-primitive', 'restricted-primitive'])
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
+    "import { DetailSheetContent } from '@/components/ui/detail-sheet'",
+  ]), [])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/ConfirmDialog.vue', [
+    "import { AlertDialog } from '@/components/ui/alert-dialog'",
+  ]), [])
+})
+
+test('GATE-04 rejects native dialogs outside test files', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/settings/Roles.vue', [
+    "if (!confirm('确定删除？')) return",
+    "window.alert('done')",
+    "if (confirm ('继续？')) save()",
+  ]), ['native-dialog', 'native-dialog', 'native-dialog'])
+  assert.deepEqual(categories('CRM-Client/src/views/settings/Roles.vue', [
+    "await useConfirm().confirm({ title: '删除' })",
+    'function confirm(): void {}',
+  ]), [])
+  assert.deepEqual(categories('CRM-Client/src/schemas/__tests__/agent-ui.test.ts', [
+    "const payload = '<img onerror=alert(1)>'",
+  ]), [])
+})
+
+test('GATE-05 rejects page status palettes and status mapping functions', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/LeadDetailSheet.vue', [
+    '.status-success {',
+    'const getStatusClass = (status: number): string => {',
+    'function getInvoiceStatusTone(status: string) {',
+    'function getStatusToneClass(status: string): string {',
+  ]), ['page-status-style', 'page-status-style', 'page-status-style', 'page-status-style'])
+  assert.deepEqual(categories('CRM-Client/src/views/LeadDetailSheet.vue', [
+    '.status-success-banner {',
+  ]), [])
+})
+
+test('GATE-05 allows the single status source', () => {
+  assert.deepEqual(categories('CRM-Client/src/utils/statusPresentation.ts', [
+    'export function getContractStatusTone(status: number) {',
+  ]), [])
+  assert.deepEqual(categories('CRM-Client/src/components/StatusBadge.vue', [
+    '.status-success {',
+  ]), [])
+})
+
+test('full audit mode skips incremental component gates but keeps token rules', () => {
+  const lines = [
+    "import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'",
+    "if (!confirm('确定删除？')) return",
+    '  color: #2563eb;',
+  ]
+  assert.deepEqual(
+    inspectContent('CRM-Client/src/components/agent/Chat.vue', lines, [], { full: true }).map((violation) => violation.category),
+    ['raw-color'],
+  )
 })

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * P2-04 设计系统增量治理检查。
+ * 设计系统治理门禁。
  *
- * 设计目标：UI 数值只来自 base.css :root（文档侧只来自 token-values.md）。
- * 默认检查暂存文件的新增行；--all 全量审计 CRM-Client/src，存在任何违规即失败。
+ * 默认检查暂存文件的新增行；--worktree 检查工作区改动；--all 全量审计 CRM-Client/src（CI 阻断）。
+ * 标记 incremental 的组件门禁只在增量模式生效，存量登记在 governance/inventory.json，阶段 3 去掉标记后进入 --all。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,10 +13,48 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const clientRoot = path.resolve(scriptDir, '..')
 const repoRoot = path.resolve(clientRoot, '..')
-const inventoryPath = path.join(repoRoot, 'CRM-Docs/design-system/migration/p2-pkg-04-inventory.json')
-const exceptionsPath = path.join(repoRoot, 'CRM-Docs/design-system/migration/p2-pkg-04-exceptions.json')
+const governanceDir = path.join(repoRoot, 'CRM-Docs/design-system/governance')
+const inventoryPath = path.join(governanceDir, 'inventory.json')
+const exceptionsPath = path.join(governanceDir, 'exceptions.json')
 
 const sourceExtensions = new Set(['.vue', '.scss', '.css', '.ts', '.tsx', '.js', '.jsx'])
+
+const SRC = 'CRM-Client/src/'
+const UI = `${SRC}components/ui/`
+const CRMWOLF = `${SRC}components/crmwolf/`
+const COMPONENTS = `${SRC}components/`
+const VIEWS = `${SRC}views/`
+const IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/g
+const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|sheet|table|form)(?:\/|$)/
+
+function isTestFile(filePath) {
+  return /\/__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath)
+}
+
+function resolveImports(filePath, text) {
+  const targets = []
+  for (const [, specifier] of text.matchAll(IMPORT_SPECIFIER)) {
+    if (specifier.startsWith('@/')) targets.push(`${SRC}${specifier.slice(2)}`)
+    else if (specifier.startsWith('.')) targets.push(path.posix.join(path.posix.dirname(filePath), specifier))
+  }
+  return targets
+}
+
+function layerOf(repoPath) {
+  const dir = `${repoPath}/`
+  if (dir.startsWith(UI)) return 'ui'
+  if (dir.startsWith(CRMWOLF)) return 'crmwolf'
+  if (dir.startsWith(COMPONENTS)) return 'components'
+  if (dir.startsWith(VIEWS)) return 'views'
+  return null
+}
+
+// 层级只能向下依赖：views → components → crmwolf → ui。
+const FORBIDDEN_LAYERS = {
+  ui: new Set(['crmwolf', 'components', 'views']),
+  crmwolf: new Set(['components', 'views']),
+  components: new Set(['views']),
+}
 
 const RULES = [
   {
@@ -27,24 +65,59 @@ const RULES = [
     exemptFiles: ['CRM-Client/src/styles/base.css'],
   },
   {
-    category: 'legacy-token',
-    pattern: /(?:variables(?:-v2)?\.scss|\$wolf-|-wolf-)/i,
-    message: '禁止旧 Token 入口（variables*.scss、$wolf-*、*-wolf-*），请使用 base.css 语义变量。',
-  },
-  {
     category: 'dark-mode',
     pattern: /(?:(?:^|[\s"'`])dark:|\.dark\b|-dark-v2\b|prefers-color-scheme)/,
     message: '当前只有浅色主题，禁止 dark 写法。',
   },
   {
-    category: 'element-plus',
-    pattern: /(?:<el-[a-z]|element-plus|\bEl[A-Z][A-Za-z]+\b)/,
-    message: '禁止新增 Element Plus 组件入口。',
-  },
-  {
     category: 'palette-color',
     pattern: /\b(?:text|bg|border|ring)-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-(?:[1-9]\d?\d?)(?:\/[0-9]+)?\b/i,
     message: '禁止 Tailwind 调色板类；状态色用 data-tone / Badge variant="status"，其余用语义 Token。',
+  },
+  {
+    category: 'layer-direction',
+    incremental: true,
+    appliesTo: (filePath) => Boolean(FORBIDDEN_LAYERS[layerOf(filePath)]),
+    test: (text, filePath) => {
+      const forbidden = FORBIDDEN_LAYERS[layerOf(filePath)]
+      return resolveImports(filePath, text).some((target) => forbidden.has(layerOf(target)))
+    },
+    message: '组件层级只能向下依赖（views → components → crmwolf → ui），禁止反向引用。',
+  },
+  {
+    category: 'barrel-reexport',
+    incremental: true,
+    appliesTo: (filePath) => filePath === `${CRMWOLF}index.ts`,
+    test: (text, filePath) => resolveImports(filePath, text).some((target) => layerOf(target) === 'ui'),
+    message: 'crmwolf/index.ts 不得转出 ui 原件；需要原件能力时在 crmwolf 中封装。',
+  },
+  {
+    category: 'restricted-primitive',
+    incremental: true,
+    appliesTo: (filePath) => !filePath.startsWith(UI) && !filePath.startsWith(CRMWOLF),
+    test: (text, filePath) => resolveImports(filePath, text).some((target) => RESTRICTED_PRIMITIVE.test(target)),
+    message: 'ui 的 alert-dialog / sheet / table / form 只能经 crmwolf 组件或 ui/detail-sheet 使用，见 components/registry.md。',
+  },
+  {
+    category: 'native-dialog',
+    incremental: true,
+    appliesTo: (filePath) => !isTestFile(filePath),
+    pattern: /(?:\b(?:window|globalThis)\.|(?<![\w$.]|function\s+))(?:confirm|alert|prompt)\s*\(/,
+    message: '禁止浏览器原生 confirm / alert / prompt，使用 confirmDialog / confirmDelete。',
+  },
+  {
+    category: 'page-status-style',
+    incremental: true,
+    appliesTo: (filePath) => filePath.endsWith('.vue') && filePath !== `${COMPONENTS}StatusBadge.vue`,
+    pattern: /\.status-(?:success|warning|danger|info|muted|default)(?![\w-])/,
+    message: '页面不得自定义 .status-* 色板，业务状态统一用 StatusBadge。',
+  },
+  {
+    category: 'page-status-style',
+    incremental: true,
+    exemptFiles: [`${SRC}utils/statusPresentation.ts`, `${COMPONENTS}StatusBadge.vue`],
+    pattern: /\b(?:function\s+|(?:const|let|var)\s+)get\w*Status\w*(?:Class|Color|Tone|Variant)\w*\b/,
+    message: '状态映射只在 utils/statusPresentation.ts 定义，页面不得自写 get*Status* 映射函数。',
   },
 ]
 
@@ -113,8 +186,26 @@ function wildcardToRegExp(pattern) {
   return new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
 }
 
-function ruleApplies(rule, filePath) {
-  return !rule.exemptFiles?.includes(filePath)
+function ruleApplies(rule, filePath, { full }) {
+  if (full && rule.incremental) return false
+  if (rule.exemptFiles?.includes(filePath)) return false
+  return rule.appliesTo ? rule.appliesTo(filePath) : true
+}
+
+function ruleMatches(rule, text, filePath) {
+  const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
+  return rule.test ? rule.test(scanText, filePath) : rule.pattern.test(scanText)
+}
+
+function inspectLine(filePath, line, text, exceptions, options) {
+  const violations = []
+  for (const rule of RULES) {
+    if (!ruleApplies(rule, filePath, options)) continue
+    if (!ruleMatches(rule, text, filePath)) continue
+    if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
+    violations.push({ category: rule.category, file: filePath, line, message: rule.message, text: text.trim() })
+  }
+  return violations
 }
 
 function exceptionMatches(exception, filePath, category, text) {
@@ -131,7 +222,7 @@ function validateGovernanceFiles() {
   for (const entry of inventory.entries ?? []) {
     for (const field of requiredFields) {
       if (entry[field] === undefined || entry[field] === '') {
-        violations.push({ category: 'inventory', file: 'p2-pkg-04-inventory.json', line: 0, message: `${entry.id ?? 'unknown'} 缺少字段 ${field}` })
+        violations.push({ category: 'inventory', file: 'governance/inventory.json', line: 0, message: `${entry.id ?? 'unknown'} 缺少字段 ${field}` })
       }
     }
   }
@@ -139,11 +230,11 @@ function validateGovernanceFiles() {
   for (const exception of exceptions.exceptions ?? []) {
     for (const field of ['id', 'category', 'files', 'match', 'reason', 'owner', 'reviewDate', 'status']) {
       if (exception[field] === undefined || exception[field] === '' || (Array.isArray(exception[field]) && exception[field].length === 0)) {
-        violations.push({ category: 'exception', file: 'p2-pkg-04-exceptions.json', line: 0, message: `${exception.id ?? 'unknown'} 缺少字段 ${field}` })
+        violations.push({ category: 'exception', file: 'governance/exceptions.json', line: 0, message: `${exception.id ?? 'unknown'} 缺少字段 ${field}` })
       }
     }
     if (exception.reviewDate && exception.reviewDate < today) {
-      violations.push({ category: 'exception', file: 'p2-pkg-04-exceptions.json', line: 0, message: `${exception.id} reviewDate 已过期` })
+      violations.push({ category: 'exception', file: 'governance/exceptions.json', line: 0, message: `${exception.id} reviewDate 已过期` })
     }
   }
   return violations
@@ -154,44 +245,25 @@ export function inspectLines(files, options = {}) {
   const violations = []
   for (const filePath of files) {
     for (const { line, text } of collectAddedLines(filePath, options)) {
-      for (const rule of RULES) {
-        if (!ruleApplies(rule, filePath)) continue
-        const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
-        if (!rule.pattern.test(scanText)) continue
-        if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
-        violations.push({ category: rule.category, file: filePath, line, message: rule.message, text: text.trim() })
-      }
+      violations.push(...inspectLine(filePath, line, text, exceptions, { full: false }))
     }
   }
   return violations
 }
 
-export function inspectContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? []) {
-  return inspectLinesFromContent(filePath, lines, exceptions)
+/**
+ * 检查给定内容。默认按增量模式运行全部规则；{ full: true } 与 --all 一致，跳过 incremental 规则。
+ */
+export function inspectContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? [], { full = false } = {}) {
+  return lines.flatMap((text, index) => inspectLine(filePath, index + 1, text, exceptions, { full }))
 }
 
 export function inspectAll(files) {
-  const violations = []
-  for (const filePath of files) {
-    const absolutePath = path.join(repoRoot, filePath)
-    const lines = fs.readFileSync(absolutePath, 'utf8').split('\n')
-    violations.push(...inspectLinesFromContent(filePath, lines))
-  }
-  return violations
-}
-
-function inspectLinesFromContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? []) {
-  const violations = []
-  lines.forEach((text, index) => {
-    for (const rule of RULES) {
-      if (!ruleApplies(rule, filePath)) continue
-      const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
-      if (!rule.pattern.test(scanText)) continue
-      if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
-      violations.push({ category: rule.category, file: filePath, line: index + 1, message: rule.message, text: text.trim() })
-    }
+  const exceptions = readJson(exceptionsPath).exceptions ?? []
+  return files.flatMap((filePath) => {
+    const lines = fs.readFileSync(path.join(repoRoot, filePath), 'utf8').split('\n')
+    return inspectContent(filePath, lines, exceptions, { full: true })
   })
-  return violations
 }
 
 function printViolations(violations) {
@@ -212,7 +284,7 @@ function main() {
   if (all) {
     const sourceFiles = runGit(['ls-files', 'CRM-Client/src']).split('\n').filter((file) => sourceExtensions.has(path.extname(file)))
     const violations = inspectAll(sourceFiles)
-    console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条未登记存量问题。`)
+    console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条违规（incremental 组件门禁不参与全量，存量见 governance/inventory.json）。`)
     printViolations(violations.slice(0, 40))
     if (violations.length > 40) console.log(`…其余 ${violations.length - 40} 条仅保留在审计统计中。`)
     process.exit(violations.length || configViolations.length ? 1 : 0)

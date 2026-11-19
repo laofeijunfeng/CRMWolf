@@ -1,5 +1,5 @@
 {
-  "$schema": "./p2-pkg-04-exceptions.schema.json",
+  "$schema": "./exceptions.schema.json",
   "version": "1.0",
   "lastVerified": "2026-11-19",
   "exceptions": []

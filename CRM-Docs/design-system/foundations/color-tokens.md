@@ -9,8 +9,6 @@
 
 使用语义令牌表达角色，不以色值表达业务含义；状态除颜色外还应有文字或其他可感知线索。系统只有亮色主题。运行时唯一入口为 `CRM-Client/src/styles/base.css` 的 `:root`；Tailwind 只映射 `var(--x)`，组件使用 `bg-background`、`text-foreground`、`bg-primary`、`border-border`、`text-muted-foreground` 等语义类，不使用 Tailwind 色阶类（如 `blue-500`、`slate-600`）。
 
-`$wolf-*-v2` 是迁移期过渡桥接，只指向上述令牌，新代码不得引用；`--wolf-*` 已废除。见[兼容策略](../migration/compatibility.md)。
-
 ## 角色分工
 
 | 令牌 | 用途 |
