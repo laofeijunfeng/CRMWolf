@@ -65,9 +65,9 @@
 | `--menu-min-width` | `160px` | Menu 浮层最小宽度（右键菜单、下拉菜单）。 |
 | 移动端输入字号 | `16px` | 防 iOS 缩放，`base.css` 统一设置。 |
 | `text-display` / `var(--font-size-display)` | `24/32px · 600` | 展示标题。 |
-| `text-title` / `var(--font-size-title)` | `18/28px · 600` | 页面主标题。 |
-| `text-body-strong` / `var(--font-size-body-strong)` | `16/24px · 500` | 区块标题、强调正文。 |
-| `text-body` / `var(--font-size-body)` | `14/20px · 400` | 正文；sm 控件内文字 13px（`var(--font-size-control-sm)`）。scoped SCSS 字号必须用 `var(--font-size-*)` / `var(--line-height-*)`，不得写裸 px。 |
+| `text-title` / `var(--font-size-title)` | `18/28px · 600` | 页面主标题、浮层标题（Dialog/Sheet/AlertDialog）。 |
+| `text-body-strong` / `var(--font-size-body-strong)` | `16/24px · 500` | 区块标题、卡片标题。 |
+| `text-body` / `var(--font-size-body)` | `14/20px · 400` | 正文；sm 控件内文字 13px（`var(--font-size-control-sm)`）。scoped SCSS 字号必须用 `var(--font-size-*)` / `var(--line-height-*)`，不得写裸 px。Label 与列表主字段用 body + `font-medium`。 |
 | `text-caption` / `var(--font-size-caption)` | `12/16px · 400` | 次要备注。 |
 | `--disabled-opacity` | `0.5` | 所有禁用态。 |
 

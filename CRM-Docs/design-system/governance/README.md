@@ -7,5 +7,6 @@
 | [文档优先级](document-precedence.md) | 判断规则所有者与冲突处理。 |
 | [写作规范](authoring.md) | 新增或修改主题文件。 |
 | [质量检查](quality-checks.md) | 本地验证文档图与质量要求。 |
+| [组件生命周期](component-lifecycle.md) | 分层、组件状态与门禁。 |
 
 [返回设计系统根入口](../README.md)

@@ -6,9 +6,10 @@
 
 - [新建或调整页面](patterns/README.md)：组合页面模式与页面例外。
 - [调整组件](components/README.md)：查找可复用组件契约。
+- [组件选型](components/registry.md)：查组件状态、替代关系与受限原件。
 - [令牌与响应式](foundations/README.md)：查找基础令牌、无障碍与响应式规范。
-- [Element Plus 迁移](migration/README.md)：查找遗留实现到目标体系的迁移资料。
 - [维护规范](governance/README.md)：查找文档治理与检查方法。
+- [组件生命周期](governance/component-lifecycle.md)：查组件分层、状态流转与组件门禁。
 
 ## 规则优先级
 
@@ -16,7 +17,7 @@
 
 ## 全局令牌约定
 
-系统只有亮色主题。设计数值只在 `CRM-Client/src/styles/base.css` 的 `:root` 定义一次，文档镜像为[令牌数值](foundations/token-values.md)；Tailwind 只映射 `var(--x)`。主操作使用中性深色 `--primary`，品牌蓝 `--brand` 用于链接、选中与焦点，中性色为 slate；不使用 Tailwind 色阶类。`$wolf-*-v2` 仅为迁移期过渡桥接，按[兼容策略](migration/compatibility.md)删除。使用规则见[颜色令牌](foundations/color-tokens.md)。
+系统只有亮色主题。设计数值只在 `CRM-Client/src/styles/base.css` 的 `:root` 定义一次，文档镜像为[令牌数值](foundations/token-values.md)；Tailwind 只映射 `var(--x)`。主操作使用中性深色 `--primary`，品牌蓝 `--brand` 用于链接、选中与焦点，中性色为 slate；不使用 Tailwind 色阶类。使用规则见[颜色令牌](foundations/color-tokens.md)。
 
 ## 本地检查
 
@@ -29,5 +30,4 @@ node CRM-Docs/scripts/check-design-system-docs.js
 - [基础规范](foundations/README.md)
 - [组件契约](components/README.md)
 - [页面模式](patterns/README.md)
-- [迁移资料](migration/README.md)
 - [文档治理](governance/README.md)

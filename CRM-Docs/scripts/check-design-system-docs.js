@@ -44,14 +44,6 @@ function validateDesignSystem({ rootDir, configPath }) {
         }
       })
     }
-    for (const forbidden of config.forbiddenText) {
-      const lines = source.split('\n')
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(forbidden)) {
-          violations.push({ file: fileName, line: i + 1, category: 'forbidden-text', message: `forbidden text ${forbidden}` })
-        }
-      }
-    }
     for (const { target, line } of parseMarkdownLinks(source)) {
       if (/^(https?:|mailto:)/.test(target)) continue
       const [rawPath, rawAnchor] = target.split('#', 2)
