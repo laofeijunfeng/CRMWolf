@@ -32,7 +32,7 @@ function executeAction(action: ActionConfig): void {
 <template>
   <template v-for="(group, groupIndex) in groups" :key="group.key">
     <ContextMenuSeparator v-if="groupIndex > 0" />
-    <ContextMenuLabel v-if="showGroupLabels" class="table-row-context-menu-label">
+    <ContextMenuLabel v-if="showGroupLabels">
       {{ group.label }}
     </ContextMenuLabel>
     <ContextMenuItem
@@ -44,35 +44,18 @@ function executeAction(action: ActionConfig): void {
       :aria-label="getTableRowActionLabel(action)"
       @select="executeAction(action)"
     >
-      <component :is="action.icon" v-if="action.icon" class="table-row-context-menu-icon" aria-hidden="true" />
+      <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
       {{ action.label }}
     </ContextMenuItem>
   </template>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.table-row-context-menu-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: hsl(var(--muted-foreground));
-}
-
 .table-row-context-menu-item {
-  gap: $space-2;
-  font-size: 14px;
-  font-weight: 500;
-  color: hsl(var(--foreground));
   cursor: pointer;
 
   &.is-destructive {
     color: hsl(var(--status-danger));
   }
-}
-
-.table-row-context-menu-icon {
-  width: 16px;
-  height: 16px;
 }
 </style>

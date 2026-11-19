@@ -570,16 +570,16 @@ watch(
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem class="min-h-11" @click.stop="handleEditPlan(item)">
-            <Pencil class="mr-2 h-4 w-4" aria-hidden="true" />
+          <DropdownMenuItem class="min-h-touch-target" @click.stop="handleEditPlan(item)">
+            <Pencil aria-hidden="true" />
             编辑
           </DropdownMenuItem>
           <DropdownMenuItem
-            class="min-h-11"
+            class="min-h-touch-target"
             :disabled="item.payment_records.length > 0"
             @click.stop="requestDeletePlan(item)"
           >
-            <Trash2 class="mr-2 h-4 w-4 text-danger" aria-hidden="true" />
+            <Trash2 class="text-danger" aria-hidden="true" />
             删除
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -751,7 +751,7 @@ watch(
 
 .stage-name {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 20px;
   word-break: break-word;
@@ -760,7 +760,7 @@ watch(
 .plan-subtitle,
 .plan-note-inline {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
   word-break: break-word;
 }
@@ -782,7 +782,7 @@ watch(
   align-items: baseline;
   gap: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .plan-progress {

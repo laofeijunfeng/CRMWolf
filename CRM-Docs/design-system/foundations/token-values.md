@@ -62,12 +62,13 @@
 | `--control-gap-sm/md` | `4` / `6px` | 图标与文字间距（xs·sm / md·lg）。 |
 | `--icon-xs/sm/lg` | `14` / `16` / `18px` | 图标尺寸。 |
 | `--touch-target` | `44px` | 移动端可点下限，含输入控件。 |
+| `--menu-min-width` | `160px` | Menu 浮层最小宽度（右键菜单、下拉菜单）。 |
 | 移动端输入字号 | `16px` | 防 iOS 缩放，`base.css` 统一设置。 |
-| `text-display` | `24/32px · 600` | 展示标题。 |
-| `text-title` | `18/28px · 600` | 页面主标题。 |
-| `text-body-strong` | `16/24px · 500` | 区块标题、强调正文。 |
-| `text-body` | `14/20px · 400` | 正文；sm 控件内文字 13px。 |
-| `text-caption` | `12/16px · 400` | 次要备注。 |
+| `text-display` / `var(--font-size-display)` | `24/32px · 600` | 展示标题。 |
+| `text-title` / `var(--font-size-title)` | `18/28px · 600` | 页面主标题。 |
+| `text-body-strong` / `var(--font-size-body-strong)` | `16/24px · 500` | 区块标题、强调正文。 |
+| `text-body` / `var(--font-size-body)` | `14/20px · 400` | 正文；sm 控件内文字 13px（`var(--font-size-control-sm)`）。scoped SCSS 字号必须用 `var(--font-size-*)` / `var(--line-height-*)`，不得写裸 px。 |
+| `text-caption` / `var(--font-size-caption)` | `12/16px · 400` | 次要备注。 |
 | `--disabled-opacity` | `0.5` | 所有禁用态。 |
 
 ## 动效
@@ -84,7 +85,7 @@
 
 | 令牌 | 解析值 | 用途 |
 | --- | --- | --- |
-| `$space-1/2/3/4/6/8`（Tailwind 同名档） | `4` / `8` / `12` / `16` / `24` / `32px` | 间距尺度。 |
+| `$space-1/2/3/4/6/8`（Tailwind `*-space-N` 档，如 `p-space-1`） | `4` / `8` / `12` / `16` / `24` / `32px` | 间距尺度。根字号 14px 下 Tailwind rem 档（`p-1`、`gap-2`）会缩放为 3.5 / 7px，新代码不得使用。 |
 | `--page-padding` | `24px`（<768px 为 `16px`） | 页面内边距，含列表页顶部。 |
 | `--sidebar-width` | `220px` | 桌面侧栏宽度。 |
 | `--topbar-height` / `--bottom-nav-height` | `56px` / `56px` | 顶栏 / 移动端底部导航。 |

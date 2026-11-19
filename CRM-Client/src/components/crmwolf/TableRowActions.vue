@@ -118,7 +118,7 @@ const executeAction = (event: Event, action: ActionConfig): void => {
             :aria-label="getTableRowActionLabel(action)"
             @select="executeAction($event, action)"
           >
-            <component :is="action.icon" v-if="action.icon" class="dropdown-icon" aria-hidden="true" />
+            <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
             {{ action.label }}
           </DropdownMenuItem>
         </template>
@@ -144,7 +144,7 @@ const executeAction = (event: Event, action: ActionConfig): void => {
   min-height: var(--touch-target);
   min-width: var(--touch-target);
   padding: 0 $space-2;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   transition: all all var(--duration-base) var(--ease-standard);
 
@@ -183,29 +183,9 @@ const executeAction = (event: Event, action: ActionConfig): void => {
   }
 }
 
-// 宽度由业务决定；圆角和阴影走 DropdownMenuContent 的 overlay 表面。
-.dropdown-content {
-  min-width: 160px;
-}
-
 // DropdownMenu 项样式
 .dropdown-item {
-  padding: $space-2 $space-3;
-  font-size: 14px;
-  font-weight: 500;
-  color: hsl(var(--foreground));
-  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background all var(--duration-base) var(--ease-standard);
-
-  &:hover:not([data-disabled]) {
-    background: var(--wash-hover);
-  }
-
-  &:focus-visible {
-    outline: 2px solid hsl(var(--brand));
-    outline-offset: 2px;
-  }
 }
 
 // DropdownMenu 危险操作项
@@ -215,13 +195,6 @@ const executeAction = (event: Event, action: ActionConfig): void => {
   &:hover:not([data-disabled]) {
     background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
   }
-}
-
-// DropdownMenu 图标
-.dropdown-icon {
-  width: 16px;
-  height: 16px;
-  margin-right: $space-2;
 }
 
 // Reduced motion 支持（UI/UX Pro Max §7）

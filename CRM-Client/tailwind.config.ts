@@ -80,18 +80,18 @@ const config: Config = {
 			mono: 'var(--font-mono)'
 		},
 		fontSize: {
-			display: ['24px', { lineHeight: '32px', fontWeight: '600' }],
-			title: ['18px', { lineHeight: '28px', fontWeight: '600' }],
-			'body-strong': ['16px', { lineHeight: '24px', fontWeight: '500' }],
-			body: ['14px', { lineHeight: '20px' }],
-			caption: ['12px', { lineHeight: '16px' }],
+			display: ['var(--font-size-display)', { lineHeight: 'var(--line-height-display)', fontWeight: '600' }],
+			title: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)', fontWeight: '600' }],
+			'body-strong': ['var(--font-size-body-strong)', { lineHeight: 'var(--line-height-body-strong)', fontWeight: '500' }],
+			body: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
+			caption: ['var(--font-size-caption)', { lineHeight: 'var(--line-height-caption)' }],
 			// 13px 只用于 sm 控件内文字
-			'control-sm': ['13px', { lineHeight: '20px' }],
-			// 根字号为 14px，rem 档会缩放；Tailwind 同名字号档固定为 px，对齐 token 字阶
-			xs: ['12px', { lineHeight: '16px' }],
-			sm: ['14px', { lineHeight: '20px' }],
-			base: ['14px', { lineHeight: '20px' }],
-			lg: ['18px', { lineHeight: '28px' }],
+			'control-sm': ['var(--font-size-control-sm)', { lineHeight: 'var(--line-height-body)' }],
+			// 根字号为 14px，rem 档会缩放；Tailwind 同名字号档固定到 token 字阶
+			xs: ['var(--font-size-caption)', { lineHeight: 'var(--line-height-caption)' }],
+			sm: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
+			base: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
+			lg: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)' }],
 			xl: ['20px', { lineHeight: '28px' }]
 		},
 		transitionDuration: {
@@ -115,7 +115,17 @@ const config: Config = {
 			'context-tabs': 'var(--context-tabs-height)'
 		},
 		minWidth: {
-			'touch-target': 'var(--touch-target)'
+			'touch-target': 'var(--touch-target)',
+			menu: 'var(--menu-min-width)'
+		},
+		// 根字号为 14px，rem 间距档（p-1、gap-2…）会按 0.875 缩放；space-N 档固定为 px，与 $space-N 一致
+		spacing: {
+			'space-1': '4px',
+			'space-2': '8px',
+			'space-3': '12px',
+			'space-4': '16px',
+			'space-6': '24px',
+			'space-8': '32px'
 		},
 		padding: {
 			'control-xs': 'var(--control-px-xs)',

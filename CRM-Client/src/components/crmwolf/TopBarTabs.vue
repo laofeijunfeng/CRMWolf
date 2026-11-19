@@ -126,15 +126,15 @@ function handleDelete(tab: TabItem): void {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side="bottom" :side-offset="6" class="tab-menu-content">
             <DropdownMenuItem class="tab-menu-item" @select="handleMoveToFirst(tab)">
-              <ArrowLeftToLine class="tab-menu-icon" aria-hidden="true" />
+              <ArrowLeftToLine aria-hidden="true" />
               <span>移到最前</span>
             </DropdownMenuItem>
             <DropdownMenuItem class="tab-menu-item" @select="handleRename(tab)">
-              <Pencil class="tab-menu-icon" aria-hidden="true" />
+              <Pencil aria-hidden="true" />
               <span>重命名</span>
             </DropdownMenuItem>
             <DropdownMenuItem class="tab-menu-item tab-menu-item--danger" @select="handleDelete(tab)">
-              <Trash2 class="tab-menu-icon" aria-hidden="true" />
+              <Trash2 aria-hidden="true" />
               <span>删除</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -201,21 +201,8 @@ function handleDelete(tab: TabItem): void {
   color: hsl(var(--brand));
 }
 
-:global(.tab-menu-content) {
-  min-width: 120px;
-}
-
-:global(.tab-menu-item) {
-  gap: 8px;
-}
-
 :global(.tab-menu-item--danger) {
   color: hsl(var(--destructive));
-}
-
-:global(.tab-menu-icon) {
-  width: 14px;
-  height: 14px;
 }
 
 .tab-trigger-content {
@@ -242,7 +229,7 @@ function handleDelete(tab: TabItem): void {
   padding: $space-1 $space-2;  // 4px 8px（紧凑）
 
   // ========== 字体 ==========
-  font-size: 14px;  // 14px，与 SidebarMenuButton text-sm 一致
+  font-size: var(--font-size-body);  // 14px，与 SidebarMenuButton text-sm 一致
   font-weight: 500;  // 500，与 SidebarMenuButton font-medium 一致
 
   // ========== 颜色（default）==========
@@ -299,7 +286,7 @@ function handleDelete(tab: TabItem): void {
     min-height: 44px;
     flex-shrink: 0;
 
-    font-size: 14px;  // 14px，与移动端 SidebarMenuButton 一致
+    font-size: var(--font-size-body);  // 14px，与移动端 SidebarMenuButton 一致
 
     // 内边距增大
     padding: 8px 16px;
@@ -321,7 +308,7 @@ function handleDelete(tab: TabItem): void {
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--font-size-caption);
   font-weight: 600;  // 600
   border-radius: 9999px;  // 50%
 }

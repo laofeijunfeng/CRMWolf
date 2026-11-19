@@ -97,6 +97,19 @@
   --icon-sm: 16px;
   --icon-lg: 18px;
   --touch-target: 44px;
+  --menu-min-width: 160px;
+  /* 字阶：Tailwind text-* 与 scoped SCSS 共用同一来源 */
+  --font-size-display: 24px;
+  --line-height-display: 32px;
+  --font-size-title: 18px;
+  --line-height-title: 28px;
+  --font-size-body-strong: 16px;
+  --line-height-body-strong: 24px;
+  --font-size-body: 14px;
+  --line-height-body: 20px;
+  --font-size-control-sm: 13px;
+  --font-size-caption: 12px;
+  --line-height-caption: 16px;
 
   /* ---------- 字体 ---------- */
   --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Segoe UI',
@@ -145,7 +158,7 @@
     @apply border-border;
   }
   html {
-    font-size: 14px;
+    font-size: var(--font-size-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -169,7 +182,7 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--font-size-body);
     line-height: 20px;
   }
   *:focus-visible {
@@ -183,7 +196,7 @@
   textarea,
   select {
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--font-size-body);
     line-height: 20px;
   }
   input:focus-visible,

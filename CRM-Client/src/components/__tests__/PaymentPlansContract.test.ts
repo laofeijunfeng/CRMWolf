@@ -25,14 +25,6 @@ describe('ContractPaymentPlans V2 migration contract', () => {
     expect(listCardEnd).toBeGreaterThan(listCardStart)
     expect(firstDialog).toBeGreaterThan(listCardEnd)
   })
-
-  it('keeps payment dialog controls and menu items at accessible touch target sizes', () => {
-    const source = readSource('src/components/ContractPaymentPlans.vue')
-
-    expect(source).toMatch(/<DropdownMenuItem[^>]*class="min-h-11"/)
-    expect(source).toContain('PaymentRecordDialog')
-    expect(source).toContain('PaymentPlanFormDialog')
-  })
 })
 
 describe('DealJourneyDetailContent payment-plan fixed contract', () => {

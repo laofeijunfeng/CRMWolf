@@ -20,7 +20,7 @@
             </Avatar>
             <span class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-semibold">{{ userName }}</span>
-              <span class="truncate text-xs text-muted-foreground">{{ teamName }}</span>
+              <span class="truncate text-caption text-muted-foreground">{{ teamName }}</span>
             </span>
             <ChevronsUpDown class="ml-auto size-4" aria-hidden="true" />
           </SidebarMenuButton>
@@ -32,8 +32,8 @@
           :side-offset="8"
           class="w-64"
         >
-          <DropdownMenuLabel class="p-0 font-normal">
-            <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+          <DropdownMenuLabel class="block p-0 text-body text-foreground">
+            <div class="flex items-center gap-space-2 px-space-1 py-space-2 text-left">
               <Avatar class="h-8 w-8 rounded-lg bg-primary text-primary-foreground">
                 <AvatarImage
                   v-if="avatarUrl !== ''"
@@ -44,15 +44,15 @@
                   {{ userInitial }}
                 </AvatarFallback>
               </Avatar>
-              <div class="grid flex-1 text-left text-sm leading-tight">
+              <div class="grid flex-1 text-left leading-tight">
                 <span class="truncate font-semibold">{{ userName }}</span>
-                <span class="truncate text-xs text-muted-foreground">{{ teamName }}</span>
+                <span class="truncate text-caption text-muted-foreground">{{ teamName }}</span>
               </div>
             </div>
           </DropdownMenuLabel>
 
           <DropdownMenuSeparator />
-          <DropdownMenuLabel class="text-xs text-muted-foreground">切换团队</DropdownMenuLabel>
+          <DropdownMenuLabel>切换团队</DropdownMenuLabel>
           <DropdownMenuItem
             v-for="team in teamStore.teams"
             :key="team.id"

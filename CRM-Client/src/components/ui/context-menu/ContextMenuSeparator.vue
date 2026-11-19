@@ -13,5 +13,5 @@ const delegatedProps = reactiveOmit(props, "class")
 </script>
 
 <template>
-  <ContextMenuSeparator v-bind="omitUndefined(delegatedProps)" :class="cn('-mx-1 my-1 h-px bg-border', props.class)" />
+  <ContextMenuSeparator v-bind="omitUndefined(delegatedProps)" :class="cn('-mx-space-1 my-space-1 h-px bg-border', props.class)" />
 </template>

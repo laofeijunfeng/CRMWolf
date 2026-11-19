@@ -15,7 +15,7 @@ const forwardedProps = useForwardProps(delegatedProps)
 <template>
   <DropdownMenuLabel
     v-bind="omitUndefined(forwardedProps)"
-    :class="cn('px-2 py-1.5 text-sm font-semibold', inset && 'pl-8', props.class)"
+    :class="cn('flex min-h-control-xs items-center px-space-2 text-caption text-muted-foreground', inset && 'pl-space-8', props.class)"
   >
     <slot />
   </DropdownMenuLabel>

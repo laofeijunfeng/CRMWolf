@@ -87,7 +87,7 @@ function executeAction(event: Event, action: ActionConfig): void {
       <DropdownMenuContent align="end" class="desktop-table-row-menu">
         <template v-for="(group, groupIndex) in desktopActions.menuGroups" :key="group.key">
           <DropdownMenuSeparator v-if="groupIndex > 0" />
-          <DropdownMenuLabel v-if="showGroupLabels" class="desktop-table-row-menu-label">
+          <DropdownMenuLabel v-if="showGroupLabels">
             {{ group.label }}
           </DropdownMenuLabel>
           <DropdownMenuItem
@@ -99,7 +99,7 @@ function executeAction(event: Event, action: ActionConfig): void {
             :aria-label="getTableRowActionLabel(action)"
             @select="executeAction($event, action)"
           >
-            <component :is="action.icon" v-if="action.icon" class="desktop-table-row-menu-icon" aria-hidden="true" />
+            <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
             {{ action.label }}
           </DropdownMenuItem>
         </template>
@@ -129,7 +129,7 @@ function executeAction(event: Event, action: ActionConfig): void {
   max-width: 128px;
   padding-inline: $space-2;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 
   &:hover:not(:disabled) {
@@ -148,15 +148,11 @@ function executeAction(event: Event, action: ActionConfig): void {
   }
 }
 
-.desktop-table-row-action-icon,
-.desktop-table-row-menu-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
 .desktop-table-row-action-icon {
-  margin-right: 4px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+  margin-right: var(--control-gap-sm);
 }
 
 .desktop-table-row-more {
@@ -177,18 +173,8 @@ function executeAction(event: Event, action: ActionConfig): void {
 }
 
 .desktop-table-row-more-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.desktop-table-row-menu {
-  min-width: 180px;
-}
-
-.desktop-table-row-menu-label {
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-  font-weight: 500;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 
 .desktop-table-row-menu :deep([data-slot='dropdown-menu-item'].is-destructive) {
