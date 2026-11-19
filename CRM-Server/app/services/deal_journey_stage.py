@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel
 from sqlalchemy import case, func
@@ -105,10 +105,15 @@ def infer_board_stage(
     return infer_active_opportunity_stage(opportunity)
 
 
+def current_opportunity_win_probability(opportunity: Opportunity) -> int | None:
+    """Current-stage win probability, falling back to the stored opportunity value."""
+    return cast("int | None", opportunity.current_win_probability or opportunity.win_probability)
+
+
 def infer_active_opportunity_stage(opportunity: Opportunity | None) -> BoardStageKey:
     if opportunity is None:
         return "early_communication"
-    win_probability = opportunity.current_win_probability or opportunity.win_probability
+    win_probability = current_opportunity_win_probability(opportunity)
     if win_probability is None:
         return "early_communication"
     if win_probability < 50:

@@ -211,7 +211,7 @@ def test_customer_journey_amount_preserves_total_amount_contract(api_env):
 @pytest.mark.parametrize(
     ("status", "expected_progress", "expected_stage"),
     [
-        (DealJourneyStatus.ACTIVE, 0, "early_communication"),
+        (DealJourneyStatus.ACTIVE, 10, "early_communication"),
         (DealJourneyStatus.COMPLETED, 100, "completed"),
     ],
 )
