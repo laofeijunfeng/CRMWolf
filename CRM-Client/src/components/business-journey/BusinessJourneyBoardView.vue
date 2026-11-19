@@ -232,7 +232,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .business-board-view {
   display: flex;
@@ -246,22 +246,22 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 .business-board-refreshing {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 40px;
-  padding: 0 $wolf-space-md-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
+  padding: 0 $space-3;
+  border-radius: var(--radius-md);
+  font-size: 12px;
 }
 
 .business-board-error {
-  border: 1px solid color-mix(in srgb, $wolf-danger-v2 18%, transparent);
-  color: $wolf-danger-text-v2;
-  background: $wolf-danger-bg-v2;
+  border: 1px solid color-mix(in srgb, hsl(var(--status-danger)) 18%, transparent);
+  color: hsl(var(--status-danger));
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .business-board-refreshing {
-  color: $wolf-text-secondary-v2;
-  background: $wolf-bg-muted-v2;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
 }
 
 .business-board-inline-retry {
@@ -284,21 +284,21 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-xl-v2;
-  color: $wolf-text-secondary-v2;
+  gap: $space-2;
+  padding: $space-6;
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
 .business-board-blocking-error strong {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
 }
 
 .blocking-error-icon {
   width: 24px;
   height: 24px;
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 .business-board-surface {
@@ -323,7 +323,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-bottom: $wolf-space-sm-v2;
+  padding-bottom: $space-2;
 }
 
 .business-board-columns,
@@ -332,7 +332,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   grid-auto-flow: column;
   grid-auto-columns: minmax(280px, 320px);
   align-items: start;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   height: 100%;
   min-height: 100%;
 }

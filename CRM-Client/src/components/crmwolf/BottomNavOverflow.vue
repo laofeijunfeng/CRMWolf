@@ -60,20 +60,20 @@ const overflowButtonClasses = computed((): string =>
     'bottom-nav-item',
     'flex flex-col items-center justify-center',
     'min-w-touch-target min-h-touch-target',  // §2: 44px
-    'px-wolf-sm py-wolf-xs',
-    'rounded-wolf',
+    'px-2 py-1',
+    'rounded-md',
     'transition-all duration-150 ease-out',
     'touch-manipulation',
     'cursor-pointer',
     'bg-transparent',
     'border-none',
     'outline-none',
-    'text-wolf-text-tertiary',
+    'text-muted-foreground',
     // Active state
     isActive.value && [
-      'text-wolf-primary',
-      'font-wolf-medium',
-      '[&_.bottom-nav-icon]:text-wolf-primary',
+      'text-brand',
+      'font-medium',
+      '[&_.bottom-nav-icon]:text-brand',
     ]
   )
 )
@@ -88,8 +88,8 @@ const overflowButtonClasses = computed((): string =>
         :aria-current="isActive ? 'page' : undefined"
         type="button"
       >
-        <MoreHorizontal class="bottom-nav-icon text-wolf-icon-lg mb-wolf-xs" />
-        <span class="bottom-nav-label text-wolf-caption">
+        <MoreHorizontal class="bottom-nav-icon mb-1" />
+        <span class="bottom-nav-label text-caption">
           更多
         </span>
       </button>
@@ -129,24 +129,24 @@ const overflowButtonClasses = computed((): string =>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .bottom-nav-item {
   // §2 press-feedback
   &:active {
     transform: scale(0.95);
     opacity: 0.7;
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   // §1 focus-states
   &:focus-visible {
-    outline: 2px solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
   }
 
   &:hover:not(:active) {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   // §7 reduced-motion
@@ -167,30 +167,30 @@ const overflowButtonClasses = computed((): string =>
 }
 
 .bottom-nav-label {
-  font-size: $wolf-font-size-caption-v2;  // 12px
+  font-size: 12px;  // 12px
   line-height: 1.2;
 }
 
 .overflow-menu {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;  // 4px
-  padding: $wolf-space-sm-v2;  // 8px
+  gap: $space-1;  // 4px
+  padding: $space-2;  // 8px
 }
 
 .overflow-item {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;  // 8px
-  padding: $wolf-space-md-v2 $wolf-space-sm-v2;  // 12px 8px
+  gap: $space-2;  // 8px
+  padding: $space-3 $space-2;  // 12px 8px
   min-height: 44px;  // §2: Touch target
   cursor: pointer;
-  border-radius: $wolf-radius-sm-v2;  // 4px
+  border-radius: var(--radius-sm);  // 4px
   transition: all 150ms ease-out;  // §7: duration
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
 
   &:hover {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   &:active {
@@ -199,7 +199,7 @@ const overflowButtonClasses = computed((): string =>
   }
 
   &:focus-visible {
-    outline: 2px solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
   }
 
@@ -214,11 +214,11 @@ const overflowButtonClasses = computed((): string =>
   }
 
   &.overflow-item-active {
-    color: $wolf-primary-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--brand));
+    font-weight: 500;
 
     .overflow-icon {
-      color: $wolf-primary-v2;
+      color: hsl(var(--brand));
     }
   }
 }
@@ -226,10 +226,10 @@ const overflowButtonClasses = computed((): string =>
 .overflow-icon {
   width: 18px;
   height: 18px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .overflow-label {
-  font-size: $wolf-font-size-body-v2;  // 14px
+  font-size: 14px;  // 14px
 }
 </style>

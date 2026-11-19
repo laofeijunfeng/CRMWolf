@@ -14,27 +14,33 @@ const iconByTone = {
 }
 
 const classesByTone = {
-  info: 'border-primary/25 bg-primary/5 text-primary',
-  success: 'border-success/25 bg-success/5 text-success',
-  warning: 'border-warning/30 bg-warning/5 text-warning'
+  info: 'border-brand/25 bg-brand/5',
+  success: 'border-success/25 bg-success/5',
+  warning: 'border-warning/30 bg-warning/5'
+} satisfies Record<NoticeBlock['tone'], string>
+
+const iconClassesByTone = {
+  info: 'bg-brand/12 text-brand',
+  success: 'bg-success/12 text-success',
+  warning: 'bg-warning/12 text-warning'
 } satisfies Record<NoticeBlock['tone'], string>
 </script>
 
 <template>
   <p
     v-if="block.title === null"
-    class="m-0 flex items-center gap-2 rounded-wolf bg-[#f7f8fa] px-3 py-1.5 text-[13px] text-[#667180]"
+    class="m-0 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-[13px] text-muted-foreground"
     :aria-label="block.text"
   >
     {{ block.text }}
   </p>
   <aside
     v-else
-    class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-wolf-surface border p-3"
-    :class="block.tone === 'warning' ? 'border-[#fde68a] bg-[#fffdf5]' : classesByTone[block.tone]"
+    class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border p-3"
+    :class="classesByTone[block.tone]"
     :aria-label="block.title"
   >
-    <span class="grid size-[22px] place-items-center rounded-wolf" :class="block.tone === 'warning' ? 'bg-[#fef3c7] text-[#b45309]' : 'bg-muted'" aria-hidden="true">
+    <span class="grid size-[22px] place-items-center rounded-md" :class="iconClassesByTone[block.tone]" aria-hidden="true">
       <component :is="iconByTone[block.tone]" class="h-3.5 w-3.5" />
     </span>
     <div class="flex min-w-0 flex-wrap items-baseline gap-x-2">

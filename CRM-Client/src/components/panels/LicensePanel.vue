@@ -3,7 +3,7 @@
  * LicensePanel.vue - 许可证面板组件
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：所有图标按钮均有 aria-label
  */
 import { ref } from 'vue'
@@ -162,7 +162,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemMain="{ item }">
-        <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.deployment_name }}</span>
+        <span class="font-medium text-foreground truncate">{{ item.deployment_name }}</span>
       </template>
 
       <template #itemMeta="{ item }">
@@ -190,7 +190,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           :aria-label="`删除部署信息 ${item.deployment_name}`"
           @click.stop="handleDeleteDeployment(item.id)"
         >
-          <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+          <Trash2 class="w-4 h-4 text-danger" />
         </Button>
       </template>
     </ListCard>
@@ -219,8 +219,8 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 
       <template #itemMain="{ item }">
         <div class="flex items-center gap-2 min-w-0">
-          <Hash class="w-3 h-3 shrink-0 text-wolf-text-tertiary-v2" />
-          <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.application_number }}</span>
+          <Hash class="w-3 h-3 shrink-0 text-muted-foreground" />
+          <span class="font-medium text-foreground truncate">{{ item.application_number }}</span>
         </div>
       </template>
 
@@ -232,7 +232,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
         <span> · </span>
         <span
           class="inline-flex items-center gap-1"
-          :class="{ 'text-wolf-danger-v2': isExpired(item.expiry_date) }"
+          :class="{ 'text-danger': isExpired(item.expiry_date) }"
         >
           <Calendar class="w-3 h-3" />
           到期: {{ formatDate(item.expiry_date) }}
@@ -301,7 +301,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           :aria-label="`删除许可证申请 ${item.application_number}`"
           @click.stop="handleDeleteApplication(item.id)"
         >
-          <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+          <Trash2 class="w-4 h-4 text-danger" />
         </Button>
       </template>
     </ListCard>
@@ -309,7 +309,6 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .license-panel {
   display: flex;
@@ -319,12 +318,12 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 .license-action-button {
   width: 32px;
   height: 32px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .license-action-button--primary {
   &:hover {
-    color: $wolf-primary-v2;
+    color: hsl(var(--brand));
   }
 }
 
@@ -335,17 +334,17 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 
 .license-action-hover-text {
   display: inline-flex;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .license-applications-empty {
   width: 100%;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 </style>

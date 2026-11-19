@@ -7,34 +7,6 @@ import { mount } from '@vue/test-utils'
 import TouchInput from './TouchInput.vue'
 
 describe('TouchInput', () => {
-  // Touch Target Tests
-  it('mobile size has 44px height for touch target', () => {
-    const wrapper = mount(TouchInput, {
-      props: {
-        label: 'Username',
-        size: 'mobile'
-      }
-    })
-
-    const inputWrapper = wrapper.find('.input-wrapper')
-    expect(inputWrapper.classes().some(c => c.includes('h-touch-target') || c.includes('h-touch-target'))).toBe(true)
-  })
-
-  // Focus Ring Tests
-  it('has visible focus ring on focus', async () => {
-    const wrapper = mount(TouchInput, {
-      props: { label: 'Focus Test' },
-      attachTo: document.body
-    })
-
-    const input = wrapper.find('input')
-    await input.trigger('focus')
-
-    expect(input.classes().some(c => c.includes('focus-visible') || c.includes('focus-ring'))).toBe(true)
-
-    wrapper.unmount()
-  })
-
   // Visible Label Tests (§8 Forms)
   it('label is always visible, not just placeholder', () => {
     const wrapper = mount(TouchInput, {

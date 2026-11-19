@@ -5,7 +5,7 @@
  * 用于 CustomerDetailSheet 中的客户活动面板
  * 包装 FollowUpList 组件，提供标题和添加按钮
  *
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  */
 import { CircleHelp, Plus } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -121,7 +121,7 @@ const handleProcess = (followUp: FollowUp): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .follow-up-panel {
   display: flex;
@@ -133,28 +133,28 @@ const handleProcess = (followUp: FollowUp): void => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .panel-title-group {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .panel-title {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
 .principle-trigger {
   width: 24px !important;
   height: 24px !important;
   min-width: 24px !important;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .principle-icon {
@@ -164,26 +164,26 @@ const handleProcess = (followUp: FollowUp): void => {
 
 :global(.principle-hover-card) {
   width: 300px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 .principle-tooltip {
   max-width: 300px;
   display: grid;
-  gap: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  font-size: 12px;
   line-height: 18px;
 }
 
 .principle-tooltip-title {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .panel-content {
   flex: 1;
   overflow: auto;
-  padding: $wolf-space-md-v2;
+  padding: $space-3;
 }
 
 // Override FollowUpList container styles to fit panel layout

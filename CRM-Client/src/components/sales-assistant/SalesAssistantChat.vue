@@ -1318,13 +1318,13 @@ void loadConversation()
     <div v-if="loadingConversation" role="status" class="mb-2 text-sm text-muted-foreground">正在恢复对话…</div>
     <div ref="scrollId" class="flex-1 space-y-3 overflow-y-auto pr-1">
       <Button v-if="olderCursor !== null" variant="ghost" size="sm" :disabled="submitting" @click="loadOlder">查看更早对话</Button>
-      <div v-if="entries.length === 0 && !loadingConversation && !historyError" class="rounded-wolf-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+      <div v-if="entries.length === 0 && !loadingConversation && !historyError" class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
         发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。
       </div>
       <template v-for="entry in entries" :key="entry.id">
         <template v-if="entry.projection?.visibility !== 'COVERED'">
           <div v-if="entry.role === 'user'" class="flex justify-end">
-            <div class="max-w-[75%] rounded-wolf-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+            <div class="max-w-[75%] rounded-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
               {{ entry.text }}
             </div>
           </div>
@@ -1334,7 +1334,7 @@ void loadConversation()
             <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
           </div>
           <div v-else class="flex gap-2.5">
-            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]">AI</div>
+            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-brand/12 text-[11px] font-semibold text-brand">AI</div>
             <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
               <AgentUIMessage
                 v-if="entry.ui"
@@ -1345,7 +1345,7 @@ void loadConversation()
                 @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
                 @action="(actionId) => { void retryRootFailure(entry, actionId) }"
               />
-              <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
+              <div v-else class="rounded-lg border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
               <Button
                 v-if="showExplicitNone(entry)"
                 type="button"
@@ -1360,26 +1360,26 @@ void loadConversation()
         </template>
       </template>
     </div>
-    <div v-if="showProcessCard" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
+    <div v-if="showProcessCard" class="mt-2 rounded-lg border border-border bg-white px-3.5 py-3">
       <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
       <p v-if="longOrganize" class="mb-2 text-sm text-foreground">正在整理，内容较长，预计需要约 1 分钟</p>
       <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
         <span>执行过程</span>
-        <span v-if="processChip" class="rounded-full border border-[#bfdbfe] bg-[#eff6ff] px-2 py-0.5 text-[11px] font-medium text-[#1d4ed8]">{{ processChip }}</span>
+        <span v-if="processChip" class="rounded-full border border-brand/30 bg-wash-selected px-2 py-0.5 text-[11px] font-medium text-brand">{{ processChip }}</span>
       </div>
-      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-success' : stageItem.status === 'running' ? 'font-medium text-[#1d4ed8]' : stageItem.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
-        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-success bg-success' : stageItem.status === 'running' ? 'border-[#2563eb] bg-white' : stageItem.status === 'failed' ? 'border-destructive bg-destructive' : 'border-border'"></span>
+      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-success' : stageItem.status === 'running' ? 'font-medium text-brand' : stageItem.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
+        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-success bg-success' : stageItem.status === 'running' ? 'border-brand bg-card' : stageItem.status === 'failed' ? 'border-destructive bg-destructive' : 'border-border'"></span>
         <span>{{ STAGE_LABELS[stageItem.name] }}</span>
         <span v-if="stageItem.status === 'done' && stageItem.ms !== undefined" class="text-xs text-muted-foreground">{{ (stageItem.ms / 1000).toFixed(1) }}s</span>
-        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-wolf-md border bg-muted/50 px-1.5 py-0.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
+        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
         <span v-if="stageItem.status === 'running'" class="text-xs font-normal text-muted-foreground">进行中…</span>
         <span v-else-if="stageItem.status === 'failed'" class="text-xs font-normal text-destructive">失败</span>
         <span v-else-if="stageItem.status === 'awaiting'" class="text-xs font-normal text-muted-foreground">待确认</span>
       </div>
     </div>
 
-    <div class="mt-3 rounded-wolf-lg border bg-background p-2.5 shadow-sm" :class="{ 'border-2 border-primary/60': isWaiting }">
-      <div v-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-primary">
+    <div class="mt-3 rounded-lg border bg-background p-2.5 shadow-sm" :class="{ 'border-2 border-brand/60': isWaiting }">
+      <div v-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-brand">
         <svg v-if="routing || processing.active || autoRecovering" class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>

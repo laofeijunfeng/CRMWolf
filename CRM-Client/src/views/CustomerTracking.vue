@@ -1037,7 +1037,7 @@ watchEffect(() => {
       @closed="handleTrackingSheetClosed"
     >
       <DetailSheetContent>
-        <SheetHeader class="tracking-sheet-header p-6 border-b border-wolf-border-default-v2">
+        <SheetHeader class="tracking-sheet-header p-6 border-b border-border">
           <div class="tracking-sheet-title">
             <FileText class="tracking-sheet-icon" aria-hidden="true" />
             <SheetTitle class="truncate">客户追踪详情</SheetTitle>
@@ -1141,7 +1141,7 @@ watchEffect(() => {
           </div>
         </ScrollArea>
 
-        <SheetFooter class="tracking-sheet-footer p-4 border-t border-wolf-border-default-v2">
+        <SheetFooter class="tracking-sheet-footer p-4 border-t border-border">
           <Button variant="outline" @click="selectedTaskId = null">关闭</Button>
           <template v-if="selectedTask && selectedPendingConfirmation">
             <Button
@@ -1221,27 +1221,27 @@ watchEffect(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .customer-tracking-page {
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
   min-height: 0;
   flex: 1;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .customer-tracking-page {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 }
 
 .tracking-cell-strong {
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   cursor: pointer;
 }
 
@@ -1259,15 +1259,15 @@ watchEffect(() => {
 
   &:hover .tracking-content,
   &:focus-visible .tracking-content {
-    color: $wolf-text-link-hover-v2;
+    color: hsl(var(--brand));
     text-decoration: underline;
     text-underline-offset: 2px;
   }
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
   }
 }
 
@@ -1283,23 +1283,23 @@ watchEffect(() => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .tracking-confirmation-inline {
   display: flex;
   min-width: 0;
   align-items: flex-start;
-  gap: $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 18px;
 }
 
 .tracking-confirmation-label {
   flex: 0 0 auto;
-  color: $wolf-warning-text-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--status-warning));
+  font-weight: 600;
 }
 
 .tracking-confirmation-question {
@@ -1310,32 +1310,32 @@ watchEffect(() => {
 
 .tracking-confirmation-more {
   flex: 0 0 auto;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .tracking-confirmation-detail {
   display: flex;
   align-items: baseline;
-  gap: $wolf-space-sm-v2;
-  padding: 0 $wolf-space-xs-v2;
+  gap: $space-2;
+  padding: 0 $space-1;
 }
 
 .tracking-confirmation-detail-question {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  line-height: 20px;
 }
 
 :global(.tracking-content-hover-card) {
   width: 360px;
   max-width: min(360px, calc(100vw - 32px));
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 .tracking-content-hover-text {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 18px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -1347,66 +1347,66 @@ watchEffect(() => {
   justify-content: center;
   max-width: 100%;
   min-height: 24px;
-  padding: 0 $wolf-space-sm-v2;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  padding: 0 $space-2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
 
 .tracking-time-badge--overdue {
-  border-color: $wolf-danger-bg-v2;
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  border-color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 .tracking-time-badge--today {
-  border-color: $wolf-warning-bg-v2;
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  border-color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .tracking-time-badge--soon {
-  border-color: $wolf-primary-light-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-color: var(--wash-hover);
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
 }
 
 .tracking-time-badge--future,
 .tracking-time-badge--closed,
 .tracking-time-badge--empty {
-  border-color: $wolf-border-light-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-tertiary-v2;
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 :global(.tracking-time-hover-card) {
   width: 280px;
   max-width: min(280px, calc(100vw - 32px));
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 .tracking-time-hover-content {
   display: grid;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .tracking-time-hover-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 18px;
 }
 
 .tracking-time-hover-row strong {
-  color: $wolf-text-secondary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -1414,33 +1414,33 @@ watchEffect(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .tracking-mobile-card-title {
   min-width: 0;
-  color: $wolf-text-link-v2;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--brand));
+  font-size: 16px;
+  font-weight: 600;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .tracking-mobile-card-content {
-  margin-top: $wolf-space-sm-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
+  margin-top: $space-2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
 
 .tracking-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .tracking-sheet-header {
@@ -1448,13 +1448,13 @@ watchEffect(() => {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   padding-right: 72px;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
     flex-direction: column;
-    padding: $wolf-space-lg-v2 56px $wolf-space-lg-v2 $wolf-space-lg-v2;
+    padding: $space-4 56px $space-4 $space-4;
   }
 }
 
@@ -1462,7 +1462,7 @@ watchEffect(() => {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .tracking-sheet-icon,
@@ -1472,69 +1472,69 @@ watchEffect(() => {
 }
 
 .tracking-sheet-content {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    padding: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    padding: $space-4;
   }
 }
 
 .tracking-sheet-muted {
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .tracking-detail {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .tracking-info-card {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-card-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
 }
 
 .tracking-card-header {
-  padding: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .tracking-card-title {
   margin: 0;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  line-height: $wolf-line-height-body-v2;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  line-height: 20px;
 }
 
 .tracking-card-body {
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
 }
 
 .tracking-description {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .tracking-description--secondary {
-  margin-top: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  margin-top: $space-2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   font-weight: 400;
 }
 
 .tracking-attributes-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -1543,32 +1543,32 @@ watchEffect(() => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .tracking-attribute-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .tracking-attribute-value {
   min-width: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .tracking-source-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
-  margin-top: $wolf-space-lg-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-light-v2;
+  gap: $space-3 $space-4;
+  margin-top: $space-4;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -1577,10 +1577,10 @@ watchEffect(() => {
   display: flex;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     :deep(button) {
       flex: 1 1 100%;
     }
@@ -1590,7 +1590,7 @@ watchEffect(() => {
 .tracking-postpone-form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 </style>

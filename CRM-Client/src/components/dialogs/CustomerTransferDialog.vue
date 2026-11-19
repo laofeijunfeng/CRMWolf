@@ -456,13 +456,13 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 :global(.customer-transfer-dialog) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   max-width: 520px;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -476,22 +476,22 @@ watch(
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 
 .customer-transfer-dialog__context {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
+  gap: $space-2;
+  padding: $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
 }
 
 .customer-transfer-dialog__context-item {
@@ -503,82 +503,82 @@ watch(
 
 .customer-transfer-dialog__context-item strong {
   overflow: hidden;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .customer-transfer-dialog__context-label {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__context-icon {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .customer-transfer-dialog__field {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .customer-transfer-dialog__hint {
   margin: 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__error {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-danger-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-danger-bg-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  gap: $space-1;
+  padding: $space-3;
+  border: 1px solid hsl(var(--status-danger));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__error strong {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-weight: 500;
 }
 
 .customer-transfer-dialog__error--submit {
-  margin-top: $wolf-space-xs-v2;
+  margin-top: $space-1;
 }
 
 .customer-transfer-dialog__scope {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .customer-transfer-dialog__scope-item {
   display: flex;
   align-items: flex-start;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 52px;
-  padding: 10px $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
+  padding: 10px $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .customer-transfer-dialog__scope-item:hover,
 .customer-transfer-dialog__scope-item--active {
-  border-color: $wolf-border-hover-v2;
-  background: $wolf-primary-light-v2;
+  border-color: hsl(var(--brand));
+  background: var(--wash-hover);
 }
 
 .customer-transfer-dialog__scope-copy {
@@ -588,29 +588,29 @@ watch(
 }
 
 .customer-transfer-dialog__scope-label {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__scope-description {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__notice {
   display: flex;
   align-items: flex-start;
-  gap: $wolf-space-sm-v2;
-  padding: 10px $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  gap: $space-2;
+  padding: 10px $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__notice svg {
@@ -621,18 +621,18 @@ watch(
 .customer-transfer-dialog__impact {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-primary-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  gap: $space-1;
+  padding: $space-3;
+  border: 1px solid hsl(var(--brand));
+  border-radius: var(--radius-md);
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .customer-transfer-dialog__impact-warning {
-  color: $wolf-warning-v2;
+  color: hsl(var(--status-warning));
 }
 
 .customer-transfer-dialog__impact p {
@@ -640,15 +640,15 @@ watch(
 }
 
 .customer-transfer-dialog__impact-heading {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .customer-transfer-dialog__footer {
-  margin-top: $wolf-space-sm-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-default-v2;
+  margin-top: $space-2;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 }
 
 @media (max-width: 480px) {

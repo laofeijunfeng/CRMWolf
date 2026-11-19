@@ -155,27 +155,27 @@ watch(open, (isOpen) => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .data-table-export-body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   max-height: 320px;
   overflow-y: auto;
 }
 
 .data-table-export-group-title {
-  margin: 0 0 $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  margin: 0 0 $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   font-weight: 500;
 }
 
 .data-table-export-list {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -184,6 +184,6 @@ watch(open, (isOpen) => {
 .data-table-export-field {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 </style>

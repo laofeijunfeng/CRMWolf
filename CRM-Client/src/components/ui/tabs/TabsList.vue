@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<Props>(), {})
 
 <template>
   <TabsList
-    :class="cn('inline-flex h-wolf-context-tabs items-center justify-center rounded-wolf-lg bg-wolf-bg-muted p-wolf-xs text-wolf-text-secondary', props.class)"
+    :class="cn('inline-flex h-context-tabs items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground', props.class)"
   >
     <slot />
   </TabsList>

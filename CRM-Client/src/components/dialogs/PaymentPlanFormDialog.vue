@@ -808,7 +808,7 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .payment-plan-form-dialog {
   max-width: 640px;
@@ -817,27 +817,27 @@ watch(
 .payment-plan-form-dialog__form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .payment-plan-form-dialog__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .payment-plan-form-dialog__field {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .payment-plan-form-dialog__footer {
-  padding-top: $wolf-space-sm-v2;
+  padding-top: $space-2;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .payment-plan-form-dialog__grid {
     grid-template-columns: 1fr;
   }
@@ -845,13 +845,13 @@ watch(
 </style>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .payment-plan-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -859,10 +859,10 @@ watch(
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 </style>

@@ -9,8 +9,8 @@ defineProps<{ block: ErrorBlock }>()
 </script>
 
 <template>
-  <aside class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-wolf-surface border border-[#fecaca] bg-[#fffafa] p-3" role="alert">
-    <span class="grid size-[22px] place-items-center rounded-wolf bg-[#fee2e2] text-[#dc2626]" aria-hidden="true">
+  <aside class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3" role="alert">
+    <span class="grid size-[22px] place-items-center rounded-md bg-danger/12 text-danger" aria-hidden="true">
       <AlertCircle class="h-3.5 w-3.5" />
     </span>
     <div>

@@ -27,7 +27,7 @@
   /* ===== Touch-safe button sizes ===== */
   .btn-touch-sm {
     /* Visual size: 24px, Touch target: 44px via hit-slop */
-    @apply h-control px-wolf-sm relative;
+    @apply h-control px-2 relative;
     &::after {
       @apply absolute;
       content: '';
@@ -40,7 +40,7 @@
 
   .btn-touch-md {
     /* Desktop: 36px visual, Mobile: 44px auto */
-    @apply h-control px-wolf-lg;
+    @apply h-control px-4;
   }
 
   /* Mobile variant for btn-touch-md */
@@ -52,16 +52,16 @@
 
   .btn-touch-lg {
     /* Always 44px touch target compliant */
-    @apply h-touch-target px-wolf-xl;
+    @apply h-touch-target px-6;
   }
 
   /* ===== Touch-safe input ===== */
   .input-touch-desktop {
-    @apply h-control px-wolf-md;
+    @apply h-control px-3;
   }
 
   .input-touch-mobile {
-    @apply h-touch-target px-wolf-xl;
+    @apply h-touch-target px-6;
   }
 
   /* ===== Touch-action manipulation ===== */

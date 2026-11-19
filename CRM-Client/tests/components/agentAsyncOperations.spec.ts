@@ -111,7 +111,7 @@ describe("agent async operation projection", () => {
       tone: "warning",
       terminal: true,
     })
-    expect(getAgentAsyncOperationStatusMeta("FAILED").toneClasses).toContain("wolf-danger")
+    expect(getAgentAsyncOperationStatusMeta("FAILED").tone).toBe("danger")
   })
 
   it("summarizes mixed operation lifecycles by the most urgent status", () => {

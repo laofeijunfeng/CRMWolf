@@ -630,7 +630,7 @@ function continueEditing(): void {
               label="所属客户"
               required
               readonly
-              control-class="bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
+              control-class="bg-muted text-foreground"
               aria-readonly="true"
             />
             <SearchableSelectField
@@ -757,9 +757,9 @@ function continueEditing(): void {
 
         <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <div class="grid gap-wolf-xs">
-              <p id="contract-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-                授权类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+            <div class="grid gap-1">
+              <p id="contract-license-type-label" class="text-caption font-medium text-foreground">
+                授权类型 <span class="text-danger" aria-hidden="true">*</span>
               </p>
               <SegmentedChoiceControl
                 id="contract-license-type"
@@ -858,13 +858,13 @@ function continueEditing(): void {
 </template>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .contract-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -872,10 +872,10 @@ function continueEditing(): void {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 </style>

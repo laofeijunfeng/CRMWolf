@@ -418,7 +418,7 @@ test('s3 follow-up confirmation card shows draft, lock, original', async ({ page
   // Locked chip appears on ACCEPTED slots; a candidate customer shows the row without chip.
   // G4: the confirmation card shows the customer row (chip when ACCEPTED,
   // plain row when CANDIDATE — both satisfy the design's locked-field intent).
-  const card = page.locator('.rounded-wolf-lg', { hasText: /整理稿|关键讨论/ }).first()
+  const card = page.locator('div').filter({ hasText: /整理稿|关键讨论/ }).filter({ has: page.getByText('客户', { exact: true }) }).last()
   await expect(card.getByText('客户', { exact: true })).toBeVisible({ timeout: 10_000 })
   await expect(card.getByText(CUSTOMER).first()).toBeVisible({ timeout: 10_000 })
   await page.getByText('对照原文').first().click()

@@ -145,7 +145,7 @@ function handleDelete(tab: TabItem): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 // ==================== Tabs 容器 ====================
 .top-bar-tabs {
@@ -165,7 +165,7 @@ function handleDelete(tab: TabItem): void {
   height: 40px;
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;  // 4px（紧凑）
+  gap: $space-1;  // 4px（紧凑）
   min-width: 0;
 
   // 移除圆角容器
@@ -175,9 +175,9 @@ function handleDelete(tab: TabItem): void {
   padding: 0;
 
   // 移动端 Touch Target 合规
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     height: 44px;  // Touch Target minimum
-    gap: $wolf-space-sm-v2;  // 8px（移动端稍大）
+    gap: $space-2;  // 8px（移动端稍大）
     min-width: max-content;
   }
 }
@@ -186,7 +186,7 @@ function handleDelete(tab: TabItem): void {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
 }
 
 .tabs-item--custom {
@@ -221,7 +221,7 @@ function handleDelete(tab: TabItem): void {
 .tab-trigger-content {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
   white-space: nowrap;
 }
@@ -236,25 +236,25 @@ function handleDelete(tab: TabItem): void {
   min-height: 44px;
 
   // ========== 圆角（轻度）==========
-  border-radius: $wolf-radius-v2;  // 6px
+  border-radius: var(--radius-md);  // 6px
 
   // ========== 内边距 ==========
-  padding: $wolf-button-padding-sm-v2;  // 4px 8px（紧凑）
+  padding: $space-1 $space-2;  // 4px 8px（紧凑）
 
   // ========== 字体 ==========
-  font-size: $wolf-font-size-body-v2;  // 14px，与 SidebarMenuButton text-sm 一致
-  font-weight: $wolf-font-weight-medium-v2;  // 500，与 SidebarMenuButton font-medium 一致
+  font-size: 14px;  // 14px，与 SidebarMenuButton text-sm 一致
+  font-weight: 500;  // 500，与 SidebarMenuButton font-medium 一致
 
   // ========== 颜色（default）==========
   color: hsl(var(--sidebar-foreground));
 
   // ========== 过渡动画 ==========
-  transition: all $wolf-transition-v2;  // 150ms ease
+  transition: all all var(--duration-base) var(--ease-standard);  // 150ms ease
 
   // ========== Hover 状态（用户需求 2）==========
   // 鼠标 hover 时显示浅 blue 背景（非激活态）
   &:hover:not([data-state="active"]):not(:disabled) {
-    background: hsl(var(--accent));  // #EFF6FF（blue-50）
+    background: hsl(var(--accent));
     color: hsl(var(--accent-foreground));
   }
 
@@ -265,7 +265,7 @@ function handleDelete(tab: TabItem): void {
     color: hsl(var(--brand));
 
     // 字重加粗
-    font-weight: $wolf-font-weight-semibold-v2;  // 600
+    font-weight: 600;  // 600
 
     // 移除白色背景（扁平）
     background: transparent;
@@ -282,24 +282,24 @@ function handleDelete(tab: TabItem): void {
 
   // ========== Disabled 状态（MASTER.md §11.1）==========
   &:disabled {
-    opacity: $wolf-disabled-opacity-light-v2;  // 0.5
+    opacity: var(--disabled-opacity);  // 0.5
     cursor: not-allowed;
     pointer-events: none;
   }
 
   // ========== Focus 状态（MASTER.md §8.2）==========
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid hsl(var(--ring) / 0.5);  // 2px rgba(#2563EB, 0.5)
-    outline-offset: $wolf-focus-ring-offset-v2;  // 2px
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;  // 2px
   }
 
   // ========== 移动端 Touch Target 合规（UI/UX Pro Max §2）==========
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     height: 44px;
     min-height: 44px;
     flex-shrink: 0;
 
-    font-size: $wolf-font-size-body-v2;  // 14px，与移动端 SidebarMenuButton 一致
+    font-size: 14px;  // 14px，与移动端 SidebarMenuButton 一致
 
     // 内边距增大
     padding: 8px 16px;
@@ -309,7 +309,7 @@ function handleDelete(tab: TabItem): void {
 // ==================== Reduced Motion（MASTER.md §8.3）====================
 @media (prefers-reduced-motion: reduce) {
   .tabs-trigger-underline {
-    transition-duration: $wolf-reduced-motion-duration-v2;  // 0.01ms
+    transition-duration: 0.01ms;  // 0.01ms
   }
 }
 
@@ -322,7 +322,7 @@ function handleDelete(tab: TabItem): void {
   height: 18px;
   padding: 0 4px;
   font-size: 11px;
-  font-weight: $wolf-font-weight-semibold-v2;  // 600
-  border-radius: $wolf-radius-full-v2;  // 50%
+  font-weight: 600;  // 600
+  border-radius: 9999px;  // 50%
 }
 </style>

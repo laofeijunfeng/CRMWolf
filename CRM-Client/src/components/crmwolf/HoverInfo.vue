@@ -54,8 +54,8 @@ const isPanel = computed(() => cn(props.contentClass).split(/\s+/).includes('is-
 const hoverContentClass = computed(() => cn(
   'crm-hover-info-content',
   isPanel.value
-    ? 'overflow-hidden rounded-wolf-overlay shadow-wolf-overlay'
-    : 'rounded-md shadow-wolf-hover',
+    ? 'overflow-hidden rounded-xl shadow-2'
+    : 'rounded-md shadow-2',
   props.contentClass,
 ))
 </script>
@@ -76,11 +76,10 @@ const hoverContentClass = computed(() => cn(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 :global(.crm-hover-info-content) {
-  border-color: $wolf-border-light-v2;
-  background: $wolf-bg-elevated-v2;
-  color: $wolf-text-primary-v2;
+  border-color: hsl(var(--border));
+  background: hsl(var(--popover));
+  color: hsl(var(--foreground));
 }
 </style>

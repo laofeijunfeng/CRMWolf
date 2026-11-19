@@ -115,16 +115,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .app-drawer {
   max-height: min(80svh, 720px);
   overflow: hidden;
-  border-color: $wolf-border-default-v2;
-  border-top-left-radius: $wolf-radius-sheet-v2;
-  border-top-right-radius: $wolf-radius-sheet-v2;
-  background: $wolf-bg-card-v2;
-  box-shadow: $wolf-shadow-modal-v2;
+  border-color: hsl(var(--border));
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+  background: hsl(var(--card));
+  box-shadow: var(--shadow-3);
 }
 
 .app-drawer__content {
@@ -134,11 +134,11 @@ onBeforeUnmount(() => {
   max-height: inherit;
   min-height: 0;
   margin: 0 auto;
-  padding: 0 $wolf-page-padding-v2 $wolf-space-lg-v2;
+  padding: 0 var(--page-padding) $space-4;
 }
 
 .app-drawer__header {
-  padding: $wolf-space-md-v2 0 $wolf-space-sm-v2;
+  padding: $space-3 0 $space-2;
   text-align: left;
 }
 
@@ -146,27 +146,27 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .app-drawer__title {
   min-width: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .app-drawer__close {
   width: 36px;
   height: 36px;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
 }
 
 .app-drawer__description {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .app-drawer__body {
@@ -178,9 +178,9 @@ onBeforeUnmount(() => {
 
 @media (max-width: 767px) {
   .app-drawer__content {
-    padding-right: $wolf-page-padding-mobile-v2;
-    padding-bottom: calc($wolf-space-md-v2 + $wolf-safe-area-bottom-v2);
-    padding-left: $wolf-page-padding-mobile-v2;
+    padding-right: var(--page-padding);
+    padding-bottom: calc($space-3 + var(--safe-bottom));
+    padding-left: var(--page-padding);
   }
 }
 </style>

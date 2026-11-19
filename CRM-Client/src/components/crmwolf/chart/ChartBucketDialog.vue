@@ -112,7 +112,7 @@ function close(open: boolean): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 :global(.chart-bucket-dialog__content) {
   display: flex;
@@ -127,7 +127,7 @@ function close(open: boolean): void {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 :global(.chart-bucket-dialog__state) {
@@ -135,13 +135,13 @@ function close(open: boolean): void {
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
 :global(.chart-bucket-dialog__inline-error) {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 :global(.chart-bucket-dialog__items) {
@@ -155,7 +155,7 @@ function close(open: boolean): void {
 :global(.chart-bucket-dialog__actions) {
   display: grid;
   flex: none;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 :global(.chart-bucket-dialog__load-more) {

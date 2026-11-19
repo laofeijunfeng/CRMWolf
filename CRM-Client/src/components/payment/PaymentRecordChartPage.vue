@@ -491,7 +491,7 @@ function retryBucket(): void {
               >
                 <template #default="{ action }">
                   <span>{{ action.label }}</span>
-                  <span class="payment-record-chart__track"><span class="payment-record-chart__fill bg-primary" :style="{ width: barWidth(amountCard, action.bucket) }" /></span>
+                  <span class="payment-record-chart__track"><span class="payment-record-chart__fill bg-brand" :style="{ width: barWidth(amountCard, action.bucket) }" /></span>
                   <span>{{ action.value }}</span>
                 </template>
               </ChartBucketActionList>
@@ -590,7 +590,7 @@ function retryBucket(): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .payment-record-chart__arr-explanation {
   margin-top: 12px;
@@ -602,26 +602,26 @@ function retryBucket(): void {
 .payment-record-chart__state {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-secondary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
 }
 
 .payment-record-chart__heading h2 {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
   line-height: 1.25;
 }
 
 .payment-record-chart__heading p {
-  margin: $wolf-space-xs-v2 0 0;
-  color: $wolf-text-tertiary-v2;
+  margin: $space-1 0 0;
+  color: hsl(var(--muted-foreground));
 }
 
 .payment-record-chart__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 
@@ -655,14 +655,14 @@ function retryBucket(): void {
   display: grid;
   gap: 4px;
   min-width: 9rem;
-  border: 1px solid $wolf-border-default-v2;
+  border: 1px solid hsl(var(--border));
   border-radius: 8px;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
   padding: 8px 10px;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-size: 12px;
   pointer-events: none;
-  box-shadow: 0 8px 24px rgb(15 23 42 / 12%);
+  box-shadow: var(--shadow-2);
 }
 
 .payment-record-chart__arr-tooltip strong {
@@ -675,13 +675,13 @@ function retryBucket(): void {
   gap: 12px;
 }
 .payment-record-chart__arr-tooltip em {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-style: normal;
 }
 
 .payment-record-chart__arr-label {
   position: absolute;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   transform: translate(-50%, -170%);
@@ -702,7 +702,7 @@ function retryBucket(): void {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
 }
 
 .payment-record-chart__empty-donut strong {
@@ -713,7 +713,7 @@ function retryBucket(): void {
 .payment-record-chart__empty-donut span,
 .payment-record-chart__legend :deep(button span:last-child),
 .payment-record-chart__bars :deep(button span:last-child) {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 
@@ -732,7 +732,7 @@ function retryBucket(): void {
   border: 0;
   background: transparent;
   padding: 2px 0;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-size: 14px;
   text-align: left;
 }
@@ -763,7 +763,7 @@ function retryBucket(): void {
   height: 8px;
   overflow: hidden;
   border-radius: 9999px;
-  background: $wolf-bg-muted-v2;
+  background: hsl(var(--muted));
 }
 
 .payment-record-chart__fill {
@@ -775,23 +775,23 @@ function retryBucket(): void {
 .payment-record-chart__dialog-list {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .payment-record-chart__dialog-list > button {
   display: flex;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   border: 0;
-  border-bottom: 1px solid $wolf-border-default-v2;
+  border-bottom: 1px solid hsl(var(--border));
   background: transparent;
-  padding: $wolf-space-sm-v2 0;
+  padding: $space-2 0;
   text-align: left;
 }
 
 .payment-record-chart__dialog-list small {
   display: block;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 @media (max-width: 720px) {

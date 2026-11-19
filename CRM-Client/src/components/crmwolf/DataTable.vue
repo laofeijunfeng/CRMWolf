@@ -1429,7 +1429,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 // ==================== 表格容器 ====================
 .data-table-state {
@@ -1438,28 +1438,28 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-xl-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xl);
 }
 
 .data-table-refreshing {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-height: 32px;
-  padding: 0 $wolf-space-md-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
-  background: $wolf-bg-page-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  padding: 0 $space-3;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .data-table-refreshing-indicator {
   width: 12px;
   height: 12px;
-  border: 2px solid $wolf-border-default-v2;
-  border-top-color: $wolf-text-secondary-v2;
+  border: 2px solid hsl(var(--border));
+  border-top-color: hsl(var(--muted-foreground));
   border-radius: 50%;
   animation: data-table-refresh-spin 300ms linear infinite;
 }
@@ -1474,23 +1474,23 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
-  background: $wolf-warning-bg-v2;
-  color: $wolf-text-primary-v2;
+  gap: $space-3;
+  padding: $space-2 $space-3;
+  border-bottom: 1px solid hsl(var(--border));
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--foreground));
 }
 
 .data-table-inline-error-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  font-size: 12px;
 }
 
 .data-table-inline-error-copy span {
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .data-table-wrapper {
@@ -1511,9 +1511,9 @@ onBeforeUnmount(() => {
 // ==================== 表格卡片（固定高度）====================
 .data-table-card {
   --data-table-actions-width: 0px;
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-xl-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xl);
   box-shadow: none;
   display: flex;
   flex-direction: column;
@@ -1597,30 +1597,30 @@ onBeforeUnmount(() => {
 .data-table-mobile-detail-trigger:focus-visible {
   position: static;
   width: auto;
-  height: $wolf-touch-target-min-v2;
-  min-height: $wolf-touch-target-min-v2;
+  height: var(--touch-target);
+  min-height: var(--touch-target);
   max-width: 100%;
-  padding: 0 $wolf-space-sm-v2;
-  margin: 0 $wolf-space-xs-v2 $wolf-space-xs-v2 0;
+  padding: 0 $space-2;
+  margin: 0 $space-1 $space-1 0;
   overflow: visible;
   clip: auto;
   clip-path: none;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   text-decoration: none;
-  outline: $wolf-focus-ring-width-strong-v2 solid $wolf-focus-ring-color-v2;
-  outline-offset: $wolf-focus-ring-offset-v2;
+  outline: 2px solid hsl(var(--ring) / 0.5);
+  outline-offset: 2px;
 }
 
 .data-table-row-detail-trigger:hover,
 .data-table-mobile-detail-trigger:hover {
-  background: $wolf-bg-table-hover-v2;
+  background: var(--wash-hover);
 }
 
 .data-table-cell--detail {
@@ -1636,14 +1636,14 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   min-height: 24px;
-  margin-bottom: $wolf-space-xs-v2;
+  margin-bottom: $space-1;
 }
 
 .data-table-selection-cell {
   width: 44px;
   min-width: 44px;
-  padding-left: $wolf-space-sm-v2;
-  padding-right: $wolf-space-sm-v2;
+  padding-left: $space-2;
+  padding-right: $space-2;
   text-align: center;
   vertical-align: middle;
 }
@@ -1652,25 +1652,25 @@ onBeforeUnmount(() => {
   position: sticky;
   left: 0;
   z-index: 50;
-  background: $wolf-bg-table-header-v2;
+  background: hsl(var(--muted));
 }
 
 .data-table-row .data-table-selection-cell {
   position: sticky;
   left: 0;
   z-index: 7;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .data-table-row:hover .data-table-selection-cell {
-  background: $wolf-bg-table-hover-v2;
+  background: var(--wash-hover);
 }
 
 .data-table-mobile-card {
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-surface-v2;
-  padding: $wolf-space-md-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  padding: $space-3;
   transition: background 150ms ease, border-color 150ms ease;
 
   &.is-interactive {
@@ -1683,37 +1683,37 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .data-table-mobile-card-title {
   min-width: 0;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   overflow-wrap: anywhere;
 }
 
 .data-table-mobile-card-status {
   flex-shrink: 0;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-secondary-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 .data-table-mobile-card-subtitle {
-  margin-top: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
+  margin-top: $space-1;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 
 .data-table-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 .data-table-mobile-card-meta-item {
@@ -1725,10 +1725,10 @@ onBeforeUnmount(() => {
 .data-table-mobile-card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-md-v2;
-  padding-top: $wolf-space-md-v2;
-  border-top: 1px solid $wolf-border-light-v2;
+  gap: $space-2;
+  margin-top: $space-3;
+  padding-top: $space-3;
+  border-top: 1px solid hsl(var(--border));
 }
 
 .data-table-mobile-empty {
@@ -1743,37 +1743,37 @@ onBeforeUnmount(() => {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: $wolf-bg-table-header-v2;  // 表头背景（list-page.md 3.2）
+  background: hsl(var(--muted));  // 表头背景（list-page.md 3.2）
 }
 
 .data-table-header-cell {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: $wolf-bg-table-header-v2;
+  background: hsl(var(--muted));
   font-size: 13px;  // 表头字号（list-page.md 3.2）
   font-weight: 600;  // 表头字重（list-page.md 3.2）
-  color: $wolf-text-secondary-v2;   // 表头文字色（list-page.md 3.2）
+  color: hsl(var(--muted-foreground));   // 表头文字色（list-page.md 3.2）
   padding: 12px 16px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  border-bottom: 1px solid hsl(var(--border));
 
   &.text-center { text-align: center; }
   &.text-right { text-align: right; }
 
   // 固定列样式
   &.fixed-left, &.fixed-right {
-    background: $wolf-bg-table-header-v2;
+    background: hsl(var(--muted));
   }
 
   // 固定列阴影（滚动时显示）
   &.fixed-left.has-shadow {
-    box-shadow: 1px 0 0 $wolf-border-light-v2, 8px 0 12px rgba(15, 23, 42, 0.04);
+    box-shadow: 1px 0 0 hsl(var(--border)), 8px 0 12px hsl(var(--foreground) / 0.04);
   }
 
   &.fixed-right.has-shadow {
-    box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
+    box-shadow: -1px 0 0 hsl(var(--border)), -8px 0 12px hsl(var(--foreground) / 0.04);
   }
 }
 
@@ -1784,8 +1784,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   min-height: 40px;
   padding: 6px 12px;
-  border-bottom: 1px solid $wolf-border-light-v2;
-  background: $wolf-bg-card-v2;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   flex-shrink: 0;
 }
 .data-table-replacement {
@@ -1794,7 +1794,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .data-table-content--board {
@@ -1806,10 +1806,10 @@ onBeforeUnmount(() => {
 .data-table-row {
   height: 44px;  // 行高（list-page.md 3.2）
   transition: background 150ms ease;
-  border-bottom: 1px solid $wolf-border-light-v2;  // 行分割线（list-page.md 3.2）
+  border-bottom: 1px solid hsl(var(--border));  // 行分割线（list-page.md 3.2）
 
   &:hover {
-    background: $wolf-bg-table-hover-v2;  // Hover 背景（list-page.md 3.2）
+    background: var(--wash-hover);  // Hover 背景（list-page.md 3.2）
   }
 
   &:last-child {
@@ -1821,17 +1821,17 @@ onBeforeUnmount(() => {
   }
 
   &.is-interactive:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: calc(-1 * #{$wolf-focus-ring-width-v2});
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: calc(-1 * #{2px});
   }
 }
 
 // 表格单元格
 .data-table-cell {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  height: $wolf-touch-target-min-v2;
-  padding: 0 $wolf-space-md-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  height: var(--touch-target);
+  padding: 0 $space-3;
   vertical-align: middle;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1849,27 +1849,27 @@ onBeforeUnmount(() => {
 
   // 固定列样式
   &.fixed-left, &.fixed-right {
-    background: $wolf-bg-card-v2;  // 固定列背景
+    background: hsl(var(--card));  // 固定列背景
   }
 
   // hover 时固定列背景同步
   .data-table-row:hover &.fixed-left,
   .data-table-row:hover &.fixed-right {
-    background: $wolf-bg-table-hover-v2;
+    background: var(--wash-hover);
   }
 
   // 固定列阴影（滚动时显示）
   &.fixed-left.has-shadow {
-    box-shadow: 1px 0 0 $wolf-border-light-v2, 8px 0 12px rgba(15, 23, 42, 0.04);
+    box-shadow: 1px 0 0 hsl(var(--border)), 8px 0 12px hsl(var(--foreground) / 0.04);
   }
 
   &.fixed-right.has-shadow {
-    box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
+    box-shadow: -1px 0 0 hsl(var(--border)), -8px 0 12px hsl(var(--foreground) / 0.04);
   }
 }
 .data-table-cell--primary {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .data-table-actions-header,
@@ -1881,8 +1881,8 @@ onBeforeUnmount(() => {
   max-width: var(--data-table-actions-width);
   // 操作列是固定宽度的功能列，标题和按钮保持同一视觉轴线，避免右贴边显得突兀。
   text-align: center;
-  background: $wolf-bg-card-v2;
-  box-shadow: -1px 0 0 $wolf-border-light-v2, -8px 0 12px rgba(15, 23, 42, 0.04);
+  background: hsl(var(--card));
+  box-shadow: -1px 0 0 hsl(var(--border)), -8px 0 12px hsl(var(--foreground) / 0.04);
   z-index: 7;
 }
 
@@ -1892,14 +1892,14 @@ onBeforeUnmount(() => {
 
 .data-table-actions-header {
   z-index: 46;
-  background: $wolf-bg-table-header-v2;
+  background: hsl(var(--muted));
 }
 
 .data-table-row:hover .data-table-actions-cell {
-  background: $wolf-bg-table-hover-v2;
+  background: var(--wash-hover);
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .data-table-card.has-desktop-row-actions {
     --data-table-actions-width: 0px;
   }
@@ -1919,7 +1919,7 @@ onBeforeUnmount(() => {
 }
 
 .data-table-empty-cell {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
   text-align: center;
 }
 
@@ -1928,15 +1928,15 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-light-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-3 $space-4;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   flex-shrink: 0;
 }
 
 .total-text {
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap; // 防止换行
   flex-shrink: 0; // 不压缩宽度
 }
@@ -1947,23 +1947,23 @@ onBeforeUnmount(() => {
 }
 
 .page-size-select {
-  min-height: $wolf-touch-target-min-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
+  min-height: var(--touch-target);
+  border-radius: var(--radius-md);
+  font-size: 12px;
   cursor: pointer;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
 .data-table-footer--compact {
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 // ==================== 响应式（MASTER.md §10）====================
-@media (max-width: $wolf-breakpoint-md-v2 - 1) {
+@media (max-width: $bp-md - 1) {
   // 表格内容区：横向滚动 + 固定列（touch 优化）
   .data-table-content {
     -webkit-overflow-scrolling: touch;
@@ -1975,38 +1975,38 @@ onBeforeUnmount(() => {
   .data-table-cell.fixed-left,
   .data-table-cell.fixed-right {
     // 确保 touch target 合规
-    min-height: $wolf-touch-target-min-v2;
+    min-height: var(--touch-target);
   }
 
   // 单元格：更紧凑的 padding
   .data-table-cell {
-    padding: 0 $wolf-space-xs-v2;
+    padding: 0 $space-1;
   }
 
   // 固定列阴影：移动端更明显（便于感知边界）
   .data-table-header-cell.fixed-left.has-shadow,
   .data-table-cell.fixed-left.has-shadow {
-    box-shadow: 1px 0 0 $wolf-border-light-v2, 10px 0 16px rgba(15, 23, 42, 0.06);
+    box-shadow: 1px 0 0 hsl(var(--border)), 10px 0 16px hsl(var(--foreground) / 0.06);
   }
 
   .data-table-header-cell.fixed-right.has-shadow,
   .data-table-cell.fixed-right.has-shadow {
-    box-shadow: -1px 0 0 $wolf-border-light-v2, -10px 0 16px rgba(15, 23, 42, 0.06);
+    box-shadow: -1px 0 0 hsl(var(--border)), -10px 0 16px hsl(var(--foreground) / 0.06);
   }
 
   // 分页区：换行布局
   .data-table-footer {
     flex-wrap: wrap;
-    gap: $wolf-space-sm-v2;
+    gap: $space-2;
   }
 
   // 行高：Touch Target 合规（44px）
   .data-table-row {
-    min-height: $wolf-touch-target-min-v2;  // 44px
+    min-height: var(--touch-target);  // 44px
   }
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .data-table-card.has-mobile-cards {
     // 移动端卡片列表由页面主体负责纵向滚动，避免页面 + DataTable 双滚动。
     overflow: visible;
@@ -2015,7 +2015,7 @@ onBeforeUnmount(() => {
   .data-table-content.has-mobile-cards {
     overflow: visible;
     padding: 0;
-    background: $wolf-bg-page-v2;
+    background: hsl(var(--card));
   }
 
   .data-table-content.has-mobile-cards .data-table {
@@ -2025,7 +2025,7 @@ onBeforeUnmount(() => {
   .data-table-content.has-mobile-cards .data-table-mobile-list {
     display: flex;
     flex-direction: column;
-    gap: $wolf-section-gap-mobile-v2;
+    gap: $space-4;
   }
 
   .data-table-card.has-mobile-cards {
@@ -2038,12 +2038,12 @@ onBeforeUnmount(() => {
   }
 
   .data-table-tools {
-    min-height: $wolf-touch-target-min-v2;
-    padding: $wolf-space-sm-v2 0;
+    min-height: var(--touch-target);
+    padding: $space-2 0;
   }
 
   .data-table-footer {
-    padding: $wolf-space-md-v2 0 calc($wolf-space-md-v2 + $wolf-safe-area-bottom-v2);
+    padding: $space-3 0 calc($space-3 + var(--safe-bottom));
     justify-content: center;
   }
 
@@ -2064,11 +2064,11 @@ onBeforeUnmount(() => {
 // ==================== Reduced Motion（MASTER.md §8.3）====================
 @media (prefers-reduced-motion: reduce) {
   .data-table-row {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 
   .data-table-refreshing-indicator {
-    animation-duration: $wolf-reduced-motion-duration-v2;
+    animation-duration: 0.01ms;
     animation-iteration-count: 1;
   }
 }

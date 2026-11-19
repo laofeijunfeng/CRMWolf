@@ -36,7 +36,7 @@ const props = withDefaults(defineProps<Props>(), {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .hover-preview {
   display: inline-flex;
@@ -44,27 +44,27 @@ const props = withDefaults(defineProps<Props>(), {
 
 :global(.hover-preview-card) {
   width: auto;
-  padding: $wolf-space-sm-v2;
+  padding: $space-2;
 }
 
 .hover-preview-tooltip {
   max-width: 380px;
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .tooltip-row {
   display: flex;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   padding: 2px 0;
 }
 
 .tooltip-label {
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .tooltip-value {
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   white-space: normal;
   overflow-wrap: anywhere;
 }

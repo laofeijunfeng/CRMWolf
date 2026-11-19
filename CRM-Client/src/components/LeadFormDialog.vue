@@ -268,7 +268,7 @@ const continueEditing = (): void => {
       </DialogHeader>
 
       <div v-if="loading" class="flex justify-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
       </div>
 
       <Form

@@ -463,7 +463,6 @@ describe('PaymentRecordDialog', () => {
     expect(source).toContain('DialogDescription')
     expect(source).toContain('InputField')
     expect(source).toContain('TextareaField')
-    expect(source).toContain('variables-v2.scss')
     expect(source).not.toContain('as any')
     expect(source).not.toContain('@ts-ignore')
     expect(source).not.toContain('toISOString')

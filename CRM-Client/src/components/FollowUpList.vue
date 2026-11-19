@@ -616,7 +616,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .follow-up-list-container {
   height: 100%;
@@ -626,13 +626,13 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .follow-up-skeleton {
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
 }
 
 .skeleton-wrapper {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .skeleton-line {
@@ -652,7 +652,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .follow-up-empty {
-  padding: $wolf-space-2xl-v2 0;
+  padding: $space-8 0;
   text-align: center;
 }
 
@@ -670,14 +670,14 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 .follow-up-item {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
+  padding: $space-2 $space-4;
+  border-bottom: 1px solid hsl(var(--border));
   transition: background 150ms ease;
 
   &:hover {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   &:last-child {
@@ -689,9 +689,9 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   width: 28px;
   height: 28px;
   margin-top: 1px;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -707,14 +707,14 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .follow-up-content-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 
@@ -725,10 +725,10 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 .follow-up-content {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -758,15 +758,15 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   height: 24px !important;
   min-width: 24px !important;
   padding: 0 !important;
-  color: $wolf-text-tertiary-v2;
-  background: $wolf-bg-card-v2 !important;
-  border: 1px solid $wolf-border-light-v2;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border));
   opacity: 0;
   transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
 
   &:hover {
-    color: $wolf-text-secondary-v2;
-    background: $wolf-bg-muted-v2 !important;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--muted)) !important;
   }
 }
 
@@ -784,23 +784,23 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 :global(.follow-up-method-hover-card) {
   width: auto;
   min-width: 56px;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+  padding: $space-1 $space-2;
 }
 
 :global(.follow-up-content-hover-card) {
   width: 320px;
   max-width: min(320px, calc(100vw - 32px));
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 :global(.follow-up-meta-hover-card) {
   width: 280px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 .follow-up-hover-text {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 18px;
 }
 
@@ -810,42 +810,42 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 .follow-up-meta-card {
   display: grid;
-  gap: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  font-size: 12px;
   line-height: 18px;
 }
 
 .follow-up-meta-card-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
 
   strong {
     min-width: 0;
-    color: $wolf-text-secondary-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
     overflow-wrap: anywhere;
   }
 }
 
 .meeting-detail {
   display: grid;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-xs-v2 0;
+  gap: $space-1;
+  padding: $space-1 0;
 }
 
 .meeting-section {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  gap: $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 18px;
 }
 
 .meeting-section-label {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .meeting-section-value {
@@ -858,8 +858,8 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .processing-error {
-  color: $wolf-danger-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--status-danger));
+  font-size: 12px;
   line-height: 18px;
 }
 
@@ -872,13 +872,13 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .effectiveness-indicator {
-  width: $wolf-touch-target-min-v2;
-  height: $wolf-touch-target-min-v2;
-  min-width: $wolf-touch-target-min-v2;
-  min-height: $wolf-touch-target-min-v2;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   padding: 0;
   border: none;
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -889,23 +889,23 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 .effectiveness-indicator-visual {
   width: 24px;
   height: 24px;
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .effectiveness-indicator-visual.is-valid {
-  color: $wolf-success-v2;
+  color: hsl(var(--status-success));
 }
 
 .effectiveness-indicator-visual.is-invalid {
-  color: $wolf-danger-v2;
-  background: $wolf-danger-bg-v2;
+  color: hsl(var(--status-danger));
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .effectiveness-indicator-visual.is-loading {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .effectiveness-icon {
@@ -919,38 +919,38 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 :global(.effectiveness-hover-card) {
   width: 280px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  padding: $space-2 $space-3;
 }
 
 .effectiveness-card {
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   line-height: 18px;
 }
 
 .effectiveness-card-title {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .effectiveness-card-score {
   margin-top: 2px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
 }
 
 .effectiveness-card-text {
-  margin-top: $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
+  margin-top: $space-1;
+  color: hsl(var(--muted-foreground));
   white-space: pre-wrap;
 }
 
 .follow-up-meta {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
   overflow: hidden;
@@ -971,7 +971,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .meta-separator {
-  color: $wolf-disabled-text-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .meta-next-action {
@@ -991,23 +991,23 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .delete-btn:hover {
-  background: $wolf-danger-bg-v2 !important;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent) !important;
 }
 
 .process-btn:hover {
-  background: $wolf-bg-muted-v2 !important;
+  background: hsl(var(--muted)) !important;
 }
 
 .delete-icon {
   width: 14px;
   height: 14px;
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .process-icon {
   width: 14px;
   height: 14px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .follow-up-item:hover .delete-btn,
@@ -1030,8 +1030,8 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   .content-expand-btn,
   .delete-btn,
   .effectiveness-icon-loading {
-    transition-duration: $wolf-reduced-motion-duration-v2;
-    animation-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
   }
 }
 

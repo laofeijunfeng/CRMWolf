@@ -13,6 +13,6 @@ const fieldName = String(toValue(name))
     :id="formMessageId"
     as="p"
     :name="fieldName"
-    class="text-wolf-caption font-wolf font-wolf-medium text-wolf-danger"
+    class="text-caption font-sans font-medium text-danger"
   />
 </template>

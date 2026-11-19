@@ -432,7 +432,7 @@ watch([hasAccess, teamId], (): void => {
       @retry="loadProducts"
     >
       <template #cell-name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.name }}</div>
+        <div class="font-medium text-foreground">{{ row.name }}</div>
         <div class="mt-1 text-xs text-muted-foreground">{{ row.description || '暂无描述' }}</div>
       </template>
       <template #cell-status="{ row }">

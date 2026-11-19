@@ -95,12 +95,12 @@ function optionId(value: string): string {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .segmented-choice {
   display: grid;
   grid-template-columns: repeat(var(--segmented-choice-columns, 2), minmax(0, 1fr));
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   width: 100%;
   min-width: 0;
 }
@@ -108,7 +108,7 @@ function optionId(value: string): string {
 .segmented-choice__item {
   position: relative;
   min-width: 0;
-  min-height: $wolf-input-height-v2;
+  min-height: var(--control-h-md);
 }
 
 .segmented-choice__radio {
@@ -126,15 +126,15 @@ function optionId(value: string): string {
   min-width: 0;
   width: 100%;
   height: auto;
-  min-height: $wolf-input-height-v2;
-  padding: 0 $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  min-height: var(--control-h-md);
+  padding: 0 $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
   transition:
@@ -156,68 +156,68 @@ function optionId(value: string): string {
 }
 
 .segmented-choice__item:hover .segmented-choice__option {
-  border-color: $wolf-border-hover-v2;
+  border-color: hsl(var(--brand));
 }
 
 .segmented-choice__radio:focus-visible + .segmented-choice__option {
-  outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-  outline-offset: $wolf-focus-ring-offset-v2;
+  outline: 2px solid hsl(var(--ring) / 0.5);
+  outline-offset: 2px;
 }
 
 .segmented-choice__radio:disabled + .segmented-choice__option {
   cursor: not-allowed;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   opacity: 0.72;
 }
 
 .segmented-choice__option--primary:not(.segmented-choice__option--active) {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .segmented-choice__option--success:not(.segmented-choice__option--active) {
-  color: $wolf-success-v2;
+  color: hsl(var(--status-success));
 }
 
 .segmented-choice__option--warning:not(.segmented-choice__option--active) {
-  color: $wolf-warning-text-v2;
+  color: hsl(var(--status-warning));
 }
 
 .segmented-choice__option--danger:not(.segmented-choice__option--active) {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .segmented-choice__option--primary.segmented-choice__option--active {
-  border-color: $wolf-primary-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-  box-shadow: inset 0 0 0 1px $wolf-primary-v2;
+  border-color: hsl(var(--brand));
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
+  box-shadow: inset 0 0 0 1px hsl(var(--brand));
 }
 
 .segmented-choice__option--success.segmented-choice__option--active {
-  border-color: $wolf-success-v2;
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-v2;
-  box-shadow: inset 0 0 0 1px $wolf-success-v2;
+  border-color: hsl(var(--status-success));
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
+  box-shadow: inset 0 0 0 1px hsl(var(--status-success));
 }
 
 .segmented-choice__option--warning.segmented-choice__option--active {
-  border-color: $wolf-warning-text-v2;
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-  box-shadow: inset 0 0 0 1px $wolf-warning-text-v2;
+  border-color: hsl(var(--status-warning));
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
+  box-shadow: inset 0 0 0 1px hsl(var(--status-warning));
 }
 
 .segmented-choice__option--danger.segmented-choice__option--active {
-  border-color: $wolf-danger-v2;
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-v2;
-  box-shadow: inset 0 0 0 1px $wolf-danger-v2;
+  border-color: hsl(var(--status-danger));
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
+  box-shadow: inset 0 0 0 1px hsl(var(--status-danger));
 }
 
 .segmented-choice__option--muted.segmented-choice__option--active {
-  border-color: $wolf-border-default-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-primary-v2;
-  box-shadow: inset 0 0 0 1px $wolf-border-default-v2;
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  box-shadow: inset 0 0 0 1px hsl(var(--border));
 }
 </style>

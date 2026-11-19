@@ -64,7 +64,6 @@ const handleViewContract = (
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 // The detail content owns the visual implementation; this wrapper only provides the Sheet boundary.
 </style>

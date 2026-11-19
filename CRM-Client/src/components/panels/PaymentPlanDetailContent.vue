@@ -791,20 +791,20 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
-$payment-border-width: $wolf-focus-ring-width-subtle-v2;
-$payment-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
-$payment-header-mobile-indent: calc($payment-title-avatar-size + $wolf-space-md-v2);
-$payment-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 12 + #{$wolf-space-2xl-v2});
-$payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
+$payment-border-width: 1px;
+$payment-title-avatar-size: calc(var(--touch-target) + $space-1);
+$payment-header-mobile-indent: calc($payment-title-avatar-size + $space-3);
+$payment-sheet-min-height: calc(#{var(--touch-target)} * 12 + #{$space-8});
+$payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .detail-embedded-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .payment-sheet-scroll {
@@ -813,18 +813,18 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .payment-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: $payment-border-width solid $wolf-border-default-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: $payment-border-width solid hsl(var(--border));
 }
 
 .payment-header-summary {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-width: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
     flex-wrap: wrap;
   }
@@ -833,14 +833,14 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .title-avatar {
   width: $payment-title-avatar-size;
   height: $payment-title-avatar-size;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: $wolf-topbar-title-font-size-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-size: 20px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -850,27 +850,27 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .payment-sheet-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .payment-sheet-description {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
+  color: hsl(var(--muted-foreground));
 }
 
 .amount-summary {
   display: grid;
   grid-template-columns: repeat(3, max-content);
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   align-items: center;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
     width: 100%;
     padding-left: $payment-header-mobile-indent;
@@ -880,54 +880,54 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .amount-summary-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: $payment-border-width solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
+  gap: $space-1;
+  padding: $space-2 $space-3;
+  border: $payment-border-width solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
 
   strong {
-    color: $wolf-text-primary-v2;
-    font-family: $wolf-font-mono-v2;
-    font-size: $wolf-font-size-body-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
+    color: hsl(var(--foreground));
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 
   &.paid strong {
-    color: $wolf-success-text-v2;
+    color: hsl(var(--status-success));
   }
 
   &.remaining strong {
-    color: $wolf-warning-text-v2;
+    color: hsl(var(--status-warning));
   }
 }
 
 .amount-summary-label {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .sheet-body {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xl-v2;
+  gap: $space-6;
   min-height: $payment-sheet-min-height;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    padding: $wolf-space-md-v2;
-    gap: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    padding: $space-3;
+    gap: $space-4;
   }
 }
 
 .payment-plan-sections {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xl-v2;
+  gap: $space-6;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    gap: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    gap: $space-4;
   }
 }
 
@@ -935,48 +935,48 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .loading-stack {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .info-card,
 .approval-card,
 .state-card {
-  background: $wolf-bg-card-v2;
-  border: $payment-border-width solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border: $payment-border-width solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .section-heading {
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: $payment-border-width solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: $payment-border-width solid hsl(var(--border));
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .section-title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .section-content {
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
 }
 
 .attributes-grid,
 .approval-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -984,7 +984,7 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .approval-summary-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -992,22 +992,22 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .attribute-label {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .attribute-value,
 .attribute-link {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   word-break: break-word;
 }
 
@@ -1016,22 +1016,22 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   min-width: 0;
   max-width: 100%;
   height: auto;
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   justify-content: flex-start;
   padding: 0;
-  color: $wolf-text-link-v2;
+  color: hsl(var(--brand));
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
 .mono-value {
-  font-family: $wolf-font-mono-v2;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1039,13 +1039,13 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .approval-content {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 
@@ -1055,21 +1055,21 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-3;
+  padding: $space-6;
 }
 
 .payment-sheet-footer {
-  padding: $wolf-space-lg-v2;
-  border-top: $payment-border-width solid $wolf-border-default-v2;
+  padding: $space-4;
+  border-top: $payment-border-width solid hsl(var(--border));
   display: flex;
   flex: 0 0 auto;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     :deep(button) {
       flex: 1 1 100%;
     }
@@ -1078,7 +1078,7 @@ $payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 
 @media (prefers-reduced-motion: reduce) {
   .payment-header-summary {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

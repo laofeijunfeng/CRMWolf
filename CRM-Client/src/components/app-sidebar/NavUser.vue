@@ -64,7 +64,7 @@
             <span class="truncate">{{ team.name }}</span>
             <Check
               v-if="team.id === teamStore.currentTeam?.id"
-              class="ml-auto text-primary"
+              class="ml-auto text-brand"
               aria-hidden="true"
             />
           </DropdownMenuItem>

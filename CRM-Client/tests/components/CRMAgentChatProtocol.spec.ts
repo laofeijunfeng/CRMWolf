@@ -451,8 +451,6 @@ describe('CRMAgentChat Agent UI protocol', () => {
 
     const assistantContent = wrapper.get('.agent-chat__assistant-content')
     expect(assistantContent.text()).toContain('结构化 Agent 输出')
-    expect(assistantContent.classes()).not.toContain('rounded-wolf-lg')
-    expect(assistantContent.classes()).not.toContain('bg-wolf-bg-card')
     expect(assistantContent.classes()).not.toContain('border')
     expect(assistantContent.classes()).toContain('max-w-[760px]')
     wrapper.unmount()

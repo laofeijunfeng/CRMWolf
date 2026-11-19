@@ -1247,79 +1247,79 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .payment-records-page {
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
   min-height: 0;
   flex: 1;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .payment-records-page {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 }
 
 // 客户名称链接
 .customer-name-link {
-  color: $wolf-text-link-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--brand));
+  font-weight: 500;
   cursor: pointer;
 
   &:hover {
-    color: $wolf-text-link-hover-v2;
+    color: hsl(var(--brand));
   }
 }
 
 // 记录编号单元格
 .record-number-cell {
-  font-family: $wolf-font-mono-v2;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .record-number-link {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   padding: 0;
   border: 0;
   background: transparent;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   cursor: pointer;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   text-align: left;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-control-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
   }
 }
 
 .payment-record-purchase-lines {
   display: grid;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .payment-record-purchase-line {
-  min-height: $wolf-space-lg-v2;
+  min-height: $space-4;
   align-content: center;
 }
 
 .payment-record-mobile-card-purchases {
   display: grid;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
+  gap: $space-1;
+  margin-top: $space-2;
 }
 
 .payment-record-mobile-card-purchase {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1327,51 +1327,51 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .payment-record-mobile-card-number {
   min-width: 0;
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-link-v2;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--brand));
   overflow-wrap: anywhere;
 }
 
 .payment-record-mobile-card-customer {
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  margin-top: $space-2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .payment-record-mobile-card-contract {
-  margin-top: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
+  margin-top: $space-1;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 
 .payment-record-mobile-card-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
+  gap: $space-1;
+  margin-top: $space-2;
 }
 
 .payment-record-mobile-card-amount {
-  margin-top: $wolf-space-sm-v2;
+  margin-top: $space-2;
 }
 
 .payment-record-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 </style>

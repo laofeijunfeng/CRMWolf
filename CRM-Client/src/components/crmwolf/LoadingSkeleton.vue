@@ -30,7 +30,7 @@ withDefaults(defineProps<Props>(), {
 const containerClasses = computed((): string =>
   cn(
     'loading-skeleton',
-    'flex flex-col gap-wolf-md',
+    'flex flex-col gap-3',
     'animate-pulse'  // Shimmer effect
   )
 )
@@ -98,7 +98,7 @@ const containerClasses = computed((): string =>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 // Base skeleton animation
 @keyframes shimmer {
@@ -117,21 +117,21 @@ const containerClasses = computed((): string =>
 .skeleton-item {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-md-v2;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-v2;
+  gap: $space-3;
+  padding: $space-3;
+  background: hsl(var(--card));
+  border-radius: var(--radius-md);
 }
 
 .skeleton-avatar {
   width: 40px;
   height: 40px;
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
   background: linear-gradient(
     90deg,
-    $wolf-bg-hover-v2 25%,
-    $wolf-bg-active-v2 50%,
-    $wolf-bg-hover-v2 75%
+    var(--wash-hover) 25%,
+    var(--wash-selected) 50%,
+    var(--wash-hover) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
@@ -141,19 +141,19 @@ const containerClasses = computed((): string =>
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .skeleton-line {
   background: linear-gradient(
     90deg,
-    $wolf-bg-hover-v2 25%,
-    $wolf-bg-active-v2 50%,
-    $wolf-bg-hover-v2 75%
+    var(--wash-hover) 25%,
+    var(--wash-selected) 50%,
+    var(--wash-hover) 75%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: var(--radius-sm);
 }
 
 .skeleton-title {
@@ -168,14 +168,14 @@ const containerClasses = computed((): string =>
 
 // Card skeleton
 .skeleton-card {
-  padding: $wolf-space-md-v2;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-v2;
-  border: 1px solid $wolf-border-default-v2;
+  padding: $space-3;
+  background: hsl(var(--card));
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(var(--border));
 }
 
 .skeleton-card-header {
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .skeleton-card-title {
@@ -186,7 +186,7 @@ const containerClasses = computed((): string =>
 .skeleton-card-body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .skeleton-card-text {
@@ -202,24 +202,24 @@ const containerClasses = computed((): string =>
 // Table skeleton
 .skeleton-table {
   width: 100%;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
 .skeleton-table-header,
 .skeleton-table-row {
   display: flex;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
+  gap: $space-3;
+  padding: $space-2 $space-3;
 }
 
 .skeleton-table-header {
-  background: $wolf-bg-hover-v2;
+  background: var(--wash-hover);
 }
 
 .skeleton-table-row {
-  background: $wolf-bg-card-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
+  background: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
 
   &:last-child {
     border-bottom: none;
@@ -242,7 +242,7 @@ const containerClasses = computed((): string =>
   .skeleton-line,
   .skeleton-avatar {
     animation: none !important;
-    background: $wolf-bg-hover-v2;  // Static gray background
+    background: var(--wash-hover);  // Static gray background
   }
 }
 </style>

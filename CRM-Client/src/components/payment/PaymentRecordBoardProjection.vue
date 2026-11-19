@@ -66,20 +66,20 @@ const trendSeries: BoardTrendSeriesPresentation[] = [
   {
     key: 'actual_amount',
     label: '回款金额',
-    color: 'hsl(var(--chart-2, 199 89% 48%))',
-    fillColor: 'hsl(var(--chart-2, 199 89% 48%) / 0.16)',
+    color: 'hsl(var(--chart-2))',
+    fillColor: 'hsl(var(--chart-2) / 0.16)',
   },
   {
     key: 'confirmed_amount',
     label: '已确认金额',
-    color: 'hsl(var(--chart-3, 142 71% 45%))',
-    fillColor: 'hsl(var(--chart-3, 142 71% 45%) / 0.16)',
+    color: 'hsl(var(--chart-3))',
+    fillColor: 'hsl(var(--chart-3) / 0.16)',
   },
   {
     key: 'unconfirmed_amount',
     label: '未确认金额',
-    color: 'hsl(var(--chart-4, 38 92% 50%))',
-    fillColor: 'hsl(var(--chart-4, 38 92% 50%) / 0.16)',
+    color: 'hsl(var(--chart-4))',
+    fillColor: 'hsl(var(--chart-4) / 0.16)',
   },
 ]
 

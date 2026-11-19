@@ -203,18 +203,18 @@ const formatDateTime = (iso: string): string => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-stepper {
   width: 100%;
   padding: 0;
   background: transparent;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
 }
 
 .approval-stepper__timeline {
   display: grid;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .approval-stepper__item {
@@ -238,11 +238,11 @@ const formatDateTime = (iso: string): string => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
   border: 0;
-  background: $wolf-success-v2;
-  box-shadow: 0 0 0 4px $wolf-success-bg-v2;
-  color: $wolf-text-inverse-v2;
+  background: hsl(var(--status-success));
+  box-shadow: 0 0 0 4px color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--primary-foreground));
   font-size: 0;
   line-height: 0;
 }
@@ -256,10 +256,10 @@ const formatDateTime = (iso: string): string => {
 
 .approval-stepper__separator {
   width: 1px;
-  min-height: $wolf-space-md-v2;
+  min-height: $space-3;
   margin-top: 8px;
   flex: 1;
-  background: $wolf-border-light-v2;
+  background: hsl(var(--border));
 }
 
 .approval-stepper__content {
@@ -271,87 +271,87 @@ const formatDateTime = (iso: string): string => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .approval-stepper__title {
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-size: 12px;
+  font-weight: 600;
   text-align: left;
-  line-height: $wolf-line-height-body-v2;
+  line-height: 20px;
 }
 
 .approval-stepper__meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .approval-stepper__meta {
   margin-top: 2px;
-  line-height: $wolf-line-height-body-v2;
+  line-height: 20px;
 }
 
 .approval-stepper__comment {
   display: flex;
   align-items: flex-start;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-xs-v2;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  gap: $space-1;
+  margin-top: $space-1;
+  padding: $space-1 $space-2;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
   line-height: 1.5;
   white-space: pre-line;
 }
 
 .approval-stepper__comment--reject {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 .approval-stepper__title--submit {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .approval-stepper__dot--submit {
-  background: $wolf-primary-v2;
-  box-shadow: 0 0 0 4px $wolf-primary-light-v2;
+  background: hsl(var(--brand));
+  box-shadow: 0 0 0 4px var(--wash-hover);
 }
 
 .approval-stepper__title--approve {
-  color: $wolf-success-text-v2;
+  color: hsl(var(--status-success));
 }
 
 .approval-stepper__dot--approve {
-  background: $wolf-success-v2;
-  box-shadow: 0 0 0 4px $wolf-success-bg-v2;
+  background: hsl(var(--status-success));
+  box-shadow: 0 0 0 4px color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
 }
 
 .approval-stepper__title--reject {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 .approval-stepper__dot--reject {
-  background: $wolf-danger-v2;
-  box-shadow: 0 0 0 4px $wolf-danger-bg-v2;
+  background: hsl(var(--status-danger));
+  box-shadow: 0 0 0 4px color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .approval-stepper__title--rollback,
 .approval-stepper__title--pending {
-  color: $wolf-warning-text-v2;
+  color: hsl(var(--status-warning));
 }
 
 .approval-stepper__dot--rollback,
 .approval-stepper__dot--pending {
-  background: $wolf-warning-v2;
-  box-shadow: 0 0 0 4px $wolf-warning-bg-v2;
+  background: hsl(var(--status-warning));
+  box-shadow: 0 0 0 4px color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
 }
 
 // Reduced Motion 支持
 @media (prefers-reduced-motion: reduce) {
   * {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 
@@ -359,7 +359,7 @@ const formatDateTime = (iso: string): string => {
   .approval-stepper__row {
     align-items: flex-start;
     flex-direction: column;
-    gap: $wolf-space-xs-v2;
+    gap: $space-1;
   }
 }
 </style>

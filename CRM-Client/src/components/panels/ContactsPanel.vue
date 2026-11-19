@@ -3,7 +3,7 @@
  * ContactsPanel.vue - 联系人面板组件
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：所有图标按钮均有 aria-label
  */
 import { Plus, Pencil, Trash2, Star } from 'lucide-vue-next'
@@ -66,7 +66,7 @@ const handleSetPrimary = (contactId: number): void => {
     </template>
 
     <template #itemMain="{ item }">
-      <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.name }}</span>
+      <span class="font-medium text-foreground truncate">{{ item.name }}</span>
     </template>
 
     <template #itemMeta="{ item }">
@@ -102,7 +102,7 @@ const handleSetPrimary = (contactId: number): void => {
         :aria-label="`删除联系人 ${item.name}`"
         @click.stop="handleDelete(item.id)"
       >
-        <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+        <Trash2 class="w-4 h-4 text-danger" />
       </Button>
       <Button
         v-if="canSetPrimary && !item.is_primary"
@@ -118,5 +118,4 @@ const handleSetPrimary = (contactId: number): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 </style>

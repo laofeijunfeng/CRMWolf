@@ -306,7 +306,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                 <template #default="{ action }">
                   <span class="truncate">{{ action.label }}</span>
                   <span class="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <span class="opportunity-chart-bar-fill h-full rounded-full" :class="isMutedBucket(action.bucket) ? 'bg-muted-foreground' : 'bg-primary'" :style="{ width: barWidth(action.card, action.bucket) }" />
+                    <span class="opportunity-chart-bar-fill h-full rounded-full" :class="isMutedBucket(action.bucket) ? 'bg-muted-foreground' : 'bg-brand'" :style="{ width: barWidth(action.card, action.bucket) }" />
                   </span>
                   <span class="text-muted-foreground tabular-nums">{{ action.value }}</span>
                 </template>
@@ -332,7 +332,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                     >
                       <template #default="{ action }">
                         <span class="opportunity-chart-forecast-track">
-                          <span class="opportunity-chart-bar-fill opportunity-chart-forecast-fill" :class="isMutedBucket(action.bucket) ? 'bg-muted-foreground' : 'bg-primary'" :style="forecastBarStyle(action.card, action.bucket)" />
+                          <span class="opportunity-chart-bar-fill opportunity-chart-forecast-fill" :class="isMutedBucket(action.bucket) ? 'bg-muted-foreground' : 'bg-brand'" :style="forecastBarStyle(action.card, action.bucket)" />
                         </span>
                         <span class="opportunity-chart-forecast-label">{{ action.label }}</span>
                       </template>
@@ -380,57 +380,57 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
-.opportunity-chart-page { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: $wolf-space-md-v2; overflow: auto; padding: $wolf-space-md-v2; }
-.opportunity-chart-summary h2 { margin: 0; color: $wolf-text-primary-v2; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
-.opportunity-chart-summary p { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; }
-.opportunity-chart-state, .opportunity-chart-refreshing, .opportunity-chart-dialog-state { display: flex; align-items: center; justify-content: center; gap: $wolf-space-sm-v2; color: $wolf-text-tertiary-v2; }
+.opportunity-chart-page { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: $space-3; overflow: auto; padding: $space-3; }
+.opportunity-chart-summary h2 { margin: 0; color: hsl(var(--foreground)); font-size: 16px; line-height: 1.25; }
+.opportunity-chart-summary p { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); }
+.opportunity-chart-state, .opportunity-chart-refreshing, .opportunity-chart-dialog-state { display: flex; align-items: center; justify-content: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
 .opportunity-chart-state { min-height: 320px; flex-direction: column; text-align: center; }
 .opportunity-chart-refreshing { justify-content: flex-start; min-height: 28px; font-size: 13px; }
-.opportunity-chart-inline-error { display: flex; align-items: center; gap: $wolf-space-sm-v2; margin: 0; color: $wolf-danger-text-v2; font-size: 13px; }
-.opportunity-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
+.opportunity-chart-inline-error { display: flex; align-items: center; gap: $space-2; margin: 0; color: hsl(var(--status-danger)); font-size: 13px; }
+.opportunity-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .opportunity-chart-card { min-width: 0; }
 .opportunity-chart-card--wide { grid-column: 1 / -1; }
 .opportunity-chart-donut-chart { width: 220px; height: 220px; min-height: 0; aspect-ratio: 1; }
 .opportunity-chart-donut { width: 220px; height: 220px; }
 .opportunity-chart-donut [data-vis-single-container] { width: 100%; height: 100%; }
-.opportunity-chart-legend { display: grid; gap: $wolf-space-sm-v2; }
-.opportunity-chart-bar-actions { gap: $wolf-space-sm-v2; }
+.opportunity-chart-legend { display: grid; gap: $space-2; }
+.opportunity-chart-bar-actions { gap: $space-2; }
 .opportunity-chart-bar-actions :deep(.opportunity-chart-bar-row) { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 12px; text-align: left; }
-.opportunity-chart-legend :deep(.opportunity-chart-legend-row) { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: $wolf-space-sm-v2; width: 100%; border: 0; border-radius: $wolf-radius-control-v2; background: transparent; padding: 2px 0; font-size: 14px; text-align: left; }
-.opportunity-chart-legend :deep(.opportunity-chart-legend-row:not(:disabled):hover) { background: $wolf-bg-muted-v2; }
+.opportunity-chart-legend :deep(.opportunity-chart-legend-row) { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: $space-2; width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: 2px 0; font-size: 14px; text-align: left; }
+.opportunity-chart-legend :deep(.opportunity-chart-legend-row:not(:disabled):hover) { background: hsl(var(--muted)); }
 .opportunity-chart-legend :deep(.opportunity-chart-legend-row:disabled) { cursor: default; opacity: .65; }
 .opportunity-chart-legend :deep(.opportunity-chart-legend-row i) { width: 8px; height: 8px; border-radius: 50%; }
-.opportunity-chart-legend-label { overflow: hidden; color: $wolf-text-primary-v2; text-overflow: ellipsis; white-space: nowrap; }
-.opportunity-chart-legend-value { color: $wolf-text-tertiary-v2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.opportunity-chart-legend-label { overflow: hidden; color: hsl(var(--foreground)); text-overflow: ellipsis; white-space: nowrap; }
+.opportunity-chart-legend-value { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .opportunity-chart-bar-fill { display: block; min-width: 0; }
-.opportunity-chart-card-empty { padding: 12px 0; color: $wolf-text-tertiary-v2; font-size: 13px; text-align: center; }
+.opportunity-chart-card-empty { padding: 12px 0; color: hsl(var(--muted-foreground)); font-size: 13px; text-align: center; }
 .opportunity-chart-dialog-state { min-height: 120px; }
 .opportunity-chart-opportunity-list { display: grid; gap: 2px; }
 .opportunity-chart-opportunity { display: flex; width: 100%; min-height: 52px; justify-content: space-between; gap: 16px; padding: 8px 10px; text-align: left; }
 .opportunity-chart-opportunity > span:first-child { min-width: 0; }
 .opportunity-chart-opportunity strong, .opportunity-chart-opportunity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.opportunity-chart-opportunity strong { color: $wolf-text-primary-v2; }
-.opportunity-chart-opportunity small { margin-top: 3px; color: $wolf-text-tertiary-v2; font-size: 12px; }
+.opportunity-chart-opportunity strong { color: hsl(var(--foreground)); }
+.opportunity-chart-opportunity small { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; }
 
 .opportunity-chart-forecast-chart { width: 100%; height: 240px; min-height: 240px; }
 .opportunity-chart-forecast { min-height: 0; padding: 0; }
 .opportunity-chart-forecast-plot { display: grid; grid-template-columns: 58px minmax(0, 1fr); min-height: 0; }
-.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 18px 0; color: $wolf-text-tertiary-v2; font-size: 11px; line-height: 1; text-align: right; }
+.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 18px 0; color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1; text-align: right; }
 .opportunity-chart-forecast-plot-area { position: relative; min-width: 0; padding: 4px 0 0; }
 .opportunity-chart-forecast-grid { position: absolute; inset: 4px 0 18px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
-.opportunity-chart-forecast-grid span { border-top: 1px solid $wolf-border-light-v2; }
-.opportunity-chart-forecast-columns { position: relative; z-index: 1; display: flex; height: 220px; align-items: flex-end; gap: $wolf-space-sm-v2; }
+.opportunity-chart-forecast-grid span { border-top: 1px solid hsl(var(--border)); }
+.opportunity-chart-forecast-columns { position: relative; z-index: 1; display: flex; height: 220px; align-items: flex-end; gap: $space-2; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { display: grid; height: 100%; min-width: 0; flex: 1 1 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; align-items: stretch; gap: 2px; padding: 0 4px; text-align: center; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: $wolf-space-sm-v2; border-left: 1px dashed $wolf-border-default-v2; border-radius: 0; padding-left: $wolf-space-md-v2; }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: $space-2; border-left: 1px dashed hsl(var(--border)); border-radius: 0; padding-left: $space-3; }
 .opportunity-chart-forecast-track { display: flex; width: 100%; min-height: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
-.opportunity-chart-forecast-fill { display: block; width: min(42px, 72%); min-width: 0; min-height: 0; border-radius: $wolf-radius-sm-v2 $wolf-radius-sm-v2 0 0; transition: height .2s ease; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column:disabled .opportunity-chart-forecast-fill) { background: $wolf-bg-muted-v2 !important; }
-.opportunity-chart-forecast-label { min-height: 16px; overflow-wrap: anywhere; color: $wolf-text-primary-v2; font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center; }
-.opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 18px; left: 0; z-index: 2; border-top: 1px solid $wolf-border-default-v2; pointer-events: none; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:not(:disabled):hover) { background: $wolf-bg-muted-v2; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:focus-visible) { outline: 2px solid $wolf-focus-ring-color-v2; outline-offset: 2px; }
+.opportunity-chart-forecast-fill { display: block; width: min(42px, 72%); min-width: 0; min-height: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; transition: height .2s ease; }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column:disabled .opportunity-chart-forecast-fill) { background: hsl(var(--muted)) !important; }
+.opportunity-chart-forecast-label { min-height: 16px; overflow-wrap: anywhere; color: hsl(var(--foreground)); font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center; }
+.opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 18px; left: 0; z-index: 2; border-top: 1px solid hsl(var(--border)); pointer-events: none; }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:not(:disabled):hover) { background: hsl(var(--muted)); }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:focus-visible) { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: 2px; }
 
 @media (max-width: 900px) {
   .opportunity-chart-grid { grid-template-columns: minmax(0, 1fr); }
@@ -439,9 +439,9 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 @media (max-width: 600px) {
   .opportunity-chart-forecast-plot { grid-template-columns: 44px minmax(0, 1fr); }
   .opportunity-chart-forecast-y-axis { padding-right: 6px; font-size: 10px; }
-  .opportunity-chart-forecast-columns { gap: $wolf-space-xs-v2; }
+  .opportunity-chart-forecast-columns { gap: $space-1; }
   .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { padding-right: 1px; padding-left: 1px; }
-  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: 0; padding-left: $wolf-space-xs-v2; }
+  .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: 0; padding-left: $space-1; }
   .opportunity-chart-forecast-label { font-size: 11px; }
 }
 </style>

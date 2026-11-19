@@ -102,7 +102,7 @@ const confirmLogout = (): void => {
             alt="CRM Logo"
             class="w-16 h-16 object-contain"
           />
-          <h1 class="text-wolf-title font-wolf-semibold text-wolf-text-primary">智能客户关系管理系统</h1>
+          <h1 class="text-body-strong font-semibold text-foreground">智能客户关系管理系统</h1>
         </div>
 
         <header class="header">
@@ -174,29 +174,29 @@ const confirmLogout = (): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .onboarding-container {
   // UI/UX Pro Max: 使用动态视口高度
-  min-height: $wolf-viewport-height-mobile-v2;
+  min-height: min(100vh, 100dvh);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: $wolf-bg-page-v2;
-  padding: $wolf-space-lg-v2;
+  background: hsl(var(--card));
+  padding: $space-4;
   // UI/UX Pro Max: Safe area 支持
-  padding-top: calc($wolf-space-lg-v2 + $wolf-safe-area-top-v2);
-  padding-bottom: calc($wolf-space-lg-v2 + $wolf-safe-area-bottom-v2);
+  padding-top: calc($space-4 + var(--safe-top));
+  padding-bottom: calc($space-4 + var(--safe-bottom));
   position: relative;
 }
 
 .logout-btn {
   position: absolute;
-  top: calc($wolf-space-lg-v2 + $wolf-safe-area-top-v2);
-  right: $wolf-space-lg-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  min-height: $wolf-touch-target-min-v2;
+  top: calc($space-4 + var(--safe-top));
+  right: $space-4;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  min-height: var(--touch-target);
 }
 
 .onboarding-card {
@@ -205,7 +205,7 @@ const confirmLogout = (): void => {
 }
 
 .card-body {
-  padding: $wolf-space-2xl-v2 $wolf-space-lg-v2;
+  padding: $space-8 $space-4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -214,81 +214,81 @@ const confirmLogout = (): void => {
 // Logo section - consistent with Login.vue
 .logo-section {
   text-align: center;
-  margin-bottom: $wolf-space-xl-v2;
+  margin-bottom: $space-6;
 
   img {
     display: block;
     margin-left: auto;
     margin-right: auto;
-    margin-bottom: $wolf-space-md-v2;
+    margin-bottom: $space-3;
   }
 
   h1 {
-    margin: 0 0 $wolf-space-sm-v2 0;
+    margin: 0 0 $space-2 0;
   }
 }
 
 .header {
   text-align: center;
-  margin-bottom: $wolf-space-2xl-v2;
+  margin-bottom: $space-8;
 
   h2 {
-    color: $wolf-text-primary-v2;
-    margin: 0 0 $wolf-space-sm-v2 0;
+    color: hsl(var(--foreground));
+    margin: 0 0 $space-2 0;
   }
 
   p {
-    font-size: $wolf-font-size-body-v2;
-    color: $wolf-text-secondary-v2;
+    font-size: 14px;
+    color: hsl(var(--muted-foreground));
     margin: 0;
   }
 }
 
 .join-form {
   width: 100%;
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .submit-btn {
   width: 100%;
-  height: $wolf-button-height-lg-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  margin-top: $wolf-space-md-v2;
+  height: var(--control-h-lg);
+  font-size: 14px;
+  font-weight: 500;
+  margin-top: $space-3;
 }
 
 .tip-text {
   text-align: center;
-  margin-bottom: $wolf-space-lg-v2;
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
+  margin-bottom: $space-4;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 .back-link {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  min-height: $wolf-touch-target-min-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  min-height: var(--touch-target);
 }
 
 // UI/UX Pro Max: Mobile breakpoint
-@media (max-width: $wolf-breakpoint-xs-v2) {
+@media (max-width: $bp-xs) {
   .onboarding-container {
-    padding: $wolf-page-padding-mobile-v2;
-    padding-top: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-top-v2);
-    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+    padding: var(--page-padding);
+    padding-top: calc(var(--page-padding) + var(--safe-top));
+    padding-bottom: calc(var(--page-padding) + var(--safe-bottom));
   }
 
   .logout-btn {
-    top: calc($wolf-space-md-v2 + $wolf-safe-area-top-v2);
-    right: $wolf-space-md-v2;
+    top: calc($space-3 + var(--safe-top));
+    right: $space-3;
   }
 
   .card-body {
-    padding: $wolf-space-xl-v2 $wolf-card-padding-mobile-v2;
+    padding: $space-6 $space-3;
   }
 
   .header h1 {
-    font-size: $wolf-font-size-title-mobile-v2;
+    font-size: 18px;
   }
 }
 </style>

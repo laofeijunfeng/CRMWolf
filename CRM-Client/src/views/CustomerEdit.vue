@@ -639,7 +639,7 @@ onUnmounted(() => {
           <Button type="button" variant="outline" @click="saveAndLeave">
             保存并离开
           </Button>
-          <AlertDialogAction class="bg-wolf-danger hover:bg-wolf-danger/90" @click="discardAndLeave">
+          <AlertDialogAction class="bg-danger hover:bg-danger/90" @click="discardAndLeave">
             放弃修改
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -649,11 +649,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .customer-edit-page {
   padding: 0;
-  background: $wolf-bg-page-v2;
+  background: hsl(var(--card));
   min-height: 100%;
 }
 
@@ -663,68 +663,68 @@ onUnmounted(() => {
   justify-content: center;
   align-items: center;
   min-height: 400px;
-  padding: $wolf-page-padding-v2;
+  padding: var(--page-padding);
 }
 
 .state-container {
   display: flex;
   justify-content: center;
-  padding: $wolf-page-padding-v2;
+  padding: var(--page-padding);
 }
 
 .form-feedback {
-  margin-bottom: $wolf-space-lg-v2;
+  margin-bottom: $space-4;
 }
 
 .options-error-action {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .options-error-fields {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .form-option-error {
-  margin-top: $wolf-space-xs-v2;
-  color: $wolf-danger-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  margin-top: $space-1;
+  color: hsl(var(--status-danger));
+  font-size: 14px;
 }
 
 .submit-feedback {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  margin-bottom: $wolf-space-lg-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-danger-v2;
-  border-radius: $wolf-radius-control-v2;
-  background: color-mix(in srgb, $wolf-danger-v2 8%, transparent);
-  color: $wolf-text-primary-v2;
+  gap: $space-1;
+  margin-bottom: $space-4;
+  padding: $space-3;
+  border: 1px solid hsl(var(--status-danger));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, hsl(var(--status-danger)) 8%, transparent);
+  color: hsl(var(--foreground));
 }
 
 .submit-feedback__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-sm-v2;
+  gap: $space-2;
+  margin-top: $space-2;
 }
 
 .form-error-summary {
-  margin-bottom: $wolf-space-lg-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-danger-v2;
-  border-radius: $wolf-radius-control-v2;
-  background: color-mix(in srgb, $wolf-danger-v2 8%, transparent);
-  color: $wolf-text-primary-v2;
+  margin-bottom: $space-4;
+  padding: $space-3;
+  border: 1px solid hsl(var(--status-danger));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, hsl(var(--status-danger)) 8%, transparent);
+  color: hsl(var(--foreground));
 }
 
 .form-error-summary ul {
-  margin: $wolf-space-xs-v2 0 0;
-  padding-left: $wolf-space-lg-v2;
+  margin: $space-1 0 0;
+  padding-left: $space-4;
 }
 
 .leave-confirm-footer {
@@ -734,8 +734,8 @@ onUnmounted(() => {
 .loading-spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid $wolf-border-default-v2;
-  border-top-color: $wolf-primary-v2;
+  border: 3px solid hsl(var(--border));
+  border-top-color: hsl(var(--brand));
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -748,35 +748,35 @@ onUnmounted(() => {
 
 // Form container (full width)
 .form-container {
-  padding: $wolf-page-padding-v2;
+  padding: var(--page-padding);
 }
 
 // Form card (full width)
 .form-card {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-surface-v2;
-  padding: $wolf-card-padding-v2;
-  margin-bottom: $wolf-space-lg-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-lg);
+  padding: $space-4;
+  margin-bottom: $space-4;
+  box-shadow: var(--shadow-1);
 }
 
 .card-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  margin-bottom: $wolf-space-lg-v2;
-  padding-bottom: $wolf-space-sm-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  margin-bottom: $space-4;
+  padding-bottom: $space-2;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 // Form grid (two columns)
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: $wolf-form-item-gap-v2;
+  gap: $space-4;
 }
 
 .form-grid-full {
@@ -785,23 +785,23 @@ onUnmounted(() => {
 
 // Form actions card
 .form-actions-card {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-surface-v2;
-  padding: $wolf-card-padding-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-lg);
+  padding: $space-4;
+  box-shadow: var(--shadow-1);
   display: flex;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 // Responsive
 @media (max-width: 768px) {
   .form-container {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 
   .form-card {
-    padding: $wolf-card-padding-mobile-v2;
+    padding: $space-3;
   }
 
   .form-grid {

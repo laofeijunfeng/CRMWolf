@@ -2,7 +2,7 @@
 /**
  * CustomerDetailSheet.vue - 客户详情抽屉组件
  *
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 宽度：75%（w-3/4 Tailwind 内置 class）
  *
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
@@ -858,7 +858,7 @@ watch(() => props.targetPanel, (panel): void => {
 
       <template v-if="selectedJourneyId === null || isSourceMode">
         <!-- Header（审批来源模式只保留客户信息，不显示导航） -->
-        <SheetHeader v-if="!isSourceMode" class="customer-detail-sheet__header p-6 border-b border-wolf-border-default-v2">
+        <SheetHeader v-if="!isSourceMode" class="customer-detail-sheet__header p-6 border-b border-border">
           <!-- ContextTabs 导航 -->
           <ContextTabs
             :tabs="navTabs"
@@ -893,8 +893,8 @@ watch(() => props.targetPanel, (panel): void => {
               <!-- 基本信息卡片 -->
               <Card class="info-card">
                 <CardContent class="p-0">
-                  <div class="p-4 border-b border-wolf-border-light-v2">
-                    <h3 class="text-sm font-semibold text-wolf-text-primary-v2 truncate">
+                  <div class="p-4 border-b border-border">
+                    <h3 class="text-sm font-semibold text-foreground truncate">
                       {{ customer?.account_name || '基本信息' }}
                     </h3>
                   </div>
@@ -1121,7 +1121,7 @@ watch(() => props.targetPanel, (panel): void => {
         <SheetFooter
           v-if="!isSourceMode"
           
-          class="customer-detail-sheet__footer p-4 border-t border-wolf-border-default-v2"
+          class="customer-detail-sheet__footer p-4 border-t border-border"
         >
           <template v-if="activePanel === 'customer-info'">
             <Button v-if="canCreateContact" variant="default" @click="handleCreateContact">
@@ -1218,7 +1218,7 @@ watch(() => props.targetPanel, (panel): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .drilldown-fade-enter-active,
 .drilldown-fade-leave-active {
@@ -1226,7 +1226,7 @@ watch(() => props.targetPanel, (panel): void => {
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
-  transition: opacity $wolf-motion-state-duration-v2 ease, transform $wolf-motion-state-duration-v2 ease;
+  transition: opacity var(--duration-base) ease, transform var(--duration-base) ease;
 }
 
 .drilldown-fade-enter-from,
@@ -1238,7 +1238,7 @@ watch(() => props.targetPanel, (panel): void => {
 @media (prefers-reduced-motion: reduce) {
   .drilldown-fade-enter-active,
   .drilldown-fade-leave-active {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 
@@ -1250,7 +1250,7 @@ watch(() => props.targetPanel, (panel): void => {
   display: flex;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .customer-detail-loading,
@@ -1260,12 +1260,12 @@ watch(() => props.targetPanel, (panel): void => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-page-padding-v2;
+  gap: $space-2;
+  padding: var(--page-padding);
 }
 
 .customer-detail-loading {
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .customer-detail-panel-loading {
@@ -1274,15 +1274,15 @@ watch(() => props.targetPanel, (panel): void => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-secondary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
 }
 
 .loading-spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid $wolf-border-default-v2;
-  border-top-color: $wolf-primary-v2;
+  border: 3px solid hsl(var(--border));
+  border-top-color: hsl(var(--brand));
   border-radius: 50%;
   animation: customer-detail-spin 1s linear infinite;
 }
@@ -1302,27 +1302,27 @@ watch(() => props.targetPanel, (panel): void => {
 .title-avatar {
   width: 48px;
   height: 48px;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -1330,19 +1330,19 @@ watch(() => props.targetPanel, (panel): void => {
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .attribute-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .attribute-value {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .license-badge {
@@ -1351,11 +1351,11 @@ watch(() => props.targetPanel, (panel): void => {
   justify-content: center;
   min-width: 52px;
   height: 24px;
-  padding: 0 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-v2;
+  padding: 0 $space-2;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }

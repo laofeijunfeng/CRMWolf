@@ -43,7 +43,6 @@ const emit = defineEmits<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .detail-context-host {
   display: flex;
@@ -51,7 +50,7 @@ const emit = defineEmits<{
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .detail-context-host__body {

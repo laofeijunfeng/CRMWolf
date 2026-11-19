@@ -51,23 +51,23 @@ function executeAction(action: ActionConfig): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .table-row-context-menu-label {
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-row-context-menu-item {
-  gap: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-primary-v2;
+  gap: $space-2;
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
   cursor: pointer;
 
   &.is-destructive {
-    color: $wolf-danger-text-v2;
+    color: hsl(var(--status-danger));
   }
 }
 

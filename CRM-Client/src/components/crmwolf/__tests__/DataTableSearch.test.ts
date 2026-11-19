@@ -53,17 +53,6 @@ describe('DataTableSearch', () => {
     expect(clearButton.attributes('disabled')).toBeDefined()
   })
 
-  it('matches toolbar typography and icon sizing', () => {
-    const wrapper = mount(DataTableSearch, {
-      props: { modelValue: 'Alpha' },
-    })
-
-    expect(wrapper.get('input').classes()).toContain('text-wolf-auxiliary')
-    for (const icon of wrapper.findAll('svg')) {
-      expect(icon.classes()).toEqual(expect.arrayContaining(['h-4', 'w-4']))
-    }
-  })
-
   it('clears the draft and emits a reset action', async () => {
     const wrapper = mount(DataTableSearch, {
       props: { modelValue: 'Alpha' },

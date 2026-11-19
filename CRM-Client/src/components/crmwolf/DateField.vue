@@ -49,10 +49,10 @@ const describedBy = computed(() => {
 </script>
 
 <template>
-  <div :class="cn('grid gap-wolf-xs', props.class)">
-    <Label v-if="label" :for="dateId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+  <div :class="cn('grid gap-1', props.class)">
+    <Label v-if="label" :for="dateId" class="text-caption font-medium text-foreground">
       {{ label }}
-      <span v-if="required" class="text-wolf-danger" aria-hidden="true">*</span>
+      <span v-if="required" class="text-danger" aria-hidden="true">*</span>
     </Label>
     <DatePicker
       :id="dateId"
@@ -64,10 +64,10 @@ const describedBy = computed(() => {
       :class="cn('', controlClass)"
       @update:model-value="emit('update:modelValue', $event)"
     />
-    <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+    <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-wolf-caption text-wolf-text-secondary">
+    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
       {{ helperText }}
     </p>
   </div>

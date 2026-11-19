@@ -3,7 +3,7 @@
  * PaymentsPanel.vue - 回款计划面板组件
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：所有图标按钮均有 aria-label
  *
  * Task 6: 添加 'view' 事件用于查看回款计划详情
@@ -137,7 +137,7 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 
     <template #itemMain="{ item }">
       <div class="payment-plan-main">
-        <span class="font-medium text-wolf-text-primary-v2 truncate">
+        <span class="font-medium text-foreground truncate">
           {{ item.stage_name }}
         </span>
 
@@ -234,13 +234,13 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .payment-plan-main {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .payment-plan-progress {
@@ -252,36 +252,36 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: $wolf-radius-full-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .payment-state--pending {
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-tertiary-v2;
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .payment-state--registered {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
 }
 
 .payment-state--reviewing,
 .payment-state--partial {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .payment-state--completed {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
 }
 
 .payment-state--overdue {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 .payment-plan-actions {
@@ -295,18 +295,18 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 .payment-plan-action-button {
   width: 32px;
   height: 32px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .payment-plan-action-button--primary {
   &:hover {
-    color: $wolf-primary-v2;
+    color: hsl(var(--brand));
   }
 }
 
 .payment-plan-action-button--danger {
   &:hover {
-    color: $wolf-danger-v2;
+    color: hsl(var(--status-danger));
   }
 }
 
@@ -316,9 +316,9 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 }
 
 .payment-plan-action-hover-text {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 </style>

@@ -550,11 +550,11 @@ watch(open, (isOpen) => {
 
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 :global(.list-filter-popover) {
   width: max-content;
-  max-width: calc(100vw - #{$wolf-space-xl-v2});
+  max-width: calc(100vw - #{$space-6});
   padding: 0;
   overflow: visible;
 }
@@ -573,11 +573,11 @@ watch(open, (isOpen) => {
 
 .filter-field-list {
   width: 180px;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-overlay-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-xl);
   max-height: 360px;
   margin: 0;
-  padding: $wolf-space-xs-v2;
+  padding: $space-1;
   overflow: auto;
   list-style: none;
 }
@@ -586,13 +586,13 @@ watch(open, (isOpen) => {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .filter-field-count {
   margin-left: auto;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -600,22 +600,22 @@ watch(open, (isOpen) => {
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .filter-field-button,
 .filter-operator-button {
   display: flex;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   width: 100%;
   align-items: center;
   justify-content: space-between;
   min-height: 32px;
-  padding: 0 $wolf-space-sm-v2;
+  padding: 0 $space-2;
   border: 0;
-  border-radius: $wolf-radius-control-v2;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   text-align: left;
 }
 
@@ -623,27 +623,27 @@ watch(open, (isOpen) => {
 .filter-operator-button-active,
 .filter-field-button:hover,
 .filter-operator-button:hover {
-  background: $wolf-bg-muted-v2;
+  background: hsl(var(--muted));
 }
 
 .filter-operator-button-active {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .filter-field-panel {
   position: absolute;
   top: var(--filter-panel-top, 0);
-  left: calc(100% + #{$wolf-space-xs-v2});
+  left: calc(100% + #{$space-1});
   width: max-content;
   min-width: 240px;
   max-width: min(360px, calc(100vw - 220px));
-  max-height: calc(100vh - #{$wolf-space-xl-v2});
-  padding: $wolf-space-sm-v2;
+  max-height: calc(100vh - #{$space-6});
+  padding: $space-2;
   overflow: auto;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-overlay-v2;
-  background: $wolf-bg-card-v2;
-  box-shadow: $wolf-shadow-overlay-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xl);
+  background: hsl(var(--card));
+  box-shadow: var(--shadow-2);
 }
 
 .filter-field-panel :deep(.date-picker-calendar) {
@@ -652,16 +652,16 @@ watch(open, (isOpen) => {
 }
 
 .filter-field-panel h3 {
-  margin: 0 0 $wolf-space-xs-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  margin: 0 0 $space-1;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .filter-operator-list {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
-  margin-bottom: $wolf-space-sm-v2;
+  gap: $space-1;
+  margin-bottom: $space-2;
 }
 
 .filter-operator-button {
@@ -669,7 +669,7 @@ watch(open, (isOpen) => {
 }
 
 .filter-option-search {
-  margin-bottom: $wolf-space-xs-v2;
+  margin-bottom: $space-1;
 }
 
 .filter-option-list {
@@ -683,7 +683,7 @@ watch(open, (isOpen) => {
 .filter-option-row {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-height: 44px;
 }
 
@@ -701,7 +701,7 @@ watch(open, (isOpen) => {
 }
 
 .filter-option-empty {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 @media (max-width: 767px) {
@@ -714,12 +714,12 @@ watch(open, (isOpen) => {
   }
 
   :global(.list-filter-popover) {
-    max-height: calc(100dvh - #{$wolf-space-xl-v2});
+    max-height: calc(100dvh - #{$space-6});
   }
 
   .filter-field-list,
   .filter-field-panel {
-    width: min(320px, calc(100vw - #{$wolf-space-xl-v2}));
+    width: min(320px, calc(100vw - #{$space-6}));
     max-height: none;
   }
 
@@ -735,7 +735,7 @@ watch(open, (isOpen) => {
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    border-top: 1px solid $wolf-border-light-v2;
+    border-top: 1px solid hsl(var(--border));
   }
 }
 </style>

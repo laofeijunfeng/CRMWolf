@@ -356,8 +356,8 @@ function formatDate(dateStr: string): string {
   >
     <component :is="embedded === true ? 'div' : DetailSheetContent" class="settings-embedded-content">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">角色管理</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">配置系统角色与权限</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">角色管理</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">配置系统角色与权限</SheetDescription>
       </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 搜索/操作栏 -->
@@ -385,7 +385,7 @@ function formatDate(dateStr: string): string {
             empty-text="暂无角色数据"
           >
             <template #itemMain="{ item }">
-              <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+              <div class="font-medium text-foreground">{{ item.name }}</div>
               <div class="mt-1 text-xs text-muted-foreground">
                 {{ item.code }} · {{ formatDate(item.created_at) }}
               </div>
@@ -619,12 +619,12 @@ function formatDate(dateStr: string): string {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

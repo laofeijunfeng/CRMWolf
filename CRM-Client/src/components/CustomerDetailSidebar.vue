@@ -87,22 +87,21 @@ const isActive = (key: string): boolean => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 // shadcn-vue Sidebar 样式覆盖
 :deep([data-sidebar="menu-button"]) {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 
   &:hover {
-    background: $wolf-bg-hover-v2;
-    color: $wolf-text-primary-v2;
+    background: var(--wash-hover);
+    color: hsl(var(--foreground));
   }
 
   &[data-active="true"] {
-    background: $wolf-primary-light-v2;
-    color: $wolf-primary-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    background: var(--wash-hover);
+    color: hsl(var(--brand));
+    font-weight: 500;
   }
 }
 </style>

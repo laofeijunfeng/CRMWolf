@@ -22,7 +22,7 @@ const forwarded = useForwardProps(delegatedProps)
       // Disabled
       'group-data-[disabled]:text-muted-foreground group-data-[disabled]:opacity-50',
       // Active
-      'group-data-[state=active]:bg-primary group-data-[state=active]:text-primary-foreground',
+      'group-data-[state=active]:bg-brand group-data-[state=active]:text-primary-foreground',
       // Completed
       'group-data-[state=completed]:bg-accent group-data-[state=completed]:text-accent-foreground',
       props.class,

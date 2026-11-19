@@ -88,7 +88,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
         <template #content><ChartContainer :config="pieConfig(card)" class="mx-auto aspect-square h-[220px] w-[220px]"><VisSingleContainer :data="pieData(card)" :margin="{ top: 8, bottom: 8 }"><VisDonut :value="(datum: PieDatum) => datum.amount" :color="(datum: PieDatum) => datum.fill" :arc-width="30" :central-label="String(population)" central-sub-label="份" :events="{ [Donut.selectors.segment]: { click: (datum: PieDatum) => { const bucket = card.buckets.find((item) => item.key === datum.key); if (bucket) openBucket(card, bucket) } } }" /><ChartTooltip :triggers="chartTriggers(Donut.selectors.segment, pieConfig(card))" /></VisSingleContainer></ChartContainer><ChartBucketActionList :actions="bucketActions(card).map((action, index) => ({ ...action, color: sliceColor(index, action.bucket) }))" :aria-label="card.title" :test-id-prefix="`contract-${card.key}-bucket`" @activate="activate" /></template>
       </ChartCardFrame>
       <ChartCardFrame v-if="amountCard" :card-key="amountCard.key" :title="amountCard.title" :description="amountCard.description" wide>
-        <template #content><ChartBucketActionList :actions="bucketActions(amountCard)" :aria-label="amountCard.title" test-id-prefix="contract-amount-bucket" @activate="activate"><template #default="{ action }"><span class="grid w-full grid-cols-[minmax(0,88px)_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm"><span class="truncate">{{ action.label }}</span><span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-primary" :style="{ width: barWidth(amountCard, action.bucket) }" /></span><span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ countText(action.bucket) }}</span></span></template></ChartBucketActionList></template>
+        <template #content><ChartBucketActionList :actions="bucketActions(amountCard)" :aria-label="amountCard.title" test-id-prefix="contract-amount-bucket" @activate="activate"><template #default="{ action }"><span class="grid w-full grid-cols-[minmax(0,88px)_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm"><span class="truncate">{{ action.label }}</span><span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-brand" :style="{ width: barWidth(amountCard, action.bucket) }" /></span><span class="whitespace-nowrap text-muted-foreground tabular-nums">{{ countText(action.bucket) }}</span></span></template></ChartBucketActionList></template>
       </ChartCardFrame>
       <ChartCardFrame v-if="monthCard" :card-key="monthCard.key" :title="monthCard.title" :description="monthCard.description" wide>
         <template #content><ChartContainer :config="monthConfig(monthCard)" class="contract-chart-page__month-chart aspect-auto h-[240px] w-full"><VisXYContainer :data="monthData(monthCard)" :height="220" :margin="{ top: 20, right: 12, bottom: isNarrow ? 52 : 36, left: 56 }" :auto-margin="false"><VisGroupedBar :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.count" :color="() => MONTH_COLOR" :group-max-width="64" :bar-min-height="1" :rounded-corners="4" :events="{ [GroupedBar.selectors.bar]: { click: (datum: MonthDatum) => openMonthFromDatum(datum) } }" /><VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :tick-values="monthData(monthCard).map((datum) => datum.index)" :tick-format="(value: number) => monthLabel(value, isNarrow, monthCard)" :tick-text-width="isNarrow ? 20 : undefined" :tick-text-font-size="isNarrow ? '10px' : undefined" :tick-text-separator="isNarrow ? '' : undefined" :tick-text-force-word-break="isNarrow" /><VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" /><ChartTooltip :triggers="chartTriggers(GroupedBar.selectors.bar, monthConfig(monthCard))" /></VisXYContainer></ChartContainer><ChartBucketActionList class="contract-chart-page__month-actions sr-only" :actions="monthBucketActions(monthCard)" :aria-label="monthCard.title" test-id-prefix="contract-month-bucket" @activate="activate" /></template>
@@ -99,20 +99,20 @@ function openMonthFromDatum(datum: MonthDatum): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
-.contract-chart-page__state,.contract-chart-page__refresh-error { display: flex; align-items: center; gap: $wolf-space-sm-v2; color: $wolf-text-secondary-v2; }
-.contract-chart-page__heading h2 { margin: 0; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
-.contract-chart-page__heading p,.contract-chart-page__refresh-error { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; font-size: $wolf-font-size-body-v2; }
-.contract-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
+@use '@/styles/tokens.scss' as *;
+.contract-chart-page__state,.contract-chart-page__refresh-error { display: flex; align-items: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
+.contract-chart-page__heading h2 { margin: 0; font-size: 16px; line-height: 1.25; }
+.contract-chart-page__heading p,.contract-chart-page__refresh-error { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); font-size: 14px; }
+.contract-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .contract-chart-dialog-list { display: flex; flex-direction: column; }
-.contract-chart-dialog-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; border-bottom: 1px solid $wolf-border-default-v2; background: transparent; padding: $wolf-space-sm-v2 0; text-align: left; }
-.contract-chart-dialog-list small { color: $wolf-text-tertiary-v2; }
+.contract-chart-dialog-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; border-bottom: 1px solid hsl(var(--border)); background: transparent; padding: $space-2 0; text-align: left; }
+.contract-chart-dialog-list small { color: hsl(var(--muted-foreground)); }
 .contract-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }
 .contract-chart-page__grid :deep(.chart-bucket-actions__value) { white-space: normal; overflow-wrap: anywhere; }
 :deep(.contract-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; }
 .contract-chart-dialog { max-width: 32rem; }
 @media (max-width: 720px) { .contract-chart-page__grid { grid-template-columns: minmax(0, 1fr); } :deep(.contract-chart-page__donut-content) { grid-template-columns: minmax(0, 1fr); } }
 .contract-chart-page__month-actions:focus-within { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; clip-path: none; white-space: normal; }
-.contract-chart-page__month-actions:focus-within .chart-bucket-actions { gap: $wolf-space-xs-v2; }
-.contract-chart-page__month-actions:focus-within .chart-bucket-actions__action { min-height: $wolf-touch-target-min-v2; }
+.contract-chart-page__month-actions:focus-within .chart-bucket-actions { gap: $space-1; }
+.contract-chart-page__month-actions:focus-within .chart-bucket-actions__action { min-height: var(--touch-target); }
 </style>

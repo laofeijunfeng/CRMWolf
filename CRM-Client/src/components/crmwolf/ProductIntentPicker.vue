@@ -49,18 +49,18 @@ function handleChange(value: string): void {
 </script>
 
 <template>
-  <div class="grid gap-wolf-xs">
-    <Label :id="labelId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-      产品 <span class="text-wolf-danger" aria-hidden="true">*</span>
+  <div class="grid gap-1">
+    <Label :id="labelId" class="text-caption font-medium text-foreground">
+      产品 <span class="text-danger" aria-hidden="true">*</span>
     </Label>
-    <p v-if="loading" class="text-sm text-wolf-text-secondary">加载产品中...</p>
+    <p v-if="loading" class="text-sm text-muted-foreground">加载产品中...</p>
     <template v-else-if="forbidden" />
     <template v-else-if="empty">
-      <p class="text-sm text-wolf-text-secondary">{{ EMPTY_CATALOG_MESSAGE }}</p>
+      <p class="text-sm text-muted-foreground">{{ EMPTY_CATALOG_MESSAGE }}</p>
       <RouterLink
         v-if="canCreate"
         to="/settings/products?action=create"
-        class="text-sm text-wolf-text-link"
+        class="text-sm text-brand"
       >
         去创建产品
       </RouterLink>

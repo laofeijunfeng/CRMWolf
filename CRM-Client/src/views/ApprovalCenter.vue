@@ -283,7 +283,7 @@
         <SheetTitle v-if="drillTarget === 'customer' || drillTarget === 'opportunity'" class="sr-only">{{ drillTarget === 'customer' ? '客户详情' : '商机详情' }}</SheetTitle>
         <div v-show="drillTarget === null" class="flex flex-1 flex-col min-h-0 min-w-0">
         <!-- Header -->
-        <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
+        <SheetHeader class="p-6 pb-4 border-b border-border">
           <SheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</SheetTitle>
           <p class="font-mono text-sm mt-1">
             <CopyableText
@@ -302,14 +302,14 @@
             <!-- 申请主体信息：优先展示审批关联业务内容 -->
             <Card v-if="selectedApproval" class="info-card">
               <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2 flex flex-wrap items-center justify-between gap-3">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">{{ approvalSubjectTitle }}</h3>
+                <div class="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
+                  <h3 class="text-sm font-semibold text-foreground">{{ approvalSubjectTitle }}</h3>
                   <Button
                     v-if="invoiceBillingType"
                     type="button"
                     variant="outline"
                     size="sm"
-                    class="border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
+                    class="border-brand/20 bg-brand/5 text-brand hover:bg-brand/10"
                     :disabled="invoiceBillingFields.length === 0"
                     @click="copyAllInvoiceBilling"
                   >
@@ -387,8 +387,8 @@
             </Card>
             <Card v-if="selectedApproval?.business_type === 'CONTRACT_CHANGE' && contractChangeFiles.length > 0" class="info-card">
               <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">变更附件</h3>
+                <div class="p-4 border-b border-border">
+                  <h3 class="text-sm font-semibold text-foreground">变更附件</h3>
                 </div>
                 <div class="p-4">
                   <FileAttachment
@@ -404,8 +404,8 @@
 
             <Card v-if="approvalCustomerInfo" class="info-card">
               <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">关联客户</h3>
+                <div class="p-4 border-b border-border">
+                  <h3 class="text-sm font-semibold text-foreground">关联客户</h3>
                 </div>
                 <div class="p-4">
                   <div class="attributes-grid">
@@ -441,8 +441,8 @@
             <!-- 审批流程卡片（组件内部处理加载/错误/空态） -->
             <Card v-if="selectedApproval && selectedApprovalEntityId !== null" class="info-card">
               <CardContent class="p-0">
-                <div class="p-4 border-b border-wolf-border-light-v2">
-                  <h3 class="text-sm font-semibold text-wolf-text-primary-v2">审批流程</h3>
+                <div class="p-4 border-b border-border">
+                  <h3 class="text-sm font-semibold text-foreground">审批流程</h3>
                 </div>
                 <div class="p-4">
                   <ApprovalProcessGeneric
@@ -465,7 +465,7 @@
         <!-- Footer -->
         <SheetFooter
           v-if="showBusinessActionFooter"
-          class="p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2"
+          class="p-4 border-t border-border flex flex-row justify-end gap-2"
         >
           <Button
             :data-testid="businessActionTestId"
@@ -1933,14 +1933,14 @@ watch(rows, async () => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-center {
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
   min-height: 0;
   flex: 1;
 }
@@ -1949,13 +1949,13 @@ watch(rows, async () => {
 .overdue-badge-inline {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-sm-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-warning-text-v2;
-  background: $wolf-warning-bg-v2;
+  gap: $space-1;
+  padding: $space-1 $space-2;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--status-warning));
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
   border: none;
 }
 
@@ -1966,14 +1966,14 @@ watch(rows, async () => {
 .approval-mobile-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   width: 100%;
 }
 
 .approval-mobile-action {
   flex: 1 1 30%;
   min-width: 0;
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
 }
 
 .approval-mobile-action-wide {
@@ -1984,11 +1984,11 @@ watch(rows, async () => {
 // 移动端卡片警告边框样式
 @media (max-width: 768px) {
   .approval-center {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 
   :deep(.data-table-mobile-card:has(.approval-mobile-card.is-overdue)) {
-    border-color: $wolf-warning-v2;
+    border-color: hsl(var(--status-warning));
     border-width: 1px;
   }
 }
@@ -1997,22 +1997,22 @@ watch(rows, async () => {
 
 // 信息卡片
 .info-card {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-surface-v2;
-  border: 1px solid $wolf-border-light-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-lg);
+  border: 1px solid hsl(var(--border));
 }
 
 // 属性网格
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -2020,27 +2020,27 @@ watch(rows, async () => {
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .attribute-item-wide {
   grid-column: span 2;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-column: span 1;
   }
 }
 
 .attribute-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .attribute-value {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
   word-break: break-all;
 }
 
@@ -2048,7 +2048,7 @@ watch(rows, async () => {
   padding: 0;
   border: 0;
   background: transparent;
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
   cursor: pointer;
 
   &:hover {

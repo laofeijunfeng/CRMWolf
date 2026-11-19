@@ -37,7 +37,7 @@ defineSlots<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .chart-page-shell {
   display: flex;
@@ -45,8 +45,8 @@ defineSlots<{
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   overflow: auto;
-  padding: $wolf-space-md-v2;
+  padding: $space-3;
 }
 </style>

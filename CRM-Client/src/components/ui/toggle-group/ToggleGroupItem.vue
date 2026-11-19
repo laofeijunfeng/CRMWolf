@@ -15,7 +15,7 @@ const props = defineProps<{
     :value="props.value"
     :disabled="props.disabled"
     :class="cn(
-      'inline-flex h-8 items-center justify-center rounded-wolf px-3 text-xs font-medium text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm',
+      'inline-flex h-8 items-center justify-center rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm',
       props.class,
     )"
   >

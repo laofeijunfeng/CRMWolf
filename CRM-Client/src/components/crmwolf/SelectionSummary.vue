@@ -132,23 +132,23 @@ const skeletonCount = computed(() => Math.max(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .selection-summary {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
+  gap: $space-1;
+  padding: $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
 }
 
 .selection-summary__items,
 .selection-summary__detail-items {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
+  gap: $space-1 $space-3;
 }
 
 .selection-summary__item {
@@ -158,39 +158,39 @@ const skeletonCount = computed(() => Math.max(
   gap: 2px;
 
   span {
-    color: $wolf-text-tertiary-v2;
-    font-size: $wolf-font-size-caption-v2;
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
   }
 
   strong {
     overflow: hidden;
-    color: $wolf-text-primary-v2;
-    font-size: $wolf-font-size-body-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--foreground));
+    font-size: 14px;
+    font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
 .selection-summary--compact {
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-md-v2;
+  gap: $space-1;
+  padding: $space-3;
 
   .selection-summary__items {
-    gap: $wolf-space-sm-v2 $wolf-form-item-gap-v2;
+    gap: $space-2 $space-4;
   }
 
   .selection-summary__item {
-    gap: $wolf-space-xs-v2;
+    gap: $space-1;
 
     span {
-      font-size: $wolf-font-size-caption-v2;
-      line-height: $wolf-line-height-body-v2;
+      font-size: 12px;
+      line-height: 20px;
     }
 
     strong {
-      font-size: $wolf-font-size-body-v2;
-      line-height: $wolf-line-height-body-v2;
+      font-size: 14px;
+      line-height: 20px;
     }
   }
 }
@@ -228,9 +228,9 @@ const skeletonCount = computed(() => Math.max(
 .selection-summary__details-trigger {
   align-self: flex-start;
   min-height: 36px;
-  padding: 0 $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  padding: 0 $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .selection-summary__details-icon {
@@ -244,11 +244,11 @@ const skeletonCount = computed(() => Math.max(
 }
 
 .selection-summary__detail-items {
-  padding-top: $wolf-space-xs-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
+  padding-top: $space-1;
+  border-top: 1px solid hsl(var(--border));
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .selection-summary__items,
   .selection-summary__detail-items {
     grid-template-columns: 1fr;

@@ -461,12 +461,12 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .edit-record-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -474,45 +474,45 @@ watch(
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 
 .edit-record-dialog__form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .edit-record-dialog__required-grid,
 .edit-record-dialog__optional-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-xl-v2 $wolf-form-item-gap-v2;
+  gap: $space-6 $space-4;
 }
 
 .edit-record-dialog__field {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .edit-record-dialog__supplement {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .edit-record-dialog__supplement-trigger {
   align-self: flex-start;
   min-height: 36px;
-  padding: 0 $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  padding: 0 $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .edit-record-dialog__supplement-icon {
@@ -526,17 +526,17 @@ watch(
 }
 
 .edit-record-dialog__button {
-  height: $wolf-button-height-md-v2;
-  min-height: $wolf-button-height-md-v2;
+  height: var(--control-h-md);
+  min-height: var(--control-h-md);
 }
 
 .edit-record-dialog__footer {
-  gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
+  gap: $space-2;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .edit-record-dialog__required-grid,
   .edit-record-dialog__optional-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -544,8 +544,8 @@ watch(
 
   .edit-record-dialog__button {
     width: 100%;
-    height: $wolf-button-height-mobile-v2;
-    min-height: $wolf-button-height-mobile-v2;
+    height: var(--touch-target);
+    min-height: var(--touch-target);
   }
 }
 </style>

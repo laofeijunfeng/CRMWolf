@@ -54,10 +54,10 @@ const describedBy = computed(() => {
 </script>
 
 <template>
-  <div :class="cn('grid gap-wolf-xs', props.class)">
-    <Label v-if="label" :for="inputId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+  <div :class="cn('grid gap-1', props.class)">
+    <Label v-if="label" :for="inputId" class="text-caption font-medium text-foreground">
       {{ label }}
-      <span v-if="required" class="text-wolf-danger" aria-hidden="true">*</span>
+      <span v-if="required" class="text-danger" aria-hidden="true">*</span>
     </Label>
     <Input
       :id="inputId"
@@ -72,10 +72,10 @@ const describedBy = computed(() => {
       :class="cn('h-control min-h-control max-[767px]:h-touch-target max-[767px]:min-h-touch-target', controlClass)"
       @update:model-value="emit('update:modelValue', $event)"
     />
-    <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+    <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-wolf-caption text-wolf-text-secondary">
+    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
       {{ helperText }}
     </p>
   </div>

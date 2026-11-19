@@ -350,18 +350,18 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .account-settings {
-  &__cards { display: grid; gap: $wolf-card-gap-v2; }
-  &__profile { display: flex; gap: $wolf-space-lg-v2; align-items: flex-start; }
-  &__password-input { display: flex; align-items: center; gap: $wolf-space-sm-v2; }
+  &__cards { display: grid; gap: $space-4; }
+  &__profile { display: flex; gap: $space-4; align-items: flex-start; }
+  &__password-input { display: flex; align-items: center; gap: $space-2; }
   &__password-input > :first-child { flex: 1; }
 
-  @media (max-width: $wolf-breakpoint-sm-v2) {
-    &__profile { gap: $wolf-card-padding-mobile-v2; }
-    &__password-input :deep(input) { min-height: $wolf-input-height-mobile-v2; padding-inline: $wolf-input-padding-mobile-v2; font-size: $wolf-font-size-body-mobile-v2; }
-    &__password-input :deep(button) { min-height: $wolf-button-height-mobile-v2; }
+  @media (max-width: $bp-sm) {
+    &__profile { gap: $space-3; }
+    &__password-input :deep(input) { min-height: var(--touch-target); padding-inline: $space-4; font-size: 16px; }
+    &__password-input :deep(button) { min-height: var(--touch-target); }
   }
 }
 

@@ -1,0 +1,15 @@
+// 编译期常量：间距与断点需参与 Sass 运算和 @media，不能用 var()。
+// 数值镜像 CRM-Docs/design-system/foundations/token-values.md「间距与布局」；其余数值只在 base.css :root。
+
+$space-1: 4px;
+$space-2: 8px;
+$space-3: 12px;
+$space-4: 16px;
+$space-6: 24px;
+$space-8: 32px;
+
+// 必须与 tailwind.config.ts screens 一致
+$bp-xs: 375px;
+$bp-sm: 768px;
+$bp-md: 1024px;
+$bp-lg: 1440px;

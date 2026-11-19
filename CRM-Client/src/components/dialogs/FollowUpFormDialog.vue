@@ -251,8 +251,8 @@ function handleOpenChange(open: boolean): void {
 
         <!-- Follow-up Method (RadioGroup) -->
         <div class="space-y-2">
-          <p id="follow-up-method-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-            活动类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+          <p id="follow-up-method-label" class="text-caption font-medium text-foreground">
+            活动类型 <span class="text-danger" aria-hidden="true">*</span>
           </p>
           <SegmentedChoiceControl
             v-model="methodValue"
@@ -365,13 +365,13 @@ function handleOpenChange(open: boolean): void {
 </template>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .follow-up-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -379,28 +379,28 @@ function handleOpenChange(open: boolean): void {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 
 .follow-up-form-dialog__footer {
-  gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
+  gap: $space-2;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 }
 </style>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .follow-up-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -408,16 +408,16 @@ function handleOpenChange(open: boolean): void {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 
 .follow-up-form-dialog__footer {
-  gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
+  gap: $space-2;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 }
 </style>

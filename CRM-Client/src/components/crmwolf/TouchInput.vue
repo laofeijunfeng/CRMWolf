@@ -96,7 +96,7 @@ const inputWrapperClasses = computed((): string =>
       'h-control': props.size === 'default',
       'h-touch-target': props.size === 'mobile',
       'focus-ring': isFocused.value,
-      'border-wolf-danger': hasError.value,
+      'border-danger': hasError.value,
       'disabled-state': props.disabled,
     }
   )
@@ -140,16 +140,16 @@ defineExpose({ focus, blur, inputRef })
 </script>
 
 <template>
-  <div class="touch-input-container flex flex-col gap-wolf-xs w-full">
+  <div class="touch-input-container flex flex-col gap-1 w-full">
     <!-- Visible Label (UI/UX Pro Max §8 Forms) -->
     <label
       :for="computedId"
-      class="label text-wolf-body font-wolf-medium text-wolf-text-secondary cursor-pointer"
+      class="label text-body font-medium text-muted-foreground cursor-pointer"
     >
       {{ label }}
       <span
         v-if="required"
-        class="required-mark text-wolf-danger ml-1"
+        class="required-mark text-danger ml-1"
         aria-hidden="true"
       >*</span>
     </label>
@@ -168,7 +168,7 @@ defineExpose({ focus, blur, inputRef })
         :aria-invalid="hasError ? 'true' : undefined"
         :aria-describedby="hasError ? `${computedId}-error` : helperText ? `${computedId}-helper` : undefined"
         :aria-required="required ? 'true' : undefined"
-        class="w-full h-full px-wolf-md text-wolf-body font-wolf bg-transparent border-none outline-none"
+        class="w-full h-full px-3 text-body font-sans bg-transparent border-none outline-none"
         @input="handleInput"
         @focus="handleFocus"
         @blur="handleBlur"
@@ -182,12 +182,12 @@ defineExpose({ focus, blur, inputRef })
         :disabled="disabled"
         :aria-label="showPassword ? '隐藏密码' : '显示密码'"
         :aria-pressed="showPassword"
-        class="password-toggle absolute right-wolf-md flex items-center justify-center h-touch-target w-touch-target min-w-touch-target cursor-pointer touch-manipulation"
+        class="password-toggle absolute right-3 flex items-center justify-center h-touch-target w-touch-target min-w-touch-target cursor-pointer touch-manipulation"
         @click="togglePassword"
       >
         <svg
           v-if="showPassword"
-          class="w-wolf-icon-sm h-wolf-icon-sm text-wolf-text-tertiary"
+          class="w-5 h-5 text-muted-foreground"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -198,7 +198,7 @@ defineExpose({ focus, blur, inputRef })
         </svg>
         <svg
           v-else
-          class="w-wolf-icon-sm h-wolf-icon-sm text-wolf-text-tertiary"
+          class="w-5 h-5 text-muted-foreground"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -215,7 +215,7 @@ defineExpose({ focus, blur, inputRef })
     <div
       v-if="helperText && !hasError"
       :id="`${computedId}-helper`"
-      class="helper-text text-wolf-caption text-wolf-text-tertiary -mt-wolf-xs"
+      class="helper-text text-caption text-muted-foreground -mt-1"
     >
       {{ helperText }}
     </div>
@@ -224,11 +224,11 @@ defineExpose({ focus, blur, inputRef })
     <div
       v-if="hasError"
       :id="`${computedId}-error`"
-      class="error-message flex items-start gap-wolf-xs text-wolf-caption text-wolf-danger -mt-wolf-xs"
+      class="error-message flex items-start gap-1 text-caption text-danger -mt-1"
       role="alert"
       aria-live="polite"
     >
-      <span class="error-icon flex-shrink-0 w-3.5 h-3.5 rounded-full bg-wolf-danger-bg text-wolf-danger flex items-center justify-center text-xs font-wolf-semibold">!</span>
+      <span class="error-icon flex-shrink-0 w-3.5 h-3.5 rounded-full bg-danger/12 text-danger flex items-center justify-center text-xs font-semibold">!</span>
       {{ error }}
     </div>
   </div>

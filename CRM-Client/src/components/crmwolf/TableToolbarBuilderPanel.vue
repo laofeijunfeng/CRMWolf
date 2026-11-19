@@ -41,13 +41,13 @@ const emit = defineEmits<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .table-toolbar-builder {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-md-v2;
+  gap: $space-3;
+  padding: $space-3;
 }
 
 .table-toolbar-builder-header,
@@ -55,7 +55,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .table-toolbar-builder-footer {
@@ -69,21 +69,21 @@ const emit = defineEmits<{
 }
 
 .table-toolbar-builder-title {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
 .table-toolbar-builder-subtitle {
   margin-top: 2px;
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 .table-toolbar-builder-body {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 </style>

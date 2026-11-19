@@ -3,7 +3,7 @@
  * OpportunityStageStepper - 商机采购阶段步骤器
  *
  * 基于 shadcn-vue Stepper 组件封装：
- * - 仅自定义主题色（使用 variables-v2.scss）
+ * - 仅自定义主题色（使用 base.css 设计令牌）
  * - 保留 Stepper 原生动画和交互
  * - 官方样式：icon + 名称竖向分布，step之间有横线连接
  *
@@ -158,13 +158,13 @@ onMounted(fetchStages)
           <div class="flex flex-col items-center gap-2">
             <!-- StepperIndicator：显示百分比 -->
             <StepperIndicator
-              class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold data-[state=active]:bg-wolf-primary-v2 data-[state=completed]:bg-wolf-success-v2 data-[state=inactive]:bg-muted"
+              class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold data-[state=active]:bg-brand data-[state=completed]:bg-success data-[state=inactive]:bg-muted"
             >
               {{ stage.win_probability }}%
             </StepperIndicator>
 
             <!-- StepperTitle：显示步骤名称 -->
-            <StepperTitle class="text-xs font-medium text-center text-wolf-text-primary-v2">
+            <StepperTitle class="text-xs font-medium text-center text-foreground">
               {{ stage.stage_name }}
             </StepperTitle>
           </div>
@@ -172,13 +172,13 @@ onMounted(fetchStages)
           <!-- StepperSeparator：横线连接 -->
           <StepperSeparator
             v-if="index < allStages.length - 1"
-            class="h-0.5 flex-1 mt-5 data-[state=active]:bg-wolf-primary-v2 data-[state=completed]:bg-wolf-success-v2 data-[state=inactive]:bg-muted"
+            class="h-0.5 flex-1 mt-5 data-[state=active]:bg-brand data-[state=completed]:bg-success data-[state=inactive]:bg-muted"
           />
         </StepperItem>
       </Stepper>
 
       <!-- 帮助提示 -->
-      <p v-if="canAdvance" class="mt-4 text-xs text-wolf-text-tertiary-v2 text-center">
+      <p v-if="canAdvance" class="mt-4 text-xs text-muted-foreground text-center">
         点击下一阶段可推进商机状态
       </p>
     </CardContent>
@@ -186,12 +186,11 @@ onMounted(fetchStages)
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .stage-card {
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
 }
 
 .stage-content {
@@ -201,7 +200,7 @@ onMounted(fetchStages)
 // Reduced Motion 支持
 @media (prefers-reduced-motion: reduce) {
   * {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

@@ -97,8 +97,8 @@ const handleViewAll = (): void => {
     </template>
 
     <section aria-label="客户业务旅程概览">
-      <header class="flex items-start justify-between gap-wolf-md px-wolf-md pt-wolf-md pb-wolf-md">
-        <h3 class="min-w-0 truncate text-wolf-body font-wolf-semibold text-wolf-text-primary-v2" :title="customerName">
+      <header class="flex items-start justify-between gap-3 px-3 pt-3 pb-3">
+        <h3 class="min-w-0 truncate text-body font-semibold text-foreground" :title="customerName">
           {{ customerName }}
         </h3>
         <Badge
@@ -121,8 +121,8 @@ const handleViewAll = (): void => {
         @retry="retryLoad"
       >
         <template #loading>
-          <div class="space-y-wolf-md px-wolf-md pb-wolf-md" aria-label="正在加载客户业务旅程">
-            <div v-for="index in 2" :key="index" class="space-y-wolf-sm rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md">
+          <div class="space-y-3 px-3 pb-3" aria-label="正在加载客户业务旅程">
+            <div v-for="index in 2" :key="index" class="space-y-2 rounded-md bg-muted p-3">
               <Skeleton class="h-4 w-2/5" />
               <Skeleton class="h-8 w-3/5" />
               <Skeleton class="h-1.5 w-full" />
@@ -132,31 +132,31 @@ const handleViewAll = (): void => {
         </template>
 
         <template #error-action>
-          <Button variant="outline" size="sm" class="mt-wolf-md" @click="retryLoad">
+          <Button variant="outline" size="sm" class="mt-3" @click="retryLoad">
             重试
           </Button>
         </template>
 
         <template #default>
           <ScrollArea v-if="loaded" class="max-h-[420px]">
-            <div class="space-y-wolf-md px-wolf-md pb-wolf-md">
+            <div class="space-y-3 px-3 pb-3">
               <Button
                 v-for="journey in journeys"
                 :key="journey.public_id"
                 variant="ghost"
-                class="group h-auto w-full items-stretch justify-start rounded-wolf bg-wolf-bg-muted-v2 p-wolf-md text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-wolf-focus"
+                class="group h-auto w-full items-stretch justify-start rounded-md bg-muted p-3 text-left hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-ring"
                 :data-testid="`customer-deal-journey-${journey.public_id}`"
                 @click="handleSelectJourney(journey.public_id)"
               >
                 <span class="flex w-full min-w-0 flex-col">
-                  <span class="flex min-w-0 items-start justify-between gap-wolf-md">
+                  <span class="flex min-w-0 items-start justify-between gap-3">
                     <span class="min-w-0">
-                      <span class="block truncate text-wolf-body font-wolf-medium text-wolf-text-secondary-v2" :title="journey.name">
+                      <span class="block truncate text-body font-medium text-muted-foreground" :title="journey.name">
                         {{ journey.name }}
                       </span>
                       <span
                         v-if="getProductName(journey)"
-                        class="mt-wolf-sm block truncate text-wolf-caption text-wolf-text-tertiary-v2"
+                        class="mt-2 block truncate text-caption text-muted-foreground"
                         :title="getProductName(journey)"
                       >
                         {{ getProductName(journey) }}
@@ -166,20 +166,20 @@ const handleViewAll = (): void => {
                       :value="journey.amount"
                       size="md"
                       tone="primary"
-                      class="shrink-0 self-start text-wolf-text-primary-v2"
+                      class="shrink-0 self-start text-foreground"
                     />
                   </span>
-                  <div class="mt-wolf-md flex items-center gap-wolf-sm">
+                  <div class="mt-3 flex items-center gap-2">
                     <Progress
                       :model-value="getJourneyProgressPercent(journey)"
                       class="h-1.5 min-w-0 flex-1 bg-muted"
                       :aria-label="getJourneyProgressLabel(journey)"
                     />
-                    <span class="shrink-0 tabular-nums text-wolf-caption text-wolf-text-tertiary-v2">
+                    <span class="shrink-0 tabular-nums text-caption text-muted-foreground">
                       {{ getJourneyProgressPercent(journey) }}%
                     </span>
                   </div>
-                  <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md">
+                  <span class="mt-2 flex items-center justify-between gap-3">
                     <Badge
                       :data-tone="businessJourneyStageTone[journey.current_board_stage]"
                       class="status-badge shrink-0"
@@ -188,7 +188,7 @@ const handleViewAll = (): void => {
                     >
                       {{ journey.current_board_stage_label }}
                     </Badge>
-                    <ChevronRight class="h-4 w-4 shrink-0 text-wolf-text-tertiary-v2 group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
+                    <ChevronRight class="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-sidebar-accent-foreground" aria-hidden="true" />
                   </span>
                 </span>
               </Button>
@@ -197,11 +197,11 @@ const handleViewAll = (): void => {
 
           <template v-if="loaded">
             <Separator />
-            <div class="p-wolf-md">
+            <div class="p-3">
               <Button
                 variant="ghost"
                 size="sm"
-                class="w-full justify-between text-wolf-text-secondary-v2 hover:text-wolf-primary-v2"
+                class="w-full justify-between text-muted-foreground hover:text-brand"
                 @click="handleViewAll"
               >
                 查看全部业务旅程
@@ -216,7 +216,6 @@ const handleViewAll = (): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .customer-deal-journey-trigger {
   display: block;
@@ -230,8 +229,8 @@ const handleViewAll = (): void => {
   align-items: center;
   padding: 2px 6px;
   font-size: 12px;
-  font-weight: $wolf-font-weight-medium-v2;
-  border-radius: $wolf-radius-full-v2;
+  font-weight: 500;
+  border-radius: 9999px;
   white-space: nowrap;
   border: none;
 }

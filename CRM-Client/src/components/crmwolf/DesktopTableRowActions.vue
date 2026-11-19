@@ -109,42 +109,42 @@ function executeAction(event: Event, action: ActionConfig): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .desktop-table-row-actions {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   max-width: 100%;
 }
 
 .desktop-table-row-action,
 .desktop-table-row-more {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   white-space: nowrap;
 }
 
 .desktop-table-row-action {
   max-width: 128px;
-  padding-inline: $wolf-space-sm-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  padding-inline: $space-2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
 
   &:hover:not(:disabled) {
-    background: $wolf-bg-hover-v2;
-    color: $wolf-text-primary-v2;
+    background: var(--wash-hover);
+    color: hsl(var(--foreground));
   }
 
   &:focus-visible,
   &:focus {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 
   &.is-destructive {
-    color: $wolf-danger-text-v2;
+    color: hsl(var(--status-danger));
   }
 }
 
@@ -160,19 +160,19 @@ function executeAction(event: Event, action: ActionConfig): void {
 }
 
 .desktop-table-row-more {
-  width: $wolf-touch-target-min-v2;
+  width: var(--touch-target);
   padding: 0;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 
   &:hover:not(:disabled) {
-    background: $wolf-bg-hover-v2;
-    color: $wolf-text-primary-v2;
+    background: var(--wash-hover);
+    color: hsl(var(--foreground));
   }
 
   &:focus-visible,
   &:focus {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
@@ -186,16 +186,16 @@ function executeAction(event: Event, action: ActionConfig): void {
 }
 
 .desktop-table-row-menu-label {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .desktop-table-row-menu :deep([data-slot='dropdown-menu-item'].is-destructive) {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .desktop-table-row-actions {
     display: none;
   }

@@ -325,12 +325,12 @@ const previewAllowsDownload = computed(() =>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .file-attachment {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 
@@ -338,7 +338,7 @@ const previewAllowsDownload = computed(() =>
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .file-attachment__heading {
@@ -347,25 +347,25 @@ const previewAllowsDownload = computed(() =>
 
 .file-attachment__title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .file-attachment__required {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .file-attachment__description {
-  margin: $wolf-space-xs-v2 0 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  margin: $space-1 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .file-attachment__upload {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   flex-shrink: 0;
 }
 
@@ -381,9 +381,9 @@ const previewAllowsDownload = computed(() =>
 .file-attachment__list {
   display: flex;
   flex-direction: column;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
   overflow: hidden;
 }
 
@@ -391,10 +391,10 @@ const previewAllowsDownload = computed(() =>
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 40px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-2 $space-3;
+  border-bottom: 1px solid hsl(var(--border));
 
   &:last-child {
     border-bottom: 0;
@@ -402,34 +402,34 @@ const previewAllowsDownload = computed(() =>
 }
 
 .file-attachment__item--error {
-  background: $wolf-danger-bg-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .file-attachment__icon {
   width: 18px;
   height: 18px;
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .file-attachment__content {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .file-attachment__name-row {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 
 .file-attachment__name {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -437,27 +437,27 @@ const previewAllowsDownload = computed(() =>
 
 .file-attachment__type {
   flex-shrink: 0;
-  padding: 2px $wolf-space-xs-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-sm-v2;
-  color: $wolf-text-secondary-v2;
-  background: $wolf-bg-muted-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  padding: 2px $space-1;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted));
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1.4;
 }
 
 .file-attachment__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .file-attachment__status {
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .file-attachment__progress {
@@ -468,21 +468,21 @@ const previewAllowsDownload = computed(() =>
 .file-attachment__error {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   margin: 0;
-  color: $wolf-danger-text-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--status-danger));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .file-attachment__actions {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .file-attachment__description--success {
-  color: $wolf-success-text-v2;
+  color: hsl(var(--status-success));
 }
 
 .file-attachment__download-disabled,
@@ -491,42 +491,42 @@ const previewAllowsDownload = computed(() =>
 }
 
 .file-attachment__download-disabled {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .file-attachment__action {
   width: 32px;
   height: 32px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
 .file-attachment__action--danger {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .file-attachment__empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 56px;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: 1px dashed $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-tertiary-v2;
-  background: $wolf-bg-hover-v2;
-  font-size: $wolf-font-size-body-v2;
+  padding: $space-2 $space-3;
+  border: 1px dashed hsl(var(--border));
+  border-radius: var(--radius-md);
+  color: hsl(var(--muted-foreground));
+  background: var(--wash-hover);
+  font-size: 14px;
 }
 
 .file-attachment__empty-icon {
   width: 18px;
   height: 18px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .file-attachment--compact {
@@ -545,8 +545,8 @@ const previewAllowsDownload = computed(() =>
 
   .file-attachment__item {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: $wolf-space-xs-v2;
-    min-height: $wolf-touch-target-min-v2;
+    gap: $space-1;
+    min-height: var(--touch-target);
     padding: 0;
     border: 0;
     background: transparent;
@@ -563,19 +563,19 @@ const previewAllowsDownload = computed(() =>
   }
 
   .file-attachment__name {
-    color: $wolf-success-text-v2;
-    font-size: $wolf-font-size-caption-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--status-success));
+    font-size: 12px;
+    font-weight: 500;
   }
 
   .file-attachment__action {
-    width: $wolf-touch-target-min-v2;
-    height: $wolf-touch-target-min-v2;
-    color: $wolf-success-text-v2;
-    background: $wolf-success-bg-v2;
+    width: var(--touch-target);
+    height: var(--touch-target);
+    color: hsl(var(--status-success));
+    background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
 
     &:hover {
-      background: $wolf-success-bg-v2;
+      background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
       opacity: 0.86;
     }
   }
@@ -588,7 +588,7 @@ const previewAllowsDownload = computed(() =>
   }
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .file-attachment__header,
   .file-attachment__item {
     grid-template-columns: auto minmax(0, 1fr);
@@ -607,13 +607,13 @@ const previewAllowsDownload = computed(() =>
   .file-attachment__name-row {
     align-items: flex-start;
     flex-direction: column;
-    gap: $wolf-space-xs-v2;
+    gap: $space-1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .file-attachment * {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

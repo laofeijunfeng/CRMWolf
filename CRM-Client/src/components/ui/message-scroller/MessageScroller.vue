@@ -76,7 +76,7 @@ onBeforeUnmount(disposeSizeChanges)
   <ScrollArea :class="cn('message-scroller h-full min-h-0', props.class)">
     <div
       ref="contentRef"
-      :class="cn('flex min-h-full flex-col gap-wolf-md p-wolf-md', props.contentClass)"
+      :class="cn('flex min-h-full flex-col gap-3 p-3', props.contentClass)"
       :style="props.contentStyle"
     >
       <slot />

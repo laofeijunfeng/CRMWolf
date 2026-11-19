@@ -29,8 +29,8 @@ const classesByStatus = {
 </script>
 
 <template>
-  <section class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-wolf-surface border p-3" :class="block.status === 'SUCCESS' ? 'border-[#a7f3d0] bg-[#f7fffb]' : classesByStatus[block.status]">
-    <span class="grid size-[22px] place-items-center rounded-wolf text-[11px] font-semibold" :class="block.status === 'SUCCESS' ? 'bg-[#d1fae5] text-[#047857]' : 'bg-muted text-muted-foreground'" aria-hidden="true">
+  <section class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border p-3" :class="block.status === 'SUCCESS' ? 'border-success/30 bg-success/5' : classesByStatus[block.status]">
+    <span class="grid size-[22px] place-items-center rounded-md text-[11px] font-semibold" :class="block.status === 'SUCCESS' ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground'" aria-hidden="true">
       <component :is="iconByStatus[block.status]" class="h-3.5 w-3.5" />
     </span>
     <div>
@@ -42,7 +42,7 @@ const classesByStatus = {
       <button
         v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
         type="button"
-        class="mt-1 block max-w-full truncate text-left text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="mt-1 block max-w-full truncate text-left text-xs text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         :aria-label="`打开${block.entity_ref.display_name}详情`"
         @click="emit('open-entity', block.entity_ref)"
       >

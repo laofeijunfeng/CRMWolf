@@ -707,7 +707,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
     <DialogContent v-bind="elevated ? { elevated: true } : {}" class="customer-form-dialog w-[calc(100vw-2rem)] sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建客户' : '编辑客户' }}</DialogTitle>
-        <DialogDescription data-testid="customer-dialog-description" class="text-sm text-slate-500">
+        <DialogDescription data-testid="customer-dialog-description" class="text-sm text-muted-foreground">
           {{ mode === 'create' ? '填写客户基础信息和联系人信息' : '先修改常用客户资料，更多信息按需展开' }}
         </DialogDescription>
       </DialogHeader>
@@ -715,7 +715,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
       <div class="customer-form-dialog__body">
 
       <div v-if="loading" class="flex justify-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
       </div>
 
       <ErrorState
@@ -785,9 +785,9 @@ function continueEditing(): void { closeGuard.continueEditing() }
         </div>
 
         <!-- Basic Information Section -->
-        <div v-if="mode === 'edit'" id="customer-basic-info-heading" class="flex items-center justify-between text-sm font-semibold text-slate-700">
+        <div v-if="mode === 'edit'" id="customer-basic-info-heading" class="flex items-center justify-between text-sm font-semibold text-foreground">
           <span>基础信息</span>
-          <span class="text-xs font-medium text-slate-400">常用字段</span>
+          <span class="text-xs font-medium text-muted-foreground">常用字段</span>
         </div>
         <div class="space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -853,9 +853,9 @@ function continueEditing(): void { closeGuard.continueEditing() }
             <!-- Company Scale -->
             <FormField v-slot="{ value, handleChange }" name="company_scale">
               <FormItem class="sm:col-span-2">
-                <div class="grid gap-wolf-xs">
-                  <p id="customer-company-scale-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-                    公司规模 <span class="text-wolf-danger" aria-hidden="true">*</span>
+                <div class="grid gap-1">
+                  <p id="customer-company-scale-label" class="text-caption font-medium text-foreground">
+                    公司规模 <span class="text-danger" aria-hidden="true">*</span>
                   </p>
                   <SegmentedChoiceControl
                     id="customer-company-scale"
@@ -973,19 +973,19 @@ function continueEditing(): void { closeGuard.continueEditing() }
         <Collapsible
           :open="moreInfoOpen"
           :unmount-on-hide="false"
-          class="space-y-3 border-t border-slate-200 pt-4"
+          class="space-y-3 border-t border-border pt-4"
           @update:open="handleMoreInfoChange"
         >
           <CollapsibleTrigger as-child>
             <button
               id="customer-more-info-trigger"
               type="button"
-              class="flex h-touch-target min-h-touch-target w-full items-center justify-between rounded-wolf-lg border border-blue-200 bg-blue-50/60 px-3 text-left text-sm font-semibold text-blue-900"
+              class="flex h-touch-target min-h-touch-target w-full items-center justify-between rounded-lg border border-brand/30 bg-wash-selected px-3 text-left text-sm font-semibold text-brand"
               :aria-expanded="moreInfoOpen"
               aria-controls="customer-more-info-content"
             >
               <span>{{ moreInfoOpen ? '收起更多客户信息' : '更多客户信息' }}</span>
-              <span class="text-xs font-semibold text-blue-700">已填写 {{ moreInfoCount }} 项</span>
+              <span class="text-xs font-semibold text-brand">已填写 {{ moreInfoCount }} 项</span>
             </button>
           </CollapsibleTrigger>
           <CollapsibleContent id="customer-more-info-content">
@@ -1005,8 +1005,8 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 :retained-industry-info="retainedIndustryInfo"
                 label="行业"
               />
-              <div class="grid gap-wolf-xs">
-                <p id="customer-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">授权类型</p>
+              <div class="grid gap-1">
+                <p id="customer-license-type-label" class="text-caption font-medium text-foreground">授权类型</p>
                 <SegmentedChoiceControl
                   id="customer-license-type"
                   class="customer-license-type"
@@ -1038,7 +1038,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
                 @update:model-value="licenseAuthorizedUsersValue = String($event ?? '')"
               />
             </div>
-            <p class="text-xs leading-relaxed text-slate-500">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
+            <p class="text-xs leading-relaxed text-muted-foreground">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
             <p class="customer-license-status text-sm" :class="licenseStatusClass(licenseExpiryDateValue, licenseTypeValue)"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
             </div>
           </CollapsibleContent>
@@ -1079,13 +1079,13 @@ function continueEditing(): void { closeGuard.continueEditing() }
 </template>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .customer-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -1093,17 +1093,17 @@ function continueEditing(): void { closeGuard.continueEditing() }
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 
 .customer-form-dialog__footer {
-  gap: $wolf-space-sm-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: 1px solid $wolf-border-divider-v2;
+  gap: $space-2;
+  padding-top: $space-4;
+  border-top: 1px solid hsl(var(--border));
 }
 
 .customer-form-dialog .customer-license-type {

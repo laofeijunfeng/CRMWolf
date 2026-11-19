@@ -36,26 +36,25 @@ const displayValue = computed(() => (isEmpty.value ? props.placeholder : formatC
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .amount-text {
   display: inline-flex;
   align-items: baseline;
   justify-content: flex-end;
   max-width: 100%;
-  font-family: $wolf-font-mono-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 1.35;
   white-space: nowrap;
 }
 
 .amount-text--sm {
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .amount-text--md {
-  font-size: $wolf-font-size-body-v2;
+  font-size: 14px;
 }
 
 .amount-text--lg {
@@ -67,28 +66,28 @@ const displayValue = computed(() => (isEmpty.value ? props.placeholder : formatC
 }
 
 .amount-text--default {
-  color: $wolf-accent-v2;
+  color: hsl(var(--status-success));
 }
 
 .amount-text--primary {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .amount-text--success {
-  color: $wolf-success-text-v2;
+  color: hsl(var(--status-success));
 }
 
 .amount-text--warning {
-  color: $wolf-warning-text-v2;
+  color: hsl(var(--status-warning));
 }
 
 .amount-text--danger {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 .amount-text--muted,
 .amount-text--empty {
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 </style>

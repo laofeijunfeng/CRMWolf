@@ -11,7 +11,7 @@ export { default as InputGroupText } from "./InputGroupText.vue"
 export { default as InputGroupTextarea } from "./InputGroupTextarea.vue"
 
 export const inputGroupAddonVariants = cva(
-  "flex h-auto cursor-text select-none items-center justify-center gap-2 py-1.5 text-sm font-medium text-wolf-text-secondary [&>svg:not([class*=size-])]:size-4 group-data-[disabled=true]/input-group:opacity-50",
+  "flex h-auto cursor-text select-none items-center justify-center gap-2 py-1.5 text-sm font-medium text-muted-foreground [&>svg:not([class*=size-])]:size-4 group-data-[disabled=true]/input-group:opacity-50",
   {
     variants: {
       align: {
@@ -34,10 +34,10 @@ export const inputGroupButtonVariants = cva(
   {
     variants: {
       size: {
-        "xs": "h-6 gap-1 rounded-wolf-sm px-2 [&>svg:not([class*=size-])]:size-3.5 has-[>svg]:px-2",
-        "sm": "h-8 gap-1.5 rounded-wolf px-2.5 has-[>svg]:px-2.5",
-        "icon-xs": "size-6 rounded-wolf-sm p-0 has-[>svg]:p-0",
-        "icon-sm": "size-8 rounded-wolf p-0 has-[>svg]:p-0",
+        "xs": "h-6 gap-1 rounded-sm px-2 [&>svg:not([class*=size-])]:size-3.5 has-[>svg]:px-2",
+        "sm": "h-8 gap-1.5 rounded-md px-2.5 has-[>svg]:px-2.5",
+        "icon-xs": "size-6 rounded-sm p-0 has-[>svg]:p-0",
+        "icon-sm": "size-8 rounded-md p-0 has-[>svg]:p-0",
       },
     },
     defaultVariants: {

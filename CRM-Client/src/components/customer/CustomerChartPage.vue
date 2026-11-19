@@ -191,7 +191,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
             <template #default="{ action }">
               <span class="grid w-full grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm">
                 <span class="truncate">{{ action.label }}</span>
-                <span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round((action.bucket.count / Math.max(...namedBuckets(industryCard).map((item) => item.count), 1)) * 100)}%` }" /></span>
+                <span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-brand" :style="{ width: `${Math.round((action.bucket.count / Math.max(...namedBuckets(industryCard).map((item) => item.count), 1)) * 100)}%` }" /></span>
                 <span class="text-muted-foreground tabular-nums">{{ countText(action.bucket) }}</span>
               </span>
             </template>
@@ -205,7 +205,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
             <template #default="{ action }">
               <span class="grid w-full grid-cols-[72px_minmax(0,1fr)_auto] items-center gap-3 text-left text-sm">
                 <span class="truncate">{{ action.label }}</span>
-                <span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-primary" :style="{ width: `${Math.round((action.bucket.count / Math.max(...namedBuckets(cityCard).map((item) => item.count), 1)) * 100)}%` }" /></span>
+                <span class="h-2 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-brand" :style="{ width: `${Math.round((action.bucket.count / Math.max(...namedBuckets(cityCard).map((item) => item.count), 1)) * 100)}%` }" /></span>
                 <span class="text-muted-foreground tabular-nums">{{ countText(action.bucket) }}</span>
               </span>
             </template>
@@ -260,16 +260,16 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .customer-chart-page__state,
-.customer-chart-page__refresh-error { display: flex; align-items: center; gap: $wolf-space-sm-v2; color: $wolf-text-secondary-v2; }
-.customer-chart-page__heading h2 { margin: 0; font-size: $wolf-font-size-title-v2; line-height: 1.25; }
+.customer-chart-page__refresh-error { display: flex; align-items: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
+.customer-chart-page__heading h2 { margin: 0; font-size: 16px; line-height: 1.25; }
 .customer-chart-page__heading p,
-.customer-chart-page__refresh-error { margin: $wolf-space-xs-v2 0 0; color: $wolf-text-tertiary-v2; }
-.customer-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $wolf-space-md-v2; }
+.customer-chart-page__refresh-error { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); }
+.customer-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .customer-chart-dialog-list { display: flex; flex-direction: column; }
-.customer-chart-dialog-list button { display: flex; justify-content: space-between; gap: $wolf-space-md-v2; border: 0; border-bottom: 1px solid $wolf-border-default-v2; background: transparent; padding: $wolf-space-sm-v2 0; text-align: left; }
+.customer-chart-dialog-list button { display: flex; justify-content: space-between; gap: $space-3; border: 0; border-bottom: 1px solid hsl(var(--border)); background: transparent; padding: $space-2 0; text-align: left; }
 :deep(.customer-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; }
 .customer-chart-dialog { max-width: 32rem; }
 .customer-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }

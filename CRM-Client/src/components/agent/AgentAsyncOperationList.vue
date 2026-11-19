@@ -139,12 +139,12 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .agent-async-operation-list {
   width: 100%;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -152,7 +152,7 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
   display: inline-grid;
   grid-template-columns: 16px minmax(0, auto) 14px;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   max-width: 100%;
   min-height: 24px;
   padding: 0;
@@ -165,13 +165,13 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 }
 
 .agent-async-operation-list__trigger:hover .agent-async-operation-list__title {
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
 }
 
 .agent-async-operation-list__trigger:focus-visible {
-  border-radius: $wolf-radius-sm-v2;
-  outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-  outline-offset: $wolf-focus-ring-offset-v2;
+  border-radius: var(--radius-sm);
+  outline: 2px solid hsl(var(--brand));
+  outline-offset: 2px;
 }
 
 .agent-async-operation-list__status-icon {
@@ -180,19 +180,19 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 }
 
 .agent-async-operation-list__status-icon--info {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .agent-async-operation-list__status-icon--success {
-  color: $wolf-success-v2;
+  color: hsl(var(--status-success));
 }
 
 .agent-async-operation-list__status-icon--warning {
-  color: $wolf-warning-v2;
+  color: hsl(var(--status-warning));
 }
 
 .agent-async-operation-list__status-icon--danger {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .agent-async-operation-list__status-icon--spin {
@@ -205,7 +205,7 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 
 .agent-async-operation-list__title {
   overflow: hidden;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color 120ms ease;
@@ -214,40 +214,40 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 .agent-async-operation-list__chevron {
   width: 14px;
   height: 14px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .agent-async-operation-list__items {
   display: grid;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-xs-v2;
+  gap: $space-2;
+  margin-top: $space-1;
   margin-left: 7px;
-  padding-top: $wolf-space-xs-v2;
+  padding-top: $space-1;
   padding-left: 16px;
-  border-left: 1px solid color-mix(in srgb, $wolf-primary-v2 12%, transparent);
+  border-left: 1px solid color-mix(in srgb, hsl(var(--brand)) 12%, transparent);
 }
 
 .agent-async-operation-list__results {
   display: grid;
-  gap: $wolf-space-sm-v2;
-  margin: $wolf-space-sm-v2 0 0;
+  gap: $space-2;
+  margin: $space-2 0 0;
   padding: 0;
   list-style: none;
 }
 
 .agent-async-operation-list__result-icon,
 .agent-async-operation-list__result-status {
-  color: $wolf-success-v2;
+  color: hsl(var(--status-success));
 }
 
 .agent-async-operation-list__result--postpone .agent-async-operation-list__result-icon,
 .agent-async-operation-list__result--postpone .agent-async-operation-list__result-status {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .agent-async-operation-list__result--cancel .agent-async-operation-list__result-icon,
 .agent-async-operation-list__result--cancel .agent-async-operation-list__result-status {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .agent-async-operation-list__result-icon {
@@ -258,12 +258,12 @@ const automaticTaskTransitionIcon = (action: AutomaticTaskTransitionAction): Com
 .agent-async-operation-list__result-title {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-weight: 500;
 }
 
 .agent-async-operation-list__result-status {
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   white-space: nowrap;
 }
 

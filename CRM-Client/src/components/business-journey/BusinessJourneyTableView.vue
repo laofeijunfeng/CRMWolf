@@ -287,47 +287,47 @@ function setDisplayMode(value: string): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .business-journey-name-link {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
   cursor: pointer;
 }
 .business-journey-mobile-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .business-journey-mobile-card-title {
   min-width: 0;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .business-journey-mobile-card-customer {
-  margin-top: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
+  margin-top: $space-1;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 
 .business-journey-mobile-card-progress {
-  margin-top: $wolf-space-sm-v2;
+  margin-top: $space-2;
 }
 
 .business-journey-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 .business-journey-mobile-card-meta-item {

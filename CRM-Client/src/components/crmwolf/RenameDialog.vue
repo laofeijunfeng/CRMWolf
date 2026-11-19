@@ -87,7 +87,6 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 :global(.rename-dialog) {
   max-width: 420px;
@@ -108,6 +107,6 @@ watch(
 .rename-dialog__error {
   font-size: 12px;
   line-height: 18px;
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 </style>

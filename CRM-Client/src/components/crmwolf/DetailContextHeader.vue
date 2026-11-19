@@ -104,24 +104,24 @@ const getNodeLabel = (node: DetailContextNode): string => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .detail-context-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  min-height: $wolf-touch-target-min-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-xl-v2;
-  border-bottom: $wolf-focus-ring-width-subtle-v2 solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  gap: $space-3;
+  min-height: var(--touch-target);
+  padding: $space-2 $space-6;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 
 .detail-context-header__navigation {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .detail-context-header__crumb {
@@ -133,6 +133,6 @@ const getNodeLabel = (node: DetailContextNode): string => {
 }
 
 .detail-context-header__crumb:hover {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 </style>

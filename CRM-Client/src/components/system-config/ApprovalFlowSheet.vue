@@ -269,8 +269,8 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
   >
     <component :is="embedded ? 'div' : DetailSheetContent">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">审批流程管理</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程与节点</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">审批流程管理</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">配置审批流程与节点</SheetDescription>
       </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 搜索/操作栏 -->
@@ -341,7 +341,7 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
             empty-text="暂无审批流程"
           >
             <template #itemMain="{ item }">
-              <div class="font-medium text-wolf-text-primary">{{ item.flow_name }}</div>
+              <div class="font-medium text-foreground">{{ item.flow_name }}</div>
               <div class="mt-1 text-xs text-muted-foreground">
                 {{ item.flow_code }} ·
                 <span v-if="item.min_amount || item.max_amount">
@@ -381,7 +381,7 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
                 variant="ghost"
                 size="icon"
                 :title="item.is_active ? '禁用' : '启用'"
-                :class="item.is_active ? 'text-orange-500' : 'text-green-600'"
+                :class="item.is_active ? 'text-warning' : 'text-success'"
                 @click="handleToggleStatus(item)"
               >
                 <Power class="h-4 w-4" />
@@ -509,12 +509,12 @@ function getSortedNodes(nodes: ApprovalNode[] | undefined): ApprovalNode[] {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

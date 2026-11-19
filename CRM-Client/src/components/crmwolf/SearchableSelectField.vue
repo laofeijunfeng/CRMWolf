@@ -150,10 +150,10 @@ function handleOpenChange(value: boolean): void {
 </script>
 
 <template>
-  <div :class="cn('grid gap-wolf-xs', props.class)">
-    <Label v-if="label" :for="selectId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+  <div :class="cn('grid gap-1', props.class)">
+    <Label v-if="label" :for="selectId" class="text-caption font-medium text-foreground">
       {{ label }}
-      <span v-if="required" class="text-wolf-danger" aria-hidden="true">*</span>
+      <span v-if="required" class="text-danger" aria-hidden="true">*</span>
     </Label>
     <Combobox
       :open="comboboxOpen"
@@ -182,16 +182,16 @@ function handleOpenChange(value: boolean): void {
             :aria-describedby="describedBy"
             :disabled="selectDisabled"
             :class="cn(
-              'h-control min-h-control w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
-              selectedLabel === '' && 'text-wolf-text-placeholder',
-              error !== '' && 'border-wolf-danger focus-visible:ring-wolf-danger/15',
+              'h-control min-h-control w-full justify-between rounded-sm border-border bg-card px-3 text-left text-body font-normal text-foreground shadow-none hover:bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
+              selectedLabel === '' && 'text-muted-foreground',
+              error !== '' && 'border-danger focus-visible:ring-danger/15',
               triggerClass,
             )"
           >
             <span class="min-w-0 flex-1 truncate">
               {{ selectedLabel !== '' ? selectedLabel : selectPlaceholder }}
             </span>
-            <ChevronsUpDown class="ml-2 size-4 shrink-0 text-wolf-text-secondary" aria-hidden="true" />
+            <ChevronsUpDown class="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </Button>
         </ComboboxTrigger>
       </ComboboxAnchor>
@@ -229,10 +229,10 @@ function handleOpenChange(value: boolean): void {
         </ComboboxGroup>
       </ComboboxList>
     </Combobox>
-    <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+    <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-wolf-caption text-wolf-text-secondary">
+    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
       {{ helperText }}
     </p>
   </div>

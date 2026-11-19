@@ -30,25 +30,25 @@ const emit = defineEmits<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-source-footer {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-lg-v2 $wolf-space-xl-v2;
-  padding-bottom: calc(#{$wolf-space-lg-v2} + #{$wolf-safe-area-bottom-v2});
-  border-top: 1px solid $wolf-border-default-v2;
+  gap: $space-3;
+  padding: $space-4 $space-6;
+  padding-bottom: calc(#{$space-4} + #{var(--safe-bottom)});
+  border-top: 1px solid hsl(var(--border));
   min-width: 0;
 }
 
 .approval-source-footer__note {
   margin: 0;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border-radius: $wolf-radius-control-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  padding: $space-2 $space-3;
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
   line-height: 1.6;
 }
 

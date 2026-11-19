@@ -218,7 +218,7 @@ useTopBarRegistration({
       @retry="loadMethod"
     >
       <template #cell-stage_name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.stage_name }}</div>
+        <div class="font-medium text-foreground">{{ row.stage_name }}</div>
         <div v-if="row.description" class="mt-1 text-sm text-muted-foreground">{{ row.description }}</div>
       </template>
       <template #cell-template_code="{ row }">

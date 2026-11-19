@@ -130,7 +130,7 @@ function isRouteActive(itemRoute: string): boolean {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .bottom-nav {
   // Fixed positioning at bottom
@@ -141,8 +141,8 @@ function isRouteActive(itemRoute: string): boolean {
   z-index: 100;  // §5 z-index-management
 
   // Background & border
-  background: $wolf-bg-card-v2;
-  border-top: 1px solid $wolf-border-default-v2;
+  background: hsl(var(--card));
+  border-top: 1px solid hsl(var(--border));
 
   // §5 safe-area-awareness: iOS notch / Android gesture bar
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -157,12 +157,12 @@ function isRouteActive(itemRoute: string): boolean {
   align-items: center;
   justify-content: space-around;  // Evenly distribute items
   max-width: 100%;
-  height: $wolf-bottom-nav-height-v2;  // 56px
-  padding: 0 $wolf-space-sm-v2;  // 8px horizontal padding
+  height: var(--bottom-nav-height);  // 56px
+  padding: 0 $space-2;  // 8px horizontal padding
 }
 
 // §9 adaptive-navigation: Hide on desktop (≥768px)
-@media (min-width: $wolf-breakpoint-sm-v2) {  // 768px
+@media (min-width: $bp-sm) {  // 768px
   .bottom-nav {
     display: none;
   }

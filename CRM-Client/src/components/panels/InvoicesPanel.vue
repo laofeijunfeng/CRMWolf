@@ -3,7 +3,7 @@
  * InvoicesPanel.vue - 客户发票面板组件
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：所有图标按钮均有 aria-label
  */
 import { Plus, Pencil, Trash2, Star, Building2, User, ReceiptText, Download, Loader2 } from 'lucide-vue-next'
@@ -13,7 +13,7 @@ import ListCard from '@/components/crmwolf/ListCard.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import type { InvoiceApplicationResponse, InvoiceApplicationStatus, InvoiceTitleResponse, InvoiceType, TitleType } from '@/api/invoice'
 import { hasDownloadableInvoiceFile } from '@/utils/invoiceDownload'
-import { getStatusPresentation, type StatusPresentation } from '@/utils/statusPresentation'
+import { getStatusPresentation, type StatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 
 // ==================== Props & Emits ====================
 interface Props {
@@ -83,12 +83,12 @@ const handleDownloadApplication = (application: InvoiceApplicationResponse): voi
 }
 
 // Get title type label and icon
-const getTitleTypeInfo = (type: TitleType): { label: string; color: string } => {
-  const typeMap: Record<TitleType, { label: string; color: string }> = {
-    COMPANY: { label: '企业', color: 'bg-blue-100 text-blue-700' },
-    PERSONAL: { label: '个人', color: 'bg-purple-100 text-purple-700' }
+const getTitleTypeInfo = (type: TitleType): { label: string; tone: StatusTone } => {
+  const typeMap: Record<TitleType, { label: string; tone: StatusTone }> = {
+    COMPANY: { label: '企业', tone: 'info' },
+    PERSONAL: { label: '个人', tone: 'neutral' }
   }
-  return typeMap[type] ?? { label: type, color: 'bg-gray-100 text-gray-700' }
+  return typeMap[type] ?? { label: type, tone: 'neutral' }
 }
 
 // Mask sensitive info (show first 4 and last 4 chars)
@@ -161,9 +161,9 @@ const formatDate = (value: string | null): string => {
         <div class="flex items-center gap-2 min-w-0">
           <component
             :is="item.title_type === 'COMPANY' ? Building2 : User"
-            class="w-4 h-4 shrink-0 text-wolf-text-secondary-v2"
+            class="w-4 h-4 shrink-0 text-muted-foreground"
           />
-          <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.title }}</span>
+          <span class="font-medium text-foreground truncate">{{ item.title }}</span>
         </div>
       </template>
 
@@ -177,7 +177,7 @@ const formatDate = (value: string | null): string => {
       </template>
 
       <template #itemBadges="{ item }">
-        <Badge :class="getTitleTypeInfo(item.title_type).color" class="text-xs">
+        <Badge variant="status" :data-tone="getTitleTypeInfo(item.title_type).tone" class="text-xs">
           {{ getTitleTypeInfo(item.title_type).label }}
         </Badge>
         <Badge v-if="item.is_default" variant="secondary" class="text-xs">
@@ -222,7 +222,7 @@ const formatDate = (value: string | null): string => {
           :aria-label="`删除发票抬头 ${item.title}`"
           @click.stop="handleDelete(item.id)"
         >
-          <Trash2 class="w-4 h-4 text-wolf-danger-text-v2" />
+          <Trash2 class="w-4 h-4 text-danger" />
         </Button>
       </template>
     </ListCard>
@@ -295,12 +295,12 @@ const formatDate = (value: string | null): string => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .invoices-panel {
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
 
   :deep(.list-card) {
     height: auto;
@@ -310,15 +310,15 @@ const formatDate = (value: string | null): string => {
 .invoice-application-main {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 
 .invoice-application-title {
   min-width: 0;
   overflow: hidden;
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -327,12 +327,12 @@ const formatDate = (value: string | null): string => {
 .invoice-action-button {
   width: 32px;
   height: 32px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .invoice-action-button--primary {
   &:hover {
-    color: $wolf-primary-v2;
+    color: hsl(var(--brand));
   }
 }
 
@@ -343,9 +343,9 @@ const formatDate = (value: string | null): string => {
 
 .invoice-action-hover-text {
   display: inline-flex;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 </style>

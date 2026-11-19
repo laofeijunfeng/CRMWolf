@@ -423,7 +423,7 @@ watch(approvalPhase, phase => {
     data-testid="opportunity-detail-content"
     :data-opportunity-id="opportunityId"
   >
-    <div class="opportunity-detail-header p-6 pb-4 border-b border-wolf-border-default-v2">
+    <div class="opportunity-detail-header p-6 pb-4 border-b border-border">
       <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -451,7 +451,7 @@ watch(approvalPhase, phase => {
           {{ opportunity.opportunity_name?.charAt(0) || '商' }}
         </div>
         <div class="flex-1 min-w-0">
-          <h2 class="text-lg font-semibold truncate text-wolf-text-primary-v2">
+          <h2 class="text-lg font-semibold truncate text-foreground">
             {{ opportunity?.opportunity_name || '商机详情' }}
           </h2>
           <div class="flex flex-wrap items-center gap-2 mt-1">
@@ -464,7 +464,7 @@ watch(approvalPhase, phase => {
             <Badge v-if="opportunity" :class="['status-badge', getPurchaseTypeClass(opportunity.purchase_type)]">
               {{ getPurchaseTypeText(opportunity.purchase_type) }}
             </Badge>
-            <span v-if="embedded" class="text-sm text-wolf-text-tertiary-v2">
+            <span v-if="embedded" class="text-sm text-muted-foreground">
               客户：{{ displayCustomerName }}
             </span>
           </div>
@@ -481,7 +481,7 @@ watch(approvalPhase, phase => {
             查看业务旅程
           </Button>
           <div class="text-right">
-            <div class="text-xs text-wolf-text-tertiary-v2">预计金额</div>
+            <div class="text-xs text-muted-foreground">预计金额</div>
             <AmountText :value="opportunity.total_amount" size="lg" tone="primary" />
           </div>
         </div>
@@ -494,7 +494,7 @@ watch(approvalPhase, phase => {
           v-if="loading"
           role="status"
           aria-live="polite"
-          class="py-8 text-center text-wolf-text-tertiary-v2"
+          class="py-8 text-center text-muted-foreground"
         >
           加载中...
         </div>
@@ -512,7 +512,7 @@ watch(approvalPhase, phase => {
           role="alert"
           class="py-8 text-center"
         >
-          <p class="text-sm text-wolf-danger-text-v2 mb-4">商机详情加载失败，请稍后重试</p>
+          <p class="text-sm text-danger mb-4">商机详情加载失败，请稍后重试</p>
           <Button
             type="button"
             variant="outline"
@@ -526,8 +526,8 @@ watch(approvalPhase, phase => {
         <template v-else-if="opportunity">
           <Card class="info-card">
             <CardContent class="p-0">
-              <div class="p-4 border-b border-wolf-border-light-v2">
-                <h3 class="text-sm font-semibold text-wolf-text-primary-v2">基本信息</h3>
+              <div class="p-4 border-b border-border">
+                <h3 class="text-sm font-semibold text-foreground">基本信息</h3>
               </div>
               <div class="p-4">
                 <div class="attributes-grid">
@@ -650,7 +650,7 @@ watch(approvalPhase, phase => {
             <AccordionItem value="approval">
               <AccordionTrigger class="px-4 py-3 hover:no-underline">
                 <div class="flex items-center gap-2 w-full">
-                  <span class="text-sm font-semibold text-wolf-text-primary-v2">审批进度</span>
+                  <span class="text-sm font-semibold text-foreground">审批进度</span>
                   <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
                     {{ getApprovalPhaseText(opportunity.approval_phase) }}
                   </Badge>
@@ -683,7 +683,7 @@ watch(approvalPhase, phase => {
             <AccordionItem value="stage">
               <AccordionTrigger class="px-4 py-3 hover:no-underline">
                 <div class="flex items-center gap-2 w-full">
-                  <span class="text-sm font-semibold text-wolf-text-primary-v2">商机进度</span>
+                  <span class="text-sm font-semibold text-foreground">商机进度</span>
                   <Badge :class="['status-badge', isStageComplete ? 'status-success' : 'status-info']">
                     {{ stageProgressText }}
                   </Badge>
@@ -704,11 +704,11 @@ watch(approvalPhase, phase => {
       </div>
     </ScrollArea>
 
-    <div v-if="!readonly" class="opportunity-detail-footer p-4 border-t border-wolf-border-default-v2 flex flex-row justify-end gap-2">
+    <div v-if="!readonly" class="opportunity-detail-footer p-4 border-t border-border flex flex-row justify-end gap-2">
       <Button
         v-if="isActive && canWin && isApprovalApproved"
         variant="default"
-        class="bg-wolf-success-v2 hover:bg-wolf-success-v2/90"
+        class="bg-success hover:bg-success/90"
         @click="winDialogOpen = true"
       >
         <Trophy class="w-4 h-4 mr-2" />
@@ -717,7 +717,7 @@ watch(approvalPhase, phase => {
       <Button
         v-if="isActive && canLose && isApprovalApproved"
         variant="outline"
-        class="text-wolf-danger-v2 border-wolf-danger-v2 hover:bg-wolf-danger-bg-v2"
+        class="text-danger border-danger hover:bg-danger/12"
         @click="loseDialogOpen = true"
       >
         <XCircle class="w-4 h-4 mr-2" />
@@ -765,71 +765,71 @@ watch(approvalPhase, phase => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .opportunity-detail-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .title-avatar {
   width: 48px;
   height: 48px;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
 .detail-breadcrumb {
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .detail-breadcrumb-link {
   border: 0;
   background: transparent;
   padding: 0;
-  color: $wolf-text-link-v2;
+  color: hsl(var(--brand));
   cursor: pointer;
   font: inherit;
 
   &:hover {
-    color: $wolf-text-link-hover-v2;
+    color: hsl(var(--brand));
   }
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-control-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
   }
 }
 
 .approval-accordion,
 .stage-accordion {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  background: $wolf-bg-card-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  background: hsl(var(--card));
   overflow: hidden;
 }
 
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -837,33 +837,33 @@ watch(approvalPhase, phase => {
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .attribute-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .attribute-value {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
   word-break: break-all;
 
   &.not-filled {
-    color: $wolf-text-placeholder-v2;
+    color: hsl(var(--muted-foreground));
   }
 }
 
 .link-text {
-  color: $wolf-text-link-v2;
+  color: hsl(var(--brand));
   cursor: pointer;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-weight: 500;
 
   &:hover {
-    color: $wolf-text-link-hover-v2;
+    color: hsl(var(--brand));
   }
 }
 
@@ -871,53 +871,53 @@ watch(approvalPhase, phase => {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  border-radius: $wolf-radius-full-v2;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 9999px;
   white-space: nowrap;
 }
 
 .status-default {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-tertiary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
 }
 
 .status-info {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
 }
 
 .status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
 }
 
 .status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .opportunity-detail-header,
   .opportunity-detail-footer {
-    padding-left: $wolf-card-padding-mobile-v2;
-    padding-right: $wolf-card-padding-mobile-v2;
+    padding-left: $space-3;
+    padding-right: $space-3;
   }
 
   .opportunity-detail-footer {
     flex-wrap: wrap;
-    padding-bottom: calc($wolf-card-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+    padding-bottom: calc($space-3 + var(--safe-bottom));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   * {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

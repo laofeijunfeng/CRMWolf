@@ -35,8 +35,8 @@ const itemClasses = computed((): string =>
     'bottom-nav-item',
     'flex flex-col items-center justify-center',
     'min-w-touch-target min-h-touch-target',  // §2 touch-target-size: 44px
-    'px-wolf-sm py-wolf-xs',
-    'rounded-wolf',
+    'px-2 py-1',
+    'rounded-md',
     'transition-all duration-150 ease-out',  // §7 duration-timing
     'touch-manipulation',  // §2 tap-delay: remove 300ms
     'cursor-pointer',
@@ -44,12 +44,12 @@ const itemClasses = computed((): string =>
     'border-none',
     'outline-none',
     // Text color
-    'text-wolf-text-tertiary',
+    'text-muted-foreground',
     // Active state
     props.active && [
-      'text-wolf-primary',
-      'font-wolf-medium',
-      '[&_.bottom-nav-icon]:text-wolf-primary',
+      'text-brand',
+      'font-medium',
+      '[&_.bottom-nav-icon]:text-brand',
     ]
   )
 )
@@ -65,37 +65,36 @@ const itemClasses = computed((): string =>
     <!-- Icon -->
     <component
       :is="item.icon"
-      class="bottom-nav-icon text-wolf-icon-lg mb-wolf-xs transition-colors duration-150 ease-out"
+      class="bottom-nav-icon mb-1 transition-colors duration-150 ease-out"
       aria-hidden="true"
     />
 
     <!-- Label (§9 nav-label-icon: always visible) -->
-    <span class="bottom-nav-label text-wolf-caption text-center whitespace-nowrap">
+    <span class="bottom-nav-label text-caption text-center whitespace-nowrap">
       {{ item.label }}
     </span>
   </RouterLink>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .bottom-nav-item {
   // §2 press-feedback: Visual feedback on press
   &:active {
     transform: scale(0.95);  // 5% scale down
     opacity: 0.7;           // 30% opacity reduction
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   // §1 focus-states: Visible focus ring for keyboard navigation
   &:focus-visible {
-    outline: 2px solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
   }
 
   // Hover state (visual only, not primary interaction)
   &:hover:not(:active) {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   // §7 reduced-motion: Respect user preference
@@ -116,7 +115,7 @@ const itemClasses = computed((): string =>
 }
 
 .bottom-nav-label {
-  font-size: $wolf-font-size-caption-v2;  // 12px
+  font-size: 12px;  // 12px
   line-height: 1.2;
 }
 </style>

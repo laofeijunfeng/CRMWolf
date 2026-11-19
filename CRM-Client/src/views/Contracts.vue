@@ -1103,27 +1103,27 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .contracts-page {
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
   min-height: 0;
   flex: 1;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .contracts-page {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 }
 
 .contract-number {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1131,49 +1131,49 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .contract-mobile-card-title {
   min-width: 0;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .contract-mobile-card-number {
-  margin-top: $wolf-space-xs-v2;
-  font-family: $wolf-font-mono-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-link-v2;
+  margin-top: $space-1;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: hsl(var(--brand));
 }
 
 .contract-mobile-card-customer {
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 
 .contract-mobile-card-amount {
-  margin-top: $wolf-space-sm-v2;
+  margin-top: $space-2;
 }
 
 .contract-mobile-card-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
+  gap: $space-1;
+  margin-top: $space-2;
 }
 
 .contract-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 </style>

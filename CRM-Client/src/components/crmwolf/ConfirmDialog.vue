@@ -50,7 +50,7 @@ const handleDialogOpenChange = (open: boolean): void => {
         </AlertDialogCancel>
         <AlertDialogAction
           :class="{
-            'bg-wolf-danger hover:bg-wolf-danger/90': state.options.variant === 'destructive',
+            'bg-danger hover:bg-danger/90': state.options.variant === 'destructive',
           }"
           @click="handleConfirm"
         >

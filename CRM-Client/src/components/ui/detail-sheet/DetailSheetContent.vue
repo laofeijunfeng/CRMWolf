@@ -40,16 +40,16 @@ defineProps<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .detail-sheet-content {
-  height: $wolf-viewport-height-mobile-v2;
-  max-height: $wolf-viewport-height-mobile-v2;
-  padding-left: $wolf-safe-area-left-v2;
-  padding-right: $wolf-safe-area-right-v2;
+  height: min(100vh, 100dvh);
+  max-height: min(100vh, 100dvh);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
-@media (min-width: $wolf-breakpoint-sm-v2) {
+@media (min-width: $bp-sm) {
   .detail-sheet-content {
     height: 100%;
     max-height: 100%;

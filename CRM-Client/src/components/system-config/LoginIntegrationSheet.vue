@@ -162,8 +162,8 @@ watch(active, (isActive) => {
   >
     <component :is="embedded ? 'div' : DetailSheetContent">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">第三方集成</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">配置当前团队的飞书应用能力</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">第三方集成</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">配置当前团队的飞书应用能力</SheetDescription>
       </SheetHeader>
 
       <ScrollArea class="h-full">
@@ -351,12 +351,12 @@ watch(active, (isActive) => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

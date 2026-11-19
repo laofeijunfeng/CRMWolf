@@ -48,7 +48,7 @@ const mapStatus = (status: PaymentConfirmationStatus | undefined): string => {
     @row-click="handleView"
   >
     <template #itemMain="{ item }">
-      <span class="font-medium text-wolf-text-primary-v2 truncate">
+      <span class="font-medium text-foreground truncate">
         {{ item.record_number ?? `回款记录 #${item.id}` }}
       </span>
     </template>

@@ -127,12 +127,12 @@ const handleSelect = (value: DateValue | undefined): void => {
         :class="cn(
           'h-control min-h-control w-full justify-start rounded-md border border-input bg-card px-control text-body text-foreground transition-colors hover:border-ring-input disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-disabled aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:outline-destructive/50 text-left font-normal hover:bg-card',
           'max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
-          !dateValue && 'text-wolf-text-placeholder',
+          !dateValue && 'text-muted-foreground',
           props.class
         )"
       >
-        <CalendarIcon class="mr-2 h-4 w-4 text-wolf-text-tertiary" />
-        <span :class="dateValue ? 'text-wolf-text-primary' : 'text-wolf-text-placeholder'">
+        <CalendarIcon class="mr-2 h-4 w-4 text-muted-foreground" />
+        <span :class="dateValue ? 'text-foreground' : 'text-muted-foreground'">
           {{ dateValue ? formattedDate : placeholder }}
         </span>
       </Button>

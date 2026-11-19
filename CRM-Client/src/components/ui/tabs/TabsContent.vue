@@ -30,11 +30,10 @@ const forcedHiddenAttrs = computed(() => {
     :value="props.value"
     v-bind="forcedHiddenAttrs"
     :class="cn(
-      'mt-wolf-md',
-      'ring-offset-wolf',
+      'mt-3',
       'focus-visible:outline-none',
       'focus-visible:ring-2',
-      'focus-visible:ring-wolf-primary',
+      'focus-visible:ring-ring',
       'focus-visible:ring-offset-2',
       props.class
     )"

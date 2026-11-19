@@ -260,11 +260,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 :global(.list-sort-popover) {
   width: max-content;
-  max-width: calc(100vw - #{$wolf-space-xl-v2});
+  max-width: calc(100vw - #{$space-6});
   padding: 0;
   overflow: visible;
 }
@@ -282,11 +282,11 @@ onBeforeUnmount(() => {
 
 .sort-field-list {
   width: 180px;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-overlay-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-xl);
   max-height: 360px;
   margin: 0;
-  padding: $wolf-space-xs-v2;
+  padding: $space-1;
   overflow: auto;
   list-style: none;
 }
@@ -295,13 +295,13 @@ onBeforeUnmount(() => {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .sort-field-priority {
   margin-left: auto;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -309,22 +309,22 @@ onBeforeUnmount(() => {
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .sort-field-button,
 .sort-direction-button {
   display: flex;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   width: 100%;
   align-items: center;
   justify-content: space-between;
   min-height: 32px;
-  padding: 0 $wolf-space-sm-v2;
+  padding: 0 $space-2;
   border: 0;
-  border-radius: $wolf-radius-control-v2;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   text-align: left;
 }
 
@@ -332,39 +332,39 @@ onBeforeUnmount(() => {
 .sort-direction-button-active,
 .sort-field-button:hover,
 .sort-direction-button:hover {
-  background: $wolf-bg-muted-v2;
+  background: hsl(var(--muted));
 }
 
 .sort-direction-button-active {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .sort-direction-panel {
   position: absolute;
   top: var(--sort-panel-top, 0);
-  left: calc(100% + #{$wolf-space-xs-v2});
+  left: calc(100% + #{$space-1});
   width: max-content;
   min-width: 160px;
   max-width: min(360px, calc(100vw - 220px));
-  max-height: calc(100vh - #{$wolf-space-xl-v2});
-  padding: $wolf-space-sm-v2;
+  max-height: calc(100vh - #{$space-6});
+  padding: $space-2;
   overflow: auto;
-  border: 1px solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-overlay-v2;
-  background: $wolf-bg-card-v2;
-  box-shadow: $wolf-shadow-overlay-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-xl);
+  background: hsl(var(--card));
+  box-shadow: var(--shadow-2);
 }
 
 .sort-direction-panel h3 {
-  margin: 0 0 $wolf-space-xs-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  margin: 0 0 $space-1;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .sort-direction-list {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .sort-direction-button {
@@ -381,12 +381,12 @@ onBeforeUnmount(() => {
   }
 
   :global(.list-sort-popover) {
-    max-height: calc(100dvh - #{$wolf-space-xl-v2});
+    max-height: calc(100dvh - #{$space-6});
   }
 
   .sort-field-list,
   .sort-direction-panel {
-    width: min(320px, calc(100vw - #{$wolf-space-xl-v2}));
+    width: min(320px, calc(100vw - #{$space-6}));
     max-height: none;
   }
 
@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    border-top: 1px solid $wolf-border-light-v2;
+    border-top: 1px solid hsl(var(--border));
   }
 }
 </style>

@@ -12,7 +12,7 @@
  * - 减少初始加载体积，只在需要时才加载
  *
  * 设计规范（V2）：
- * - 使用 variables-v2.scss Design Token（颜色、间距、阴影、圆角）
+ * - 使用 base.css 设计令牌（颜色、间距、阴影、圆角）
  * - 使用 Lucide Icons（SVG 图标）
  * - 响应式布局：移动优先，375px 1列，768px 2列，1024px 3列
  * - 交互状态：hover 阴影、active scale 反馈
@@ -161,9 +161,9 @@ onMounted(() => {
         @click="openSheet('roles')"
       >
         <CardContent class="p-6">
-          <Shield class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">角色管理</h3>
-          <p class="text-sm text-wolf-text-secondary">配置角色与权限</p>
+          <Shield class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">角色管理</h3>
+          <p class="text-sm text-muted-foreground">配置角色与权限</p>
         </CardContent>
       </Card>
 
@@ -174,9 +174,9 @@ onMounted(() => {
         @click="openSheet('approval-flows')"
       >
         <CardContent class="p-6">
-          <Workflow class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">审批流程管理</h3>
-          <p class="text-sm text-wolf-text-secondary">配置审批流程与节点</p>
+          <Workflow class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">审批流程管理</h3>
+          <p class="text-sm text-muted-foreground">配置审批流程与节点</p>
         </CardContent>
       </Card>
 
@@ -187,9 +187,9 @@ onMounted(() => {
         @click="openSheet('acquisition-source')"
       >
         <CardContent class="p-6">
-          <Megaphone class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">获客来源</h3>
-          <p class="text-sm text-wolf-text-secondary">配置线索与客户共用的获客渠道</p>
+          <Megaphone class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">获客来源</h3>
+          <p class="text-sm text-muted-foreground">配置线索与客户共用的获客渠道</p>
         </CardContent>
       </Card>
 
@@ -200,9 +200,9 @@ onMounted(() => {
         @click="openSheet('procurement')"
       >
         <CardContent class="p-6">
-          <ShoppingCart class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">采购方式管理</h3>
-          <p class="text-sm text-wolf-text-secondary">配置采购方式与阶段模板</p>
+          <ShoppingCart class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">采购方式管理</h3>
+          <p class="text-sm text-muted-foreground">配置采购方式与阶段模板</p>
         </CardContent>
       </Card>
 
@@ -213,9 +213,9 @@ onMounted(() => {
         @click="openSheet('ai-config')"
       >
         <CardContent class="p-6">
-          <Cpu class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">AI 配置</h3>
-          <p class="text-sm text-wolf-text-secondary">配置大模型服务接口</p>
+          <Cpu class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">AI 配置</h3>
+          <p class="text-sm text-muted-foreground">配置大模型服务接口</p>
         </CardContent>
       </Card>
 
@@ -226,9 +226,9 @@ onMounted(() => {
         @click="openSheet('notification')"
       >
         <CardContent class="p-6">
-          <Bell class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">通知配置</h3>
-          <p class="text-sm text-wolf-text-secondary">配置审批流程的飞书群通知</p>
+          <Bell class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">通知配置</h3>
+          <p class="text-sm text-muted-foreground">配置审批流程的飞书群通知</p>
         </CardContent>
       </Card>
 
@@ -239,9 +239,9 @@ onMounted(() => {
         @click="openSheet('team-members')"
       >
         <CardContent class="p-6">
-          <Users class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">团队成员</h3>
-          <p class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</p>
+          <Users class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">团队成员</h3>
+          <p class="text-sm text-muted-foreground">管理团队成员与角色分配</p>
         </CardContent>
       </Card>
 
@@ -251,9 +251,9 @@ onMounted(() => {
         @click="openSheet('login-integration')"
       >
         <CardContent class="p-6">
-          <Plug class="w-8 h-8 mb-3 text-wolf-primary" />
-          <h3 class="text-base font-semibold text-wolf-text-primary mb-1">第三方集成</h3>
-          <p class="text-sm text-wolf-text-secondary">配置飞书登录与 AI Agent 机器人</p>
+          <Plug class="w-8 h-8 mb-3 text-brand" />
+          <h3 class="text-base font-semibold text-foreground mb-1">第三方集成</h3>
+          <p class="text-sm text-muted-foreground">配置飞书登录与 AI Agent 机器人</p>
         </CardContent>
       </Card>
 
@@ -295,12 +295,12 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-page {
-  background: $wolf-bg-page-v2;
+  background: hsl(var(--card));
   min-height: 100%;
-  padding: $wolf-page-padding-v2;
+  padding: var(--page-padding);
 }
 
 .system-config-loading {
@@ -309,15 +309,15 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-secondary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
 }
 
 .system-config-loading__bar {
   width: min(360px, 80%);
   height: 12px;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-muted-v2;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--muted));
   animation: system-config-pulse 1.2s ease-in-out infinite;
 }
 
@@ -336,16 +336,16 @@ onMounted(() => {
 // 响应式布局：移动优先，根据设计规范断点调整列数
 .system-config-grid {
   display: grid;
-  gap: $wolf-card-gap-v2; // 16px
+  gap: $space-4; // 16px
   grid-template-columns: 1fr; // 默认 1 列（移动端）
 
   // 平板竖屏 (768px+)：2 列
-  @media (min-width: $wolf-breakpoint-sm-v2) {
+  @media (min-width: $bp-sm) {
     grid-template-columns: repeat(2, 1fr);
   }
 
   // 平板横屏/小桌面 (1024px+)：3 列
-  @media (min-width: $wolf-breakpoint-md-v2) {
+  @media (min-width: $bp-md) {
     grid-template-columns: repeat(3, 1fr);
   }
 }
@@ -353,17 +353,17 @@ onMounted(() => {
 // 配置卡片
 // 使用设计 Token：阴影、过渡、圆角
 .system-config-card {
-  cursor: $wolf-cursor-clickable-v2;
-  transition: $wolf-transition-hover-v2;
-  border-radius: $wolf-radius-v2;
+  cursor: pointer;
+  transition: all var(--duration-base) var(--ease-standard);
+  border-radius: var(--radius-md);
 
   &:hover {
-    box-shadow: $wolf-shadow-hover-v2;
+    box-shadow: var(--shadow-2);
   }
 
   &:active {
     transform: scale(0.98);
-    box-shadow: $wolf-shadow-card-v2;
+    box-shadow: var(--shadow-1);
   }
 }
 </style>

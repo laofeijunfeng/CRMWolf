@@ -590,7 +590,7 @@ onBeforeUnmount((): void => {
 <template>
   <div class="contract-detail-content" :class="{ 'flex-1 min-h-0': readonly }">
     <!-- Header -->
-    <SheetHeader class="p-6 pb-4 border-b border-wolf-border-default-v2">
+    <SheetHeader class="p-6 pb-4 border-b border-border">
       <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -626,7 +626,7 @@ onBeforeUnmount((): void => {
             <Badge v-if="contractInfo" :class="['status-badge', getStatusClass(contractInfo.status)]">
               {{ getStatusText(contractInfo.status) }}
             </Badge>
-            <span v-else class="text-sm text-wolf-text-tertiary-v2">
+            <span v-else class="text-sm text-muted-foreground">
               {{ loading ? '正在加载合同信息' : '查看合同基础信息与审批进度' }}
             </span>
           </SheetDescription>
@@ -635,7 +635,7 @@ onBeforeUnmount((): void => {
         <div v-if="contractInfo" class="amount-summary">
           <div class="amount-label">合同总金额</div>
           <AmountText :value="contractInfo.total_amount" size="lg" />
-          <div v-if="pendingContractChange !== null" class="mt-2 max-w-sm rounded-md border border-wolf-warning/30 bg-wolf-warning/10 px-3 py-2 text-sm text-wolf-warning">
+          <div v-if="pendingContractChange !== null" class="mt-2 max-w-sm rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
             合同变更审批中：金额拟改为 {{ formatCurrencyValue(pendingNewAmount) }}
           </div>
         </div>
@@ -821,7 +821,7 @@ onBeforeUnmount((): void => {
                       <span>{{ item.reason }}</span>
                     </div>
                     <div class="flex items-start gap-2">
-                      <Badge :class="item.approval_phase === 'rejected' ? 'bg-wolf-danger/10 text-wolf-danger' : item.approval_phase === 'approved' ? 'bg-wolf-success/10 text-wolf-success' : 'bg-wolf-warning/10 text-wolf-warning'">{{ approvalPhaseText(item.approval_phase) }}</Badge>
+                      <Badge :class="item.approval_phase === 'rejected' ? 'bg-danger/10 text-danger' : item.approval_phase === 'approved' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'">{{ approvalPhaseText(item.approval_phase) }}</Badge>
                       <Button v-if="item.attachment_name !== null" type="button" variant="ghost" size="sm" :aria-label="`下载${item.attachment_name}`" @click="downloadContractChangeAttachment(item)">
                         <Download class="w-4 h-4 mr-1" aria-hidden="true" />附件
                       </Button>
@@ -887,7 +887,7 @@ onBeforeUnmount((): void => {
       </ScrollArea>
 
       <!-- Footer -->
-      <SheetFooter v-if="!readonly" class="p-4 border-t border-wolf-border-default-v2 footer-actions">
+      <SheetFooter v-if="!readonly" class="p-4 border-t border-border footer-actions">
         <div v-if="showContractChangeEntry" class="mr-auto flex flex-col items-start gap-2">
           <p v-if="!canRequestContractChange" class="text-sm text-muted-foreground">
             {{ pendingContractChange !== null ? '已有一条变更在审批中，审批结束前不能再次发起' : contractInfo?.change_disabled_reason }}
@@ -978,46 +978,46 @@ onBeforeUnmount((): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .contract-detail-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .detail-breadcrumb {
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .detail-breadcrumb-link {
   border: 0;
   background: transparent;
   padding: 0;
-  color: $wolf-text-link-v2;
+  color: hsl(var(--brand));
   cursor: pointer;
   font: inherit;
 
   &:hover {
-    color: $wolf-text-link-hover-v2;
+    color: hsl(var(--brand));
   }
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
-    border-radius: $wolf-radius-control-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
   }
 }
 
 .contract-header-summary {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-width: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
     flex-wrap: wrap;
   }
@@ -1026,14 +1026,14 @@ onBeforeUnmount((): void => {
 .title-avatar {
   width: 48px;
   height: 48px;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -1046,7 +1046,7 @@ onBeforeUnmount((): void => {
   text-align: right;
   flex-shrink: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     width: 100%;
     text-align: left;
     padding-left: 64px;
@@ -1054,64 +1054,64 @@ onBeforeUnmount((): void => {
 }
 
 .amount-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  margin-bottom: $wolf-space-xs-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: $space-1;
 }
 
 .sheet-body {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xl-v2;
+  gap: $space-6;
   min-height: 600px;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    padding: $wolf-space-md-v2;
-    gap: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    padding: $space-3;
+    gap: $space-4;
   }
 }
 
 .loading-stack {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .info-card,
 .state-card {
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .section-heading {
-  padding: $wolf-space-md-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-3;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .section-title {
   margin: 0;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
 }
 
 .section-content {
-  padding: $wolf-space-md-v2;
+  padding: $space-3;
 }
 
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -1119,25 +1119,25 @@ onBeforeUnmount((): void => {
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .attribute-label {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
 }
 
 .attribute-value {
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-secondary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+  line-height: 20px;
   word-break: break-word;
 
   &.not-filled {
-    color: $wolf-text-placeholder-v2;
+    color: hsl(var(--muted-foreground));
   }
 }
 
@@ -1148,18 +1148,18 @@ onBeforeUnmount((): void => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-3;
+  padding: $space-6;
 }
 
 .footer-actions {
   display: flex;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     :deep(button) {
       flex: 1 1 100%;
     }
@@ -1170,47 +1170,47 @@ onBeforeUnmount((): void => {
 .status-badge {
   display: inline-flex;
   align-items: center;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  border-radius: $wolf-radius-full-v2;
+  padding: $space-1 $space-2;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 9999px;
   white-space: nowrap;
 }
 
 .status-default {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-tertiary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
 }
 
 .status-info {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
 }
 
 .status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
 }
 
 .status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 .status-muted {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-placeholder-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
 }
 
 // Reduced Motion 支持
 @media (prefers-reduced-motion: reduce) {
   * {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

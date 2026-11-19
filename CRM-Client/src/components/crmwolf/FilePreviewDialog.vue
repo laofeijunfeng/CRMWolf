@@ -504,15 +504,15 @@ const contentClass = computed(() => cn(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .file-preview__header {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 56px;
-  padding: $wolf-space-sm-v2 $wolf-space-sm-v2 $wolf-space-sm-v2 $wolf-space-lg-v2;
-  padding-top: max(#{$wolf-space-sm-v2}, env(safe-area-inset-top, 0px));
+  padding: $space-2 $space-2 $space-2 $space-4;
+  padding-top: max(#{$space-2}, env(safe-area-inset-top, 0px));
   border-bottom: 1px solid hsl(var(--border));
 }
 
@@ -532,15 +532,15 @@ const contentClass = computed(() => cn(
 
 .file-preview__title {
   overflow: hidden;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .file-preview__meta {
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .file-preview__header-actions,
@@ -548,7 +548,7 @@ const contentClass = computed(() => cn(
 .file-preview__state-actions {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .file-preview__header-actions {
@@ -558,7 +558,7 @@ const contentClass = computed(() => cn(
 .file-preview__toolbar {
   flex-wrap: nowrap;
   min-height: 48px;
-  padding: $wolf-space-xs-v2 $wolf-space-lg-v2;
+  padding: $space-1 $space-4;
   overflow-x: auto;
   border-bottom: 1px solid hsl(var(--border));
 }
@@ -566,14 +566,14 @@ const contentClass = computed(() => cn(
 .file-preview__divider {
   width: 1px;
   height: 20px;
-  margin: 0 $wolf-space-xs-v2;
+  margin: 0 $space-1;
   background: hsl(var(--border));
 }
 
 .file-preview__scale {
   min-width: 64px;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -585,8 +585,8 @@ const contentClass = computed(() => cn(
   align-items: safe center;
   justify-content: safe center;
   min-height: 0;
-  padding: $wolf-space-lg-v2;
-  padding-bottom: max(#{$wolf-space-lg-v2}, env(safe-area-inset-bottom, 0px));
+  padding: $space-4;
+  padding-bottom: max(#{$space-4}, env(safe-area-inset-bottom, 0px));
   overflow: auto;
   background: hsl(var(--muted));
   overscroll-behavior: contain;
@@ -605,7 +605,7 @@ const contentClass = computed(() => cn(
   flex: none;
   max-width: none;
   background: hsl(var(--background));
-  box-shadow: $wolf-shadow-card-v2;
+  box-shadow: var(--shadow-1);
 }
 
 .file-preview__frame {
@@ -620,13 +620,13 @@ const contentClass = computed(() => cn(
   flex: none;
   flex-direction: column;
   align-items: center;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 
   :deep(section.docx) {
     flex: none;
     margin: 0;
-    background: $wolf-bg-card-v2;
-    box-shadow: $wolf-shadow-card-v2;
+    background: hsl(var(--card));
+    box-shadow: var(--shadow-1);
   }
 }
 
@@ -641,8 +641,8 @@ const contentClass = computed(() => cn(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-2;
+  padding: $space-6;
   text-align: center;
 }
 
@@ -663,17 +663,17 @@ const contentClass = computed(() => cn(
 .file-preview__state-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: $wolf-font-size-body-v2;
+  font-size: 14px;
 }
 
 .file-preview__state-hint {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .file-preview__state-actions {
-  margin-top: $wolf-space-xs-v2;
+  margin-top: $space-1;
 }
 
 @keyframes file-preview-spin {
@@ -689,20 +689,20 @@ const contentClass = computed(() => cn(
   }
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .file-preview__header {
-    padding-left: $wolf-space-md-v2;
+    padding-left: $space-3;
   }
 
   .file-preview__toolbar {
     justify-content: space-between;
-    padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+    padding: $space-1 $space-2;
   }
 
   .file-preview__button,
   .file-preview__icon-button {
-    min-width: $wolf-touch-target-min-v2;
-    min-height: $wolf-touch-target-min-v2;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
   }
 
   .file-preview__maximize,
@@ -711,13 +711,13 @@ const contentClass = computed(() => cn(
   }
 
   .file-preview__reader {
-    padding: $wolf-space-sm-v2;
+    padding: $space-2;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .file-preview__spinner {
-    animation-duration: $wolf-reduced-motion-duration-v2;
+    animation-duration: 0.01ms;
   }
 }
 </style>

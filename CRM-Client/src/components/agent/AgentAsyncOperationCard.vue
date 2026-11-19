@@ -137,12 +137,12 @@ const retryNotice = computed(() => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .agent-async-operation {
   width: 100%;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -150,7 +150,7 @@ const retryNotice = computed(() => {
   display: inline-grid;
   grid-template-columns: 16px minmax(0, auto) 14px;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   max-width: 100%;
   min-height: 24px;
   padding: 0;
@@ -163,13 +163,13 @@ const retryNotice = computed(() => {
 }
 
 .agent-async-operation__trigger:hover .agent-async-operation__title {
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
 }
 
 .agent-async-operation__trigger:focus-visible {
-  border-radius: $wolf-radius-sm-v2;
-  outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-  outline-offset: $wolf-focus-ring-offset-v2;
+  border-radius: var(--radius-sm);
+  outline: 2px solid hsl(var(--brand));
+  outline-offset: 2px;
 }
 
 .agent-async-operation__status-icon {
@@ -178,19 +178,19 @@ const retryNotice = computed(() => {
 }
 
 .agent-async-operation__status-icon--info {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
 }
 
 .agent-async-operation__status-icon--success {
-  color: $wolf-success-v2;
+  color: hsl(var(--status-success));
 }
 
 .agent-async-operation__status-icon--warning {
-  color: $wolf-warning-v2;
+  color: hsl(var(--status-warning));
 }
 
 .agent-async-operation__status-icon--danger {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .agent-async-operation__status-icon--spin {
@@ -203,7 +203,7 @@ const retryNotice = computed(() => {
 
 .agent-async-operation__title {
   overflow: hidden;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: color 120ms ease;
@@ -212,22 +212,22 @@ const retryNotice = computed(() => {
 .agent-async-operation__chevron {
   width: 14px;
   height: 14px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .agent-async-operation__details {
   display: grid;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-xs-v2;
+  gap: $space-2;
+  margin-top: $space-1;
   margin-left: 7px;
-  padding-top: $wolf-space-xs-v2;
+  padding-top: $space-1;
   padding-left: 16px;
-  border-left: 1px solid color-mix(in srgb, $wolf-primary-v2 12%, transparent);
+  border-left: 1px solid color-mix(in srgb, hsl(var(--brand)) 12%, transparent);
 }
 
 .agent-async-operation__events {
   display: grid;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -237,7 +237,7 @@ const retryNotice = computed(() => {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr);
   align-items: flex-start;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .agent-async-operation__event-icon {
@@ -245,14 +245,14 @@ const retryNotice = computed(() => {
   height: 6px;
   margin-top: 6px;
   fill: currentColor;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   stroke-width: 0;
 }
 
 .agent-async-operation__empty,
 .agent-async-operation__notice {
   margin: 0;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 @keyframes agent-async-operation-spin {

@@ -9,7 +9,7 @@
  * - Conditional approval progress display using V2 design system
  * - Footer close button
  *
- * Design: shadcn-vue + variables-v2.scss.
+ * Design: shadcn-vue + base.css 设计令牌.
  * Accessibility: focus-visible states, aria labels, touch targets >= 44px, semantic status display.
  */
 import { computed, ref, watch } from 'vue'
@@ -728,20 +728,20 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
-$record-border-width: $wolf-focus-ring-width-subtle-v2;
-$record-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
-$record-header-mobile-indent: calc($record-title-avatar-size + $wolf-space-md-v2);
-$record-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 8 + #{$wolf-space-2xl-v2});
-$record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
+$record-border-width: 1px;
+$record-title-avatar-size: calc(var(--touch-target) + $space-1);
+$record-header-mobile-indent: calc($record-title-avatar-size + $space-3);
+$record-sheet-min-height: calc(#{var(--touch-target)} * 8 + #{$space-8});
+$record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .detail-embedded-content {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: $wolf-bg-card-v2;
+  background: hsl(var(--card));
 }
 
 .record-sheet-scroll {
@@ -750,22 +750,22 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .readonly-error-state {
-  padding: $wolf-space-lg-v2 0;
+  padding: $space-4 0;
 }
 
 .record-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: $record-border-width solid $wolf-border-default-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: $record-border-width solid hsl(var(--border));
 }
 
 .record-header-summary {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-width: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
     flex-wrap: wrap;
   }
@@ -774,14 +774,14 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 .title-avatar {
   width: $record-title-avatar-size;
   height: $record-title-avatar-size;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: $wolf-topbar-title-font-size-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-size: 20px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -791,32 +791,32 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .record-sheet-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
 }
 
 .record-sheet-description {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
+  color: hsl(var(--muted-foreground));
   flex-wrap: wrap;
 }
 
 .stage-name {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .amount-summary {
   display: flex;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   align-items: center;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     width: 100%;
     padding-left: $record-header-mobile-indent;
   }
@@ -826,43 +826,43 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: $wolf-space-xs-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  border: $record-border-width solid $wolf-border-light-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
+  gap: $space-1;
+  padding: $space-2 $space-3;
+  border: $record-border-width solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
 
   strong {
-    color: $wolf-success-text-v2;
-    font-family: $wolf-font-mono-v2;
-    font-size: $wolf-font-size-body-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
+    color: hsl(var(--status-success));
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 }
 
 .amount-summary-label {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .sheet-body {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xl-v2;
+  gap: $space-6;
   min-height: $record-sheet-min-height;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    padding: $wolf-space-md-v2;
-    gap: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    padding: $space-3;
+    gap: $space-4;
   }
 }
 
 .loading-stack {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .info-card,
@@ -870,42 +870,42 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 .rejection-card,
 .approval-card,
 .state-card {
-  background: $wolf-bg-card-v2;
-  border: $record-border-width solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border: $record-border-width solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .section-heading {
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: $record-border-width solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: $record-border-width solid hsl(var(--border));
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .section-title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .section-content {
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
 }
 
 .attributes-grid,
 .approval-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -913,7 +913,7 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 .approval-summary-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -921,17 +921,17 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .attribute-label {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  gap: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .attribute-icon {
@@ -941,10 +941,10 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .attribute-value {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   word-break: break-word;
 }
 
@@ -953,23 +953,23 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .mono-value {
-  font-family: $wolf-font-mono-v2;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .voucher-section {
-  margin-top: $wolf-space-lg-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: $record-border-width solid $wolf-border-light-v2;
+  margin-top: $space-4;
+  padding-top: $space-4;
+  border-top: $record-border-width solid hsl(var(--border));
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .voucher-preview {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .voucher-thumb {
@@ -977,12 +977,12 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
   max-width: 100%;
   padding: 0;
   border: 0;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
   background: none;
   cursor: zoom-in;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
   }
 }
@@ -991,8 +991,8 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
   display: block;
   max-width: 100%;
   max-height: 240px;
-  border-radius: $wolf-radius-v2;
-  border: $record-border-width solid $wolf-border-light-v2;
+  border-radius: var(--radius-md);
+  border: $record-border-width solid hsl(var(--border));
   transition: transform 0.15s ease;
 
   .voucher-thumb:hover & {
@@ -1001,33 +1001,33 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .voucher-link {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   align-self: flex-start;
 }
 
 .voucher-hint {
   margin: 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .notes-text {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  line-height: 20px;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .rejection-card {
-  border-color: $wolf-danger-v2;
-  background: $wolf-danger-bg-v2;
+  border-color: hsl(var(--status-danger));
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .rejection-reason {
   margin: 0;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1036,13 +1036,13 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
   flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .approval-content {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .record-status-badge {
@@ -1051,18 +1051,18 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 
 .record-status-badge,
 .status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
 }
 
 .status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 
@@ -1072,8 +1072,8 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-3;
+  padding: $space-6;
 }
 
 .state-card-content-inline {
@@ -1084,16 +1084,16 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 }
 
 .record-sheet-footer {
-  padding: $wolf-space-lg-v2;
-  border-top: $record-border-width solid $wolf-border-default-v2;
+  padding: $space-4;
+  border-top: $record-border-width solid hsl(var(--border));
   display: flex;
   flex: 0 0 auto;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     :deep(button) {
       flex: 1 1 100%;
     }
@@ -1102,7 +1102,7 @@ $record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-
 
 @media (prefers-reduced-motion: reduce) {
   .record-header-summary {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

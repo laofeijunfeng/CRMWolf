@@ -177,7 +177,6 @@ watch(isCompactToolbar, async (compact) => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .list-advanced-tools-desktop {
   display: contents;
@@ -202,8 +201,8 @@ watch(isCompactToolbar, async (compact) => {
 
 .list-advanced-tools-heading {
   padding: 4px 8px;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .list-advanced-tools-items {

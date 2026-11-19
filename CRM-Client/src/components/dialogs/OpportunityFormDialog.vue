@@ -582,7 +582,7 @@ function continueEditing(): void {
               label="所属客户"
               required
               readonly
-              control-class="bg-wolf-bg-muted-v2 text-wolf-text-primary-v2"
+              control-class="bg-muted text-foreground"
               aria-readonly="true"
             />
             <SearchableSelectField
@@ -607,11 +607,11 @@ function continueEditing(): void {
         </FormField>
 
         <div class="space-y-2">
-          <p id="opportunity-product-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-            产品 <span class="text-wolf-danger" aria-hidden="true">*</span>
+          <p id="opportunity-product-label" class="text-caption font-medium text-foreground">
+            产品 <span class="text-danger" aria-hidden="true">*</span>
           </p>
-          <p v-if="loadingProducts" class="text-sm text-wolf-text-secondary">加载产品中...</p>
-          <p v-else-if="productOptions.length === 0" class="text-sm text-wolf-text-secondary">{{ EMPTY_CATALOG_MESSAGE }}</p>
+          <p v-if="loadingProducts" class="text-sm text-muted-foreground">加载产品中...</p>
+          <p v-else-if="productOptions.length === 0" class="text-sm text-muted-foreground">{{ EMPTY_CATALOG_MESSAGE }}</p>
           <SegmentedChoiceControl
             v-else
             :model-value="String(values.product_public_id ?? '')"
@@ -628,9 +628,9 @@ function continueEditing(): void {
 
         <FormField v-slot="{ value, handleChange }" name="product_module_public_ids">
           <FormItem>
-            <div class="grid gap-wolf-xs">
-              <p id="opportunity-modules-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-                产品模块 <span class="text-wolf-danger" aria-hidden="true">*</span>
+            <div class="grid gap-1">
+              <p id="opportunity-modules-label" class="text-caption font-medium text-foreground">
+                产品模块 <span class="text-danger" aria-hidden="true">*</span>
               </p>
               <MultiSelect
                 :model-value="Array.isArray(value) ? value : []"
@@ -682,9 +682,9 @@ function continueEditing(): void {
 
         <FormField v-slot="{ value, handleChange }" name="license_type">
           <FormItem>
-            <div class="grid gap-wolf-xs">
-              <p id="opportunity-license-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-                授权类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+            <div class="grid gap-1">
+              <p id="opportunity-license-type-label" class="text-caption font-medium text-foreground">
+                授权类型 <span class="text-danger" aria-hidden="true">*</span>
               </p>
               <SegmentedChoiceControl
                 id="opportunity-license-type"
@@ -720,9 +720,9 @@ function continueEditing(): void {
 
         <FormField v-slot="{ value, handleChange }" name="purchase_type">
           <FormItem>
-            <div class="grid gap-wolf-xs">
-              <p id="opportunity-purchase-type-label" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
-                采购类型 <span class="text-wolf-danger" aria-hidden="true">*</span>
+            <div class="grid gap-1">
+              <p id="opportunity-purchase-type-label" class="text-caption font-medium text-foreground">
+                采购类型 <span class="text-danger" aria-hidden="true">*</span>
               </p>
               <SegmentedChoiceControl
                 id="opportunity-purchase-type"
@@ -807,13 +807,13 @@ function continueEditing(): void {
 </template>
 
 <style lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* 非 scoped：DialogContent 经 Portal 渲染，scoped data 属性不随 class 传递 */
 .opportunity-form-dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow: hidden;
 }
 
@@ -821,10 +821,10 @@ function continueEditing(): void {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-inline: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  scroll-padding-bottom: calc($wolf-space-xl-v2 + $wolf-safe-area-bottom-v2);
+  padding-inline: calc(2px + 2px);
+  scroll-padding-bottom: calc($space-6 + var(--safe-bottom));
 }
 </style>

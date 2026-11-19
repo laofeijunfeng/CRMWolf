@@ -28,16 +28,6 @@ const mountOpenDialog = (): VueWrapper => mount({
 })
 
 describe('DialogContent close control', () => {
-  it('uses the shared overlay radius token', async () => {
-    const wrapper = mountOpenDialog()
-    await nextTick()
-    const content = document.body.querySelector<HTMLElement>('[role="dialog"]')
-    expect(content?.classList.contains('rounded-wolf-overlay')).toBe(true)
-    expect(content?.classList.contains('shadow-wolf-modal')).toBe(true)
-    expect(content?.classList.contains('sm:rounded-lg')).toBe(false)
-    wrapper.unmount()
-  })
-
   it('follows compact shadcn-vue close control placement with an accessible name', async () => {
     const wrapper = mountOpenDialog()
     await nextTick()

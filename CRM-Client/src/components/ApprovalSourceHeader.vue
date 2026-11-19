@@ -52,14 +52,14 @@ const emit = defineEmits<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-source-header {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-lg-v2 $wolf-space-xl-v2 0;
-  padding-right: calc(#{$wolf-space-xl-v2} + 32px);
+  gap: $space-3;
+  padding: $space-4 $space-6 0;
+  padding-right: calc(#{$space-6} + 32px);
   min-width: 0;
 }
 
@@ -67,29 +67,29 @@ const emit = defineEmits<{
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-secondary-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 .approval-source-header__back,
 .approval-source-header__breadcrumb-back {
   display: inline-flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   flex-shrink: 0;
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
   border: 0;
   background: transparent;
   padding: 0;
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
   font-weight: 500;
   cursor: pointer;
   &:focus-visible {
-    outline: 2px solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
-    border-radius: $wolf-radius-sm-v2;
+    border-radius: var(--radius-sm);
   }
 }
 
@@ -100,7 +100,7 @@ const emit = defineEmits<{
 
 .approval-source-header__back {
   justify-content: center;
-  width: $wolf-touch-target-min-v2;
+  width: var(--touch-target);
 }
 
 .approval-source-header__breadcrumb {
@@ -108,7 +108,7 @@ const emit = defineEmits<{
   flex: 1;
   flex-wrap: wrap;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 

@@ -234,16 +234,16 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .area-trend-card {
   min-width: 0;
-  border-color: color-mix(in srgb, $wolf-border-default-v2 90%, transparent);
-  border-radius: $wolf-radius-xl-v2;
+  border-color: color-mix(in srgb, hsl(var(--border)) 90%, transparent);
+  border-radius: var(--radius-xl);
   background:
-    linear-gradient(0deg, color-mix(in srgb, $wolf-primary-v2 4.5%, transparent) 0%, color-mix(in srgb, $wolf-primary-v2 1.8%, transparent) 36%, rgba(255, 255, 255, 0) 72%),
-    $wolf-bg-card-v2;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    linear-gradient(0deg, color-mix(in srgb, hsl(var(--brand)) 4.5%, transparent) 0%, color-mix(in srgb, hsl(var(--brand)) 1.8%, transparent) 36%, transparent 72%),
+    hsl(var(--card));
+  box-shadow: var(--shadow-1);
 }
 
 .area-trend-card__header {
@@ -251,7 +251,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
   padding: 16px 18px 8px;
 }
 
@@ -261,17 +261,17 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 
 .area-trend-card__title {
   margin: 0;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-size: 16px;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   line-height: 1.4;
   letter-spacing: 0;
 }
 
 .area-trend-card__description {
   margin-top: 2px;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -289,8 +289,8 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -299,7 +299,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   width: 8px;
   height: 8px;
   flex: 0 0 8px;
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
 }
 
 .area-trend-card__actions {
@@ -328,7 +328,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: 12px;
   line-height: 1.4;
   white-space: nowrap;
@@ -338,14 +338,14 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   width: 8px;
   height: 8px;
   flex: 0 0 8px;
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
 }
 
 .area-trend-card__summary strong {
-  color: $wolf-text-primary-v2;
-  font-family: $wolf-font-mono-v2;
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono);
   font-size: 12px;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -355,8 +355,8 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 }
 
 .area-trend-chart {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .area-trend-tooltip-host {
@@ -370,7 +370,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   position: absolute;
   z-index: 1;
   width: 1px;
-  background: color-mix(in srgb, $wolf-text-tertiary-v2 26%, transparent);
+  background: color-mix(in srgb, hsl(var(--muted-foreground)) 26%, transparent);
   pointer-events: none;
 }
 
@@ -379,15 +379,15 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed color-mix(in srgb, $wolf-border-default-v2 80%, transparent);
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  border: 1px dashed color-mix(in srgb, hsl(var(--border)) 80%, transparent);
+  border-radius: var(--radius-md);
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .area-trend-card__skeleton {
   overflow: hidden;
-  background: linear-gradient(90deg, color-mix(in srgb, $wolf-bg-muted-v2 55%, transparent), color-mix(in srgb, $wolf-bg-muted-v2 95%, transparent), color-mix(in srgb, $wolf-bg-muted-v2 55%, transparent));
+  background: linear-gradient(90deg, color-mix(in srgb, hsl(var(--muted)) 55%, transparent), color-mix(in srgb, hsl(var(--muted)) 95%, transparent), color-mix(in srgb, hsl(var(--muted)) 55%, transparent));
   background-size: 200% 100%;
   animation: areaTrendLoading 1.2s ease-in-out infinite;
 }
@@ -403,21 +403,19 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   width: 100%;
   min-width: 184px;
   padding: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-secondary-v2;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow:
-    0 8px 18px rgba(15, 23, 42, 0.1),
-    0 1px 2px rgba(15, 23, 42, 0.05);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--popover) / 0.96);
+  box-shadow: var(--shadow-2);
   backdrop-filter: blur(8px);
 }
 
 :global(.area-trend-tooltip__title) {
   margin-bottom: 8px;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1.4;
 }
 
@@ -426,7 +424,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -444,21 +442,21 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   width: 8px;
   height: 8px;
   flex: 0 0 8px;
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
 }
 
 :global(.area-trend-tooltip__row strong) {
   flex: 0 0 auto;
-  color: $wolf-text-primary-v2;
-  font-family: $wolf-font-mono-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .area-trend-card__header {
     flex-direction: column;
-    gap: $wolf-space-sm-v2;
+    gap: $space-2;
     padding: 14px 14px 8px;
   }
 

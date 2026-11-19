@@ -60,26 +60,26 @@ function activate(action: T): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .chart-bucket-actions {
   display: grid;
   min-width: 0;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .chart-bucket-actions__action {
   width: 100%;
   height: auto;
   justify-content: flex-start;
-  gap: $wolf-space-sm-v2;
-  border-radius: $wolf-radius-control-v2;
+  gap: $space-2;
+  border-radius: var(--radius-md);
   text-align: left;
   white-space: normal;
 }
 
 .chart-bucket-actions__action:not(:disabled):hover {
-  background: $wolf-bg-muted-v2;
+  background: hsl(var(--muted));
 }
 
 .chart-bucket-actions__color {
@@ -91,18 +91,18 @@ function activate(action: T): void {
 
 @media (max-width: 600px) {
   .chart-bucket-actions__action {
-    min-height: $wolf-touch-target-min-v2;
+    min-height: var(--touch-target);
   }
 }
 
 .chart-bucket-actions__label {
   min-width: 0;
   flex: 1 1 auto;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
 }
 
 .chart-bucket-actions__value {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

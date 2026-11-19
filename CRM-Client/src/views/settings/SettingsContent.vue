@@ -17,27 +17,27 @@ const props = withDefaults(defineProps<Props>(), {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .settings-content {
   min-height: 100%;
-  padding: $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .settings-content__description {
   margin: 0;
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-secondary-v2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 :deep(.settings-form-grid) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-form-item-gap-v2;
+  gap: $space-4;
 }
 
 :deep(.settings-form-grid-full) {
@@ -47,24 +47,24 @@ const props = withDefaults(defineProps<Props>(), {
 :deep(.settings-form-actions) {
   display: flex;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-surface-v2;
-  padding: $wolf-card-padding-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  gap: $space-2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-lg);
+  padding: $space-4;
+  box-shadow: var(--shadow-1);
 }
 
 :deep(.settings-dl) {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr) 120px minmax(0, 1fr);
-  gap: $wolf-space-md-v2 $wolf-space-xl-v2;
+  gap: $space-3 $space-6;
   margin: 0;
-  font-size: $wolf-font-size-body-v2;
+  font-size: 14px;
 }
 
 :deep(.settings-dl dt) {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 :deep(.settings-dl dd) {
@@ -77,9 +77,9 @@ const props = withDefaults(defineProps<Props>(), {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: $wolf-space-lg-v2;
-  padding: $wolf-space-md-v2 0;
-  border-top: 1px solid $wolf-border-light-v2;
+  gap: $space-4;
+  padding: $space-3 0;
+  border-top: 1px solid hsl(var(--border));
 }
 
 :deep(.settings-setting-row:first-child) {
@@ -87,9 +87,9 @@ const props = withDefaults(defineProps<Props>(), {
   padding-top: 0;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .settings-content {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 
   :deep(.settings-form-grid),

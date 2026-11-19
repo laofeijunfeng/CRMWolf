@@ -52,7 +52,7 @@
           <div class="header-center">
             <Transition name="title-fade" mode="out-in">
               <h1
-                class="wolf-page-title"
+                class="app-page-title"
                 :key="pageTitle"
                 :class="{ 'title-empty': !pageTitle }"
               >
@@ -328,9 +328,9 @@ onMounted(async () => {
 /**
  * AppLayout Styles - V2 Design Tokens
  * 规范依据: MASTER.md 二、Design Token 强制规范
- * 导入: variables-v2.scss
+ * 导入: base.css 设计令牌
  */
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 // ==================== z-index 层级管理 ====================
 // MASTER.md 5.5 + UI/UX Pro Max §5
@@ -454,8 +454,8 @@ $z-index-bottom-nav: 100;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  height: $wolf-topbar-height-v2;  // 56px
-  padding: 0 $wolf-space-lg-v2;
+  height: var(--topbar-height);  // 56px
+  padding: 0 $space-4;
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   box-shadow: none;
@@ -463,20 +463,20 @@ $z-index-bottom-nav: 100;
   top: 0;
   z-index: $z-index-topbar;  // 90
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {  // <768px
-    height: $wolf-topbar-height-mobile-v2;
-    padding: 0 $wolf-page-padding-mobile-v2;
+  @media (max-width: $bp-sm - 1) {  // <768px
+    height: var(--topbar-height);
+    padding: 0 var(--page-padding);
 
     @supports (padding-top: env(safe-area-inset-top)) {
-      height: calc($wolf-topbar-height-mobile-v2 + $wolf-safe-area-top-v2);
-      padding-top: $wolf-safe-area-top-v2;
+      height: calc(var(--topbar-height) + var(--safe-top));
+      padding-top: var(--safe-top);
     }
 
     &.has-tabs {
-      height: calc($wolf-topbar-height-mobile-v2 + 44px);
+      height: calc(var(--topbar-height) + 44px);
 
       @supports (padding-top: env(safe-area-inset-top)) {
-        height: calc($wolf-topbar-height-mobile-v2 + 44px + $wolf-safe-area-top-v2);
+        height: calc(var(--topbar-height) + 44px + var(--safe-top));
       }
     }
   }
@@ -485,7 +485,7 @@ $z-index-bottom-nav: 100;
 .top-bar-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  column-gap: $wolf-space-md-v2;
+  column-gap: $space-3;
   align-items: center;
   width: 100%;
   height: 100%;
@@ -504,7 +504,7 @@ $z-index-bottom-nav: 100;
   align-items: center;
   min-width: 0;
   min-height: 44px;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 
   // TopBarTabs 在 TopBar 左侧的样式调整
   .top-bar-tabs {
@@ -537,17 +537,17 @@ $z-index-bottom-nav: 100;
   display: none;
 }
 
-.wolf-page-title {
-  font-size: $wolf-font-size-title-v2;  // 16px → 20px（MASTER.md 6.2）
-  font-weight: $wolf-font-weight-semibold-v2;  // 600
+.app-page-title {
+  font-size: 16px;  // 16px → 20px（MASTER.md 6.2）
+  font-weight: 600;  // 600
   letter-spacing: -0.02em;
-  color: hsl(var(--foreground));  // #020817
+  color: hsl(var(--foreground));
   margin: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity $wolf-transition-v2;
+  transition: opacity all var(--duration-base) var(--ease-standard);
 
   &.title-empty {
     opacity: 0.6;
@@ -560,20 +560,20 @@ $z-index-bottom-nav: 100;
   justify-self: end;
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;  // 8px
+  gap: $space-2;  // 8px
   min-width: 44px;
 }
 
 .header-actions-desktop {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .header-actions-mobile {
   display: none;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 // Header Buttons
@@ -587,8 +587,8 @@ $z-index-bottom-nav: 100;
   justify-content: center;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid hsl(var(--ring) / 0.5);
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
@@ -616,7 +616,7 @@ $z-index-bottom-nav: 100;
 
 .header-more-item {
   min-height: 44px;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .header-more-item--danger {
@@ -633,7 +633,7 @@ $z-index-bottom-nav: 100;
   width: 1px;
   height: 24px;
   background: hsl(var(--border));
-  margin: 0 $wolf-space-sm-v2;  // 0 8px
+  margin: 0 $space-2;  // 0 8px
 }
 
 .header-approval {
@@ -643,7 +643,7 @@ $z-index-bottom-nav: 100;
 // Title transition
 .title-fade-enter-active,
 .title-fade-leave-active {
-  transition: opacity $wolf-transition-v2;
+  transition: opacity all var(--duration-base) var(--ease-standard);
 }
 
 .title-fade-enter-from,
@@ -653,7 +653,7 @@ $z-index-bottom-nav: 100;
 
 // ==================== Mobile Responsive ====================
 // MASTER.md 10.1 + UI/UX Pro Max §5
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {  // <768px
+@media (max-width: $bp-sm - 1) {  // <768px
   .main-content {
     height: 100dvh;
     overflow: hidden;
@@ -684,7 +684,7 @@ $z-index-bottom-nav: 100;
   .top-bar-main {
     grid-template-columns: 72px minmax(0, 1fr) minmax(44px, auto);
     column-gap: 0;
-    height: $wolf-topbar-height-mobile-v2;
+    height: var(--topbar-height);
     flex-shrink: 0;
   }
 
@@ -700,7 +700,7 @@ $z-index-bottom-nav: 100;
   }
 
   .sidebar-trigger-separator {
-    margin-left: $wolf-space-xs-v2;
+    margin-left: $space-1;
   }
 
   .top-bar-tabs-desktop {
@@ -713,18 +713,18 @@ $z-index-bottom-nav: 100;
 
   .header-center {
     min-width: 0;
-    padding: 0 $wolf-space-sm-v2;
+    padding: 0 $space-2;
   }
 
-  .wolf-page-title {
-    font-size: $wolf-font-size-title-mobile-v2;
-    line-height: $wolf-line-height-title-v2;
+  .app-page-title {
+    font-size: 18px;
+    line-height: 24px;
     letter-spacing: 0;
   }
 
   .header-right {
     flex-shrink: 0;
-    gap: $wolf-space-xs-v2;
+    gap: $space-1;
   }
 
   .header-actions-desktop {
@@ -736,7 +736,7 @@ $z-index-bottom-nav: 100;
   }
 
   .header-mobile-primary {
-    padding: 0 $wolf-space-sm-v2;
+    padding: 0 $space-2;
   }
 
   .header-mobile-primary--icon-only {
@@ -790,14 +790,14 @@ $z-index-bottom-nav: 100;
   .user-chevron,
   .top-bar,
   .header-mobile-primary {
-    transition-duration: $wolf-reduced-motion-duration-v2;  // 0.01ms
+    transition-duration: 0.01ms;  // 0.01ms
   }
 
   .dropdown-enter-active,
   .dropdown-leave-active,
   .title-fade-enter-active,
   .title-fade-leave-active {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 
   @keyframes dropdown-enter {

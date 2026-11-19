@@ -13,10 +13,10 @@ const props = withDefaults(defineProps<{
 <template>
   <div
     :class="cn(
-      'max-w-[min(680px,100%)] rounded-wolf-lg px-wolf-md py-wolf-sm text-wolf-body leading-relaxed shadow-sm',
-      variant === 'sent' && 'bg-wolf-primary text-white',
-      variant === 'received' && 'border border-wolf-border-default bg-wolf-bg-card text-wolf-text-primary',
-      variant === 'default' && 'border border-wolf-border-default bg-wolf-bg-muted text-wolf-text-primary',
+      'max-w-[min(680px,100%)] rounded-lg px-3 py-2 text-body leading-relaxed shadow-sm',
+      variant === 'sent' && 'bg-primary text-primary-foreground',
+      variant === 'received' && 'border border-border bg-card text-foreground',
+      variant === 'default' && 'border border-border bg-muted text-foreground',
       props.class
     )"
   >

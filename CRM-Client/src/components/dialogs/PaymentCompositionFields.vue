@@ -122,43 +122,43 @@ function updateField(field: keyof PaymentCompositionForm, value: string | number
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .payment-composition {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-lg-v2;
-  border: 1px solid $wolf-border-divider-v2;
-  border-radius: $wolf-radius-lg-v2;
+  gap: $space-3;
+  padding: $space-4;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
 }
 
 .payment-composition__header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .payment-composition__title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .payment-composition__hint,
 .payment-composition__column,
 .payment-composition__status {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .payment-composition__table {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-  gap: $wolf-space-sm-v2 $wolf-space-md-v2;
+  gap: $space-2 $space-3;
   align-items: center;
 }
 
@@ -167,17 +167,17 @@ function updateField(field: keyof PaymentCompositionForm, value: string | number
 }
 
 .payment-composition__row {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .payment-composition__status--error {
-  color: $wolf-danger-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--status-danger));
+  font-weight: 500;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .payment-composition__header {
     flex-direction: column;
   }

@@ -60,9 +60,9 @@ async function focusField(item: FormErrorSummaryItem): Promise<void> {
 .form-error-summary {
   margin-bottom: 1rem;
   padding: 0.75rem 1rem;
-  border: 1px solid rgb(220 38 38 / 30%);
+  border: 1px solid hsl(var(--status-danger) / 0.3);
   border-radius: 0.375rem;
-  background: rgb(220 38 38 / 5%);
+  background: hsl(var(--status-danger) / 0.05);
   color: hsl(var(--destructive));
   font-size: 0.875rem;
 }

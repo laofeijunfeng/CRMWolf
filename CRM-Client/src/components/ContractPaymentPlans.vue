@@ -579,7 +579,7 @@ watch(
             :disabled="item.payment_records.length > 0"
             @click.stop="requestDeletePlan(item)"
           >
-            <Trash2 class="mr-2 h-4 w-4 text-wolf-danger-text" aria-hidden="true" />
+            <Trash2 class="mr-2 h-4 w-4 text-danger" aria-hidden="true" />
             删除
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -690,49 +690,49 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .plan-row {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   width: 100%;
-  padding-left: $wolf-space-md-v2;
+  padding-left: $space-3;
 
   &::before {
     content: '';
     position: absolute;
-    top: $wolf-space-xs-v2;
-    bottom: $wolf-space-xs-v2;
+    top: $space-1;
+    bottom: $space-1;
     left: 0;
     width: 3px;
-    border-radius: $wolf-radius-full-v2;
-    background: $wolf-border-default-v2;
+    border-radius: 9999px;
+    background: hsl(var(--border));
   }
 }
 
 .plan-status-pending::before,
 .plan-status-partial::before {
-  background: $wolf-warning-v2;
+  background: hsl(var(--status-warning));
 }
 
 .plan-status-overdue::before {
-  background: $wolf-danger-v2;
+  background: hsl(var(--status-danger));
 }
 
 .plan-status-completed::before {
-  background: $wolf-success-v2;
+  background: hsl(var(--status-success));
 }
 
 .plan-row-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-width: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -745,23 +745,23 @@ watch(
 .plan-title-line {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 }
 
 .stage-name {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
   word-break: break-word;
 }
 
 .plan-subtitle,
 .plan-note-inline {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
   word-break: break-word;
 }
 
@@ -769,10 +769,10 @@ watch(
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   flex-shrink: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
   }
 }
@@ -780,9 +780,9 @@ watch(
 .amount-subtitle {
   display: inline-flex;
   align-items: baseline;
-  gap: $wolf-space-xs-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  gap: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .plan-progress {
@@ -790,10 +790,10 @@ watch(
 }
 
 .contract-payment-records-dialog {
-  max-height: $wolf-modal-height-mobile-v2;
+  max-height: min(90vh, 90dvh);
   overflow-y: auto;
 
-  @media (min-width: $wolf-breakpoint-sm-v2) {
+  @media (min-width: $bp-sm) {
     max-width: 800px;
   }
 }

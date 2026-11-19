@@ -79,7 +79,6 @@ function handleKeyDown(event: KeyboardEvent): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .touch-card {
   // §2 press-feedback: Visual feedback on press
@@ -90,13 +89,13 @@ function handleKeyDown(event: KeyboardEvent): void {
 
   // §1 focus-states: Visible focus ring
   &:focus-visible {
-    outline: 2px solid $wolf-primary-v2;
+    outline: 2px solid hsl(var(--brand));
     outline-offset: 2px;
   }
 
   // Hover state (visual only)
   &:hover:not(:active):not(.cursor-not-allowed) {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--shadow-2);
   }
 
   // §7 reduced-motion: Respect user preference

@@ -6,7 +6,7 @@
       :scroll-key="messageScrollKey"
     >
       <div v-if="showEmptyState" class="grid min-h-full place-items-center content-center gap-4 text-center text-muted-foreground">
-        <Sparkles class="h-9 w-9 text-primary" aria-hidden="true" />
+        <Sparkles class="h-9 w-9 text-brand" aria-hidden="true" />
         <div class="text-base font-semibold text-foreground">告诉我你想查询或处理的 CRM 事项</div>
         <div class="flex flex-wrap justify-center gap-2">
           <Button type="button" variant="outline" size="sm" @click="useExample('我在上海有哪些客户？')">
@@ -35,7 +35,7 @@
         <Message :role="message.role" class="items-start">
           <Avatar
             v-if="message.role !== 'user'"
-            class="h-8 w-8 shrink-0 border border-primary/20 bg-primary/10 text-primary"
+            class="h-8 w-8 shrink-0 border border-brand/20 bg-brand/10 text-brand"
           >
             <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
               AI
@@ -113,7 +113,7 @@
       </Message>
 
       <Message v-if="streamingMessage !== null || showProcessingState" role="assistant" class="items-start">
-        <Avatar class="h-8 w-8 shrink-0 border border-primary/20 bg-primary/10 text-primary">
+        <Avatar class="h-8 w-8 shrink-0 border border-brand/20 bg-brand/10 text-brand">
           <AvatarFallback class="flex h-full w-full items-center justify-center font-semibold text-current">
             AI
           </AvatarFallback>

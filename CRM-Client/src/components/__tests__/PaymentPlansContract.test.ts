@@ -13,7 +13,6 @@ describe('ContractPaymentPlans V2 migration contract', () => {
     expect(source).toContain("@/components/crmwolf/ListCard.vue")
     expect(source).toContain("@/components/ui/button")
     expect(source).toContain("@/components/ui/dialog")
-    expect(source).toContain("@/styles/variables-v2.scss")
   })
 
   it('keeps payment-plan dialogs outside the ListCard content shell', () => {
@@ -33,8 +32,6 @@ describe('ContractPaymentPlans V2 migration contract', () => {
     expect(source).toMatch(/<DropdownMenuItem[^>]*class="min-h-11"/)
     expect(source).toContain('PaymentRecordDialog')
     expect(source).toContain('PaymentPlanFormDialog')
-    expect(source).toContain('text-wolf-danger-text')
-    expect(source).not.toContain('text-wolf-danger-text-v2')
   })
 })
 

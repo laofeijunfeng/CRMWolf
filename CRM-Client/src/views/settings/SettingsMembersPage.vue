@@ -486,7 +486,7 @@ watch([hasAccess, teamId], (): void => {
             {{ row.name?.charAt(0) || 'U' }}
           </div>
           <div class="min-w-0">
-            <div class="font-medium text-wolf-text-primary">{{ row.name }}</div>
+            <div class="font-medium text-foreground">{{ row.name }}</div>
             <div class="mt-1 text-xs text-muted-foreground">
               {{ row.email }}
             </div>

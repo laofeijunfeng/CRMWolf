@@ -9,7 +9,7 @@ const props = withDefaults(defineProps<Props>(), {})
 </script>
 
 <template>
-  <tr :class="cn('border-b border-wolf-border-light transition-colors hover:bg-wolf-bg-hover data-[state=selected]:bg-wolf-bg-muted', props.class)">
+  <tr :class="cn('border-b border-border transition-colors hover:bg-accent data-[state=selected]:bg-muted', props.class)">
     <slot />
   </tr>
 </template>

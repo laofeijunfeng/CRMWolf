@@ -298,8 +298,8 @@ watch(active, (isActive) => {
   >
     <component :is="embedded ? 'div' : DetailSheetContent">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">AI 配置</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">配置大模型服务接口</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">AI 配置</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">配置大模型服务接口</SheetDescription>
       </SheetHeader>
       <ScrollArea class="h-full">
         <div class="p-4 space-y-4">
@@ -511,7 +511,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://platform.deepseek.com/api-docs/"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       DeepSeek API 文档
                       <ExternalLink class="w-3 h-3" />
@@ -521,7 +521,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://platform.openai.com/docs/api-reference/chat"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       OpenAI API 文档
                       <ExternalLink class="w-3 h-3" />
@@ -531,7 +531,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://open.bigmodel.cn/dev/api"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       智谱 AI API 文档
                       <ExternalLink class="w-3 h-3" />
@@ -541,7 +541,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://help.aliyun.com/document_detail/610000.html"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       阿里云通义 API 文档
                       <ExternalLink class="w-3 h-3" />

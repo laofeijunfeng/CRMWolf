@@ -450,8 +450,8 @@ function handleRoleChange(roleId: number, checked: boolean): void {
   >
     <component :is="embedded === true ? 'div' : DetailSheetContent" class="settings-embedded-content">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">团队成员</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">管理团队成员与角色分配</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">团队成员</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">管理团队成员与角色分配</SheetDescription>
       </SheetHeader>
       <ScrollArea class="h-full">
         <!-- 团队信息 -->
@@ -507,7 +507,7 @@ function handleRoleChange(roleId: number, checked: boolean): void {
                   {{ item.name?.charAt(0) || 'U' }}
                 </div>
                 <div class="min-w-0">
-                  <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+                  <div class="font-medium text-foreground">{{ item.name }}</div>
                   <div class="mt-1 text-xs text-muted-foreground">
                     {{ item.email }} · {{ formatDate(item.joined_at) }}
                   </div>
@@ -778,12 +778,12 @@ function handleRoleChange(roleId: number, checked: boolean): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

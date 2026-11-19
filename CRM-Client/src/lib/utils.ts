@@ -4,30 +4,8 @@ import { extendTailwindMerge } from 'tailwind-merge'
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
-      rounded: [{
-        rounded: [
-          'wolf',
-          'wolf-sm',
-          'wolf-md',
-          'wolf-lg',
-          'wolf-xl',
-          'wolf-surface',
-          'wolf-overlay',
-          'wolf-sheet',
-          'wolf-popover',
-          'wolf-full'
-        ]
-      }],
-      shadow: [{
-        shadow: [
-          'wolf-card',
-          'wolf-hover',
-          'wolf-overlay',
-          'wolf-dropdown',
-          'wolf-modal',
-          'wolf-bottom'
-        ]
-      }]
+      'font-size': [{ text: ['display', 'title', 'body-strong', 'body', 'caption', 'control-sm'] }],
+      shadow: [{ shadow: ['1', '2', '3'] }]
     }
   }
 })

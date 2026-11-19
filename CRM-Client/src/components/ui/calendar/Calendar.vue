@@ -125,10 +125,10 @@ function compareDates(left: DateValue, right: DateValue): number {
   return left.compare(right)
 }
 
-const rangePointClass = 'is-range-point !bg-wolf-primary !text-wolf-text-inverse hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
-const rangeStartClass = 'is-range-start !bg-wolf-primary !text-wolf-text-inverse !rounded-l-md !rounded-r-none hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
-const rangeEndClass = 'is-range-end !bg-wolf-primary !text-wolf-text-inverse !rounded-r-md !rounded-l-none hover:!bg-wolf-primary hover:!text-wolf-text-inverse'
-const rangeMiddleClass = 'is-range-middle !rounded-none !bg-wolf-primary/15 !text-wolf-text-primary hover:!bg-wolf-primary/15 hover:!text-wolf-text-primary'
+const rangePointClass = 'is-range-point !bg-brand !text-primary-foreground hover:!bg-brand hover:!text-primary-foreground'
+const rangeStartClass = 'is-range-start !bg-brand !text-primary-foreground !rounded-l-md !rounded-r-none hover:!bg-brand hover:!text-primary-foreground'
+const rangeEndClass = 'is-range-end !bg-brand !text-primary-foreground !rounded-r-md !rounded-l-none hover:!bg-brand hover:!text-primary-foreground'
+const rangeMiddleClass = 'is-range-middle !rounded-none !bg-brand/15 !text-foreground hover:!bg-brand/15 hover:!text-foreground'
 
 function rangeCellClass(day: DateValue): string {
   const start = props.rangeStart
@@ -211,14 +211,14 @@ const calendarRootProps = computed<CalendarRootProps>(() => {
   >
     <CalendarHeader class="flex items-center justify-between gap-2 pt-1">
       <CalendarPrev
-        class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary h-7 w-7 bg-transparent p-0 text-wolf-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:opacity-50"
+        class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-foreground h-7 w-7 bg-transparent p-0 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       >
         <ChevronLeft class="h-4 w-4" />
       </CalendarPrev>
 
       <div class="flex flex-1 items-center justify-center gap-2">
         <Select v-model="selectedYear">
-          <SelectTrigger class="date-picker-calendar__year-trigger h-8 shrink-0 border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+          <SelectTrigger class="date-picker-calendar__year-trigger h-8 shrink-0 border-border bg-white px-2 text-sm focus:ring-ring focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent class="max-h-72" data-date-picker-select-content>
@@ -233,7 +233,7 @@ const calendarRootProps = computed<CalendarRootProps>(() => {
         </Select>
 
         <Select v-model="selectedMonth">
-          <SelectTrigger class="date-picker-calendar__month-trigger h-8 shrink-0 border-wolf-border bg-white px-2 text-sm focus:ring-wolf-primary focus:ring-offset-0">
+          <SelectTrigger class="date-picker-calendar__month-trigger h-8 shrink-0 border-border bg-white px-2 text-sm focus:ring-ring focus:ring-offset-0">
             <SelectValue />
           </SelectTrigger>
           <SelectContent data-date-picker-select-content>
@@ -249,7 +249,7 @@ const calendarRootProps = computed<CalendarRootProps>(() => {
       </div>
 
       <CalendarNext
-        class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary h-7 w-7 bg-transparent p-0 text-wolf-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:opacity-50"
+        class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-foreground h-7 w-7 bg-transparent p-0 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
       >
         <ChevronRight class="h-4 w-4" />
       </CalendarNext>
@@ -265,7 +265,7 @@ const calendarRootProps = computed<CalendarRootProps>(() => {
           <CalendarHeadCell
             v-for="day in weekDays"
             :key="day"
-            class="date-picker-calendar__head-cell text-center text-xs font-normal text-wolf-text-tertiary"
+            class="date-picker-calendar__head-cell text-center text-xs font-normal text-muted-foreground"
           >
             {{ day }}
           </CalendarHeadCell>
@@ -287,7 +287,7 @@ const calendarRootProps = computed<CalendarRootProps>(() => {
               :day="weekDate"
               :month="month.value"
               :class="rangeCellClass(weekDate)"
-              class="date-picker-calendar__cell-trigger inline-flex items-center justify-center rounded-md text-sm font-normal transition-colors hover:bg-wolf-bg-hover hover:text-wolf-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-wolf-primary data-[selected]:text-wolf-text-inverse data-[today]:bg-wolf-bg-muted data-[today]:text-wolf-text-primary"
+              class="date-picker-calendar__cell-trigger inline-flex items-center justify-center rounded-md text-sm font-normal transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[selected]:bg-brand data-[selected]:text-primary-foreground data-[today]:bg-muted data-[today]:text-foreground"
             />
           </CalendarCell>
         </CalendarGridRow>

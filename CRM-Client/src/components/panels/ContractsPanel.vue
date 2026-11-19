@@ -3,7 +3,7 @@
  * ContractsPanel.vue - 合同面板组件
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：所有图标按钮均有 aria-label
  *
  * Task 6: 改为 emit 'view' 事件，由父组件决定打开 Sheet 或导航
@@ -120,7 +120,7 @@ const formatDate = (dateStr: string | null): string => {
     </template>
 
     <template #itemMain="{ item }">
-      <span class="font-medium text-wolf-text-primary-v2 truncate">
+      <span class="font-medium text-foreground truncate">
         {{ item.contract_name }}
       </span>
     </template>
@@ -227,7 +227,6 @@ const formatDate = (dateStr: string | null): string => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .contract-actions {
   display: inline-flex;
@@ -240,18 +239,18 @@ const formatDate = (dateStr: string | null): string => {
 .contract-action-button {
   width: 32px;
   height: 32px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .contract-action-button--primary {
   &:hover {
-    color: $wolf-primary-v2;
+    color: hsl(var(--brand));
   }
 }
 
 .contract-action-button--danger {
   &:hover {
-    color: $wolf-danger-v2;
+    color: hsl(var(--status-danger));
   }
 }
 
@@ -263,8 +262,8 @@ const formatDate = (dateStr: string | null): string => {
 .contract-action-hover-text {
   display: inline-flex;
   white-space: nowrap;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
 }
 </style>

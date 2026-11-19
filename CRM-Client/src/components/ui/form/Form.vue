@@ -31,7 +31,7 @@ function handleSubmit(values: GenericObject): void {
     v-if="props.schema"
     :validation-schema="toTypedSchema(props.schema)"
     v-bind="omitUndefined({ initialValues: props.initialValues })"
-    :class="cn('space-y-wolf-md', props.class)"
+    :class="cn('space-y-3', props.class)"
     @submit="handleSubmit"
   >
     <slot />
@@ -39,7 +39,7 @@ function handleSubmit(values: GenericObject): void {
   <Form
     v-else
     v-bind="omitUndefined({ initialValues: props.initialValues })"
-    :class="cn('space-y-wolf-md', props.class)"
+    :class="cn('space-y-3', props.class)"
     @submit="handleSubmit"
   >
     <slot />

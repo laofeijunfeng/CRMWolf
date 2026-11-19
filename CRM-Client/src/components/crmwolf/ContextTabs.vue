@@ -73,23 +73,23 @@ function handleTabChange(value: string): void {
         :class="cn(
           'context-tab-item',
           'inline-flex items-center justify-center',
-          'whitespace-nowrap rounded-wolf',
-          'px-wolf-lg py-wolf-sm',
-          'text-wolf-body font-wolf-medium',
-          'transition-all duration-wolf-fast',
+          'whitespace-nowrap rounded-md',
+          'px-4 py-2',
+          'text-body font-medium',
+          'transition-all duration',
           // Focus ring（MASTER.md §8.2）
           'focus-visible:outline-none',
           'focus-visible:ring-2',
-          'focus-visible:ring-wolf-primary',
+          'focus-visible:ring-ring',
           'focus-visible:ring-offset-2',
           // Disabled state（MASTER.md §11.1）
           'disabled:pointer-events-none',
           'disabled:opacity-40',
           // Active state
-          'data-[state=active]:text-wolf-primary',
-          'data-[state=active]:font-wolf-semibold',
+          'data-[state=active]:text-brand',
+          'data-[state=active]:font-semibold',
           // Hover state
-          'hover:text-wolf-primary'
+          'hover:text-brand'
         )"
       >
         <span class="inline-flex items-center gap-2">
@@ -108,7 +108,7 @@ function handleTabChange(value: string): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .context-tabs-container {
   width: 100%;
@@ -116,7 +116,7 @@ function handleTabChange(value: string): void {
   padding: 0;
   background: transparent;
   border-radius: 0;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   overflow-x: auto;
   scrollbar-width: none;
 
@@ -128,41 +128,41 @@ function handleTabChange(value: string): void {
 .context-tab-item {
   height: 32px;
   min-height: 32px;
-  padding: $wolf-button-padding-sm-v2;
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  padding: $space-1 $space-2;
+  border-radius: var(--radius-md);
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
 
   &[data-state="active"] {
     background: transparent;
-    color: $wolf-primary-v2;
-    font-weight: $wolf-font-weight-semibold-v2;
+    color: hsl(var(--brand));
+    font-weight: 600;
     box-shadow: none;
 
     &:hover {
       background: transparent;
-      color: $wolf-primary-v2;
+      color: hsl(var(--brand));
     }
   }
 
   &:hover:not([data-state="active"]):not(:disabled) {
-    background: $wolf-bg-hover-v2;
-    color: $wolf-text-secondary-v2;
+    background: var(--wash-hover);
+    color: hsl(var(--muted-foreground));
   }
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     height: 44px;
     flex-shrink: 0;
     padding: 8px 16px;
-    font-size: $wolf-font-size-body-mobile-v2;
+    font-size: 16px;
   }
 }
 
 // ==================== Reduced Motion（MASTER.md §8.3）====================
 @media (prefers-reduced-motion: reduce) {
   .context-tab-item {
-    transition-duration: $wolf-reduced-motion-duration-v2;  // 0.01ms
+    transition-duration: 0.01ms;  // 0.01ms
   }
 }
 </style>

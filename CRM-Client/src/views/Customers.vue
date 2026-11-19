@@ -1678,7 +1678,7 @@ defineExpose({
             请填写退回“{{ selectedCustomer?.account_name ?? '该客户' }}”的原因，提交后客户将从当前负责人名下移除。
           </DialogDescription>
         </DialogHeader>
-        <div class="grid gap-wolf-md">
+        <div class="grid gap-3">
           <SelectField
             id="customer-return-reason"
             v-model="returnForm.return_reason"
@@ -1784,14 +1784,14 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .customers-page {
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
-  background: $wolf-bg-page-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  background: hsl(var(--card));
   display: flex;
   flex-direction: column;
-  gap: $wolf-section-gap-v2;
+  gap: $space-6;
   min-height: 0;
   flex: 1;
 }
@@ -1801,9 +1801,9 @@ defineExpose({
   overflow: visible;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .customers-page {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 }
 
@@ -1826,15 +1826,15 @@ defineExpose({
 }
 
 .customer-name-meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-normal-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 400;
   line-height: 16px;
 }
 
 .customer-account-name {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1855,14 +1855,14 @@ defineExpose({
 }
 
 .customer-contact-name {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
   line-height: 20px;
 }
 
 .customer-contact-meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -1887,14 +1887,14 @@ defineExpose({
 }
 
 .customer-owner-name {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
   line-height: 20px;
 }
 
 .customer-owner-meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -1919,8 +1919,8 @@ defineExpose({
 }
 
 .license-summary__primary {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-weight: 500;
   line-height: 18px;
 }
 
@@ -1941,8 +1941,8 @@ defineExpose({
 }
 
 .license-summary__secondary {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
   line-height: 16px;
 }
 
@@ -1955,7 +1955,7 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .customer-status-cell {
@@ -1966,8 +1966,8 @@ defineExpose({
 }
 
 .customer-status-stage-hint {
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 .customer-mobile-status {
@@ -1979,9 +1979,9 @@ defineExpose({
 
 .customer-mobile-card-title {
   min-width: 0;
-  font-size: $wolf-font-size-body-mobile-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 16px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -1989,17 +1989,17 @@ defineExpose({
 .customer-mobile-card-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
-  margin-top: $wolf-space-sm-v2;
+  gap: $space-1;
+  margin-top: $space-2;
 }
 
 .customer-mobile-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  margin-top: $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-mobile-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1 $space-3;
+  margin-top: $space-2;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 </style>

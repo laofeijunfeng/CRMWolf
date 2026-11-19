@@ -730,7 +730,7 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-flow-form-dialog {
   width: min(920px, calc(100vw - 32px));
@@ -740,21 +740,21 @@ watch(
 .dialog-body {
   max-height: min(70vh, 720px);
   overflow-y: auto;
-  padding-left: calc($wolf-focus-ring-width-v2 + $wolf-focus-ring-offset-v2);
-  padding-right: $wolf-space-xs-v2;
+  padding-left: calc(2px + 2px);
+  padding-right: $space-1;
 }
 
 .loading-state,
 .empty-nodes {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  padding: $wolf-space-xl-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  padding: $space-6;
   text-align: center;
 }
 
 .form-section {
-  border-top: 1px solid $wolf-border-default-v2;
-  padding: $wolf-space-lg-v2 0;
+  border-top: 1px solid hsl(var(--border));
+  padding: $space-4 0;
 
   &:first-child {
     border-top: 0;
@@ -766,15 +766,15 @@ watch(
   align-items: center;
   display: flex;
   justify-content: space-between;
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .section-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
-  margin: 0 0 $wolf-space-md-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+  margin: 0 0 $space-3;
 }
 
 .section-header .section-title {
@@ -783,96 +783,96 @@ watch(
 
 .form-grid {
   display: grid;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .form-field {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .required,
 .field-error {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 .field-error {
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  font-size: 12px;
+  line-height: 20px;
   margin: 0;
 }
 
 .switch-row {
   align-items: center;
   display: flex;
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
 }
 
 .switch-row--node {
   align-self: end;
-  margin-bottom: $wolf-space-xs-v2;
+  margin-bottom: $space-1;
 }
 
 .nodes-list {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .node-item {
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  padding: $wolf-card-padding-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  padding: $space-4;
 }
 
 .node-header {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
 }
 
 .node-order {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .node-actions {
   display: flex;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .notify-panel {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-sm-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
-  margin-bottom: $wolf-space-md-v2;
-  padding: $wolf-space-md-v2;
+  gap: $space-2;
+  margin-bottom: $space-3;
+  padding: $space-3;
 }
 
 .notify-panel__header {
   align-items: center;
   display: flex;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .notify-actions {
   display: flex;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .notify-users {
   display: grid;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   max-height: 156px;
   overflow-y: auto;
@@ -880,30 +880,30 @@ watch(
 
 .notify-user {
   align-items: center;
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: var(--radius-sm);
   display: grid;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   grid-template-columns: auto minmax(72px, max-content) minmax(0, 1fr);
-  min-height: $wolf-touch-target-min-v2;
-  padding: $wolf-space-xs-v2 $wolf-space-sm-v2;
+  min-height: var(--touch-target);
+  padding: $space-1 $space-2;
 }
 
 .notify-user:hover {
-  background: $wolf-bg-hover-v2;
+  background: var(--wash-hover);
 }
 
 .notify-user__name {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .notify-user__email,
 .notify-empty,
 .notify-hint {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .notify-user__email {
@@ -914,14 +914,14 @@ watch(
 }
 
 .notify-empty {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
 }
 
 .notify-hint {
   margin: 0;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .approval-flow-form-dialog {
     width: calc(100vw - 16px);
     max-width: calc(100vw - 16px);

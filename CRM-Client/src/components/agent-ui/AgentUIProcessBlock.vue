@@ -44,17 +44,17 @@ const statusIcon = (status: ProcessItem['status']): Component => ({
 const statusClass = (status: ProcessItem['status']): string => {
   if (status === 'FAILED') return 'text-destructive'
   if (status === 'CANCELLED' || status === 'PENDING' || status === 'SKIPPED') return 'text-muted-foreground'
-  if (status === 'WAITING' || status === 'RUNNING') return 'text-primary'
+  if (status === 'WAITING' || status === 'RUNNING') return 'text-brand'
   return 'text-success'
 }
 </script>
 
 <template>
-  <Collapsible v-slot="{ open }" class="rounded-wolf-surface border border-border bg-card">
+  <Collapsible v-slot="{ open }" class="rounded-lg border border-border bg-card">
     <CollapsibleTrigger as-child>
       <button
         type="button"
-        class="flex min-h-11 w-full items-center gap-2 rounded-wolf-surface px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
         <component
           :is="open ? ChevronDown : ChevronRight"

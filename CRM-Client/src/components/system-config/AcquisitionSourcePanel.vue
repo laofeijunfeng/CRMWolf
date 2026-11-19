@@ -275,7 +275,7 @@ watch(() => [props.action, props.recordId, sources.value.length] as const, ([act
             empty-text="暂无获客来源"
           >
             <template #itemMain="{ item }">
-              <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+              <div class="font-medium text-foreground">{{ item.name }}</div>
               <div class="mt-1 text-xs text-muted-foreground">
                 线索 {{ item.lead_count }} · 客户 {{ item.customer_count }} · 排序 {{ item.sort_order }}
               </div>

@@ -91,7 +91,7 @@ const handleViewDetail = (): void => {
 
       <div class="rounded-md border bg-muted/30 p-4">
         <div class="flex items-center gap-3">
-          <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <div class="flex size-10 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
             <ReceiptText class="size-5" aria-hidden="true" />
           </div>
           <div class="min-w-0 flex-1">

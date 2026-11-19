@@ -5,7 +5,7 @@
  * 用于 Sheet、侧栏等受限空间的同类型列表项展示
  * 符合 list-card.md 规范 + accessibility.md 无障碍规范
  *
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  * 无障碍：WCAG AA 级别（焦点、对比度、aria-label）
  */
 import { Card } from '@/components/ui/card'
@@ -122,16 +122,16 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 // ==================== Card Container ====================
 .list-card {
   display: flex;
   flex-direction: column;
   height: auto;
-  background: $wolf-bg-card-v2;
-  border-radius: $wolf-radius-surface-v2;
-  border: 1px solid $wolf-border-default-v2;
+  background: hsl(var(--card));
+  border-radius: var(--radius-lg);
+  border: 1px solid hsl(var(--border));
 }
 
 // ==================== Header ====================
@@ -139,21 +139,21 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .list-card-title {
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
   margin: 0; // Reset default margin
 }
 
 .list-card-actions {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 // ==================== Content ====================
@@ -165,35 +165,35 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 // ==================== Loading State ====================
 .list-card-loading {
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+  padding: $space-3 $space-4;
 }
 
 .skeleton-header {
   height: 20px;
   background: linear-gradient(
     90deg,
-    $wolf-bg-muted-v2 25%,
-    $wolf-bg-hover-v2 50%,
-    $wolf-bg-muted-v2 75%
+    hsl(var(--muted)) 25%,
+    var(--wash-hover) 50%,
+    hsl(var(--muted)) 75%
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
-  border-radius: $wolf-radius-sm-v2;
-  margin-bottom: $wolf-space-md-v2;
+  border-radius: var(--radius-sm);
+  margin-bottom: $space-3;
 }
 
 .skeleton-item {
-  height: $wolf-touch-target-min-v2; // 44px
+  height: var(--touch-target); // 44px
   background: linear-gradient(
     90deg,
-    $wolf-bg-muted-v2 25%,
-    $wolf-bg-hover-v2 50%,
-    $wolf-bg-muted-v2 75%
+    hsl(var(--muted)) 25%,
+    var(--wash-hover) 50%,
+    hsl(var(--muted)) 75%
   );
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
-  border-radius: $wolf-radius-sm-v2;
-  margin-bottom: $wolf-space-sm-v2;
+  border-radius: var(--radius-sm);
+  margin-bottom: $space-2;
 
   &:last-child {
     margin-bottom: 0;
@@ -214,7 +214,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   .skeleton-header,
   .skeleton-item {
     animation: none;
-    background: $wolf-bg-muted-v2;
+    background: hsl(var(--muted));
   }
 }
 
@@ -224,14 +224,14 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   align-items: center;
   justify-content: center;
   min-height: 68px;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
+  padding: $space-3 $space-4;
 }
 
 .list-card-empty-state {
   width: 100%;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
@@ -245,10 +245,10 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-height: 68px;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: 1px solid hsl(var(--border));
   transition: background 150ms ease;
 
   &:last-child {
@@ -256,13 +256,13 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   }
 
   &:hover {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   // Keyboard focus state (accessibility.md requirement)
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 
   // Interactive row cursor
@@ -271,13 +271,13 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   }
 
   &.is-highlighted {
-    background: $wolf-primary-light-v2;
+    background: var(--wash-hover);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .list-card-item {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 
@@ -287,8 +287,8 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 .list-card-item-meta {
   min-width: 0;
-  font-size: $wolf-font-size-caption-v2;
-  color: $wolf-text-tertiary-v2;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -297,7 +297,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 .list-card-item-badges {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2; // Must be >=8px - defined in variables-v2
+  gap: $space-1;
   min-width: 0;
   flex-shrink: 0;
   white-space: nowrap;
@@ -306,23 +306,23 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 .list-card-item-actions {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2; // Must be >=8px - touch spacing compliance
+  gap: $space-1; // Must be >=8px - touch spacing compliance
   flex-shrink: 0;
 
   // Ensure all buttons meet touch target size
   button {
-    min-height: $wolf-touch-target-min-v2;
-    min-width: $wolf-touch-target-min-v2;
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
   }
 }
 
 // ==================== Responsive ====================
-@media (max-width: $wolf-breakpoint-md-v2 - 1) {
+@media (max-width: $bp-md - 1) {
   .list-card-header,
   .list-card-empty,
   .list-card-item {
-    padding-left: $wolf-space-md-v2;
-    padding-right: $wolf-space-md-v2;
+    padding-left: $space-3;
+    padding-right: $space-3;
   }
 
   .list-card-item {
@@ -336,16 +336,16 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
   // Stack actions vertically on small screens if > 2 buttons
   .list-card-item-actions {
-    @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+    @media (max-width: $bp-sm - 1) {
       flex-direction: column;
-      gap: $wolf-space-xs-v2;
+      gap: $space-1;
     }
   }
 }
 
 // ==================== Disabled State ====================
 .list-card-item-actions button[disabled] {
-  opacity: $wolf-disabled-opacity-v2;
-  cursor: $wolf-cursor-disabled-v2;
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
 }
 </style>

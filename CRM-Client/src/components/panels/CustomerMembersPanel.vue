@@ -185,7 +185,7 @@ watch(
       </template>
 
       <template #itemMain="{ item }">
-        <span class="font-medium text-wolf-text-primary-v2 truncate">{{ item.user_info?.name ?? '-' }}</span>
+        <span class="font-medium text-foreground truncate">{{ item.user_info?.name ?? '-' }}</span>
       </template>
 
       <template #itemMeta="{ item }">
@@ -201,7 +201,7 @@ watch(
         <Button v-if="!readonly && item.can_manage" variant="ghost" size="icon" class="h-8 w-8" aria-label="编辑成员" @click="openEditDialog(item)">
           <Pencil class="w-4 h-4" />
         </Button>
-        <Button v-if="!readonly && item.can_manage" variant="ghost" size="icon" class="h-8 w-8 text-wolf-danger-text-v2" aria-label="移除成员" @click="handleRemove(item)">
+        <Button v-if="!readonly && item.can_manage" variant="ghost" size="icon" class="h-8 w-8 text-danger" aria-label="移除成员" @click="handleRemove(item)">
           <Trash2 class="w-4 h-4" />
         </Button>
       </template>
@@ -285,7 +285,7 @@ watch(
   justify-content: center;
   gap: 8px;
   min-height: 72px;
-  color: var(--wolf-text-tertiary-v2);
+  color: hsl(var(--muted-foreground));
   font-size: 13px;
 }
 

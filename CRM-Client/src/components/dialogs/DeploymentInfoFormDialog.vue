@@ -239,7 +239,7 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .deployment-dialog {
   max-width: 560px;
@@ -248,29 +248,29 @@ watch(
 .deployment-dialog__form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .deployment-dialog__field {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .deployment-dialog__switch-label {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .deployment-dialog__switch-row {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .deployment-dialog__footer {
-  padding-top: $wolf-space-sm-v2;
+  padding-top: $space-2;
 }
 </style>

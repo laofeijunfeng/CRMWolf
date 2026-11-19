@@ -13,7 +13,7 @@ const props = withDefaults(defineProps<{
 <template>
   <article
     :class="cn(
-      'flex w-full gap-wolf-sm',
+      'flex w-full gap-2',
       role === 'user' && 'justify-end',
       role !== 'user' && 'justify-start',
       props.class

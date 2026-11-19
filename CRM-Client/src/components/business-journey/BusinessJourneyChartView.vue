@@ -326,7 +326,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
                 <span class="h-2 overflow-hidden rounded-full bg-muted">
                   <span
                     class="block h-full rounded-full"
-                    :class="isMutedKey(segment.key) ? 'bg-muted-foreground' : 'bg-primary'"
+                    :class="isMutedKey(segment.key) ? 'bg-muted-foreground' : 'bg-brand'"
                     :style="{ width: barWidth(card, segment) }"
                   />
                 </span>
@@ -380,36 +380,36 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .journey-chart {
   display: flex;
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   overflow: auto;
-  padding: $wolf-space-md-v2;
+  padding: $space-3;
 }
 
 .journey-chart-summary h2 {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
   line-height: 1.25;
 }
 
 .journey-chart-summary p,
 .journey-chart-note {
-  margin: $wolf-space-xs-v2 0 0;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-body-v2;
+  margin: $space-1 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .journey-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .journey-chart-card {
@@ -423,7 +423,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-bars,
 .journey-chart-legend {
   display: grid;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .journey-chart-bars button,
@@ -436,7 +436,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 
 .journey-chart-bars button.is-selected,
 .journey-chart-legend button.is-selected {
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
   background: hsl(var(--brand) / 0.08);
 }
 
@@ -447,7 +447,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 
 .journey-chart-preview small,
 :global(.journey-chart-segment-items small) {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: 12px;
 }
 
@@ -458,8 +458,8 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   min-height: 48px;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  color: hsl(var(--muted-foreground));
 }
 
 .journey-chart-preview,
@@ -469,8 +469,8 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-preview {
-  margin-top: $wolf-space-md-v2;
-  border-top: 1px solid $wolf-border-default-v2;
+  margin-top: $space-3;
+  border-top: 1px solid hsl(var(--border));
 }
 
 .journey-chart-preview button,
@@ -478,12 +478,12 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   width: 100%;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  padding: $wolf-space-sm-v2 0;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: $space-2 0;
   text-align: left;
-  font-size: $wolf-font-size-body-v2;
+  font-size: 14px;
 }
 
 .journey-chart-preview__more {
@@ -509,7 +509,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 :global(.journey-chart-segment-items) {

@@ -6,7 +6,7 @@
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton size="lg" class="cursor-default">
-            <div class="flex aspect-square size-8 items-center justify-center overflow-hidden rounded-lg bg-wolf-bg-card">
+            <div class="flex aspect-square size-8 items-center justify-center overflow-hidden rounded-lg bg-card">
               <img src="/logo.png" alt="CRMWolf Logo" class="size-8 object-contain" />
             </div>
             <div class="grid flex-1 text-left text-sm leading-tight">

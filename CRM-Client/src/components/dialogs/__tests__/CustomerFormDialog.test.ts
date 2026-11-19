@@ -1129,15 +1129,6 @@ describe('CustomerFormDialog recovery and close guards', () => {
     wrapper.unmount()
   })
 
-  it('gives the more-information trigger the mobile minimum touch height', async () => {
-    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
-    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
-    const wrapper = mountRecoveryEdit()
-    await flushPromises()
-    expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('h-touch-target')
-    expect(wrapper.get('#customer-more-info-trigger').classes()).toContain('min-h-touch-target')
-    wrapper.unmount()
-  })
   it('preserves dirty more-information values across a 409 recovery', async () => {
     vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])

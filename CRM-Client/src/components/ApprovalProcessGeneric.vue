@@ -579,57 +579,57 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .approval-process-generic {
   width: 100%;
   background: transparent;
-  border-radius: $wolf-radius-v2;
+  border-radius: var(--radius-md);
   padding: 0;
 }
 
 .approval-process-generic__body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .approval-process-generic__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   margin-bottom: 0;
 }
 
 .approval-process-generic__title {
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  color: $wolf-text-primary-v2;
-  line-height: $wolf-line-height-body-v2;
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  line-height: 20px;
 }
 
 .approval-process-generic__conflict {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
-  border-radius: $wolf-radius-sm-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  gap: $space-2;
+  padding: $space-2 $space-3;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
+  border-radius: var(--radius-sm);
+  font-size: 14px;
 }
 
 .approval-process-generic__current-node {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-1;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
 
   .approval-process-generic__current-node-value {
-    color: $wolf-text-secondary-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--muted-foreground));
+    font-weight: 500;
   }
 }
 
@@ -637,10 +637,10 @@ watch(
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-xs-v2;
-  padding-top: $wolf-space-sm-v2;
-  border-top: 1px solid $wolf-border-light-v2;
+  gap: $space-2;
+  margin-top: $space-1;
+  padding-top: $space-2;
+  border-top: 1px solid hsl(var(--border));
 }
 
 </style>

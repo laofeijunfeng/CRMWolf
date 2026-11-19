@@ -18,7 +18,7 @@
           </SidebarMenuButton>
           <SidebarMenuBadge
             v-if="item.badge !== undefined"
-            class="bg-primary/10 text-primary"
+            class="bg-brand/10 text-brand"
             data-testid="nav-item-badge"
           >
             {{ item.badge }}

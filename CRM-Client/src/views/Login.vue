@@ -173,31 +173,31 @@ async function handleLogin(): Promise<void> {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .auth-page {
   display: flex;
   min-height: 100dvh;
   align-items: center;
   justify-content: center;
-  background: $wolf-bg-page-v2;
-  padding: $wolf-space-xl-v2;
+  background: hsl(var(--card));
+  padding: $space-6;
 }
 
 .auth-page__shell {
   display: grid;
   width: 100%;
   max-width: 420px;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .auth-page__brand {
   display: grid;
   justify-items: center;
-  gap: $wolf-space-sm-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  gap: $space-2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .auth-page__logo {
@@ -216,38 +216,38 @@ async function handleLogin(): Promise<void> {
 }
 
 .auth-card__title {
-  font-size: $wolf-font-size-title-v2;
+  font-size: 16px;
 }
 
 .auth-form {
   display: grid;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .auth-form__field {
   display: grid;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 .auth-form__error {
   margin: 0;
-  color: $wolf-danger-text-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--status-danger));
+  font-size: 12px;
 }
 
 .auth-card__switch {
-  margin: $wolf-space-lg-v2 0 0;
+  margin: $space-4 0 0;
   text-align: center;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 
   a {
-    color: $wolf-text-link-v2;
-    font-weight: $wolf-font-weight-medium-v2;
+    color: hsl(var(--brand));
+    font-weight: 500;
     text-decoration: none;
 
     &:hover {
-      color: $wolf-text-link-hover-v2;
+      color: hsl(var(--brand));
       text-decoration: underline;
     }
   }
@@ -255,7 +255,7 @@ async function handleLogin(): Promise<void> {
 
 @media (max-width: 767px) {
   .auth-page {
-    padding: $wolf-page-padding-mobile-v2;
+    padding: var(--page-padding);
   }
 }
 </style>

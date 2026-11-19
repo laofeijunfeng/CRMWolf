@@ -411,7 +411,7 @@ watch([hasAccess, teamId], (): void => {
       @retry="loadMethods"
     >
       <template #cell-name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.name }}</div>
+        <div class="font-medium text-foreground">{{ row.name }}</div>
         <div class="mt-1 text-xs text-muted-foreground">{{ row.code }}</div>
       </template>
       <template #cell-stage_count="{ row }">

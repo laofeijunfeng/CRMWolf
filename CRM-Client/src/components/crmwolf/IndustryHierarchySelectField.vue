@@ -132,11 +132,11 @@ function handleOpenChange(value: boolean): void {
 
 </script>
 <template>
-  <div :class="cn('grid gap-wolf-xs', props.class)">
+  <div :class="cn('grid gap-1', props.class)">
     <Label
       v-if="props.label"
       :for="selectId"
-      class="text-wolf-caption font-wolf-medium text-wolf-text-primary"
+      class="text-caption font-medium text-foreground"
     >
       {{ props.label }}
     </Label>
@@ -162,16 +162,16 @@ function handleOpenChange(value: boolean): void {
             :aria-describedby="describedBy"
             :disabled="selectDisabled"
             :class="cn(
-              'h-control min-h-control w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
-              selectedLabel === '' && 'text-wolf-text-placeholder',
-              props.error.trim() !== '' && 'border-wolf-danger focus-visible:ring-wolf-danger/15',
+              'h-control min-h-control w-full justify-between rounded-sm border-border bg-card px-3 text-left text-body font-normal text-foreground shadow-none hover:bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
+              selectedLabel === '' && 'text-muted-foreground',
+              props.error.trim() !== '' && 'border-danger focus-visible:ring-danger/15',
               props.triggerClass,
             )"
           >
             <span class="min-w-0 flex-1 truncate">
               {{ selectedLabel !== '' ? selectedLabel : props.placeholder }}
             </span>
-            <ChevronsUpDown class="ml-2 size-4 shrink-0 text-wolf-text-secondary" aria-hidden="true" />
+            <ChevronsUpDown class="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </Button>
         </ComboboxTrigger>
       </ComboboxAnchor>
@@ -188,7 +188,7 @@ function handleOpenChange(value: boolean): void {
         <div v-if="props.loading" class="px-2 py-2 text-sm text-muted-foreground">
           加载中...
         </div>
-        <div v-else-if="hasBlockingError" class="px-2 py-2 text-sm text-wolf-danger" role="alert">
+        <div v-else-if="hasBlockingError" class="px-2 py-2 text-sm text-danger" role="alert">
           {{ props.error }}
         </div>
         <template v-if="!props.loading && !hasBlockingError">
@@ -231,10 +231,10 @@ function handleOpenChange(value: boolean): void {
         </ComboboxGroup>
       </ComboboxList>
     </Combobox>
-    <p v-if="props.error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+    <p v-if="props.error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ props.error }}
     </p>
-    <p v-else-if="props.helperText" :id="descriptionId" class="m-0 text-wolf-caption text-wolf-text-secondary">
+    <p v-else-if="props.helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
       {{ props.helperText }}
     </p>
   </div>

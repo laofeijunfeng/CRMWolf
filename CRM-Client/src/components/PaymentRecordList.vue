@@ -210,12 +210,12 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .record-empty-card {
-  background: $wolf-bg-card-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
 }
 
 .record-card-header {
@@ -223,86 +223,86 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-light-v2;
+  gap: $space-3;
+  padding: $space-3 $space-4;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .record-card-title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .record-empty-state {
   border: 0;
-  padding: $wolf-space-xl-v2 $wolf-space-lg-v2;
+  padding: $space-6 $space-4;
 }
 
 .record-main {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-width: 0;
 }
 
 .record-title-line {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 }
 
 .record-status-badge {
   border: 0;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .record-status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-warning));
 }
 
 .record-status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-success));
 }
 
 .record-status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  color: hsl(var(--status-danger));
 }
 
 .record-meta-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: $wolf-space-xs-v2 $wolf-space-md-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  gap: $space-1 $space-3;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
 
 .record-notes {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  line-height: 20px;
   word-break: break-word;
 }
 
 .record-delete-icon {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 @media (prefers-reduced-motion: reduce) {
   .record-main {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

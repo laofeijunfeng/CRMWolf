@@ -15,7 +15,7 @@ const delegatedProps = reactiveOmit(props, "class")
     v-bind="delegatedProps as any"
     :class="
       cn(
-        'text-wolf-caption font-wolf font-wolf-medium leading-none text-wolf-text-primary peer-disabled:cursor-not-allowed peer-disabled:text-wolf-text-tertiary',
+        'text-caption font-sans font-medium leading-none text-foreground peer-disabled:cursor-not-allowed peer-disabled:text-muted-foreground',
         props.class,
       )
     "

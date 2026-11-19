@@ -3,7 +3,7 @@
  * DealJourneysPanel.vue - 业务旅程列表面板
  *
  * 使用 ListCard 组件确保风格统一
- * 技术栈：shadcn-vue + variables-v2.scss
+ * 技术栈：shadcn-vue + base.css 设计令牌
  */
 import { nextTick, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
@@ -110,7 +110,7 @@ watch(
       </template>
 
       <template #itemMain="{ item }">
-        <span class="font-medium text-wolf-text-primary-v2 truncate">
+        <span class="font-medium text-foreground truncate">
           {{ item.name }}
         </span>
       </template>
@@ -128,7 +128,6 @@ watch(
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .deal-journeys-panel {
   min-width: 0;

@@ -20,8 +20,8 @@ const updateValue = (event: Event): void => {
   <textarea
     :value="modelValue ?? defaultValue"
     :class="cn(
-      'flex min-h-[60px] w-full rounded-wolf border border-wolf-border-default bg-wolf-bg-card px-wolf-md py-wolf-sm text-wolf-body font-wolf text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf placeholder:text-wolf-text-placeholder hover:border-wolf-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60 aria-[invalid=true]:border-wolf-danger aria-[invalid=true]:ring-wolf-danger',
-      'max-[767px]:min-h-[88px] max-[767px]:px-wolf-xl',
+      'flex min-h-[60px] w-full rounded-md border border-border bg-card px-3 py-2 text-body font-sans text-foreground transition-colors duration placeholder:text-muted-foreground hover:border-ring-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-60 aria-[invalid=true]:border-danger aria-[invalid=true]:ring-danger',
+      'max-[767px]:min-h-[88px] max-[767px]:px-6',
       props.class
     )"
     @input="updateValue"

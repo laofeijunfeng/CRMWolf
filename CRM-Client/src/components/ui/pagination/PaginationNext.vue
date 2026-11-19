@@ -51,9 +51,9 @@ const handleClick = (event: MouseEvent): void => {
     :rel="element === 'a' ? props.rel : undefined"
     aria-label="下一页"
     :class="cn(
-      'inline-flex size-9 items-center justify-center rounded-wolf border border-wolf-border-default',
-      'bg-wolf-bg-card text-wolf-text-secondary hover:bg-wolf-bg-hover',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',
+      'inline-flex size-9 items-center justify-center rounded-md border border-border',
+      'bg-card text-muted-foreground hover:bg-accent',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
       'disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
       'transition-colors',
       props.class

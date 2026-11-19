@@ -25,7 +25,7 @@ const forwardSubmit = (actionId: string, values: JsonObject): void => {
 
 <template>
   <section
-    class="overflow-hidden rounded-wolf-surface border border-border bg-card divide-y divide-border"
+    class="overflow-hidden rounded-lg border border-border bg-card divide-y divide-border"
     aria-label="待办任务"
   >
     <AgentUIInteractionBlock

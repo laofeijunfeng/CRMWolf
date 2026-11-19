@@ -33,7 +33,6 @@ const props = withDefaults(defineProps<{
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .table-toolbar-button {
   height: 30px;
@@ -41,24 +40,24 @@ const props = withDefaults(defineProps<{
   padding: 0 8px;
   gap: 5px;
   border: 0;
-  border-radius: $wolf-radius-control-v2;
+  border-radius: var(--radius-md);
   background: transparent;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-auxiliary-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 
   &:hover {
-    background: $wolf-bg-muted-v2;
-    color: $wolf-text-primary-v2;
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
   }
 }
 
 .table-toolbar-button-active {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
 
   &:hover {
-    background: $wolf-bg-active-v2;
-    color: $wolf-primary-v2;
+    background: var(--wash-selected);
+    color: hsl(var(--brand));
   }
 }
 
@@ -67,8 +66,8 @@ const props = withDefaults(defineProps<{
   height: 16px;
   padding: 0 5px;
   border-radius: 999px;
-  background: $wolf-primary-v2;
-  color: $wolf-text-inverse-v2;
+  background: hsl(var(--brand));
+  color: hsl(var(--primary-foreground));
   font-size: 11px;
   line-height: 16px;
   text-align: center;

@@ -71,14 +71,14 @@ withDefaults(defineProps<Props>(), {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .metric-card {
   position: relative;
   min-width: 0;
   overflow: hidden;
   border-color: hsl(var(--border) / 0.9);
-  border-radius: $wolf-radius-xl-v2;
+  border-radius: var(--radius-xl);
   background:
     linear-gradient(0deg, hsl(var(--brand) / 0.06) 0%, hsl(var(--brand) / 0.025) 34%, hsl(var(--background) / 0) 70%),
     linear-gradient(135deg, hsl(var(--muted) / 0.88) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
@@ -108,7 +108,7 @@ withDefaults(defineProps<Props>(), {
 
 .metric-card__header {
   position: relative;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 84px;
   padding: 14px 16px 6px;
 }
@@ -118,14 +118,14 @@ withDefaults(defineProps<Props>(), {
   align-items: center;
   justify-content: space-between;
   min-height: 24px;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .metric-card__label {
   min-width: 0;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 1.4;
 }
 
@@ -133,16 +133,16 @@ withDefaults(defineProps<Props>(), {
   flex: 0 0 auto;
   max-width: 48%;
   height: 24px;
-  padding: 0 $wolf-space-sm-v2;
+  padding: 0 $space-2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-color: hsl(var(--foreground) / 0.12);
-  border-radius: $wolf-radius-full-v2;
+  border-radius: 9999px;
   color: hsl(var(--card-foreground));
   background: hsl(var(--background) / 0.72);
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-size: 12px;
+  font-weight: 600;
   line-height: 22px;
   box-shadow: none;
 }
@@ -162,7 +162,7 @@ withDefaults(defineProps<Props>(), {
 .metric-card__value {
   min-width: 0;
   color: hsl(var(--foreground));
-  font-family: $wolf-font-mono-v2;
+  font-family: var(--font-mono);
   font-size: 30px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -177,7 +177,7 @@ withDefaults(defineProps<Props>(), {
   min-width: 0;
   min-height: 20px;
   color: hsl(var(--card-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -193,14 +193,14 @@ withDefaults(defineProps<Props>(), {
   min-width: 0;
   gap: 3px;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   line-height: 1.45;
 }
 
 .metric-card__footer-title {
   min-width: 0;
   color: hsl(var(--foreground));
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
 }
 
 .metric-card__footer-note {
@@ -213,7 +213,7 @@ withDefaults(defineProps<Props>(), {
   width: 72%;
   height: 12px;
   background: hsl(var(--muted));
-  border-radius: $wolf-radius-sm-v2;
+  border-radius: var(--radius-sm);
 }
 
 .metric-card__skeleton--value {
@@ -225,7 +225,7 @@ withDefaults(defineProps<Props>(), {
   width: 46%;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .metric-card__header {
     min-height: 80px;
     padding: 12px 14px 6px;

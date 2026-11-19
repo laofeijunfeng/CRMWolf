@@ -576,7 +576,6 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
 
 .business-journeys-page {
   box-sizing: border-box;
@@ -585,15 +584,15 @@ onMounted(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: $wolf-list-page-padding-top-v2 $wolf-page-padding-v2 $wolf-page-padding-v2;
+  padding: var(--page-padding) var(--page-padding) var(--page-padding);
   gap: 16px;
-  background: $wolf-bg-page-v2;
+  background: hsl(var(--card));
 }
 
 @media (max-width: 900px) {
   .business-journeys-page {
-    padding: $wolf-page-padding-mobile-v2;
-    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+    padding: var(--page-padding);
+    padding-bottom: calc(var(--page-padding) + var(--safe-bottom));
   }
 }
 .refresh-icon {

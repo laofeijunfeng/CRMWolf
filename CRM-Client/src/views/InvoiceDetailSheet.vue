@@ -1866,26 +1866,26 @@ onBeforeUnmount((): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
-$invoice-border-width: $wolf-focus-ring-width-subtle-v2;
-$invoice-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
-$invoice-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 12 + #{$wolf-space-2xl-v2});
-$invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
+$invoice-border-width: 1px;
+$invoice-title-avatar-size: calc(var(--touch-target) + $space-1);
+$invoice-sheet-min-height: calc(#{var(--touch-target)} * 12 + #{$space-8});
+$invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .invoice-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: $invoice-border-width solid $wolf-border-default-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: $invoice-border-width solid hsl(var(--border));
 }
 
 .invoice-header-summary {
   display: flex;
   align-items: center;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   min-width: 0;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     align-items: flex-start;
   }
 }
@@ -1896,11 +1896,11 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   justify-content: center;
   width: $invoice-title-avatar-size;
   height: $invoice-title-avatar-size;
-  border-radius: $wolf-radius-full-v2;
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-  font-size: $wolf-topbar-title-font-size-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  border-radius: 9999px;
+  background: var(--wash-hover);
+  color: hsl(var(--brand));
+  font-size: 20px;
+  font-weight: 600;
   flex-shrink: 0;
 }
 
@@ -1910,10 +1910,10 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .invoice-sheet-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-title-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-title-v2;
+  color: hsl(var(--foreground));
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
   word-break: break-word;
 }
 
@@ -1921,9 +1921,9 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
-  color: $wolf-text-tertiary-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
+  color: hsl(var(--muted-foreground));
 }
 
 .type-badge,
@@ -1931,33 +1931,33 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   display: inline-flex;
   align-items: center;
   min-height: 24px;
-  padding: 0 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  padding: 0 $space-2;
+  border-radius: var(--radius-sm);
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 
 .sheet-body {
-  padding: $wolf-space-xl-v2;
+  padding: $space-6;
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xl-v2;
+  gap: $space-6;
   min-height: $invoice-sheet-min-height;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
-    padding: $wolf-space-md-v2;
-    gap: $wolf-space-lg-v2;
+  @media (max-width: $bp-sm - 1) {
+    padding: $space-3;
+    gap: $space-4;
   }
 }
 
 .loading-stack {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .state-card-content {
@@ -1966,47 +1966,47 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-3;
+  padding: $space-6;
 }
 
 .info-card,
 .state-card {
-  background: $wolf-bg-card-v2;
-  border: $invoice-border-width solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-surface-v2;
-  box-shadow: $wolf-shadow-card-v2;
+  background: hsl(var(--card));
+  border: $invoice-border-width solid hsl(var(--border));
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .section-heading {
-  padding: $wolf-space-md-v2 $wolf-space-lg-v2;
-  border-bottom: $invoice-border-width solid $wolf-border-light-v2;
+  padding: $space-3 $space-4;
+  border-bottom: $invoice-border-width solid hsl(var(--border));
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .section-title {
   margin: 0;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .section-content {
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
 }
 
 .attributes-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: $wolf-space-md-v2 $wolf-space-lg-v2;
+  gap: $space-3 $space-4;
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -2014,7 +2014,7 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .attribute-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
@@ -2025,10 +2025,10 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .attribute-label {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  gap: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 500;
 
   svg {
     width: 14px;
@@ -2038,10 +2038,10 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .attribute-value {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   overflow-wrap: anywhere;
 }
 
@@ -2051,16 +2051,16 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .mono-value {
-  font-family: $wolf-font-mono-v2;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 .invoice-detail-group {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
-  padding-top: $wolf-space-lg-v2;
-  border-top: $invoice-border-width solid $wolf-border-light-v2;
+  gap: $space-3;
+  padding-top: $space-4;
+  border-top: $invoice-border-width solid hsl(var(--border));
 
   &:first-child {
     padding-top: 0;
@@ -2069,14 +2069,14 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .invoice-detail-group + .invoice-detail-group {
-  margin-top: $wolf-space-lg-v2;
+  margin-top: $space-4;
 }
 
 .invoice-detail-group-title {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .reissue-card-header {
@@ -2084,9 +2084,9 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     flex-direction: column;
   }
 }
@@ -2099,32 +2099,32 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   margin-left: auto;
 }
 
 .reissue-card-meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
   white-space: nowrap;
 }
 
 .reissue-number--current {
-  color: $wolf-success-text-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--status-success));
+  font-weight: 500;
 }
 
 .invoice-sheet-footer {
-  padding: $wolf-space-lg-v2;
-  border-top: $invoice-border-width solid $wolf-border-default-v2;
+  padding: $space-4;
+  border-top: $invoice-border-width solid hsl(var(--border));
   display: flex;
   flex-direction: row;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   flex-wrap: wrap;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     :deep(button) {
       flex: 1 1 100%;
     }
@@ -2134,29 +2134,29 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .dialog-form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .red-offset-context {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
+  gap: $space-2;
+  padding: $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
 }
 
 .red-offset-context__heading {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .red-offset-context__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-sm-v2 $wolf-space-lg-v2;
+  gap: $space-2 $space-4;
 }
 
 .red-offset-context__item {
@@ -2167,39 +2167,39 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 }
 
 .red-offset-context__item > span {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .red-offset-context__item > strong {
   overflow: hidden;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .red-offset-context__impact {
   margin: 0;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .form-error {
   margin: 0;
-  color: $wolf-danger-text-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  line-height: $wolf-line-height-body-v2;
+  color: hsl(var(--status-danger));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .dialog-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -2207,26 +2207,26 @@ $invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space
 .form-field {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .required-mark {
   margin-left: 2px;
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 }
 
 .field-optional {
   margin-left: 2px;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-normal-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .form-field--full {
   grid-column: 1 / -1;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .red-offset-context__grid {
     grid-template-columns: 1fr;
   }

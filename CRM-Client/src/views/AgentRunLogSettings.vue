@@ -179,7 +179,7 @@ watch([permissionsPending, permissionsUnavailable, hasAccess], () => {
 <template>
   <main class="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6" aria-label="Agent 运行日志">
     <div class="space-y-1">
-      <p class="text-sm font-medium text-primary">系统设置</p>
+      <p class="text-sm font-medium text-brand">系统设置</p>
       <h1 class="text-2xl font-semibold tracking-tight">Agent 运行日志</h1>
       <p class="text-sm text-muted-foreground">查看任意同事的 Agent 回合过程和写入结果，不进入销售会话。</p>
     </div>

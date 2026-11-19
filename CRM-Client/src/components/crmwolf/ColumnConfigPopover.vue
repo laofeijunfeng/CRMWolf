@@ -198,7 +198,7 @@ watch(() => props.scope, (scope) => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 :global(.column-config-popover) {
   padding: 0;
@@ -207,7 +207,7 @@ watch(() => props.scope, (scope) => {
 .column-config-scope {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
 }
 
 
@@ -216,34 +216,34 @@ watch(() => props.scope, (scope) => {
 }
 
 .column-config-state {
-  padding: $wolf-space-xl-v2;
-  font-size: $wolf-font-size-body-v2;
-  color: $wolf-text-tertiary-v2;
+  padding: $space-6;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
   text-align: center;
 }
 
 .column-config-row {
   display: grid;
-  grid-template-columns: $wolf-button-height-sm-v2 minmax(0, 1fr) $wolf-button-height-sm-v2;
+  grid-template-columns: var(--control-h-sm) minmax(0, 1fr) var(--control-h-sm);
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  min-height: $wolf-touch-target-min-v2;
-  padding: 0 $wolf-space-sm-v2;
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-primary-v2;
+  gap: $space-2;
+  min-height: var(--touch-target);
+  padding: 0 $space-2;
+  border-radius: var(--radius-md);
+  color: hsl(var(--foreground));
   cursor: grab;
 
   &:hover {
-    background: $wolf-bg-muted-v2;
+    background: hsl(var(--muted));
   }
 
   &.is-locked {
     cursor: default;
-    color: $wolf-text-secondary-v2;
+    color: hsl(var(--muted-foreground));
   }
 
   &.is-hidden {
-    color: $wolf-text-tertiary-v2;
+    color: hsl(var(--muted-foreground));
   }
 }
 
@@ -251,21 +251,21 @@ watch(() => props.scope, (scope) => {
 .column-config-lock-icon {
   width: 16px;
   height: 16px;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
   justify-self: center;
 }
 
 .column-config-visibility-button {
   justify-self: center;
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 
   &:hover {
-    color: $wolf-text-primary-v2;
+    color: hsl(var(--foreground));
   }
 }
 
 .column-config-row.is-hidden .column-config-visibility-button {
-  color: $wolf-text-tertiary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .column-config-row-title {
@@ -273,6 +273,6 @@ watch(() => props.scope, (scope) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: $wolf-font-size-body-v2;
+  font-size: 14px;
 }
 </style>

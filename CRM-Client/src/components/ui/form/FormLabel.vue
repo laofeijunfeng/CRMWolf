@@ -13,7 +13,7 @@ const { error, formItemId } = useFormField()
 <template>
   <Label
     :class="cn(
-      error && 'text-wolf-danger',
+      error && 'text-danger',
       props.class,
     )"
     :for="formItemId"

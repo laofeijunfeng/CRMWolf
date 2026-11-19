@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
@@ -27,11 +26,6 @@ const paymentRecordsFixture = (): PaymentRecordInfo[] => [
     invoice_application_count: 0,
   },
 ]
-
-const sourceText = (): string => readFileSync(
-  `${process.cwd()}/src/components/PaymentRecordList.vue`,
-  'utf8'
-)
 
 describe('PaymentRecordList V2 card layout', () => {
   it('renders payment records as interactive ListCard rows with edit and approval seams', async () => {
@@ -72,12 +66,5 @@ describe('PaymentRecordList V2 card layout', () => {
     await wrapper.get('[aria-label="登记回款"]').trigger('click')
 
     expect(wrapper.emitted('register')).toHaveLength(1)
-  })
-
-  it('uses V2 primitives in the component source', () => {
-    const source = sourceText()
-
-    expect(source).toContain('ListCard')
-    expect(source).toContain('variables-v2.scss')
   })
 })

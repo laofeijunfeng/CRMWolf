@@ -65,14 +65,14 @@ const followUpTrendSeries = [
   {
     key: 'total',
     label: '跟进总数',
-    color: '#2563eb',
-    fillColor: 'rgba(37, 99, 235, 0.14)'
+    color: 'hsl(var(--chart-1))',
+    fillColor: 'hsl(var(--chart-1) / 0.14)'
   },
   {
     key: 'valid',
     label: '有效跟进',
-    color: '#60a5fa',
-    fillColor: 'rgba(96, 165, 250, 0.16)'
+    color: 'hsl(var(--chart-4))',
+    fillColor: 'hsl(var(--chart-4) / 0.16)'
   }
 ]
 
@@ -101,13 +101,13 @@ const followUpTrendSummaries = computed(() => {
       key: 'total',
       label: '跟进总数',
       value: formatCount(totals.total),
-      color: followUpTrendSeries[0]?.color ?? '#2563eb'
+      color: followUpTrendSeries[0]?.color ?? 'hsl(var(--chart-1))'
     },
     {
       key: 'valid',
       label: '有效跟进',
       value: formatCount(totals.valid),
-      color: followUpTrendSeries[1]?.color ?? '#60a5fa'
+      color: followUpTrendSeries[1]?.color ?? 'hsl(var(--chart-4))'
     }
   ]
 })
@@ -171,8 +171,8 @@ const formatFollowUpTooltip = (datum: Record<string, unknown>): string => {
 
   return `<div class="area-trend-tooltip sales-follow-tooltip">
     <div class="area-trend-tooltip__title">${escapeHtml(point.date)}</div>
-    <div class="area-trend-tooltip__row"><span><i style="background:#2563eb"></i>跟进总数</span><strong>${formatCount(point.total)}</strong></div>
-    <div class="area-trend-tooltip__row"><span><i style="background:#60a5fa"></i>有效跟进</span><strong>${formatCount(point.valid)}</strong></div>
+    <div class="area-trend-tooltip__row"><span><i style="background:hsl(var(--chart-1))"></i>跟进总数</span><strong>${formatCount(point.total)}</strong></div>
+    <div class="area-trend-tooltip__row"><span><i style="background:hsl(var(--chart-4))"></i>有效跟进</span><strong>${formatCount(point.valid)}</strong></div>
     <div class="sales-follow-tooltip__divider"></div>
     ${memberSection}
   </div>`
@@ -422,7 +422,7 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .sales-dashboard-page {
   box-sizing: border-box;
@@ -431,7 +431,7 @@ onMounted(() => {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  padding: $wolf-page-padding-v2;
+  padding: var(--page-padding);
   background: hsl(var(--background));
 }
 
@@ -439,17 +439,17 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-bottom: $wolf-space-sm-v2;
+  padding-bottom: $space-2;
 }
 
 .dashboard-summary {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .dashboard-trend {
-  margin-top: $wolf-space-lg-v2;
+  margin-top: $space-4;
 }
 
 .trend-range-select {
@@ -458,16 +458,16 @@ onMounted(() => {
   border-color: hsl(var(--border) / 0.95);
   background: hsl(var(--card));
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .dashboard-toolbar {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 32px;
-  margin-bottom: $wolf-space-md-v2;
+  margin-bottom: $space-3;
   background: transparent;
 }
 
@@ -487,14 +487,14 @@ onMounted(() => {
 .dashboard-error {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 40px;
-  padding: 0 $wolf-space-md-v2;
+  padding: 0 $space-3;
   color: hsl(var(--destructive));
   background: hsl(var(--destructive) / 0.1);
   border: 1px solid hsl(var(--destructive) / 0.18);
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
+  border-radius: var(--radius-md);
+  font-size: 12px;
 }
 
 .error-icon {
@@ -505,20 +505,20 @@ onMounted(() => {
 .dashboard-inline-error {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 40px;
-  margin-bottom: $wolf-space-sm-v2;
-  padding: 0 $wolf-space-md-v2;
+  margin-bottom: $space-2;
+  padding: 0 $space-3;
   color: hsl(var(--destructive));
   background: hsl(var(--destructive) / 0.06);
   border: 1px solid hsl(var(--destructive) / 0.16);
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-caption-v2;
+  border-radius: var(--radius-md);
+  font-size: 12px;
 }
 
 .dashboard-inline-error--toolbar {
   flex: 0 0 auto;
-  margin: calc(-1 * #{$wolf-space-sm-v2}) 0 $wolf-space-md-v2;
+  margin: calc(-1 * #{$space-2}) 0 $space-3;
 }
 
 .dashboard-inline-retry {
@@ -531,27 +531,27 @@ onMounted(() => {
   display: grid;
   place-items: center;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .metric-secondary-value {
   color: hsl(var(--status-success));
-  font-family: $wolf-font-mono-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .metric-footer-title {
   min-width: 0;
   color: hsl(var(--foreground));
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-weight: 600;
 }
 
 :global(.sales-follow-tooltip__member) {
@@ -560,7 +560,7 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -574,8 +574,8 @@ onMounted(() => {
 :global(.sales-follow-tooltip__member strong) {
   justify-self: end;
   color: hsl(var(--foreground));
-  font-family: $wolf-font-mono-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  font-family: var(--font-mono);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -594,7 +594,7 @@ onMounted(() => {
 
 :global(.sales-follow-tooltip__empty) {
   color: hsl(var(--muted-foreground));
-  font-size: $wolf-font-size-caption-v2;
+  font-size: 12px;
 }
 
 @keyframes spin {
@@ -603,19 +603,19 @@ onMounted(() => {
   }
 }
 
-@media (max-width: $wolf-breakpoint-md-v2) {
+@media (max-width: $bp-md) {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: $wolf-space-md-v2;
+    gap: $space-3;
   }
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2) {
+@media (max-width: $bp-sm) {
   .sales-dashboard-page {
     height: 100%;
     min-height: 0;
-    padding: $wolf-page-padding-mobile-v2;
-    padding-bottom: calc($wolf-page-padding-mobile-v2 + $wolf-safe-area-bottom-v2);
+    padding: var(--page-padding);
+    padding-bottom: calc(var(--page-padding) + var(--safe-bottom));
   }
 
   .metric-grid {

@@ -101,10 +101,10 @@ function handleUpdate(value: unknown): void {
 </script>
 
 <template>
-  <div :class="cn('grid gap-wolf-xs', props.class)">
-    <Label v-if="label" :for="selectId" class="text-wolf-caption font-wolf-medium text-wolf-text-primary">
+  <div :class="cn('grid gap-1', props.class)">
+    <Label v-if="label" :for="selectId" class="text-caption font-medium text-foreground">
       {{ label }}
-      <span v-if="required" class="text-wolf-danger" aria-hidden="true">*</span>
+      <span v-if="required" class="text-danger" aria-hidden="true">*</span>
     </Label>
     <Select
       :model-value="normalizedValue"
@@ -133,7 +133,7 @@ function handleUpdate(value: unknown): void {
             <TooltipTrigger as-child>
               <span class="flex min-w-0 items-center gap-2">
                 <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
-                <span class="shrink-0 text-wolf-caption text-wolf-text-secondary">{{ option.disabledReason }}</span>
+                <span class="shrink-0 text-caption text-muted-foreground">{{ option.disabledReason }}</span>
               </span>
             </TooltipTrigger>
             <TooltipContent>{{ option.disabledReason }}</TooltipContent>
@@ -146,7 +146,7 @@ function handleUpdate(value: unknown): void {
           :value="addActionValue"
           :disabled="addActionDisabled === true"
           :aria-label="addActionLabel"
-          class="justify-center px-2 text-wolf-primary focus:text-wolf-primary"
+          class="justify-center px-2 text-brand focus:text-brand"
           data-slot="select-add-action"
         >
           <Plus class="size-4" aria-hidden="true" />
@@ -154,10 +154,10 @@ function handleUpdate(value: unknown): void {
         </SelectItem>
       </SelectContent>
     </Select>
-    <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">
+    <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-wolf-caption text-wolf-text-secondary">
+    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
       {{ helperText }}
     </p>
   </div>

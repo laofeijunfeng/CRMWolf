@@ -331,7 +331,7 @@ watch([hasAccess, teamId], (): void => {
       @retry="loadSources"
     >
       <template #cell-name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.name }}</div>
+        <div class="font-medium text-foreground">{{ row.name }}</div>
         <div v-if="row.is_system" class="mt-1">
           <Badge variant="outline">系统</Badge>
         </div>

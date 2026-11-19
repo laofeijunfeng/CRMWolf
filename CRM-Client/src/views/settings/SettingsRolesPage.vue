@@ -413,7 +413,7 @@ watch(() => route.query['action'], (action) => {
       @retry="loadRoles"
     >
       <template #cell-name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.name }}</div>
+        <div class="font-medium text-foreground">{{ row.name }}</div>
         <div v-if="row.description" class="mt-1 text-sm text-muted-foreground">
           {{ row.description }}
         </div>

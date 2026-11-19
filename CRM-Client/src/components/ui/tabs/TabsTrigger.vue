@@ -22,7 +22,7 @@ const props = withDefaults(defineProps<Props>(), {
   <TabsTrigger
     :value="props.value"
     :disabled="props.disabled"
-    :class="cn('inline-flex items-center justify-center whitespace-nowrap rounded-wolf px-wolf-lg py-wolf-sm text-wolf-body font-wolf-medium ring-offset-wolf transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 data-[state=active]:bg-wolf-bg-card data-[state=active]:text-wolf-primary data-[state=active]:shadow-wolf-card', props.class)"
+    :class="cn('inline-flex items-center justify-center whitespace-nowrap rounded-md px-4 py-2 text-body font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-40 data-[state=active]:bg-card data-[state=active]:text-brand data-[state=active]:shadow-1', props.class)"
   >
     <slot />
   </TabsTrigger>

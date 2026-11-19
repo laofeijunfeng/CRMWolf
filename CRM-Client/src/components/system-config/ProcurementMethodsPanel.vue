@@ -324,7 +324,7 @@ function formatDate(dateStr: string): string {
             empty-text="暂无采购方式"
           >
             <template #itemMain="{ item }">
-              <div class="font-medium text-wolf-text-primary">{{ item.name }}</div>
+              <div class="font-medium text-foreground">{{ item.name }}</div>
               <div class="mt-1 text-xs text-muted-foreground">
                 {{ item.code }} · 排序 {{ item.sort_order }} · {{ formatDate(item.created_time) }}
               </div>

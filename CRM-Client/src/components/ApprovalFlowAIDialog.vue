@@ -750,23 +750,23 @@ watch(visible, (val): void => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .dialog-content {
-  width: min(920px, calc(100vw - #{$wolf-space-xl-v2}));
+  width: min(920px, calc(100vw - #{$space-6}));
   max-width: 920px;
   max-height: 88vh;
-  border-radius: $wolf-radius-overlay-v2;
-  background: $wolf-bg-card-v2;
-  box-shadow: $wolf-shadow-modal-v2;
-  padding: $wolf-space-lg-v2;
+  border-radius: var(--radius-xl);
+  background: hsl(var(--card));
+  box-shadow: var(--shadow-3);
+  padding: $space-4;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     width: 100%;
     max-width: 100%;
-    max-height: $wolf-modal-height-mobile-v2;
+    max-height: min(90vh, 90dvh);
     margin: 0;
-    border-radius: $wolf-radius-overlay-v2 $wolf-radius-overlay-v2 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     position: fixed;
     right: 0;
     bottom: 0;
@@ -781,59 +781,59 @@ watch(visible, (val): void => {
 .error-recovery {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  padding: $wolf-space-md-v2;
-  border-radius: $wolf-radius-v2;
-  font-size: $wolf-font-size-body-v2;
+  gap: $space-2;
+  padding: $space-3;
+  border-radius: var(--radius-md);
+  font-size: 14px;
 }
 
 .input-hint,
 .status-message {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-secondary-v2;
+  background: var(--wash-hover);
+  color: hsl(var(--muted-foreground));
 }
 
 .hint-icon,
 .status-icon {
   width: 20px;
   height: 20px;
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
   flex: 0 0 auto;
 }
 
 .input-stage {
   .input-hint {
-    margin-bottom: $wolf-space-md-v2;
+    margin-bottom: $space-3;
   }
 
   .input-tip {
-    font-size: $wolf-font-size-caption-v2;
-    color: $wolf-text-tertiary-v2;
-    margin-top: $wolf-space-sm-v2;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    margin-top: $space-2;
   }
 
   .input-actions {
     display: flex;
     justify-content: flex-end;
-    gap: $wolf-space-sm-v2;
-    margin-top: $wolf-space-md-v2;
+    gap: $space-2;
+    margin-top: $space-3;
   }
 }
 
 .input-textarea {
-  border-radius: $wolf-radius-v2;
-  border: 1px solid $wolf-border-default-v2;
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(var(--border));
 
   &:focus-visible {
-    border-color: $wolf-primary-v2;
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    border-color: hsl(var(--brand));
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
 .parse-stage {
   .progress-section {
-    margin-bottom: $wolf-space-md-v2;
+    margin-bottom: $space-3;
   }
 
   .progress-bar {
@@ -843,23 +843,23 @@ watch(visible, (val): void => {
   .progress-stage {
     display: flex;
     justify-content: space-between;
-    gap: $wolf-space-md-v2;
-    margin-top: $wolf-space-sm-v2;
-    color: $wolf-text-tertiary-v2;
-    font-size: $wolf-font-size-caption-v2;
+    gap: $space-3;
+    margin-top: $space-2;
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
   }
 
   .thinking-section {
-    margin-top: $wolf-space-md-v2;
+    margin-top: $space-3;
   }
 
   .thinking-header {
     display: flex;
     align-items: center;
-    gap: $wolf-space-xs-v2;
-    margin-bottom: $wolf-space-sm-v2;
-    color: $wolf-text-tertiary-v2;
-    font-size: $wolf-font-size-caption-v2;
+    gap: $space-1;
+    margin-bottom: $space-2;
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
   }
 
   .thinking-scroll {
@@ -867,11 +867,11 @@ watch(visible, (val): void => {
   }
 
   .thinking-content {
-    padding: $wolf-space-md-v2;
-    border-radius: $wolf-radius-sm-v2;
-    background: $wolf-bg-muted-v2;
-    color: $wolf-text-secondary-v2;
-    font-size: $wolf-font-size-caption-v2;
+    padding: $space-3;
+    border-radius: var(--radius-sm);
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
     line-height: 1.6;
     white-space: pre-wrap;
   }
@@ -879,48 +879,48 @@ watch(visible, (val): void => {
   .parse-actions {
     display: flex;
     justify-content: flex-end;
-    margin-top: $wolf-space-md-v2;
+    margin-top: $space-3;
   }
 }
 
 .error-stage {
   .error-message {
-    background: $wolf-danger-bg-v2;
-    color: $wolf-danger-text-v2;
+    background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+    color: hsl(var(--status-danger));
   }
 
   .warning-icon {
     width: 20px;
     height: 20px;
-    color: $wolf-danger-v2;
+    color: hsl(var(--status-danger));
     flex: 0 0 auto;
   }
 
   .error-recovery {
-    margin-top: $wolf-space-md-v2;
-    background: $wolf-bg-hover-v2;
-    color: $wolf-text-secondary-v2;
+    margin-top: $space-3;
+    background: var(--wash-hover);
+    color: hsl(var(--muted-foreground));
   }
 
   .error-actions,
   .error-back {
     display: flex;
     justify-content: flex-end;
-    gap: $wolf-space-sm-v2;
-    margin-top: $wolf-space-md-v2;
+    gap: $space-2;
+    margin-top: $space-3;
   }
 }
 
 .preview-scroll {
   max-height: calc(88vh - 112px);
-  padding-right: $wolf-space-xs-v2;
+  padding-right: $space-1;
 }
 
 .preview-stage {
   .preview-header {
-    margin-bottom: $wolf-space-md-v2;
-    background: $wolf-success-bg-v2;
-    color: $wolf-success-text-v2;
+    margin-bottom: $space-3;
+    background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+    color: hsl(var(--status-success));
   }
 
   .preview-icon {
@@ -933,16 +933,16 @@ watch(visible, (val): void => {
 .preview-form {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .form-grid,
 .node-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -950,7 +950,7 @@ watch(visible, (val): void => {
 .node-grid {
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(180px, 0.8fr);
 
-  @media (max-width: $wolf-breakpoint-md-v2 - 1) {
+  @media (max-width: $bp-md - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -958,78 +958,78 @@ watch(visible, (val): void => {
 .form-item {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   min-width: 0;
 }
 
 .form-label {
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
+  font-weight: 500;
 
   .required {
-    color: $wolf-danger-v2;
+    color: hsl(var(--status-danger));
   }
 }
 
 .error-message {
-  color: $wolf-danger-text-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--status-danger));
+  font-size: 12px;
 }
 
 .dialog-input,
 .dialog-select {
-  height: $wolf-input-height-v2;
-  border-radius: $wolf-radius-v2;
-  border: 1px solid $wolf-border-default-v2;
+  height: var(--control-h-md);
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(var(--border));
 
   &:focus-visible {
-    border-color: $wolf-primary-v2;
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    border-color: hsl(var(--brand));
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 }
 
 .nodes-section {
-  margin-top: $wolf-space-lg-v2;
+  margin-top: $space-4;
 }
 
 .nodes-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  margin-bottom: $wolf-space-md-v2;
+  gap: $space-3;
+  margin-bottom: $space-3;
 }
 
 .section-title {
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .section-subtitle {
-  margin-top: $wolf-space-xs-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  margin-top: $space-1;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .node-list {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 
 .node-item {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-md-v2;
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-card-v2;
+  gap: $space-3;
+  padding: $space-3;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--card));
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 28px minmax(0, 1fr);
   }
 }
@@ -1040,11 +1040,11 @@ watch(visible, (val): void => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: $wolf-radius-sm-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  border-radius: var(--radius-sm);
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .node-fields {
@@ -1054,11 +1054,11 @@ watch(visible, (val): void => {
 .node-bottom {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
   align-items: end;
-  margin-top: $wolf-space-md-v2;
+  margin-top: $space-3;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-template-columns: 1fr;
   }
 }
@@ -1066,69 +1066,69 @@ watch(visible, (val): void => {
 .required-toggle {
   display: flex;
   align-items: center;
-  gap: $wolf-space-sm-v2;
-  height: $wolf-input-height-v2;
-  color: $wolf-text-secondary-v2;
-  font-size: $wolf-font-size-body-v2;
+  gap: $space-2;
+  height: var(--control-h-md);
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .node-actions {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 
-  @media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+  @media (max-width: $bp-sm - 1) {
     grid-column: 2;
     justify-content: flex-end;
   }
 }
 
 .danger-button {
-  color: $wolf-danger-v2;
+  color: hsl(var(--status-danger));
 }
 
 .empty-nodes {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: $wolf-space-md-v2;
-  padding: $wolf-space-lg-v2;
-  border: 1px dashed $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-body-v2;
+  gap: $space-3;
+  padding: $space-4;
+  border: 1px dashed hsl(var(--border));
+  border-radius: var(--radius-md);
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
 
 .preview-actions {
   display: flex;
   justify-content: flex-end;
-  gap: $wolf-space-sm-v2;
-  margin-top: $wolf-space-lg-v2;
+  gap: $space-2;
+  margin-top: $space-4;
 }
 
 .dialog-button,
 .compact-button {
-  border-radius: $wolf-radius-v2;
-  cursor: $wolf-cursor-clickable-v2;
+  border-radius: var(--radius-md);
+  cursor: pointer;
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
 
   &:disabled {
-    cursor: $wolf-cursor-disabled-v2;
-    opacity: $wolf-disabled-opacity-light-v2;
+    cursor: not-allowed;
+    opacity: var(--disabled-opacity);
   }
 }
 
 .dialog-button {
-  height: $wolf-button-height-md-v2;
-  padding: $wolf-button-padding-md-v2;
+  height: var(--control-h-md);
+  padding: $space-2 $space-4;
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .input-actions,
   .preview-actions,
   .error-actions,
@@ -1138,16 +1138,16 @@ watch(visible, (val): void => {
 
   .dialog-button {
     width: 100%;
-    min-height: $wolf-touch-target-min-v2;
-    height: $wolf-button-height-mobile-v2;
-    padding: $wolf-button-padding-mobile-v2;
+    min-height: var(--touch-target);
+    height: var(--touch-target);
+    padding: $space-3 $space-6;
   }
 
   .dialog-input,
   .dialog-select,
   .input-textarea {
-    min-height: $wolf-input-height-mobile-v2;
-    font-size: $wolf-font-size-body-mobile-v2;
+    min-height: var(--touch-target);
+    font-size: 16px;
   }
 }
 
@@ -1156,7 +1156,7 @@ watch(visible, (val): void => {
   .dialog-input,
   .dialog-select,
   .input-textarea {
-    transition-duration: $wolf-reduced-motion-duration-v2;
+    transition-duration: 0.01ms;
   }
 }
 </style>

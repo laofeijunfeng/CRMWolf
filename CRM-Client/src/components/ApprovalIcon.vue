@@ -4,7 +4,7 @@
   设计规范依据:
   - approval-center.md §2: Header icon entry + Badge 样式
   - MASTER.md §5.1: Button 视觉规范
-  - MASTER.md §2: Design Token 强制规范（variables-v2.scss）
+  - MASTER.md §2: Design Token 强制规范（base.css 设计令牌）
   - UI/UX Pro Max §2: Touch Target ≥ 44×44pt
   - UI/UX Pro Max §1: aria-label 含待办数量
   - §3.0: shadcn-vue 强制使用规则
@@ -138,9 +138,8 @@ const handleClick = (): void => {
 /**
  * ApprovalIcon Styles - V2 Design Tokens
  * 规范依据: approval-center.md §2 + MASTER.md §5.1
- * 导入: variables-v2.scss（CRITICAL）
+ * 导入: base.css 设计令牌（CRITICAL）
  */
-@use '@/styles/variables-v2.scss' as *;
 
 // ==================== 审批按钮容器 ====================
 // 与 shadcn sidebar trigger 的 32px icon button 对齐
@@ -156,11 +155,11 @@ const handleClick = (): void => {
 .approval-action-icon {
   width: 16px;
   height: 16px;
-  color: $wolf-text-secondary-v2;  // #64748B（默认态）
+  color: hsl(var(--muted-foreground));
 
   // Hover 时颜色变化（MASTER.md §7.1）
   .approval-icon:hover & {
-    color: $wolf-primary-v2;  // #2563EB（强调交互）
+    color: hsl(var(--brand));
   }
 
   // 过渡动画：使用 shadcn-vue Button 原生 transition
@@ -180,16 +179,16 @@ const handleClick = (): void => {
   padding: 0 4px;
 
   // 颜色（approval-center.md §2.2）
-  background: $wolf-danger-v2;  // #DC2626（红色）
-  color: $wolf-text-inverse-v2;  // #FFFFFF（白色文字）
+  background: hsl(var(--status-danger));
+  color: hsl(var(--primary-foreground));
 
   // 字体
   font-size: 10px;
-  font-weight: $wolf-font-weight-semibold-v2;  // 600
+  font-weight: 600;  // 600
   line-height: 1;
 
   // 圆角（approval-center.md §2.2: 圆形）
-  border-radius: $wolf-radius-full-v2;  // 9999px
+  border-radius: 9999px;  // 9999px
 
   // 布局
   display: flex;

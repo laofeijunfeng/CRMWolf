@@ -90,12 +90,12 @@ const feedbackAlertClass = computed(() => [
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .feedback-alert__body {
   display: flex;
   flex-direction: column;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .feedback-alert__body p {
@@ -103,31 +103,31 @@ const feedbackAlertClass = computed(() => [
 }
 
 .feedback-alert__outcome {
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
 }
 
 .feedback-alert__meta {
-  color: $wolf-text-tertiary-v2;
-  font-size: $wolf-font-size-caption-v2;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .feedback-alert__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
 }
 
 .feedback-alert__action {
-  min-height: $wolf-touch-target-min-v2;
+  min-height: var(--touch-target);
 }
 
 .feedback-alert--compact {
-  padding-top: $wolf-space-sm-v2;
-  padding-bottom: $wolf-space-sm-v2;
+  padding-top: $space-2;
+  padding-bottom: $space-2;
 
   .feedback-alert__body {
     gap: 2px;
-    font-size: $wolf-font-size-caption-v2;
+    font-size: 12px;
   }
 }
 </style>

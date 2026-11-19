@@ -60,12 +60,12 @@ const handleClick = (event: MouseEvent): void => {
     :data-selected="isCurrentPage ? 'true' : undefined"
     data-type="page"
     :class="cn(
-      'inline-flex size-9 items-center justify-center rounded-wolf text-sm font-medium transition-colors cursor-pointer',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-wolf-primary focus-visible:ring-offset-2',
+      'inline-flex size-9 items-center justify-center rounded-md text-sm font-medium transition-colors cursor-pointer',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
       'disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50',
       isCurrentPage
-        ? 'bg-wolf-primary text-wolf-text-inverse'
-        : 'text-wolf-text-secondary hover:bg-wolf-bg-hover border border-wolf-border-default',
+        ? 'bg-brand text-primary-foreground'
+        : 'text-muted-foreground hover:bg-accent border border-border',
       props.class
     )"
     @click="handleClick"

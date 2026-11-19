@@ -135,7 +135,7 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 /* DataTable 有 replacement 时不套用列表高度，图表才能按内容增高。
    看板要沿用列表那张卡片的视口高度，列才能在里面自己滚动。
@@ -153,7 +153,7 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
   flex: 1;
   flex-direction: column;
   gap: 12px;
-  padding: $wolf-space-md-v2;
+  padding: $space-3;
 }
 
 .journey-board__alert,

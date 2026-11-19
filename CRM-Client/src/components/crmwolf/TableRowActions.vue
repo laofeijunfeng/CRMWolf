@@ -128,12 +128,12 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .table-row-actions {
   display: flex;
   align-items: center;
-  gap: $wolf-space-xs-v2;
+  gap: $space-1;
   justify-content: center;
 }
 
@@ -141,20 +141,20 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 .action-button {
   // Touch target size 扩展（UI/UX Pro Max §2）
   // shadcn-vue Button sm: 36px，需要扩展到 ≥44px
-  min-height: $wolf-touch-target-min-v2;
-  min-width: $wolf-touch-target-min-v2;
-  padding: 0 $wolf-space-sm-v2;
-  font-size: $wolf-font-size-caption-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  transition: all $wolf-transition-v2;
+  min-height: var(--touch-target);
+  min-width: var(--touch-target);
+  padding: 0 $space-2;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all all var(--duration-base) var(--ease-standard);
 
   &:hover:not(:disabled) {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--brand));
+    outline-offset: 2px;
   }
 }
 
@@ -167,10 +167,10 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 
 // 危险操作（红色）
 .action-destructive {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 
   &:hover:not(:disabled) {
-    background: $wolf-danger-bg-v2;
+    background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
   }
 }
 
@@ -190,30 +190,30 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 
 // DropdownMenu 项样式
 .dropdown-item {
-  padding: $wolf-space-sm-v2 $wolf-space-md-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-medium-v2;
-  color: $wolf-text-primary-v2;
-  border-radius: $wolf-radius-v2;
+  padding: $space-2 $space-3;
+  font-size: 14px;
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background $wolf-transition-v2;
+  transition: background all var(--duration-base) var(--ease-standard);
 
   &:hover:not([data-disabled]) {
-    background: $wolf-bg-hover-v2;
+    background: var(--wash-hover);
   }
 
   &:focus-visible {
-    outline: $wolf-focus-ring-width-v2 solid $wolf-primary-v2;
-    outline-offset: $wolf-focus-ring-offset-v2;
+    outline: 2px solid hsl(var(--brand));
+    outline-offset: 2px;
   }
 }
 
 // DropdownMenu 危险操作项
 .dropdown-item-destructive {
-  color: $wolf-danger-text-v2;
+  color: hsl(var(--status-danger));
 
   &:hover:not([data-disabled]) {
-    background: $wolf-danger-bg-v2;
+    background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
   }
 }
 
@@ -221,7 +221,7 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 .dropdown-icon {
   width: 16px;
   height: 16px;
-  margin-right: $wolf-space-sm-v2;
+  margin-right: $space-2;
 }
 
 // Reduced motion 支持（UI/UX Pro Max §7）

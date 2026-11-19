@@ -56,7 +56,7 @@ function handleClear(): void {
     >
       <InputGroupInput
         v-model="draft"
-        class="data-table-search-input text-wolf-auxiliary"
+        class="data-table-search-input text-body"
         type="search"
         :placeholder="props.placeholder"
         :aria-label="props.placeholder"
@@ -96,7 +96,7 @@ function handleClear(): void {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .data-table-search {
   width: 280px;
@@ -109,7 +109,7 @@ function handleClear(): void {
   }
 }
 
-@media (max-width: $wolf-breakpoint-sm-v2 - 1) {
+@media (max-width: $bp-sm - 1) {
   .data-table-search {
     width: 100%;
     flex: 1 1 100%;

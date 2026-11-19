@@ -333,7 +333,7 @@ watch([hasAccess, teamId], (): void => {
       @retry="loadApprovalFlows"
     >
       <template #cell-flow_name="{ row }">
-        <div class="font-medium text-wolf-text-primary">{{ row.flow_name }}</div>
+        <div class="font-medium text-foreground">{{ row.flow_name }}</div>
         <div class="mt-1 text-xs text-muted-foreground">
           {{ row.flow_code }}
         </div>

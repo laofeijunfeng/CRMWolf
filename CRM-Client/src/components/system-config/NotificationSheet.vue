@@ -229,8 +229,8 @@ watch(active, (isActive) => {
   >
     <component :is="embedded ? 'div' : DetailSheetContent">
       <SheetHeader v-if="!embedded" class="system-config-sheet-header">
-        <SheetTitle class="text-base font-semibold text-wolf-text-primary">通知配置</SheetTitle>
-        <SheetDescription class="text-sm text-wolf-text-secondary">配置审批流程的飞书群通知</SheetDescription>
+        <SheetTitle class="text-base font-semibold text-foreground">通知配置</SheetTitle>
+        <SheetDescription class="text-sm text-muted-foreground">配置审批流程的飞书群通知</SheetDescription>
       </SheetHeader>
       <ScrollArea class="h-full">
         <div class="p-4 space-y-4">
@@ -381,7 +381,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://open.feishu.cn/document/ukTMukTMukTM/ucTM5YjL3ETO24yNxkjN"
                       target="_blank"
-                      class="text-primary text-xs hover:underline flex items-center gap-1 mt-1"
+                      class="text-brand text-xs hover:underline flex items-center gap-1 mt-1"
                     >
                       查看官方文档
                       <ExternalLink class="w-3 h-3" />
@@ -421,7 +421,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://open.feishu.cn/document/ukTMukTMukTM/ucTM5YjL3ETO24yNxkjN"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       飞书群聊机器人配置指南
                       <ExternalLink class="w-3 h-3" />
@@ -431,7 +431,7 @@ watch(active, (isActive) => {
                     <a
                       href="https://open.feishu.cn/document/ukTMukTMukTM/uUjN14yIdjL14iTMykTN"
                       target="_blank"
-                      class="text-primary text-sm hover:underline flex items-center gap-1"
+                      class="text-brand text-sm hover:underline flex items-center gap-1"
                     >
                       如何获取 Webhook URL
                       <ExternalLink class="w-3 h-3" />
@@ -448,12 +448,12 @@ watch(active, (isActive) => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .system-config-sheet-header {
-  padding: $wolf-space-xl-v2;
-  padding-bottom: $wolf-space-lg-v2;
-  border-bottom: 1px solid $wolf-border-default-v2;
-  background: $wolf-bg-card-v2;
+  padding: $space-6;
+  padding-bottom: $space-4;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
 }
 </style>

@@ -49,29 +49,29 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="invite-login min-h-dvh flex items-center justify-center bg-wolf-bg-page px-wolf-lg py-wolf-lg">
+  <main class="invite-login min-h-dvh flex items-center justify-center bg-background px-4 py-4">
     <Card class="w-full max-w-[420px] overflow-hidden">
-      <CardContent class="p-wolf-lg pt-wolf-xl">
+      <CardContent class="p-4 pt-6">
         <div class="invite-login__brand">
           <img src="/logo.png" alt="CRM Logo" class="h-16 w-16 object-contain" />
           <h1>加入团队</h1>
         </div>
 
         <div v-if="loading" class="invite-login__state">
-          <Loader2 class="h-5 w-5 animate-spin text-wolf-primary" />
+          <Loader2 class="h-5 w-5 animate-spin text-brand" />
           <span>正在加载邀请信息</span>
         </div>
 
         <template v-else-if="invite">
           <div class="invite-login__team">
-            <Building2 class="h-5 w-5 text-wolf-primary" />
+            <Building2 class="h-5 w-5 text-brand" />
             <span>{{ invite.team_name }}</span>
           </div>
 
           <Button
             v-if="invite.feishu_login_enabled"
             size="lg"
-            class="mt-wolf-lg w-full"
+            class="mt-4 w-full"
             :disabled="redirecting"
             @click="handleFeishuLogin"
           >
@@ -91,18 +91,18 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .invite-login__brand {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: $wolf-space-md-v2;
-  margin-bottom: $wolf-section-gap-v2;
+  gap: $space-3;
+  margin-bottom: $space-6;
 
   h1 {
     margin: 0;
-    color: $wolf-text-primary-v2;
+    color: hsl(var(--foreground));
     font-size: 20px;
     font-weight: 600;
   }
@@ -113,17 +113,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-sm-v2;
+  gap: $space-2;
   min-height: 44px;
-  color: $wolf-text-secondary-v2;
+  color: hsl(var(--muted-foreground));
   font-size: 14px;
 }
 
 .invite-login__team {
-  border: 1px solid $wolf-border-default-v2;
-  border-radius: $wolf-radius-v2;
-  background: $wolf-bg-muted-v2;
-  color: $wolf-text-primary-v2;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
 }
 
 .invite-login__state {

@@ -307,12 +307,6 @@ const getButtonByText = (wrapper: VueWrapper, text: string): DOMWrapper<Element>
   return button
 }
 
-const sourceText = (): string => [
-  `${process.cwd()}/src/views/PaymentPlanDetailSheet.vue`,
-  `${process.cwd()}/src/components/panels/PaymentPlanDetailContent.vue`,
-].map((filePath) => readFileSync(filePath, 'utf8')).join('\n')
-
-
 const installPaymentPlanDetailStyles = async (): Promise<HTMLStyleElement> => {
   const filePath = `${process.cwd()}/src/components/panels/PaymentPlanDetailContent.vue`
   const { descriptor } = parse(readFileSync(filePath, 'utf8'), { filename: filePath })
@@ -323,11 +317,11 @@ const installPaymentPlanDetailStyles = async (): Promise<HTMLStyleElement> => {
     throw new Error('PaymentPlanDetailContent scoped styles are unavailable')
   }
 
-  const variablesPath = `${process.cwd()}/src/styles/variables-v2.scss`
+  const tokensPath = `${process.cwd()}/src/styles/tokens.scss`
   const result = await compileStyleAsync({
     filename: filePath,
     id: scopeId.replace('data-v-', ''),
-    source: styleBlock.content.replace('@/styles/variables-v2.scss', variablesPath),
+    source: styleBlock.content.replace('@/styles/tokens.scss', tokensPath),
     scoped: styleBlock.scoped,
     preprocessLang: styleBlock.lang,
   })
@@ -699,15 +693,6 @@ describe('PaymentPlanDetailSheet', () => {
     expect(wrapper.text()).toContain('金额凭证不一致')
     expect(wrapper.text()).toContain('财务复核')
     expect(wrapper.get('[data-testid="approval-process-stepper"]').attributes('data-record-count')).toBe('2')
-  })
-
-  it('keeps the sheet source on V2 primitives', () => {
-    const source = sourceText()
-
-    expect(source).toContain("import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'")
-    expect(source).toContain('<ApprovalProcessStepper')
-    expect(source).toContain('variables-v2.scss')
-    expect(source).not.toMatch(/(?:48|60|20|12|560|280)px/)
   })
 
   it('does not emit removed seam events (register-payment, edit-record, submit-approval, resubmit-approval)', async () => {

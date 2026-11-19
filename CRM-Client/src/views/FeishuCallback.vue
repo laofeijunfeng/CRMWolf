@@ -89,12 +89,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="feishu-callback min-h-dvh flex items-center justify-center bg-wolf-bg-page px-wolf-lg py-wolf-lg">
+  <main class="feishu-callback min-h-dvh flex items-center justify-center bg-background px-4 py-4">
     <Card class="w-full max-w-[420px] overflow-hidden">
       <CardContent class="feishu-callback__content">
-        <Loader2 v-if="loading" class="h-8 w-8 animate-spin text-wolf-primary" />
+        <Loader2 v-if="loading" class="h-8 w-8 animate-spin text-brand" />
         <XCircle v-else-if="failed" class="h-8 w-8 text-destructive" />
-        <CheckCircle2 v-else class="h-8 w-8 text-emerald-600" />
+        <CheckCircle2 v-else class="h-8 w-8 text-success" />
         <h1>{{ message }}</h1>
         <Button v-if="failed" variant="outline" class="w-full" @click="router.replace('/login')">返回登录</Button>
       </CardContent>
@@ -103,7 +103,7 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .feishu-callback__content {
   display: flex;
@@ -111,12 +111,12 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: $wolf-space-lg-v2;
-  padding: $wolf-space-xl-v2;
+  gap: $space-4;
+  padding: $space-6;
 
   h1 {
     margin: 0;
-    color: $wolf-text-primary-v2;
+    color: hsl(var(--foreground));
     font-size: 18px;
     font-weight: 600;
   }

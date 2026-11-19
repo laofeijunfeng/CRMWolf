@@ -68,13 +68,13 @@ const retryTeamLoad = async (): Promise<void> => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .team-unavailable {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: $wolf-space-lg-v2;
+  padding: $space-4;
   background: hsl(var(--background));
 }
 
@@ -84,12 +84,12 @@ const retryTeamLoad = async (): Promise<void> => {
 
 .team-unavailable__content {
   display: grid;
-  gap: $wolf-space-lg-v2;
+  gap: $space-4;
 }
 
 .team-unavailable__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: $wolf-space-md-v2;
+  gap: $space-3;
 }
 </style>

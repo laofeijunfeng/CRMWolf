@@ -38,7 +38,7 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 </script>
 
 <style scoped lang="scss">
-@use '@/styles/variables-v2.scss' as *;
+@use '@/styles/tokens.scss' as *;
 
 .agent-message-body {
   min-width: 0;
@@ -64,32 +64,32 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 .agent-message-body--markdown :deep(ol + p),
 .agent-message-body--markdown :deep(ul + ul),
 .agent-message-body--markdown :deep(ol + ol) {
-  margin-top: $wolf-space-sm-v2;
+  margin-top: $space-2;
 }
 
 .agent-message-body--markdown :deep(h1),
 .agent-message-body--markdown :deep(h2),
 .agent-message-body--markdown :deep(h3),
 .agent-message-body--markdown :deep(h4) {
-  margin-bottom: $wolf-space-xs-v2;
-  color: $wolf-text-primary-v2;
-  font-size: $wolf-font-size-body-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
-  line-height: $wolf-line-height-body-v2;
+  margin-bottom: $space-1;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .agent-message-body--markdown :deep(h1:not(:first-child)),
 .agent-message-body--markdown :deep(h2:not(:first-child)),
 .agent-message-body--markdown :deep(h3:not(:first-child)),
 .agent-message-body--markdown :deep(h4:not(:first-child)) {
-  margin-top: $wolf-space-md-v2;
+  margin-top: $space-3;
 }
 
 .agent-message-body--markdown :deep(ul),
 .agent-message-body--markdown :deep(ol) {
   display: grid;
-  gap: $wolf-space-xs-v2;
-  padding-left: $wolf-space-lg-v2;
+  gap: $space-1;
+  padding-left: $space-4;
 }
 
 .agent-message-body--markdown :deep(ul) {
@@ -101,33 +101,33 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 }
 
 .agent-message-body--markdown :deep(li) {
-  padding-left: $wolf-space-xs-v2;
+  padding-left: $space-1;
 }
 
 .agent-message-body--markdown :deep(strong) {
-  color: $wolf-text-primary-v2;
-  font-weight: $wolf-font-weight-semibold-v2;
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .agent-message-body--markdown :deep(a) {
-  color: $wolf-primary-v2;
+  color: hsl(var(--brand));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .agent-message-body--markdown :deep(code) {
-  border-radius: $wolf-radius-sm-v2;
-  background: color-mix(in srgb, $wolf-text-primary-v2 8%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
   padding: 1px 4px;
-  color: $wolf-text-primary-v2;
+  color: hsl(var(--foreground));
   font-size: 0.92em;
 }
 
 .agent-message-body--markdown :deep(pre) {
   overflow-x: auto;
-  border-radius: $wolf-radius-v2;
-  background: color-mix(in srgb, $wolf-text-primary-v2 8%, transparent);
-  padding: $wolf-space-sm-v2;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
+  padding: $space-2;
 }
 
 .agent-message-body--markdown :deep(pre code) {
