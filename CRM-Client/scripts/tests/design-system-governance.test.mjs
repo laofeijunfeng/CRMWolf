@@ -14,7 +14,7 @@ test('rejects newly added UI raw colors', () => {
     category: 'raw-color',
     file: 'CRM-Client/src/components/Example.vue',
     line: 2,
-    message: '新增 UI 颜色必须使用语义 Token；图表/可视化例外请登记。',
+    message: 'UI 颜色必须使用 base.css 语义 Token。',
     text: 'color: #2563eb;',
   })
 })
@@ -63,47 +63,64 @@ test('ignores colors that only appear in source comments', () => {
 })
 
 
-test('rejects direct utility status colors', () => {
+test('rejects Tailwind palette classes including ring and zinc', () => {
   const violations = inspectContent('CRM-Client/src/components/Example.vue', [
-    '  <span class=\"text-red-600 bg-red-50\">已驳回</span>',
+    '  <span class="text-red-600 bg-red-50">已驳回</span>',
+    '  <div class="ring-blue-500"></div>',
+    '  <div class="border-zinc-200"></div>',
   ], [])
 
-  assert.deepEqual(violations.map((violation) => violation.category), [
-    'status-color',
+  assert.deepEqual(violations.map((violation) => [violation.category, violation.line]), [
+    ['palette-color', 1],
+    ['palette-color', 2],
+    ['palette-color', 3],
   ])
 })
 
-test('DS-EX-004 allows only extracted legacy board status-color tokens', () => {
-  const boardPath = 'CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue'
+test('allows semantic token classes and data-tone status badges', () => {
+  assert.deepEqual(inspectContent('CRM-Client/src/components/Example.vue', [
+    '  <Badge variant="status" :data-tone="tone" class="text-muted-foreground bg-brand/10 ring-ring" />',
+    '  color: hsl(var(--status-danger) / 0.3);',
+  ], []), [])
+})
 
-  assert.equal(inspectContent(boardPath, [
+test('rejects dark-mode variants', () => {
+  const violations = inspectContent('CRM-Client/src/components/Example.vue', [
+    '  <div class="bg-card dark:bg-background"></div>',
+    '.dark .card { color: inherit; }',
+    '  color: var(--wolf-text-dark-v2);',
+    '@media (prefers-color-scheme: dark) {',
+  ], [])
+
+  assert.deepEqual(violations.filter((violation) => violation.category === 'dark-mode').map((violation) => violation.line), [1, 2, 3, 4])
+})
+
+test('exempts only base.css from raw colors as the single value source', () => {
+  const shadow = ['  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.05);']
+  assert.deepEqual(inspectContent('CRM-Client/src/styles/base.css', shadow, []), [])
+  assert.deepEqual(inspectContent('CRM-Client/src/styles/touch-safety.css', shadow, []).map((violation) => violation.category), ['raw-color'])
+})
+
+test('registered exceptions no longer allow palette or raw colors anywhere', () => {
+  assert.deepEqual(inspectContent('CRM-Client/src/components/business-journey/BusinessJourneyBoardView.vue', [
     "countBadge: 'bg-blue-50 text-blue-700 border-blue-100'",
-  ]).length, 0)
-
-  assert.deepEqual(inspectContent(boardPath, [
-    "countBadge: 'bg-blue-50 text-blue-700 border-blue-100 bg-blue-950'",
-  ]).map((violation) => violation.category), [
-    'status-color',
-  ])
-
-  assert.deepEqual(inspectContent(boardPath, [
-    "class: 'foo-bg-blue-50'",
-  ]).map((violation) => violation.category), [
-    'status-color',
-  ])
-
-  assert.equal(inspectContent(boardPath, [
-    "countBadge: 'bg-blue-50 text-blue-700 border-blue-100' // bg-blue-950",
-  ]).length, 0)
+    '  background: rgb(240 249 255);',
+  ]).map((violation) => violation.category), ['palette-color', 'raw-color'])
 })
 
-test('rejects new legacy and Element Plus entries', () => {
+test('rejects legacy token entries and Element Plus', () => {
   const violations = inspectContent('CRM-Client/src/views/Example.vue', [
     "@use '@/styles/variables.scss';",
+    "@use '@/styles/variables-v2.scss' as *;",
+    '  <div class="rounded-wolf-md px-wolf-sm"></div>',
+    '  padding: $wolf-page-padding-v2;',
     '<el-button>保存</el-button>',
   ], [])
 
   assert.deepEqual(violations.map((violation) => violation.category), [
+    'legacy-token',
+    'legacy-token',
+    'legacy-token',
     'legacy-token',
     'element-plus',
   ])

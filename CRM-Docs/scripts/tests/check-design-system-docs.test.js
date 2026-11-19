@@ -4,7 +4,7 @@ const os = require('os')
 const path = require('path')
 const { validateDesignSystem } = require('../check-design-system-docs')
 
-function makeFixture(files) {
+function makeFixture(files, extraConfig = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'design-system-docs-'))
   for (const [relativePath, content] of Object.entries(files)) {
     const file = path.join(root, relativePath)
@@ -22,7 +22,8 @@ function makeFixture(files) {
       'pages/detail-page.md',
       'pages/form-page.md',
       'pages/approval-center.md'
-    ]
+    ],
+    ...extraConfig
   }), 'utf8')
   return root
 }
@@ -91,5 +92,29 @@ assert.match(forbidden5.message, /forbidden text pages\/form-page\.md/)
 const forbidden6 = check({ 'README.md': 'Old pages/approval-center.md ref\n' })[0]
 assert.strictEqual(forbidden6.category, 'forbidden-text')
 assert.match(forbidden6.message, /forbidden text pages\/approval-center\.md/)
+
+// Test: hex/px values fail outside the exempt token-values file
+const rawValueConfig = {
+  forbiddenPatterns: [{
+    name: 'raw-ui-value',
+    pattern: '(?<![\\w/.(#-])#[0-9a-fA-F]{3,8}\\b|\\b\\d+(?:\\.\\d+)?px\\b',
+    exemptFiles: ['foundations/token-values.md'],
+    message: 'hex/px values belong only in foundations/token-values.md'
+  }]
+}
+function checkWith(files, extraConfig) {
+  const rootDir = makeFixture(files, extraConfig)
+  return validateDesignSystem({ rootDir, configPath: path.join(rootDir, 'governance/check-config.json') })
+}
+const rawHex = checkWith({ 'README.md': '| primary | #17191b |\n' }, rawValueConfig)
+assert.strictEqual(rawHex.length, 1)
+assert.strictEqual(rawHex[0].category, 'forbidden-pattern')
+assert.strictEqual(rawHex[0].line, 1)
+const rawPx = checkWith({ 'README.md': 'Title\n按钮高度 32px\n' }, rawValueConfig)
+assert.deepStrictEqual(rawPx.map(v => [v.category, v.line]), [['forbidden-pattern', 2]])
+assert.deepStrictEqual(checkWith({
+  'README.md': '[Tokens](foundations/token-values.md)\n[Anchor](foundations/token-values.md#add)\n使用 `--control-h-md`\n',
+  'foundations/token-values.md': '# Tokens\n## add\n| --primary | #17191b | 32px |\n'
+}, rawValueConfig), [])
 
 console.log('check-design-system-docs tests passed')

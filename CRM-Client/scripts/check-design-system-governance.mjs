@@ -2,8 +2,8 @@
 /**
  * P2-04 设计系统增量治理检查。
  *
- * 设计目标：只阻止新增设计系统债务，不把存量问题伪装成新问题。
- * 默认检查暂存文件；--all 仅输出全量审计结果，不作为迁移完成的替代品。
+ * 设计目标：UI 数值只来自 base.css :root（文档侧只来自 token-values.md）。
+ * 默认检查暂存文件的新增行；--all 全量审计 CRM-Client/src，存在任何违规即失败。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,12 +22,19 @@ const RULES = [
   {
     category: 'raw-color',
     pattern: /(?:^|[=:,(]|\s)(?:#[0-9a-f]{3,8}\b|rgba?\s*\(\s*(?:#?[0-9]|\d))/i,
-    message: '新增 UI 颜色必须使用语义 Token；图表/可视化例外请登记。',
+    message: 'UI 颜色必须使用 base.css 语义 Token。',
+    // 唯一数值源：base.css :root 定义 Token 原始值。
+    exemptFiles: ['CRM-Client/src/styles/base.css'],
   },
   {
     category: 'legacy-token',
-    pattern: /(?:variables\.scss(?!-v2)|\$wolf-[\w-]+-v1\b|--wolf-[\w-]+-v1\b)/i,
-    message: '禁止新增旧 Token 入口，请使用 base.css 语义变量或已登记兼容层。',
+    pattern: /(?:variables(?:-v2)?\.scss|\$wolf-|-wolf-)/i,
+    message: '禁止旧 Token 入口（variables*.scss、$wolf-*、*-wolf-*），请使用 base.css 语义变量。',
+  },
+  {
+    category: 'dark-mode',
+    pattern: /(?:(?:^|[\s"'`])dark:|\.dark\b|-dark-v2\b|prefers-color-scheme)/,
+    message: '当前只有浅色主题，禁止 dark 写法。',
   },
   {
     category: 'element-plus',
@@ -35,9 +42,9 @@ const RULES = [
     message: '禁止新增 Element Plus 组件入口。',
   },
   {
-    category: 'status-color',
-    pattern: /\b(?:text|bg|border)-(?:red|orange|amber|yellow|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|pink|rose|slate|gray)-(?:[1-9]\d?\d?)(?:\/[0-9]+)?\b/i,
-    message: '状态颜色必须通过 StatusBadge/ApprovalStatusBadge 或登记例外表达。',
+    category: 'palette-color',
+    pattern: /\b(?:text|bg|border|ring)-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-(?:[1-9]\d?\d?)(?:\/[0-9]+)?\b/i,
+    message: '禁止 Tailwind 调色板类；状态色用 data-tone / Badge variant="status"，其余用语义 Token。',
   },
 ]
 
@@ -106,6 +113,10 @@ function wildcardToRegExp(pattern) {
   return new RegExp(`^${pattern.split('*').map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`)
 }
 
+function ruleApplies(rule, filePath) {
+  return !rule.exemptFiles?.includes(filePath)
+}
+
 function exceptionMatches(exception, filePath, category, text) {
   if (exception.status !== 'active' || exception.category !== category) return false
   if (!exception.files.some((file) => wildcardToRegExp(file).test(filePath))) return false
@@ -144,6 +155,7 @@ export function inspectLines(files, options = {}) {
   for (const filePath of files) {
     for (const { line, text } of collectAddedLines(filePath, options)) {
       for (const rule of RULES) {
+        if (!ruleApplies(rule, filePath)) continue
         const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
         if (!rule.pattern.test(scanText)) continue
         if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
@@ -172,6 +184,7 @@ function inspectLinesFromContent(filePath, lines, exceptions = readJson(exceptio
   const violations = []
   lines.forEach((text, index) => {
     for (const rule of RULES) {
+      if (!ruleApplies(rule, filePath)) continue
       const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
       if (!rule.pattern.test(scanText)) continue
       if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
@@ -202,7 +215,7 @@ function main() {
     console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条未登记存量问题。`)
     printViolations(violations.slice(0, 40))
     if (violations.length > 40) console.log(`…其余 ${violations.length - 40} 条仅保留在审计统计中。`)
-    process.exit(configViolations.length ? 1 : 0)
+    process.exit(violations.length || configViolations.length ? 1 : 0)
   }
 
   if (files.length === 0) {

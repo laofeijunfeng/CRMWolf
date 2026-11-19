@@ -11,12 +11,13 @@
 node CRM-Docs/scripts/check-design-system-docs.js
 ```
 
-## 四类失败
+## 五类失败
 
 1. **行数超限：**单个 Markdown 超过 100 行。
 2. **链接无效：**相对文件目标不存在，或链接锚点没有对应标题。
 3. **不可达：**文档无法从根入口沿 Markdown 链接访问。
 4. **废弃标识：**文档包含配置中禁止的旧路径或名称。
+5. **散落数值：**除 `foundations/token-values.md` 外出现 hex 色值或 px 数值（`forbiddenPatterns`）；改为引用 Token 名。
 
 ## 修复步骤
 
@@ -24,4 +25,4 @@ node CRM-Docs/scripts/check-design-system-docs.js
 2. 将过长内容拆分到拥有该主题的新文件，并从索引链接。
 3. 修正相对路径或标题锚点。
 4. 从根入口补齐到领域索引和主题文件的链接。
-5. 删除废弃标识及其引用后，重新运行命令直至通过。
+5. 删除废弃标识及其引用、把散落数值改为 Token 名后，重新运行命令直至通过。

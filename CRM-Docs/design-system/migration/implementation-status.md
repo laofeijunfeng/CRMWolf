@@ -61,10 +61,10 @@ Element Plus 迁移文档保留为历史背景，不代表当前仍存在对应�
 | `TopBarTabs` | 激活、hover、focus、危险操作改用语义 CSS variables | 已验证 | 2026-09-04 |
 | `DataViewStatePanel` + `PaymentPlanDetailContent` | loading/error/empty/ready 组合已接入，保留回款动作 | 已验证 | 2026-09-04 |
 | `StatusBadge` + `ApprovalStatusBadge` | 生命周期/审批契约有未知状态兜底和组件测试 | 已验证 | 2026-09-04 |
-| `SalesDashboard` | 页面 UI 边框、错误提示和分隔线已迁移；图表序列色保留登记例外 | 部分验证 | 2026-09-04 |
+| `SalesDashboard` | 页面 UI 边框、错误提示、分隔线和图表序列色（`--chart-*`）已迁移 | 已验证 | 2026-11-19 |
 | `AppLayout` | 壳层背景、分隔线、标题、focus 和危险操作改用 shadcn CSS variables | 已验证 | 2026-09-04 |
 | `AccountSettings` | 账户页面 loading/error/empty/ready 统一由 `DataViewStatePanel` 承载，保留密码与飞书授权动作 | 已验证 | 2026-09-04 |
-| `CustomerOpportunityHoverCard` | 客户商机浮层 loading/error/empty/ready 统一由 `DataViewStatePanel` 承载，保留预览与跳转动作；商机阶段蓝色标签例外登记为 `DS-EX-003` | 已验证 | 2026-09-04 |
+| `CustomerOpportunityHoverCard` | 客户商机浮层 loading/error/empty/ready 统一由 `DataViewStatePanel` 承载，保留预览与跳转动作 | 已验证 | 2026-09-04 |
 
 验证命令：`npm run type-check`、`npm run build`、`npm run test:governance`、`npm run test:unit -- --run tests/components/StatusBadge.spec.ts tests/components/ApprovalStatusBadge.spec.ts tests/components/DataViewStatePanel.spec.ts`、`npm run lint:design-system -- --worktree`。详细字段以 [P2-04 台账](./p2-pkg-04-inventory.md) 为准。
 

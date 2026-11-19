@@ -35,6 +35,15 @@ function validateDesignSystem({ rootDir, configPath }) {
     const fileName = relative(file)
     const lineCount = source.endsWith('\n') ? source.slice(0, -1).split('\n').length : source.split('\n').length
     if (lineCount > 100) violations.push({ file: fileName, line: 0, category: 'line-limit', message: 'exceeds 100 lines' })
+    for (const rule of config.forbiddenPatterns ?? []) {
+      if (rule.exemptFiles?.includes(fileName)) continue
+      const pattern = new RegExp(rule.pattern)
+      source.split('\n').forEach((text, i) => {
+        if (pattern.test(text)) {
+          violations.push({ file: fileName, line: i + 1, category: 'forbidden-pattern', message: `${rule.name}: ${rule.message}` })
+        }
+      })
+    }
     for (const forbidden of config.forbiddenText) {
       const lines = source.split('\n')
       for (let i = 0; i < lines.length; i++) {

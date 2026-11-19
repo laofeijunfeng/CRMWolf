@@ -24,14 +24,14 @@
       "file": "CRM-Client/src/views/SalesDashboard.vue",
       "symbol": "trend series colors",
       "category": "raw-color",
-      "current": "图表序列颜色使用数据可视化色板",
-      "target": "UI 外壳迁移到语义 Token，序列色保留登记例外",
-      "exception": true,
+      "current": "图表序列颜色使用 --chart-1 / --chart-4 Token",
+      "target": "UI 外壳与图表序列色全部来自 base.css 语义 Token",
+      "exception": false,
       "batch": "P2-04-05",
       "risk": "visualization-regression",
-      "verification": "亮色、图表 tooltip、图例回归",
-      "status": "exception-registered",
-      "lastVerified": "2026-09-04",
+      "verification": "亮色、图表 tooltip、图例回归；npm run lint:design-system:all 0 违规",
+      "status": "implemented-compatible",
+      "lastVerified": "2026-11-19",
       "owner": "frontend-platform"
     },
     {
@@ -182,8 +182,7 @@
       "verification": "npm run test:unit -- --run tests/components/CustomerOpportunityHoverCard.spec.ts; npm run type-check; 首次打开、加载失败重试、空态、选择商机和查看全部回归",
       "status": "implemented-compatible",
       "lastVerified": "2026-09-04",
-      "owner": "frontend-platform",
-      "notes": "商机阶段 Badge 的蓝色业务标签样式为已登记例外 DS-EX-003；不属于生命周期状态徽章。"
+      "owner": "frontend-platform"
     }
   ]
 }

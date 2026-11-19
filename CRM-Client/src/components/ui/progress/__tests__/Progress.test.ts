@@ -13,12 +13,12 @@ describe('Progress indicator classes', () => {
     const wrapper = mount(Progress, {
       props: {
         modelValue: 42,
-        indicatorClass: 'bg-yellow-500'
+        indicatorClass: 'bg-brand'
       }
     })
 
     const indicator = wrapper.get('[role="progressbar"] > div')
-    expect(indicator.classes()).toContain('bg-yellow-500')
+    expect(indicator.classes()).toContain('bg-brand')
     expect(indicator.classes()).not.toContain('bg-primary')
   })
 })
