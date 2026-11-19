@@ -12,7 +12,7 @@ import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
 import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
-import { type AssistantTaskView, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary } from '@/schemas/assistant-contracts'
+import { type AssistantTaskView, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary, type ConversationProjection } from '@/schemas/assistant-contracts'
 
 interface ChatEntry {
   id: number
@@ -27,6 +27,7 @@ interface ChatEntry {
   replayed: boolean
   outcome?: NonNullable<ConversationView['messages'][number]['outcome']> | undefined
   ui?: AgentUIEnvelope | null | undefined
+  projection?: ConversationProjection | null | undefined
 }
 
 const task = ref<AssistantTaskView | null>(null)
@@ -1050,12 +1051,138 @@ const entryBlocks = (entry: ChatEntry): NonNullable<ChatEntry['ui']>['blocks'] =
 const isUnknownResult = (entry: ChatEntry): boolean => entryBlocks(entry).some((block) =>
   (block.type === 'error' && block.code === 'UNKNOWN_COMMIT_RESULT')
   || (block.type === 'notice' && block.title === '结果待核对'))
+const hasErrorUi = (entry: ChatEntry): boolean => entryBlocks(entry).some((block) => block.type === 'error')
 const isAuthoritativeWrite = (entry: ChatEntry): boolean => {
-  if (entry.role !== 'assistant') return false
+  if (entry.role !== 'assistant' || entry.outcome === 'failure' || isUnknownResult(entry) || hasErrorUi(entry)) return false
   if (entry.outcome === 'activity_written') return true
   return entryBlocks(entry).some((block) =>
     (block.type === 'action_result' && block.status === 'SUCCESS')
     || (block.type === 'notice' && block.title === '本次跟进已写入'))
+}
+const activityProjectionId = (entry: ChatEntry): string | null => {
+  if (entry.projection?.activity_public_id != null) return entry.projection.activity_public_id
+  if (entry.outcome !== 'activity_written') return null
+  const receipt = entry.ownTask?.committed.find((item) => item.kind === 'customer_activity')
+  return receipt?.kind === 'customer_activity' ? receipt.public_id : null
+}
+
+const dispositionProjection = (entry: ChatEntry): NonNullable<ConversationProjection['disposition']> | null => {
+  if (entry.role !== 'assistant' || entry.outcome === 'failure' || isUnknownResult(entry) || hasErrorUi(entry)) return null
+  if (entry.projection?.disposition != null) return entry.projection.disposition
+  const currentTask = entry.ownTask
+  const payload = currentTask?.follow_up_disposition
+  if (currentTask == null || payload == null) return null
+  if (currentTask.waiting?.type !== 'FOLLOW_UP_DISPOSITION' && entry.outcome !== 'follow_up_disposition') return null
+  if (payload.batch_id == null || payload.batch_id === '') return null
+  return {
+    task_public_id: currentTask.public_id,
+    batch_id: payload.batch_id,
+    item_ids: payload.items.map((item) => item.item_id),
+    card_role: payload.status === 'DONE' ? 'FINAL' : currentTask.waiting?.type === 'FOLLOW_UP_DISPOSITION' ? 'CURRENT' : 'NONE',
+    version: currentTask.version,
+  }
+}
+
+const dispositionCovers = (carrier: ChatEntry, source: ChatEntry): boolean => {
+  const carrierProjection = dispositionProjection(carrier)
+  const sourceProjection = dispositionProjection(source)
+  if (carrierProjection == null || sourceProjection == null || carrierProjection.card_role === 'NONE') return false
+  if (carrierProjection.task_public_id !== sourceProjection.task_public_id || carrierProjection.batch_id !== sourceProjection.batch_id) return false
+  const carrierProjectionIds = carrierProjection.item_ids.filter((id) => id.trim() !== '')
+  const sourceProjectionIds = sourceProjection.item_ids.filter((id) => id.trim() !== '')
+  if (carrierProjectionIds.length === 0 || sourceProjectionIds.length === 0
+    || carrierProjectionIds.length !== carrierProjection.item_ids.length
+    || sourceProjectionIds.length !== sourceProjection.item_ids.length
+    || new Set(carrierProjectionIds).size !== carrierProjectionIds.length
+    || new Set(sourceProjectionIds).size !== sourceProjectionIds.length
+    || sourceProjectionIds.some((id) => !carrierProjectionIds.includes(id))) return false
+  const carrierItems = new Map(carrier.ownTask?.follow_up_disposition?.items.map((item) => [item.item_id, item]) ?? [])
+  const sourceItems = source.ownTask?.follow_up_disposition?.items
+  if (sourceItems == null || sourceItems.length === 0) return false
+  for (const sourceItem of sourceItems) {
+    if (!sourceItem.item_id.trim() || sourceItem.task_public_id == null || !sourceItem.task_public_id.trim()) return false
+    const target = carrierItems.get(sourceItem.item_id)
+    if (target == null || target.task_public_id == null || target.task_public_id !== sourceItem.task_public_id) return false
+    if (['complete', 'hold', 'skip', 'failed', 'unknown'].includes(sourceItem.state)
+      && (target.state !== sourceItem.state || (target.result_title ?? null) !== (sourceItem.result_title ?? null)
+        || (target.result_message ?? null) !== (sourceItem.result_message ?? null))) return false
+    if (((sourceItem.evidence_quote ?? '') !== '' && target.evidence_quote !== sourceItem.evidence_quote)
+      || ((sourceItem.evidence_reason ?? '') !== '' && target.evidence_reason !== sourceItem.evidence_reason)) return false
+  }
+  return true
+}
+
+const dispositionRoleRank = (role: NonNullable<ConversationProjection['disposition']>['card_role']): number =>
+  role === 'FINAL' ? 2 : role === 'CURRENT' ? 1 : 0
+const compareCardEntries = (left: ChatEntry, right: ChatEntry): number => {
+  const leftProjection = dispositionProjection(left)
+  const rightProjection = dispositionProjection(right)
+  const roleOrder = dispositionRoleRank(leftProjection?.card_role ?? 'NONE') - dispositionRoleRank(rightProjection?.card_role ?? 'NONE')
+  if (roleOrder !== 0) return roleOrder
+  const versionOrder = (leftProjection?.version ?? 0) - (rightProjection?.version ?? 0)
+  if (versionOrder !== 0) return versionOrder
+  const timeOrder = (left.at?.getTime() ?? 0) - (right.at?.getTime() ?? 0)
+  if (timeOrder !== 0) return timeOrder
+  const serverOrder = (left.serverId ?? '').localeCompare(right.serverId ?? '')
+  if (serverOrder !== 0) return serverOrder
+  return left.id - right.id
+}
+
+const recomputeProjectionCoverage = (): void => {
+  const activityGroups = new Map<string, ChatEntry[]>()
+  const dispositionGroups = new Map<string, ChatEntry[]>()
+  for (const entry of entries.value) {
+    const wasCovered = entry.projection?.visibility === 'COVERED'
+    if (wasCovered && entry.projection != null) {
+      entry.projection = { ...entry.projection, visibility: 'VISIBLE', covered_by: null }
+
+    }
+    if (entry.role !== 'assistant') continue
+    const activityId = activityProjectionId(entry)
+    if (activityId != null && isAuthoritativeWrite(entry)) {
+      entry.projection = { ...(entry.projection ?? {}), visibility: 'VISIBLE', activity_public_id: activityId, covered_by: null }
+      const group = activityGroups.get(activityId) ?? []
+      group.push(entry)
+      activityGroups.set(activityId, group)
+    }
+    const disposition = dispositionProjection(entry)
+    if (disposition != null) {
+      const current = task.value
+      const isCurrentWait = !entry.replayed && current?.status === 'ACTIVE'
+        && current.public_id === entry.ownTask?.public_id && current.waiting?.type === 'FOLLOW_UP_DISPOSITION'
+        && current.waiting.action_id === entry.waiting?.action_id
+        && current.waiting.expected_version === entry.waiting?.expected_version
+      if (!isCurrentWait && entry.ui != null) {
+        entry.ui = { ...entry.ui, blocks: entry.ui.blocks.map((block) =>
+          block.type === 'interaction' && block.business_action === 'settle_follow_up_disposition'
+            && block.state === 'ACTIVE'
+            ? { ...block, state: 'READ_ONLY', submit_action_id: null, submit_on_select: false, allow_cancel: false,
+                options: block.options.map((option) => ({ ...option, disabled: true })) }
+            : block) }
+      }
+      entry.projection = { ...(entry.projection ?? {}), visibility: 'VISIBLE', disposition, covered_by: null }
+      const key = `${disposition.task_public_id}:${disposition.batch_id}`
+      const group = dispositionGroups.get(key) ?? []
+      group.push(entry)
+      dispositionGroups.set(key, group)
+    }
+  }
+  for (const group of activityGroups.values()) {
+    const carrier = [...group].sort((left, right) => (right.at?.getTime() ?? 0) - (left.at?.getTime() ?? 0) || right.id - left.id)[0]
+    if (carrier === undefined) continue
+    for (const entry of group) if (entry !== carrier && entry.projection != null) {
+      entry.projection.visibility = 'COVERED'
+      entry.projection.covered_by = carrier.serverId ?? String(carrier.id)
+    }
+  }
+  for (const group of dispositionGroups.values()) {
+    const carrier = [...group].sort((left, right) => compareCardEntries(right, left)).find((entry) => dispositionProjection(entry)?.card_role !== 'NONE')
+    if (carrier === undefined) continue
+    for (const entry of group) if (entry !== carrier && entry.projection != null && dispositionCovers(carrier, entry)) {
+      entry.projection.visibility = 'COVERED'
+      entry.projection.covered_by = carrier.serverId ?? String(carrier.id)
+    }
+  }
 }
 const noteEpisodeMessages = (): void => {
   if (processing.value.episode === 0) return
@@ -1103,11 +1230,20 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
     waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
     at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
-    ui: message.role === 'assistant' ? message.ui : null
+    ui: message.role === 'assistant' ? message.ui : null, projection: message.projection ?? null,
   }))
-  const incomingIds = new Set(mapped.filter((entry) => !older || entry.outcome !== 'task_completed').map((entry) => entry.serverId))
-  const merged = older ? [...mapped, ...preserved.filter((entry) => !incomingIds.has(entry.serverId))]
-    : [...preserved.filter((entry) => !incomingIds.has(entry.serverId)), ...mapped]
+  const incomingIds = new Set(mapped.map((entry) => entry.serverId))
+  const preservedIds = new Set(preserved.map((entry) => entry.serverId))
+  const uniqueMapped: ChatEntry[] = []
+  const seenMapped = new Set<string | undefined>()
+  for (const entry of mapped) {
+    if (entry.serverId !== undefined && seenMapped.has(entry.serverId)) continue
+    seenMapped.add(entry.serverId)
+    uniqueMapped.push(entry)
+  }
+  const merged = older
+    ? [...uniqueMapped.filter((entry) => entry.serverId === undefined || !preservedIds.has(entry.serverId)), ...preserved]
+    : [...preserved.filter((entry) => !incomingIds.has(entry.serverId)), ...uniqueMapped]
   const completionIds = new Map<string | undefined, number>()
   for (const entry of merged) {
     if (entry.outcome === 'task_completed') completionIds.set(entry.ownTask?.public_id ?? entry.serverId, entry.id)
@@ -1127,6 +1263,7 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
       if (added !== undefined) added.serverId = `current:${current.public_id}:${current.version}`
     }
   }
+  recomputeProjectionCoverage()
   if (!older && current !== null) adoptProcessingTurn(current)
   if (!older && view.has_pending_request) resultPending.value = true
   if (!older) noteEpisodeMessages()
@@ -1184,42 +1321,43 @@ void loadConversation()
       <div v-if="entries.length === 0 && !loadingConversation && !historyError" class="rounded-wolf-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
         发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。
       </div>
-
       <template v-for="entry in entries" :key="entry.id">
-        <div v-if="entry.role === 'user'" class="flex justify-end">
-          <div class="max-w-[75%] rounded-wolf-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
-            {{ entry.text }}
+        <template v-if="entry.projection?.visibility !== 'COVERED'">
+          <div v-if="entry.role === 'user'" class="flex justify-end">
+            <div class="max-w-[75%] rounded-wolf-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+              {{ entry.text }}
+            </div>
           </div>
-        </div>
-        <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-3 py-2 text-sm text-muted-foreground">
-          <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
-          <span class="shrink-0 whitespace-nowrap">本次任务已完成</span>
-          <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
-        </div>
-        <div v-else class="flex gap-2.5">
-          <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]">AI</div>
-          <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
-            <AgentUIMessage
-              v-if="entry.ui"
-              :message="entry.ui"
-              :disabled="busy"
-              :locked-action-ids="heldActionIds"
-              :notices="interactionNotices"
-              @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
-              @action="(actionId) => { void retryRootFailure(entry, actionId) }"
-            />
-            <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
-            <Button
-              v-if="showExplicitNone(entry)"
-              type="button"
-              variant="link"
-              size="sm"
-              class="h-auto min-h-11 px-0 text-xs font-normal text-muted-foreground underline-offset-2"
-              :disabled="busy"
-              @click="() => { void gapNone(entry) }"
-            >这条没有下一步</Button>
+          <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-3 py-2 text-sm text-muted-foreground">
+            <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
+            <span class="shrink-0 whitespace-nowrap">本次任务已完成</span>
+            <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
           </div>
-        </div>
+          <div v-else class="flex gap-2.5">
+            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#dbeafe] text-[11px] font-semibold text-[#1d4ed8]">AI</div>
+            <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
+              <AgentUIMessage
+                v-if="entry.ui"
+                :message="entry.ui"
+                :disabled="busy"
+                :locked-action-ids="heldActionIds"
+                :notices="interactionNotices"
+                @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
+                @action="(actionId) => { void retryRootFailure(entry, actionId) }"
+              />
+              <div v-else class="rounded-wolf-surface border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
+              <Button
+                v-if="showExplicitNone(entry)"
+                type="button"
+                variant="link"
+                size="sm"
+                class="h-auto min-h-11 px-0 text-xs font-normal text-muted-foreground underline-offset-2"
+                :disabled="busy"
+                @click="() => { void gapNone(entry) }"
+              >这条没有下一步</Button>
+            </div>
+          </div>
+        </template>
       </template>
     </div>
     <div v-if="showProcessCard" class="mt-2 rounded-wolf-surface border border-border bg-white px-3.5 py-3">
