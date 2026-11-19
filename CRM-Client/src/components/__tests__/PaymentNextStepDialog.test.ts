@@ -10,11 +10,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: mocks.push }),
+  useRouter: (): { push: typeof mocks.push } => ({ push: mocks.push }),
 }))
 
 vi.mock('@/stores/approval', () => ({
-  useApprovalStore: () => ({ submitEntity: mocks.submitEntity }),
+  useApprovalStore: (): { submitEntity: typeof mocks.submitEntity } => ({ submitEntity: mocks.submitEntity }),
 }))
 
 const record: PaymentRecordResponse = {
