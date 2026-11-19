@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { X, RotateCw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import type { FeedbackError } from '@/types/feedback'
 import type { FilterSummaryItem, SortSummaryItem } from './listViewState'
 
@@ -53,6 +54,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
 <template>
   <section class="list-view-state-summary" aria-label="当前列表状态">
     <div class="list-view-state-summary-main">
+      <TooltipProvider>
       <div class="list-view-state-summary-filters" aria-live="polite">
         <span v-if="filters.length === 0" class="list-view-state-summary-muted">
           无额外筛选
@@ -66,19 +68,25 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
           role="group"
           tabindex="0"
         >
-          <span>{{ filter.fieldLabel }} {{ filter.operatorLabel }}</span>
-          <span v-if="filter.valueLabel" class="list-view-state-summary-value">“{{ filter.valueLabel }}”</span>
-          <button
-            v-if="filter.removable"
-            type="button"
-            class="list-view-state-summary-remove"
-            :aria-label="`移除筛选：${filter.fieldLabel}`"
-            @click="emit('remove-filter', filter.id)"
-          >
-            <X class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          <span class="list-view-state-summary-label">{{ filter.fieldLabel }} {{ filter.operatorLabel }}<span v-if="filter.valueLabel" class="list-view-state-summary-value">“{{ filter.valueLabel }}”</span></span>
+          <!-- title="" 阻断标签原生 title 继承，悬停 x 时只出现一个提示 -->
+          <Tooltip v-if="filter.removable">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="list-view-state-summary-remove"
+                title=""
+                :aria-label="`移除筛选：${filter.fieldLabel}`"
+                @click="emit('remove-filter', filter.id)"
+              >
+                <X class="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>移除筛选条件</TooltipContent>
+          </Tooltip>
         </span>
       </div>
+      </TooltipProvider>
 
       <div class="list-view-state-summary-secondary">
         <span v-if="showSorts && sorts.length > 0" class="list-view-state-summary-meta">
@@ -204,9 +212,18 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   position: relative;
 }
 
-.list-view-state-summary-filter > span {
+// 文字合成一个盒子，截断时整句只有一个“…”
+.list-view-state-summary-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+// x 显示时文字盒让出 x 盖住的宽度（44px x − 8px 右内边距），“…”紧贴 x。
+// 百分比 max-width 不参与标签自身宽度计算，标签宽度与文字起点不变。
+.list-view-state-summary-filter:has(.list-view-state-summary-remove):hover .list-view-state-summary-label,
+.list-view-state-summary-filter:has(.list-view-state-summary-remove):focus-within .list-view-state-summary-label {
+  max-width: calc(100% - (var(--touch-target) - 8px));
 }
 
 .list-view-state-summary-filter:focus-visible {
@@ -270,9 +287,10 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   color: hsl(var(--foreground));
 }
 
+// 在标签同色实底上叠一层前景水洗，加深一档且不透字
 .list-view-state-summary-remove:hover::before,
 .list-view-state-summary-remove:focus-visible::before {
-  background: var(--wash-hover);
+  background: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl(var(--muted));
 }
 
 .list-view-state-summary-remove:focus-visible {
@@ -350,6 +368,10 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
     opacity: 1;
     pointer-events: auto;
     visibility: visible;
+  }
+
+  .list-view-state-summary-filter:has(.list-view-state-summary-remove) .list-view-state-summary-label {
+    max-width: calc(100% - (var(--touch-target) - 8px));
   }
 }
 
