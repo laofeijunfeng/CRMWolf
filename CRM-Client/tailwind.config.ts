@@ -102,6 +102,10 @@ const config: Config = {
 				DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
 				foreground: 'hsl(var(--brand-foreground) / <alpha-value>)'
 			},
+			success: 'hsl(var(--status-success) / <alpha-value>)',
+			warning: 'hsl(var(--status-warning) / <alpha-value>)',
+			danger: 'hsl(var(--status-danger) / <alpha-value>)',
+			info: 'hsl(var(--status-info) / <alpha-value>)',
 			'wash-hover': 'var(--wash-hover)',
 			'wash-selected': 'var(--wash-selected)',
 			wolf: {
@@ -250,6 +254,12 @@ const config: Config = {
 			'body-strong': ['16px', { lineHeight: '24px', fontWeight: '500' }],
 			body: ['14px', { lineHeight: '20px' }],
 			caption: ['12px', { lineHeight: '16px' }],
+			// 根字号为 14px，rem 档会缩放；Tailwind 同名字号档固定为 px，对齐 token 字阶
+			xs: ['12px', { lineHeight: '16px' }],
+			sm: ['14px', { lineHeight: '20px' }],
+			base: ['14px', { lineHeight: '20px' }],
+			lg: ['18px', { lineHeight: '28px' }],
+			xl: ['20px', { lineHeight: '28px' }],
 			'wolf-title': [
 				'16px',
 				{
