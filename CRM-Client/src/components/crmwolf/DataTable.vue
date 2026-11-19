@@ -1431,6 +1431,11 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 
+// 固定列（选择列、fixed 列、操作列）hover 背景：wash-hover 是半透明叠色，
+// 固定列必须不透明才能遮住横向滚动到下方的内容；叠在 card 上合成后与普通单元格透出的行底色一致，
+// 且固定列自身不透明会盖住行背景，不会出现两层 wash 叠加变深。
+$sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl(var(--card));
+
 // ==================== 表格容器 ====================
 .data-table-state {
   flex: 1;
@@ -1663,7 +1668,7 @@ onBeforeUnmount(() => {
 }
 
 .data-table-row:hover .data-table-selection-cell {
-  background: var(--wash-hover);
+  background: $sticky-row-hover-bg;
 }
 
 .data-table-mobile-card {
@@ -1855,7 +1860,7 @@ onBeforeUnmount(() => {
   // hover 时固定列背景同步
   .data-table-row:hover &.fixed-left,
   .data-table-row:hover &.fixed-right {
-    background: var(--wash-hover);
+    background: $sticky-row-hover-bg;
   }
 
   // 固定列阴影（滚动时显示）
@@ -1896,7 +1901,7 @@ onBeforeUnmount(() => {
 }
 
 .data-table-row:hover .data-table-actions-cell {
-  background: var(--wash-hover);
+  background: $sticky-row-hover-bg;
 }
 
 @media (max-width: $bp-sm - 1) {
