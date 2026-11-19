@@ -41,7 +41,7 @@
 | 新增代码门禁 | 已有 Stylelint 设计系统规则，存在 raw color 和旧变量检查意图，但未形成完整例外流程 | 部分实现 | 补充脚本入口、例外登记、CI/本地命令和误报处理 |
 | 共享组件优先 | `DataTable`、详情 Sheet、状态徽章、反馈组件已存在，但调用层仍有多套组合 | 部分实现 | 先冻结共享 API，再迁移首批页面和局部状态组合 |
 | 状态组合收敛 | 列表态由 `DataTable` 统一，详情/设置/卡片中仍有定制 loading/empty/error 文案和结构 | 未完全实现 | 提供状态配方和共享容器，保留页面业务文案差异 |
-| 迁移回归 | base.css 已有 focus、暗色、reduced motion、移动触控基础规则，多个组件有独立 Sass 样式 | 部分实现 | 建立主题、无障碍、滚动、移动端和回归快照矩阵 |
+| 迁移回归 | base.css 已有 focus、reduced motion、移动触控基础规则，多个组件有独立 Sass 样式 | 部分实现 | 建立主题、无障碍、滚动、移动端和回归快照矩阵 |
 | 首批审计文件 | `AppLayout.vue`、`SalesDashboard.vue`、`MetricCard.vue`、`TopBarTabs.vue`、`PaymentPlanDetailContent.vue` 均存在独立样式或 raw color/兼容 Token 使用 | 已确认存在 | 作为首批迁移对象，但先按实际风险拆批，不一次性改完所有页面 |
 
 ## 4. 当前设计系统资产盘点
@@ -184,7 +184,7 @@ CRMWolf shared components（DataTable / DetailSheetContent / StatusBadge / Error
 
 **实现内容。** 为 `StatusBadge` 和 `ApprovalStatusBadge` 补充输入、未知状态、尺寸、可访问性和主题回归测试；审计直接 `Badge` 和页面级状态 class，按“生命周期状态 / 指标标签 / 可视化色板”分类。只迁移第一类，不改业务状态枚举。
 
-**独立验收。** 客户、商机、合同、发票、回款和审批状态在亮色/暗色主题下均有文案、颜色和必要图标；未知状态不会渲染为空；审批状态不丢失图标和严肃语义。
+**独立验收。** 客户、商机、合同、发票、回款和审批状态在亮色主题下均有文案、颜色和必要图标；未知状态不会渲染为空；审批状态不丢失图标和严肃语义。
 
 ### 7.5 P2-04-05：首批共享组件与高频页面迁移
 
@@ -193,7 +193,7 @@ CRMWolf shared components（DataTable / DetailSheetContent / StatusBadge / Error
 **迁移顺序。**
 
 1. `MetricCard.vue`：优先处理卡片边框、背景、阴影和状态 tone，保留指标视觉层级。
-2. `TopBarTabs.vue`：处理导航激活、hover、focus 和暗色主题入口，保持现有 tab 路由行为。
+2. `TopBarTabs.vue`：处理导航激活、hover、focus 状态，保持现有 tab 路由行为。
 3. `AppLayout.vue`：只收敛壳层颜色、分隔线、focus 和响应式 Token，不动路由、侧栏和审批入口。
 4. `PaymentPlanDetailContent.vue`：只收敛面板状态、回款计划状态显示和可复用反馈组合，不改变回款登记流程。
 5. `SalesDashboard.vue`：把可迁移的页面 UI 色值改成语义 Token；图表序列色和 tooltip 内联色按例外规则处理，不改变图表数据和交互。
@@ -212,7 +212,7 @@ CRMWolf shared components（DataTable / DetailSheetContent / StatusBadge / Error
 
 | 文件/目录 | 变更 | 不变内容 |
 | --- | --- | --- |
-| `CRM-Client/src/styles/base.css` | 仅补充缺失的语义变量或主题回归所需变量 | 不改变现有主色、暗色主题和全局 focus 约定 |
+| `CRM-Client/src/styles/base.css` | 仅补充缺失的语义变量或主题回归所需变量 | 数值以设计系统令牌数值为准，不新增暗色主题，不另写 focus 约定 |
 | `CRM-Client/src/styles/global.scss` | 明确兼容变量注释和迁移边界 | 不删除 `--wolf-*` 存量入口 |
 | `CRM-Client/src/styles/variables-v2.scss` | 增加 deprecated/compat 注释或拆分迁移清单，不在本期大规模改名 | 不删除尺寸、safe area、断点等仍被使用的 Token |
 | `.stylelintrc.design-system.js` / `scripts` | 增加新增 diff 检查、例外文件校验和输出格式 | 不以全量 error 的方式一次性阻塞所有存量问题 |
@@ -243,7 +243,7 @@ CRMWolf shared components（DataTable / DetailSheetContent / StatusBadge / Error
 
 | 维度 | 必测页面/组件 | 通过条件 |
 | --- | --- | --- |
-| 亮色/暗色 | AppLayout、TopBarTabs、MetricCard、DataTable、StatusBadge | 文字、边框、状态色和 focus 可读，不出现白底白字或低对比 |
+| 亮色 | AppLayout、TopBarTabs、MetricCard、DataTable、StatusBadge | 文字、边框、状态色和 focus 可读，不出现白底白字或低对比 |
 | 键盘/焦点 | 列表筛选、表格行操作、详情 Sheet、审批详情 | Tab 顺序稳定，Esc/Enter 行为不变，焦点不丢失 |
 | 移动端 | Customers、CustomerTracking、ApprovalCenter、PaymentPlans | 44px 触控目标，卡片不产生额外页面横向滚动 |
 | 表格滚动 | Customers、Contracts、Invoices、PaymentRecords | 超过 20 条时页面不随表格内容增长，表格内部滚动和分页正常 |
@@ -271,7 +271,7 @@ CRMWolf shared components（DataTable / DetailSheetContent / StatusBadge / Error
 3. `DataTable`、`DetailSheetContent`、`StatusBadge`、`ApprovalStatusBadge`、`ErrorState`、`LoadingSkeleton` 的职责和推荐用法在源码、测试和设计系统文档中一致。
 4. 至少一个列表页和一个详情页完成共享反馈状态配方样板迁移；首次加载、有数据刷新失败、无数据、筛选无结果、局部失败和重试均可验收。
 5. 首批 `AppLayout`、`SalesDashboard`、`MetricCard`、`TopBarTabs`、`PaymentPlanDetailContent` 完成可迁移样式项处理；图表和看板色板例外均有登记。
-6. 亮色/暗色、键盘焦点、禁用态、移动端触控、reduced motion 和状态色对比度通过回归。
+6. 亮色主题、键盘焦点、禁用态、移动端触控、reduced motion 和状态色对比度通过回归。
 7. 客户、客户追踪、合同、发票、回款计划、回款记录和审批中心的 DataTable 固定高度、内部滚动、分页、操作列和移动端模式无回归。
 8. 审批中心保持单条严肃审批操作，不新增或恢复批量审批。
 9. `type-check`、`lint`、样式检查、单元测试和设计系统文档检查通过，或对已知存量问题有明确基线说明。

@@ -14,7 +14,7 @@
       "exception": false,
       "batch": "P2-04-05",
       "risk": "theme-regression",
-      "verification": "npm run test:unit -- --run tests/components/AppLayout.spec.ts; npm run type-check; 亮暗色与侧栏回归",
+      "verification": "npm run test:unit -- --run tests/components/AppLayout.spec.ts; npm run type-check; 亮色与侧栏回归",
       "status": "implemented-compatible",
       "lastVerified": "2026-09-04",
       "owner": "frontend-platform"
@@ -29,7 +29,7 @@
       "exception": true,
       "batch": "P2-04-05",
       "risk": "visualization-regression",
-      "verification": "亮暗色、图表 tooltip、图例回归",
+      "verification": "亮色、图表 tooltip、图例回归",
       "status": "exception-registered",
       "lastVerified": "2026-09-04",
       "owner": "frontend-platform"
@@ -44,7 +44,7 @@
       "exception": false,
       "batch": "P2-04-05",
       "risk": "theme-regression",
-      "verification": "npm run type-check; npx eslint src/components/crmwolf/MetricCard.vue --max-warnings=0; 亮暗色与 reduced-motion 回归",
+      "verification": "npm run type-check; npx eslint src/components/crmwolf/MetricCard.vue --max-warnings=0; 亮色与 reduced-motion 回归",
       "status": "implemented-compatible",
       "lastVerified": "2026-09-04",
       "owner": "frontend-platform"
@@ -59,7 +59,7 @@
       "exception": false,
       "batch": "P2-04-05",
       "risk": "navigation-regression",
-      "verification": "npm run type-check; npx eslint src/components/crmwolf/TopBarTabs.vue --max-warnings=0; 键盘 Tab/Enter、亮暗色、路由行为回归",
+      "verification": "npm run type-check; npx eslint src/components/crmwolf/TopBarTabs.vue --max-warnings=0; 键盘 Tab/Enter、亮色、路由行为回归",
       "status": "implemented-compatible",
       "lastVerified": "2026-09-04",
       "owner": "frontend-platform"
@@ -104,7 +104,7 @@
       "exception": false,
       "batch": "P2-04-04",
       "risk": "status-display-regression",
-      "verification": "各实体状态、未知状态、亮暗色组件测试",
+      "verification": "各实体状态、未知状态、亮色组件测试",
       "status": "implemented-compatible",
       "lastVerified": "2026-09-04",
       "owner": "frontend-platform"

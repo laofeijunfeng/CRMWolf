@@ -5,8 +5,9 @@
 | 主题 | 使用场景 |
 | --- | --- |
 | [设计原则](principles.md) | 目标架构与决策优先级。 |
-| [颜色令牌](color-tokens.md) | 语义色、运行时入口与兼容层边界。 |
-| [排版](typography.md) | 文字层级与移动端排版。 |
+| [令牌数值](token-values.md) | 全部设计数值的唯一事实来源。 |
+| [颜色令牌](color-tokens.md) | 语义色角色与使用规则。 |
+| [排版](typography.md) | 字阶与文字层级。 |
 | [间距与布局](spacing-layout.md) | 空间、容器与几何规则。 |
 | [圆角与层级](radius-elevation.md) | 圆角例外与视觉层级。 |
 | [动效与性能](motion-performance.md) | 动效、降动效与响应预算。 |

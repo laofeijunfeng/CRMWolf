@@ -5,8 +5,8 @@
 ## 视觉规则
 
 - 默认使用 shadcn-vue `Badge` 封装，不新增一次性标签样式。
-- 在浅色背景、浅色分组列或看板卡片内，常规业务元信息徽标优先使用浅底深字，减少白色卡片内的重色块密度。
-- 阶段或分类徽标可使用官方 Tailwind 色阶表达分组。常规数量和元信息使用浅色组合，例如 `blue-50 text-blue-700 border-blue-100`、`emerald-50 text-emerald-700 border-emerald-100`；少量关键强调信息可使用实心组合，例如 `sky-600 text-white border-transparent`。
+- 徽标默认中性：`--muted` 浅底、`--foreground` 文字，用于数量、负责人、赢率、阶段等常规元信息。
+- 需要表达好 / 需关注 / 坏时只用 `data-tone="success|warning|danger|info"`，浅底与文字色由[令牌数值](../foundations/token-values.md#状态语气)派生；不得使用 Tailwind 色阶类，不使用实心彩色徽标，阶段与分类不配色。
 - 徽标圆角、字号和间距遵循[圆角与层级](../foundations/radius-elevation.md)、[排版](../foundations/typography.md)和[间距与布局](../foundations/spacing-layout.md)。长文本必须截断或换行，不能撑开卡片或列宽。
 
 ## 使用约束

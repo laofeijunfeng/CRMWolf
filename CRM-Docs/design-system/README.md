@@ -12,11 +12,11 @@
 
 ## 规则优先级
 
-页面特有规则 > 交互模式 > 组件规则 > 基础规范。同级主题文件不得定义冲突规则；链接到其唯一事实来源。
+页面特有规则 > 交互模式 > 组件规则 > 基础规范。同级主题文件不得定义冲突规则；链接到其唯一事实来源。设计数值不适用该优先级：[令牌数值](foundations/token-values.md)是数值的唯一事实来源，任何层级都不得覆盖或另写数值。
 
 ## 全局令牌约定
 
-颜色运行时唯一入口为 `CRM-Client/src/styles/base.css` 的 shadcn CSS variables。组件基础色遵循 shadcn-vue `baseColor: "slate"` 与 `cssVariables: true`，中性色使用 slate，主强调色使用官方 Tailwind blue 色阶。新增实现优先使用 shadcn 语义类与 CSS 变量；`$wolf-*` / `--wolf-*` 仅作为业务兼容层。详见[颜色令牌](foundations/color-tokens.md)。
+系统只有亮色主题。设计数值只在 `CRM-Client/src/styles/base.css` 的 `:root` 定义一次，文档镜像为[令牌数值](foundations/token-values.md)；Tailwind 只映射 `var(--x)`。主操作使用中性深色 `--primary`，品牌蓝 `--brand` 用于链接、选中与焦点，中性色为 slate；不使用 Tailwind 色阶类。`$wolf-*-v2` 仅为迁移期过渡桥接，按[兼容策略](migration/compatibility.md)删除。使用规则见[颜色令牌](foundations/color-tokens.md)。
 
 ## 本地检查
 

@@ -19,6 +19,6 @@
 
 ## 响应式与视觉
 
-表单输入、选择、日期选择和同等数据录入控件的默认最小高度为 44px，保证桌面端与移动端在弹窗、Sheet 和表单页中拥有一致的可点区域。信息密集型表格、工具栏中的紧凑筛选控件如需更小视觉高度，必须由对应复合组件显式声明紧凑变体，不得在业务表单中局部手写高度。
+表单输入、选择、日期选择和同等数据录入控件桌面默认使用 md 高度（`--control-h-md`），紧凑场景用 sm、强调场景用 lg，由组件 `size` 声明，不得在业务表单中局部手写高度。窄视口下统一抬高到 `--touch-target`，保证弹窗、Sheet 和表单页的可点区域。数值见[令牌数值](../foundations/token-values.md#控件与版式)。
 
 字段间距遵循[间距与布局](../foundations/spacing-layout.md)，圆角遵循[圆角与层级](../foundations/radius-elevation.md)。窄视口的输入文字和可触达尺寸遵循[排版](../foundations/typography.md)与[响应式与移动端](../foundations/responsive-mobile.md)。状态过渡和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
