@@ -122,6 +122,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
       <CardContent class="business-board-surface-content">
         <div class="business-board-scroll">
           <DataViewStatePanel
+            class="h-full"
             :state="viewState"
             :error-title="errorMessage || '旅程看板暂时无法加载'"
             error-description="请检查网络连接后重试。"
