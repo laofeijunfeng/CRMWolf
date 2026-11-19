@@ -7,7 +7,7 @@
 
 ## 状态
 
-`stable` 契约达标可直接使用；`candidate` 已在用、契约待补；`restricted` 仅允许在 `ui/**`、`crmwolf/**` 内使用；`deprecated` 不再新增引用；`remove` 计划删除；`removed` 已删除。契约列「待补」表示尚无组件契约，阶段 1 先补 DataTable、DetailSheet、Field 系列、ConfirmDialog、DataViewStatePanel、StatusBadge。
+`stable` 契约满足[契约要求](../governance/component-lifecycle.md#契约要求)并经评审，可直接使用；`candidate` 已在用、契约缺失或未达标；`restricted` 仅允许在 `ui/**`、`crmwolf/**` 内使用；`deprecated` 不再新增引用；`remove` 计划删除；`removed` 已删除。契约列「待补」表示尚无组件契约，阶段 1 先补 DataTable、DetailSheet、Field 系列、ConfirmDialog、DataViewStatePanel、StatusBadge。
 
 ## 字段与输入
 
@@ -61,6 +61,7 @@
 | FilePreviewDialog | crmwolf | candidate | 文件预览 | — | 待补 |
 | HoverInfo | crmwolf | candidate | 悬停说明 | — | 待补 |
 | StatusBadge | components | candidate | 业务状态 | — | [状态徽标](status-badge.md) |
+| DetailSheet | ui | candidate | 详情抽屉（`ui/detail-sheet`），页面可直接使用 | — | 待补 |
 
 ## 反馈
 
@@ -78,13 +79,14 @@
 | 原件 | 状态 | 页面改用 |
 | --- | --- | --- |
 | `ui/alert-dialog` | restricted | ConfirmDialog 或 `confirmDialog`·`confirmDelete`·`confirmLogout` |
-| `ui/sheet` | restricted | DetailSheet |
+| `ui/sheet` | restricted | DetailSheet（`ui/detail-sheet`） |
 | `ui/table` | restricted | DataTable |
 | `ui/form` | restricted | `*Field` 系列 |
 
 ## 已知问题
 
 - StatusBadge 由 `crmwolf/index.ts` 从 `components/` 反向导出，阶段 2 迁入 crmwolf。
+- DataTable、DataViewStatePanel 反向引用业务组件 `components/ErrorState.vue`，已登记，阶段 2 迁入 crmwolf。
 - `crmwolf/index.ts` 尾部转导出约 30 组 `ui` 原件，违反 barrel 规则，已登记待清理；不为这些原件建行。
 - FeedbackAlert、ListAdvancedTools、ListViewStateSummary、TableRowContextMenuContent 存在但未导出，按需登记。
 - 页面空、错、加载状态统一用 DataViewStatePanel，不另建 EmptyState。

@@ -1082,6 +1082,21 @@
       "verification": "npm run lint:design-system -- --worktree 对该文件无 restricted-primitive 命中",
       "status": "pending",
       "lastVerified": "2026-11-19"
+    },
+    {
+      "id": "GOV-073",
+      "file": "CRM-Client/src/components/ContractPaymentPlans.vue",
+      "symbol": "function getStatusToneClass(status: PaymentPlanStatus): string {",
+      "category": "page-status-style",
+      "current": "1 处命中，行 176",
+      "target": "映射收回 utils/statusPresentation.ts，展示用 StatusBadge（CMP-02）",
+      "exception": false,
+      "owner": "frontend-platform",
+      "batch": "阶段1",
+      "risk": "状态颜色与文案回归",
+      "verification": "npm run lint:design-system -- --worktree 对该文件无 page-status-style 命中",
+      "status": "pending",
+      "lastVerified": "2026-11-19"
     }
   ]
 }

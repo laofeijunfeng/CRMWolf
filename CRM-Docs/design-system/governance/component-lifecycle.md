@@ -12,14 +12,14 @@
 - `ui/**` 不引用 crmwolf、业务组件或 views。
 - `crmwolf/**` 不引用 `ui` 以外的 `components/*`，不引用 views。
 - `components/**` 不引用 `views/**`。
-- 页面通过 crmwolf 使用受限原件，见[受限原件](../components/registry.md#受限原件)。
+- 页面经 crmwolf 组件或 `ui/detail-sheet` 使用受限原件，见[受限原件](../components/registry.md#受限原件)。
 
 ## 状态流转
 
 `candidate` → `stable` → `deprecated` → `remove` → `removed`；`restricted` 用于只允许在 `ui/**`、`crmwolf/**` 内使用的原件。状态定义见[组件选型](../components/registry.md#状态)。
 
 - **新增：**先在 `registry.md` 登记层、状态、用途；无契约时标 `candidate`、契约列写「待补」。
-- **转 stable：**在 `components/` 下写成契约文档并从 registry 链接。
+- **转 stable：**`components/` 下的契约文档满足下文契约要求、从 registry 链接并经评审后，改为 `stable`。
 - **废弃：**标 `deprecated` 并填替代组件；不再新增引用。
 - **删除：**确认无引用、无动态导入与全局注册后删除，状态改为 `removed`。
 

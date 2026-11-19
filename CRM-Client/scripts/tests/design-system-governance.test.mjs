@@ -159,7 +159,12 @@ test('GATE-04 rejects native dialogs outside test files', () => {
   assert.deepEqual(categories('CRM-Client/src/views/settings/Roles.vue', [
     "if (!confirm('确定删除？')) return",
     "window.alert('done')",
-  ]), ['native-dialog', 'native-dialog'])
+    "if (confirm ('继续？')) save()",
+  ]), ['native-dialog', 'native-dialog', 'native-dialog'])
+  assert.deepEqual(categories('CRM-Client/src/views/settings/Roles.vue', [
+    "await useConfirm().confirm({ title: '删除' })",
+    'function confirm(): void {}',
+  ]), [])
   assert.deepEqual(categories('CRM-Client/src/schemas/__tests__/agent-ui.test.ts', [
     "const payload = '<img onerror=alert(1)>'",
   ]), [])
@@ -170,7 +175,11 @@ test('GATE-05 rejects page status palettes and status mapping functions', () => 
     '.status-success {',
     'const getStatusClass = (status: number): string => {',
     'function getInvoiceStatusTone(status: string) {',
-  ]), ['page-status-style', 'page-status-style', 'page-status-style'])
+    'function getStatusToneClass(status: string): string {',
+  ]), ['page-status-style', 'page-status-style', 'page-status-style', 'page-status-style'])
+  assert.deepEqual(categories('CRM-Client/src/views/LeadDetailSheet.vue', [
+    '.status-success-banner {',
+  ]), [])
 })
 
 test('GATE-05 allows the single status source', () => {
