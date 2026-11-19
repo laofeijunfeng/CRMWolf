@@ -14,6 +14,7 @@ import { Progress } from '@/components/ui/progress'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import ListCard from '@/components/crmwolf/ListCard.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 import type { PaymentPlanResponse } from '@/api/payment'
 
 type PaymentPlanActionPredicate = (plan: PaymentPlanResponse) => boolean
@@ -70,35 +71,27 @@ const formatDate = (dateStr: string): string => {
   return date.toLocaleDateString('zh-CN')
 }
 
-const getPaymentStateText = (plan: PaymentPlanResponse): string => {
+type PaymentProgressKey = 'pending' | 'registered' | 'reviewing' | 'partial' | 'completed' | 'overdue'
+
+const resolvePaymentProgress = (plan: PaymentPlanResponse): PaymentProgressKey => {
   const paidAmount = Number(plan.paid_amount ?? 0)
   const plannedAmount = Number(plan.planned_amount ?? 0)
   if (plan.status === 'COMPLETED' || (plannedAmount > 0 && paidAmount >= plannedAmount)) {
-    return '已回款'
+    return 'completed'
   }
   if (paidAmount > 0) {
-    return '部分回款'
+    return 'partial'
   }
   if (plan.latest_approval?.status === 'PENDING' || plan.payment_records.some(record => record.approval?.status === 'PENDING')) {
-    return '审批中'
+    return 'reviewing'
   }
   if (plan.payment_records.length > 0) {
-    return '已登记'
+    return 'registered'
   }
   if (plan.status === 'OVERDUE') {
-    return '已逾期'
+    return 'overdue'
   }
-  return '未登记'
-}
-
-const getPaymentStateClass = (plan: PaymentPlanResponse): string => {
-  const state = getPaymentStateText(plan)
-  if (state === '已回款') return 'payment-state--completed'
-  if (state === '部分回款') return 'payment-state--partial'
-  if (state === '审批中') return 'payment-state--reviewing'
-  if (state === '已登记') return 'payment-state--registered'
-  if (state === '已逾期') return 'payment-state--overdue'
-  return 'payment-state--pending'
+  return 'pending'
 }
 
 const calculateProgress = (plan: PaymentPlanResponse): number => {
@@ -162,9 +155,7 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
     </template>
 
     <template #itemBadges="{ item }">
-      <span :class="['payment-state-badge', getPaymentStateClass(item)]">
-        {{ getPaymentStateText(item) }}
-      </span>
+      <StatusBadge type="paymentState" :status="resolvePaymentProgress(item)" size="small" />
     </template>
 
     <template #itemActions="{ item }">
@@ -246,42 +237,6 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 .payment-plan-progress {
   width: min(160px, 100%);
   height: 6px;
-}
-
-.payment-state-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.payment-state--pending {
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-}
-
-.payment-state--registered {
-  background: var(--wash-hover);
-  color: hsl(var(--brand));
-}
-
-.payment-state--reviewing,
-.payment-state--partial {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.payment-state--completed {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.payment-state--overdue {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
 }
 
 .payment-plan-actions {

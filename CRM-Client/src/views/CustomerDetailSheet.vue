@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import ErrorState from '@/components/ErrorState.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { ContextTabs } from '@/components/crmwolf'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
@@ -44,7 +45,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatProductIntentName } from '@/utils/productIntent'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
-import { licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
+import { classifyLicenseStatus } from '@/utils/licenseStatus'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
@@ -927,12 +928,10 @@ watch(() => props.targetPanel, (panel): void => {
                       <div class="attribute-item">
                         <div class="attribute-label">授权状态</div>
                         <div class="attribute-value">
-                          <span
-                            class="license-badge"
-                            :class="licenseStatusClass(customer?.license_expiry_date, customer?.license_type)"
-                          >
-                            {{ licenseStatusLabel(customer?.license_expiry_date, customer?.license_type) }}
-                          </span>
+                          <StatusBadge
+                            type="licenseStatus"
+                            :status="classifyLicenseStatus(customer?.license_expiry_date, customer?.license_type)"
+                          />
                         </div>
                       </div>
                       <div class="attribute-item">
@@ -1343,45 +1342,6 @@ watch(() => props.targetPanel, (panel): void => {
   font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
-}
-
-.license-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 52px;
-  height: 24px;
-  padding: 0 $space-2;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.license-badge--official {
-  color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground)));
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  border-color: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-}
-
-.license-badge--trial {
-  color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground)));
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  border-color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-}
-
-.license-badge--expired {
-  color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground)));
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  border-color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-}
-
-.license-badge--none {
-  color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground)));
-  background: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-bg-mix), transparent);
-  border-color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-bg-mix), transparent);
 }
 
 </style>

@@ -35,7 +35,6 @@ import { downloadResolvedInvoice, hasDownloadableInvoiceFile, resolveInvoiceDown
 import invoiceApi, {
   type InvoiceApplicationResponse,
   type InvoiceApplicationQueryParams,
-  type InvoiceEffectiveStatus,
   type InvoiceExportTab,
 } from '@/api/invoice'
 import { type ListExportPayload } from '@/api/listExport'
@@ -103,12 +102,7 @@ const invoiceTypeOptions = [
   { value: 'VAT_NORMAL', label: '增值税普通发票' }
 ]
 const invoiceStatusOptions = getStatusOptions('invoiceApplication')
-const invoiceEffectiveStatusOptions = [
-  { value: 'ACTIVE', label: '有效' },
-  { value: 'REISSUE_PENDING', label: '重开中' },
-  { value: 'RED_OFFSET', label: '已冲红' },
-  { value: 'REISSUED', label: '已重开' }
-]
+const invoiceEffectiveStatusOptions = getStatusOptions('invoiceEffectiveStatus')
 
 const fields: ListFieldDefinition[] = [
   { key: 'keyword', label: '关键字', type: 'text', role: 'keyword', filter: true },
@@ -627,27 +621,6 @@ const getInvoiceTypeTone = (type: string): StatusTone => {
   return Object.prototype.hasOwnProperty.call(map, type) ? map[type] ?? 'neutral' : 'neutral'
 }
 
-const getInvoiceEffectiveStatusText = (status: InvoiceEffectiveStatus | null | undefined): string => {
-  const map: Record<InvoiceEffectiveStatus, string> = {
-    ACTIVE: '有效',
-    REISSUE_PENDING: '重开中',
-    RED_OFFSET: '已冲红',
-    REISSUED: '已重开'
-  }
-  return status === null || status === undefined ? '有效' : map[status] ?? '有效'
-}
-
-const getInvoiceEffectiveStatusTone = (status: InvoiceEffectiveStatus | null | undefined): StatusTone => {
-  const map: Record<InvoiceEffectiveStatus, StatusTone> = {
-    ACTIVE: 'success',
-    REISSUE_PENDING: 'warning',
-    RED_OFFSET: 'danger',
-    REISSUED: 'neutral'
-  }
-  return status === null || status === undefined ? 'success' : map[status] ?? 'success'
-}
-
-
 const formatDateTime = (dateStr: string): string => {
   const date = new Date(dateStr)
   return date.toLocaleString('zh-CN', {
@@ -782,9 +755,7 @@ watchEffect(() => {
           <Badge variant="status" :data-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
             {{ getInvoiceTypeText(row.invoice_type) }}
           </Badge>
-          <Badge variant="status" :data-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
-            {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
-          </Badge>
+          <StatusBadge type="invoiceEffectiveStatus" :status="row.invoice_effective_status ?? 'ACTIVE'" />
           <span>申请人：{{ row.applicant_name || '-' }}</span>
           <span>{{ formatDateTime(row.created_time) }}</span>
         </div>
@@ -837,9 +808,7 @@ watchEffect(() => {
 
       <!-- 发票状态 -->
       <template #cell-invoice_effective_status="{ row }">
-        <Badge variant="status" :data-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
-          {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
-        </Badge>
+        <StatusBadge type="invoiceEffectiveStatus" :status="row.invoice_effective_status ?? 'ACTIVE'" />
       </template>
 
       <!-- 申请人 -->

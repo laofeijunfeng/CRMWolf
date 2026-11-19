@@ -41,7 +41,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { SelectField, TextareaField } from '@/components/crmwolf'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDialog, confirmDiscardChanges } from '@/utils/confirmDialog'
 import { formatProductIntentName } from '@/utils/productIntent'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
@@ -74,7 +74,8 @@ import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
 import { isCustomerPublicId } from '@/utils/customerRoutes'
 import { isDealJourneyPublicId } from '@/utils/dealJourney'
-import { LICENSE_STATUS_LABELS, formatLicenseSummary, licenseStatusClass, type LicenseSummary } from '@/utils/licenseStatus'
+import { LICENSE_STATUS_LABELS, classifyLicenseStatus, formatLicenseSummary, type LicenseSummary } from '@/utils/licenseStatus'
+import { getStatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 import {
@@ -1151,10 +1152,7 @@ const handleReturnDialogOpenChange = async (open: boolean): Promise<void> => {
     closeReturnDialog()
     return
   }
-  const confirmed = await confirmDialog('已填写的退回原因尚未提交，关闭后内容会丢失。', '放弃填写？', {
-    confirmText: '放弃填写',
-    variant: 'destructive',
-  })
+  const confirmed = await confirmDiscardChanges('close')
   if (confirmed) closeReturnDialog()
 }
 
@@ -1168,10 +1166,7 @@ const handleLoseDialogOpenChange = async (open: boolean): Promise<void> => {
     closeLoseDialog()
     return
   }
-  const confirmed = await confirmDialog('已填写的输单原因尚未提交，关闭后内容会丢失。', '放弃填写？', {
-    confirmText: '放弃填写',
-    variant: 'destructive',
-  })
+  const confirmed = await confirmDiscardChanges('close')
   if (confirmed) closeLoseDialog()
 }
 
@@ -1315,9 +1310,8 @@ const getLicenseSummary = (row: CustomerResponse): LicenseSummary => {
   return formatLicenseSummary(row.license_expiry_date, row.license_type, row.license_authorized_users)
 }
 
-const getLicenseStatusClass = (row: CustomerResponse): string => {
-  return licenseStatusClass(row.license_expiry_date, row.license_type)
-}
+const getLicenseBarTone = (row: CustomerResponse): StatusTone =>
+  getStatusPresentation('licenseStatus', classifyLicenseStatus(row.license_expiry_date, row.license_type)).tone
 
 // 派生客户状态（后端 derived_status;旧数据/接口降级时按 legacy status 兜底）
 const customerDerivedStatusKey = (row: CustomerResponse): string => {
@@ -1497,8 +1491,8 @@ defineExpose({
             :status="getAcquisitionSourceDisplayName(row, '')"
             type="source"
           />
-          <span class="license-summary" :class="getLicenseStatusClass(row)">
-            <span class="license-summary__bar"></span>
+          <span class="license-summary">
+            <span class="license-summary__bar" :data-tone="getLicenseBarTone(row)"></span>
             <span class="license-summary__text">
               <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
               <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
@@ -1564,8 +1558,8 @@ defineExpose({
       </template>
 
       <template #cell-license_expiry_date="{ row }">
-        <span class="license-summary" :class="getLicenseStatusClass(row)">
-          <span class="license-summary__bar"></span>
+        <span class="license-summary">
+          <span class="license-summary__bar" :data-tone="getLicenseBarTone(row)"></span>
           <span class="license-summary__text">
             <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
             <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
@@ -1873,11 +1867,6 @@ defineExpose({
   font-size: var(--font-size-caption);
   line-height: 16px;
 }
-
-.license-badge--official { color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground))); }
-.license-badge--trial { color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground))); }
-.license-badge--expired { color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground))); }
-.license-badge--none { color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground))); }
 
 .customer-mobile-card-header {
   display: flex;

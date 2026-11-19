@@ -4,12 +4,12 @@ import { defineComponent, h, nextTick } from 'vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import type { PaymentRecordResponse } from '@/api/payment'
 
-const { confirmDialogMock } = vi.hoisted(() => ({
-  confirmDialogMock: vi.fn(),
+const { confirmDiscardChangesMock } = vi.hoisted(() => ({
+  confirmDiscardChangesMock: vi.fn(),
 }))
 
 vi.mock('@/utils/confirmDialog', () => ({
-  confirmDialog: confirmDialogMock,
+  confirmDiscardChanges: confirmDiscardChangesMock,
 }))
 
 vi.mock('@/components/ui/dialog', () => {
@@ -260,7 +260,7 @@ describe('EditRecordDialog', () => {
   })
 
   it('protects modified content before closing and does not add a guard for untouched content', async () => {
-    confirmDialogMock.mockResolvedValue(false)
+    confirmDiscardChangesMock.mockResolvedValue(false)
     const wrapper = mount(EditRecordDialog, {
       props: {
         open: true,
@@ -271,14 +271,10 @@ describe('EditRecordDialog', () => {
     await wrapper.get('button.edit-record-dialog__supplement-trigger').trigger('click')
     await wrapper.get('textarea[name="notes"]').setValue('新的备注')
     await wrapper.get('.edit-record-dialog__footer button[type="button"]').trigger('click')
-    expect(confirmDialogMock).toHaveBeenCalledWith(
-      '已修改回款记录，关闭后这些修改不会保存。确定关闭吗？',
-      '放弃本次修改？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    expect(confirmDiscardChangesMock).toHaveBeenCalledWith('close')
     expect(wrapper.emitted('update:open')).toBeUndefined()
 
-    confirmDialogMock.mockResolvedValue(true)
+    confirmDiscardChangesMock.mockResolvedValue(true)
     await wrapper.get('.edit-record-dialog__footer button[type="button"]').trigger('click')
     expect(wrapper.emitted('update:open')).toEqual([[false]])
   })

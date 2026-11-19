@@ -30,5 +30,5 @@
 
 ## 运行时颜色
 
-- 状态徽标使用 `CRM-Client/src/styles/base.css` 中成对的 `--status-*-foreground` / `--status-*-background` 运行时变量，并通过 `data-status-tone` 选择语义。必须使用不透明背景，避免依赖外层页面表面。
+- 状态徽标使用 `CRM-Client/src/styles/base.css` 中成对的 `--status-*-foreground` / `--status-*-background` 运行时变量，并通过 `data-tone` 选择语义。必须使用不透明背景，避免依赖外层页面表面。
 - 普通小字号文字的实际前景/背景对比度目标为至少 4.5:1；页面特有的授权有效期摘要若处于遗留白色表面，也必须使用对应的成对变量。

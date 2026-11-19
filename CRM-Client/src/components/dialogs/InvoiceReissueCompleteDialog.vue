@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import {
   Dialog,
   DialogContent,
@@ -133,11 +133,7 @@ const handleDialogOpenChange = async (open: boolean): Promise<void> => {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写发票号码或选择发票文件，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次重开？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) emit('update:open', false)
   } finally {
     closeGuardPending.value = false

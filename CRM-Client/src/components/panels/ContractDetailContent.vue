@@ -24,7 +24,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import {
   Breadcrumb,
@@ -191,13 +191,6 @@ const changeRequestId = ref<number>(0)
 const amountInCents = (amount: string): bigint => {
   const [whole = '0', fractional = ''] = amount.split('.')
   return BigInt(whole) * 100n + BigInt(fractional.padEnd(2, '0'))
-}
-
-const approvalPhaseText = (phase: ContractChangeResponse['approval_phase']): string => {
-  const phases: Record<ContractChangeResponse['approval_phase'], string> = {
-    draft: '草稿', pending_review: '审批中', approved: '已通过', rejected: '已驳回'
-  }
-  return phases[phase]
 }
 
 const openContractChangeDialog = (): void => {
@@ -526,32 +519,6 @@ const formatDateTime = (dateStr: string | null | undefined): string => {
   return `${year}-${month}-${day} ${hours}:${minutes}`
 }
 
-const getStatusText = (status: ContractStatus | undefined): string => {
-  if (status === undefined) return '-'
-  const map: Record<ContractStatus, string> = {
-    DRAFT: '草稿',
-    PENDING_REVIEW: '审批中',
-    SIGNED: '已签署',
-    EFFECTIVE: '已签署',
-    EXPIRED: '已到期',
-    TERMINATED: '已终止'
-  }
-  return map[status]
-}
-
-const getStatusClass = (status: ContractStatus | undefined): string => {
-  if (status === undefined) return 'status-default'
-  const map: Record<ContractStatus, string> = {
-    DRAFT: 'status-default',
-    PENDING_REVIEW: 'status-warning',
-    SIGNED: 'status-info',
-    EFFECTIVE: 'status-info',
-    EXPIRED: 'status-danger',
-    TERMINATED: 'status-muted'
-  }
-  return map[status]
-}
-
 const getLicenseTypeText = (type: LicenseType | undefined): string => {
   if (type === undefined) return '-'
   const map: Record<LicenseType, string> = {
@@ -623,9 +590,7 @@ onBeforeUnmount((): void => {
             {{ contractInfo?.contract_name || '合同详情' }}
           </SheetTitle>
           <SheetDescription class="flex items-center gap-2 mt-1 min-h-6">
-            <Badge v-if="contractInfo" :class="['status-badge', getStatusClass(contractInfo.status)]">
-              {{ getStatusText(contractInfo.status) }}
-            </Badge>
+            <StatusBadge v-if="contractInfo" type="contract" :status="contractInfo.status.toLowerCase()" />
             <span v-else class="text-sm text-muted-foreground">
               {{ loading ? '正在加载合同信息' : '查看合同基础信息与审批进度' }}
             </span>
@@ -821,7 +786,7 @@ onBeforeUnmount((): void => {
                       <span>{{ item.reason }}</span>
                     </div>
                     <div class="flex items-start gap-2">
-                      <Badge :class="item.approval_phase === 'rejected' ? 'bg-danger/10 text-danger' : item.approval_phase === 'approved' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'">{{ approvalPhaseText(item.approval_phase) }}</Badge>
+                      <StatusBadge type="approvalPhase" :status="item.approval_phase" />
                       <Button v-if="item.attachment_name !== null" type="button" variant="ghost" size="sm" :aria-label="`下载${item.attachment_name}`" @click="downloadContractChangeAttachment(item)">
                         <Download class="w-4 h-4 mr-1" aria-hidden="true" />附件
                       </Button>
@@ -1164,47 +1129,6 @@ onBeforeUnmount((): void => {
       flex: 1 1 100%;
     }
   }
-}
-
-// 状态 Badge
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: $space-1 $space-2;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-  border-radius: 9999px;
-  white-space: nowrap;
-}
-
-.status-default {
-  background: var(--wash-hover);
-  color: hsl(var(--muted-foreground));
-}
-
-.status-info {
-  background: var(--wash-hover);
-  color: hsl(var(--brand));
-}
-
-.status-warning {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.status-success {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.status-danger {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
-}
-
-.status-muted {
-  background: var(--wash-hover);
-  color: hsl(var(--muted-foreground));
 }
 
 // Reduced Motion 支持

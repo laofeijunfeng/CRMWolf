@@ -7,14 +7,14 @@ import { handleApiError } from '@/utils/errorHandler'
 import type { Opportunity } from '@/api/opportunity'
 
 const mocks = vi.hoisted(() => ({
-  confirmDialog: vi.fn(),
+  confirmDiscardChanges: vi.fn(),
   getOpportunity: vi.fn(),
   markAsWon: vi.fn(),
   markAsLost: vi.fn(),
 }))
 
 vi.mock('@/utils/confirmDialog', () => ({
-  confirmDialog: mocks.confirmDialog,
+  confirmDiscardChanges: mocks.confirmDiscardChanges,
 }))
 
 vi.mock('@/utils/errorHandler', () => ({
@@ -185,7 +185,7 @@ function opportunityFixture(): Opportunity {
 describe('Opportunity outcome dialogs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.confirmDialog.mockResolvedValue(false)
+    mocks.confirmDiscardChanges.mockResolvedValue(false)
   })
 
   it('uses a stable context skeleton while loading the win dialog', async () => {

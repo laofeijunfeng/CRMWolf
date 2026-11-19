@@ -57,6 +57,33 @@ export async function confirmDialog(
 }
 
 /**
+ * 放弃未保存更改的唯一文案（modal-sheet.md / D-6）。
+ * 默认焦点落在「继续编辑」，确认按钮为 destructive。
+ */
+export const DISCARD_CHANGES_COPY = {
+  title: '放弃未保存的更改？',
+  closeMessage: '关闭后，本次修改不会保存。',
+  leaveMessage: '离开后，本次修改不会保存。',
+  confirmText: '放弃更改',
+  cancelText: '继续编辑',
+} as const
+
+/**
+ * 放弃更改确认快捷方法：close 用于弹窗/抽屉关闭，leave 用于路由离开。
+ */
+export async function confirmDiscardChanges(kind: 'close' | 'leave' = 'close'): Promise<boolean> {
+  return confirmDialog(
+    kind === 'close' ? DISCARD_CHANGES_COPY.closeMessage : DISCARD_CHANGES_COPY.leaveMessage,
+    DISCARD_CHANGES_COPY.title,
+    {
+      confirmText: DISCARD_CHANGES_COPY.confirmText,
+      cancelText: DISCARD_CHANGES_COPY.cancelText,
+      variant: 'destructive',
+    },
+  )
+}
+
+/**
  * 删除确认快捷方法
  */
 export async function confirmDelete(itemName = '该项'): Promise<boolean> {

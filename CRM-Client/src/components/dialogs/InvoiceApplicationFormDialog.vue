@@ -9,16 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import contractApi, { type ContractListResponse } from '@/api/contract'
 import customerApi, { type CustomerResponse } from '@/api/customer'
@@ -146,7 +136,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 const title = computed<string>(() => {
   if (isCreateMode.value) return '申请发票'
   return isRejectedEditMode.value ? '修改并重新提交发票申请' : '编辑发票申请'
@@ -512,14 +501,6 @@ function handleCancel(): void {
   closeGuard.requestClose()
 }
 
-function continueEditing(): void {
-  closeGuard.continueEditing()
-}
-
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
-}
-
 function customerOptionLabel(customer: CustomerResponse): string {
   return customer.account_name
 }
@@ -753,20 +734,6 @@ watch(
     @update:open="invoiceTitleDialogOpen = $event"
     @success="handleInvoiceTitleSuccess"
   />
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃填写发票申请？</AlertDialogTitle>
-        <AlertDialogDescription>
-          当前已填写或调整发票申请内容，关闭后这些未保存内容会丢失。
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

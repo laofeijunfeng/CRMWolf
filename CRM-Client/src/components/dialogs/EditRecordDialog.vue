@@ -23,7 +23,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import FormErrorSummary, { type FormErrorSummaryItem } from '@/components/crmwolf/FormErrorSummary.vue'
 import {
   DateField,
@@ -296,11 +296,7 @@ async function handleOpenChange(open: boolean): Promise<void> {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已修改回款记录，关闭后这些修改不会保存。确定关闭吗？',
-      '放弃本次修改？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) visible.value = false
   } finally {
     closeGuardPending.value = false

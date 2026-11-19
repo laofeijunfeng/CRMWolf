@@ -11,16 +11,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   RadioGroup,
   RadioGroupItem,
 } from '@/components/ui/radio-group'
@@ -121,7 +111,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 
 const scopeOptions: {
   value: CustomerTransferScope
@@ -228,14 +217,6 @@ function handleOpenChange(open: boolean): void {
 
 function handleCancel(): void {
   closeGuard.requestClose()
-}
-
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
-}
-
-function continueEditing(): void {
-  closeGuard.continueEditing()
 }
 
 async function handleSubmit(): Promise<void> {
@@ -438,21 +419,6 @@ watch(
   </DialogFooter>
     </DialogContent>
   </Dialog>
-
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
-        <AlertDialogDescription>
-          您有未保存的移交信息，确定要关闭吗？
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">放弃更改</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

@@ -6,7 +6,7 @@ import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
 const mocks = vi.hoisted(() => ({
   getLeadDetail: vi.fn(),
   getProcurementMethodOptions: vi.fn(),
-  confirmDialog: vi.fn(),
+  confirmDiscardChanges: vi.fn(),
 }))
 
 vi.mock('@/api/lead', () => ({
@@ -22,7 +22,7 @@ vi.mock('@/api/customer', () => ({
 }))
 
 vi.mock('@/utils/confirmDialog', () => ({
-  confirmDialog: mocks.confirmDialog,
+  confirmDiscardChanges: mocks.confirmDiscardChanges,
 }))
 
 vi.mock('@/components/ui/dialog', () => {
@@ -121,7 +121,7 @@ describe('LeadConvertDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getProcurementMethodOptions.mockResolvedValue([{ id: 1, name: '订阅' }])
-    mocks.confirmDialog.mockResolvedValue(false)
+    mocks.confirmDiscardChanges.mockResolvedValue(false)
   })
 
   it('keeps the dialog open with recovery feedback when lead context loading fails', async () => {

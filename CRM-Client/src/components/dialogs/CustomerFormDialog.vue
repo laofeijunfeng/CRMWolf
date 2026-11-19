@@ -11,16 +11,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FormField, FormItem, FormMessage } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
@@ -37,7 +27,9 @@ import {
 import FormErrorSummary from '@/components/crmwolf/FormErrorSummary.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
-import { LICENSE_STATUS_LABELS, licenseStatusClass, licenseStatusLabel } from '@/utils/licenseStatus'
+import { classifyLicenseStatus } from '@/utils/licenseStatus'
+import { getStatusPresentation } from '@/utils/statusPresentation'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { productPublicIdFromIntent } from '@/utils/productIntent'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import customerApi, {
@@ -85,10 +77,14 @@ const { handleSubmit, resetForm, setValues, setFieldValue, setFieldError, setErr
 })
 const { value: contactGenderValue, errorMessage: contactGenderError } = useField<string>('contact_gender')
 const genderOptions = [{ value: '男', label: '男', tone: 'primary' as const }, { value: '女', label: '女', tone: 'success' as const }]
-const customerLicenseTypeOptions = [
-  { value: 'TRIAL', label: LICENSE_STATUS_LABELS.trial, tone: 'warning' as const },
-  { value: 'OFFICIAL', label: LICENSE_STATUS_LABELS.official, tone: 'success' as const },
-]
+function licenseTypeOption(
+  value: 'TRIAL' | 'OFFICIAL',
+  status: 'trial' | 'official',
+): { value: 'TRIAL' | 'OFFICIAL'; label: string; tone: 'success' | 'warning' | 'danger' | 'muted' } {
+  const { label, tone } = getStatusPresentation('licenseStatus', status)
+  return { value, label, tone: tone === 'neutral' || tone === 'info' ? 'muted' as const : tone }
+}
+const customerLicenseTypeOptions = [licenseTypeOption('TRIAL', 'trial'), licenseTypeOption('OFFICIAL', 'official')]
 const submitting = ref(false)
 const loading = ref(false)
 const loadError = ref<FeedbackError | null>(null)
@@ -154,7 +150,6 @@ const closeGuard = useDialogCloseGuard({
     emit('update:open', open)
   },
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 const fieldLabels: Record<string, string> = {
   account_name: '客户名称',
   city: '所在城市',
@@ -697,8 +692,6 @@ async function onSubmit(event: Event): Promise<void> {
 }
 function handleOpenChange(open: boolean): void { closeGuard.handleOpenChange(open) }
 function handleCancel(): void { closeGuard.requestClose() }
-function confirmCancel(): void { closeGuard.confirmDiscard() }
-function continueEditing(): void { closeGuard.continueEditing() }
 </script>
 
 
@@ -1039,7 +1032,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
               />
             </div>
             <p class="text-xs leading-relaxed text-muted-foreground">此处只更新客户授权汇总信息，不创建 License 申请、不发起审批，也不修改正式 License 记录。</p>
-            <p class="customer-license-status text-sm" :class="licenseStatusClass(licenseExpiryDateValue, licenseTypeValue)"><span class="font-medium">授权状态：</span>{{ licenseStatusLabel(licenseExpiryDateValue, licenseTypeValue) }}</p>
+            <p class="customer-license-status text-sm"><span class="font-medium">授权状态：</span><StatusBadge type="licenseStatus" :status="classifyLicenseStatus(licenseExpiryDateValue, licenseTypeValue)" /></p>
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -1056,26 +1049,6 @@ function continueEditing(): void { closeGuard.continueEditing() }
       </DialogFooter>
     </DialogContent>
   </Dialog>
-
-  <!-- Confirm discard changes dialog -->
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
-        <AlertDialogDescription>
-          您有未保存的更改，确定要关闭吗？
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">
-          继续编辑
-        </AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">
-          放弃更改
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style lang="scss">
@@ -1127,9 +1100,4 @@ function continueEditing(): void { closeGuard.continueEditing() }
     box-shadow: inset 0 0 0 1px var(--license-type-foreground);
   }
 }
-
-.customer-license-status.license-badge--official { color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground))); }
-.customer-license-status.license-badge--trial { color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground))); }
-.customer-license-status.license-badge--expired { color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground))); }
-.customer-license-status.license-badge--none { color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground))); }
 </style>

@@ -1,3 +1,6 @@
+import { DEAL_JOURNEY_BOARD_STAGE_LABELS } from '@/utils/dealJourney'
+import { LICENSE_STATUS_LABELS } from '@/utils/licenseStatus'
+
 export type StatusTone = 'neutral' | 'info' | 'warning' | 'success' | 'danger'
 
 export type StatusDomain =
@@ -19,6 +22,11 @@ export type StatusDomain =
   | 'procurementType'
   | 'industry'
   | 'companyScale'
+  | 'approvalPhase'
+  | 'invoiceEffectiveStatus'
+  | 'licenseStatus'
+  | 'paymentState'
+  | 'paymentConfirmation'
 
 interface StatusConfig {
   readonly label: string
@@ -69,13 +77,29 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     won: { label: '已赢单', tone: 'success' },
     lost: { label: '已输单', tone: 'danger' },
   },
+  // 看板阶段只靠列标题与顺序表达；状态色只给结束态。
   businessJourney: {
-    approval_rejected: { label: '审批未通过', tone: 'warning' },
+    early_communication: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.early_communication, tone: 'neutral' },
+    active_progress: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.active_progress, tone: 'neutral' },
+    closing_soon: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.closing_soon, tone: 'neutral' },
+    contract_processing: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.contract_processing, tone: 'neutral' },
+    payment_processing: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.payment_processing, tone: 'neutral' },
+    invoice_processing: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.invoice_processing, tone: 'neutral' },
+    completed: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.completed, tone: 'success' },
+    lost: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.lost, tone: 'danger' },
+    approval_rejected: { label: DEAL_JOURNEY_BOARD_STAGE_LABELS.approval_rejected, tone: 'warning' },
+  },
+  approvalPhase: {
+    draft: { label: '待提交', tone: 'neutral' },
+    pending_review: { label: '审批中', tone: 'warning' },
+    approved: { label: '审批通过', tone: 'success' },
+    rejected: { label: '审批拒绝', tone: 'danger' },
   },
   contract: {
     draft: { label: '草稿', tone: 'neutral' },
     pending_review: { label: '审批中', tone: 'warning' },
     signed: { label: '已签署', tone: 'success' },
+    effective: { label: '已签署', tone: 'success' },
     expired: { label: '已到期', tone: 'danger' },
     terminated: { label: '已终止', tone: 'neutral' },
   },
@@ -103,10 +127,35 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     completed: { label: '已登记', tone: 'success' },
     overdue: { label: '已逾期', tone: 'danger' },
   },
+  paymentState: {
+    pending: { label: '未登记', tone: 'neutral' },
+    registered: { label: '已登记', tone: 'info' },
+    reviewing: { label: '审批中', tone: 'warning' },
+    partial: { label: '部分回款', tone: 'warning' },
+    completed: { label: '已回款', tone: 'success' },
+    overdue: { label: '已逾期', tone: 'danger' },
+  },
   paymentRecord: {
     pending: { label: '待确认', tone: 'warning' },
     confirmed: { label: '已确认', tone: 'success' },
     rejected: { label: '已驳回', tone: 'danger' },
+  },
+  paymentConfirmation: {
+    PENDING: { label: '待确认', tone: 'warning' },
+    CONFIRMED: { label: '已确认', tone: 'success' },
+    DISPUTED: { label: '有争议', tone: 'danger' },
+  },
+  invoiceEffectiveStatus: {
+    ACTIVE: { label: '有效', tone: 'success' },
+    REISSUE_PENDING: { label: '重开中', tone: 'warning' },
+    RED_OFFSET: { label: '已冲红', tone: 'danger' },
+    REISSUED: { label: '已重开', tone: 'neutral' },
+  },
+  licenseStatus: {
+    none: { label: LICENSE_STATUS_LABELS.none, tone: 'neutral' },
+    expired: { label: LICENSE_STATUS_LABELS.expired, tone: 'danger' },
+    trial: { label: LICENSE_STATUS_LABELS.trial, tone: 'warning' },
+    official: { label: LICENSE_STATUS_LABELS.official, tone: 'success' },
   },
   generic: {
     active: { label: '启用', tone: 'success' },

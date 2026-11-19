@@ -22,7 +22,7 @@ import AmountText from '@/components/crmwolf/AmountText.vue'
 import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { handleApiError } from '@/utils/errorHandler'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import {
   customerMemberAccessOptions,
@@ -462,11 +462,7 @@ async function handleOpenChange(open: boolean): Promise<void> {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写回款信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次回款登记？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) visible.value = false
   } finally {
     closeGuardPending.value = false

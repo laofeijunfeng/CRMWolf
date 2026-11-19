@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { TextareaField } from '@/components/crmwolf'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import licenseApplicationApi from '@/api/licenseApplication'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -102,11 +102,7 @@ const handleDialogOpenChange = async (open: boolean): Promise<void> => {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写 License 信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次发放？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) emit('update:open', false)
   } finally {
     closeGuardPending.value = false

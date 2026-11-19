@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
-import { onBeforeRouteLeave, useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
@@ -10,6 +10,7 @@ import { productPublicIdFromIntent } from '@/utils/productIntent'
 import customerApi, { type CustomerCreate, type CustomerUpdate } from '@/api/customer'
 import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
+import { useRouteLeaveGuard } from '@/composables/useRouteLeaveGuard'
 import { useHeaderStore } from '@/stores/header'
 import {
   FormControl,
@@ -26,16 +27,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { ProductIntentPicker } from '@/components/crmwolf'
 import ErrorState from '@/components/ErrorState.vue'
@@ -67,12 +58,9 @@ const {
 const customerId = computed(() => String(route.params['id'] ?? ''))
 const optionsReady = computed(() => optionsLoaded.value)
 const isEdit = computed(() => !!customerId.value)
-const showLeaveConfirm = ref(false)
-const pendingNavigationPath = ref<string | null>(null)
-const allowNextNavigation = ref(false)
 
 // VeeValidate form setup
-const { handleSubmit, setFieldError, errors, meta, resetForm, validate } = useForm({
+const { handleSubmit, setFieldError, errors, meta, resetForm } = useForm({
   validationSchema: toTypedSchema(customerFormSchema),
   initialValues: {
     account_name: '',
@@ -86,6 +74,10 @@ const { handleSubmit, setFieldError, errors, meta, resetForm, validate } = useFo
 })
 
 const isDirty = computed(() => meta.value.dirty)
+const leaveGuard = useRouteLeaveGuard({
+  isDirty: (): boolean => isDirty.value,
+  isSubmitting: (): boolean => submitting.value,
+})
 
 function normalizeCompanyScale(value: string | null): CustomerForm['company_scale'] | undefined {
   return companyScaleOptions.some(option => option.value === value)
@@ -95,17 +87,6 @@ function normalizeCompanyScale(value: string | null): CustomerForm['company_scal
 
 function emptyToNull(value: string | null | undefined): string | null {
   return value === undefined || value === null || value === '' ? null : value
-}
-
-function isCompleteCustomerForm(value: Partial<CustomerForm> | undefined): value is CustomerForm {
-  return value !== undefined
-    && typeof value.account_name === 'string'
-    && typeof value.city === 'string'
-    && typeof value.company_scale === 'string'
-    && typeof value.source_public_id === 'string'
-    && typeof value.product_public_id === 'string'
-    && value.product_public_id !== ''
-    && typeof value.default_procurement_method_id === 'number'
 }
 
 function toFormValues(res: { account_name: string; city: string; address: string | null; company_scale: string | null; source_info?: { public_id: string } | null; product_public_id?: string | null; products?: { public_id: string; name: string }[]; default_procurement_method_id: number | null }): Partial<CustomerForm> {
@@ -251,7 +232,7 @@ const refreshConflict = async (preserveInput: boolean): Promise<void> => {
 }
 
 // Form submission
-const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: boolean): Promise<boolean> => {
+const submitCustomer = async (formValues: CustomerForm): Promise<void> => {
   submitError.value = null
   submitting.value = true
   try {
@@ -283,11 +264,8 @@ const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: bo
       const createdCustomer = await customerApi.createCustomer(createData)
       toast.success(`客户「${createdCustomer.account_name}」创建成功，当前状态：${customerStatusLabel(createdCustomer.status)}`)
     }
-    if (navigateAfterSuccess) {
-      allowNextNavigation.value = true
-      router.back()
-    }
-    return true
+    leaveGuard.allowNextNavigation()
+    router.back()
   } catch (error: unknown) {
     submitError.value = toFeedbackError(error, isEdit.value ? '更新客户' : '创建客户', { operation: 'write' })
     if (submitError.value.fieldErrors && submitError.value.fieldErrors.length > 0) {
@@ -296,14 +274,13 @@ const submitCustomer = async (formValues: CustomerForm, navigateAfterSuccess: bo
     if (submitError.value.kind !== 'conflict') {
       handleApiError(error, isEdit.value ? '更新客户' : '创建客户')
     }
-    return false
   } finally {
     submitting.value = false
   }
 }
 
 const onSubmit = handleSubmit(async (formValues: CustomerForm) => {
-  await submitCustomer(formValues, true)
+  await submitCustomer(formValues)
 })
 
 const retryLoad = async (): Promise<void> => {
@@ -321,72 +298,8 @@ const handleGoBack = (): void => {
   }
 }
 
-const continueEditing = (): void => {
-  showLeaveConfirm.value = false
-  pendingNavigationPath.value = null
-}
-
-const navigateAfterLeaveDecision = async (path: string): Promise<void> => {
-  allowNextNavigation.value = true
-  try {
-    await router.push(path)
-  } catch (error: unknown) {
-    allowNextNavigation.value = false
-    logger.error('[CustomerEdit]', '离开编辑页失败', { error })
-  }
-}
-
-const discardAndLeave = async (): Promise<void> => {
-  const path = pendingNavigationPath.value
-  showLeaveConfirm.value = false
-  pendingNavigationPath.value = null
-  if (path !== null) await navigateAfterLeaveDecision(path)
-}
-
-const saveAndLeave = async (): Promise<void> => {
-  const path = pendingNavigationPath.value
-  if (path === null || submitting.value) return
-
-  const validation = await validate()
-  if (!validation.valid || !isCompleteCustomerForm(validation.values)) {
-    showLeaveConfirm.value = false
-    await focusFirstError()
-    return
-  }
-
-  showLeaveConfirm.value = false
-  const saved = await submitCustomer(validation.values, false)
-  if (saved) {
-    pendingNavigationPath.value = null
-    await navigateAfterLeaveDecision(path)
-  }
-}
-
-const handleLeaveDialogOpenChange = (open: boolean): void => {
-  if (!open) continueEditing()
-}
-
-const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
-  if (!isDirty.value || submitting.value) return
-  event.preventDefault()
-  event.returnValue = ''
-}
-
-onBeforeRouteLeave((to) => {
-  if (allowNextNavigation.value) {
-    allowNextNavigation.value = false
-    return true
-  }
-  if (!isDirty.value) return true
-
-  pendingNavigationPath.value = to.fullPath
-  showLeaveConfirm.value = true
-  return false
-})
-
 onMounted(async () => {
   headerStore.setBack(true)
-  window.addEventListener('beforeunload', handleBeforeUnload)
   await fetchOptions()
   if (isEdit.value) {
     await fetchCustomerDetail()
@@ -394,7 +307,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('beforeunload', handleBeforeUnload)
   headerStore.clear()
 })
 </script>
@@ -623,28 +535,6 @@ onUnmounted(() => {
         </Button>
       </div>
     </div>
-
-    <AlertDialog :open="showLeaveConfirm" @update:open="handleLeaveDialogOpenChange">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>离开前处理未保存更改？</AlertDialogTitle>
-          <AlertDialogDescription>
-            当前页面有尚未保存的更改。您可以保存后离开，或放弃更改。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter class="leave-confirm-footer">
-          <AlertDialogCancel @click="continueEditing">
-            继续编辑
-          </AlertDialogCancel>
-          <Button type="button" variant="outline" @click="saveAndLeave">
-            保存并离开
-          </Button>
-          <AlertDialogAction class="bg-danger hover:bg-danger/90" @click="discardAndLeave">
-            放弃修改
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>
 
@@ -725,10 +615,6 @@ onUnmounted(() => {
 .form-error-summary ul {
   margin: $space-1 0 0;
   padding-left: $space-4;
-}
-
-.leave-confirm-footer {
-  flex-wrap: wrap;
 }
 
 .loading-spinner {

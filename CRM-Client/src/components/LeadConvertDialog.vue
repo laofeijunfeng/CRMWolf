@@ -30,7 +30,7 @@ import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import { leadApi, type LeadDetail } from '@/api/lead'
 import customerApi from '@/api/customer'
 import procurementApi from '@/api/procurement'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { formatProductIntentName, productPublicIdFromIntent } from '@/utils/productIntent'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -263,11 +263,7 @@ const handleClose = async (): Promise<void> => {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写客户信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次转化？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) visible.value = false
   } finally {
     closeGuardPending.value = false

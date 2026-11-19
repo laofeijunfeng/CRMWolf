@@ -60,17 +60,6 @@ vi.mock('@/components/ui/dialog', () => ({
   DialogFooter: passthrough('UiDialogFooter'),
 }))
 
-vi.mock('@/components/ui/alert-dialog', () => ({
-  AlertDialog: passthrough('UiAlertDialog'),
-  AlertDialogAction: passthrough('UiAlertDialogAction'),
-  AlertDialogCancel: passthrough('UiAlertDialogCancel'),
-  AlertDialogContent: passthrough('UiAlertDialogContent'),
-  AlertDialogDescription: passthrough('UiAlertDialogDescription'),
-  AlertDialogFooter: passthrough('UiAlertDialogFooter'),
-  AlertDialogHeader: passthrough('UiAlertDialogHeader'),
-  AlertDialogTitle: passthrough('UiAlertDialogTitle'),
-}))
-
 vi.mock('@/components/ui/button', () => ({
   Button: defineComponent({
     name: 'UiButton',

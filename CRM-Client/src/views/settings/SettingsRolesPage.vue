@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import ErrorState from '@/components/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
+import { confirmDelete } from '@/utils/confirmDialog'
 
 import roleApi from '@/api/role'
 import type { RoleResponse, RoleWithPermissions, PermissionResponse } from '@/api/role'
@@ -214,9 +215,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 })
 
 const handleDelete = async (record: RoleResponse): Promise<void> => {
-  if (!confirm(`确定要删除角色"${record.name}"吗？删除后不可恢复。`)) {
-    return
-  }
+  if (!(await confirmDelete(`角色"${record.name}"`))) return
 
   try {
     await roleApi.deleteRole(record.id)

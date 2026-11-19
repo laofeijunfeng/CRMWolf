@@ -33,23 +33,6 @@ vi.mock('@/components/ui/dialog', () => {
 
 })
 
-vi.mock('@/components/ui/alert-dialog', () => {
-  const passthrough = (name: string) => defineComponent({
-    name,
-    setup: (_, { slots }) => () => h('div', slots.default?.()),
-  })
-
-  return {
-    AlertDialog: passthrough('AlertDialog'),
-    AlertDialogAction: passthrough('AlertDialogAction'),
-    AlertDialogCancel: passthrough('AlertDialogCancel'),
-    AlertDialogContent: passthrough('AlertDialogContent'),
-    AlertDialogDescription: passthrough('AlertDialogDescription'),
-    AlertDialogFooter: passthrough('AlertDialogFooter'),
-    AlertDialogHeader: passthrough('AlertDialogHeader'),
-    AlertDialogTitle: passthrough('AlertDialogTitle'),
-  }
-})
 
 vi.mock('@/components/ui/form', async () => {
   const { defineComponent, h } = await import('vue')

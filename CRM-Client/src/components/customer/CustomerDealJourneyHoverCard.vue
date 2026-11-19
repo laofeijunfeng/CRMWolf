@@ -183,7 +183,7 @@ const handleViewAll = (): void => {
                   <span class="mt-2 flex items-center justify-between gap-3">
                     <Badge
                       variant="status"
-                      :data-tone="businessJourneyStageTone[journey.current_board_stage]"
+                      :data-tone="businessJourneyStageTone(journey.current_board_stage)"
                       class="status-badge shrink-0"
                       :data-testid="`customer-deal-journey-stage-${journey.public_id}`"
                       :title="`业务旅程当前状态：${journey.current_board_stage_label}`"

@@ -35,22 +35,12 @@ import { useUserStore } from '@/stores/user'
 import { useTeamStore } from '@/stores/team'
 import { usePermissionStore } from '@/stores/permissions'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
-import { useSettingsUnsavedLeave } from '@/composables/useSettingsUnsavedLeave'
+import { useRouteLeaveGuard } from '@/composables/useRouteLeaveGuard'
 import { getSettingsNavigationItem } from '@/settingsNavigation'
 import { useHeaderStore } from '@/stores/header'
 
 import { usePageTitle } from '@/composables/usePageTitle'
 import SettingsContent from '@/views/settings/SettingsContent.vue'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 
 usePageTitle()
 const headerStore = useHeaderStore()
@@ -111,17 +101,10 @@ const { handleSubmit, resetForm, values, meta } = useForm({
   },
 })
 
-const { showLeaveConfirm, confirmLeave, cancelLeave } = useSettingsUnsavedLeave({
+useRouteLeaveGuard({
   isDirty: (): boolean => meta.value.dirty,
   isSubmitting: (): boolean => saving.value,
 })
-
-const handleLeaveDialogOpenChange = (open: boolean): void => {
-  if (open) return
-  Promise.resolve().then((): void => {
-    if (showLeaveConfirm.value) cancelLeave()
-  })
-}
 
 const testData = reactive({
   test_message: '帮我查询线索列表',
@@ -513,19 +496,5 @@ watch(hasAccess, (ok) => {
         </div>
       </form>
     </template>
-    <AlertDialog :open="showLeaveConfirm" @update:open="handleLeaveDialogOpenChange">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>放弃未保存的更改？</AlertDialogTitle>
-          <AlertDialogDescription>
-            当前页面有尚未保存的更改。离开后这些内容会丢失。
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="cancelLeave">继续编辑</AlertDialogCancel>
-          <AlertDialogAction @click="confirmLeave">放弃更改</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </SettingsContent>
 </template>

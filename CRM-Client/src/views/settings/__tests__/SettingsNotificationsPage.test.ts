@@ -9,9 +9,9 @@ import { useUserStore } from '@/stores/user'
 import type { TeamResponse } from '@/api/team'
 import type { UserResponse } from '@/schemas/auth'
 import type {
-  SettingsUnsavedLeaveGuard,
-  SettingsUnsavedLeaveOptions,
-} from '@/composables/useSettingsUnsavedLeave'
+  RouteLeaveGuard,
+  RouteLeaveGuardOptions,
+} from '@/composables/useRouteLeaveGuard'
 
 const unsavedLeave = vi.hoisted(() => ({
   isDirty: (): boolean => false,
@@ -25,14 +25,14 @@ vi.mock('@/api/notificationConfig', () => ({
   },
 }))
 
-vi.mock('@/composables/useSettingsUnsavedLeave', async (importOriginal) => {
+vi.mock('@/composables/useRouteLeaveGuard', async (importOriginal) => {
   const actual = await importOriginal<{
-    useSettingsUnsavedLeave: (options: SettingsUnsavedLeaveOptions) => SettingsUnsavedLeaveGuard
+    useRouteLeaveGuard: (options: RouteLeaveGuardOptions) => RouteLeaveGuard
   }>()
   return {
-    useSettingsUnsavedLeave: (options: SettingsUnsavedLeaveOptions): SettingsUnsavedLeaveGuard => {
+    useRouteLeaveGuard: (options: RouteLeaveGuardOptions): RouteLeaveGuard => {
       unsavedLeave.isDirty = options.isDirty
-      return actual.useSettingsUnsavedLeave(options)
+      return actual.useRouteLeaveGuard(options)
     },
   }
 })

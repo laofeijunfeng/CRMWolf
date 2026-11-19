@@ -193,7 +193,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
                         v-if="isBusinessJourneyEndStage(card.current_board_stage)"
                         variant="status"
                         class="journey-info-tag"
-                        :data-tone="businessJourneyStageTone[card.current_board_stage]"
+                        :data-tone="businessJourneyStageTone(card.current_board_stage)"
                       >
                         {{ getEndStageLabel(card) }}
                       </Badge>

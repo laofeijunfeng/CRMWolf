@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/sheet'
 import { DetailSheetContent } from '@/components/ui/detail-sheet'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import StatusBadge from '@/components/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -217,21 +217,14 @@ const formatDateForInput = (date: Date): string => {
   return `${year}-${month}-${day}`
 }
 
-const getStatusText = (status: number | undefined): string => {
-  if (status === undefined) return '-'
-  const map: Record<number, string> = { 0: '新建', 1: '跟进中', 2: '已转化', 3: '无效' }
-  return map[status] ?? '未知'
-}
-
-const getStatusClass = (status: number | undefined): string => {
-  if (status === undefined) return ''
-  const map: Record<number, string> = {
-    0: 'status-default',
-    1: 'status-warning',
-    2: 'status-success',
-    3: 'status-danger'
+const mapLeadStatus = (status: number): string => {
+  const map: Record<number, 'new' | 'following' | 'converted' | 'invalid'> = {
+    0: 'new',
+    1: 'following',
+    2: 'converted',
+    3: 'invalid'
   }
-  return map[status] ?? 'status-default'
+  return map[status] ?? String(status)
 }
 
 // ==================== Watch ====================
@@ -257,9 +250,7 @@ watch(() => props.visible, (visible): void => {
               {{ leadData?.lead_name || '线索详情' }}
             </SheetTitle>
             <SheetDescription class="flex items-center gap-2 mt-1">
-              <Badge v-if="leadData" :class="['status-badge', getStatusClass(leadData.status)]">
-                {{ getStatusText(leadData.status) }}
-              </Badge>
+              <StatusBadge v-if="leadData" type="lead" :status="mapLeadStatus(leadData.status)" />
             </SheetDescription>
           </div>
           <div v-if="leadData" class="text-right">
@@ -512,37 +503,6 @@ watch(() => props.visible, (visible): void => {
   color: hsl(var(--muted-foreground));
   font-weight: 500;
   word-break: break-all;
-}
-
-// 状态 Badge
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-  border-radius: 9999px;
-  white-space: nowrap;
-}
-
-.status-default {
-  background: var(--wash-hover);
-  color: hsl(var(--muted-foreground));
-}
-
-.status-warning {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.status-success {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.status-danger {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
 }
 
 // 跟进记录卡片
