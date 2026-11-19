@@ -45,7 +45,7 @@ const statusClass = (status: ProcessItem['status']): string => {
   if (status === 'FAILED') return 'text-destructive'
   if (status === 'CANCELLED' || status === 'PENDING' || status === 'SKIPPED') return 'text-muted-foreground'
   if (status === 'WAITING' || status === 'RUNNING') return 'text-primary'
-  return 'text-emerald-600 dark:text-emerald-400'
+  return 'text-emerald-600'
 }
 </script>
 

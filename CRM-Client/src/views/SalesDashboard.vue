@@ -518,7 +518,7 @@ onMounted(() => {
 
 .dashboard-inline-error--toolbar {
   flex: 0 0 auto;
-  margin: -$wolf-space-sm-v2 0 $wolf-space-md-v2;
+  margin: calc(-1 * #{$wolf-space-sm-v2}) 0 $wolf-space-md-v2;
 }
 
 .dashboard-inline-retry {

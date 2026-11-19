@@ -6,15 +6,11 @@ export { default as ChartLegendContent } from "./ChartLegendContent.vue"
 export { default as ChartTooltipContent } from "./ChartTooltipContent.vue"
 export { componentToString } from "./utils"
 
-export const THEMES = { light: "", dark: ".dark" } as const
-
 export type ChartConfig = Record<string, {
   label?: string | Component
   icon?: string | Component
-} & (
-  | { color?: string, theme?: never }
-  | { color?: never, theme: Record<keyof typeof THEMES, string> }
-)>
+  color?: string
+}>
 
 interface ChartContextProps {
   id: string

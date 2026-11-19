@@ -1,7 +1,6 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
-  darkMode: ['class', 'class'],
   content: [
     './index.html',
     './src/**/*.{vue,js,ts,jsx,tsx}',
@@ -98,6 +97,13 @@ const config: Config = {
 			border: 'hsl(var(--border) / <alpha-value>)',
 			input: 'hsl(var(--input) / <alpha-value>)',
 			ring: 'hsl(var(--ring) / <alpha-value>)',
+			'ring-input': 'hsl(var(--ring-input) / <alpha-value>)',
+			brand: {
+				DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
+				foreground: 'hsl(var(--brand-foreground) / <alpha-value>)'
+			},
+			'wash-hover': 'var(--wash-hover)',
+			'wash-selected': 'var(--wash-selected)',
 			wolf: {
 				primary: {
 					DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
@@ -169,6 +175,10 @@ const config: Config = {
 			}
 		},
 		borderRadius: {
+			sm: 'var(--radius-sm)',
+			md: 'var(--radius-md)',
+			lg: 'var(--radius-lg)',
+			xl: 'var(--radius-xl)',
 			wolf: '6px',
 			'wolf-sm': '4px',
 				'wolf-md': '6px',
@@ -196,6 +206,9 @@ const config: Config = {
 			'wolf-icon-lg': '32px'
 		},
 		boxShadow: {
+			'1': 'var(--shadow-1)',
+			'2': 'var(--shadow-2)',
+			'3': 'var(--shadow-3)',
 			'wolf-card': '0 1px 3px rgba(0, 0, 0, 0.1)',
 			'wolf-hover': '0 2px 8px rgba(0, 0, 0, 0.15)',
 			'wolf-overlay': '0 4px 12px rgba(0, 0, 0, 0.12)',
@@ -204,6 +217,7 @@ const config: Config = {
 			'wolf-bottom': '0 -2px 8px rgba(0, 0, 0, 0.1)'
 		},
 		fontFamily: {
+			sans: 'var(--font-sans)',
 			wolf: [
 				'-apple-system',
 				'BlinkMacSystemFont',
@@ -231,6 +245,11 @@ const config: Config = {
 			]
 		},
 		fontSize: {
+			display: ['24px', { lineHeight: '32px', fontWeight: '600' }],
+			title: ['18px', { lineHeight: '28px', fontWeight: '600' }],
+			'body-strong': ['16px', { lineHeight: '24px', fontWeight: '500' }],
+			body: ['14px', { lineHeight: '20px' }],
+			caption: ['12px', { lineHeight: '16px' }],
 			'wolf-title': [
 				'16px',
 				{
@@ -262,6 +281,8 @@ const config: Config = {
 			'wolf-semibold': '600'
 		},
 		transitionDuration: {
+			DEFAULT: 'var(--duration-base)',
+			overlay: 'var(--duration-overlay)',
 			wolf: '150ms',
 			'wolf-fast': '150ms',
 			'wolf-hover': '200ms',
@@ -275,13 +296,23 @@ const config: Config = {
 		outlineOffset: {
 			wolf: '2px'
 		},
+		transitionTimingFunction: {
+			DEFAULT: 'var(--ease-standard)',
+			standard: 'var(--ease-standard)'
+		},
 			minHeight: {
-				'touch-target': '44px',
+				'touch-target': 'var(--touch-target)',
+				control: 'var(--control-h-md)',
 				'input-desktop': '36px',
 				'input-mobile': '44px'
 			},
 		height: {
-			'touch-target': '44px',
+			'touch-target': 'var(--touch-target)',
+			'control-xs': 'var(--control-h-xs)',
+			'control-sm': 'var(--control-h-sm)',
+			control: 'var(--control-h-md)',
+			'control-lg': 'var(--control-h-lg)',
+			'context-tabs': 'var(--context-tabs-height)',
 				'button-sm': '32px',
 				'button-md': '36px',
 				'button-lg': '40px',
@@ -294,7 +325,12 @@ const config: Config = {
 				'wolf-context-tabs': '36px'
 		},
 		minWidth: {
-			'touch-target': '44px'
+			'touch-target': 'var(--touch-target)'
+		},
+		size: {
+			'icon-xs': 'var(--icon-xs)',
+			'icon-sm': 'var(--icon-sm)',
+			'icon-lg': 'var(--icon-lg)'
 		},
 		screens: {
 			xs: '375px',

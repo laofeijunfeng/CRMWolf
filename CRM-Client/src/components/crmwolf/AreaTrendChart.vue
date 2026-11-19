@@ -238,10 +238,10 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 
 .area-trend-card {
   min-width: 0;
-  border-color: rgba($wolf-border-default-v2, 0.9);
+  border-color: color-mix(in srgb, $wolf-border-default-v2 90%, transparent);
   border-radius: $wolf-radius-xl-v2;
   background:
-    linear-gradient(0deg, rgba($wolf-primary-v2, 0.045) 0%, rgba($wolf-primary-v2, 0.018) 36%, rgba(255, 255, 255, 0) 72%),
+    linear-gradient(0deg, color-mix(in srgb, $wolf-primary-v2 4.5%, transparent) 0%, color-mix(in srgb, $wolf-primary-v2 1.8%, transparent) 36%, rgba(255, 255, 255, 0) 72%),
     $wolf-bg-card-v2;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
@@ -370,7 +370,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   position: absolute;
   z-index: 1;
   width: 1px;
-  background: rgba($wolf-text-tertiary-v2, 0.26);
+  background: color-mix(in srgb, $wolf-text-tertiary-v2 26%, transparent);
   pointer-events: none;
 }
 
@@ -379,7 +379,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed rgba($wolf-border-default-v2, 0.8);
+  border: 1px dashed color-mix(in srgb, $wolf-border-default-v2 80%, transparent);
   border-radius: $wolf-radius-v2;
   color: $wolf-text-tertiary-v2;
   font-size: $wolf-font-size-caption-v2;
@@ -387,7 +387,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 
 .area-trend-card__skeleton {
   overflow: hidden;
-  background: linear-gradient(90deg, rgba($wolf-bg-muted-v2, 0.55), rgba($wolf-bg-muted-v2, 0.95), rgba($wolf-bg-muted-v2, 0.55));
+  background: linear-gradient(90deg, color-mix(in srgb, $wolf-bg-muted-v2 55%, transparent), color-mix(in srgb, $wolf-bg-muted-v2 95%, transparent), color-mix(in srgb, $wolf-bg-muted-v2 55%, transparent));
   background-size: 200% 100%;
   animation: areaTrendLoading 1.2s ease-in-out infinite;
 }

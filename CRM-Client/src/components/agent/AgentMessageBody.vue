@@ -117,7 +117,7 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 
 .agent-message-body--markdown :deep(code) {
   border-radius: $wolf-radius-sm-v2;
-  background: rgba($wolf-text-primary-v2, 0.08);
+  background: color-mix(in srgb, $wolf-text-primary-v2 8%, transparent);
   padding: 1px 4px;
   color: $wolf-text-primary-v2;
   font-size: 0.92em;
@@ -126,7 +126,7 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 .agent-message-body--markdown :deep(pre) {
   overflow-x: auto;
   border-radius: $wolf-radius-v2;
-  background: rgba($wolf-text-primary-v2, 0.08);
+  background: color-mix(in srgb, $wolf-text-primary-v2 8%, transparent);
   padding: $wolf-space-sm-v2;
 }
 

@@ -1,183 +1,215 @@
+/* =====================================================================
+ * CRMWolf 唯一设计数值源（仅亮色主题）
+ * 文档镜像：CRM-Docs/design-system/foundations/token-values.md，两者必须同步修改。
+ * Tailwind / SCSS / 组件只引用 var()；系统没有暗色主题。
+ * 颜色沿用 shadcn「HSL 分量」格式，行尾注释为规范 hex；派生色用 color-mix()。
+ * ===================================================================== */
+
 @import './touch-safety.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ==================== shadcn-vue Theme Tokens ==================== */
-/* components.json: baseColor = slate, cssVariables = true; primary uses Tailwind blue */
 :root {
+  /* ---------- 中性色 ---------- */
   --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --foreground: 222.2 84% 4.9%; /* #020817 */
+  --card: 0 0% 100%; /* #fff */
+  --card-foreground: var(--foreground);
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-hover: 224.3 76.3% 48%;
-  --primary-active: 225.9 70.7% 40.2%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
+  --popover-foreground: var(--foreground);
+  --muted: 210 40% 96.1%; /* #f1f5f9 */
   --muted-foreground: 215.4 16.3% 46.9%;
+  --secondary: var(--muted);
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --border: 214.3 31.8% 91.4%; /* #e2e8f0 */
+  --input: var(--border);
+
+  /* ---------- 主操作 ---------- */
+  --primary: 221.2 83.2% 53.3%;
+  --primary-foreground: 0 0% 100%;
+
+  /* ---------- 品牌：链接、活动导航、选中、焦点 ---------- */
+  --brand: 205.4 96% 39%; /* #0472c3 */
+  --brand-foreground: 0 0% 100%;
+  --ring: var(--primary);
+  --ring-input: 211.3 100% 56.1%; /* #1f8aff */
+
+  /* ---------- 悬停 / 选中水洗 ---------- */
   --accent: 210 40% 96.1%;
   --accent-foreground: 222.2 47.4% 11.2%;
+  --wash-hover: color-mix(in srgb, hsl(var(--foreground)) 4%, transparent);
+  --wash-selected: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
+
+  /* ---------- 状态语气：每种 1 个基色，浅底与文字由基色派生 ---------- */
+  --status-success: 143 71.9% 44.7%; /* #20c45f */
+  --status-warning: 44.3 100% 42.7%; /* #daa100 */
+  --status-danger: 351.1 100% 44.9%; /* #e50022 */
+  --status-info: 207.4 100% 57.5%; /* #269cff */
+  --status-neutral: var(--muted-foreground);
+  --status-bg-mix: 12%;
+  --status-fg-mix: 72%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
-  --radius: 0.5rem;
+
+  /* ---------- 侧栏 ---------- */
+  --sidebar-background: 210 40% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* ---------- 图表 ---------- */
   --chart-1: 221.2 83.2% 53.3%;
   --chart-2: 212 95% 68%;
   --chart-3: 217 91% 60%;
   --chart-4: 224 76% 48%;
   --chart-5: 226 71% 40%;
 
+  /* ---------- 圆角 ---------- */
+  --radius: 0.5rem;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* ---------- 阴影：3 档；内容容器用描边、不加阴影 ---------- */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-2: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px rgb(0 0 0 / 0.04);
+  --shadow-3: 0 9px 48px rgb(0 0 0 / 0.08), 0 6px 24px rgb(0 0 0 / 0.1), 0 1px 1px rgb(0 0 0 / 0.04);
+
+  /* ---------- 控件几何 ---------- */
+  --control-h-xs: 24px;
+  --control-h-sm: 28px;
+  --control-h-md: 32px;
+  --control-h-lg: 36px;
+  --control-px-xs: 8px;
+  --control-px-sm: 10px;
+  --control-px-md: 12px;
+  --control-px-lg: 14px;
+  --control-gap-sm: 4px;
+  --control-gap-md: 6px;
+  --icon-xs: 14px;
+  --icon-sm: 16px;
+  --icon-lg: 18px;
+  --touch-target: 44px;
+
+  /* ---------- 字体 ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'IBM Plex Sans', var(--font-sans);
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Monaco, 'Cascadia Code', monospace;
+
+  /* ---------- 动效 ---------- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-base: 150ms;
+  --duration-overlay: 200ms;
+  --press-scale: 0.98;
+
+  /* ---------- 禁用态 ---------- */
+  --disabled-opacity: 0.5;
+
+  /* ---------- 布局 ---------- */
+  --page-padding: 24px;
+  --sidebar-width: 220px;
+  --topbar-height: 56px;
+  --context-tabs-height: 36px;
+  --bottom-nav-height: 56px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* ---------- 迁移期遗留（随代码迁移删除） ---------- */
+  --primary-hover: 224.3 76.3% 48%;
+  --primary-active: 225.9 70.7% 40.2%;
   --success: 160.1 84.1% 39.4%;
   --warning: 37.7 92.1% 50.2%;
   --info: 217.2 91.2% 59.8%;
-
-  --status-neutral-foreground: hsl(215.294118 19.318182% 34.509804%);
-  --status-neutral-background: hsl(210.000000 40.000000% 96.078431%);
-  --status-info-foreground: hsl(224.278075 76.326531% 48.039216%);
-  --status-info-background: hsl(213.750000 100.000000% 96.862745%);
-  --status-warning-foreground: hsl(25.964912 90.476190% 37.058824%);
-  --status-warning-background: hsl(48.000000 100.000000% 96.078431%);
-  --status-success-foreground: hsl(162.931034 93.548387% 24.313725%);
-  --status-success-background: hsl(151.764706 80.952381% 95.882353%);
-  --status-danger-foreground: hsl(0.000000 73.708920% 41.764706%);
-  --status-danger-background: hsl(0.000000 85.714286% 97.254902%);
-
-  --sidebar-background: 210 40% 98%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-primary: 221.2 83.2% 53.3%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 210 40% 96.1%;
-  --sidebar-accent-foreground: 222.2 47.4% 11.2%;
   --sidebar-active: 214.3 100% 96.9%;
   --sidebar-active-foreground: 224.3 76.3% 48%;
-  --sidebar-border: 214.3 31.8% 91.4%;
-  --sidebar-ring: 221.2 83.2% 53.3%;
+  --status-neutral-foreground: hsl(215.294118 19.318182% 34.509804%);
+  --status-neutral-background: hsl(210 40% 96.078431%);
+  --status-info-foreground: hsl(224.278075 76.326531% 48.039216%);
+  --status-info-background: hsl(213.75 100% 96.862745%);
+  --status-warning-foreground: hsl(25.964912 90.47619% 37.058824%);
+  --status-warning-background: hsl(48 100% 96.078431%);
+  --status-success-foreground: hsl(162.931034 93.548387% 24.313725%);
+  --status-success-background: hsl(151.764706 80.952381% 95.882353%);
+  --status-danger-foreground: hsl(0 73.70892% 41.764706%);
+  --status-danger-background: hsl(0 85.714286% 97.254902%);
 }
 
-.dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
-  --card-foreground: 210 40% 98%;
-  --popover: 222.2 84% 4.9%;
-  --popover-foreground: 210 40% 98%;
-  --primary: 213.9 93.9% 67.8%;
-  --primary-hover: 217.2 91.2% 59.8%;
-  --primary-active: 221.2 83.2% 53.3%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 217.2 32.6% 17.5%;
-  --ring: 213.9 93.9% 67.8%;
-  --chart-1: 221 83% 60%;
-  --chart-2: 212 95% 74%;
-  --chart-3: 217 91% 68%;
-  --chart-4: 224 76% 58%;
-  --chart-5: 226 71% 50%;
-
-  --success: 160 84% 39%;
-  --warning: 43 96% 56%;
-  --info: 213 94% 68%;
-
-  --status-neutral-foreground: hsl(212.727273 26.829268% 83.921569%);
-  --status-neutral-background: hsl(217.241379 32.584270% 17.450980%);
-  --status-info-foreground: hsl(211.698113 96.363636% 78.431373%);
-  --status-info-background: hsl(226.229508 57.009346% 20.980392%);
-  --status-warning-foreground: hsl(45.942857 96.685083% 64.509804%);
-  --status-warning-background: hsl(20.909091 91.666667% 14.117647%);
-  --status-success-foreground: hsl(156.198347 71.597633% 66.862745%);
-  --status-success-background: hsl(165.714286 91.304348% 9.019608%);
-  --status-danger-foreground: hsl(0.000000 93.548387% 81.764706%);
-  --status-danger-background: hsl(0.000000 74.683544% 15.490196%);
-
-  --sidebar-background: 240 5.9% 10%;
-  --sidebar-foreground: 240 4.8% 95.9%;
-  --sidebar-primary: 213.9 93.9% 67.8%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 226.2 57% 21%;
-  --sidebar-accent-foreground: 213.3 96.9% 87.3%;
-  --sidebar-active: 226.2 57% 21%;
-  --sidebar-active-foreground: 213.3 96.9% 87.3%;
-  --sidebar-border: 240 3.7% 15.9%;
-  --sidebar-ring: 213.9 93.9% 67.8%;
+@media (max-width: 767px) {
+  :root {
+    --page-padding: 16px;
+  }
 }
 
-/* Opaque pairs keep status contrast independent of the containing surface. */
 .business-status {
   color: var(--status-neutral-foreground);
   background-color: var(--status-neutral-background);
   white-space: nowrap;
 }
 
-.business-status[data-status-tone="info"] {
+.business-status[data-status-tone='info'] {
   color: var(--status-info-foreground);
   background-color: var(--status-info-background);
 }
 
-.business-status[data-status-tone="warning"] {
+.business-status[data-status-tone='warning'] {
   color: var(--status-warning-foreground);
   background-color: var(--status-warning-background);
 }
 
-.business-status[data-status-tone="success"] {
+.business-status[data-status-tone='success'] {
   color: var(--status-success-foreground);
   background-color: var(--status-success-background);
 }
 
-.business-status[data-status-tone="danger"] {
+.business-status[data-status-tone='danger'] {
   color: var(--status-danger-foreground);
   background-color: var(--status-danger-background);
 }
 
-/* ==================== CRMWolf Base Layer Overrides ==================== */
-/* UI/UX Pro Max CRITICAL: Focus states, Touch targets, Reduced motion */
-
 @layer base {
-  /* ===== Focus Ring Default ===== */
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
   *:focus-visible {
-    @apply outline-wolf-focus outline-offset-wolf outline-wolf-primary/50;
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
-
-  /* ===== Button Reset ===== */
   button {
-    @apply cursor-pointer;
+    cursor: pointer;
   }
-
-  /* ===== Input Reset ===== */
   input,
   textarea,
   select {
-    @apply font-wolf text-wolf-body;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
   }
-
-  /* ===== Touch Target Safety ===== */
-  /* Mobile: 所有交互元素最小 44px */
   @media (max-width: 767px) {
     button,
     a,
     input,
     select,
-    [role="button"] {
-      @apply min-h-touch-target min-w-touch-target;
+    [role='button'] {
+      min-height: var(--touch-target);
+      min-width: var(--touch-target);
+    }
+    input,
+    textarea,
+    select {
+      font-size: 16px; /* 避免 iOS 输入框自动放大 */
     }
   }
-
-  /* ===== Reduced Motion Support ===== */
-  /* UI/UX Pro Max CRITICAL: Respect prefers-reduced-motion */
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -187,62 +219,37 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
-
-    /* Tab content fade animation fallback */
-    [data-state="inactive"] {
+    [data-state='inactive'] {
       opacity: 0 !important;
     }
-    [data-state="active"] {
+    [data-state='active'] {
       opacity: 1 !important;
     }
   }
-
-  /* ===== iOS Auto-zoom Prevention ===== */
-  /* UI/UX Pro Max CRITICAL: input font-size >= 16px on mobile */
-  @media (max-width: 767px) {
-    input,
-    textarea,
-    select {
-      font-size: 16px;
-    }
-  }
 }
-
-/* ==================== CRMWolf Utilities ==================== */
 
 @layer utilities {
-  /* ===== Touch-safe utility ===== */
   .touch-safe {
-    @apply min-h-touch-target min-w-touch-target;
+    min-height: var(--touch-target);
+    min-width: var(--touch-target);
   }
-
-  /* ===== Press feedback ===== */
   .press-feedback {
-    @apply transition-transform duration-wolf-press active:scale-[0.98];
+    transition: transform var(--duration-base) var(--ease-standard);
   }
-
-  /* ===== Focus ring utilities ===== */
-  .focus-ring {
-    @apply focus-visible:outline-wolf-focus focus-visible:outline-offset-wolf;
+  .press-feedback:active {
+    transform: scale(var(--press-scale));
   }
-
-  .focus-ring-danger {
-    @apply focus-visible:outline-wolf-focus focus-visible:outline-offset-wolf focus-visible:outline-wolf-danger/50;
+  .focus-ring:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.5);
+    outline-offset: 2px;
   }
-
-  /* ===== Disabled state ===== */
+  .focus-ring-danger:focus-visible {
+    outline: 2px solid hsl(var(--destructive) / 0.5);
+    outline-offset: 2px;
+  }
   .disabled-state {
-    @apply opacity-40 cursor-not-allowed pointer-events-none;
-  }
-}
-
-
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 }

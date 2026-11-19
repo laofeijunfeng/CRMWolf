@@ -222,7 +222,7 @@ const retryNotice = computed(() => {
   margin-left: 7px;
   padding-top: $wolf-space-xs-v2;
   padding-left: 16px;
-  border-left: 1px solid rgba($wolf-primary-v2, 0.12);
+  border-left: 1px solid color-mix(in srgb, $wolf-primary-v2 12%, transparent);
 }
 
 .agent-async-operation__events {

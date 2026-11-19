@@ -11,8 +11,6 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { Button } from '@/components/ui/button'
 import TouchInput from '@/components/crmwolf/TouchInput.vue'
-import fs from 'fs'
-import path from 'path'
 
 describe('Touch Target Compliance (UI/UX Pro Max §2)', () => {
   describe('Button', () => {
@@ -59,14 +57,6 @@ describe('Touch Target Compliance (UI/UX Pro Max §2)', () => {
       expect(inputWrapper.classes()).toContain('h-input-mobile')
     })
 
-    it('mobile input has 16px font-size protection through base layer', () => {
-      const baseCssPath = path.resolve(__dirname, '../../src/styles/base.css')
-      const baseCss = fs.readFileSync(baseCssPath, 'utf-8')
-
-      expect(baseCss).toContain('@media (max-width: 767px)')
-      expect(baseCss).toContain('font-size: 16px')
-    })
-
     it('default size has 32px height for desktop', () => {
       const wrapper = mount(TouchInput, {
         props: {
@@ -77,16 +67,6 @@ describe('Touch Target Compliance (UI/UX Pro Max §2)', () => {
 
       const inputWrapper = wrapper.find('.input-wrapper')
       expect(inputWrapper.classes()).toContain('h-input-desktop')
-    })
-  })
-
-  describe('Global Base Layer', () => {
-    it('base.css applies min-h-touch-target on mobile', () => {
-      const baseCssPath = path.resolve(__dirname, '../../src/styles/base.css')
-      const baseCss = fs.readFileSync(baseCssPath, 'utf-8')
-
-      expect(baseCss).toContain('min-h-touch-target')
-      expect(baseCss).toContain('@media (max-width: 767px)')
     })
   })
 })

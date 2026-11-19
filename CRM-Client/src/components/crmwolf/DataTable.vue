@@ -1822,7 +1822,7 @@ onBeforeUnmount(() => {
 
   &.is-interactive:focus-visible {
     outline: $wolf-focus-ring-width-v2 solid $wolf-focus-ring-color-v2;
-    outline-offset: -$wolf-focus-ring-width-v2;
+    outline-offset: calc(-1 * #{$wolf-focus-ring-width-v2});
   }
 }
 

@@ -796,8 +796,8 @@ watch(
 $payment-border-width: $wolf-focus-ring-width-subtle-v2;
 $payment-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
 $payment-header-mobile-indent: calc($payment-title-avatar-size + $wolf-space-md-v2);
-$payment-sheet-min-height: ($wolf-touch-target-min-v2 * 12) + $wolf-space-2xl-v2;
-$payment-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+$payment-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 12 + #{$wolf-space-2xl-v2});
+$payment-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
 
 .detail-embedded-content {
   display: flex;

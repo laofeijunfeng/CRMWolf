@@ -407,7 +407,7 @@ describe('PaymentPlanDetailSheet', () => {
       expect(['0', '0px']).toContain(style.minWidth)
       expect(style.maxWidth).toBe('100%')
       expect(style.height).toBe('auto')
-      expect(style.minHeight).toBe('44px')
+      expect(style.minHeight).toBe('var(--touch-target)')
       expect(style.whiteSpace).toBe('normal')
       expect(style.overflowWrap).toBe('anywhere')
       expect(style.justifyContent).toBe('flex-start')

@@ -702,7 +702,7 @@ onUnmounted(() => {
   padding: $wolf-space-md-v2;
   border: 1px solid $wolf-danger-v2;
   border-radius: $wolf-radius-control-v2;
-  background: rgba($wolf-danger-v2, 0.08);
+  background: color-mix(in srgb, $wolf-danger-v2 8%, transparent);
   color: $wolf-text-primary-v2;
 }
 
@@ -718,7 +718,7 @@ onUnmounted(() => {
   padding: $wolf-space-md-v2;
   border: 1px solid $wolf-danger-v2;
   border-radius: $wolf-radius-control-v2;
-  background: rgba($wolf-danger-v2, 0.08);
+  background: color-mix(in srgb, $wolf-danger-v2 8%, transparent);
   color: $wolf-text-primary-v2;
 }
 

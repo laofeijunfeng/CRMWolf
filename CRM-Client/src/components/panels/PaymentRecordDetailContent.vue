@@ -733,8 +733,8 @@ watch(
 $record-border-width: $wolf-focus-ring-width-subtle-v2;
 $record-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
 $record-header-mobile-indent: calc($record-title-avatar-size + $wolf-space-md-v2);
-$record-sheet-min-height: ($wolf-touch-target-min-v2 * 8) + $wolf-space-2xl-v2;
-$record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+$record-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 8 + #{$wolf-space-2xl-v2});
+$record-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
 
 .detail-embedded-content {
   display: flex;

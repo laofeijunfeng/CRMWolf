@@ -1870,8 +1870,8 @@ onBeforeUnmount((): void => {
 
 $invoice-border-width: $wolf-focus-ring-width-subtle-v2;
 $invoice-title-avatar-size: calc($wolf-touch-target-min-v2 + $wolf-space-xs-v2);
-$invoice-sheet-min-height: ($wolf-touch-target-min-v2 * 12) + $wolf-space-2xl-v2;
-$invoice-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
+$invoice-sheet-min-height: calc(#{$wolf-touch-target-min-v2} * 12 + #{$wolf-space-2xl-v2});
+$invoice-empty-min-height: calc(#{$wolf-touch-target-min-v2} * 6 + #{$wolf-space-lg-v2});
 
 .invoice-sheet-header {
   padding: $wolf-space-xl-v2;

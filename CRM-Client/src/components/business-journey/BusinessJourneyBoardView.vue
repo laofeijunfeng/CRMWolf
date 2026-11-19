@@ -245,7 +245,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 }
 
 .business-board-error {
-  border: 1px solid rgba($wolf-danger-v2, 0.18);
+  border: 1px solid color-mix(in srgb, $wolf-danger-v2 18%, transparent);
   color: $wolf-danger-text-v2;
   background: $wolf-danger-bg-v2;
 }
