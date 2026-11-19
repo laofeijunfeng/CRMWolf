@@ -5,62 +5,6 @@ const config: Config = {
     './index.html',
     './src/**/*.{vue,js,ts,jsx,tsx}',
   ],
-  // Safelist: 确保 cn() 函数中的 wolf-* 类都被生成
-  safelist: [
-    // Colors
-    'bg-wolf-bg-card',
-    'bg-wolf-bg-page',
-    'bg-wolf-bg-hover',
-    'bg-wolf-bg-muted',
-    'text-wolf-text-primary',
-    'text-wolf-text-secondary',
-    'text-wolf-text-tertiary',
-    'text-wolf-text-inverse',
-    'text-wolf-primary',
-    'border-wolf-border-default',
-    'border-wolf-border-hover',
-    // Status colors (for ApprovalStatusBadge)
-    'text-wolf-success-text',
-    'bg-wolf-success-bg',
-    'text-wolf-warning-text',
-    'bg-wolf-warning-bg',
-    'text-wolf-danger-text',
-    'bg-wolf-danger-bg',
-    // Radius
-    'rounded-wolf',
-    'rounded-wolf-sm',
-    'rounded-wolf-md',
-    'rounded-wolf-lg',
-    'rounded-wolf-xl',
-    'rounded-wolf-surface',
-    'rounded-wolf-overlay',
-    'rounded-wolf-sheet',
-    'rounded-wolf-popover',
-    'rounded-wolf-full',
-    // Shadows
-    'shadow-wolf-card',
-    'shadow-wolf-hover',
-    'shadow-wolf-overlay',
-    'shadow-wolf-modal',
-    // Spacing
-    'px-wolf-lg',
-    'px-wolf-sm',
-    'px-wolf-xs',
-    'py-wolf-sm',
-    'p-wolf-xs',
-    'p-wolf-sm',
-    // Typography
-    'text-wolf-body',
-    'text-wolf-title',
-    'text-wolf-caption',
-    'font-wolf-medium',
-    'font-wolf-semibold',
-    // Transitions
-    'transition-all',
-    'duration-150',
-    // Heights
-    'h-wolf-context-tabs',
-  ],
   theme: {
 	extend: {
 		colors: {
@@ -108,63 +52,6 @@ const config: Config = {
 			info: 'hsl(var(--status-info) / <alpha-value>)',
 			'wash-hover': 'var(--wash-hover)',
 			'wash-selected': 'var(--wash-selected)',
-			wolf: {
-				primary: {
-					DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
-					hover: 'hsl(var(--brand) / <alpha-value>)',
-					active: 'hsl(var(--brand) / <alpha-value>)',
-					light: 'var(--wash-hover)'
-				},
-				secondary: 'hsl(var(--status-info) / <alpha-value>)',
-				accent: 'hsl(var(--status-success) / <alpha-value>)',
-				bg: {
-					page: 'hsl(var(--background) / <alpha-value>)',
-					card: 'hsl(var(--card) / <alpha-value>)',
-					sidebar: 'hsl(var(--sidebar-background) / <alpha-value>)',
-					hover: 'hsl(var(--accent) / <alpha-value>)',
-					muted: 'hsl(var(--muted) / <alpha-value>)',
-					elevated: 'hsl(var(--popover) / <alpha-value>)'
-				},
-				text: {
-					primary: 'hsl(var(--foreground) / <alpha-value>)',
-					secondary: 'hsl(var(--muted-foreground) / <alpha-value>)',
-					tertiary: 'hsl(var(--muted-foreground) / <alpha-value>)',
-					placeholder: 'hsl(var(--muted-foreground) / <alpha-value>)',
-					inverse: 'hsl(var(--primary-foreground) / <alpha-value>)',
-					link: 'hsl(var(--brand) / <alpha-value>)',
-					'link-hover': 'hsl(var(--brand) / <alpha-value>)'
-				},
-				border: {
-					'default': 'hsl(var(--border) / <alpha-value>)',
-					hover: 'hsl(var(--ring) / <alpha-value>)',
-					light: 'hsl(var(--muted) / <alpha-value>)',
-					divider: 'hsl(var(--border) / <alpha-value>)'
-				},
-				success: {
-					DEFAULT: 'hsl(var(--status-success) / <alpha-value>)',
-					text: 'hsl(var(--status-success) / <alpha-value>)',
-					bg: 'color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent)',
-					border: 'hsl(var(--status-success) / <alpha-value>)'
-				},
-				warning: {
-					DEFAULT: 'hsl(var(--status-warning) / <alpha-value>)',
-					text: 'hsl(var(--status-warning) / <alpha-value>)',
-					bg: 'color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent)',
-					border: 'hsl(var(--status-warning) / <alpha-value>)'
-				},
-				danger: {
-					DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
-					text: 'hsl(var(--destructive) / <alpha-value>)',
-					bg: 'color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent)',
-					border: 'hsl(var(--destructive) / <alpha-value>)'
-				},
-				info: {
-					DEFAULT: 'hsl(var(--status-info) / <alpha-value>)',
-					text: 'hsl(var(--status-info) / <alpha-value>)',
-					bg: 'color-mix(in srgb, hsl(var(--status-info)) var(--status-bg-mix), transparent)',
-					border: 'hsl(var(--status-info) / <alpha-value>)'
-				}
-			},
 			sidebar: {
 				DEFAULT: 'hsl(var(--sidebar-background) / <alpha-value>)',
 				foreground: 'hsl(var(--sidebar-foreground) / <alpha-value>)',
@@ -181,55 +68,14 @@ const config: Config = {
 			md: 'var(--radius-md)',
 			lg: 'var(--radius-lg)',
 			xl: 'var(--radius-xl)',
-			wolf: '6px',
-			'wolf-sm': '4px',
-				'wolf-md': '6px',
-			'wolf-lg': '8px',
-				'wolf-xl': '12px',
-				'wolf-surface': '12px',
-				'wolf-overlay': '12px',
-				'wolf-sheet': '12px',
-				'wolf-popover': '12px',
-			'wolf-full': '9999px'
-		},
-		spacing: {
-			'wolf-xs': '4px',
-			'wolf-sm': '8px',
-			'wolf-md': '12px',
-			'wolf-lg': '16px',
-			'wolf-xl': '24px',
-			'wolf-2xl': '32px',
-			'wolf-8': '32px'
-		},
-		width: {
-			'wolf-icon-xs': '16px',
-			'wolf-icon-sm': '20px',
-			'wolf-icon-md': '24px',
-			'wolf-icon-lg': '32px'
 		},
 		boxShadow: {
 			'1': 'var(--shadow-1)',
 			'2': 'var(--shadow-2)',
-			'3': 'var(--shadow-3)',
-			'wolf-card': '0 1px 3px rgba(0, 0, 0, 0.1)',
-			'wolf-hover': '0 2px 8px rgba(0, 0, 0, 0.15)',
-			'wolf-overlay': '0 4px 12px rgba(0, 0, 0, 0.12)',
-			'wolf-dropdown': '0 -4px 12px rgba(0, 0, 0, 0.15)',
-			'wolf-modal': '0 4px 16px rgba(0, 0, 0, 0.15)',
-			'wolf-bottom': '0 -2px 8px rgba(0, 0, 0, 0.1)'
+			'3': 'var(--shadow-3)'
 		},
 		fontFamily: {
 			sans: 'var(--font-sans)',
-			wolf: [
-				'-apple-system',
-				'BlinkMacSystemFont',
-				'PingFang SC',
-				'Segoe UI',
-				'Roboto',
-				'Helvetica Neue',
-				'Arial',
-				'sans-serif'
-			],
 			display: [
 				'IBM Plex Sans',
 				'-apple-system',
@@ -259,52 +105,11 @@ const config: Config = {
 			sm: ['14px', { lineHeight: '20px' }],
 			base: ['14px', { lineHeight: '20px' }],
 			lg: ['18px', { lineHeight: '28px' }],
-			xl: ['20px', { lineHeight: '28px' }],
-			'wolf-title': [
-				'16px',
-				{
-					lineHeight: '1.2'
-				}
-			],
-			'wolf-body': [
-				'14px',
-				{
-					lineHeight: '1.5'
-				}
-			],
-			'wolf-auxiliary': [
-				'13px',
-				{
-					lineHeight: '1.5'
-				}
-			],
-			'wolf-caption': [
-				'12px',
-				{
-					lineHeight: '1.5'
-				}
-			]
-		},
-		fontWeight: {
-			'wolf-normal': '400',
-			'wolf-medium': '500',
-			'wolf-semibold': '600'
+			xl: ['20px', { lineHeight: '28px' }]
 		},
 		transitionDuration: {
 			DEFAULT: 'var(--duration-base)',
-			overlay: 'var(--duration-overlay)',
-			wolf: '150ms',
-			'wolf-fast': '150ms',
-			'wolf-hover': '200ms',
-			'wolf-press': '150ms'
-		},
-		outlineWidth: {
-			'wolf-focus': '2px',
-			'wolf-focus-strong': '3px',
-			'wolf-focus-subtle': '1px'
-		},
-		outlineOffset: {
-			wolf: '2px'
+			overlay: 'var(--duration-overlay)'
 		},
 		transitionTimingFunction: {
 			DEFAULT: 'var(--ease-standard)',
@@ -320,12 +125,7 @@ const config: Config = {
 			'control-sm': 'var(--control-h-sm)',
 			control: 'var(--control-h-md)',
 			'control-lg': 'var(--control-h-lg)',
-			'context-tabs': 'var(--context-tabs-height)',
-			'wolf-icon-xs': '16px',
-			'wolf-icon-sm': '20px',
-			'wolf-icon-md': '24px',
-			'wolf-icon-lg': '32px',
-				'wolf-context-tabs': '36px'
+			'context-tabs': 'var(--context-tabs-height)'
 		},
 		minWidth: {
 			'touch-target': 'var(--touch-target)'

@@ -5,7 +5,6 @@ import { createPinia } from 'pinia'
 import 'vue-sonner/style.css'
 
 import './styles/base.css'
-import './styles/global.scss'
 import App from './App.vue'
 import router from './router'
 import { setupPermissionDirective } from './directives/permission'

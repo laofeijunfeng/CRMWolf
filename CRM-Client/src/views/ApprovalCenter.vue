@@ -78,7 +78,7 @@
 
         <!-- 类型列 -->
         <template #cell-business_type="{ row }">
-          <span class="text-secondary">{{ businessTypeLabel(row.business_type) }}</span>
+          <span class="text-muted-foreground">{{ businessTypeLabel(row.business_type) }}</span>
         </template>
 
         <!-- 实体列 -->
