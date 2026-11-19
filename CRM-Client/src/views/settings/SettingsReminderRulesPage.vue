@@ -10,7 +10,7 @@ import MultiSelect from '@/components/crmwolf/MultiSelect.vue'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { DetailSheet, DetailSheetContent, DetailSheetDescription, DetailSheetFooter, DetailSheetHeader, DetailSheetTitle } from '@/components/ui/detail-sheet'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -417,12 +417,12 @@ watch([hasAccess, (): number | undefined => teamStore.currentTeam?.id], (): void
     </Tabs>
   </SettingsContent>
 
-  <Sheet :open="sheetOpen" @update:open="(open: boolean): void => { if (!open) closeSheet() }">
-    <SheetContent class="flex w-[min(1120px,calc(100vw-2rem))] max-w-none flex-col p-0 sm:max-w-none" @interact-outside="(event: Event): void => { if (saving) event.preventDefault() }" @escape-key-down="(event: Event): void => { if (saving) event.preventDefault() }">
-      <SheetHeader class="px-4 pt-4 sm:px-6 sm:pt-6">
-        <SheetTitle>{{ selectedRule ? selectedRule.version === 2 && canEdit ? '编辑提醒' : '提醒详情' : '新建提醒' }}</SheetTitle>
-        <SheetDescription>{{ selectedRule && (selectedRule.version !== 2 || !canEdit) ? '查看已保存的规则内容。' : '设置触发时间和字段条件，再配置飞书消息。' }}</SheetDescription>
-      </SheetHeader>
+  <DetailSheet :open="sheetOpen" @update:open="(open: boolean): void => { if (!open) closeSheet() }">
+    <DetailSheetContent @interact-outside="(event: Event): void => { if (saving) event.preventDefault() }" @escape-key-down="(event: Event): void => { if (saving) event.preventDefault() }">
+      <DetailSheetHeader class="px-4 pt-4 sm:px-6 sm:pt-6">
+        <DetailSheetTitle>{{ selectedRule ? selectedRule.version === 2 && canEdit ? '编辑提醒' : '提醒详情' : '新建提醒' }}</DetailSheetTitle>
+        <DetailSheetDescription>{{ selectedRule && (selectedRule.version !== 2 || !canEdit) ? '查看已保存的规则内容。' : '设置触发时间和字段条件，再配置飞书消息。' }}</DetailSheetDescription>
+      </DetailSheetHeader>
       <ErrorState v-if="saveError" variant="error" :title="saveError.title" :description="saveError.description" class="mx-4 mt-4 sm:mx-6" />
       <div v-if="selectedRule && (selectedRule.version !== 2 || !canEdit)" class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
         <p v-if="selectedRule.version !== 2" class="text-sm text-muted-foreground">旧版规则仅供查看，不能使用新版编辑器修改。</p>
@@ -502,7 +502,7 @@ watch([hasAccess, (): number | undefined => teamStore.currentTeam?.id], (): void
           </div>
         </section>
       </div>
-      <SheetFooter class="border-t px-4 py-4 sm:px-6"><Button variant="outline" :disabled="saving" @click="closeSheet">{{ selectedRule && (selectedRule.version !== 2 || !canEdit) ? '关闭' : '取消' }}</Button><Button v-if="!selectedRule || (selectedRule.version === 2 && canEdit)" :disabled="saving || !canSaveDraft" @click="saveRule">{{ selectedRule ? '保存修改' : '保存并启用' }}</Button></SheetFooter>
-    </SheetContent>
-  </Sheet>
+      <DetailSheetFooter class="border-t px-4 py-4 sm:px-6"><Button variant="outline" :disabled="saving" @click="closeSheet">{{ selectedRule && (selectedRule.version !== 2 || !canEdit) ? '关闭' : '取消' }}</Button><Button v-if="!selectedRule || (selectedRule.version === 2 && canEdit)" :disabled="saving || !canSaveDraft" @click="saveRule">{{ selectedRule ? '保存修改' : '保存并启用' }}</Button></DetailSheetFooter>
+    </DetailSheetContent>
+  </DetailSheet>
 </template>

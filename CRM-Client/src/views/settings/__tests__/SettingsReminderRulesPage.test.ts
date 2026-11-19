@@ -62,7 +62,7 @@ const MultiSelect = defineComponent({ props: { modelValue: { type: Array as Prop
 async function mountEditor(catalogResponse: Promise<ReminderObjectCatalog[]> = Promise.resolve(catalog)): Promise<VueWrapper> {
   vi.mocked(reminderRuleApi.catalog).mockImplementation(() => catalogResponse)
   const wrapper = shallowMount(SettingsReminderRulesPage, { global: { stubs: {
-    SettingsContent: slot, Sheet: slot, SheetContent: slot, SheetHeader: slot, SheetFooter: slot, SheetTitle: slot, SheetDescription: slot,
+    SettingsContent: slot, Sheet: slot, DetailSheetContent: slot, SheetHeader: slot, SheetFooter: slot, SheetTitle: slot, SheetDescription: slot,
     Tabs: slot, TabsList: slot, TabsContent: slot, TabsTrigger: slot, Select, SelectContent: slot, SelectItem, SelectTrigger: slot, SelectValue: true,
     MultiSelect, Input: defineComponent({ props: { modelValue: { type: [String, Number], default: undefined }, value: { type: String, default: undefined }, type: { type: String, default: undefined }, min: { type: String, default: undefined } }, emits: ['update:modelValue'], template: '<input :value="modelValue ?? value" :type="type" :min="min" @input="$emit(\'update:modelValue\', $event.target.value)" />' }),
     Textarea: defineComponent({ props: { modelValue: { type: String, default: '' } }, emits: ['update:modelValue'], template: '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' }),

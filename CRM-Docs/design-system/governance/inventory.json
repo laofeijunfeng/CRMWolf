@@ -1058,14 +1058,14 @@
       "file": "CRM-Client/src/views/settings/SettingsReminderRulesPage.vue",
       "symbol": "import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT",
       "category": "restricted-primitive",
-      "current": "1 处命中，行 13",
+      "current": "已清零：抽屉改用 ui/detail-sheet（CMP-09）",
       "target": "sheet → ui/detail-sheet 详情浮层",
       "exception": false,
       "owner": "frontend-platform",
       "batch": "阶段2",
       "risk": "浮层/表单交互回归",
       "verification": "npm run lint:design-system -- --worktree 对该文件无 restricted-primitive 命中",
-      "status": "pending",
+      "status": "fixed",
       "lastVerified": "2026-11-19"
     },
     {
