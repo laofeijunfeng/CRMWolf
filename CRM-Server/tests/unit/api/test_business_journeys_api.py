@@ -334,12 +334,12 @@ def test_progress_agrees_across_business_and_customer_reads_without_changing_sta
         created_by="1",
     ))
     api_env.db.commit()
-    assert_progress(75)
+    assert_progress(90)
 
     contract.status = ContractStatus.DRAFT
     contract.payment_status = PaymentStatus.UNPAID
     api_env.db.commit()
-    assert_progress(25)
+    assert_progress(50)
     reissue = InvoiceReissueApplication(
         team_id=1,
         application_number="REISSUE-PROGRESS",
@@ -357,23 +357,27 @@ def test_progress_agrees_across_business_and_customer_reads_without_changing_sta
     )
     api_env.db.add(reissue)
     api_env.db.commit()
-    assert_progress(50)
+    assert_progress(60)
 
     reissue.status = "DRAFT"
     api_env.db.commit()
-    assert_progress(25)
+    assert_progress(50)
 
     reissue.status = "COMPLETED"
     api_env.db.commit()
-    assert_progress(50)
+    assert_progress(60)
 
     contract.status = ContractStatus.SIGNED
     api_env.db.commit()
-    assert_progress(75)
+    assert_progress(80)
 
     opportunity.status = 0
     api_env.db.commit()
-    assert_progress(50)
+    assert_progress(40)
+
+    opportunity.current_win_probability = 80
+    api_env.db.commit()
+    assert_progress(70)
 
     journey.status = DealJourneyStatus.COMPLETED
     api_env.db.commit()

@@ -27,6 +27,7 @@ from app.services.deal_journey_stage import (
     BusinessJourneyContractSummary,
     BusinessJourneyInvoiceSummary,
     BusinessJourneyPaymentSummary,
+    current_opportunity_win_probability,
     infer_board_stage,
     load_contract_summaries,
     load_invoice_summaries,
@@ -84,7 +85,7 @@ def customer_opportunity_summary(
         opportunity_name=opportunity.opportunity_name,
         status=int(opportunity.status),
         approval_phase=opportunity.approval_phase,
-        win_probability=opportunity.current_win_probability or opportunity.win_probability,
+        win_probability=current_opportunity_win_probability(opportunity),
         expected_closing_date=opportunity.expected_closing_date,
         product_name=product.name if product is not None else None,
     )
@@ -148,27 +149,22 @@ def customer_journey_responses(
             .all()
         )
         opportunity_map = {int(opportunity.id): opportunity for opportunity in opportunities}
-    opportunity_won_by_journey: dict[int, bool] = {}
-    for journey in journeys:
-        opportunity_id = journey.primary_opportunity_id
-        opportunity = opportunity_map.get(int(opportunity_id)) if opportunity_id is not None else None
-        if opportunity_id is not None and opportunity is not None:
-            opportunity_won_by_journey[int(journey.id)] = opportunity.status == 1
+    primary_opportunity_by_journey = {
+        int(journey.id): opportunity_map.get(int(journey.primary_opportunity_id))
+        for journey in journeys
+        if journey.primary_opportunity_id is not None
+    }
     progress_map = load_cumulative_progress_percentages(
         db,
         team_id,
         journeys,
-        opportunity_won_by_journey=opportunity_won_by_journey,
+        primary_opportunity_by_journey=primary_opportunity_by_journey,
     )
 
     return [
         customer_journey_response(
             journey,
-            opportunity=(
-                opportunity_map.get(int(journey.primary_opportunity_id))
-                if journey.primary_opportunity_id is not None
-                else None
-            ),
+            opportunity=primary_opportunity_by_journey.get(int(journey.id)),
             contract_summary=contract_map.get(int(journey.id), _EMPTY_CONTRACT),
             payment_summary=payment_map.get(int(journey.id), _EMPTY_PAYMENT),
             invoice_summary=invoice_map.get(int(journey.id), _EMPTY_INVOICE),
@@ -305,7 +301,7 @@ def _board_opportunity_summary(
         ),
         status=int(opportunity.status),
         current_stage_name=opportunity.current_stage_name,
-        win_probability=opportunity.current_win_probability or opportunity.win_probability,
+        win_probability=current_opportunity_win_probability(opportunity),
         expected_closing_date=opportunity.expected_closing_date,
     )
 

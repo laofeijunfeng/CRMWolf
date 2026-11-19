@@ -711,15 +711,13 @@ class BusinessJourneyQueryService:
         contract_map = load_contract_summaries(db, team_id, journey_ids)
         payment_map = load_payment_summaries(db, team_id, journey_ids)
         invoice_map = load_invoice_summaries(db, team_id, journey_ids)
-        opportunity_won_by_journey = {
-            int(journey.id): bool(opportunity is not None and opportunity.status == 1)
-            for journey, _, opportunity in raw_rows
-        }
         progress_map = load_cumulative_progress_percentages(
             db,
             team_id,
             [journey for journey, _, _ in raw_rows],
-            opportunity_won_by_journey=opportunity_won_by_journey,
+            primary_opportunity_by_journey={
+                int(journey.id): opportunity for journey, _, opportunity in raw_rows
+            },
         )
         rows: list[BusinessJourneyQueryRow] = []
         for journey, customer, opportunity in raw_rows:

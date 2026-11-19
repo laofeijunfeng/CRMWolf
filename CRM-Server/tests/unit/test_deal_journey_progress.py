@@ -3,6 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
+import pytest
+
+from app.constants.approval_phase import ApprovalPhase
 from app.models.contract import ContractStatus, PaymentStatus
 from app.models.invoice import (
     InvoiceApplicationStatus,
@@ -46,41 +49,112 @@ def _red_offset(
     return SimpleNamespace(source_type=source_type, created_time=created_time, id=id)
 
 
-def test_cumulative_progress_counts_four_current_milestones_equally() -> None:
-    assert calculate_cumulative_progress_percent(
-        journey_status="ACTIVE",
-        primary_opportunity_won=True,
-        contracts=[],
-        invoice_applications=[],
-    ) == 25
+def _opportunity(
+    *,
+    status: int = 0,
+    current_win_probability: int | None = None,
+    win_probability: int = 0,
+    approval_phase: str = ApprovalPhase.APPROVED.value,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        status=status,
+        current_win_probability=current_win_probability,
+        win_probability=win_probability,
+        approval_phase=approval_phase,
+    )
 
-    signed_contract = SimpleNamespace(status=ContractStatus.SIGNED, payment_status=PaymentStatus.UNPAID)
-    paid_contract = SimpleNamespace(status=ContractStatus.EFFECTIVE, payment_status=PaymentStatus.COMPLETED)
-    assert calculate_cumulative_progress_percent(
-        journey_status="ACTIVE",
-        primary_opportunity_won=True,
-        contracts=[signed_contract, paid_contract],
+
+def _progress(opportunity: SimpleNamespace | None, *, journey_status: str = "ACTIVE", **facts) -> int:
+    return calculate_cumulative_progress_percent(
+        journey_status=journey_status,
+        primary_opportunity=opportunity,
+        contracts=facts.get("contracts", []),
+        invoice_applications=facts.get("invoice_applications", []),
+        invoice_validity=facts.get("invoice_validity"),
+    )
+
+
+_SIGNED = SimpleNamespace(status=ContractStatus.SIGNED, payment_status=PaymentStatus.UNPAID)
+_PAID = SimpleNamespace(status=ContractStatus.EFFECTIVE, payment_status=PaymentStatus.COMPLETED)
+
+
+@pytest.mark.parametrize(
+    ("current_win_probability", "win_probability", "expected"),
+    [
+        (30, 30, 15),
+        (80, 80, 40),
+        (99, 99, 49),
+        (100, 100, 49),
+        (None, 0, 0),
+        (None, 60, 30),
+    ],
+)
+def test_deal_half_follows_current_win_rate_before_win_and_caps_at_49(
+    current_win_probability: int | None,
+    win_probability: int,
+    expected: int,
+) -> None:
+    opportunity = _opportunity(
+        current_win_probability=current_win_probability,
+        win_probability=win_probability,
+    )
+    assert _progress(opportunity) == expected
+
+
+def test_deal_half_drops_with_win_rate_instead_of_keeping_history() -> None:
+    opportunity = _opportunity(current_win_probability=60, win_probability=60)
+    assert _progress(opportunity) == 30
+    opportunity.current_win_probability = 30
+    opportunity.win_probability = 30
+    assert _progress(opportunity) == 15
+
+
+def test_without_primary_opportunity_deal_half_is_zero() -> None:
+    assert _progress(None) == 0
+
+
+def test_won_opportunity_fixes_deal_half_and_delivery_milestones_add_up() -> None:
+    won = _opportunity(status=1, current_win_probability=30, win_probability=100)
+    assert _progress(won) == 50
+    assert _progress(won, contracts=[_SIGNED]) == 70
+    assert _progress(
+        won,
+        contracts=[_SIGNED],
         invoice_applications=[_application()],
         invoice_validity=[True],
-    ) == 75
-
-
-def test_cumulative_progress_completed_overrides_current_facts() -> None:
-    assert calculate_cumulative_progress_percent(
-        journey_status="COMPLETED",
-        primary_opportunity_won=False,
-        contracts=[],
-        invoice_applications=[],
+    ) == 80
+    assert _progress(
+        won,
+        contracts=[_SIGNED],
+        invoice_applications=[_application()],
+        invoice_validity=[False],
+    ) == 70
+    assert _progress(
+        won,
+        contracts=[_PAID],
+        invoice_applications=[_application()],
+        invoice_validity=[True],
     ) == 100
 
 
-def test_empty_contracts_and_invoices_do_not_satisfy_milestones() -> None:
-    assert calculate_cumulative_progress_percent(
-        journey_status="ACTIVE",
-        primary_opportunity_won=False,
-        contracts=[],
-        invoice_applications=[],
-    ) == 0
+@pytest.mark.parametrize(
+    "opportunity",
+    [
+        _opportunity(status=2, current_win_probability=80, win_probability=0),
+        _opportunity(current_win_probability=80, win_probability=80, approval_phase=ApprovalPhase.REJECTED.value),
+        _opportunity(status=1, win_probability=100, approval_phase=ApprovalPhase.REJECTED.value),
+    ],
+    ids=["lost", "rejected", "rejected-but-won"],
+)
+def test_lost_or_rejected_opportunity_has_no_deal_half_but_keeps_delivery_facts(
+    opportunity: SimpleNamespace,
+) -> None:
+    assert _progress(opportunity) == 0
+    assert _progress(opportunity, contracts=[_SIGNED]) == 20
+
+
+def test_cumulative_progress_completed_overrides_current_facts() -> None:
+    assert _progress(None, journey_status="COMPLETED") == 100
 
 
 def test_invoice_pending_reissue_invalidates_previous_completed_replacement() -> None:

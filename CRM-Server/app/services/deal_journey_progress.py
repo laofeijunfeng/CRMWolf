@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
+from app.constants.approval_phase import ApprovalPhase
 from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.deal_journey import CustomerDealJourney, DealJourneyStatus
 from app.models.invoice import (
@@ -12,6 +13,8 @@ from app.models.invoice import (
     InvoiceReissueApplication,
     InvoiceReissueApplicationStatus,
 )
+from app.models.opportunity import Opportunity, OpportunityStatus
+from app.services.deal_journey_stage import current_opportunity_win_probability
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -19,7 +22,11 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-_PROGRESS_MILESTONE_PERCENT = 25
+_DEAL_PERCENT = 50
+_DEAL_PERCENT_BEFORE_WIN_CAP = 49
+_SIGNED_PERCENT = 20
+_INVOICED_PERCENT = 10
+_PAID_PERCENT = 20
 _ACTIVE_REISSUE_STATUSES = frozenset(
     {
         InvoiceReissueApplicationStatus.DRAFT,
@@ -48,10 +55,25 @@ def invoice_application_is_currently_valid(
     return application.status == InvoiceApplicationStatus.ISSUED
 
 
+def _deal_progress_percent(opportunity: Opportunity | None) -> int:
+    """Deal half: win-rate weighted before the win, fixed once won."""
+    if opportunity is None:
+        return 0
+    if (
+        opportunity.status == OpportunityStatus.LOST.value
+        or opportunity.approval_phase == ApprovalPhase.REJECTED.value
+    ):
+        return 0
+    if opportunity.status == OpportunityStatus.WON.value:
+        return _DEAL_PERCENT
+    win_probability = current_opportunity_win_probability(opportunity) or 0
+    return min(_DEAL_PERCENT * win_probability // 100, _DEAL_PERCENT_BEFORE_WIN_CAP)
+
+
 def calculate_cumulative_progress_percent(
     *,
     journey_status: str,
-    primary_opportunity_won: bool,
+    primary_opportunity: Opportunity | None,
     contracts: Sequence[Contract],
     invoice_applications: Sequence[InvoiceApplication],
     invoice_validity: Sequence[bool] | None = None,
@@ -78,8 +100,11 @@ def calculate_cumulative_progress_percent(
             and len(invoice_validity) == len(invoice_applications)
             and all(invoice_validity)
         )
-    return _PROGRESS_MILESTONE_PERCENT * sum(
-        (primary_opportunity_won, signed, paid, invoices_valid)
+    return (
+        _deal_progress_percent(primary_opportunity)
+        + (_SIGNED_PERCENT if signed else 0)
+        + (_INVOICED_PERCENT if invoices_valid else 0)
+        + (_PAID_PERCENT if paid else 0)
     )
 
 
@@ -88,13 +113,14 @@ def load_cumulative_progress_percentages(
     team_id: int,
     journeys: Sequence[CustomerDealJourney],
     *,
-    opportunity_won_by_journey: Mapping[int, bool],
+    primary_opportunity_by_journey: Mapping[int, Opportunity | None],
 ) -> dict[int, int]:
     """Batch-load current facts and calculate cumulative progress per journey.
 
-    ``opportunity_won_by_journey`` is supplied by callers that already selected
-    the primary opportunity.  The journey model does not expose a reliable
-    ``primary_opportunity`` relationship, so progress must not lazy-load one.
+    ``primary_opportunity_by_journey`` is supplied by callers that already
+    selected the team-scoped primary opportunity.  The journey model does not
+    expose a reliable ``primary_opportunity`` relationship, so progress must
+    not lazy-load one.
     """
     if not journeys:
         return {}
@@ -162,10 +188,9 @@ def load_cumulative_progress_percentages(
             )
             for application in applications_for_journey
         ]
-        opportunity_won = opportunity_won_by_journey.get(journey_id, False)
         progress[journey_id] = calculate_cumulative_progress_percent(
             journey_status=journey.status,
-            primary_opportunity_won=opportunity_won,
+            primary_opportunity=primary_opportunity_by_journey.get(journey_id),
             contracts=contracts_by_journey.get(journey_id, []),
             invoice_applications=applications_for_journey,
             invoice_validity=invoice_validity,
