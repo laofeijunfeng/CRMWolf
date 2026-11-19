@@ -33,7 +33,7 @@
 
 ## 组件门禁
 
-由 `CRM-Client/scripts/check-design-system-governance.mjs` 执行。以下规则只检查增量；阶段 3 前 `--all` 跳过。
+由 `CRM-Client/scripts/check-design-system-governance.mjs` 执行。逐行规则只检查增量，阶段 3 前 `--all` 跳过；仓库级规则（GATE-07/08/09）每次运行都检查全仓。
 
 | 规则 | 编号 | 禁止 |
 | --- | --- | --- |
@@ -42,6 +42,11 @@
 | `restricted-primitive` | GATE-03 | `ui` 与 `crmwolf` 之外导入 `ui/alert-dialog`、`ui/sheet`、`ui/table`、`ui/form`。 |
 | `native-dialog` | GATE-04 | 调用原生 `confirm`、`alert`、`prompt`；跳过测试文件。 |
 | `page-status-style` | GATE-05 | `.vue` 中的 `.status-*` 状态类与手写 `get*Status(Class/Color/Tone/Variant)` 映射；状态统一用 StatusBadge。 |
+| `geometry-token` | GATE-06 | `ui` 与 `styles` 之外新增像素字号、非令牌高度、圆角、内边距任意值，以及 `*Content` 上的像素宽度；任意值只能写 `var(--*)`，见[令牌数值](../foundations/token-values.md)。 |
+| `orphan-component` | GATE-07 | `components/**`（`ui` 除外）没有生产代码消费方的组件；待删组件在 `exceptions.json` 登记到期日。 |
+| `style-ratchet` | GATE-08 | views 私有样式行数与 `:deep(` 数量超过 [`ratchet.json`](ratchet.json) 基线；降低后同步下调基线。 |
+| `icon-button-label` | GATE-09 | 只有图标的 Button 缺少 `aria-label`；纯图标白名单见[按钮](../components/button.md#变体与内容)。 |
+| `page-form-primitive` | GATE-10 | views 直接导入 `ui/input`、`ui/label` 拼表单；改用 crmwolf `*Field`，存量见 `inventory.json`。 |
 
 「同排同档」「loading 不改宽」暂无脚本，由代码评审检查。
 

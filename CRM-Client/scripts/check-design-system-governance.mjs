@@ -16,6 +16,7 @@ const repoRoot = path.resolve(clientRoot, '..')
 const governanceDir = path.join(repoRoot, 'CRM-Docs/design-system/governance')
 const inventoryPath = path.join(governanceDir, 'inventory.json')
 const exceptionsPath = path.join(governanceDir, 'exceptions.json')
+const ratchetPath = path.join(governanceDir, 'ratchet.json')
 
 const sourceExtensions = new Set(['.vue', '.scss', '.css', '.ts', '.tsx', '.js', '.jsx'])
 
@@ -26,6 +27,18 @@ const COMPONENTS = `${SRC}components/`
 const VIEWS = `${SRC}views/`
 const IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/g
 const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|sheet|table|form)(?:\/|$)/
+// ui/form 已由 restricted-primitive 拦截，这里只补 input、label。
+const PAGE_FORM_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:input|label)(?:\/|$)/
+const STYLES = `${SRC}styles/`
+// GATE-06：任意值只允许引用令牌（var(...)）；*Content 上的像素宽度另行拦截。
+const GEOMETRY_LITERALS = [
+  /(?<![\w-])text-\[\d+(?:\.\d+)?px\]/,
+  /(?<![\w-])h-\[(?!var\()[^\]]+\]/,
+  /(?<![\w-])rounded(?:-[trblse]{1,2})?-\[(?!var\()[^\]]+\]/,
+  /(?<![\w-])p[xytrblse]?-\[\d+(?:\.\d+)?px\]/,
+  /\bfont-size\s*:\s*\d+(?:\.\d+)?px/,
+]
+const CONTENT_PX_WIDTH = /(?<![\w-])(?:[a-z]+:)?max-w-\[\d+px\]/
 
 function isTestFile(filePath) {
   return /\/__tests__\/|\.(?:test|spec)\.[cm]?[jt]sx?$/.test(filePath)
@@ -118,6 +131,20 @@ const RULES = [
     exemptFiles: [`${SRC}utils/statusPresentation.ts`, `${CRMWOLF}StatusBadge.vue`],
     pattern: /\b(?:function\s+|(?:const|let|var)\s+)get\w*Status\w*(?:Class|Color|Tone|Variant)\w*\b/,
     message: '状态映射只在 utils/statusPresentation.ts 定义，页面不得自写 get*Status* 映射函数。',
+  },
+  {
+    category: 'geometry-token',
+    incremental: true,
+    appliesTo: (filePath) => /\.(?:vue|s?css)$/.test(filePath) && !filePath.startsWith(UI) && !filePath.startsWith(STYLES),
+    test: (text) => GEOMETRY_LITERALS.some((pattern) => pattern.test(text)) || (/Content\b/.test(text) && CONTENT_PX_WIDTH.test(text)),
+    message: '宽度、字号、高度、圆角、内边距走令牌：弹窗用 size，其余用 --control-h-* / --radius-* / 字号令牌，见 foundations/token-values.md。',
+  },
+  {
+    category: 'page-form-primitive',
+    incremental: true,
+    appliesTo: (filePath) => filePath.startsWith(VIEWS) && !isTestFile(filePath),
+    test: (text, filePath) => resolveImports(filePath, text).some((target) => PAGE_FORM_PRIMITIVE.test(target)),
+    message: '页面表单用 crmwolf *Field 组件，不得直接组合 ui/input、ui/label；存量见 governance/inventory.json。',
   },
 ]
 
@@ -273,6 +300,97 @@ function printViolations(violations) {
   }
 }
 
+// GATE-07：components/**/*.vue（ui 除外）必须有生产代码消费方；经桶文件转出时要求消费方使用转出名。
+export function findOrphanComponents(sources, exceptions = []) {
+  const resolveTarget = (target) => [target, `${target}.vue`, `${target}.ts`, `${target}/index.ts`].find((candidate) => sources.has(candidate))
+  const importers = new Map()
+  for (const [filePath, content] of sources) {
+    for (const target of resolveImports(filePath, content)) {
+      const resolved = resolveTarget(target)
+      if (!resolved || resolved === filePath) continue
+      if (!importers.has(resolved)) importers.set(resolved, new Set())
+      importers.get(resolved).add(filePath)
+    }
+  }
+  const barrelNames = (barrel, component) => {
+    const names = []
+    for (const [, list, specifier] of sources.get(barrel).matchAll(/export\s*\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g)) {
+      if (resolveImports(barrel, `from '${specifier}'`).map(resolveTarget)[0] !== component) continue
+      names.push(...list.split(',').map((name) => name.trim().split(/\s+as\s+/).pop()).filter(Boolean))
+    }
+    return names
+  }
+  const isConsumed = (component) => [...(importers.get(component) ?? [])].some((importer) => {
+    if (!importer.endsWith('/index.ts')) return true
+    const names = barrelNames(importer, component)
+    return [...(importers.get(importer) ?? [])].some((consumer) => consumer !== component
+      && names.some((name) => new RegExp(`\\b${name}\\b`).test(sources.get(consumer))))
+  })
+  return [...sources.keys()]
+    .filter((filePath) => filePath.startsWith(COMPONENTS) && !filePath.startsWith(UI) && filePath.endsWith('.vue'))
+    .filter((filePath) => !isConsumed(filePath))
+    .filter((filePath) => !exceptions.some((exception) => exceptionMatches(exception, filePath, 'orphan-component', filePath)))
+    .map((filePath) => ({ category: 'orphan-component', file: filePath, line: 0, message: '组件没有生产代码消费方：删除，或在 governance/exceptions.json 登记到期日。' }))
+}
+
+// GATE-08：views 私有样式只减不增，基线在 governance/ratchet.json。
+export function measureViewStyles(sources) {
+  let styleLines = 0
+  let deepSelectors = 0
+  for (const [filePath, content] of sources) {
+    if (!filePath.startsWith(VIEWS) || !filePath.endsWith('.vue')) continue
+    for (const [, body] of content.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)) {
+      styleLines += body.replace(/^\n|\n$/g, '').split('\n').length
+      deepSelectors += body.match(/:deep\(/g)?.length ?? 0
+    }
+  }
+  return { styleLines, deepSelectors }
+}
+
+export function checkStyleRatchet(measured, baseline) {
+  return Object.entries(measured)
+    .filter(([key, value]) => value > baseline[key])
+    .map(([key, value]) => ({ category: 'style-ratchet', file: 'governance/ratchet.json', line: 0, message: `views ${key} ${value} 超过基线 ${baseline[key]}，样式下沉到 crmwolf 或令牌。` }))
+}
+
+// GATE-09：只有图标的 Button 必须有 aria-label。自闭合与嵌套 Button 不参与匹配。
+const BUTTON_ELEMENT = /<Button\b((?:[^>"'/]|\/(?!>)|"[^"]*"|'[^']*')*)>((?:(?!<Button\b)[\s\S])*?)<\/Button>/g
+
+export function findIconOnlyButtons(filePath, content, exceptions = []) {
+  if (!filePath.endsWith('.vue') || filePath.startsWith(UI) || isTestFile(filePath)) return []
+  const violations = []
+  for (const match of content.matchAll(BUTTON_ELEMENT)) {
+    const [element, attrs, inner] = match
+    if (/(?:^|\s)(?::|v-bind:)?aria-label(?:ledby)?=|\sv-bind=/.test(attrs)) continue
+    const visibleText = inner.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '').trim()
+    if (visibleText || !/<[A-Z]\w*/.test(inner)) continue
+    const text = element.split('\n')[0].trim()
+    if (exceptions.some((exception) => exceptionMatches(exception, filePath, 'icon-button-label', text))) continue
+    violations.push({ category: 'icon-button-label', file: filePath, line: content.slice(0, match.index).split('\n').length, message: '只有图标的 Button 必须提供 aria-label。', text })
+  }
+  return violations
+}
+
+function inspectRepository() {
+  const exceptions = readJson(exceptionsPath).exceptions ?? []
+  const sources = new Map()
+  for (const filePath of runGit(['ls-files', '--cached', '--others', '--exclude-standard', SRC]).split('\n')) {
+    if (!sourceExtensions.has(path.extname(filePath)) || isTestFile(filePath)) continue
+    const absolutePath = path.join(repoRoot, filePath)
+    if (fs.existsSync(absolutePath)) sources.set(filePath, fs.readFileSync(absolutePath, 'utf8'))
+  }
+  const measured = measureViewStyles(sources)
+  const baseline = readJson(ratchetPath)
+  for (const [key, value] of Object.entries(measured)) {
+    if (value < baseline[key]) console.log(`views ${key} 已降到 ${value}（基线 ${baseline[key]}），请同步下调 governance/ratchet.json。`)
+  }
+  return [
+    ...findOrphanComponents(sources, exceptions),
+    ...checkStyleRatchet(measured, baseline),
+    ...[...sources].flatMap(([filePath, content]) => findIconOnlyButtons(filePath, content, exceptions)),
+  ]
+}
+
 function main() {
   const args = new Set(process.argv.slice(2))
   const all = args.has('--all')
@@ -280,23 +398,27 @@ function main() {
   const files = collectChangedPaths({ staged })
   const configViolations = validateGovernanceFiles()
   if (configViolations.length) printViolations(configViolations)
+  const repositoryViolations = inspectRepository()
+  printViolations(repositoryViolations)
+  const blocked = configViolations.length > 0 || repositoryViolations.length > 0
 
   if (all) {
-    const sourceFiles = runGit(['ls-files', 'CRM-Client/src']).split('\n').filter((file) => sourceExtensions.has(path.extname(file)))
+    const sourceFiles = runGit(['ls-files', '--cached', '--others', '--exclude-standard', 'CRM-Client/src']).split('\n')
+      .filter((file) => sourceExtensions.has(path.extname(file)) && fs.existsSync(path.join(repoRoot, file)))
     const violations = inspectAll(sourceFiles)
     console.log(`设计系统全量审计：${sourceFiles.length} 个源码文件，发现 ${violations.length} 条违规（incremental 组件门禁不参与全量，存量见 governance/inventory.json）。`)
     printViolations(violations.slice(0, 40))
     if (violations.length > 40) console.log(`…其余 ${violations.length - 40} 条仅保留在审计统计中。`)
-    process.exit(violations.length || configViolations.length ? 1 : 0)
+    process.exit(violations.length || blocked ? 1 : 0)
   }
 
   if (files.length === 0) {
     console.log('设计系统增量检查：没有暂存的前端源码文件。')
-    process.exit(configViolations.length ? 1 : 0)
+    process.exit(blocked ? 1 : 0)
   }
   const violations = inspectLines(files, { staged })
   printViolations(violations)
-  if (violations.length || configViolations.length) process.exit(1)
+  if (violations.length || blocked) process.exit(1)
   console.log(`✓ 设计系统增量检查通过：${files.length} 个文件。`)
 }
 

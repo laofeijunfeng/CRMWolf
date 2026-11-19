@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { inspectContent } from '../check-design-system-governance.mjs'
+import {
+  checkStyleRatchet,
+  findIconOnlyButtons,
+  findOrphanComponents,
+  inspectContent,
+  measureViewStyles,
+} from '../check-design-system-governance.mjs'
 
 test('rejects newly added UI raw colors', () => {
   const violations = inspectContent('CRM-Client/src/components/Example.vue', [
@@ -201,4 +207,63 @@ test('full audit mode skips incremental component gates but keeps token rules', 
     inspectContent('CRM-Client/src/components/agent/Chat.vue', lines, [], { full: true }).map((violation) => violation.category),
     ['raw-color'],
   )
+})
+
+test('GATE-06 rejects new geometry literals outside ui and styles', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
+    '<span class="text-[13px]">',
+    '<div class="h-[38px]">',
+    '<div class="rounded-[10px]">',
+    '<div class="px-[12px]">',
+    '  font-size: 14px;',
+    '<DialogContent class="max-w-[600px]">',
+  ]), Array(6).fill('geometry-token'))
+  assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
+    '<div class="h-[var(--control-h-md)] max-w-[600px]">',
+  ]), [])
+  assert.deepEqual(categories('CRM-Client/src/components/ui/button/Button.vue', ['<span class="text-[13px]">']), [])
+  assert.deepEqual(
+    inspectContent('CRM-Client/src/views/Customers.vue', ['<span class="text-[13px]">'], [], { full: true }).map((violation) => violation.category),
+    [],
+  )
+})
+
+test('GATE-10 rejects form primitives imported by views only', () => {
+  assert.deepEqual(categories('CRM-Client/src/views/Leads.vue', ["import { Input } from '@/components/ui/input'"]), ['page-form-primitive'])
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/InputField.vue', ["import { Input } from '@/components/ui/input'"]), [])
+})
+
+test('GATE-07 reports components without production consumers unless registered', () => {
+  const sources = new Map([
+    ['CRM-Client/src/components/Used.vue', '<template />'],
+    ['CRM-Client/src/components/Orphan.vue', '<template />'],
+    ['CRM-Client/src/components/crmwolf/Exported.vue', '<template />'],
+    ['CRM-Client/src/components/crmwolf/Unnamed.vue', '<template />'],
+    ['CRM-Client/src/components/crmwolf/index.ts', "export { default as Exported } from './Exported.vue'\nexport { default as Unnamed } from './Unnamed.vue'"],
+    ['CRM-Client/src/views/Page.vue', "import Used from '@/components/Used.vue'\nimport { Exported } from '@/components/crmwolf'"],
+  ])
+  const orphans = (exceptions) => findOrphanComponents(sources, exceptions).map((violation) => violation.file)
+  assert.deepEqual(orphans([]), ['CRM-Client/src/components/Orphan.vue', 'CRM-Client/src/components/crmwolf/Unnamed.vue'])
+  assert.deepEqual(orphans([{
+    id: 'EXC-T', category: 'orphan-component', files: ['CRM-Client/src/components/Orphan.vue'], match: '.*',
+    reason: 'test', owner: 'frontend-platform', reviewDate: '2999-01-01', status: 'active',
+  }]), ['CRM-Client/src/components/crmwolf/Unnamed.vue'])
+})
+
+test('GATE-08 blocks view style growth above the ratchet', () => {
+  const measured = measureViewStyles(new Map([
+    ['CRM-Client/src/views/A.vue', '<template />\n<style scoped>\n.a { color: red; }\n:deep(.b) { margin: 0; }\n</style>'],
+    ['CRM-Client/src/components/B.vue', '<style>\n.b {}\n</style>'],
+  ]))
+  assert.deepEqual(measured, { styleLines: 2, deepSelectors: 1 })
+  assert.deepEqual(checkStyleRatchet(measured, { styleLines: 2, deepSelectors: 1 }), [])
+  assert.deepEqual(checkStyleRatchet(measured, { styleLines: 1, deepSelectors: 1 }).map((violation) => violation.category), ['style-ratchet'])
+})
+
+test('GATE-09 requires accessible names on icon-only buttons', () => {
+  const found = (template) => findIconOnlyButtons('CRM-Client/src/views/A.vue', template).length
+  assert.equal(found('<Button size="icon" title="删除"><Trash2 /></Button>'), 1)
+  assert.equal(found('<Button size="icon" aria-label="删除"><Trash2 /></Button>'), 0)
+  assert.equal(found('<Button size="icon" :aria-label="label"><Trash2 /></Button>'), 0)
+  assert.equal(found('<Button><Plus /> 新建</Button>'), 0)
 })

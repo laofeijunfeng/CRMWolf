@@ -22,7 +22,7 @@ export const usePermissionStore = defineStore('permissions', () => {
 
   // Permission consumers must fail closed until the current team's snapshot
   // has been confirmed. This protects direct callers that do not render
-  // through v-permission/Permission.vue (for example row actions and route
+  // through the v-permission directive (for example row actions and route
   // guards), including the short window during a team switch or refresh.
   const hasPermission = (code: string): boolean => {
     return loadState.value === 'ready' && permissionSet.value.has(code)

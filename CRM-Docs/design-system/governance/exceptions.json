@@ -2,5 +2,46 @@
   "$schema": "./exceptions.schema.json",
   "version": "1.0",
   "lastVerified": "2026-11-19",
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "EXC-ORPHAN-01",
+      "category": "orphan-component",
+      "files": [
+        "CRM-Client/src/components/crmwolf/TouchInput.vue",
+        "CRM-Client/src/components/crmwolf/TouchCard.vue"
+      ],
+      "match": ".*",
+      "reason": "registry.md 删除清单：阶段 3 删除，替代为 InputField / ListCard。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "EXC-ORPHAN-02",
+      "category": "orphan-component",
+      "files": [
+        "CRM-Client/src/components/CustomerDetailSidebar.vue",
+        "CRM-Client/src/components/HoverPreviewTooltip.vue",
+        "CRM-Client/src/components/panels/PaymentRecordsPanel.vue",
+        "CRM-Client/src/components/business-journey/BusinessJourneyListTools.vue"
+      ],
+      "match": ".*",
+      "reason": "registry.md 删除清单：业务组件阶段 3 删除前复核动态导入。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    },
+    {
+      "id": "EXC-ORPHAN-03",
+      "category": "orphan-component",
+      "files": [
+        "CRM-Client/src/components/agent/CRMAgentChat.vue"
+      ],
+      "match": ".*",
+      "reason": "旧 /agent 页（views/AgentChat.vue）已删除，/agent 重定向 /assistant；组件仍由协议规格测试覆盖，阶段 3 决定并入 SalesAssistant 或删除。",
+      "owner": "frontend-platform",
+      "reviewDate": "2027-02-19",
+      "status": "active"
+    }
+  ]
 }

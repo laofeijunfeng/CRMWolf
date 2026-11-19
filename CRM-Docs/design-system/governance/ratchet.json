@@ -1,0 +1,5 @@
+{
+  "$comment": "GATE-08 views 私有样式基线，只减不增；降低后同步下调。",
+  "styleLines": 1849,
+  "deepSelectors": 16
+}

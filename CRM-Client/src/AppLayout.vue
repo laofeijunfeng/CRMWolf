@@ -229,7 +229,7 @@ const appLayoutClass = computed(() => ({
   'app-layout--fixed': isFixedWorkspaceRoute.value,
 }))
 const isContainedChatRoute = computed(() => (
-  route.name === 'SalesAssistant' || route.name === 'AgentChat' || route.path.startsWith('/agent')
+  route.name === 'SalesAssistant' || route.path.startsWith('/agent')
 ))
 const mainViewClass = computed(() => ({
   'main-view--contained': isContainedChatRoute.value,

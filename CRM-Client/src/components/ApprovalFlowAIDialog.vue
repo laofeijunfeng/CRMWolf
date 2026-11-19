@@ -291,6 +291,7 @@
                     variant="ghost"
                     size="icon"
                     title="上移"
+                    aria-label="上移节点"
                     :disabled="index === 0"
                     @click="handleMoveNode(index, -1)"
                   >
@@ -300,6 +301,7 @@
                     variant="ghost"
                     size="icon"
                     title="下移"
+                    aria-label="下移节点"
                     :disabled="index === flowForm.nodes.length - 1"
                     @click="handleMoveNode(index, 1)"
                   >
@@ -309,6 +311,7 @@
                     variant="ghost"
                     size="icon"
                     title="删除"
+                    aria-label="删除节点"
                     class="danger-button"
                     @click="handleRemoveNode(index)"
                   >
