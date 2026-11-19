@@ -3,8 +3,6 @@ import type { LicenseType, PurchaseType } from '@/api/contract'
 import type { CommandRequestOptions } from '@/api/command'
 import type { RequestConfig } from '@/utils/request'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
-import { PaymentPlanBoardResponseSchema, type PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
-import { PaymentRecordBoardResponseSchema, type PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
 import {
   PaymentRecordChartBucketRecordsSchema,
   PaymentRecordChartResponseSchema,
@@ -252,8 +250,6 @@ export interface PaymentPlanListParams {
   page_size?: number
 }
 
-export type PaymentPlanBoardParams = Omit<PaymentPlanListParams, 'page' | 'page_size'>
-
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
@@ -308,8 +304,6 @@ export interface PaymentRecordListParams {
   page?: number
   page_size?: number
 }
-
-export type PaymentRecordBoardParams = Omit<PaymentRecordListParams, 'page' | 'page_size'>
 
 export interface PaymentRecordChartBucketParams extends Omit<PaymentRecordListParams, 'page' | 'page_size'> {
   chart: 'license_type' | 'purchase_type' | 'amount_band' | 'payment_month' | 'arr_ratio'
@@ -458,18 +452,6 @@ const paymentApi = {
     return request.get<PaginatedResponse<PaymentRecordWithDetails>>('/v1/payments/payment-records', { params })
   },
 
-  getPaymentPlanBoard: async (params: PaymentPlanBoardParams): Promise<PaymentPlanBoardResponse> => {
-    const serialized = serializeListQuery()
-    const response: unknown = await request.get('/v1/payments/payment-plans/board', {
-      params: {
-        ...params,
-        filters: params.filters ?? serialized.filters,
-        sorts: params.sorts ?? serialized.sorts,
-      },
-    })
-    return PaymentPlanBoardResponseSchema.parse(response)
-  },
-
   getPaymentRecordChart: async (params?: PaymentRecordListParams): Promise<PaymentRecordChartResponse> => {
     const serialized = serializeListQuery()
     const response: unknown = await request.get('/v1/payments/payment-records/chart', {
@@ -492,18 +474,6 @@ const paymentApi = {
       },
     })
     return PaymentRecordChartBucketRecordsSchema.parse(response)
-  },
-
-  getPaymentRecordBoard: async (params: PaymentRecordBoardParams): Promise<PaymentRecordBoardResponse> => {
-    const serialized = serializeListQuery()
-    const response: unknown = await request.get('/v1/payments/payment-records/board', {
-      params: {
-        ...params,
-        filters: params.filters ?? serialized.filters,
-        sorts: params.sorts ?? serialized.sorts,
-      },
-    })
-    return PaymentRecordBoardResponseSchema.parse(response)
   },
 
   getBadgeCounts: (): Promise<BadgeCounts> => {

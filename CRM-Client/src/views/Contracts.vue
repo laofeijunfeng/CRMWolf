@@ -23,16 +23,12 @@ import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
-import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
-import ContractBoardProjection from '@/components/contract/ContractBoardProjection.vue'
+import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import ContractChartPage from '@/components/contract/ContractChartPage.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import contractApi, {
-  type ContractBoardParams,
   type ContractChartBucket,
   type ContractChartBucketContracts,
   type ContractChartCard,
@@ -47,10 +43,8 @@ import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import approvalGenericApi from '@/api/approvalGeneric'
 import { usePermissionStore } from '@/stores/permissions'
-import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
-import type { ContractBoardResponse } from '@/schemas/contractBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
@@ -69,7 +63,6 @@ interface ContractDetailSheetExpose {
 usePageTitle()
 
 const permissionStore = usePermissionStore()
-const teamStore = useTeamStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
 
@@ -80,7 +73,7 @@ const listRequestId = ref<number>(0)
 const tableData = ref<ContractListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
 const activeTab = ref('all')
-const displayMode = ref<'table' | 'board' | 'chart'>('table')
+const displayMode = ref<'table' | 'chart'>('table')
 
 const search = ref('')
 
@@ -292,7 +285,7 @@ const fetchOwnerFilterOptions = async (): Promise<void> => {
 }
 
 const fetchContractList = async (): Promise<boolean> => {
-  if (displayMode.value === 'board' || displayMode.value === 'chart') return false
+  if (displayMode.value === 'chart') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -340,7 +333,7 @@ const contractEffectiveFilters = computed(() => (
     : withoutFilterFields(activeFilters.value, ['status'])
 ))
 
-const boardParams = computed<ContractBoardParams>(() => {
+const chartParams = computed<Omit<ContractQueryParams, 'skip' | 'limit'>>(() => {
   const serialized = serializeListQuery({
     filters: contractEffectiveFilters.value,
     sorts: activeSorts.value,
@@ -350,31 +343,6 @@ const boardParams = computed<ContractBoardParams>(() => {
     ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
     ...serialized,
   }
-})
-
-const boardScopeKey = computed(() => {
-  const team = teamStore.currentTeam
-  const user = userStore.userInfo
-  const permissionItems = permissionStore.permissions
-  return {
-    teamId: team?.id ?? null,
-    userId: user?.id === undefined || user.id === null ? null : String(user.id),
-    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
-  }
-})
-
-const contractBoard = useBoardSnapshot<ContractBoardParams, ContractBoardResponse>({
-  fetchBoard: (query) => contractApi.getContractBoard(query),
-  getCurrentQuery: () => boardParams.value,
-  getQuerySignature: (query) => JSON.stringify({
-    tab: activeTab.value,
-    search: search.value.trim(),
-    filters: contractEffectiveFilters.value,
-    sorts: activeSorts.value,
-    query,
-  }),
-  getScopeKey: () => boardScopeKey.value,
-  isPermissionReady: () => permissionStore.loadState === 'ready',
 })
 
 const chart = ref<ContractChartResponse | null>(null)
@@ -387,8 +355,6 @@ const chartBucketRequest = ref<{ card: ContractChartCard, bucket: ContractChartB
 const chartBucketResetToken = ref(0)
 let chartRequestId = 0
 let chartBucketRequestId = 0
-
-const chartParams = computed<ContractBoardParams>(() => ({ ...boardParams.value }))
 
 const fetchContractChart = async (): Promise<boolean> => {
   const requestId = ++chartRequestId
@@ -413,12 +379,11 @@ const refreshActiveContractView = (): Promise<boolean> => {
     closeChartBucket()
     return fetchContractChart()
   }
-  if (displayMode.value !== 'board') return fetchContractList()
-  return contractBoard.refresh(boardParams.value).then(() => true, () => false)
+  return fetchContractList()
 }
 
 const handleDisplayModeChange = (mode: string | number | undefined): void => {
-  if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
+  if (mode !== 'table' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
   if (mode !== 'chart') closeChartBucket()
@@ -431,7 +396,6 @@ watch([activeTab, activeFilters, activeSorts, search], () => {
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'chart') void fetchContractChart()
-  else if (displayMode.value === 'board') void refreshActiveContractView()
 })
 
 const CHART_PAGE_SIZE = 10
@@ -482,12 +446,6 @@ const closeChartBucket = (): void => {
   chartBucketLoading.value = false
 }
 
-const handleBoardCardActivate = (payload: BoardCardActivation): void => {
-  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
-  viewingContractId.value = payload.id
-}
-
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'contracts.list',
   activeTab,
@@ -495,6 +453,7 @@ const customFilterViews = useCustomFilterViews({
   activeSorts,
   activeColumns,
   activeDisplayMode: displayMode,
+  normalizeDisplayMode: normalizeListChartDisplayMode,
   refresh: refreshActiveContractView,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
@@ -517,7 +476,7 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
 )
 
 const refreshTableQuery = (): void => {
-  if (displayMode.value !== 'board') void refreshActiveContractView()
+  void refreshActiveContractView()
 }
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -615,7 +574,7 @@ async function refreshContractDetailIfOpen(contractId: number | null): Promise<b
 }
 
 function contractViewLabel(): string {
-  return displayMode.value === 'chart' ? '合同图表' : displayMode.value === 'board' ? '合同看板' : '合同列表'
+  return displayMode.value === 'chart' ? '合同图表' : '合同列表'
 }
 
 function getRefreshFailureDescription(viewRefreshed: boolean, detailRefreshed: boolean): string | undefined {
@@ -919,23 +878,11 @@ defineExpose({
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
           <TabsList aria-label="合同展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>
       </template>
-      <template v-if="displayMode === 'board'" #replacement>
-        <ContractBoardProjection
-          :response="contractBoard.data"
-          :loading="contractBoard.loading"
-          :refreshing="contractBoard.refreshing"
-          :stale="contractBoard.stale"
-          :error="contractBoard.error"
-          @activate-card="handleBoardCardActivate"
-          @retry="contractBoard.retry"
-        />
-      </template>
-      <template v-else-if="displayMode === 'chart'" #replacement>
+      <template v-if="displayMode === 'chart'" #replacement>
         <ContractChartPage
           :chart="chart"
           :loading="chartLoading"

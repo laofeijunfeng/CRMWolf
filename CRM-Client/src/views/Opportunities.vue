@@ -26,22 +26,17 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
-import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
-import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
-import OpportunityBoardProjection from '@/components/opportunity/OpportunityBoardProjection.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { opportunityApi, type Opportunity, type OpportunityBoardParams, type OpportunityChartParams, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption, type OpportunityExportTab } from '@/api/opportunity'
+import { opportunityApi, type Opportunity, type OpportunityChartParams, type OpportunityListParams, type OpportunityListResponse, type OwnerFilterOption, type OpportunityExportTab } from '@/api/opportunity'
 import type { OpportunityChartBucket, OpportunityChartBucketOpportunities, OpportunityChartCard, OpportunityChartResponse } from '@/schemas/opportunity'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import type { ListExportPayload } from '@/api/listExport'
 import procurementApi from '@/api/procurement'
 import { usePermissionStore } from '@/stores/permissions'
-import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
-import type { OpportunityBoardResponse } from '@/schemas/opportunityBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { formatOpportunityModuleNames, formatOpportunityProductName, formatOpportunityProductSummary } from '@/utils/opportunityProduct'
@@ -68,7 +63,6 @@ usePageTitle()
 const router = useRouter()
 const route = useRoute()
 const permissionStore = usePermissionStore()
-const teamStore = useTeamStore()
 const userStore = useUserStore()
 const headerStore = useHeaderStore()
 
@@ -78,8 +72,7 @@ const loadError = ref<FeedbackError | null>(null)
 const listRequestId = ref<number>(0)
 const tableData = ref<OpportunityListResponse[]>([])
 const ownerFilterOptions = ref<OwnerFilterOption[]>([])
-type OpportunityDisplayMode = 'table' | 'board' | 'chart'
-const displayMode = ref<OpportunityDisplayMode>('table')
+const displayMode = ref<'table' | 'chart'>('table')
 const chart = ref<OpportunityChartResponse | null>(null)
 const chartLoading = ref(false)
 const chartError = ref('')
@@ -455,7 +448,6 @@ const closeOpportunityChartBucket = (): void => {
 }
 
 const fetchOpportunities = async (): Promise<boolean> => {
-  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -485,87 +477,21 @@ const fetchOpportunities = async (): Promise<boolean> => {
   }
 }
 
-const opportunityTabStatus = computed<number | null>(() => (
-  activeTab.value === 'active'
-    ? 0
-    : activeTab.value === 'won'
-      ? 1
-      : activeTab.value === 'lost'
-        ? 2
-        : null
-))
-
-const opportunityEffectiveFilters = computed(() => (
-  opportunityTabStatus.value === null
-    ? activeFilters.value
-    : withoutFilterFields(activeFilters.value, ['status'])
-))
-
-const boardParams = computed<OpportunityBoardParams>(() => {
-  const serialized = serializeListQuery({
-    filters: opportunityEffectiveFilters.value,
-    sorts: activeSorts.value,
-  })
-  return {
-    status: opportunityTabStatus.value,
-    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
-    ...serialized,
-  }
-})
-
-const boardScopeKey = computed(() => {
-  const team = teamStore.currentTeam
-  const user = userStore.userInfo
-  const permissionItems = permissionStore.permissions
-  return {
-    teamId: team?.id ?? null,
-    userId: user?.id === undefined || user.id === null ? null : String(user.id),
-    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
-  }
-})
-
-const opportunityBoard = useBoardSnapshot<OpportunityBoardParams, OpportunityBoardResponse>({
-  fetchBoard: (query) => opportunityApi.getOpportunityBoard(query),
-  getCurrentQuery: () => boardParams.value,
-  getQuerySignature: (query) => JSON.stringify({
-    tab: activeTab.value,
-    search: search.value.trim(),
-    filters: opportunityEffectiveFilters.value,
-    sorts: activeSorts.value,
-    query,
-  }),
-  getScopeKey: () => boardScopeKey.value,
-  isPermissionReady: () => permissionStore.loadState === 'ready',
-})
-
 const refreshActiveOpportunityView = (): Promise<boolean> => {
   if (displayMode.value === 'chart') {
     closeOpportunityChartBucket()
     return fetchOpportunityChart()
   }
-  if (displayMode.value === 'board') {
-    return opportunityBoard.refresh(boardParams.value).then(() => true, () => false)
-  }
   return fetchOpportunities()
 }
 
 const handleDisplayModeChange = (mode: string): void => {
-  if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
+  if (mode !== 'table' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
   closeOpportunityChartBucket()
   void refreshActiveOpportunityView()
 }
-
-watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board') void refreshActiveOpportunityView()
-})
-
-const handleBoardCardActivate = (payload: BoardCardActivation): void => {
-  if (typeof payload.id !== 'string' || !isOpportunityPublicId(payload.id)) return
-  openOpportunitySheet(payload.id)
-}
-
 
 const customFilterViews = useCustomFilterViews({
   viewKey: 'opportunities.list',
@@ -589,7 +515,7 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
 )
 
 const refreshTableQuery = (): void => {
-  if (displayMode.value !== 'board') void refreshActiveOpportunityView()
+  void refreshActiveOpportunityView()
 }
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -689,8 +615,7 @@ async function refreshOpportunityDetailIfOpen(opportunityId: string | null): Pro
 }
 
 function opportunityViewLabel(): string {
-  if (displayMode.value === 'chart') return '商机图表'
-  return displayMode.value === 'board' ? '商机看板' : '商机列表'
+  return displayMode.value === 'chart' ? '商机图表' : '商机列表'
 }
 
 function getRefreshFailureDescription(viewRefreshed: boolean, detailRefreshed: boolean): string | undefined {
@@ -1138,23 +1063,11 @@ defineExpose({
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
           <TabsList aria-label="商机展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>
       </template>
-      <template v-if="displayMode === 'board'" #replacement>
-        <OpportunityBoardProjection
-          :response="opportunityBoard.data"
-          :loading="opportunityBoard.loading"
-          :refreshing="opportunityBoard.refreshing"
-          :stale="opportunityBoard.stale"
-          :error="opportunityBoard.error"
-          @activate-card="handleBoardCardActivate"
-          @retry="opportunityBoard.retry"
-        />
-      </template>
-      <template v-else-if="displayMode === 'chart'" #replacement>
+      <template v-if="displayMode === 'chart'" #replacement>
         <OpportunityChartPage
           :chart="chart"
           :loading="chartLoading"

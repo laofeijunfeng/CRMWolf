@@ -29,14 +29,10 @@ import {
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, CheckCircle, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { ViewPreferenceConfig } from '@/api/viewPreference'
-import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
-import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
-import PaymentPlanBoardProjection from '@/components/payment/PaymentPlanBoardProjection.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
@@ -45,17 +41,13 @@ import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vu
 import paymentApi, {
   type PaymentRecordCreate,
   type PaymentRecordResponse,
-  type PaymentPlanBoardParams,
   type PaymentPlanWithDetails,
   type PaymentPlanListParams,
   type PaymentPlanExportTab,
 } from '@/api/payment'
 import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
-import { useTeamStore } from '@/stores/team'
-import { useUserStore } from '@/stores/user'
 import { useHeaderStore } from '@/stores/header'
-import type { PaymentPlanBoardResponse } from '@/schemas/paymentPlanBoard'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useDataTableExport } from '@/composables/useDataTableExport'
@@ -69,8 +61,6 @@ import type { FormSuccessPayload } from '@/types/actionOutcome'
 usePageTitle()
 
 const permissionStore = usePermissionStore()
-const teamStore = useTeamStore()
-const userStore = useUserStore()
 const headerStore = useHeaderStore()
 const route = useRoute()
 
@@ -110,7 +100,6 @@ const tabs = [
 ]
 
 const activeTab = ref('all')
-const displayMode = ref<'table' | 'board'>('table')
 
 watch(activeTab, () => {
   search.value = ''
@@ -205,7 +194,6 @@ const registerDefaultPayerName = computed<string>(() => selectedConfirmPlan.valu
 
 // ==================== Methods ====================
 const fetchPaymentPlans = async (): Promise<boolean> => {
-  if (displayMode.value === 'board') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -244,91 +232,13 @@ const fetchPaymentPlans = async (): Promise<boolean> => {
   }
 }
 
-
-const paymentPlanTabStatus = computed<string | null>(() => (
-  activeTab.value === 'pending'
-    ? 'PENDING'
-    : activeTab.value === 'partial'
-      ? 'PARTIAL'
-      : activeTab.value === 'completed'
-        ? 'COMPLETED'
-        : null
-))
-
-const paymentPlanEffectiveFilters = computed(() => (
-  paymentPlanTabStatus.value === null
-    ? activeFilters.value
-    : withoutFilterFields(activeFilters.value, ['status'])
-))
-
-const boardParams = computed<PaymentPlanBoardParams>(() => {
-  const serialized = serializeListQuery({
-    filters: paymentPlanEffectiveFilters.value,
-    sorts: activeSorts.value,
-  })
-  return {
-    ...(paymentPlanTabStatus.value === null ? {} : { status: paymentPlanTabStatus.value }),
-    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
-    ...serialized,
-  }
-})
-
-const boardScopeKey = computed(() => {
-  const team = teamStore.currentTeam
-  const user = userStore.userInfo
-  const permissionItems = permissionStore.permissions
-  return {
-    teamId: team?.id ?? null,
-    userId: user?.id === undefined || user.id === null ? null : String(user.id),
-    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
-  }
-})
-
-const paymentPlanBoard = useBoardSnapshot<PaymentPlanBoardParams, PaymentPlanBoardResponse>({
-  fetchBoard: (query) => paymentApi.getPaymentPlanBoard(query),
-  getCurrentQuery: () => boardParams.value,
-  getQuerySignature: (query) => JSON.stringify({
-    tab: activeTab.value,
-    search: search.value.trim(),
-    filters: paymentPlanEffectiveFilters.value,
-    sorts: activeSorts.value,
-    query,
-  }),
-  getScopeKey: () => boardScopeKey.value,
-  isPermissionReady: () => permissionStore.loadState === 'ready',
-})
-
-const refreshActivePaymentPlanView = (): Promise<boolean> => {
-  if (displayMode.value !== 'board') return fetchPaymentPlans()
-  return paymentPlanBoard.refresh(boardParams.value).then(() => true, () => false)
-}
-
-const handleDisplayModeChange = (mode: string | number | undefined): void => {
-  if (mode !== 'table' && mode !== 'board') return
-  if (mode === displayMode.value) return
-  displayMode.value = mode
-  void refreshActivePaymentPlanView()
-}
-
-watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board') void refreshActivePaymentPlanView()
-})
-
-const handleBoardCardActivate = (payload: BoardCardActivation): void => {
-  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
-  selectedPlanId.value = payload.id
-  planSheetVisible.value = true
-}
-
-
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-plans.list',
   activeTab,
   activeFilters,
   activeSorts,
   activeColumns,
-  activeDisplayMode: displayMode,
-  refresh: refreshActivePaymentPlanView,
+  refresh: fetchPaymentPlans,
   onViewApplySuccess: (tabKey) => headerStore.setActiveTab(tabKey),
 })
 const allTabs = computed(() => customFilterViews.mergeTabs(tabs))
@@ -354,7 +264,7 @@ const columnPreferenceMode = computed<'default' | 'custom'>(() =>
 )
 
 const refreshTableQuery = (): void => {
-  if (displayMode.value !== 'board') void refreshActivePaymentPlanView()
+  void fetchPaymentPlans()
 }
 
 const handleFilterApply = async (filters: ListFilterCondition[]): Promise<void> => {
@@ -474,21 +384,17 @@ const handlePlanSheetVisibleChange = (visible: boolean): void => {
   }
 }
 
-function paymentPlanViewLabel(): string {
-  return displayMode.value === 'board' ? '回款计划看板' : '回款计划列表'
-}
-
 const handlePlanSheetRefresh = async (): Promise<void> => {
-  const refreshed = await refreshActivePaymentPlanView()
+  const refreshed = await fetchPaymentPlans()
   if (!refreshed) {
-    toast.warning(`操作已完成，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`)
+    toast.warning('操作已完成，但回款计划列表刷新失败，请稍后重试。')
   }
 }
 
 const handlePlanFormSuccess = async (_payload?: FormSuccessPayload): Promise<void> => {
-  const refreshed = await refreshActivePaymentPlanView()
+  const refreshed = await fetchPaymentPlans()
   if (!refreshed) {
-    toast.warning(`回款计划已保存，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`)
+    toast.warning('回款计划已保存，但回款计划列表刷新失败，请稍后重试。')
   }
 }
 
@@ -591,12 +497,11 @@ const handleRegisterSubmit = async (payload: PaymentRecordCreate): Promise<void>
     selectedConfirmPlan.value = null
     paymentRecordIdempotencyKey.value = null
     paymentRecordCommandOptions.value = null
-    const refreshed = await refreshActivePaymentPlanView()
-    const viewLabel = paymentPlanViewLabel()
+    const refreshed = await fetchPaymentPlans()
     toast.success(`回款登记成功，${resultMessage}`, {
       description: refreshed
-        ? `${viewLabel}已同步。`
-        : `回款已登记，但${viewLabel}刷新失败，请稍后重试。`,
+        ? '回款计划列表已同步。'
+        : '回款已登记，但回款计划列表刷新失败，请稍后重试。',
     })
   } catch (error) {
     handleApiError(error, '登记回款')
@@ -624,9 +529,9 @@ const handleDelete = async (row: PaymentPlanWithDetails): Promise<void> => {
       planSheetVisible.value = false
       selectedPlanId.value = null
     }
-    const refreshed = await refreshActivePaymentPlanView()
+    const refreshed = await fetchPaymentPlans()
     toast.success(`回款计划“${row.stage_name}”已删除`, refreshed ? undefined : {
-      description: `回款计划已删除，但${paymentPlanViewLabel()}刷新失败，请稍后重试。`,
+      description: '回款计划已删除，但回款计划列表刷新失败，请稍后重试。',
     })
   } catch (error) {
     handleApiError(error, '删除回款计划')
@@ -729,7 +634,7 @@ watchEffect(() => {
       return
     }
     customFilterViews.applyBuiltInTab(headerStore.activeTab)
-    void refreshActivePaymentPlanView()
+    void fetchPaymentPlans()
   }
 })
 
@@ -745,7 +650,6 @@ defineExpose({
   activeTab,
   activeFilters,
   activeSorts,
-  displayMode,
   selectedPlanId,
   planSheetVisible,
 })
@@ -772,7 +676,6 @@ defineExpose({
       :total="pagination.total"
       :sorts="activeSorts"
       view-key="payment-plans.list"
-      :view-display-mode="displayMode"
       :effective-filters="effectiveFilters"
       :view-applying="customFilterViews.applying.value"
       :view-apply-error="customFilterViews.applyError.value"
@@ -812,28 +715,9 @@ defineExpose({
       @column-config-current-change="handleColumnConfigCurrentChange"
       @column-config-save="handleColumnConfigSave"
       @column-config-reset="handleColumnConfigReset"
-      @retry="refreshActivePaymentPlanView"
+      @retry="fetchPaymentPlans"
       @row-click="handleViewDetail"
     >
-      <template #tableTools>
-        <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="handleDisplayModeChange">
-          <TabsList aria-label="回款计划展示" class="h-8 p-0.5">
-            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </template>
-      <template v-if="displayMode === 'board'" #replacement>
-        <PaymentPlanBoardProjection
-          :response="paymentPlanBoard.data"
-          :loading="paymentPlanBoard.loading"
-          :refreshing="paymentPlanBoard.refreshing"
-          :stale="paymentPlanBoard.stale"
-          :error="paymentPlanBoard.error"
-          @activate-card="handleBoardCardActivate"
-          @retry="paymentPlanBoard.retry"
-        />
-      </template>
       <template #mobile-card="{ row }">
         <div class="payment-plan-mobile-card-header">
           <div class="payment-plan-mobile-card-number">

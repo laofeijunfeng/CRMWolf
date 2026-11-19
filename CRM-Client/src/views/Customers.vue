@@ -18,7 +18,6 @@
  * - ✅ 保留业务逻辑（退回公海、输单、赢单等）
  */
 import { ref, reactive, computed, onMounted, watch, watchEffect, type Component } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { handleApiError, handleOutcomeUnknown, isOutcomeUnknown } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
@@ -51,11 +50,7 @@ import CustomerDetailSheet from './CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
 import CustomerChartPage from '@/components/customer/CustomerChartPage.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import CustomerBoardProjection from '@/components/customer/CustomerBoardProjection.vue'
-import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
-import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
 import customerApi, {
-  type CustomerBoardParams,
   type CustomerResponse,
   type CustomerDetailResponse,
   type CustomerStatus,
@@ -66,7 +61,6 @@ import customerApi, {
   type CustomerExportTab,
   type CustomerQueryParams,
 } from '@/api/customer'
-import { useTeamStore } from '@/stores/team'
 import type { CustomerChartBucket, CustomerChartBucketCustomers, CustomerChartCard, CustomerChartResponse } from '@/schemas/customer'
 import { useUserStore } from '@/stores/user'
 import { usePermissionStore } from '@/stores/permissions'
@@ -77,7 +71,6 @@ import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { companyScaleOptions } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
-import type { CustomerBoardResponse } from '@/schemas/customerBoard'
 import { serializeListQuery } from '@/utils/listQuery'
 import { isCustomerPublicId } from '@/utils/customerRoutes'
 import { isDealJourneyPublicId } from '@/utils/dealJourney'
@@ -97,12 +90,8 @@ import {
 usePageTitle()
 
 const userStore = useUserStore()
-const teamStore = useTeamStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
-const { currentTeam } = storeToRefs(teamStore)
-const { userInfo } = storeToRefs(userStore)
-const { permissions, loadState: permissionLoadState } = storeToRefs(permissionStore)
 const route = useRoute()
 
 type CustomerTableRow = CustomerResponse
@@ -248,7 +237,7 @@ const tabs = [
 const customerPageScope = 'owned_or_collaborated' as const
 
 const activeTab = ref('all')
-const displayMode = ref<'table' | 'board' | 'chart'>('table')
+const displayMode = ref<'table' | 'chart'>('table')
 
 const search = ref('')
 
@@ -752,12 +741,11 @@ const refreshVisibleCustomers = (): Promise<boolean> => {
     closeChartBucket()
     return fetchCustomerChart()
   }
-  if (boardEligible.value) return customerBoard.refresh(boardParams.value).then(() => true, () => false)
   return fetchCustomerList()
 }
 
 const setCustomerDisplayMode = (value: string): void => {
-  if (value !== 'table' && value !== 'board' && value !== 'chart') return
+  if (value !== 'table' && value !== 'chart') return
   if (activeTab.value === 'public' && value !== 'table') {
     closeChartBucket()
     displayMode.value = 'table'
@@ -816,7 +804,6 @@ const closeChartBucket = (): void => {
 }
 
 const fetchCustomerList = async (): Promise<boolean> => {
-  if (displayMode.value === 'board' && activeTab.value !== 'public') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -857,65 +844,18 @@ const fetchCustomerList = async (): Promise<boolean> => {
   }
 }
 
-const boardEligible = computed(() => activeTab.value !== 'public' && displayMode.value === 'board')
-
-const boardParams = computed<CustomerBoardParams>(() => {
-  const serialized = serializeListQuery({ filters: activeFilters.value, sorts: activeSorts.value })
-  return {
-    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
-    ...serialized,
-    scope: customerPageScope,
-  }
-})
-
-const boardScopeKey = computed(() => {
-  const team = currentTeam?.value ?? teamStore.currentTeam
-  const user = userInfo?.value ?? userStore.userInfo
-  const permissionItems = (permissions?.value.length ?? 0) > 0 ? permissions.value : permissionStore.permissions
-  return {
-    teamId: team?.id ?? null,
-    userId: user?.id === undefined || user.id === null ? null : String(user.id),
-    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
-  }
-})
-
-const customerBoard = useBoardSnapshot<CustomerBoardParams, CustomerBoardResponse>({
-  fetchBoard: (query) => customerApi.getCustomerBoard(query),
-  getCurrentQuery: () => boardParams.value,
-  getQuerySignature: (query) => JSON.stringify({
-    tab: activeTab.value,
-    search: search.value.trim(),
-    filters: activeFilters.value,
-    sorts: activeSorts.value,
-    query,
-  }),
-  getScopeKey: () => boardScopeKey.value,
-  isPermissionReady: () => (permissionLoadState?.value ?? permissionStore.loadState) === 'ready',
-})
-
-
 watch([activeTab, activeFilters, activeSorts, search], () => {
   if (displayMode.value === 'chart' || chartBucketRequest.value !== null) closeChartBucket()
 }, { flush: 'sync' })
 
 watch([activeTab, activeFilters, activeSorts, search], () => {
-  if (displayMode.value === 'board' && activeTab.value !== 'public') void refreshVisibleCustomers()
   if (displayMode.value === 'chart') void fetchCustomerChart()
 })
-
-const handleBoardCardActivate = (payload: BoardCardActivation): void => {
-  if (typeof payload.id !== 'string' || !isCustomerPublicId(payload.id)) return
-  openCustomerDetail(payload.id)
-}
 
 const refreshCustomerListAfterMutation = async (operationLabel: string): Promise<boolean> => {
   const refreshed = await refreshVisibleCustomers()
   if (!refreshed) {
-    const viewLabel = displayMode.value === 'chart'
-      ? '客户图表'
-      : boardEligible.value
-        ? '客户看板'
-        : '客户列表'
+    const viewLabel = displayMode.value === 'chart' ? '客户图表' : '客户列表'
     toast.warning(`${operationLabel}已成功，但${viewLabel}刷新失败，请稍后重试。`)
   }
   return refreshed
@@ -1078,7 +1018,7 @@ const handleCustomerFormSuccess = async (payload?: FormSuccessPayload): Promise<
     const failedScopes: string[] = []
     if (!refreshed) {
       failedScopes.push(
-        displayMode.value === 'chart' ? '客户图表' : boardEligible.value ? '客户看板' : '客户列表',
+        displayMode.value === 'chart' ? '客户图表' : '客户列表',
       )
     }
     if (!detailRefreshed) failedScopes.push('客户详情')
@@ -1516,23 +1456,11 @@ defineExpose({
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
           <TabsList aria-label="客户展示" class="h-8 p-0.5">
             <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="board" class="h-7 px-3 py-0">看板</TabsTrigger>
             <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>
       </template>
-      <template v-if="boardEligible" #replacement>
-        <CustomerBoardProjection
-          :response="customerBoard.data"
-          :loading="customerBoard.loading"
-          :refreshing="customerBoard.refreshing"
-          :stale="customerBoard.stale"
-          :error="customerBoard.error"
-          @activate-card="handleBoardCardActivate"
-          @retry="customerBoard.retry"
-        />
-      </template>
-      <template v-else-if="displayMode === 'chart'" #replacement>
+      <template v-if="displayMode === 'chart'" #replacement>
         <CustomerChartPage
           :chart="chart"
           :loading="chartLoading"

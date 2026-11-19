@@ -20,15 +20,12 @@ import { handleApiError } from '@/utils/errorHandler'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
-import type { BoardCardActivation } from '@/components/crmwolf/boardTypes'
-import { useBoardSnapshot } from '@/components/crmwolf/useBoardSnapshot'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
-import { normalizeListChartDisplayMode, type ViewDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
+import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
 import StatusBadge from '@/components/StatusBadge.vue'
-import PaymentRecordBoardProjection from '@/components/payment/PaymentRecordBoardProjection.vue'
 import PaymentRecordChartPage from '@/components/payment/PaymentRecordChartPage.vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type {
@@ -42,7 +39,6 @@ import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type PaymentRecordWithDetails,
   type PaymentRecordListParams,
-  type PaymentRecordBoardParams,
   type PaymentRecordUpdate,
   type PaymentRecordExportTab,
 } from '@/api/payment'
@@ -50,13 +46,11 @@ import { type ListExportPayload } from '@/api/listExport'
 import { usePermissionStore } from '@/stores/permissions'
 import { useApprovalStore } from '@/stores/approval'
 import { useHeaderStore } from '@/stores/header'
-import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { isCustomFilterViewTab, useCustomFilterViews } from '@/composables/useCustomFilterViews'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import type { PaymentRecordBoardResponse } from '@/schemas/paymentRecordBoard'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -68,7 +62,6 @@ const router = useRouter()
 const permissionStore = usePermissionStore()
 const approvalStore = useApprovalStore()
 const headerStore = useHeaderStore()
-const teamStore = useTeamStore()
 const userStore = useUserStore()
 
 // ==================== State ====================
@@ -77,7 +70,7 @@ const loadError = ref<FeedbackError | null>(null)
 const listRequestId = ref<number>(0)
 const tableData = ref<PaymentRecordWithDetails[]>([])
 const selectedRecord = ref<PaymentRecordWithDetails | null>(null)
-const selectedBoardRecordId = ref<number | null>(null)
+const selectedChartRecordId = ref<number | null>(null)
 const detailSheetVisible = ref(false)
 const editDialogOpen = ref(false)
 const editSubmitting = ref(false)
@@ -87,7 +80,7 @@ const activeFilters = ref<ListFilterCondition[]>([])
 const activeSorts = ref<ListSortCondition[]>([])
 const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const search = ref('')
-const displayMode = ref<ViewDisplayMode>('table')
+const displayMode = ref<'table' | 'chart'>('table')
 const ownRecordScope = ref(false)
 const pagination = reactive({
   current: 1,
@@ -347,7 +340,7 @@ const canDeleteRecordRow = (row: PaymentRecordWithDetails): boolean => {
 
 // ==================== Methods ====================
 const fetchPaymentRecords = async (): Promise<boolean> => {
-  if (displayMode.value === 'board' || displayMode.value === 'chart') return false
+  if (displayMode.value === 'chart') return false
   const requestId = ++listRequestId.value
   loadError.value = null
   loading.value = true
@@ -401,45 +394,6 @@ const recordEffectiveFilters = computed(() => (
     ? activeFilters.value
     : withoutFilterFields(activeFilters.value, ['approval_status'])
 ))
-
-const boardParams = computed<PaymentRecordBoardParams>(() => {
-  const serialized = serializeListQuery({
-    filters: recordEffectiveFilters.value,
-    sorts: activeSorts.value,
-  })
-  return {
-    ...(recordTabApprovalStatus.value === null ? {} : { approval_status: recordTabApprovalStatus.value }),
-    ...(search.value.trim() === '' ? {} : { search: search.value.trim() }),
-    ...(ownRecordScope.value ? { me: true } : {}),
-    ...serialized,
-  }
-})
-
-const boardScopeKey = computed(() => {
-  const team = teamStore.currentTeam
-  const user = userStore.userInfo
-  const permissionItems = permissionStore.permissions
-  return {
-    teamId: team?.id ?? null,
-    userId: user?.id === undefined || user.id === null ? null : String(user.id),
-    permissionFingerprint: permissionItems.map((permission) => permission.code).sort().join(','),
-  }
-})
-
-const paymentRecordBoard = useBoardSnapshot<PaymentRecordBoardParams, PaymentRecordBoardResponse>({
-  fetchBoard: (query) => paymentApi.getPaymentRecordBoard(query),
-  getCurrentQuery: () => boardParams.value,
-  getQuerySignature: (query) => JSON.stringify({
-    tab: activeTab.value,
-    search: search.value.trim(),
-    filters: recordEffectiveFilters.value,
-    sorts: activeSorts.value,
-    ownRecordScope: ownRecordScope.value,
-    query,
-  }),
-  getScopeKey: () => boardScopeKey.value,
-  isPermissionReady: () => permissionStore.loadState === 'ready',
-})
 
 const chart = ref<PaymentRecordChartResponse | null>(null)
 const chartLoading = ref(false)
@@ -532,7 +486,7 @@ const loadMoreChartBucket = (): Promise<void> => {
 const openChartRecord = (recordId: number): void => {
   if (!Number.isInteger(recordId) || recordId <= 0) return
   selectedRecord.value = null
-  selectedBoardRecordId.value = recordId
+  selectedChartRecordId.value = recordId
   detailSheetVisible.value = true
 }
 
@@ -541,16 +495,15 @@ const refreshActivePaymentRecordView = (): Promise<boolean> => {
     closeChartBucket()
     return fetchPaymentChart()
   }
-  if (displayMode.value !== 'board') return fetchPaymentRecords()
-  return paymentRecordBoard.refresh(boardParams.value).then(() => true, () => false)
+  return fetchPaymentRecords()
 }
 
 const refreshTableQuery = (): void => {
-  if (displayMode.value !== 'board') void refreshActivePaymentRecordView()
+  void refreshActivePaymentRecordView()
 }
 
 const handleDisplayModeChange = (mode: string | number): void => {
-  if (mode !== 'table' && mode !== 'board' && mode !== 'chart') return
+  if (mode !== 'table' && mode !== 'chart') return
   if (mode === displayMode.value) return
   displayMode.value = mode
   if (mode !== 'chart') closeChartBucket()
@@ -558,82 +511,8 @@ const handleDisplayModeChange = (mode: string | number): void => {
 }
 
 watch([activeTab, activeFilters, activeSorts, search, ownRecordScope], () => {
-  if (displayMode.value === 'board' || displayMode.value === 'chart') void refreshActivePaymentRecordView()
+  if (displayMode.value === 'chart') void refreshActivePaymentRecordView()
 })
-
-const recordDrillStatuses = ['pending_submit', 'pending_approval', 'rejected', 'approved', 'unclassified'] as const
-
-const isRecordDrillStatus = (value: string): value is typeof recordDrillStatuses[number] => (
-  recordDrillStatuses.some((status) => status === value)
-)
-
-const handleBoardViewAll = (columnKey: string): void => {
-  if (!paymentRecordBoard.canDrillThrough || !isRecordDrillStatus(columnKey)) return
-  activeFilters.value = [columnKey === 'unclassified'
-    ? { field: 'approval_status', op: 'is_empty', value: null }
-    : { field: 'approval_status', op: 'eq', value: columnKey }]
-  pagination.current = 1
-  displayMode.value = 'table'
-  void fetchPaymentRecords()
-}
-
-const handleBoardCardActivate = (payload: BoardCardActivation): void => {
-  if (typeof payload.id !== 'number' || !Number.isInteger(payload.id) || payload.id <= 0) return
-  selectedRecord.value = null
-  selectedBoardRecordId.value = payload.id
-  detailSheetVisible.value = true
-}
-
-const boardRecordItem = (recordId: number): PaymentRecordBoardResponse['columns'][number]['items'][number] | null => {
-  const response = paymentRecordBoard.data
-  if (response === null) return null
-  for (const column of response.columns) {
-    const item = column.items.find((candidate) => candidate.id === recordId)
-    if (item !== undefined) return item
-  }
-  return null
-}
-
-const handleBoardCardAction = (payload: { id: number, action: 'edit' | 'delete' | 'resubmit' }): void => {
-  const item = boardRecordItem(payload.id)
-  if (item === null) return
-  if (payload.action === 'edit' && !item.action_state.can_edit) return
-  if (payload.action === 'delete' && !item.action_state.can_delete) return
-  if (payload.action === 'resubmit' && !item.action_state.can_resubmit) return
-  void openBoardRecordAction(payload.id, payload.action)
-}
-
-const openBoardRecordAction = async (
-  recordId: number,
-  action: 'edit' | 'delete' | 'resubmit',
-): Promise<void> => {
-  let record: PaymentRecordWithDetails
-  try {
-    record = await paymentApi.getPaymentRecordDetail(recordId)
-  } catch (error) {
-    handleApiError(
-      error,
-      action === 'delete' ? '删除回款记录' : action === 'resubmit' ? '重新提交审批' : '编辑回款记录',
-    )
-    return
-  }
-  if (record.id !== recordId) return
-  const current = boardRecordItem(recordId)
-  if (current === null) return
-  if (action === 'edit') {
-    if (!current.action_state.can_edit) return
-    handleEdit(record)
-    return
-  }
-  if (action === 'delete') {
-    if (!current.action_state.can_delete) return
-    await handleDelete(record)
-    return
-  }
-  if (!current.action_state.can_resubmit) return
-  handleEdit(record)
-  isResubmitMode.value = true
-}
 
 const customFilterViews = useCustomFilterViews({
   viewKey: 'payment-records.list',
@@ -738,7 +617,7 @@ const handleCreateRecord = (): void => {
 }
 
 const handleViewDetail = (record: PaymentRecordWithDetails): void => {
-  selectedBoardRecordId.value = null
+  selectedChartRecordId.value = null
   selectedRecord.value = record
   detailSheetVisible.value = true
 }
@@ -771,7 +650,7 @@ const handleDetailSheetVisibleChange = (visible: boolean): void => {
   detailSheetVisible.value = visible
   if (!visible && !editDialogOpen.value) {
     selectedRecord.value = null
-    selectedBoardRecordId.value = null
+    selectedChartRecordId.value = null
   }
 }
 
@@ -848,12 +727,12 @@ const handleDelete = async (record: PaymentRecordWithDetails): Promise<void> => 
   deletingRecordIds.value = new Set(deletingRecordIds.value).add(record.id)
   try {
     await paymentApi.deletePaymentRecord(record.id)
-    if (selectedRecord.value?.id === record.id || selectedBoardRecordId.value === record.id) {
+    if (selectedRecord.value?.id === record.id || selectedChartRecordId.value === record.id) {
       detailSheetVisible.value = false
       editDialogOpen.value = false
       isResubmitMode.value = false
       selectedRecord.value = null
-      selectedBoardRecordId.value = null
+      selectedChartRecordId.value = null
     }
     const refreshed = await refreshActivePaymentRecordView()
     toast.success(`回款记录“${recordLabel}”已删除`, refreshed ? undefined : {
@@ -966,7 +845,6 @@ defineExpose({
   activeSorts,
   displayMode,
   selectedRecord,
-  selectedBoardRecordId,
   detailSheetVisible,
   ownRecordScope,
 })
@@ -1043,21 +921,7 @@ defineExpose({
           </TabsList>
         </Tabs>
       </template>
-      <template v-if="displayMode === 'board'" #replacement>
-        <PaymentRecordBoardProjection
-          :response="paymentRecordBoard.data"
-          :loading="paymentRecordBoard.loading"
-          :refreshing="paymentRecordBoard.refreshing"
-          :stale="paymentRecordBoard.stale"
-          :error="paymentRecordBoard.error"
-          :can-drill-through="paymentRecordBoard.canDrillThrough"
-          @activate-card="handleBoardCardActivate"
-          @view-all="handleBoardViewAll"
-          @card-action="handleBoardCardAction"
-          @retry="paymentRecordBoard.retry"
-        />
-      </template>
-      <template v-else-if="displayMode === 'chart'" #replacement>
+      <template v-if="displayMode === 'chart'" #replacement>
         <PaymentRecordChartPage
           :chart="chart"
           :loading="chartLoading"
@@ -1224,7 +1088,7 @@ defineExpose({
     </DataTable>
 
     <PaymentRecordDetailSheet
-      :record-id="selectedBoardRecordId ?? selectedRecord?.id ?? null"
+      :record-id="selectedChartRecordId ?? selectedRecord?.id ?? null"
       :visible="detailSheetVisible"
       :elevated="chartBucket !== null"
       :record="selectedRecord"

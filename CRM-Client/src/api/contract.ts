@@ -2,8 +2,6 @@ import request from '@/utils/request'
 import type { PaginatedResponse } from '@/types/pagination'
 import { OptionalNullableStringSchema, OptionalStringFromNullableSchema } from '@/schemas/common'
 import { z } from 'zod'
-import { ContractBoardResponseSchema, type ContractBoardResponse } from '@/schemas/contractBoard'
-import { serializeListQuery } from '@/utils/listQuery'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
 
 export type ContractExportTab = 'all' | 'DRAFT' | 'PENDING_REVIEW' | 'SIGNED'
@@ -227,8 +225,6 @@ export interface ContractQueryParams {
   order_dir?: 'asc' | 'desc'
 }
 
-export type ContractBoardParams = Omit<ContractQueryParams, 'skip' | 'limit'>
-
 export interface ContractFromOpportunityParams {
   contract_name: string
   signing_contact_id: number
@@ -380,7 +376,7 @@ export type ContractChartBucket = z.infer<typeof ContractChartBucketSchema>
 export type ContractChartCard = z.infer<typeof ContractChartCardSchema>
 export type ContractChartResponse = z.infer<typeof ContractChartResponseSchema>
 export type ContractChartBucketContracts = z.infer<typeof ContractChartBucketContractsSchema>
-export type ContractChartParams = ContractBoardParams & { chart?: string, bucket?: string, skip?: number, limit?: number }
+export type ContractChartParams = Omit<ContractQueryParams, 'skip' | 'limit'> & { chart?: string, bucket?: string, skip?: number, limit?: number }
 
 const OwnerFilterOptionSchema = z.object({
   id: z.string(),
@@ -412,20 +408,7 @@ export const contractApi = {
     return ContractListApiResponseSchema.parse(response) as ContractListResponse[] | PaginatedResponse<ContractListResponse>
   },
 
-  getContractBoard: async (params: ContractBoardParams): Promise<ContractBoardResponse> => {
-    const serialized = serializeListQuery()
-    // eslint-disable-next-line crmwolf/require-zod-schema
-    const response: unknown = await request.get('/v1/contracts/board', {
-      params: {
-        ...params,
-        filters: params.filters ?? serialized.filters,
-        sorts: params.sorts ?? serialized.sorts,
-      },
-    })
-    return ContractBoardResponseSchema.parse(response)
-  },
-
-  getContractChart: async (params: ContractBoardParams): Promise<ContractChartResponse> => {
+  getContractChart: async (params: Omit<ContractQueryParams, 'skip' | 'limit'>): Promise<ContractChartResponse> => {
     // eslint-disable-next-line crmwolf/require-zod-schema
     const response: unknown = await request.get('/v1/contracts/chart', { params })
     return ContractChartResponseSchema.parse(response)

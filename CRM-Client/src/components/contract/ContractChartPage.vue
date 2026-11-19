@@ -81,7 +81,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
     <template #loading>正在整理合同图表…</template>
     <template #error><div class="contract-chart-page__state" role="alert"><span>{{ error }}</span><Button type="button" variant="outline" size="sm" @click="emit('retry')">重试</Button></div></template>
     <template #empty><div class="contract-chart-page__state">暂无合同图表</div></template>
-    <template #summary><header class="contract-chart-page__heading"><h2>{{ population }} 份 · {{ moneyText(totalAmount) }}</h2><p>当前筛选范围内的合同。状态仍在看板看。金额是合同金额。</p></header></template>
+    <template #summary><header class="contract-chart-page__heading"><h2>{{ population }} 份 · {{ moneyText(totalAmount) }}</h2><p>当前筛选范围内的合同。金额是合同金额。</p></header></template>
     <template #inline-error><p v-if="error" class="contract-chart-page__refresh-error" role="alert">{{ error }}</p></template>
     <div v-if="chart" class="contract-chart-page__grid">
       <ChartCardFrame v-for="card in donutCards" :key="card.key" :card-key="card.key" :title="card.title" :description="card.description" content-class="contract-chart-page__donut-content">
