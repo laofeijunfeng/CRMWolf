@@ -26,7 +26,7 @@ const CRMWOLF = `${SRC}components/crmwolf/`
 const COMPONENTS = `${SRC}components/`
 const VIEWS = `${SRC}views/`
 const IMPORT_SPECIFIER = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)['"]([^'"]+)['"]/g
-const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|sheet|table|form)(?:\/|$)/
+const RESTRICTED_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:alert-dialog|sheet|form)(?:\/|$)/
 // ui/form 已由 restricted-primitive 拦截，这里只补 input、label。
 const PAGE_FORM_PRIMITIVE = /^CRM-Client\/src\/components\/ui\/(?:input|label)(?:\/|$)/
 const STYLES = `${SRC}styles/`
@@ -109,7 +109,7 @@ const RULES = [
     incremental: true,
     appliesTo: (filePath) => !filePath.startsWith(UI) && !filePath.startsWith(CRMWOLF),
     test: (text, filePath) => resolveImports(filePath, text).some((target) => RESTRICTED_PRIMITIVE.test(target)),
-    message: 'ui 的 alert-dialog / sheet / table / form 只能经 crmwolf 组件或 ui/detail-sheet 使用，见 components/registry.md。',
+    message: 'ui 的 alert-dialog / sheet / form 只能经 crmwolf 组件或 ui/detail-sheet 使用，见 components/registry.md。',
   },
   {
     category: 'native-dialog',

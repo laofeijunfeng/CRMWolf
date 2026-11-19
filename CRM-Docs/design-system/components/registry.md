@@ -13,8 +13,8 @@
 
 | 组件 | 层 | 状态 | 用途 | 替代 | 契约 |
 | --- | --- | --- | --- | --- | --- |
-| TouchInput | crmwolf | remove | 旧触控输入 | InputField | — |
-| TouchCard | crmwolf | remove | 旧触控卡片 | ListCard | — |
+| TouchInput | crmwolf | removed | 旧触控输入 | InputField | — |
+| TouchCard | crmwolf | removed | 旧触控卡片 | ListCard | — |
 | InputField | crmwolf | candidate | 单行输入字段 | — | [输入](input.md#实现契约) |
 | SelectField | crmwolf | candidate | 下拉选择字段 | — | [输入](input.md#实现契约) |
 | TextareaField | crmwolf | candidate | 多行输入字段 | — | [输入](input.md#实现契约) |
@@ -82,7 +82,7 @@
 | --- | --- | --- |
 | `ui/alert-dialog` | restricted | [确认对话框](confirm-dialog.md)的 `confirm*` 函数 |
 | `ui/sheet` | restricted | DetailSheet（`ui/detail-sheet`） |
-| `ui/table` | restricted | DataTable |
+| `ui/table` | removed | DataTable |
 | `ui/form` | restricted | [`*Field` 系列](input.md#实现契约) |
 
 ## 已知问题
@@ -92,8 +92,8 @@
 
 ## 删除清单
 
-阶段 3 删除，删除后状态改为 `removed`；删除前检查动态导入与全局注册。
+以下组件已在阶段 3 删除（状态 `removed`），删除前已确认无动态导入与全局注册；不得重新引入。
 
 - crmwolf：TouchInput、TouchCard。
 - ui：`app-drawer`、`toggle-group`、`table`、`drawer`。
-- 业务组件：CustomerDetailSidebar、HoverPreviewTooltip、`panels/PaymentRecordsPanel`、BusinessJourneyListTools。
+- 业务组件：CustomerDetailSidebar、HoverPreviewTooltip、`panels/PaymentRecordsPanel`、BusinessJourneyListTools、`agent/CRMAgentChat`（已由销售助手替代）。

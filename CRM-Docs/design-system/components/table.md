@@ -31,7 +31,7 @@
 
 ## 实现契约
 
-页面表格只用 crmwolf `DataTable`；`ui/table` 为受限原件，见[受限原件](registry.md#受限原件)。
+页面表格只用 crmwolf `DataTable`；`ui/table` 已删除，见[删除清单](registry.md#删除清单)。
 
 - **字段：**`fields`（列、筛选、排序、字段配置的唯一来源）、`data`、`rowKey`、`total`、`page`、`pageSize`。不再接收 `columns`、`filterFields`、`sortFields`。
 - **读取状态：**优先 `viewState`（loading / error / empty / ready）配合 `loadError`、`emptyReason`；`loading` 布尔值仅为兼容。空、错、加载由内置的 [DataViewStatePanel](data-view-state-panel.md) 呈现，页面不另写状态块。

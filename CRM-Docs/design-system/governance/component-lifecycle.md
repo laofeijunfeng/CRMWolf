@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | `layer-direction` | GATE-01 | 违反上文分层方向的导入。 |
 | `barrel-reexport` | GATE-02 | `crmwolf/index.ts` 转导出 `@/components/ui/*`。 |
-| `restricted-primitive` | GATE-03 | `ui` 与 `crmwolf` 之外导入 `ui/alert-dialog`、`ui/sheet`、`ui/table`、`ui/form`。 |
+| `restricted-primitive` | GATE-03 | `ui` 与 `crmwolf` 之外导入 `ui/alert-dialog`、`ui/sheet`、`ui/form`。 |
 | `native-dialog` | GATE-04 | 调用原生 `confirm`、`alert`、`prompt`；跳过测试文件。 |
 | `page-status-style` | GATE-05 | `.vue` 中的 `.status-*` 状态类与手写 `get*Status(Class/Color/Tone/Variant)` 映射；状态统一用 StatusBadge。 |
 | `geometry-token` | GATE-06 | `ui` 与 `styles` 之外新增像素字号、非令牌高度、圆角、内边距任意值，以及 `*Content` 上的像素宽度；任意值只能写 `var(--*)`，见[令牌数值](../foundations/token-values.md)。 |

@@ -3,9 +3,7 @@
  * UI/UX Pro Max compliant primitives
  */
 
-// Touch-optimized components
-export { default as TouchInput } from './TouchInput.vue'
-export { default as TouchCard } from './TouchCard.vue'
+// Field components
 export { default as InputField } from './InputField.vue'
 export { default as SelectField } from './SelectField.vue'
 export { default as TextareaField } from './TextareaField.vue'

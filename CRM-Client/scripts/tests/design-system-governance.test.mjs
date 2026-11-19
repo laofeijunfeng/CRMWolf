@@ -146,13 +146,12 @@ test('GATE-02 rejects ui re-exports only in the crmwolf barrel', () => {
   assert.deepEqual(categories('CRM-Client/src/components/crmwolf/ConfirmDialog.vue', line), [])
 })
 
-test('GATE-03 restricts alert-dialog, sheet, table and form to ui and crmwolf', () => {
+test('GATE-03 restricts alert-dialog, sheet and form to ui and crmwolf', () => {
   assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
     "import { AlertDialog } from '@/components/ui/alert-dialog'",
     "import { Sheet } from '@/components/ui/sheet'",
-    "import { Table } from '@/components/ui/table'",
     "import { FormField } from '@/components/ui/form'",
-  ]), ['restricted-primitive', 'restricted-primitive', 'restricted-primitive', 'restricted-primitive'])
+  ]), ['restricted-primitive', 'restricted-primitive', 'restricted-primitive'])
   assert.deepEqual(categories('CRM-Client/src/views/Customers.vue', [
     "import { DetailSheetContent } from '@/components/ui/detail-sheet'",
   ]), [])
