@@ -6,7 +6,7 @@
  * 使用 vee-validate + Zod 进行表单校验。
  */
 import { computed, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -18,11 +18,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -239,38 +234,34 @@ const onSubmit = handleSubmit(async (formValues) => {
         />
 
         <form id="opportunity-win-form" class="opportunity-win-dialog__form" @submit="onSubmit">
-          <FormField v-slot="{ value, handleChange }" name="actual_amount">
-            <FormItem>
-              <InputField
-                id="opportunity-win-amount"
-                :model-value="Number(value ?? 0)"
-                label="实际成交金额"
-                required
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="请输入金额"
-                :disabled="loading || submitting || loadError !== null"
-                @update:model-value="handleChange(Number($event))"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
+          <Field v-slot="{ value, handleChange, errorMessage }" name="actual_amount">
+            <InputField
+              id="opportunity-win-amount"
+              :model-value="Number(value ?? 0)"
+              label="实际成交金额"
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="请输入金额"
+              :disabled="loading || submitting || loadError !== null"
+              :error="errorMessage ?? ''"
+              @update:model-value="handleChange(Number($event))"
+            />
+          </Field>
 
-          <FormField v-slot="{ value, handleChange }" name="actual_closing_date">
-            <FormItem>
-              <DateField
-                id="opportunity-win-date"
-                :model-value="value ? new Date(String(value)) : null"
-                label="实际成交日期"
-                required
-                placeholder="请选择实际成交日期"
-                :disabled="loading || submitting || loadError !== null"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
+          <Field v-slot="{ value, handleChange, errorMessage }" name="actual_closing_date">
+            <DateField
+              id="opportunity-win-date"
+              :model-value="value ? new Date(String(value)) : null"
+              label="实际成交日期"
+              required
+              placeholder="请选择实际成交日期"
+              :disabled="loading || submitting || loadError !== null"
+              :error="errorMessage ?? ''"
+              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
+            />
+          </Field>
         </form>
       </div>
 

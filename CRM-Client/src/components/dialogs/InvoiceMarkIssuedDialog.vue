@@ -6,7 +6,7 @@
  * 使用 vee-validate + Zod 进行表单校验。
  */
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -18,11 +18,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   FileAttachment,
@@ -237,20 +232,18 @@ onUnmounted(() => {
         <p v-if="fileError" class="text-sm text-destructive" role="alert">{{ fileError }}</p>
 
         <!-- 发票号码 -->
-        <FormField v-slot="{ value, handleChange }" name="invoice_number">
-          <FormItem>
-            <InputField
-              id="invoice-issued-number"
-              :model-value="String(value ?? '')"
-              label="发票号码"
-              type="text"
-              placeholder="请输入发票号码（可选）"
-              :disabled="submitting"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="invoice_number">
+          <InputField
+            id="invoice-issued-number"
+            :model-value="String(value ?? '')"
+            label="发票号码"
+            type="text"
+            placeholder="请输入发票号码（可选）"
+            :disabled="submitting"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+          />
+        </Field>
       </form>
 
       <DialogFooter class="flex-col gap-2 sm:flex-row">

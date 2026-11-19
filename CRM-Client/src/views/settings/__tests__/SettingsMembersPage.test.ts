@@ -95,7 +95,6 @@ describe('SettingsMembersPage', () => {
     DialogContent: { template: '<div><slot /></div>' },
     DialogHeader: true, DialogTitle: true, DialogDescription: true,
     DialogFooter: { template: '<footer><slot /></footer>' },
-    FormField: { template: '<div><slot :componentField="{}" /></div>' },
     SettingsContent: { template: '<main><slot /></main>' },
     ErrorState: {
       props: ['title'],

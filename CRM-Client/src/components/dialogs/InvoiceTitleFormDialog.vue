@@ -8,7 +8,7 @@
  * 技术栈：shadcn-vue + base.css 设计令牌
  */
 import { ref, computed, watch } from 'vue'
-import { useForm, useField } from 'vee-validate'
+import { Field, useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -19,11 +19,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import {
@@ -208,90 +203,78 @@ function handleOpenChange(open: boolean): void {
         </div>
 
         <!-- Title Name (required) -->
-        <FormField v-slot="{ value, handleChange }" name="title">
-          <FormItem>
-            <InputField
-              id="invoice-title-name"
-              :model-value="String(value ?? '')"
-              label="发票抬头"
-              required
-              placeholder="请输入发票抬头名称"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="title">
+          <InputField
+            id="invoice-title-name"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="发票抬头"
+            required
+            placeholder="请输入发票抬头名称"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Taxpayer ID (required) -->
-        <FormField v-slot="{ value, handleChange }" name="taxpayer_id">
-          <FormItem>
-            <InputField
-              id="invoice-title-taxpayer-id"
-              :model-value="String(value ?? '')"
-              label="税号"
-              required
-              placeholder="请输入纳税人识别号"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="taxpayer_id">
+          <InputField
+            id="invoice-title-taxpayer-id"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="税号"
+            required
+            placeholder="请输入纳税人识别号"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Bank Name -->
-        <FormField v-slot="{ value, handleChange }" name="bank_name">
-          <FormItem>
-            <InputField
-              id="invoice-title-bank-name"
-              :model-value="String(value ?? '')"
-              label="开户银行"
-              placeholder="请输入开户银行名称"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="bank_name">
+          <InputField
+            id="invoice-title-bank-name"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="开户银行"
+            placeholder="请输入开户银行名称"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Bank Account -->
-        <FormField v-slot="{ value, handleChange }" name="bank_account">
-          <FormItem>
-            <InputField
-              id="invoice-title-bank-account"
-              :model-value="String(value ?? '')"
-              label="银行账号"
-              placeholder="请输入银行账号"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="bank_account">
+          <InputField
+            id="invoice-title-bank-account"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="银行账号"
+            placeholder="请输入银行账号"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Address -->
-        <FormField v-slot="{ value, handleChange }" name="address">
-          <FormItem>
-            <InputField
-              id="invoice-title-address"
-              :model-value="String(value ?? '')"
-              label="地址"
-              placeholder="请输入注册地址"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="address">
+          <InputField
+            id="invoice-title-address"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="地址"
+            placeholder="请输入注册地址"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Phone -->
-        <FormField v-slot="{ value, handleChange }" name="phone">
-          <FormItem>
-            <InputField
-              id="invoice-title-phone"
-              :model-value="String(value ?? '')"
-              label="电话"
-              placeholder="请输入电话号码"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="phone">
+          <InputField
+            id="invoice-title-phone"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="电话"
+            placeholder="请输入电话号码"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- DialogFooter -->
         </form>

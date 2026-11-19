@@ -32,20 +32,6 @@ vi.mock('@/components/ui/dialog', () => {
   }
 })
 
-
-vi.mock('@/components/ui/form', async () => {
-  const { defineComponent, h } = await import('vue')
-  const { Field } = await import('vee-validate')
-  const passthrough = (name: string) => defineComponent({ name, setup: (_, { slots }) => () => h('div', slots.default?.()) })
-  return {
-    FormField: Field,
-    FormControl: passthrough('FormControl'),
-    FormItem: passthrough('FormItem'),
-    FormLabel: passthrough('FormLabel'),
-    FormMessage: passthrough('FormMessage'),
-  }
-})
-
 vi.mock('@/components/ui/radio-group', async () => {
   const { defineComponent, h, inject, provide } = await import('vue')
   interface RadioContext {

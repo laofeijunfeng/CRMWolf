@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useForm, useField } from 'vee-validate'
+import { Field, useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -12,11 +12,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -244,19 +239,17 @@ function handleCancel(): void {
       <div class="contact-form-dialog__body">
 
       <form id="contact-form" class="space-y-4" @submit="onSubmit">
-        <FormField v-slot="{ value, handleChange }" name="name">
-          <FormItem>
-            <InputField
-              id="contact-name"
-              :model-value="String(value ?? '')"
-              label="姓名"
-              required
-              placeholder="请输入姓名"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="name">
+          <InputField
+            id="contact-name"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="姓名"
+            required
+            placeholder="请输入姓名"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Gender -->
         <div class="space-y-2">
@@ -274,19 +267,17 @@ function handleCancel(): void {
           </p>
         </div>
 
-        <FormField v-slot="{ value, handleChange }" name="position">
-          <FormItem>
-            <InputField
-              id="contact-position"
-              :model-value="String(value ?? '')"
-              label="职位"
-              required
-              placeholder="请输入职位"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="position">
+          <InputField
+            id="contact-position"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="职位"
+            required
+            placeholder="请输入职位"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Is Decision Maker (Switch) -->
         <div class="flex items-center space-x-2">
@@ -298,77 +289,67 @@ function handleCancel(): void {
           <Label for="is_decision_maker" class="cursor-pointer">是否决策者</Label>
         </div>
 
-        <FormField v-slot="{ value, handleChange }" name="mobile">
-          <FormItem>
-            <InputField
-              id="contact-mobile"
-              :model-value="String(value ?? '')"
-              label="手机号"
-              required
-              type="tel"
-              autocomplete="tel"
-              placeholder="请输入手机号"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="mobile">
+          <InputField
+            id="contact-mobile"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="手机号"
+            required
+            type="tel"
+            autocomplete="tel"
+            placeholder="请输入手机号"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
-        <FormField v-slot="{ value, handleChange }" name="email">
-          <FormItem>
-            <InputField
-              id="contact-email"
-              :model-value="String(value ?? '')"
-              label="邮箱"
-              type="email"
-              autocomplete="email"
-              placeholder="请输入邮箱"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="email">
+          <InputField
+            id="contact-email"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="邮箱"
+            type="email"
+            autocomplete="email"
+            placeholder="请输入邮箱"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
-        <FormField v-slot="{ value, handleChange }" name="wechat_id">
-          <FormItem>
-            <InputField
-              id="contact-wechat-id"
-              :model-value="String(value ?? '')"
-              label="微信号"
-              placeholder="请输入微信号"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="wechat_id">
+          <InputField
+            id="contact-wechat-id"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="微信号"
+            placeholder="请输入微信号"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
-        <FormField v-if="reportsToOptions.length > 0" v-slot="{ value, handleChange }" name="reports_to">
-          <FormItem>
-            <SelectField
-              id="contact-reports-to"
-              :model-value="String(value ?? '')"
-              label="汇报对象"
-              :options="reportsToOptions"
-              placeholder="选择汇报对象"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-if="reportsToOptions.length > 0" v-slot="{ value, handleChange, errorMessage }" name="reports_to">
+          <SelectField
+            id="contact-reports-to"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="汇报对象"
+            :options="reportsToOptions"
+            placeholder="选择汇报对象"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
-        <FormField v-slot="{ value, handleChange }" name="remark">
-          <FormItem>
-            <TextareaField
-              id="contact-remark"
-              :model-value="String(value ?? '')"
-              label="备注"
-              placeholder="请输入备注"
-              control-class="min-h-20 resize-none"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="remark">
+          <TextareaField
+            id="contact-remark"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="备注"
+            placeholder="请输入备注"
+            control-class="min-h-20 resize-none"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- DialogFooter -->
         </form>

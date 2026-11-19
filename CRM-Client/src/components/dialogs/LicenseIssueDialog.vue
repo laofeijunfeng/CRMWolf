@@ -6,7 +6,7 @@
  * 使用 vee-validate + Zod 进行表单校验。
  */
 import { computed, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -18,11 +18,6 @@ import {
   DialogDescription,
   DialogFooter
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { TextareaField } from '@/components/crmwolf'
 import { confirmDiscardChanges } from '@/utils/confirmDialog'
@@ -159,8 +154,8 @@ const onSubmit = handleSubmit(async (formValues) => {
 
       <form class="grid gap-4 py-4" @submit="onSubmit">
         <!-- License 信息 -->
-        <FormField v-slot="{ value, handleChange }" name="license_info">
-          <FormItem>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="license_info">
+          <div class="grid gap-space-1">
             <TextareaField
               id="license-issue-info"
               :model-value="String(value ?? '')"
@@ -169,22 +164,20 @@ const onSubmit = handleSubmit(async (formValues) => {
               :rows="8"
               placeholder="请输入 License 信息"
               :disabled="submitting || closeGuardPending"
+              :error="errorMessage ?? ''"
               maxlength="10000"
               control-class="resize-none"
               @update:model-value="handleChange"
             />
-            <div class="flex justify-between items-center">
-              <FormMessage />
-              <span class="text-xs text-muted-foreground ml-auto">
-                {{ (value as string)?.length || 0 }} / 10000
-              </span>
-            </div>
-          </FormItem>
-        </FormField>
+            <span class="text-xs text-muted-foreground ml-auto">
+              {{ (value as string)?.length || 0 }} / 10000
+            </span>
+          </div>
+        </Field>
 
         <!-- 备注 -->
-        <FormField v-slot="{ value, handleChange }" name="comment">
-          <FormItem>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="comment">
+          <div class="grid gap-space-1">
             <TextareaField
               id="license-issue-comment"
               :model-value="String(value ?? '')"
@@ -192,18 +185,16 @@ const onSubmit = handleSubmit(async (formValues) => {
               :rows="3"
               placeholder="请输入备注（可选）"
               :disabled="submitting || closeGuardPending"
+              :error="errorMessage ?? ''"
               maxlength="500"
               control-class="resize-none"
               @update:model-value="handleChange"
             />
-            <div class="flex justify-between items-center">
-              <FormMessage />
-              <span class="text-xs text-muted-foreground ml-auto">
-                {{ (value as string)?.length || 0 }} / 500
-              </span>
-            </div>
-          </FormItem>
-        </FormField>
+            <span class="text-xs text-muted-foreground ml-auto">
+              {{ (value as string)?.length || 0 }} / 500
+            </span>
+          </div>
+        </Field>
       </form>
 
       <DialogFooter class="flex-col gap-2 sm:flex-row">

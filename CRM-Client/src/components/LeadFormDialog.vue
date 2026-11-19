@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
-import type { GenericObject } from 'vee-validate'
+import { Field, Form, type GenericObject } from 'vee-validate'
 import { toast } from 'vue-sonner'
 import {
   Dialog,
@@ -9,12 +9,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Form,
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   InputField,
@@ -286,112 +280,101 @@ const handleCancel = (): void => {
         <div class="space-y-4 mt-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <!-- 线索名称 -->
-            <FormField v-slot="{ value, handleChange }" name="lead_name">
-              <FormItem>
-                <InputField
-                  id="lead-name"
-                  :model-value="String(value ?? '')"
-                  label="线索名称"
-                  required
-                  autocomplete="organization"
-                  placeholder="请输入线索名称"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="lead_name">
+              <InputField
+                id="lead-name"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="线索名称"
+                required
+                autocomplete="organization"
+                placeholder="请输入线索名称"
+                @update:model-value="handleChange"
+              />
+            </Field>
 
             <!-- 线索来源 -->
-            <FormField v-slot="{ value, handleChange }" name="source_public_id">
-              <FormItem>
-                <SelectField
-                  id="lead-source"
-                  :model-value="String(value ?? '')"
-                  label="线索来源"
-                  required
-                  :options="sourceOptions"
-                  placeholder="请选择来源"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="source_public_id">
+              <SelectField
+                id="lead-source"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="线索来源"
+                required
+                :options="sourceOptions"
+                placeholder="请选择来源"
+                @update:model-value="handleChange"
+              />
+            </Field>
 
             <!-- 意向产品：分段选择需要整行宽度，避免挤在半列里溢出 -->
-            <FormField v-slot="{ value, handleChange }" name="product_public_id">
-              <FormItem class="sm:col-span-2">
+            <Field v-slot="{ value, handleChange, errorMessage }" name="product_public_id">
+              <div class="grid gap-space-1 sm:col-span-2">
                 <ProductIntentPicker
                   :model-value="String(value ?? '')"
                   id-prefix="lead-product"
+                  :invalid="Boolean(errorMessage)"
                   @update:model-value="handleChange"
                 />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+                <p v-if="errorMessage" id="lead-product-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+              </div>
+            </Field>
 
             <!-- 所在城市 -->
-            <FormField v-slot="{ value, handleChange }" name="city">
-              <FormItem>
-                <InputField
-                  id="lead-city"
-                  :model-value="String(value ?? '')"
-                  label="所在城市"
-                  required
-                  autocomplete="address-level2"
-                  placeholder="请输入城市"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="city">
+              <InputField
+                id="lead-city"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="所在城市"
+                required
+                autocomplete="address-level2"
+                placeholder="请输入城市"
+                @update:model-value="handleChange"
+              />
+            </Field>
 
             <!-- 公司规模 -->
-            <FormField v-slot="{ value, handleChange }" name="company_scale">
-              <FormItem>
-                <SelectField
-                  id="lead-company-scale"
-                  :model-value="String(value ?? '')"
-                  label="公司规模"
-                  :options="companyScaleOptions"
-                  placeholder="请选择规模"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="company_scale">
+              <SelectField
+                id="lead-company-scale"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="公司规模"
+                :options="companyScaleOptions"
+                placeholder="请选择规模"
+                @update:model-value="handleChange"
+              />
+            </Field>
 
             <!-- 联系人姓名 -->
-            <FormField v-slot="{ value, handleChange }" name="contact_name">
-              <FormItem>
-                <InputField
-                  id="lead-contact-name"
-                  :model-value="String(value ?? '')"
-                  label="联系人姓名"
-                  required
-                  autocomplete="name"
-                  placeholder="请输入联系人姓名"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="contact_name">
+              <InputField
+                id="lead-contact-name"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="联系人姓名"
+                required
+                autocomplete="name"
+                placeholder="请输入联系人姓名"
+                @update:model-value="handleChange"
+              />
+            </Field>
 
             <!-- 联系电话（UX 优化：Input Types） -->
-            <FormField v-slot="{ value, handleChange }" name="contact_phone">
-              <FormItem>
-                <InputField
-                  id="lead-contact-phone"
-                  :model-value="String(value ?? '')"
-                  label="联系电话"
-                  required
-                  type="tel"
-                  autocomplete="tel"
-                  placeholder="请输入联系电话"
-                  @update:model-value="handleChange"
-                />
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="contact_phone">
+              <InputField
+                id="lead-contact-phone"
+                :error="errorMessage ?? ''"
+                :model-value="String(value ?? '')"
+                label="联系电话"
+                required
+                type="tel"
+                autocomplete="tel"
+                placeholder="请输入联系电话"
+                @update:model-value="handleChange"
+              />
+            </Field>
           </div>
         </div>
 

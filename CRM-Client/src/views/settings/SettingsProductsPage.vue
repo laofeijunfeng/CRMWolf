@@ -3,12 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toTypedSchema } from '@vee-validate/zod'
 
+import { Field, Form } from 'vee-validate'
 import type { GenericObject } from 'vee-validate'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { InputField, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 
@@ -21,14 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
@@ -476,24 +468,28 @@ watch([hasAccess, teamId], (): void => {
         class="space-y-4"
         @submit="onSubmit"
       >
-        <FormField v-slot="{ componentField }" name="name">
-          <FormItem>
-            <FormLabel>名称</FormLabel>
-            <FormControl>
-              <Input v-bind="componentField as unknown as Record<string, unknown>" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-        <FormField v-slot="{ componentField }" name="description">
-          <FormItem>
-            <FormLabel>描述</FormLabel>
-            <FormControl>
-              <Textarea v-bind="componentField as unknown as Record<string, unknown>" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="name">
+          <InputField
+            id="product-name"
+            name="name"
+            label="名称"
+            :model-value="value as string"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description">
+          <TextareaField
+            id="product-description"
+            name="description"
+            label="描述"
+            :model-value="value as string"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
         <DialogFooter>
           <Button type="submit" :disabled="dialogSubmitting">保存</Button>
         </DialogFooter>
@@ -516,24 +512,28 @@ watch([hasAccess, teamId], (): void => {
         class="space-y-4"
         @submit="onModuleSubmit"
       >
-        <FormField v-slot="{ componentField }" name="name">
-          <FormItem>
-            <FormLabel>名称</FormLabel>
-            <FormControl>
-              <Input v-bind="componentField as unknown as Record<string, unknown>" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-        <FormField v-slot="{ componentField }" name="description">
-          <FormItem>
-            <FormLabel>描述</FormLabel>
-            <FormControl>
-              <Textarea v-bind="componentField as unknown as Record<string, unknown>" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="name">
+          <InputField
+            id="product-module-name"
+            name="name"
+            label="名称"
+            :model-value="value as string"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description">
+          <TextareaField
+            id="product-module-description"
+            name="description"
+            label="描述"
+            :model-value="value as string"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
         <DialogFooter>
           <Button type="submit" :disabled="moduleDialogSubmitting">保存</Button>
         </DialogFooter>

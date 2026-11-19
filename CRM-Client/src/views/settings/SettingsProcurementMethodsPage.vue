@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
+import { InputField, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 
@@ -18,14 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import procurementApi, {
   type ProcurementMethod,
@@ -438,61 +430,60 @@ watch([hasAccess, teamId], (): void => {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
-        <FormField v-slot="{ componentField }" name="code">
-          <FormItem>
-            <FormLabel>编码 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="如：PUBLIC_BIDDING"
-                :disabled="isEditMode"
-                class="uppercase"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="code">
+          <InputField
+            id="procurement-method-code"
+            label="编码"
+            required
+            :model-value="value as string"
+            placeholder="如：PUBLIC_BIDDING"
+            :disabled="isEditMode"
+            control-class="uppercase"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
-        <FormField v-slot="{ componentField }" name="name">
-          <FormItem>
-            <FormLabel>名称 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="请输入采购方式名称"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="name">
+          <InputField
+            id="procurement-method-name"
+            label="名称"
+            required
+            :model-value="value as string"
+            placeholder="请输入采购方式名称"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
-        <FormField v-slot="{ componentField }" name="sort_order">
-          <FormItem>
-            <FormLabel>排序序号 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                type="number"
-                placeholder="请输入排序序号"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="sort_order">
+          <InputField
+            id="procurement-method-sort-order"
+            label="排序序号"
+            required
+            :model-value="value as string"
+            type="number"
+            placeholder="请输入排序序号"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
-        <FormField v-slot="{ componentField }" name="description">
-          <FormItem>
-            <FormLabel>描述</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="请输入描述"
-                :rows="3"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description">
+          <TextareaField
+            id="procurement-method-description"
+            label="描述"
+            :model-value="value as string"
+            placeholder="请输入描述"
+            :rows="3"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <DialogFooter class="pt-4 border-t">
           <Button

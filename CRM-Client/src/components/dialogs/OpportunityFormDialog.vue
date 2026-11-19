@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -13,11 +13,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -552,38 +547,37 @@ function handleCancel(): void {
 
       <form id="opportunity-form" class="space-y-4" @submit="onSubmit">
         <!-- Customer (required) -->
-        <FormField v-slot="{ value, handleChange }" name="customer_id">
-          <FormItem>
-            <InputField
-              v-if="customerLocked === true"
-              id="opportunity-customer-locked"
-              :model-value="selectedCustomerName"
-              label="所属客户"
-              required
-              readonly
-              control-class="bg-muted text-foreground"
-              aria-readonly="true"
-            />
-            <SearchableSelectField
-              v-else
-              id="opportunity-customer"
-              :model-value="String(value ?? '')"
-              label="所属客户"
-              required
-              :options="customerSelectOptions"
-              :search-value="customerSearchKeyword"
-              placeholder="请选择客户"
-              search-placeholder="搜索客户名称"
-              :loading="loadingCustomers"
-              loading-text="加载中..."
-              empty-text="暂无客户"
-              @update:model-value="handleChange"
-              @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
-              @update:search-value="handleCustomerSearch"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="customer_id">
+          <InputField
+            v-if="customerLocked === true"
+            id="opportunity-customer-locked"
+            :model-value="selectedCustomerName"
+            label="所属客户"
+            required
+            readonly
+            control-class="bg-muted text-foreground"
+            aria-readonly="true"
+            :error="errorMessage ?? ''"
+          />
+          <SearchableSelectField
+            v-else
+            id="opportunity-customer"
+            :model-value="String(value ?? '')"
+            label="所属客户"
+            required
+            :options="customerSelectOptions"
+            :search-value="customerSearchKeyword"
+            placeholder="请选择客户"
+            search-placeholder="搜索客户名称"
+            :loading="loadingCustomers"
+            loading-text="加载中..."
+            empty-text="暂无客户"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
+            @update:search-value="handleCustomerSearch"
+          />
+        </Field>
 
         <div class="space-y-2">
           <p id="opportunity-product-label" class="text-caption font-medium text-foreground">
@@ -605,148 +599,136 @@ function handleCancel(): void {
           <p v-if="productError" id="opportunity-product-error" class="text-sm text-destructive" role="alert">{{ productError }}</p>
         </div>
 
-        <FormField v-slot="{ value, handleChange }" name="product_module_public_ids">
-          <FormItem>
-            <div class="grid gap-1">
-              <p id="opportunity-modules-label" class="text-caption font-medium text-foreground">
-                产品模块 <span class="text-danger" aria-hidden="true">*</span>
-              </p>
-              <MultiSelect
-                :model-value="Array.isArray(value) ? value : []"
-                :options="moduleOptions"
-                placeholder="请选择产品模块"
-                :disabled="!values.product_public_id || moduleOptions.length === 0"
-                @update:model-value="handleChange"
-              />
-            </div>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Total Amount (required) -->
-        <FormField v-slot="{ value, handleChange }" name="total_amount">
-          <FormItem>
-            <InputField
-                id="opportunity-total-amount"
-                :model-value="Number(value ?? 0)"
-                label="总金额"
-                required
-                type="number"
-                inputmode="decimal"
-                step="0.01"
-                min="0"
-                placeholder="请输入总金额"
-                @update:model-value="handleChange"
-              />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- User Count (required) -->
-        <FormField v-slot="{ value, handleChange }" name="user_count">
-          <FormItem>
-            <InputField
-                id="opportunity-user-count"
-                :model-value="Number(value ?? 1)"
-                label="用户数"
-                required
-                type="number"
-                min="1"
-                placeholder="请输入用户数"
-                @update:model-value="handleChange"
-              />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ value, handleChange }" name="license_type">
-          <FormItem>
-            <div class="grid gap-1">
-              <p id="opportunity-license-type-label" class="text-caption font-medium text-foreground">
-                授权类型 <span class="text-danger" aria-hidden="true">*</span>
-              </p>
-              <SegmentedChoiceControl
-                id="opportunity-license-type"
-                :model-value="String(value ?? '')"
-                :options="licenseTypeOptions"
-                labelled-by="opportunity-license-type-label"
-                id-prefix="opportunity-license-type"
-                style="--segmented-choice-columns: 2"
-                @update:model-value="handleChange"
-              />
-            </div>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Subscription Years (required, only for SUBSCRIPTION) -->
-        <FormField v-if="values.license_type === LicenseType.SUBSCRIPTION" v-slot="{ value, handleChange }" name="subscription_years">
-          <FormItem>
-            <InputField
-                id="opportunity-subscription-years"
-                :model-value="Number(value ?? 1)"
-                label="订阅年限"
-                required
-                type="number"
-                min="1"
-                max="10"
-                placeholder="请输入订阅年限"
-                @update:model-value="handleChange"
-              />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ value, handleChange }" name="purchase_type">
-          <FormItem>
-            <div class="grid gap-1">
-              <p id="opportunity-purchase-type-label" class="text-caption font-medium text-foreground">
-                采购类型 <span class="text-danger" aria-hidden="true">*</span>
-              </p>
-              <SegmentedChoiceControl
-                id="opportunity-purchase-type"
-                :model-value="String(value ?? '')"
-                :options="purchaseTypeOptions"
-                labelled-by="opportunity-purchase-type-label"
-                id-prefix="opportunity-purchase-type"
-                style="--segmented-choice-columns: 3"
-                @update:model-value="handleChange"
-              />
-            </div>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Expected Closing Date (required) -->
-        <FormField v-slot="{ value, handleChange }" name="expected_closing_date">
-          <FormItem>
-            <DateField
-                id="opportunity-expected-closing-date"
-                :model-value="value ? new Date(String(value)) : null"
-                label="预计成交日期"
-                required
-                placeholder="请选择预计成交日期"
-                @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
-              />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <!-- Procurement Method (optional) -->
-        <FormField v-slot="{ value, handleChange }" name="procurement_method_id">
-          <FormItem>
-            <SelectField
-              id="opportunity-procurement-method"
-              :model-value="String(value ?? '')"
-              label="采购方式"
-              :options="procurementMethodOptions"
-              :placeholder="loadingMethods ? '加载采购方式中...' : '请选择采购方式'"
-              :disabled="loadingMethods"
+        <Field v-slot="{ value, handleChange, errorMessage }" name="product_module_public_ids">
+          <div class="grid gap-1">
+            <p id="opportunity-modules-label" class="text-caption font-medium text-foreground">
+              产品模块 <span class="text-danger" aria-hidden="true">*</span>
+            </p>
+            <MultiSelect
+              :model-value="Array.isArray(value) ? value : []"
+              :options="moduleOptions"
+              placeholder="请选择产品模块"
+              :disabled="!values.product_public_id || moduleOptions.length === 0"
               @update:model-value="handleChange"
             />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+            <p v-if="errorMessage" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+          </div>
+        </Field>
+
+        <!-- Total Amount (required) -->
+        <Field v-slot="{ value, handleChange, errorMessage }" name="total_amount">
+          <InputField
+            id="opportunity-total-amount"
+            :model-value="Number(value ?? 0)"
+            label="总金额"
+            required
+            type="number"
+            inputmode="decimal"
+            step="0.01"
+            min="0"
+            placeholder="请输入总金额"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+          />
+        </Field>
+
+        <!-- User Count (required) -->
+        <Field v-slot="{ value, handleChange, errorMessage }" name="user_count">
+          <InputField
+            id="opportunity-user-count"
+            :model-value="Number(value ?? 1)"
+            label="用户数"
+            required
+            type="number"
+            min="1"
+            placeholder="请输入用户数"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+          />
+        </Field>
+
+        <Field v-slot="{ value, handleChange, errorMessage }" name="license_type">
+          <div class="grid gap-1">
+            <p id="opportunity-license-type-label" class="text-caption font-medium text-foreground">
+              授权类型 <span class="text-danger" aria-hidden="true">*</span>
+            </p>
+            <SegmentedChoiceControl
+              id="opportunity-license-type"
+              :model-value="String(value ?? '')"
+              :options="licenseTypeOptions"
+              labelled-by="opportunity-license-type-label"
+              id-prefix="opportunity-license-type"
+              :invalid="Boolean(errorMessage)"
+              :described-by="errorMessage ? 'opportunity-license-type-error' : undefined"
+              style="--segmented-choice-columns: 2"
+              @update:model-value="handleChange"
+            />
+            <p v-if="errorMessage" id="opportunity-license-type-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+          </div>
+        </Field>
+
+        <!-- Subscription Years (required, only for SUBSCRIPTION) -->
+        <Field v-if="values.license_type === LicenseType.SUBSCRIPTION" v-slot="{ value, handleChange, errorMessage }" name="subscription_years">
+          <InputField
+            id="opportunity-subscription-years"
+            :model-value="Number(value ?? 1)"
+            label="订阅年限"
+            required
+            type="number"
+            min="1"
+            max="10"
+            placeholder="请输入订阅年限"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+          />
+        </Field>
+
+        <Field v-slot="{ value, handleChange, errorMessage }" name="purchase_type">
+          <div class="grid gap-1">
+            <p id="opportunity-purchase-type-label" class="text-caption font-medium text-foreground">
+              采购类型 <span class="text-danger" aria-hidden="true">*</span>
+            </p>
+            <SegmentedChoiceControl
+              id="opportunity-purchase-type"
+              :model-value="String(value ?? '')"
+              :options="purchaseTypeOptions"
+              labelled-by="opportunity-purchase-type-label"
+              id-prefix="opportunity-purchase-type"
+              :invalid="Boolean(errorMessage)"
+              :described-by="errorMessage ? 'opportunity-purchase-type-error' : undefined"
+              style="--segmented-choice-columns: 3"
+              @update:model-value="handleChange"
+            />
+            <p v-if="errorMessage" id="opportunity-purchase-type-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+          </div>
+        </Field>
+
+        <!-- Expected Closing Date (required) -->
+        <Field v-slot="{ value, handleChange, errorMessage }" name="expected_closing_date">
+          <DateField
+            id="opportunity-expected-closing-date"
+            :model-value="value ? new Date(String(value)) : null"
+            label="预计成交日期"
+            required
+            placeholder="请选择预计成交日期"
+            :error="errorMessage ?? ''"
+            @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : '')"
+          />
+        </Field>
+
+        <!-- Procurement Method (optional) -->
+        <Field v-slot="{ value, handleChange, errorMessage }" name="procurement_method_id">
+          <SelectField
+            id="opportunity-procurement-method"
+            :model-value="String(value ?? '')"
+            label="采购方式"
+            :options="procurementMethodOptions"
+            :placeholder="loadingMethods ? '加载采购方式中...' : '请选择采购方式'"
+            :disabled="loadingMethods"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- DialogFooter -->
         </form>

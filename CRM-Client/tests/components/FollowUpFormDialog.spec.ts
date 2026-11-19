@@ -29,24 +29,6 @@ vi.mock('@/components/ui/dialog', () => {
     DialogHeader: passthrough('DialogHeader'),
     DialogTitle: passthrough('DialogTitle'),
   }
-
-
-})
-
-
-vi.mock('@/components/ui/form', async () => {
-  const { defineComponent, h } = await import('vue')
-  const { Field } = await import('vee-validate')
-  const passthrough = (name: string) => defineComponent({
-    name,
-    setup: (_, { slots }) => () => h('div', slots.default?.()),
-  })
-
-  return {
-    FormField: Field,
-    FormItem: passthrough('FormItem'),
-    FormMessage: passthrough('FormMessage'),
-  }
 })
 
 vi.mock('@/components/ui/button', () => ({

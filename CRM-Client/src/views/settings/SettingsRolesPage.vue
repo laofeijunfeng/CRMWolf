@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
+import { InputField, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,14 +16,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -441,49 +433,48 @@ watch(() => route.query['action'], (action) => {
 
       <form class="space-y-4" @submit="onSubmit">
         <!-- 角色代码 -->
-        <FormField v-slot="{ componentField }" name="code">
-          <FormItem>
-            <FormLabel>角色代码 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="如：SALES_DIRECTOR"
-                :disabled="isEditMode"
-                class="uppercase"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="code">
+          <InputField
+            id="role-code"
+            label="角色代码"
+            required
+            :model-value="value as string"
+            placeholder="如：SALES_DIRECTOR"
+            :disabled="isEditMode"
+            control-class="uppercase"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <!-- 角色名称 -->
-        <FormField v-slot="{ componentField }" name="name">
-          <FormItem>
-            <FormLabel>角色名称 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="如：销售总监"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="name">
+          <InputField
+            id="role-name"
+            label="角色名称"
+            required
+            :model-value="value as string"
+            placeholder="如：销售总监"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <!-- 描述 -->
-        <FormField v-slot="{ componentField }" name="description">
-          <FormItem>
-            <FormLabel>描述</FormLabel>
-            <FormControl>
-              <Textarea
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="请输入角色描述"
-                :rows="3"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description">
+          <TextareaField
+            id="role-description"
+            label="描述"
+            :model-value="value as string"
+            placeholder="请输入角色描述"
+            :rows="3"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <DialogFooter class="pt-4 border-t">
           <Button

@@ -133,7 +133,6 @@ describe('SettingsRolesPage', () => {
           Dialog: { template: '<div><slot /></div>' },
           DialogContent: { template: '<div><slot /></div>' },
           DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
-          FormField: { template: '<div><slot :componentField="{}" /></div>' },
         },
       },
     })
@@ -181,7 +180,6 @@ describe('SettingsRolesPage', () => {
           Dialog: { template: '<div><slot /></div>' },
           DialogContent: { template: '<div><slot /></div>' },
           DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
-          FormField: { template: '<div><slot :componentField="{}" /></div>' },
           Checkbox: { template: '<input type="checkbox">' },
           Label: { template: '<label><slot /></label>' },
           Badge: { template: '<span><slot /></span>' },
@@ -227,7 +225,6 @@ describe('SettingsRolesPage', () => {
           Dialog: { template: '<div><slot /></div>' },
           DialogContent: { template: '<div><slot /></div>' },
           DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
-          FormField: { template: '<div><slot :componentField="{}" /></div>' },
         },
       },
     })

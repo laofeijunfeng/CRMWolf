@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
+import { InputField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 
@@ -18,13 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 import { Badge } from '@/components/ui/badge'
 import acquisitionSourceApi, {
   type AcquisitionSource,
@@ -363,32 +356,31 @@ watch([hasAccess, teamId], (): void => {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onSubmit">
-        <FormField v-slot="{ componentField }" name="name">
-          <FormItem>
-            <FormLabel>名称 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                placeholder="请输入获客来源名称"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="name">
+          <InputField
+            id="acquisition-source-name"
+            label="名称"
+            required
+            :model-value="value as string"
+            placeholder="请输入获客来源名称"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
-        <FormField v-slot="{ componentField }" name="sort_order">
-          <FormItem>
-            <FormLabel>排序序号</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                type="number"
-                placeholder="可选，留空由系统分配"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="sort_order">
+          <InputField
+            id="acquisition-source-sort-order"
+            label="排序序号"
+            :model-value="value as string"
+            type="number"
+            placeholder="可选，留空由系统分配"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <DialogFooter class="pt-4 border-t">
           <Button type="button" variant="outline" @click="dialogOpen = false">

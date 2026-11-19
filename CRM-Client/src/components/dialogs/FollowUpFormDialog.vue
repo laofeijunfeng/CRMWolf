@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from 'vue'
-import { useForm, useField } from 'vee-validate'
+import { Field, useForm, useField } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -12,11 +12,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -246,51 +241,45 @@ function handleOpenChange(open: boolean): void {
         </div>
 
         <!-- Follow-up Content (Textarea, required) -->
-        <FormField v-slot="{ value, handleChange }" name="content">
-          <FormItem>
-            <TextareaField
-              id="follow-up-content"
-              :model-value="String(value ?? '')"
-              label="活动内容"
-              required
-              :rows="6"
-              placeholder="可直接粘贴跟进内容或完整会议纪要"
-              control-class="resize-none"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="content">
+          <TextareaField
+            id="follow-up-content"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="活动内容"
+            required
+            :rows="6"
+            placeholder="可直接粘贴跟进内容或完整会议纪要"
+            control-class="resize-none"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Next Follow-up Time -->
-        <FormField v-slot="{ value, handleChange }" name="next_follow_time">
-          <FormItem>
-            <DateField
-              id="follow-up-next-time"
-              :model-value="value ? new Date(value as string) : null"
-              label="下次跟进时间（可选）"
-              placeholder="如有下一步安排，请选择时间"
-              @update:model-value="(date: Date | null) => handleNextFollowTimeChange(handleChange, date)"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="next_follow_time">
+          <DateField
+            id="follow-up-next-time"
+            :error="errorMessage ?? ''"
+            :model-value="value ? new Date(value as string) : null"
+            label="下次跟进时间（可选）"
+            placeholder="如有下一步安排，请选择时间"
+            @update:model-value="(date: Date | null) => handleNextFollowTimeChange(handleChange, date)"
+          />
+        </Field>
 
         <!-- Next Action (Textarea) -->
-        <FormField v-slot="{ value, handleChange }" name="next_action">
-          <FormItem>
-            <TextareaField
-              id="follow-up-next-action"
-              :model-value="String(value ?? '')"
-              label="下一步动作（可选）"
-              :rows="3"
-              placeholder="请输入下一步动作"
-              control-class="resize-none"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="next_action">
+          <TextareaField
+            id="follow-up-next-action"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="下一步动作（可选）"
+            :rows="3"
+            placeholder="请输入下一步动作"
+            control-class="resize-none"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- DialogFooter -->
         </form>

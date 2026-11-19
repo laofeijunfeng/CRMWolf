@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 
 import { z } from 'zod'
@@ -16,13 +16,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+import { InputField } from '@/components/crmwolf'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -670,33 +664,33 @@ watch([hasAccess, teamId], (): void => {
       </DialogHeader>
 
       <form class="space-y-4" @submit="onResetPasswordSubmit">
-        <FormField v-slot="{ componentField }" name="newPassword">
-          <FormItem>
-            <FormLabel>新密码 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                type="password"
-                placeholder="请输入新密码（6-50位）"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="newPassword">
+          <InputField
+            id="member-new-password"
+            label="新密码"
+            required
+            :model-value="value as string"
+            type="password"
+            placeholder="请输入新密码（6-50位）"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
-        <FormField v-slot="{ componentField }" name="confirmPassword">
-          <FormItem>
-            <FormLabel>确认密码 <span class="text-destructive">*</span></FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField as unknown as Record<string, unknown>"
-                type="password"
-                placeholder="请再次输入新密码"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="confirmPassword">
+          <InputField
+            id="member-confirm-password"
+            label="确认密码"
+            required
+            :model-value="value as string"
+            type="password"
+            placeholder="请再次输入新密码"
+            :error="errorMessage ?? ''"
+            @update:model-value="handleChange"
+            @blur="handleBlur"
+          />
+        </Field>
 
         <DialogFooter>
           <Button type="button" variant="outline" @click="resetPasswordDialogOpen = false">取消</Button>

@@ -150,20 +150,10 @@ const stubs = {
   DialogTitle: { template: '<h2><slot /></h2>' },
   DialogDescription: { template: '<div><slot /></div>' },
   DialogFooter: { template: '<div><slot /></div>' },
-  FormField: { template: '<div><slot :componentField="{}" /></div>' },
-  FormControl: { template: '<div><slot /></div>' },
-  FormItem: { template: '<div><slot /></div>' },
-  FormLabel: { template: '<label><slot /></label>' },
-  FormMessage: { template: '<span><slot /></span>' },
 }
 
 const formSubmitStubs: Record<string, object> = Object.fromEntries(
   Object.entries(stubs).filter(([key]) => ![
-    'FormField',
-    'FormControl',
-    'FormItem',
-    'FormLabel',
-    'FormMessage',
     'Input',
     'Textarea',
   ].includes(key)),

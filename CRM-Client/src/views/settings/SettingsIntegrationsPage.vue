@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Label } from '@/components/ui/label'
+import { InputField } from '@/components/crmwolf'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { oauthApi } from '@/api/oauth'
 import type { OAuthProviderConfigResponse, OAuthProviderConfigUpdate } from '@/api/oauth'
@@ -188,80 +189,77 @@ watch(hasAccess, (ok) => {
             <CardDescription>当前配置只对本团队生效，用于飞书登录。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
-            <FormField v-slot="{ value }" name="enabled">
-              <FormItem>
-                <div class="flex items-center justify-between gap-4">
-                  <div class="space-y-0.5">
-                    <FormLabel>启用飞书登录</FormLabel>
-                    <FormDescription>启用后，团队邀请链接将使用飞书登录。</FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      :model-value="value ?? false"
-                      :disabled="loading || saving"
-                      @update:model-value="(checked: boolean) => setFieldValue('enabled', checked)"
-                    />
-                  </FormControl>
+            <Field v-slot="{ value }" name="enabled">
+              <div class="flex items-center justify-between gap-4">
+                <div class="space-y-0.5">
+                  <Label for="feishu-enabled">启用飞书登录</Label>
+                  <p id="feishu-enabled-description" class="text-caption text-muted-foreground">
+                    启用后，团队邀请链接将使用飞书登录。
+                  </p>
                 </div>
-              </FormItem>
-            </FormField>
+                <Switch
+                  id="feishu-enabled"
+                  aria-describedby="feishu-enabled-description"
+                  :model-value="(value as boolean) ?? false"
+                  :disabled="loading || saving"
+                  @update:model-value="(checked: boolean) => setFieldValue('enabled', checked)"
+                />
+              </div>
+            </Field>
 
             <div class="flex flex-col gap-4">
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="app_id">
-                <FormItem>
-                  <FormLabel>App ID</FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value"
-                      :disabled="loading || saving"
-                      autocomplete="off"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="app_id">
+                <InputField
+                  id="feishu-app-id"
+                  label="App ID"
+                  :model-value="value as string"
+                  :disabled="loading || saving"
+                  autocomplete="off"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="app_secret">
-                <FormItem>
-                  <FormLabel>App Secret</FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value"
-                      :placeholder="config?.app_secret_configured ? '已配置，留空则不修改' : '请输入 App Secret'"
-                      :disabled="loading || saving"
-                      type="password"
-                      autocomplete="new-password"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription>已配置时留空保存表示保持原密钥。</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="app_secret">
+                <InputField
+                  id="feishu-app-secret"
+                  label="App Secret"
+                  :model-value="value as string"
+                  :placeholder="config?.app_secret_configured ? '已配置，留空则不修改' : '请输入 App Secret'"
+                  :disabled="loading || saving"
+                  type="password"
+                  autocomplete="new-password"
+                  helper-text="已配置时留空保存表示保持原密钥。"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="redirect_uri">
-                <FormItem>
-                  <FormLabel>重定向 URL</FormLabel>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="redirect_uri">
+                <div class="grid gap-1">
+                  <Label for="feishu-redirect-uri" class="text-caption font-medium text-foreground">重定向 URL</Label>
                   <div class="flex items-start gap-2">
-                    <FormControl>
-                      <Input
-                        class="flex-1"
-                        :model-value="value"
-                        :disabled="loading || saving"
-                        @update:model-value="handleChange"
-                        @blur="handleBlur"
-                      />
-                    </FormControl>
+                    <Input
+                      id="feishu-redirect-uri"
+                      class="flex-1"
+                      :model-value="value as string"
+                      :disabled="loading || saving"
+                      :aria-invalid="Boolean(errorMessage)"
+                      :aria-describedby="errorMessage ? 'feishu-redirect-uri-error' : undefined"
+                      @update:model-value="handleChange"
+                      @blur="handleBlur"
+                    />
                     <Button type="button" variant="outline" size="icon" aria-label="复制重定向 URL" @click="copyCallbackUrl">
                       <Copy class="h-4 w-4" />
                     </Button>
                   </div>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+                  <p v-if="errorMessage" id="feishu-redirect-uri-error" class="text-caption text-destructive" role="alert">
+                    {{ errorMessage }}
+                  </p>
+                </div>
+              </Field>
             </div>
           </CardContent>
         </Card>

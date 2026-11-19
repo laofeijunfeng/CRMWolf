@@ -51,7 +51,6 @@ const pageStubs = {
   },
   DialogContent: { template: '<div><slot /></div>' },
   DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
-  FormField: { template: '<div><slot :componentField="{}" /></div>' },
 }
 
 function seedOwnerPinia(): void {

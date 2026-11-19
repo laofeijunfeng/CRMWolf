@@ -6,7 +6,7 @@
  * 使用 vee-validate + Zod 进行表单校验。
  */
 import { computed, ref, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -18,11 +18,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import { TextareaField } from '@/components/crmwolf'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
@@ -224,23 +219,21 @@ const onSubmit = handleSubmit(async (formValues) => {
         />
 
         <form id="opportunity-lose-form" class="opportunity-lose-dialog__form" @submit="onSubmit">
-          <FormField v-slot="{ value, handleChange }" name="loss_reason">
-            <FormItem>
-              <TextareaField
-                id="opportunity-lose-reason"
-                :model-value="String(value ?? '')"
-                label="输单原因"
-                required
-                :rows="4"
-                :maxlength="500"
-                placeholder="请输入输单原因"
-                :disabled="loading || submitting || loadError !== null"
-                control-class="resize-none"
-                @update:model-value="handleChange"
-              />
-              <FormMessage />
-            </FormItem>
-          </FormField>
+          <Field v-slot="{ value, handleChange, errorMessage }" name="loss_reason">
+            <TextareaField
+              id="opportunity-lose-reason"
+              :model-value="String(value ?? '')"
+              label="输单原因"
+              required
+              :rows="4"
+              :maxlength="500"
+              placeholder="请输入输单原因"
+              :disabled="loading || submitting || loadError !== null"
+              control-class="resize-none"
+              :error="errorMessage ?? ''"
+              @update:model-value="handleChange"
+            />
+          </Field>
         </form>
       </div>
 

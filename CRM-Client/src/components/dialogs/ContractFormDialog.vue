@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
@@ -12,11 +12,6 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  FormField,
-  FormItem,
-  FormMessage,
-} from '@/components/ui/form'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -600,70 +595,65 @@ function handleCancel(): void {
 
       <form id="contract-form" class="space-y-4" @submit="onSubmit">
         <!-- Customer (required, only in create mode) -->
-        <FormField v-if="!isEdit" v-slot="{ value, handleChange }" name="customer_id">
-          <FormItem>
-            <InputField
-              v-if="customerLocked === true"
-              id="contract-customer-locked"
-              :model-value="selectedCustomerName"
-              label="所属客户"
-              required
-              readonly
-              control-class="bg-muted text-foreground"
-              aria-readonly="true"
-            />
-            <SearchableSelectField
-              v-else
-              id="contract-customer"
-              :model-value="String(value ?? '')"
-              label="所属客户"
-              required
-              :options="customerSelectOptions"
-              :search-value="customerSearchKeyword"
-              placeholder="请选择客户"
-              search-placeholder="搜索客户名称"
-              :loading="loadingCustomers"
-              loading-text="加载中..."
-              empty-text="暂无客户"
-              @update:model-value="handleChange"
-              @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
-              @update:search-value="handleCustomerSearch"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-if="!isEdit" v-slot="{ value, handleChange, errorMessage }" name="customer_id">
+          <InputField
+            v-if="customerLocked === true"
+            id="contract-customer-locked"
+            :error="errorMessage ?? ''"
+            :model-value="selectedCustomerName"
+            label="所属客户"
+            required
+            readonly
+            control-class="bg-muted text-foreground"
+            aria-readonly="true"
+          />
+          <SearchableSelectField
+            v-else
+            id="contract-customer"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="所属客户"
+            required
+            :options="customerSelectOptions"
+            :search-value="customerSearchKeyword"
+            placeholder="请选择客户"
+            search-placeholder="搜索客户名称"
+            :loading="loadingCustomers"
+            loading-text="加载中..."
+            empty-text="暂无客户"
+            @update:model-value="handleChange"
+            @update:open="(open: boolean) => { if (open) fetchCustomers(customerSearchKeyword) }"
+            @update:search-value="handleCustomerSearch"
+          />
+        </Field>
 
         <!-- Opportunity (required, only in create mode) -->
-        <FormField v-if="!isEdit" v-slot="{ value }" name="opportunity_id">
-          <FormItem>
-            <SelectField
-              id="contract-opportunity"
-              :model-value="value !== undefined && value !== null ? String(value) : ''"
-              label="关联商机"
-              required
-              :options="opportunitySelectOptions"
-              :placeholder="opportunitySelectPlaceholder"
-              :disabled="opportunitySelectDisabled"
-              @update:model-value="handleOpportunityChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-if="!isEdit" v-slot="{ value, errorMessage }" name="opportunity_id">
+          <SelectField
+            id="contract-opportunity"
+            :error="errorMessage ?? ''"
+            :model-value="value !== undefined && value !== null ? String(value) : ''"
+            label="关联商机"
+            required
+            :options="opportunitySelectOptions"
+            :placeholder="opportunitySelectPlaceholder"
+            :disabled="opportunitySelectDisabled"
+            @update:model-value="handleOpportunityChange"
+          />
+        </Field>
 
         <!-- Contract Name (required) -->
-        <FormField v-slot="{ value, handleChange }" name="contract_name">
-          <FormItem>
-            <InputField
-              id="contract-name"
-              :model-value="String(value ?? '')"
-              label="合同名称"
-              required
-              placeholder="选择商机后自动生成，可手动修改"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="contract_name">
+          <InputField
+            id="contract-name"
+            :error="errorMessage ?? ''"
+            :model-value="String(value ?? '')"
+            label="合同名称"
+            required
+            placeholder="选择商机后自动生成，可手动修改"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <FileAttachment
           v-if="!isEdit"
@@ -682,122 +672,110 @@ function handleCancel(): void {
         />
 
         <!-- Signing Contact (required) -->
-        <FormField v-slot="{ value, handleChange }" name="signing_contact_id">
-          <FormItem>
-            <SelectField
-              id="contract-signing-contact"
-              :model-value="value !== undefined && value !== null ? String(value) : ''"
-              label="签署联系人"
-              required
-              :options="contactSelectOptions"
-              :placeholder="loadingContacts ? '加载联系人中...' : '请选择签署联系人'"
-              :disabled="loadingContacts"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="signing_contact_id">
+          <SelectField
+            id="contract-signing-contact"
+            :error="errorMessage ?? ''"
+            :model-value="value !== undefined && value !== null ? String(value) : ''"
+            label="签署联系人"
+            required
+            :options="contactSelectOptions"
+            :placeholder="loadingContacts ? '加载联系人中...' : '请选择签署联系人'"
+            :disabled="loadingContacts"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- User Count (required) -->
-        <FormField v-slot="{ value, handleChange }" name="user_count">
-          <FormItem>
-            <InputField
-              id="contract-user-count"
-              :model-value="Number(value ?? 1)"
-              label="用户数"
-              required
-              type="number"
-              min="1"
-              placeholder="请输入用户数"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="user_count">
+          <InputField
+            id="contract-user-count"
+            :error="errorMessage ?? ''"
+            :model-value="Number(value ?? 1)"
+            label="用户数"
+            required
+            type="number"
+            min="1"
+            placeholder="请输入用户数"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Total Amount (required) -->
-        <FormField v-slot="{ value, handleChange }" name="total_amount">
-          <FormItem>
-            <InputField
-              id="contract-total-amount"
-              :model-value="Number(value ?? 0)"
-              label="总金额"
-              required
-              type="number"
-              inputmode="decimal"
-              step="0.01"
-              min="0"
-              placeholder="请输入总金额"
+        <Field v-slot="{ value, handleChange, errorMessage }" name="total_amount">
+          <InputField
+            id="contract-total-amount"
+            :error="errorMessage ?? ''"
+            :model-value="Number(value ?? 0)"
+            label="总金额"
+            required
+            type="number"
+            inputmode="decimal"
+            step="0.01"
+            min="0"
+            placeholder="请输入总金额"
+            @update:model-value="handleChange"
+          />
+        </Field>
+
+        <Field v-slot="{ value, handleChange, errorMessage }" name="license_type">
+          <div class="grid gap-1">
+            <p id="contract-license-type-label" class="text-caption font-medium text-foreground">
+              授权类型 <span class="text-danger" aria-hidden="true">*</span>
+            </p>
+            <SegmentedChoiceControl
+              id="contract-license-type"
+              :model-value="String(value ?? '')"
+              :options="licenseTypeOptions"
+              labelled-by="contract-license-type-label"
+              id-prefix="contract-license-type"
+              :invalid="Boolean(errorMessage)"
+              :described-by="errorMessage ? 'contract-license-type-error' : undefined"
+              style="--segmented-choice-columns: 2"
               @update:model-value="handleChange"
             />
-            <FormMessage />
-          </FormItem>
-        </FormField>
-
-        <FormField v-slot="{ value, handleChange }" name="license_type">
-          <FormItem>
-            <div class="grid gap-1">
-              <p id="contract-license-type-label" class="text-caption font-medium text-foreground">
-                授权类型 <span class="text-danger" aria-hidden="true">*</span>
-              </p>
-              <SegmentedChoiceControl
-                id="contract-license-type"
-                :model-value="String(value ?? '')"
-                :options="licenseTypeOptions"
-                labelled-by="contract-license-type-label"
-                id-prefix="contract-license-type"
-                style="--segmented-choice-columns: 2"
-                @update:model-value="handleChange"
-              />
-            </div>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+            <p v-if="errorMessage" id="contract-license-type-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+          </div>
+        </Field>
 
         <!-- Subscription Years (optional, only for SUBSCRIPTION) -->
-        <FormField v-if="values.license_type === 'SUBSCRIPTION'" v-slot="{ value, handleChange }" name="subscription_years">
-          <FormItem>
-            <InputField
-              id="contract-subscription-years"
-              :model-value="Number(value ?? 1)"
-              label="订阅年限"
-              type="number"
-              min="1"
-              max="10"
-              placeholder="请输入订阅年限"
-              @update:model-value="handleChange"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-if="values.license_type === 'SUBSCRIPTION'" v-slot="{ value, handleChange, errorMessage }" name="subscription_years">
+          <InputField
+            id="contract-subscription-years"
+            :error="errorMessage ?? ''"
+            :model-value="Number(value ?? 1)"
+            label="订阅年限"
+            type="number"
+            min="1"
+            max="10"
+            placeholder="请输入订阅年限"
+            @update:model-value="handleChange"
+          />
+        </Field>
 
         <!-- Signing Date (optional) -->
-        <FormField v-slot="{ value, handleChange }" name="signing_date">
-          <FormItem>
-            <DateField
-              id="contract-signing-date"
-              :model-value="value ? new Date(String(value)) : null"
-              label="签署日期"
-              placeholder="请选择签署日期"
-              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="signing_date">
+          <DateField
+            id="contract-signing-date"
+            :error="errorMessage ?? ''"
+            :model-value="value ? new Date(String(value)) : null"
+            label="签署日期"
+            placeholder="请选择签署日期"
+            @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+          />
+        </Field>
 
         <!-- Effective Date (optional) -->
-        <FormField v-slot="{ value, handleChange }" name="effective_date">
-          <FormItem>
-            <DateField
-              id="contract-effective-date"
-              :model-value="value ? new Date(String(value)) : null"
-              label="生效日期"
-              placeholder="请选择生效日期"
-              @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
-            />
-            <FormMessage />
-          </FormItem>
-        </FormField>
+        <Field v-slot="{ value, handleChange, errorMessage }" name="effective_date">
+          <DateField
+            id="contract-effective-date"
+            :error="errorMessage ?? ''"
+            :model-value="value ? new Date(String(value)) : null"
+            label="生效日期"
+            placeholder="请选择生效日期"
+            @update:model-value="(date: Date | null) => handleChange(date ? formatLocalDate(date) : null)"
+          />
+        </Field>
 
         <!-- DialogFooter -->
         </form>

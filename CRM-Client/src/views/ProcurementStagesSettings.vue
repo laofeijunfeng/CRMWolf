@@ -5,16 +5,14 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
+import { DataTable, InputField, TableRowActions, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import procurementApi, { type ProcurementMethodWithStages, type ProcurementStageTemplate, type ProcurementStageTemplateCreate, type ProcurementStageTemplateUpdate } from '@/api/procurement'
@@ -251,12 +249,12 @@ useTopBarRegistration({
     <DialogContent>
       <DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader>
       <form class="space-y-4" @submit="submit">
-        <FormField v-slot="{ componentField }" name="template_code"><FormItem><FormLabel>阶段编码</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" /></FormControl><FormMessage /></FormItem></FormField>
-        <FormField v-slot="{ componentField }" name="stage_name"><FormItem><FormLabel>阶段名称</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" placeholder="请输入阶段名称" /></FormControl><FormMessage /></FormItem></FormField>
-        <div class="grid grid-cols-2 gap-4"><FormField v-slot="{ componentField }" name="win_probability"><FormItem><FormLabel>赢率（%）</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField><FormField v-slot="{ componentField }" name="sort_order"><FormItem><FormLabel>排序</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" type="number" /></FormControl><FormMessage /></FormItem></FormField></div>
-        <FormField v-slot="{ value, handleChange }" name="is_default_start"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>默认起点</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField>
-        <FormField v-slot="{ value, handleChange }" name="can_skip"><FormItem class="flex items-center justify-between rounded-lg border p-3"><FormLabel>允许跳过</FormLabel><FormControl><Switch :model-value="value" @update:model-value="handleChange" /></FormControl></FormItem></FormField>
-        <FormField v-slot="{ componentField }" name="description"><FormItem><FormLabel>描述</FormLabel><FormControl><Textarea v-bind="componentField as unknown as Record<string, unknown>" :rows="3" placeholder="可选" /></FormControl><FormMessage /></FormItem></FormField>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="template_code"><InputField id="procurement-stage-template-code" name="template_code" :model-value="String(value ?? '')" label="阶段编码" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="stage_name"><InputField id="procurement-stage-name" name="stage_name" :model-value="String(value ?? '')" label="阶段名称" placeholder="请输入阶段名称" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
+        <div class="grid grid-cols-2 gap-4"><Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="win_probability"><InputField id="procurement-stage-win-probability" name="win_probability" :model-value="typeof value === 'number' ? value : ''" label="赢率（%）" type="number" :error="errorMessage ?? ''" @update:model-value="handleChange($event === '' ? undefined : Number($event))" @blur="handleBlur" /></Field><Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="sort_order"><InputField id="procurement-stage-sort-order" name="sort_order" :model-value="typeof value === 'number' ? value : ''" label="排序" type="number" :error="errorMessage ?? ''" @update:model-value="handleChange($event === '' ? undefined : Number($event))" @blur="handleBlur" /></Field></div>
+        <Field v-slot="{ value, handleChange }" name="is_default_start"><div class="flex items-center justify-between rounded-lg border p-3"><Label for="procurement-stage-default-start">默认起点</Label><Switch id="procurement-stage-default-start" :model-value="value" @update:model-value="handleChange" /></div></Field>
+        <Field v-slot="{ value, handleChange }" name="can_skip"><div class="flex items-center justify-between rounded-lg border p-3"><Label for="procurement-stage-can-skip">允许跳过</Label><Switch id="procurement-stage-can-skip" :model-value="value" @update:model-value="handleChange" /></div></Field>
+        <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description"><TextareaField id="procurement-stage-description" name="description" :model-value="String(value ?? '')" label="描述" :rows="3" placeholder="可选" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
         <DialogFooter><Button type="button" variant="outline" @click="dialogOpen = false">取消</Button><Button type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '保存' }}</Button></DialogFooter>
       </form>
     </DialogContent>

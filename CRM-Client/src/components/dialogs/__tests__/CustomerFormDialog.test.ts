@@ -533,10 +533,7 @@ describe('CustomerFormDialog progressive edit sections', () => {
     DateField: DateFieldStub,
     InputField: InputFieldStub,
     Button: defineComponent({ inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' }),
-    FormField: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
     Field: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
-    FormItem: defineComponent({ template: '<div><slot /></div>' }),
-    FormMessage: defineComponent({ template: '<div><slot /></div>' }),
   }
   const mountEdit = (customer: CustomerDetailResponse = { ...customerDetail, company_scale: '1-50人', source_info: { public_id: 'source-1', name: '来源', is_active: true } }): VueWrapper<InstanceType<typeof CustomerFormDialog>> => shallowMount(CustomerFormDialog, {
     global: { stubs: dialogStubs },
@@ -956,10 +953,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
         Collapsible: MoreInfoCollapsibleStub,
         CollapsibleTrigger: defineComponent({ template: '<slot />' }),
         CollapsibleContent: defineComponent({ template: '<div><slot /></div>' }),
-        FormField: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
         Field: defineComponent({ setup(_, { slots }): () => VNode { return () => h('div', slots['default']?.({ value: undefined, handleChange: () => undefined })) } }),
-        FormItem: defineComponent({ template: '<div><slot /></div>' }),
-        FormMessage: defineComponent({ template: '<div><slot /></div>' }),
         IndustryHierarchySelectField: IndustryHierarchySelectFieldStub,
         SelectField: SelectFieldStub,
         DateField: DateFieldStub,

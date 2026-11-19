@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
@@ -12,23 +12,8 @@ import procurementApi, { type ProcurementMethodOption } from '@/api/procurement'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useRouteLeaveGuard } from '@/composables/useRouteLeaveGuard'
 import { useHeaderStore } from '@/stores/header'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { ProductIntentPicker } from '@/components/crmwolf'
+import { InputField, ProductIntentPicker, SelectField } from '@/components/crmwolf'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { customerFormSchema, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
@@ -49,6 +34,9 @@ const submitError = ref<FeedbackError | null>(null)
 const submitting = ref(false)
 const loadedVersion = ref<number | null>(null)
 const procurementMethodOptions = ref<ProcurementMethodOption[]>([])
+const procurementSelectOptions = computed(() =>
+  procurementMethodOptions.value.map(option => ({ value: option.id, label: option.name })),
+)
 const {
   formSelectOptions: sourceSelectOptions,
   loadFormOptions,
@@ -378,144 +366,125 @@ onUnmounted(() => {
         <form id="customer-edit-form" class="space-y-4" @submit="onSubmit">
           <div class="form-grid">
             <!-- Customer Name -->
-            <FormField v-slot="{ componentField }" name="account_name">
-              <FormItem>
-                <FormLabel>客户名称 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    placeholder="请输入客户公司名称"
-                    class="h-11 sm:h-8"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="account_name">
+              <InputField
+                id="customer-edit-account-name"
+                name="account_name"
+                :model-value="String(value ?? '')"
+                label="客户名称"
+                required
+                placeholder="请输入客户公司名称"
+                :error="errorMessage ?? ''"
+                @update:model-value="handleChange"
+                @blur="handleBlur"
+              />
+            </Field>
 
             <!-- City -->
-            <FormField v-slot="{ componentField }" name="city">
-              <FormItem>
-                <FormLabel>所在城市 <span class="text-destructive">*</span></FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    placeholder="请输入所在城市"
-                    class="h-11 sm:h-8"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="city">
+              <InputField
+                id="customer-edit-city"
+                name="city"
+                :model-value="String(value ?? '')"
+                label="所在城市"
+                required
+                placeholder="请输入所在城市"
+                :error="errorMessage ?? ''"
+                @update:model-value="handleChange"
+                @blur="handleBlur"
+              />
+            </Field>
           </div>
 
           <div class="form-grid">
             <!-- Source -->
-            <FormField v-slot="{ componentField }" name="source_public_id">
-              <FormItem>
-                <FormLabel>客户来源 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any" :disabled="optionsLoading || optionsErrorFields.includes('source_public_id')">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择客户来源" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in sourceSelectOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
+            <Field v-slot="{ value, handleChange, errorMessage }" name="source_public_id">
+              <div class="grid gap-space-1">
+                <SelectField
+                  id="customer-edit-source"
+                  name="source_public_id"
+                  :model-value="String(value ?? '')"
+                  :options="sourceSelectOptions"
+                  label="客户来源"
+                  required
+                  placeholder="请选择客户来源"
+                  :disabled="optionsLoading || optionsErrorFields.includes('source_public_id')"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                />
                 <p v-if="optionsErrorFields.includes('source_public_id')" class="form-option-error">
                   获客来源加载失败，请点击上方“重试加载选项”。
                 </p>
-              </FormItem>
-            </FormField>
+              </div>
+            </Field>
 
             <div class="form-grid-full">
-              <FormField v-slot="{ value, handleChange }" name="product_public_id">
-                <FormItem>
+              <Field v-slot="{ value, handleChange, errorMessage }" name="product_public_id">
+                <div class="grid gap-space-1">
                   <ProductIntentPicker
                     :model-value="String(value ?? '')"
                     id-prefix="customer-edit-product"
+                    :invalid="Boolean(errorMessage)"
                     @update:model-value="handleChange"
                   />
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+                  <p v-if="errorMessage" id="customer-edit-product-error" class="text-caption text-destructive" role="alert">
+                    {{ errorMessage }}
+                  </p>
+                </div>
+              </Field>
             </div>
 
             <!-- Company Scale -->
-            <FormField v-slot="{ componentField }" name="company_scale">
-              <FormItem>
-                <FormLabel>公司规模 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择公司规模" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in companyScaleOptions"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, errorMessage }" name="company_scale">
+              <SelectField
+                id="customer-edit-company-scale"
+                name="company_scale"
+                :model-value="String(value ?? '')"
+                :options="companyScaleOptions"
+                label="公司规模"
+                required
+                placeholder="请选择公司规模"
+                :error="errorMessage ?? ''"
+                @update:model-value="handleChange"
+              />
+            </Field>
           </div>
 
           <div class="form-grid">
             <!-- Default Procurement Method -->
-            <FormField v-slot="{ componentField }" name="default_procurement_method_id">
-              <FormItem>
-                <FormLabel>采购方式 <span class="text-destructive">*</span></FormLabel>
-                <Select v-bind="componentField as any" :disabled="optionsLoading || optionsErrorFields.includes('default_procurement_method_id')">
-                  <FormControl>
-                    <SelectTrigger class="h-11 sm:h-8">
-                      <SelectValue placeholder="请选择采购方式" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem
-                      v-for="option in procurementMethodOptions"
-                      :key="option['id']"
-                      :value="option['id']"
-                    >
-                      {{ option.name }}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
+            <Field v-slot="{ value, handleChange, errorMessage }" name="default_procurement_method_id">
+              <div class="grid gap-space-1">
+                <SelectField
+                  id="customer-edit-procurement-method"
+                  name="default_procurement_method_id"
+                  :model-value="value === undefined || value === null ? '' : String(value)"
+                  :options="procurementSelectOptions"
+                  label="采购方式"
+                  required
+                  placeholder="请选择采购方式"
+                  :disabled="optionsLoading || optionsErrorFields.includes('default_procurement_method_id')"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange(Number($event))"
+                />
                 <p v-if="optionsErrorFields.includes('default_procurement_method_id')" class="form-option-error">
                   采购方式加载失败，请点击上方“重试加载选项”。
                 </p>
-              </FormItem>
-            </FormField>
+              </div>
+            </Field>
 
             <!-- Address -->
-            <FormField v-slot="{ componentField }" name="address">
-              <FormItem>
-                <FormLabel>公司地址</FormLabel>
-                <FormControl>
-                  <Input
-                    v-bind="componentField as any"
-                    placeholder="请输入公司地址"
-                    class="h-11 sm:h-8"
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            </FormField>
+            <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="address">
+              <InputField
+                id="customer-edit-address"
+                name="address"
+                :model-value="String(value ?? '')"
+                label="公司地址"
+                placeholder="请输入公司地址"
+                :error="errorMessage ?? ''"
+                @update:model-value="handleChange"
+                @blur="handleBlur"
+              />
+            </Field>
           </div>
         </form>
       </div>

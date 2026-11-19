@@ -80,8 +80,7 @@ const mountConfig = async (config: OAuthProviderConfigResponse = configFixture):
       stubs: {
         Card: passthrough, CardHeader: passthrough, CardTitle: passthrough,
         CardDescription: passthrough, CardContent: passthrough,
-        FormItem: passthrough, FormControl: passthrough, FormLabel: passthrough,
-        FormDescription: passthrough, FormMessage: true, Switch: true,
+        Switch: true,
         Label: passthrough, Skeleton: true,
       },
     },

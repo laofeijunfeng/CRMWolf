@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { toTypedSchema } from '@vee-validate/zod'
-import { ErrorMessage, useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toast } from 'vue-sonner'
 import { CopyableText, DataViewStatePanel } from '@/components/crmwolf'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -10,10 +10,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CardTitle, Card, CardContent, CardHeader } from '@/components/ui/card'
-import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
 import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'
 import { changePasswordSchema, type ChangePasswordFormValues } from '@/schemas/account-settings'
@@ -285,45 +285,39 @@ onMounted(() => {
       <DialogContent>
         <DialogHeader><DialogTitle>修改密码</DialogTitle></DialogHeader>
         <form class="space-y-4" @submit.prevent="submitPassword">
-          <FormField v-slot="{ value, handleChange, handleBlur }" name="oldPassword">
-            <FormItem>
-              <FormLabel>当前密码</FormLabel>
+          <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="oldPassword">
+            <div class="grid gap-space-2">
+              <Label for="account-old-password">当前密码</Label>
               <div class="account-settings__password-input">
-                <FormControl><Input :model-value="value" name="oldPassword" :type="passwordVisible.oldPassword ? 'text' : 'password'" autocomplete="current-password" @update:model-value="handleChange" @blur="handleBlur" /></FormControl>
+                <Input id="account-old-password" :model-value="value" name="oldPassword" :type="passwordVisible.oldPassword ? 'text' : 'password'" autocomplete="current-password" :aria-invalid="Boolean(errorMessage)" :aria-describedby="errorMessage ? 'account-old-password-error' : undefined" @update:model-value="handleChange" @blur="handleBlur" />
                 <Tooltip><TooltipTrigger as-child><Button type="button" variant="ghost" size="icon" :aria-label="passwordVisible.oldPassword ? '隐藏当前密码' : '显示当前密码'" @click="passwordVisible.oldPassword = !passwordVisible.oldPassword">{{ passwordVisible.oldPassword ? '隐藏' : '显示' }}</Button></TooltipTrigger><TooltipContent>{{ passwordVisible.oldPassword ? '隐藏密码' : '显示密码' }}</TooltipContent></Tooltip>
               </div>
-              <ErrorMessage v-slot="{ message }" as="div" name="oldPassword">
-                <p v-if="message" role="alert" class="text-sm font-medium text-destructive">{{ message }}</p>
-              </ErrorMessage>
-            </FormItem>
-          </FormField>
+              <p v-if="errorMessage" id="account-old-password-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+            </div>
+          </Field>
 
-          <FormField v-slot="{ value, handleChange, handleBlur }" name="newPassword">
-            <FormItem>
-              <FormLabel>新密码</FormLabel>
+          <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="newPassword">
+            <div class="grid gap-space-2">
+              <Label for="account-new-password">新密码</Label>
               <div class="account-settings__password-input">
-                <FormControl><Input :model-value="value" name="newPassword" :type="passwordVisible.newPassword ? 'text' : 'password'" autocomplete="new-password" @update:model-value="handleChange" @blur="handleBlur" /></FormControl>
+                <Input id="account-new-password" :model-value="value" name="newPassword" :type="passwordVisible.newPassword ? 'text' : 'password'" autocomplete="new-password" :aria-invalid="Boolean(errorMessage)" :aria-describedby="errorMessage ? 'account-new-password-description account-new-password-error' : 'account-new-password-description'" @update:model-value="handleChange" @blur="handleBlur" />
                 <Tooltip><TooltipTrigger as-child><Button type="button" variant="ghost" size="icon" :aria-label="passwordVisible.newPassword ? '隐藏新密码' : '显示新密码'" @click="passwordVisible.newPassword = !passwordVisible.newPassword">{{ passwordVisible.newPassword ? '隐藏' : '显示' }}</Button></TooltipTrigger><TooltipContent>{{ passwordVisible.newPassword ? '隐藏密码' : '显示密码' }}</TooltipContent></Tooltip>
               </div>
-              <FormDescription>密码长度为 6–50 个字符。</FormDescription>
-              <ErrorMessage v-slot="{ message }" as="div" name="newPassword">
-                <p v-if="message" role="alert" class="text-sm font-medium text-destructive">{{ message }}</p>
-              </ErrorMessage>
-            </FormItem>
-          </FormField>
+              <p id="account-new-password-description" class="text-caption text-muted-foreground">密码长度为 6–50 个字符。</p>
+              <p v-if="errorMessage" id="account-new-password-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+            </div>
+          </Field>
 
-          <FormField v-slot="{ value, handleChange, handleBlur }" name="confirmPassword">
-            <FormItem>
-              <FormLabel>确认新密码</FormLabel>
+          <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="confirmPassword">
+            <div class="grid gap-space-2">
+              <Label for="account-confirm-password">确认新密码</Label>
               <div class="account-settings__password-input">
-                <FormControl><Input :model-value="value" name="confirmPassword" :type="passwordVisible.confirmPassword ? 'text' : 'password'" autocomplete="new-password" @update:model-value="handleChange" @blur="handleBlur" /></FormControl>
+                <Input id="account-confirm-password" :model-value="value" name="confirmPassword" :type="passwordVisible.confirmPassword ? 'text' : 'password'" autocomplete="new-password" :aria-invalid="Boolean(errorMessage)" :aria-describedby="errorMessage ? 'account-confirm-password-error' : undefined" @update:model-value="handleChange" @blur="handleBlur" />
                 <Tooltip><TooltipTrigger as-child><Button type="button" variant="ghost" size="icon" :aria-label="passwordVisible.confirmPassword ? '隐藏确认密码' : '显示确认密码'" @click="passwordVisible.confirmPassword = !passwordVisible.confirmPassword">{{ passwordVisible.confirmPassword ? '隐藏' : '显示' }}</Button></TooltipTrigger><TooltipContent>{{ passwordVisible.confirmPassword ? '隐藏密码' : '显示密码' }}</TooltipContent></Tooltip>
               </div>
-              <ErrorMessage v-slot="{ message }" as="div" name="confirmPassword">
-                <p v-if="message" role="alert" class="text-sm font-medium text-destructive">{{ message }}</p>
-              </ErrorMessage>
-            </FormItem>
-          </FormField>
+              <p v-if="errorMessage" id="account-confirm-password-error" class="text-caption text-destructive" role="alert">{{ errorMessage }}</p>
+            </div>
+          </Field>
 
           <DialogFooter>
             <Button type="button" variant="outline" :disabled="passwordSubmitting" @click="closePasswordDialog">取消</Button>

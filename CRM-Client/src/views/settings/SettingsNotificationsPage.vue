@@ -1,22 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { AlertTriangle, Check } from 'lucide-vue-next'
-import { Input } from '@/components/ui/input'
+import { InputField } from '@/components/crmwolf'
+import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -266,58 +259,51 @@ watch(hasAccess, (ok) => {
             <CardDescription>配置审批流程提交时的飞书群通知</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
-            <FormField v-slot="{ value }" name="feishu_webhook_enabled">
-              <FormItem>
-                <div class="flex items-center justify-between gap-4">
-                  <div class="space-y-0.5">
-                    <FormLabel>启用通知</FormLabel>
-                    <FormDescription>开启后，审批流程提交时会自动发送通知到飞书群</FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      :model-value="value ?? false"
-                      @update:model-value="(checked: boolean) => setFieldValue('feishu_webhook_enabled', checked)"
-                    />
-                  </FormControl>
+            <Field v-slot="{ value }" name="feishu_webhook_enabled">
+              <div class="flex items-center justify-between gap-4">
+                <div class="space-y-0.5">
+                  <Label for="feishu-webhook-enabled">启用通知</Label>
+                  <p id="feishu-webhook-enabled-description" class="text-caption text-muted-foreground">
+                    开启后，审批流程提交时会自动发送通知到飞书群
+                  </p>
                 </div>
-              </FormItem>
-            </FormField>
+                <Switch
+                  id="feishu-webhook-enabled"
+                  aria-describedby="feishu-webhook-enabled-description"
+                  :model-value="(value as boolean) ?? false"
+                  @update:model-value="(checked: boolean) => setFieldValue('feishu_webhook_enabled', checked)"
+                />
+              </div>
+            </Field>
 
             <div class="settings-form-grid">
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="notification_group_name">
-                <FormItem>
-                  <FormLabel>群名称</FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value ?? ''"
-                      :disabled="!values.feishu_webhook_enabled"
-                      placeholder="如：审批通知群"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription>用于标识通知目标群（可选）</FormDescription>
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="notification_group_name">
+                <InputField
+                  id="notification-group-name"
+                  label="群名称"
+                  :model-value="(value as string) ?? ''"
+                  :disabled="!values.feishu_webhook_enabled"
+                  placeholder="如：审批通知群"
+                  helper-text="用于标识通知目标群（可选）"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="feishu_webhook_url">
-                <FormItem>
-                  <FormLabel>Webhook</FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value ?? ''"
-                      :disabled="!values.feishu_webhook_enabled"
-                      placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {{ values.feishu_webhook_enabled ? '从飞书群聊机器人设置中获取' : '请先开启「启用通知」开关' }}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="feishu_webhook_url">
+                <InputField
+                  id="feishu-webhook-url"
+                  label="Webhook"
+                  :model-value="(value as string) ?? ''"
+                  :disabled="!values.feishu_webhook_enabled"
+                  placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+                  :helper-text="values.feishu_webhook_enabled ? '从飞书群聊机器人设置中获取' : '请先开启「启用通知」开关'"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
             </div>
 
             <Alert v-if="!canTest" variant="default">

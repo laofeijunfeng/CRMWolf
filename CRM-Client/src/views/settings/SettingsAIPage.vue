@@ -1,23 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
-import { useForm } from 'vee-validate'
+import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
 import { AlertCircle, Check } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
+import { InputField, SelectField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 import {
   Select,
   SelectContent,
@@ -90,6 +83,11 @@ const aiConfigSchema = toTypedSchema(
     structured_output_mode: z.enum(['json_object', 'json_schema']),
   }),
 )
+
+const structuredOutputModeOptions = [
+  { value: 'json_object', label: 'JSON 对象（本地完整校验）' },
+  { value: 'json_schema', label: 'JSON Schema（严格协议）' },
+] as const
 
 const { handleSubmit, resetForm, values, meta } = useForm({
   validationSchema: aiConfigSchema,
@@ -352,71 +350,64 @@ watch(hasAccess, (ok) => {
                 </Select>
               </div>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="model_name">
-                <FormItem>
-                  <FormLabel>模型名称 <span class="text-destructive">*</span></FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value"
-                      placeholder="如 deepseek-chat"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription>模型名称，如 deepseek-chat、gpt-4o、glm-4 等</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="model_name">
+                <InputField
+                  id="ai-model-name"
+                  label="模型名称"
+                  required
+                  :model-value="value as string"
+                  placeholder="如 deepseek-chat"
+                  helper-text="模型名称，如 deepseek-chat、gpt-4o、glm-4 等"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="api_host">
-                <FormItem class="settings-form-grid-full">
-                  <FormLabel>接口地址 <span class="text-destructive">*</span></FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value"
-                      placeholder="如 https://api.deepseek.com/v1"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription>兼容 OpenAI 格式的 API 基础地址</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="api_host">
+                <InputField
+                  id="ai-api-host"
+                  class="settings-form-grid-full"
+                  label="接口地址"
+                  required
+                  :model-value="value as string"
+                  placeholder="如 https://api.deepseek.com/v1"
+                  helper-text="兼容 OpenAI 格式的 API 基础地址"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
 
-              <FormField v-slot="{ value, handleChange, handleBlur }" name="api_key">
-                <FormItem class="settings-form-grid-full">
-                  <FormLabel>API Key <span class="text-destructive">*</span></FormLabel>
-                  <FormControl>
-                    <Input
-                      :model-value="value"
-                      type="password"
-                      placeholder="输入 API Key"
-                      autocomplete="new-password"
-                      @update:model-value="handleChange"
-                      @blur="handleBlur"
-                    />
-                  </FormControl>
-                  <FormDescription v-if="configInfo?.api_key_masked">
-                    当前配置：<span class="font-mono">{{ configInfo.api_key_masked }}</span>
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
-              <FormField v-slot="{ value, handleChange }" name="structured_output_mode">
-                <FormItem class="settings-form-grid-full">
-                  <FormLabel>结构化输出协议</FormLabel>
-                  <Select :model-value="value" @update:model-value="handleChange">
-                    <FormControl><SelectTrigger class="min-h-11"><SelectValue /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value="json_object">JSON 对象（本地完整校验）</SelectItem>
-                      <SelectItem value="json_schema">JSON Schema（严格协议）</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>能力验证优先检查严格协议，仅在服务明确不支持时检查 JSON 对象协议。</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              </FormField>
+              <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="api_key">
+                <InputField
+                  id="ai-api-key"
+                  class="settings-form-grid-full"
+                  label="API Key"
+                  required
+                  :model-value="value as string"
+                  type="password"
+                  placeholder="输入 API Key"
+                  autocomplete="new-password"
+                  :helper-text="configInfo?.api_key_masked ? `当前配置：${configInfo.api_key_masked}` : ''"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                  @blur="handleBlur"
+                />
+              </Field>
+              <Field v-slot="{ value, handleChange, errorMessage }" name="structured_output_mode">
+                <SelectField
+                  id="ai-structured-output-mode"
+                  class="settings-form-grid-full"
+                  label="结构化输出协议"
+                  :model-value="value as string"
+                  :options="structuredOutputModeOptions"
+                  trigger-class="min-h-11"
+                  helper-text="能力验证优先检查严格协议，仅在服务明确不支持时检查 JSON 对象协议。"
+                  :error="errorMessage ?? ''"
+                  @update:model-value="handleChange"
+                />
+              </Field>
             </div>
           </CardContent>
         </Card>
