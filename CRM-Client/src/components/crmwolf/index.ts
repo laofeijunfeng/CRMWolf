@@ -44,7 +44,8 @@ export { default as TableToolbarBuilderPanel } from './TableToolbarBuilderPanel.
 export { default as TableRowActions } from './TableRowActions.vue'
 export { default as DesktopTableRowActions } from './DesktopTableRowActions.vue'
 export { default as HoverInfo } from './HoverInfo.vue'
-export { default as StatusBadge } from '../StatusBadge.vue'
+export { default as StatusBadge } from './StatusBadge.vue'
+export { default as ApprovalStatusBadge } from './ApprovalStatusBadge.vue'
 export { default as DataTableExportDialog } from './DataTableExportDialog.vue'
 export type { DataTableExportDialogField } from './DataTableExportDialog.vue'
 
@@ -72,6 +73,7 @@ export type { ListSortCondition, ListSortField } from './listSortTypes'
 // Feedback components (§8 MEDIUM Priority)
 export { default as LoadingSkeleton } from './LoadingSkeleton.vue'
 export { default as DataViewStatePanel } from './DataViewStatePanel.vue'
+export { default as ErrorState } from './ErrorState.vue'
 export type { DataViewState } from './DataViewStatePanel.vue'
 export { default as LiveRegion } from './LiveRegion.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'

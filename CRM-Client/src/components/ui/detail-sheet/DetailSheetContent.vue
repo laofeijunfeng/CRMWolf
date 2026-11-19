@@ -16,7 +16,6 @@
  * - LeadDetailSheet（线索详情）
  * - OpportunityDetailSheet（商机详情）
  * - CustomerDetailSheet（客户详情）
- * - SystemConfig Sheet（系统配置）
  */
 import { SheetContent } from '@/components/ui/sheet'
 

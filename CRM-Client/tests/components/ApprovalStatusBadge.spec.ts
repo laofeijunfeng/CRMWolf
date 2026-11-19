@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
+import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
 
 describe('ApprovalStatusBadge', () => {
   const mountBadge = (props: Record<string, unknown>) =>

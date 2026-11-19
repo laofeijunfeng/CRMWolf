@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Sheet } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { DetailSheetContent, DetailSheet } from '@/components/ui/detail-sheet'
 import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 import type { PaymentPlanResponse, PaymentRecordInfo } from '@/api/payment'
 
@@ -46,7 +45,7 @@ const handleViewContract = (
 </script>
 
 <template>
-  <Sheet v-model:open="visibleModel">
+  <DetailSheet v-model:open="visibleModel">
     <DetailSheetContent>
       <PaymentPlanDetailContent
         :plan-id="planId"
@@ -60,7 +59,7 @@ const handleViewContract = (
         @close="closeSheet"
       />
     </DetailSheetContent>
-  </Sheet>
+  </DetailSheet>
 </template>
 
 <style scoped lang="scss">

@@ -108,14 +108,14 @@ const RULES = [
   {
     category: 'page-status-style',
     incremental: true,
-    appliesTo: (filePath) => filePath.endsWith('.vue') && filePath !== `${COMPONENTS}StatusBadge.vue`,
+    appliesTo: (filePath) => filePath.endsWith('.vue') && filePath !== `${CRMWOLF}StatusBadge.vue`,
     pattern: /\.status-(?:success|warning|danger|info|muted|default)(?![\w-])/,
     message: '页面不得自定义 .status-* 色板，业务状态统一用 StatusBadge。',
   },
   {
     category: 'page-status-style',
     incremental: true,
-    exemptFiles: [`${SRC}utils/statusPresentation.ts`, `${COMPONENTS}StatusBadge.vue`],
+    exemptFiles: [`${SRC}utils/statusPresentation.ts`, `${CRMWOLF}StatusBadge.vue`],
     pattern: /\b(?:function\s+|(?:const|let|var)\s+)get\w*Status\w*(?:Class|Color|Tone|Variant)\w*\b/,
     message: '状态映射只在 utils/statusPresentation.ts 定义，页面不得自写 get*Status* 映射函数。',
   },

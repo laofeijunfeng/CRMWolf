@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 
  describe('StatusBadge', () => {
   it('does not disguise unknown backend values as a valid state and retains diagnostic context', () => {

@@ -62,12 +62,16 @@ vi.mock('@/components/ui/sheet', () => {
   }
 })
 
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({
-    name: 'DetailSheetContent',
-    setup: (_, { slots, attrs }) => () => h('div', attrs, slots.default?.()),
-  }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({
+      name: 'DetailSheetContent',
+      setup: (_, { slots, attrs }) => () => h('div', attrs, slots.default?.()),
+    }),
+  }
+})
 
 vi.mock('@/components/ui/card', () => {
   const passthrough = (name: string) => defineComponent({
@@ -154,7 +158,7 @@ vi.mock('@/components/ui/skeleton', () => ({
   }),
 }))
 
-vi.mock('@/components/StatusBadge.vue', () => ({
+vi.mock('@/components/crmwolf/StatusBadge.vue', () => ({
   default: defineComponent({
     name: 'StatusBadge',
     props: {
@@ -265,7 +269,7 @@ vi.mock('@/components/dialogs/EditRecordDialog.vue', () => ({
   }),
 }))
 
-import PaymentPlanDetailSheet from '@/views/PaymentPlanDetailSheet.vue'
+import PaymentPlanDetailSheet from '@/components/panels/PaymentPlanDetailSheet.vue'
 import PaymentPlanDetailContent from '@/components/panels/PaymentPlanDetailContent.vue'
 
 const paymentRecordFixture = (): PaymentRecordInfo => ({

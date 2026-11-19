@@ -19,7 +19,7 @@ import {
   EmptyMedia,
   EmptyTitle
 } from '@/components/ui/empty'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
 
 import { confirmDialog } from '@/utils/confirmDialog'

@@ -20,8 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Sheet, SheetFooter, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { DetailSheetContent, DetailSheet, DetailSheetFooter, DetailSheetHeader, DetailSheetTitle } from '@/components/ui/detail-sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import FollowUpFormDialog from '@/components/dialogs/FollowUpFormDialog.vue'
 import {
@@ -1031,16 +1030,16 @@ watchEffect(() => {
       </template>
     </DataTable>
 
-    <Sheet
+    <DetailSheet
       :open="selectedTaskId !== null"
       @update:open="handleTrackingSheetOpenChange"
       @closed="handleTrackingSheetClosed"
     >
       <DetailSheetContent>
-        <SheetHeader class="tracking-sheet-header p-6 border-b border-border">
+        <DetailSheetHeader class="tracking-sheet-header p-6 border-b border-border">
           <div class="tracking-sheet-title">
             <FileText class="tracking-sheet-icon" aria-hidden="true" />
-            <SheetTitle class="truncate">客户追踪详情</SheetTitle>
+            <DetailSheetTitle class="truncate">客户追踪详情</DetailSheetTitle>
           </div>
           <Button
             v-if="selectedCustomerId"
@@ -1050,7 +1049,7 @@ watchEffect(() => {
             <Plus class="tracking-button-icon" aria-hidden="true" />
             添加跟进记录
           </Button>
-        </SheetHeader>
+        </DetailSheetHeader>
 
         <ScrollArea class="flex-1">
           <div class="tracking-sheet-content">
@@ -1141,7 +1140,7 @@ watchEffect(() => {
           </div>
         </ScrollArea>
 
-        <SheetFooter class="tracking-sheet-footer p-4 border-t border-border">
+        <DetailSheetFooter class="tracking-sheet-footer p-4 border-t border-border">
           <Button variant="outline" @click="selectedTaskId = null">关闭</Button>
           <template v-if="selectedTask && selectedPendingConfirmation">
             <Button
@@ -1177,9 +1176,9 @@ watchEffect(() => {
             <Button variant="outline" :disabled="transitioningTaskIds.has(selectedTask.public_id) || isPostponingTask(selectedTask.public_id)" @click="transitionTask(selectedTask, 'cancel')">关闭追踪</Button>
             <Button :disabled="transitioningTaskIds.has(selectedTask.public_id) || isPostponingTask(selectedTask.public_id)" @click="transitionTask(selectedTask, 'complete')">完成</Button>
           </template>
-        </SheetFooter>
+        </DetailSheetFooter>
       </DetailSheetContent>
-    </Sheet>
+    </DetailSheet>
 
     <FollowUpFormDialog
       v-if="selectedCustomerId"

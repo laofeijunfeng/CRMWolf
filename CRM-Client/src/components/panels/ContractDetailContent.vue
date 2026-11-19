@@ -9,12 +9,7 @@ import { toast } from 'vue-sonner'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { AlertCircle, Download, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
-import {
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter
-} from '@/components/ui/sheet'
+import { DetailSheetHeader, DetailSheetTitle, DetailSheetDescription, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import {
   Dialog,
   DialogContent,
@@ -24,7 +19,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import {
   Breadcrumb,
@@ -43,7 +38,7 @@ import {
   EmptyDescription
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
@@ -557,7 +552,7 @@ onBeforeUnmount((): void => {
 <template>
   <div class="contract-detail-content" :class="{ 'flex-1 min-h-0': readonly }">
     <!-- Header -->
-    <SheetHeader class="p-6 pb-4 border-b border-border">
+    <DetailSheetHeader class="p-6 pb-4 border-b border-border">
       <Breadcrumb v-if="embedded && showBreadcrumb" class="detail-breadcrumb">
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -586,15 +581,15 @@ onBeforeUnmount((): void => {
         </div>
 
         <div class="header-title-block">
-          <SheetTitle class="text-lg font-semibold truncate">
+          <DetailSheetTitle class="text-lg font-semibold truncate">
             {{ contractInfo?.contract_name || '合同详情' }}
-          </SheetTitle>
-          <SheetDescription class="flex items-center gap-2 mt-1 min-h-6">
+          </DetailSheetTitle>
+          <DetailSheetDescription class="flex items-center gap-2 mt-1 min-h-6">
             <StatusBadge v-if="contractInfo" type="contract" :status="contractInfo.status.toLowerCase()" />
             <span v-else class="text-sm text-muted-foreground">
               {{ loading ? '正在加载合同信息' : '查看合同基础信息与审批进度' }}
             </span>
-          </SheetDescription>
+          </DetailSheetDescription>
         </div>
 
         <div v-if="contractInfo" class="amount-summary">
@@ -605,7 +600,7 @@ onBeforeUnmount((): void => {
           </div>
         </div>
       </div>
-    </SheetHeader>
+    </DetailSheetHeader>
 
       <!-- Content -->
       <ScrollArea class="flex-1">
@@ -852,7 +847,7 @@ onBeforeUnmount((): void => {
       </ScrollArea>
 
       <!-- Footer -->
-      <SheetFooter v-if="!readonly" class="p-4 border-t border-border footer-actions">
+      <DetailSheetFooter v-if="!readonly" class="p-4 border-t border-border footer-actions">
         <div v-if="showContractChangeEntry" class="mr-auto flex flex-col items-start gap-2">
           <p v-if="!canRequestContractChange" class="text-sm text-muted-foreground">
             {{ pendingContractChange !== null ? '已有一条变更在审批中，审批结束前不能再次发起' : contractInfo?.change_disabled_reason }}
@@ -871,7 +866,7 @@ onBeforeUnmount((): void => {
           <X class="w-4 h-4 mr-2" aria-hidden="true" />
           关闭
         </Button>
-      </SheetFooter>
+      </DetailSheetFooter>
   </div>
 
   <Dialog v-if="!readonly && contractInfo" :open="changeDialogOpen" @update:open="value => { if (!changeSubmitting) changeDialogOpen = value }">

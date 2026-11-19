@@ -25,7 +25,7 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import { confirmDialog } from '@/utils/confirmDialog'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import PaymentRecordChartPage from '@/components/payment/PaymentRecordChartPage.vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type {
@@ -34,7 +34,7 @@ import type {
   PaymentRecordChartCard,
   PaymentRecordChartResponse,
 } from '@/schemas/paymentRecordChart'
-import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/components/panels/PaymentRecordDetailSheet.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import paymentApi, {
   type PaymentRecordWithDetails,

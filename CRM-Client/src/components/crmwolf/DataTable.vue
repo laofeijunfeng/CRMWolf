@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/empty'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import LiveRegion from './LiveRegion.vue'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import ListFilterPopover from './ListFilterPopover.vue'

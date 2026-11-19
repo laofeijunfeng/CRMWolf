@@ -29,7 +29,7 @@ import {
   InputField,
 } from '@/components/crmwolf'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import SelectionSummary, { type SummaryItem } from '@/components/crmwolf/SelectionSummary.vue'
 import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { getTodayLocalDate, formatLocalDate } from '@/utils/format'

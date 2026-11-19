@@ -29,7 +29,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProductIntentPicker } from '@/components/crmwolf'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { customerFormSchema, companyScaleOptions, type CustomerForm } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'

@@ -110,11 +110,11 @@ vi.mock('@/components/crmwolf', () => ({
     ]),
   }),
 }))
-vi.mock('@/components/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
+vi.mock('@/components/crmwolf/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityWinDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityWinDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityLoseDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityLoseDialog', setup: () => () => null }) }))
-vi.mock('@/views/OpportunityDetailSheet.vue', () => ({
+vi.mock('@/components/panels/OpportunityDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'OpportunityDetailSheet',
     props: { visible: Boolean, opportunityId: String },

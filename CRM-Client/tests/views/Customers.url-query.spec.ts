@@ -127,7 +127,7 @@ vi.mock('@/components/dialogs/CustomerFormDialog.vue', () => ({
 }))
 vi.mock('@/components/dialogs/CustomerTransferDialog.vue', () => ({ default: defineComponent({ name: 'CustomerTransferDialog', setup: () => () => null }) }))
 vi.mock('@/components/dialogs/OpportunityFormDialog.vue', () => ({ default: defineComponent({ name: 'OpportunityFormDialog', setup: () => () => null }) }))
-vi.mock('@/components/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
+vi.mock('@/components/crmwolf/StatusBadge.vue', () => ({ default: defineComponent({ name: 'StatusBadge', setup: () => () => h('span') }) }))
 vi.mock('@/components/customer/CustomerDealJourneyHoverCard.vue', () => ({
   default: defineComponent({
     name: 'CustomerDealJourneyHoverCard',
@@ -147,7 +147,7 @@ vi.mock('@/components/customer/CustomerDealJourneyHoverCard.vue', () => ({
     ]),
   }),
 }))
-vi.mock('@/views/CustomerDetailSheet.vue', () => ({
+vi.mock('@/components/panels/CustomerDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'CustomerDetailSheet',
     props: {

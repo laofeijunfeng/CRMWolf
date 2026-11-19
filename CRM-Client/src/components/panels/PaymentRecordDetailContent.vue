@@ -24,12 +24,7 @@ import {
   Wallet,
   X
 } from 'lucide-vue-next'
-import {
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle
-} from '@/components/ui/sheet'
+import { DetailSheetDescription, DetailSheetFooter, DetailSheetHeader, DetailSheetTitle } from '@/components/ui/detail-sheet'
 import {
   Card,
   CardContent,
@@ -49,9 +44,9 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
-import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
-import ErrorState from '@/components/ErrorState.vue'
+import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
 import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
@@ -373,17 +368,17 @@ watch(
 
   <div class="detail-embedded-content">
 
-      <SheetHeader class="record-sheet-header">
+      <DetailSheetHeader class="record-sheet-header">
         <div class="record-header-summary">
           <div v-if="hasRecord" class="title-avatar" aria-hidden="true">
             {{ (detailRecord?.record_number ?? '款').charAt(0) }}
           </div>
 
           <div class="header-title-block">
-            <SheetTitle class="record-sheet-title">
+            <DetailSheetTitle class="record-sheet-title">
               {{ detailRecord?.record_number ?? '回款记录详情' }}
-            </SheetTitle>
-            <SheetDescription class="record-sheet-description">
+            </DetailSheetTitle>
+            <DetailSheetDescription class="record-sheet-description">
               <StatusBadge
                 v-if="hasRecord"
                 type="paymentConfirmation"
@@ -407,7 +402,7 @@ watch(
               />
               <span v-if="detailRecord?.stage_name ?? props.stageName" class="stage-name">{{ detailRecord?.stage_name ?? props.stageName }}</span>
               <span v-else>{{ loading ? '正在加载回款记录' : '查看回款详情与审批进度' }}</span>
-            </SheetDescription>
+            </DetailSheetDescription>
           </div>
 
           <div v-if="hasRecord" class="amount-summary" aria-label="回款金额">
@@ -417,7 +412,7 @@ watch(
             </div>
           </div>
         </div>
-      </SheetHeader>
+      </DetailSheetHeader>
 
       <ScrollArea class="record-sheet-scroll">
         <div class="sheet-body">
@@ -678,7 +673,7 @@ watch(
         </div>
       </ScrollArea>
 
-      <SheetFooter v-if="!readonly" class="record-sheet-footer">
+      <DetailSheetFooter v-if="!readonly" class="record-sheet-footer">
         <Button
           v-if="canEditRecord"
           variant="outline"
@@ -692,7 +687,7 @@ watch(
           <X data-icon="inline-start" aria-hidden="true" />
           关闭
         </Button>
-      </SheetFooter>
+      </DetailSheetFooter>
 
       <FilePreviewDialog
         v-model:open="proofPreviewOpen"

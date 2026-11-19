@@ -186,7 +186,7 @@ test('GATE-05 allows the single status source', () => {
   assert.deepEqual(categories('CRM-Client/src/utils/statusPresentation.ts', [
     'export function getContractStatusTone(status: number) {',
   ]), [])
-  assert.deepEqual(categories('CRM-Client/src/components/StatusBadge.vue', [
+  assert.deepEqual(categories('CRM-Client/src/components/crmwolf/StatusBadge.vue', [
     '.status-success {',
   ]), [])
 })

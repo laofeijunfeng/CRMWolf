@@ -14,7 +14,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'

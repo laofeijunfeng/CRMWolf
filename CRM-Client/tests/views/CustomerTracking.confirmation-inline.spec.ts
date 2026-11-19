@@ -179,9 +179,13 @@ vi.mock('@/components/ui/sheet', () => ({
   SheetHeader: defineComponent({ name: 'SheetHeader', setup: (_, { slots }) => () => h('header', slots.default?.()) }),
   SheetTitle: defineComponent({ name: 'SheetTitle', setup: (_, { slots }) => () => h('h2', slots.default?.()) }),
 }))
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
+  }
+})
 vi.mock('@/components/ui/scroll-area', () => ({
   ScrollArea: defineComponent({ name: 'ScrollArea', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
 }))

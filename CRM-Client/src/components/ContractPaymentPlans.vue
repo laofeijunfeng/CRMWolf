@@ -36,7 +36,7 @@ import {
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { getStatusPresentation } from '@/utils/statusPresentation'
 import PaymentNextStepDialog from '@/components/PaymentNextStepDialog.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'

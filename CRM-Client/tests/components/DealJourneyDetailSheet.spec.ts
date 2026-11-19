@@ -10,12 +10,16 @@ vi.mock('@/components/ui/sheet', () => ({
     setup: (_, { slots }) => () => h('section', slots.default?.()),
   }),
 }))
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({
-    name: 'DetailSheetContent',
-    setup: (_, { slots }) => () => h('div', slots.default?.()),
-  }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({
+      name: 'DetailSheetContent',
+      setup: (_, { slots }) => () => h('div', slots.default?.()),
+    }),
+  }
+})
 vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
   default: defineComponent({
     name: 'DealJourneyDetailHost',
@@ -24,13 +28,13 @@ vi.mock('@/components/business-journey/DealJourneyDetailHost.vue', () => ({
     setup: props => () => h('div', { 'data-customer-id': props.customerId, 'data-journey-id': props.journeyId }),
   }),
 }))
-vi.mock('@/views/CustomerDetailSheet.vue', () => ({
+vi.mock('@/components/panels/CustomerDetailSheet.vue', () => ({
   default: defineComponent({ name: 'CustomerDetailSheet', setup: () => () => h('div') }),
 }))
 
-import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
+import DealJourneyDetailSheet from '@/components/panels/DealJourneyDetailSheet.vue'
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
-import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import CustomerDetailSheet from '@/components/panels/CustomerDetailSheet.vue'
 
 function mountSheet() {
   return mount(DealJourneyDetailSheet, {

@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/select'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { aiConfigApi } from '@/api/aiConfig'
 import type { AIConfigResponse, SSEEvent, AssistantCapabilityResult, AssistantVerificationStage } from '@/api/aiConfig'

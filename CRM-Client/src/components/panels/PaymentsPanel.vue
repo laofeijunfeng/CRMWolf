@@ -14,7 +14,7 @@ import { Progress } from '@/components/ui/progress'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import ListCard from '@/components/crmwolf/ListCard.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import type { PaymentPlanResponse } from '@/api/payment'
 
 type PaymentPlanActionPredicate = (plan: PaymentPlanResponse) => boolean

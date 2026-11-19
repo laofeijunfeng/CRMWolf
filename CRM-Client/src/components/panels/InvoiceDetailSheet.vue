@@ -20,12 +20,7 @@ import {
   Wallet,
   X,
 } from 'lucide-vue-next'
-import {
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
+import { DetailSheetDescription, DetailSheetFooter, DetailSheetHeader, DetailSheetTitle } from '@/components/ui/detail-sheet'
 import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import {
   Card,
@@ -59,8 +54,8 @@ import { AmountText, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
-import ErrorState from '@/components/ErrorState.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import InvoiceTypeSegmentedControl from '@/components/invoice/InvoiceTypeSegmentedControl.vue'
@@ -1109,17 +1104,17 @@ onBeforeUnmount((): void => {
         subject-label="发票详情"
         @back="emit('back')"
       />
-      <SheetHeader class="invoice-sheet-header">
+      <DetailSheetHeader class="invoice-sheet-header">
         <div class="invoice-header-summary">
           <div v-if="invoiceInfo" class="title-avatar" aria-hidden="true">
             {{ invoiceInfo.application_number.charAt(0) || '票' }}
           </div>
 
           <div class="header-title-block">
-            <SheetTitle class="invoice-sheet-title">
+            <DetailSheetTitle class="invoice-sheet-title">
               {{ invoiceInfo?.application_number ?? '发票申请详情' }}
-            </SheetTitle>
-            <SheetDescription class="invoice-sheet-description">
+            </DetailSheetTitle>
+            <DetailSheetDescription class="invoice-sheet-description">
               <StatusBadge
                 v-if="invoiceInfo"
                 :status="invoiceInfo.status"
@@ -1137,11 +1132,11 @@ onBeforeUnmount((): void => {
                 :status="invoiceInfo.reissue_status"
               />
               <span v-if="!invoiceInfo">{{ loading ? '正在加载发票申请' : '查看申请、审批与发票文件' }}</span>
-            </SheetDescription>
+            </DetailSheetDescription>
           </div>
 
         </div>
-      </SheetHeader>
+      </DetailSheetHeader>
 
       <ScrollArea class="flex-1" :class="{ 'min-h-0': isSourceMode }">
         <div class="sheet-body">
@@ -1499,7 +1494,7 @@ onBeforeUnmount((): void => {
         </div>
       </ScrollArea>
 
-      <SheetFooter v-if="!isSourceMode" class="invoice-sheet-footer">
+      <DetailSheetFooter v-if="!isSourceMode" class="invoice-sheet-footer">
         <Button v-if="canEdit" variant="outline" type="button" @click="handleEdit">
           编辑
         </Button>
@@ -1544,7 +1539,7 @@ onBeforeUnmount((): void => {
           <X data-icon="inline-start" aria-hidden="true" />
           关闭
         </Button>
-      </SheetFooter>
+      </DetailSheetFooter>
       <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
   </DetailSheetSurface>
 

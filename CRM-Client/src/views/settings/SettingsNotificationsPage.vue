@@ -20,7 +20,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { notificationConfigApi } from '@/api/notificationConfig'
 import type { NotificationConfigResponse, NotificationConfigUpdate } from '@/api/notificationConfig'

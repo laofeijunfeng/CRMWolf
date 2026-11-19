@@ -48,7 +48,7 @@ vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/utils/renameDialog', () => ({ renameDialog: vi.fn().mockResolvedValue('审批未通过视图') }))
-vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
+vi.mock('@/components/panels/DealJourneyDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'DealJourneyDetailSheet',
     props: {
@@ -65,7 +65,7 @@ vi.mock('@/views/DealJourneyDetailSheet.vue', () => ({
     }),
   }),
 }))
-vi.mock('@/views/CustomerDetailSheet.vue', () => ({
+vi.mock('@/components/panels/CustomerDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'CustomerDetailSheet',
     props: {
@@ -86,8 +86,8 @@ import BusinessJourneyTableView from '@/components/business-journey/BusinessJour
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
 import BusinessJourneyChartView from '@/components/business-journey/BusinessJourneyChartView.vue'
 import { useHeaderStore } from '@/stores/header'
-import DealJourneyDetailSheet from '@/views/DealJourneyDetailSheet.vue'
-import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import DealJourneyDetailSheet from '@/components/panels/DealJourneyDetailSheet.vue'
+import CustomerDetailSheet from '@/components/panels/CustomerDetailSheet.vue'
 
 const emptyList = {
   items: [],

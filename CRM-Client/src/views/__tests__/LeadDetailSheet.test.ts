@@ -1,7 +1,7 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import LeadDetailSheet from '../LeadDetailSheet.vue'
+import LeadDetailSheet from '@/components/panels/LeadDetailSheet.vue'
 import { leadApi, type LeadDetail } from '@/api/lead'
 
 const leadDetail: LeadDetail = {

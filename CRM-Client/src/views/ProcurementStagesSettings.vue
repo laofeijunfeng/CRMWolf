@@ -12,7 +12,7 @@ import { Button, DataTable, Dialog, DialogContent, DialogDescription, DialogFoot
 import { Badge } from '@/components/ui/badge'
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import procurementApi, { type ProcurementMethodWithStages, type ProcurementStageTemplate, type ProcurementStageTemplateCreate, type ProcurementStageTemplateUpdate } from '@/api/procurement'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
 import { getSettingsNavigationItem } from '@/settingsNavigation'

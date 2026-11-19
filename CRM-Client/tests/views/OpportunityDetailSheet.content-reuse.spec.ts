@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import OpportunityDetailSheet from '@/views/OpportunityDetailSheet.vue'
+import OpportunityDetailSheet from '@/components/panels/OpportunityDetailSheet.vue'
 import { LicenseType, OpportunityStatus, PurchaseType, type Opportunity } from '@/api/opportunity'
 
 const routerPush = vi.hoisted(() => vi.fn())
@@ -58,9 +58,13 @@ vi.mock('@/components/ui/sheet', () => {
   }
 })
 
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
+  }
+})
 
 vi.mock('@/components/ui/card', () => {
   const passthrough = (name: string) => defineComponent({ name, setup: (_, { slots }) => () => h('div', slots.default?.()) })

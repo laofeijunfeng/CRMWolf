@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, type HTMLAttributes } from 'vue'
 import { cn } from '@/lib/utils'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { Button } from '@/components/ui/button'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import {

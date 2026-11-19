@@ -10,7 +10,7 @@
  */
 import { Plus, Pencil, Send, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import { HoverInfo } from '@/components/crmwolf'
 import ListCard from '@/components/crmwolf/ListCard.vue'

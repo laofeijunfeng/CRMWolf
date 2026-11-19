@@ -12,12 +12,16 @@ vi.mock('@/components/ui/sheet', () => ({
   }),
 }))
 
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({
-    name: 'DetailSheetContent',
-    setup: (_, { slots }) => () => h('div', slots.default?.()),
-  }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({
+      name: 'DetailSheetContent',
+      setup: (_, { slots }) => () => h('div', slots.default?.()),
+    }),
+  }
+})
 
 vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
   default: defineComponent({
@@ -31,7 +35,7 @@ vi.mock('@/components/panels/ContractDetailContent.vue', () => ({
   }),
 }))
 
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import ContractDetailSheet from '@/components/panels/ContractDetailSheet.vue'
 import ContractDetailContent from '@/components/panels/ContractDetailContent.vue'
 
 const paymentPlanFixture = (): PaymentPlanResponse => ({

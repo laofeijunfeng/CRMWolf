@@ -8,7 +8,7 @@ import { toast } from 'vue-sonner'
 import { Plus } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 
 import {
   Dialog,

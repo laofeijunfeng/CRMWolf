@@ -15,7 +15,7 @@ import { formatOpportunityProductSummary } from '@/utils/opportunityProduct'
 import { AmountText } from '@/components/crmwolf'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import {
   Accordion,
@@ -32,7 +32,7 @@ import {
   BreadcrumbSeparator
 } from '@/components/ui/breadcrumb'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import OpportunityStageStepper from '@/components/OpportunityStageStepper.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
 import OpportunityWinDialog from '@/components/dialogs/OpportunityWinDialog.vue'

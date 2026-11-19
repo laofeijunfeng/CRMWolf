@@ -60,14 +60,16 @@
 | FileAttachment | crmwolf | candidate | 附件 | — | 待补 |
 | FilePreviewDialog | crmwolf | candidate | 文件预览 | — | 待补 |
 | HoverInfo | crmwolf | candidate | 悬停说明 | — | 待补 |
-| StatusBadge | components | candidate | 业务状态 | — | [状态徽标](status-badge.md) |
-| DetailSheet | ui | candidate | 详情抽屉（`ui/detail-sheet`），页面可直接使用 | — | 待补 |
+| StatusBadge | crmwolf | candidate | 业务状态 | — | [状态徽标](status-badge.md) |
+| ApprovalStatusBadge | crmwolf | candidate | 审批状态（带图标） | — | [状态徽标](status-badge.md) |
+| DetailSheet | ui | candidate | 详情抽屉（`ui/detail-sheet`：DetailSheet·DetailSheetContent·DetailSheetSurface·DetailSheetHeader·DetailSheetTitle·DetailSheetDescription·DetailSheetFooter），页面可直接使用 | `ui/sheet` | 待补 |
 
 ## 反馈
 
 | 组件 | 层 | 状态 | 用途 | 替代 | 契约 |
 | --- | --- | --- | --- | --- | --- |
 | DataViewStatePanel | crmwolf | candidate | 空、错、加载状态 | 手写状态块 | 待补 |
+| ErrorState | crmwolf | candidate | 错误、无权限状态块 | — | 待补 |
 | LoadingSkeleton | crmwolf | candidate | 加载骨架 | — | 待补 |
 | LiveRegion | crmwolf | candidate | 读屏播报 | — | 待补 |
 | ConfirmDialog | crmwolf | candidate | 确认操作 | 原生 `confirm()` | [模态框与抽屉](modal-sheet.md) |
@@ -85,8 +87,6 @@
 
 ## 已知问题
 
-- StatusBadge 由 `crmwolf/index.ts` 从 `components/` 反向导出，阶段 2 迁入 crmwolf。
-- DataTable、DataViewStatePanel 反向引用业务组件 `components/ErrorState.vue`，已登记，阶段 2 迁入 crmwolf。
 - `crmwolf/index.ts` 尾部转导出约 30 组 `ui` 原件，违反 barrel 规则，已登记待清理；不为这些原件建行。
 - FeedbackAlert、ListAdvancedTools、ListViewStateSummary、TableRowContextMenuContent 存在但未导出，按需登记。
 - 页面空、错、加载状态统一用 DataViewStatePanel，不另建 EmptyState。

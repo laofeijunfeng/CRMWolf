@@ -11,12 +11,7 @@ import {
   WalletCards,
   X
 } from 'lucide-vue-next'
-import {
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle
-} from '@/components/ui/sheet'
+import { DetailSheetDescription, DetailSheetFooter, DetailSheetHeader, DetailSheetTitle } from '@/components/ui/detail-sheet'
 import {
   Card,
   CardContent,
@@ -27,8 +22,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import StatusBadge from '@/components/StatusBadge.vue'
-import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
+import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
 import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
@@ -514,24 +509,24 @@ watch(
 
   <div class="detail-embedded-content">
 
-      <SheetHeader class="payment-sheet-header">
+      <DetailSheetHeader class="payment-sheet-header">
         <div class="payment-header-summary">
           <div v-if="paymentPlan" class="title-avatar" aria-hidden="true">
             {{ paymentPlan.stage_name.charAt(0) || '款' }}
           </div>
 
           <div class="header-title-block">
-            <SheetTitle class="payment-sheet-title">
+            <DetailSheetTitle class="payment-sheet-title">
               {{ paymentPlan?.stage_name ?? '回款计划详情' }}
-            </SheetTitle>
-            <SheetDescription class="payment-sheet-description">
+            </DetailSheetTitle>
+            <DetailSheetDescription class="payment-sheet-description">
               <StatusBadge
                 v-if="paymentPlan"
                 :status="mapPaymentPlanStatus(paymentPlan.status)"
                 type="paymentPlan"
               />
               <span v-else>{{ loading ? '正在加载回款计划' : '查看计划、记录与审批进度' }}</span>
-            </SheetDescription>
+            </DetailSheetDescription>
           </div>
 
           <div v-if="paymentPlan" class="amount-summary" aria-label="回款金额概览">
@@ -549,7 +544,7 @@ watch(
             </div>
           </div>
         </div>
-      </SheetHeader>
+      </DetailSheetHeader>
 
       <ScrollArea class="payment-sheet-scroll">
         <div class="sheet-body">
@@ -711,7 +706,7 @@ watch(
         </div>
       </ScrollArea>
 
-      <SheetFooter class="payment-sheet-footer">
+      <DetailSheetFooter class="payment-sheet-footer">
         <Button
           v-if="canResubmitApproval"
           variant="outline"
@@ -765,7 +760,7 @@ watch(
           <X data-icon="inline-start" aria-hidden="true" />
           关闭
         </Button>
-      </SheetFooter>
+      </DetailSheetFooter>
   </div>
 
   <!-- Register payment dialog -->

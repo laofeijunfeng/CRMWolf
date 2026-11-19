@@ -4,7 +4,7 @@
   基于 V2 设计规范重构：
   - TopBar 集成 ContextTabs（待我审批/我已处理/我提交的，权限驱动）+ Badge 显示待办数
   - DataTable 工具栏筛选（单据类型）
-  - DataTable（桌面端表格）+ 键盘快捷键（J/K 上下行、Enter 开 Sheet、Esc 关 Sheet）
+  - DataTable（桌面端表格）+ 键盘快捷键（J/K 上下行、Enter 开 DetailSheet、Esc 关 DetailSheet）
   - 移动端卡片列表 + 快速审批按钮（Touch Target ≥44pt）
   - DetailSheetContent（统一详情抽屉样式）
   - V2 Design Tokens 统一样式
@@ -12,7 +12,7 @@
   核心功能：
   - 待我审批按 overdue_hours 降序排列
   - 超时徽章（overdue_hours>=48）实时提醒
-  - Sheet 关闭焦点回归触发行
+  - DetailSheet 关闭焦点回归触发行
   - 单号 mono 字体 + 点击复制
   - 快速审批（同意/驳回）
   - REJECTED 行显示「修改并重新提交」
@@ -278,13 +278,13 @@
       </DataTable>
 
     <!-- 详情 Sheet -->
-    <Sheet v-model:open="sheetVisible">
+    <DetailSheet v-model:open="sheetVisible">
       <DetailSheetContent aria-describedby="" @close-auto-focus="restoreListFocus">
-        <SheetTitle v-if="drillTarget === 'customer' || drillTarget === 'opportunity'" class="sr-only">{{ drillTarget === 'customer' ? '客户详情' : '商机详情' }}</SheetTitle>
+        <DetailSheetTitle v-if="drillTarget === 'customer' || drillTarget === 'opportunity'" class="sr-only">{{ drillTarget === 'customer' ? '客户详情' : '商机详情' }}</DetailSheetTitle>
         <div v-show="drillTarget === null" class="flex flex-1 flex-col min-h-0 min-w-0">
         <!-- Header -->
-        <SheetHeader class="p-6 pb-4 border-b border-border">
-          <SheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</SheetTitle>
+        <DetailSheetHeader class="p-6 pb-4 border-b border-border">
+          <DetailSheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</DetailSheetTitle>
           <p class="font-mono text-sm mt-1">
             <CopyableText
               v-if="selectedApproval?.application_number"
@@ -294,7 +294,7 @@
             />
             <template v-else>-</template>
           </p>
-        </SheetHeader>
+        </DetailSheetHeader>
 
         <!-- Content -->
         <ScrollArea class="flex-1 min-h-0 min-w-0">
@@ -463,7 +463,7 @@
         </ScrollArea>
 
         <!-- Footer -->
-        <SheetFooter
+        <DetailSheetFooter
           v-if="showBusinessActionFooter"
           class="p-4 border-t border-border flex flex-row justify-end gap-2"
         >
@@ -474,7 +474,7 @@
           >
             {{ uploadFooterLabel }}
           </Button>
-        </SheetFooter>
+        </DetailSheetFooter>
         </div>
         <div v-if="drillTarget !== null" ref="drillSurface" class="flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden">
           <ContractDetailSheet v-if="drillTarget === 'contract'" :contract-id="Number(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
@@ -484,7 +484,7 @@
           <CustomerDetailSheet v-else-if="drillTarget === 'customer'" :customer-id="String(drillId)" :visible="true" embedded :source-approval="approvalSource" @update:visible="handleDrillVisibleChange" @back="closeDrilldown" />
         </div>
       </DetailSheetContent>
-    </Sheet>
+    </DetailSheet>
 
     <InvoiceMarkIssuedDialog
       v-if="selectedApproval?.business_type === 'INVOICE'"
@@ -611,26 +611,25 @@ import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { DetailSheetContent, DetailSheet, DetailSheetHeader, DetailSheetTitle, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
+import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
 import InvoiceApplicationFormDialog from '@/components/dialogs/InvoiceApplicationFormDialog.vue'
 import InvoiceMarkIssuedDialog from '@/components/dialogs/InvoiceMarkIssuedDialog.vue'
 import InvoiceReissueCompleteDialog from '@/components/dialogs/InvoiceReissueCompleteDialog.vue'
 import LicenseIssueDialog from '@/components/dialogs/LicenseIssueDialog.vue'
-import InvoiceDetailSheet from '@/views/InvoiceDetailSheet.vue'
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
-import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
-import OpportunityDetailSheet from '@/views/OpportunityDetailSheet.vue'
-import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import InvoiceDetailSheet from '@/components/panels/InvoiceDetailSheet.vue'
+import ContractDetailSheet from '@/components/panels/ContractDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/components/panels/PaymentRecordDetailSheet.vue'
+import OpportunityDetailSheet from '@/components/panels/OpportunityDetailSheet.vue'
+import CustomerDetailSheet from '@/components/panels/CustomerDetailSheet.vue'
 import type { ApprovalSourceContext } from '@/types/approvalSource'
 import { useApprovalStore } from '@/stores/approval'
 import { usePermissionStore } from '@/stores/permissions'

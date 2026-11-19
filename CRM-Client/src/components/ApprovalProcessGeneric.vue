@@ -26,9 +26,9 @@ import type {
   ApprovalRecord
 } from '@/schemas/approvalGeneric'
 import type { ApprovalEntityId } from '@/api/approvalGeneric'
-import ApprovalStatusBadge from './ApprovalStatusBadge.vue'
+import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
 import ApprovalProcessStepper from './ApprovalProcessStepper.vue'
-import ErrorState from './ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { Button } from '@/components/ui/button'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { getStatusPresentation } from '@/utils/statusPresentation'

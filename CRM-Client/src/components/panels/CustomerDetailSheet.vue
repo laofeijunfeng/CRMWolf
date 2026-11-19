@@ -8,16 +8,13 @@
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
 import { computed, ref, watch } from 'vue'
-import {
-  SheetHeader,
-  SheetFooter
-} from '@/components/ui/sheet'
+import { DetailSheetHeader, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import ErrorState from '@/components/ErrorState.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { ContextTabs } from '@/components/crmwolf'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
@@ -859,7 +856,7 @@ watch(() => props.targetPanel, (panel): void => {
 
       <template v-if="selectedJourneyId === null || isSourceMode">
         <!-- Header（审批来源模式只保留客户信息，不显示导航） -->
-        <SheetHeader v-if="!isSourceMode" class="customer-detail-sheet__header p-6 border-b border-border">
+        <DetailSheetHeader v-if="!isSourceMode" class="customer-detail-sheet__header p-6 border-b border-border">
           <!-- ContextTabs 导航 -->
           <ContextTabs
             :tabs="navTabs"
@@ -867,7 +864,7 @@ watch(() => props.targetPanel, (panel): void => {
             @update:activeTab="setActivePanel"
             class="w-full"
           />
-        </SheetHeader>
+        </DetailSheetHeader>
 
         <!-- Content -->
         <ScrollArea class="flex-1" :class="isSourceMode ? 'min-h-0' : undefined">
@@ -1117,7 +1114,7 @@ watch(() => props.targetPanel, (panel): void => {
         </ScrollArea>
 
         <!-- Footer -->
-        <SheetFooter
+        <DetailSheetFooter
           v-if="!isSourceMode"
           
           class="customer-detail-sheet__footer p-4 border-t border-border"
@@ -1154,7 +1151,7 @@ watch(() => props.targetPanel, (panel): void => {
               新建商机
             </Button>
           </template>
-        </SheetFooter>
+        </DetailSheetFooter>
       </template>
       <ApprovalSourceFooter v-if="isSourceMode" @back="emit('back')" />
   </DetailSheetSurface>

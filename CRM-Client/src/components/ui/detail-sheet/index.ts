@@ -6,3 +6,11 @@
  * - docs/LAYOUT.md - z-index 层级管理
  */
 export { default as DetailSheetContent } from './DetailSheetContent.vue'
+export { default as DetailSheetSurface } from './DetailSheetSurface.vue'
+export {
+  Sheet as DetailSheet,
+  SheetDescription as DetailSheetDescription,
+  SheetFooter as DetailSheetFooter,
+  SheetHeader as DetailSheetHeader,
+  SheetTitle as DetailSheetTitle,
+} from '@/components/ui/sheet'

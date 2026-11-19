@@ -26,7 +26,7 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { normalizeListChartDisplayMode, type ViewPreferenceConfig } from '@/api/viewPreference'
 import ContractChartPage from '@/components/contract/ContractChartPage.vue'
 import { confirmDialog } from '@/utils/confirmDialog'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import contractApi, {
   type ContractChartBucket,
@@ -53,7 +53,7 @@ import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import ContractDetailSheet from '@/views/ContractDetailSheet.vue'
+import ContractDetailSheet from '@/components/panels/ContractDetailSheet.vue'
 
 interface ContractDetailSheetExpose {
   refresh: () => Promise<boolean>

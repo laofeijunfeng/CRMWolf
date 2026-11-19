@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type PropType } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import CustomerDetailSheet from '@/views/CustomerDetailSheet.vue'
+import CustomerDetailSheet from '@/components/panels/CustomerDetailSheet.vue'
 import DetailContextHost from '@/components/crmwolf/DetailContextHost.vue'
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 import type { CustomerDetailResponse } from '@/api/customer'
@@ -128,9 +128,13 @@ vi.mock('@/components/ui/sheet', () => {
   }
 })
 
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({ name: 'DetailSheetContent', setup: (_, { slots }) => () => h('div', slots.default?.()) }),
+  }
+})
 
 vi.mock('@/components/ui/button', () => ({
   Button: defineComponent({

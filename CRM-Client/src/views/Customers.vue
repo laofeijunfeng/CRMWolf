@@ -46,10 +46,10 @@ import { formatProductIntentName } from '@/utils/productIntent'
 import CustomerFormDialog from '@/components/dialogs/CustomerFormDialog.vue'
 import CustomerTransferDialog from '@/components/dialogs/CustomerTransferDialog.vue'
 import OpportunityFormDialog from '@/components/dialogs/OpportunityFormDialog.vue'
-import CustomerDetailSheet from './CustomerDetailSheet.vue'
+import CustomerDetailSheet from '@/components/panels/CustomerDetailSheet.vue'
 import CustomerDealJourneyHoverCard from '@/components/customer/CustomerDealJourneyHoverCard.vue'
 import CustomerChartPage from '@/components/customer/CustomerChartPage.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import customerApi, {
   type CustomerResponse,
   type CustomerDetailResponse,

@@ -132,7 +132,7 @@ vi.mock('@/components/ApprovalProcessStepper.vue', () => ({
   default: defineComponent({ name: 'ApprovalProcessStepper', setup: () => () => h('div') }),
 }))
 
-vi.mock('@/components/ApprovalStatusBadge.vue', () => ({
+vi.mock('@/components/crmwolf/ApprovalStatusBadge.vue', () => ({
   default: defineComponent({ name: 'ApprovalStatusBadge', setup: () => () => h('span') }),
 }))
 
@@ -140,7 +140,7 @@ vi.mock('@/components/InvoiceFileUpload.vue', () => ({
   default: defineComponent({ name: 'InvoiceFileUpload', setup: () => () => h('div') }),
 }))
 
-vi.mock('@/components/ErrorState.vue', () => ({
+vi.mock('@/components/crmwolf/ErrorState.vue', () => ({
   default: defineComponent({
     name: 'ErrorState',
     props: { title: String, description: String },

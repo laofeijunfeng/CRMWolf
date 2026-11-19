@@ -60,12 +60,16 @@ vi.mock('@/components/ui/sheet', () => {
   }
 })
 
-vi.mock('@/components/ui/detail-sheet', () => ({
-  DetailSheetContent: defineComponent({
-    name: 'DetailSheetContent',
-    setup: (_, { slots, attrs }) => () => h('div', attrs, slots.default?.()),
-  }),
-}))
+vi.mock('@/components/ui/detail-sheet', async () => {
+  const sheet = await import('@/components/ui/sheet')
+  return {
+    ...Object.fromEntries(Object.entries(sheet).map(([name, part]) => [`Detail${name}`, part])),
+    DetailSheetContent: defineComponent({
+      name: 'DetailSheetContent',
+      setup: (_, { slots, attrs }) => () => h('div', attrs, slots.default?.()),
+    }),
+  }
+})
 
 vi.mock('@/components/ui/card', () => {
   const passthrough = (name: string) => defineComponent({
@@ -174,7 +178,7 @@ vi.mock('@/components/ApprovalProcessGeneric.vue', () => ({
   }),
 }))
 
-import PaymentRecordDetailSheet from '@/views/PaymentRecordDetailSheet.vue'
+import PaymentRecordDetailSheet from '@/components/panels/PaymentRecordDetailSheet.vue'
 
 const paymentRecordFixture = (overrides: Partial<PaymentRecordDetailInfo> = {}): PaymentRecordDetailInfo => ({
   id: 501,

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Sheet } from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { DetailSheetContent, DetailSheet } from '@/components/ui/detail-sheet'
 import DealJourneyDetailHost from '@/components/business-journey/DealJourneyDetailHost.vue'
 
 interface Props {
@@ -34,7 +33,7 @@ function closeSheet(): void {
 </script>
 
 <template>
-  <Sheet v-if="visible" v-model:open="visibleModel">
+  <DetailSheet v-if="visible" v-model:open="visibleModel">
     <DetailSheetContent v-bind="elevated ? { elevated: true } : {}">
       <DealJourneyDetailHost v-bind="elevated ? { elevated: true } : {}"
         v-if="customerId !== null && journeyId !== null"
@@ -47,5 +46,5 @@ function closeSheet(): void {
         @view-customer="emit('view-customer', $event)"
       />
     </DetailSheetContent>
-  </Sheet>
+  </DetailSheet>
 </template>

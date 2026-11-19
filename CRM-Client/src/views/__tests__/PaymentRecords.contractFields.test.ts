@@ -102,7 +102,7 @@ vi.mock('@/components/crmwolf', async (): Promise<Record<string, unknown>> => {
   const TableRowActions = defineComponent({ name: 'TableRowActions', setup: (): (() => VNode) => () => h('div') })
   return { DataTable, AmountText, TableRowActions }
 })
-vi.mock('@/views/PaymentRecordDetailSheet.vue', async (): Promise<Record<string, unknown>> => {
+vi.mock('@/components/panels/PaymentRecordDetailSheet.vue', async (): Promise<Record<string, unknown>> => {
   const { defineComponent, h } = await import('vue')
   return { default: defineComponent({ name: 'PaymentRecordDetailSheet', setup: (): (() => VNode) => () => h('div') }) }
 })

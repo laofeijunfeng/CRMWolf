@@ -21,16 +21,9 @@ import { CheckCircle, Pencil, Plus, TrendingUp } from 'lucide-vue-next'
 import LeadFormDialog from '@/components/LeadFormDialog.vue'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import LeadConvertDialog from '@/components/LeadConvertDialog.vue'
-import {
-  Sheet,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  SheetFooter
-} from '@/components/ui/sheet'
-import { DetailSheetContent } from '@/components/ui/detail-sheet'
+import { DetailSheetContent, DetailSheet, DetailSheetHeader, DetailSheetTitle, DetailSheetDescription, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import { Card, CardHeader, CardContent } from '@/components/ui/card'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -237,21 +230,21 @@ watch(() => props.visible, (visible): void => {
 
 <template>
   <!-- 线索详情抽屉 -->
-  <Sheet :open="visible" @update:open="$emit('update:visible', $event)">
+  <DetailSheet :open="visible" @update:open="$emit('update:visible', $event)">
     <DetailSheetContent>
       <!-- Header -->
-      <SheetHeader class="p-6 pb-4 border-b border-border">
+      <DetailSheetHeader class="p-6 pb-4 border-b border-border">
         <div class="flex items-center gap-4">
           <div v-if="leadData" class="title-avatar">
             {{ leadData.lead_name?.charAt(0) || '线' }}
           </div>
           <div class="flex-1 min-w-0">
-            <SheetTitle class="text-lg font-semibold truncate">
+            <DetailSheetTitle class="text-lg font-semibold truncate">
               {{ leadData?.lead_name || '线索详情' }}
-            </SheetTitle>
-            <SheetDescription class="flex items-center gap-2 mt-1">
+            </DetailSheetTitle>
+            <DetailSheetDescription class="flex items-center gap-2 mt-1">
               <StatusBadge v-if="leadData" type="lead" :status="mapLeadStatus(leadData.status)" />
-            </SheetDescription>
+            </DetailSheetDescription>
           </div>
           <div v-if="leadData" class="text-right">
             <div class="text-xs text-muted-foreground">跟进次数</div>
@@ -260,7 +253,7 @@ watch(() => props.visible, (visible): void => {
             </div>
           </div>
         </div>
-      </SheetHeader>
+      </DetailSheetHeader>
 
       <!-- Content -->
       <ScrollArea class="flex-1">
@@ -358,7 +351,7 @@ watch(() => props.visible, (visible): void => {
       </ScrollArea>
 
       <!-- Footer -->
-      <SheetFooter class="p-4 border-t border-border flex flex-row gap-2">
+      <DetailSheetFooter class="p-4 border-t border-border flex flex-row gap-2">
         <Button
           v-if="leadData?.status === 0 || leadData?.status === 1"
           variant="default"
@@ -371,9 +364,9 @@ watch(() => props.visible, (visible): void => {
           <Pencil class="w-4 h-4 mr-2" />
           编辑
         </Button>
-      </SheetFooter>
+      </DetailSheetFooter>
     </DetailSheetContent>
-  </Sheet>
+  </DetailSheet>
 
   <!-- 添加跟进记录弹窗 -->
   <Dialog v-model:open="followUpDialogOpen">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ExternalLink } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { PaymentConfirmationStatus, PaymentRecordWithDetails } from '@/api/payment'

@@ -27,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { handleApiError } from '@/utils/errorHandler'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 
 import { confirmDelete } from '@/utils/confirmDialog'
 import { teamApi } from '@/api/team'

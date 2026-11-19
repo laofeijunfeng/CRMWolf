@@ -29,7 +29,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatLocalDate } from '@/utils/format'
 import { classifyLicenseStatus } from '@/utils/licenseStatus'
 import { getStatusPresentation } from '@/utils/statusPresentation'
-import StatusBadge from '@/components/StatusBadge.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { productPublicIdFromIntent } from '@/utils/productIntent'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 import customerApi, {
@@ -49,7 +49,7 @@ import {
   type CustomerCreateForm,
 } from '@/schemas/customer-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
-import ErrorState from '@/components/ErrorState.vue'
+import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
 
