@@ -373,7 +373,7 @@ watch([hasAccess, teamId], (): void => {
 
   <!-- 流程详情 Dialog (z-[1000]) -->
   <Dialog v-model:open="detailDialogOpen">
-    <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto z-[1000]">
+    <DialogContent size="lg" class="max-h-[90vh] overflow-y-auto z-[1000]">
       <DialogHeader>
         <DialogTitle>流程详情 - {{ currentFlow?.flow_name }}</DialogTitle>
         <DialogDescription>

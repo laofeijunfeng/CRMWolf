@@ -429,7 +429,7 @@ watch([hasAccess, teamId], (): void => {
   </SettingsContent>
 
   <Dialog v-model:open="dialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? '编辑采购方式' : '新增采购方式' }}</DialogTitle>
         <DialogDescription>

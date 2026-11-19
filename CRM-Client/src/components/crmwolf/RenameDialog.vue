@@ -52,7 +52,7 @@ watch(
 
 <template>
   <Dialog :open="state.visible" @update:open="handleOpenChange">
-    <DialogContent class="rename-dialog">
+    <DialogContent size="sm" class="rename-dialog">
       <DialogHeader>
         <DialogTitle>{{ state.options.title }}</DialogTitle>
         <DialogDescription v-if="state.options.description">
@@ -87,10 +87,6 @@ watch(
 </template>
 
 <style scoped lang="scss">
-
-:global(.rename-dialog) {
-  max-width: 420px;
-}
 
 .rename-dialog__form {
   display: flex;

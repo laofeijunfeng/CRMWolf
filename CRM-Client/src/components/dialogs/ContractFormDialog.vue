@@ -590,7 +590,7 @@ function handleCancel(): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="contract-form-dialog w-[calc(100vw-2rem)] max-w-[720px]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}" class="contract-form-dialog">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑合同' : '新建合同' }}</DialogTitle>
         <DialogDescription class="sr-only">填写合同基本信息、授权信息和签署日期</DialogDescription>

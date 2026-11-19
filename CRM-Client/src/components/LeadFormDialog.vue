@@ -241,7 +241,7 @@ const handleCancel = (): void => {
 
 <template>
   <Dialog :open="props.open" @update:open="closeGuard.handleOpenChange">
-    <DialogContent class="w-[calc(100vw-2rem)] px-[28px] sm:max-w-2xl max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
+    <DialogContent size="lg" class="px-[28px] max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建线索' : '编辑线索' }}</DialogTitle>
       </DialogHeader>

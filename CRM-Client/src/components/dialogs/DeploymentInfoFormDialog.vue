@@ -206,10 +206,6 @@ watch(
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 
-.deployment-dialog {
-  max-width: 560px;
-}
-
 .deployment-dialog__form {
   display: flex;
   flex-direction: column;

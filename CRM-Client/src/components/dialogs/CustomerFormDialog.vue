@@ -697,7 +697,7 @@ function handleCancel(): void { closeGuard.requestClose() }
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="customer-form-dialog w-[calc(100vw-2rem)] sm:max-w-2xl">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}" class="customer-form-dialog">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建客户' : '编辑客户' }}</DialogTitle>
         <DialogDescription data-testid="customer-dialog-description" class="text-sm text-muted-foreground">

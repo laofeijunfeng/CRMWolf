@@ -192,7 +192,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="opportunity-win-dialog w-[calc(100vw-2rem)] max-w-[425px]">
+    <DialogContent size="sm" v-bind="elevated ? { elevated: true } : {}" class="opportunity-win-dialog">
       <DialogHeader>
         <DialogTitle>标记赢单</DialogTitle>
         <DialogDescription>确认商机成交信息后，商机状态将变更为“已赢单”。</DialogDescription>

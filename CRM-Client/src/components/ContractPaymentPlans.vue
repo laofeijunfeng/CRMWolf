@@ -585,7 +585,7 @@ watch(
 
   <Teleport to="body">
     <Dialog v-model:open="recordsDialogOpen">
-      <DialogContent class="contract-payment-records-dialog">
+      <DialogContent size="xl" class="contract-payment-records-dialog">
         <DialogHeader>
           <DialogTitle>{{ currentPlanDialogTitle }}</DialogTitle>
           <DialogDescription>查看、修改或删除该阶段的回款登记历史。</DialogDescription>
@@ -774,9 +774,5 @@ watch(
 .contract-payment-records-dialog {
   max-height: min(90vh, 90dvh);
   overflow-y: auto;
-
-  @media (min-width: $bp-sm) {
-    max-width: 800px;
-  }
 }
 </style>

@@ -558,7 +558,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="invoice-application-form-dialog invoice-application-dialog w-[calc(100vw-2rem)]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}" class="invoice-application-form-dialog invoice-application-dialog">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
@@ -738,10 +738,6 @@ watch(
 
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
-
-.invoice-application-dialog {
-  max-width: 720px;
-}
 
 .invoice-application-dialog__form {
   display: flex;

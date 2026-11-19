@@ -278,17 +278,18 @@ const handleKeydown = (event: KeyboardEvent): void => {
 }
 
 const contentClass = computed(() => cn(
-  'flex flex-col gap-0 overflow-hidden p-0 max-w-none',
-  'max-sm:h-dvh max-sm:w-screen max-sm:rounded-none max-sm:border-0',
+  'flex flex-col gap-0 overflow-hidden p-0',
+  'max-sm:h-dvh max-sm:w-screen max-sm:max-w-none max-sm:rounded-none max-sm:border-0',
   maximized.value
-    ? 'h-dvh w-screen rounded-none border-0'
-    : 'h-[calc(100dvh-48px)] w-[min(1280px,calc(100vw-48px))]'
+    ? 'h-dvh w-screen max-w-none rounded-none border-0'
+    : 'h-[calc(100dvh-48px)]'
 ))
 </script>
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent
+      size="full"
       :class="contentClass"
       hide-close
     >

@@ -2,7 +2,7 @@
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="dialog-content">
+    <DialogContent size="xl" class="dialog-content">
       <DialogHeader>
         <DialogTitle>AI 智能创建审批流程</DialogTitle>
         <DialogDescription>
@@ -745,8 +745,6 @@ watch(visible, (val): void => {
 @use '@/styles/tokens.scss' as *;
 
 .dialog-content {
-  width: min(920px, calc(100vw - #{$space-6}));
-  max-width: 920px;
   max-height: 88vh;
   border-radius: var(--radius-xl);
   background: hsl(var(--card));

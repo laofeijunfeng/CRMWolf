@@ -63,6 +63,7 @@
 | `--icon-xs/sm/lg` | `14` / `16` / `18px` | 图标尺寸。 |
 | `--touch-target` | `44px` | 移动端可点下限，含输入控件。 |
 | `--menu-min-width` | `160px` | Menu 浮层最小宽度（右键菜单、下拉菜单）。 |
+| `--dialog-w-sm/md/lg/xl/full` | `440` / `560` / `720` / `960px` / `90vw` | Dialog 宽度档位（`DialogContent size`，默认 md）；AlertDialog 固定 sm；窄视口统一 `calc(100vw - 2rem)`。 |
 | 移动端输入字号 | `16px` | 防 iOS 缩放，`base.css` 统一设置。 |
 | `text-display` / `var(--font-size-display)` | `24/32px · 600` | 展示标题。 |
 | `text-title` / `var(--font-size-title)` | `18/28px · 600` | 页面主标题、浮层标题（Dialog/Sheet/AlertDialog）。 |

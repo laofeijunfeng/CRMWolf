@@ -464,7 +464,7 @@ watch([hasAccess, teamId], (): void => {
   </SettingsContent>
 
   <Dialog v-model:open="dialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? '编辑产品' : '新建产品' }}</DialogTitle>
         <DialogDescription>维护产品名称和描述。</DialogDescription>
@@ -502,7 +502,7 @@ watch([hasAccess, teamId], (): void => {
   </Dialog>
 
   <Dialog v-model:open="moduleDialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ isModuleEditMode ? '编辑模块' : '新增模块' }}</DialogTitle>
         <DialogDescription>

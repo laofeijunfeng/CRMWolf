@@ -342,7 +342,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent class="lead-convert-dialog w-[calc(100vw-2rem)] max-w-[600px]">
+    <DialogContent size="lg" class="lead-convert-dialog">
       <DialogHeader>
         <DialogTitle>转化为客户</DialogTitle>
         <DialogDescription>

@@ -383,7 +383,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="license-application-form-dialog license-application-dialog w-[calc(100vw-2rem)]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}" class="license-application-form-dialog license-application-dialog">
       <DialogHeader>
         <DialogTitle>申请 License</DialogTitle>
         <DialogDescription>选择部署信息、License 类型和有效期，提交后进入审批流程。</DialogDescription>
@@ -508,10 +508,6 @@ watch(
 
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
-
-.license-application-dialog {
-  max-width: 720px;
-}
 
 .license-application-dialog__form {
   display: flex;

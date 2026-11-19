@@ -354,7 +354,7 @@ watch([hasAccess, teamId], (): void => {
   </SettingsContent>
 
   <Dialog v-model:open="dialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? '编辑获客来源' : '新增获客来源' }}</DialogTitle>
         <DialogDescription>

@@ -59,7 +59,7 @@ function close(open: boolean): void {
 
 <template>
   <Dialog :open="open" @update:open="close">
-    <DialogContent :class="['chart-bucket-dialog__content w-[calc(100vw-2rem)] max-w-2xl', props.class]">
+    <DialogContent size="lg" :class="['chart-bucket-dialog__content', props.class]">
       <DialogHeader v-if="title || description">
         <DialogTitle v-if="title">{{ title }}</DialogTitle>
         <DialogDescription v-if="description">{{ description }}</DialogDescription>

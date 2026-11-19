@@ -508,7 +508,7 @@ watch([hasAccess, teamId], (): void => {
 
   <!-- 邀请成员 Dialog (z-[1000]) -->
   <Dialog v-model:open="inviteDialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>邀请成员</DialogTitle>
         <DialogDescription>
@@ -574,7 +574,7 @@ watch([hasAccess, teamId], (): void => {
 
   <!-- 分配角色 Dialog (z-[1000]) -->
   <Dialog v-model:open="roleDialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>分配角色</DialogTitle>
         <DialogDescription>
@@ -628,7 +628,7 @@ watch([hasAccess, teamId], (): void => {
 
   <!-- 修改用户名 Dialog (z-[1000]) -->
   <Dialog v-model:open="updateNameDialogOpen">
-    <DialogContent class="max-w-md z-[1000]">
+    <DialogContent size="sm" class="z-[1000]">
       <DialogHeader>
         <DialogTitle>修改用户名 - {{ updateNameTargetUser?.name }}</DialogTitle>
         <DialogDescription>
@@ -661,7 +661,7 @@ watch([hasAccess, teamId], (): void => {
 
   <!-- 重置密码 Dialog (z-[1000]) -->
   <Dialog v-model:open="resetPasswordDialogOpen">
-    <DialogContent class="max-w-md z-[1000]">
+    <DialogContent size="sm" class="z-[1000]">
       <DialogHeader>
         <DialogTitle>重置密码 - {{ resetPasswordTargetUser?.name }}</DialogTitle>
         <DialogDescription>

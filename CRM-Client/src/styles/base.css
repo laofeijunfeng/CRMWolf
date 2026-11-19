@@ -98,6 +98,12 @@
   --icon-lg: 18px;
   --touch-target: 44px;
   --menu-min-width: 160px;
+  /* 弹窗宽度 5 档（D-5）：Dialog 默认 md，AlertDialog 固定 sm */
+  --dialog-w-sm: 440px;
+  --dialog-w-md: 560px;
+  --dialog-w-lg: 720px;
+  --dialog-w-xl: 960px;
+  --dialog-w-full: 90vw;
   /* 字阶：Tailwind text-* 与 scoped SCSS 共用同一来源 */
   --font-size-display: 24px;
   --line-height-display: 32px;

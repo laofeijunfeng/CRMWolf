@@ -1552,7 +1552,7 @@ onBeforeUnmount((): void => {
   />
 
   <Dialog v-if="!isSourceMode" :open="redOffsetDialogOpen" @update:open="handleRedOffsetDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[560px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>冲红发票</DialogTitle>
         <DialogDescription>核对原发票信息并上传红字发票。提交成功后，原蓝字发票将标记为已冲红。</DialogDescription>
@@ -1659,7 +1659,7 @@ onBeforeUnmount((): void => {
   </Dialog>
 
   <Dialog v-if="!isSourceMode" :open="reissueDialogOpen" @update:open="reissueDialogOpen = $event">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[720px]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>{{ reissueDialogTitle }}</DialogTitle>
         <DialogDescription>{{ reissueDialogDescription }}</DialogDescription>
@@ -1763,7 +1763,7 @@ onBeforeUnmount((): void => {
   </Dialog>
 
   <Dialog v-if="!isSourceMode" :open="completeReissueDialogOpen" @update:open="handleCompleteReissueDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[560px]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>完成发票重开</DialogTitle>
         <DialogDescription>需要同时上传红字发票和新蓝字发票，发票号码可选。</DialogDescription>

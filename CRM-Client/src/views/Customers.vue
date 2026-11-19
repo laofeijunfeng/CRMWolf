@@ -1593,7 +1593,7 @@ defineExpose({
 
     <!-- 退回公海：保留原有理由填写流程，统一使用设计系统 Dialog -->
     <Dialog :open="returnModalVisible" @update:open="handleReturnDialogOpenChange">
-      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>退回公海</DialogTitle>
           <DialogDescription>
@@ -1639,7 +1639,7 @@ defineExpose({
 
     <!-- 标记输单：保留原有理由填写流程，统一使用设计系统 Dialog -->
     <Dialog :open="loseModalVisible" @update:open="handleLoseDialogOpenChange">
-      <DialogContent class="w-[calc(100%-2rem)] max-w-lg">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>标记输单</DialogTitle>
           <DialogDescription>

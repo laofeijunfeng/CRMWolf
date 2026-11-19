@@ -77,7 +77,7 @@ const handleViewDetail = (): void => {
 <template>
   <Dialog :open="visible" @update:open="!submitting && emit('update:visible', $event)">
     <DialogContent
-      class="sm:max-w-[440px]"
+      size="sm"
       :hide-close="submitting"
       @escape-key-down="(event) => submitting && event.preventDefault()"
       @interact-outside="(event) => event.preventDefault()"

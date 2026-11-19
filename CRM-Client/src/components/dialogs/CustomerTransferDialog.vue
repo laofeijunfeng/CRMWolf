@@ -427,7 +427,6 @@ watch(
 :global(.customer-transfer-dialog) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  max-width: 520px;
   max-height: min(90vh, 90dvh);
   overflow: hidden;
 }

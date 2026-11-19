@@ -870,7 +870,7 @@ onBeforeUnmount((): void => {
   </div>
 
   <Dialog v-if="!readonly && contractInfo" :open="changeDialogOpen" @update:open="value => { if (!changeSubmitting) changeDialogOpen = value }">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="w-[calc(100vw-2rem)] max-w-[640px]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>申请变更合同</DialogTitle>
         <DialogDescription>审批通过前合同保持原样，审批通过后才会更新合同金额。</DialogDescription>

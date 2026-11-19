@@ -628,7 +628,7 @@ watch(
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="payment-record-dialog w-[calc(100vw-2rem)] max-w-[640px]">
+    <DialogContent size="lg" v-bind="elevated ? { elevated: true } : {}" class="payment-record-dialog">
       <DialogHeader>
         <DialogTitle>登记回款</DialogTitle>
         <DialogDescription>

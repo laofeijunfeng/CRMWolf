@@ -177,7 +177,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="opportunity-lose-dialog w-[calc(100vw-2rem)] max-w-[425px]">
+    <DialogContent size="sm" v-bind="elevated ? { elevated: true } : {}" class="opportunity-lose-dialog">
       <DialogHeader>
         <DialogTitle>标记输单</DialogTitle>
         <DialogDescription>确认输单原因后，商机状态将变更为“已输单”。</DialogDescription>

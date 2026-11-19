@@ -180,7 +180,7 @@ onUnmounted(() => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[520px] max-w-full">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>上传重开发票</DialogTitle>
         <DialogDescription>上传红字发票和新蓝字发票，发票号码可选。</DialogDescription>

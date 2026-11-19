@@ -217,7 +217,7 @@ function handleOpenChange(open: boolean): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="follow-up-form-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="follow-up-form-dialog">
       <DialogHeader>
         <DialogTitle>添加客户活动</DialogTitle>
         <DialogDescription class="sr-only">记录本次客户活动的详细信息</DialogDescription>

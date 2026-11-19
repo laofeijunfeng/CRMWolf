@@ -138,7 +138,7 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[525px] max-w-full">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>发放 License</DialogTitle>
         <DialogDescription>请输入 License 信息完成发放</DialogDescription>

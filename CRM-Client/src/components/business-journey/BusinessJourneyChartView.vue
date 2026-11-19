@@ -340,7 +340,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
     </template>
 
     <Dialog :open="segmentOpen ?? false" @update:open="emit('update:segment-open', $event)">
-      <DialogContent class="journey-chart-segment-dialog w-[calc(100%-2rem)] max-w-lg">
+      <DialogContent class="journey-chart-segment-dialog">
         <DialogHeader>
           <DialogTitle>{{ segmentLabel }}</DialogTitle>
           <DialogDescription>{{ selectedCardTitle }} · 共 {{ segmentTotal }} 条</DialogDescription>

@@ -19,6 +19,18 @@
 
 颜色遵循[颜色令牌](../foundations/color-tokens.md)，圆角、遮罩和浮层层级遵循[圆角与层级](../foundations/radius-elevation.md)。外壳分档遵循[浮层表面](overlay.md)的 Modal。进入、退出和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
 
+## 宽度
+
+Dialog 宽度只取 `DialogContent` 的 `size` 五档，数值见[令牌数值](../foundations/token-values.md#控件与版式)的 `--dialog-w-*`：
+
+- **sm：**单字段或纯确认（重命名、确认赢单/输单、简单设置）。
+- **md（默认）：**常规单列表单与说明。
+- **lg：**双列表单、带明细的业务单据。
+- **xl：**带表格或流程编排的复杂编辑。
+- **full：**大图、文件预览与比对。
+
+AlertDialog 固定 sm，不提供 `size`。页面不得再写 `max-w-[…]`、`w-[calc(…)]` 或在 scoped 样式里设置弹窗宽度；窄视口宽度由 `DialogContent` 统一处理。抽屉（Sheet / DetailSheet）不使用这套档位。
+
 ## 响应式
 
 窄视口按[响应式与移动端](../foundations/responsive-mobile.md)选择不遮挡关键操作的承载形式，避开安全区域并支持内容内部滚动。页面背景不得因浮层内容而产生横向滚动。

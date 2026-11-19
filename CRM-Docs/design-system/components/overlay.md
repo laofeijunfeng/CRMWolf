@@ -31,4 +31,4 @@ Panel 标题栏的 X 只关闭浮层，不清空内容。清空、恢复默认�
 
 ## 落地边界
 
-新浮层改 `ui/*Content` 默认表面或 crmwolf 封装，不在页面覆盖圆角和阴影。内容宽度、打开延迟和触发方式仍由各组件拥有。窄视口规则遵循[响应式与移动端](../foundations/responsive-mobile.md)。动效遵循[动效与性能](../foundations/motion-performance.md)。
+新浮层改 `ui/*Content` 默认表面或 crmwolf 封装，不在页面覆盖圆角和阴影。Modal 宽度只用 `DialogContent size` 五档（见[模态框与抽屉](modal-sheet.md#宽度)）；其余浮层的内容宽度、打开延迟和触发方式仍由各组件拥有。窄视口规则遵循[响应式与移动端](../foundations/responsive-mobile.md)。动效遵循[动效与性能](../foundations/motion-performance.md)。

@@ -46,3 +46,38 @@ describe('DialogContent close control', () => {
     wrapper.unmount()
   })
 })
+
+describe('DialogContent size', () => {
+  const mountSized = (attrs: string): VueWrapper => mount({
+    components: { Dialog, DialogContent, DialogTitle },
+    template: `<Dialog :open="true"><DialogContent ${attrs}><DialogTitle>t</DialogTitle></DialogContent></Dialog>`,
+    attachTo: document.body
+  })
+  const contentClasses = (): DOMTokenList => {
+    const el = document.body.querySelector('[role="dialog"]')
+    if (el === null) throw new Error('Dialog content not found')
+    return el.classList
+  }
+
+  it('defaults to the md width tier and honours an explicit size', async () => {
+    const md = mountSized('')
+    await nextTick()
+    expect(contentClasses().contains('max-w-[var(--dialog-w-md)]')).toBe(true)
+    md.unmount()
+    document.body.innerHTML = ''
+
+    const lg = mountSized('size="lg"')
+    await nextTick()
+    expect(contentClasses().contains('max-w-[var(--dialog-w-lg)]')).toBe(true)
+    expect(contentClasses().contains('max-w-[var(--dialog-w-md)]')).toBe(false)
+    lg.unmount()
+  })
+
+  it('lets an explicit max-w-none override the tier (maximized preview)', async () => {
+    const w = mountSized('size="full" class="max-w-none"')
+    await nextTick()
+    expect(contentClasses().contains('max-w-none')).toBe(true)
+    expect(contentClasses().contains('max-w-[var(--dialog-w-full)]')).toBe(false)
+    w.unmount()
+  })
+})

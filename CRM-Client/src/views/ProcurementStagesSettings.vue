@@ -248,7 +248,7 @@ useTopBarRegistration({
     </DataTable>
   </SettingsContent>
   <Dialog v-model:open="dialogOpen">
-    <DialogContent class="max-w-lg">
+    <DialogContent>
       <DialogHeader><DialogTitle>{{ editingStage === null ? '新增阶段模板' : '编辑阶段模板' }}</DialogTitle><DialogDescription>阶段编码创建后不可修改，避免影响已有商机引用。</DialogDescription></DialogHeader>
       <form class="space-y-4" @submit="submit">
         <FormField v-slot="{ componentField }" name="template_code"><FormItem><FormLabel>阶段编码</FormLabel><FormControl><Input v-bind="componentField as unknown as Record<string, unknown>" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" /></FormControl><FormMessage /></FormItem></FormField>

@@ -431,7 +431,7 @@ watch(() => route.query['action'], (action) => {
 
   <!-- 新建/编辑角色 Dialog (z-[1000]) -->
   <Dialog v-model:open="roleDialogOpen">
-    <DialogContent class="max-w-lg z-[1000]">
+    <DialogContent class="z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ isEditMode ? '编辑角色' : '新建角色' }}</DialogTitle>
         <DialogDescription>
@@ -503,7 +503,7 @@ watch(() => route.query['action'], (action) => {
 
   <!-- 配置权限 Dialog (z-[1000]) -->
   <Dialog v-model:open="permissionsDialogOpen">
-    <DialogContent class="max-w-2xl max-h-[90vh] overflow-y-auto z-[1000]">
+    <DialogContent size="lg" class="max-h-[90vh] overflow-y-auto z-[1000]">
       <DialogHeader>
         <DialogTitle>配置角色权限</DialogTitle>
         <DialogDescription>

@@ -186,7 +186,7 @@ function handleOpenChange(open: boolean): void {
 
 <template>
   <Dialog :open="props.open" @update:open="handleOpenChange">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="invoice-title-form-dialog w-[calc(100vw-2rem)]">
+    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="invoice-title-form-dialog">
       <DialogHeader>
         <DialogTitle>{{ isEdit ? '编辑发票抬头' : '新建发票抬头' }}</DialogTitle>
       </DialogHeader>

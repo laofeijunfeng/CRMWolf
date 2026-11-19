@@ -145,7 +145,6 @@ describe('LeadFormDialog product field', () => {
     expect(wrapper.findComponent({ name: 'ProductIntentPicker' }).exists()).toBe(true)
     expect(wrapper.text()).not.toContain('基础模块')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
-    expect(wrapper.find('.sm\\:max-w-2xl').exists()).toBe(true)
     expect(wrapper.find('.sm\\:col-span-2').exists()).toBe(true)
 
     await wrapper.get('#lead-name').setValue('飞驰科技')

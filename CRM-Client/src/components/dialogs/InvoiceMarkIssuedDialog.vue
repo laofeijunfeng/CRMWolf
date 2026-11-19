@@ -199,7 +199,7 @@ onUnmounted(() => {
 
 <template>
   <Dialog :open="props.open" @update:open="handleDialogClose">
-    <DialogContent v-bind="elevated ? { elevated: true } : {}" class="sm:max-w-[425px] max-w-full">
+    <DialogContent size="sm" v-bind="elevated ? { elevated: true } : {}">
       <DialogHeader>
         <DialogTitle>开票</DialogTitle>
         <DialogDescription>上传发票文件和填写发票号码（均为可选）</DialogDescription>

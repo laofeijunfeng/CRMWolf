@@ -428,7 +428,7 @@ watch(
 
 <template>
   <Dialog v-model:open="visible">
-    <DialogContent class="approval-flow-form-dialog z-[1000]">
+    <DialogContent size="xl" class="approval-flow-form-dialog z-[1000]">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription>{{ description }}</DialogDescription>
@@ -732,11 +732,6 @@ watch(
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 
-.approval-flow-form-dialog {
-  width: min(920px, calc(100vw - 32px));
-  max-width: min(920px, calc(100vw - 32px));
-}
-
 .dialog-body {
   max-height: min(70vh, 720px);
   overflow-y: auto;
@@ -922,11 +917,6 @@ watch(
 }
 
 @media (max-width: $bp-sm) {
-  .approval-flow-form-dialog {
-    width: calc(100vw - 16px);
-    max-width: calc(100vw - 16px);
-  }
-
   .dialog-body {
     max-height: 72vh;
   }

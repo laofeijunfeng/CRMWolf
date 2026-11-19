@@ -533,7 +533,7 @@
 
     <!-- 移动端快速驳回弹窗 -->
     <Dialog :open="quickRejectVisible" @update:open="handleQuickRejectOpenChange">
-      <DialogContent class="max-w-[90vw]">
+      <DialogContent size="full">
         <DialogHeader>
           <DialogTitle>驳回审批</DialogTitle>
           <DialogDescription>

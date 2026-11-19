@@ -499,7 +499,7 @@ watch(
 
       <!-- 驳回弹窗：reason 必填，C-DSG-7 条2 -->
       <Dialog :open="rejectDialogVisible" @update:open="handleRejectDialogOpenChange">
-        <DialogContent class="sm:max-w-[480px]">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>驳回审批</DialogTitle>
             <DialogDescription>

@@ -847,7 +847,7 @@ watchEffect(() => {
 
     <!-- 分配线索弹窗 -->
     <Dialog v-model:open="assignModalVisible">
-      <DialogContent class="sm:max-w-[400px]">
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>分配线索</DialogTitle>
         </DialogHeader>
@@ -879,7 +879,7 @@ watchEffect(() => {
 
     <!-- 标记无效弹窗 -->
     <Dialog v-model:open="invalidModalVisible">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>标记无效</DialogTitle>
           <DialogDescription>请输入线索无效的原因说明</DialogDescription>
