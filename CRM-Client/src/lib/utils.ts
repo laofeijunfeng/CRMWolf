@@ -5,7 +5,14 @@ const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
       'font-size': [{ text: ['display', 'title', 'body-strong', 'body', 'caption', 'control-sm'] }],
-      shadow: [{ shadow: ['1', '2', '3'] }]
+      shadow: [{ shadow: ['1', '2', '3'] }],
+      h: [{ h: ['touch-target', 'control-xs', 'control-sm', 'control', 'control-lg', 'context-tabs'] }],
+      'min-h': [{ 'min-h': ['touch-target', 'control'] }],
+      'min-w': [{ 'min-w': ['touch-target'] }],
+      size: [{ size: ['control-sm', 'control', 'control-lg', 'icon-xs', 'icon-sm', 'icon-lg'] }],
+      px: [{ px: ['control-xs', 'control-sm', 'control', 'control-lg'] }],
+      gap: [{ gap: ['control-sm', 'control'] }],
+      opacity: [{ opacity: ['disabled'] }]
     }
   }
 })

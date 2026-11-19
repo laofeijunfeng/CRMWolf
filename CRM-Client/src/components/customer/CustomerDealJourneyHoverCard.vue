@@ -103,6 +103,7 @@ const handleViewAll = (): void => {
         </h3>
         <Badge
           v-if="loaded"
+          variant="status"
           class="status-badge shrink-0"
           data-tone="neutral"
           data-testid="customer-deal-journey-total"
@@ -181,6 +182,7 @@ const handleViewAll = (): void => {
                   </div>
                   <span class="mt-2 flex items-center justify-between gap-3">
                     <Badge
+                      variant="status"
                       :data-tone="businessJourneyStageTone[journey.current_board_stage]"
                       class="status-badge shrink-0"
                       :data-testid="`customer-deal-journey-stage-${journey.public_id}`"

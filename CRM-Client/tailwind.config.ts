@@ -76,21 +76,8 @@ const config: Config = {
 		},
 		fontFamily: {
 			sans: 'var(--font-sans)',
-			display: [
-				'IBM Plex Sans',
-				'-apple-system',
-				'BlinkMacSystemFont',
-				'PingFang SC',
-				'Segoe UI',
-				'sans-serif'
-			],
-			mono: [
-				'IBM Plex Mono',
-				'SF Mono',
-				'Monaco',
-				'Cascadia Code',
-				'monospace'
-			]
+			display: 'var(--font-display)',
+			mono: 'var(--font-mono)'
 		},
 		fontSize: {
 			display: ['24px', { lineHeight: '32px', fontWeight: '600' }],
