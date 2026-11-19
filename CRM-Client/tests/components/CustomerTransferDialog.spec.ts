@@ -7,6 +7,7 @@ import type { CustomerResponse } from '@/api/customer'
 const mocks = vi.hoisted(() => ({
   getTeamMembers: vi.fn(),
   assignCustomer: vi.fn(),
+  confirmDiscardChanges: vi.fn<(kind?: 'close' | 'leave') => Promise<boolean>>(),
 }))
 
 vi.mock('@/utils/errorHandler', () => ({ handleApiError: vi.fn() }))
@@ -17,30 +18,9 @@ vi.mock('@/types/feedback', () => ({
     description: '请重试',
   })),
 }))
-vi.mock('@/components/ui/alert-dialog', () => {
-  const passthrough = (name: string, tag = 'div') => defineComponent({
-    name,
-    setup: (_props, { slots, attrs }) => () => h(tag, attrs, slots.default?.()),
-  })
-
-  return {
-    AlertDialog: defineComponent({
-      name: 'AlertDialog',
-      props: { open: Boolean },
-      emits: ['update:open'],
-      setup: (props, { slots }) => () => props.open
-        ? h('section', { role: 'alertdialog' }, slots.default?.())
-        : null,
-    }),
-    AlertDialogAction: passthrough('AlertDialogAction', 'button'),
-    AlertDialogCancel: passthrough('AlertDialogCancel', 'button'),
-    AlertDialogContent: passthrough('AlertDialogContent'),
-    AlertDialogDescription: passthrough('AlertDialogDescription', 'p'),
-    AlertDialogFooter: passthrough('AlertDialogFooter'),
-    AlertDialogHeader: passthrough('AlertDialogHeader'),
-    AlertDialogTitle: passthrough('AlertDialogTitle', 'h2'),
-  }
-})
+vi.mock('@/utils/confirmDialog', () => ({
+  confirmDiscardChanges: mocks.confirmDiscardChanges,
+}))
 vi.mock('@/api/customer', () => ({
   default: { assignCustomer: mocks.assignCustomer },
 }))
@@ -198,11 +178,11 @@ describe('CustomerTransferDialog', () => {
     await flushPromises()
     const cancelButton = wrapper.findAll('button').find(button => button.text().includes('取消'))
     if (cancelButton === undefined) throw new Error('未找到取消按钮')
+    mocks.confirmDiscardChanges.mockResolvedValue(false)
     await cancelButton.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('放弃更改？')
-    expect(wrapper.text()).toContain('您有未保存的移交信息，确定要关闭吗？')
+    expect(mocks.confirmDiscardChanges).toHaveBeenCalledWith('close')
     expect(wrapper.emitted('update:open')).toBeUndefined()
   })
 })

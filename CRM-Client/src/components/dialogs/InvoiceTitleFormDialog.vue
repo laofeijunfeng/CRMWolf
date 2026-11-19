@@ -20,16 +20,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   FormField,
   FormItem,
   FormMessage,
@@ -112,7 +102,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 
 const titleTypeOptions = [
   { value: 'COMPANY', label: '企业', tone: 'primary' as const },
@@ -188,14 +177,6 @@ const onSubmit = handleSubmit(async (formValues) => {
 
 function handleCancel(): void {
   closeGuard.requestClose()
-}
-
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
-}
-
-function continueEditing(): void {
-  closeGuard.continueEditing()
 }
 
 function handleOpenChange(open: boolean): void {
@@ -327,25 +308,6 @@ function handleOpenChange(open: boolean): void {
     </DialogContent>
   </Dialog>
 
-  <!-- Confirm discard changes dialog -->
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
-        <AlertDialogDescription>
-          您有未保存的更改，确定要关闭吗？
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">
-          继续编辑
-        </AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">
-          放弃更改
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

@@ -29,11 +29,6 @@ const Dialog = defineComponent({
   emits: ['update:open'],
   template: '<div v-if="open"><slot /></div>',
 })
-const AlertDialog = defineComponent({
-  name: 'AlertDialog',
-  props: { open: Boolean },
-  template: '<div v-if="open"><slot /></div>',
-})
 const InputField = defineComponent({
   name: 'InputField',
   props: {
@@ -59,14 +54,6 @@ const stubs = {
   DialogFooter: passthrough('DialogFooter'),
   DialogHeader: passthrough('DialogHeader'),
   DialogTitle: passthrough('DialogTitle'),
-  AlertDialog,
-  AlertDialogAction: passthrough('AlertDialogAction'),
-  AlertDialogCancel: passthrough('AlertDialogCancel'),
-  AlertDialogContent: passthrough('AlertDialogContent'),
-  AlertDialogDescription: passthrough('AlertDialogDescription'),
-  AlertDialogFooter: passthrough('AlertDialogFooter'),
-  AlertDialogHeader: passthrough('AlertDialogHeader'),
-  AlertDialogTitle: passthrough('AlertDialogTitle'),
   Button: passthrough('Button'),
   InputField,
   Label: passthrough('Label'),

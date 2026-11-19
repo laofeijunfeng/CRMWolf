@@ -34,7 +34,7 @@ vi.mock('@/api/product', () => ({
 vi.mock('vue-sonner', () => ({ toast: mocks.toast }))
 
 vi.mock('@/utils/confirmDialog', () => ({
-  confirmDialog: vi.fn().mockResolvedValue(false),
+  confirmDiscardChanges: vi.fn().mockResolvedValue(false),
 }))
 
 function passthrough(name: string): Component {

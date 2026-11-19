@@ -8,7 +8,15 @@ import procurementApi from '@/api/procurement'
 import { acquisitionSourceApi } from '@/api/acquisition-source'
 import { entityParseApi } from '@/api/entityParse'
 import { customerCreateSchema, customerEditSchema, customerFormSchema } from '@/schemas/customer-form'
+import type * as ConfirmDialogModule from '@/utils/confirmDialog'
 
+const { confirmDiscardChanges } = vi.hoisted(() => ({
+  confirmDiscardChanges: vi.fn<(kind?: 'close' | 'leave') => Promise<boolean>>(),
+}))
+vi.mock('@/utils/confirmDialog', async (importOriginal) => {
+  const actual = await importOriginal<typeof ConfirmDialogModule>()
+  return { ...actual, confirmDiscardChanges }
+})
 vi.mock('@/api/product', () => ({
   default: {
     list: vi.fn().mockResolvedValue([
@@ -586,12 +594,14 @@ describe('CustomerFormDialog progressive edit sections', () => {
     })
     const wrapper = mountCreate()
     await flushPromises()
-    const vm = wrapper.vm as unknown as { rawText: string; handleParse: () => Promise<void>; handleCancel: () => void; showConfirmDialog: boolean }
+    const vm = wrapper.vm as unknown as { rawText: string; handleParse: () => Promise<void>; handleCancel: () => void }
     vm.rawText = '解析客户在北京'
     await vm.handleParse()
     await flushPromises()
+    confirmDiscardChanges.mockClear().mockResolvedValue(false)
     vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(true)
+    await flushPromises()
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
@@ -674,11 +684,14 @@ describe('CustomerFormDialog progressive edit sections', () => {
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountEdit({ ...customerDetail, industry: null })
     await flushPromises()
-    const vm = wrapper.vm as unknown as { industryValue: string; industryBaseline: string | null; handleCancel: () => void; showConfirmDialog: boolean }
+    const vm = wrapper.vm as unknown as { industryValue: string; industryBaseline: string | null; handleCancel: () => void }
     expect(vm.industryValue).toBe('')
     expect(vm.industryBaseline).toBe('')
+    confirmDiscardChanges.mockClear()
     vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(false)
+    await flushPromises()
+    expect(confirmDiscardChanges).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })
 
@@ -1179,7 +1192,6 @@ describe('CustomerFormDialog recovery and close guards', () => {
       setValues: (values: Record<string, unknown>) => void
       onSubmit: (event: Event) => Promise<void>
       handleCancel: () => void
-      showConfirmDialog: boolean
     }
     vm.setValues({ account_name: '当前输入' })
     await vm.onSubmit(new Event('submit'))
@@ -1189,8 +1201,10 @@ describe('CustomerFormDialog recovery and close guards', () => {
     await flushPromises()
     expect(getDetail).toHaveBeenCalledTimes(1)
 
+    confirmDiscardChanges.mockClear().mockResolvedValue(false)
     vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(true)
+    await flushPromises()
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('update:open')).toBeUndefined()
     wrapper.unmount()
   })
@@ -1259,12 +1273,13 @@ describe('CustomerFormDialog recovery and close guards', () => {
     vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
     const wrapper = mountRecoveryEdit()
     await flushPromises()
-    const vm = wrapper.vm as unknown as { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null; handleCancel: () => void; showConfirmDialog: boolean; confirmCancel: () => void }
+    const vm = wrapper.vm as unknown as { setValues: (values: Record<string, unknown>) => void; licenseTypeValue: string | null; handleCancel: () => void }
     dirty(vm)
+    confirmDiscardChanges.mockClear().mockResolvedValue(true)
     vm.handleCancel()
-    expect(vm.showConfirmDialog).toBe(true)
+    expect(confirmDiscardChanges).toHaveBeenCalledWith('close')
     expect(wrapper.emitted('update:open')).toBeUndefined()
-    vm.confirmCancel()
+    await flushPromises()
     expect(wrapper.emitted('update:open')).toContainEqual([false])
     wrapper.unmount()
   })

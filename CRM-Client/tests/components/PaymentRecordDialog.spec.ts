@@ -5,13 +5,13 @@ import PaymentRecordDialog from '@/components/dialogs/PaymentRecordDialog.vue'
 import { handleApiError } from '@/utils/errorHandler'
 
 const mocks = vi.hoisted(() => ({
-  confirmDialog: vi.fn(),
+  confirmDiscardChanges: vi.fn(),
   getPaymentPlanDetail: vi.fn(),
   getCustomerMemberCandidates: vi.fn(),
 }))
 
 vi.mock('@/utils/confirmDialog', () => ({
-  confirmDialog: mocks.confirmDialog,
+  confirmDiscardChanges: mocks.confirmDiscardChanges,
 }))
 
 vi.mock('@/api/payment', () => ({
@@ -213,7 +213,7 @@ function createDeferred<T>() {
 describe('PaymentRecordDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.confirmDialog.mockResolvedValue(false)
+    mocks.confirmDiscardChanges.mockResolvedValue(false)
     mocks.getCustomerMemberCandidates.mockResolvedValue([])
   })
 
@@ -424,12 +424,12 @@ describe('PaymentRecordDialog', () => {
     await findButton(wrapper, '取消').trigger('click')
     await flushPromises()
 
-    expect(mocks.confirmDialog).not.toHaveBeenCalled()
+    expect(mocks.confirmDiscardChanges).not.toHaveBeenCalled()
     expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
   })
 
   it('修改内容后关闭时保护未保存输入', async () => {
-    mocks.confirmDialog.mockResolvedValue(true)
+    mocks.confirmDiscardChanges.mockResolvedValue(true)
     const wrapper = mount(PaymentRecordDialog, {
       props: {
         open: true,
@@ -443,11 +443,7 @@ describe('PaymentRecordDialog', () => {
     await findButton(wrapper, '取消').trigger('click')
     await flushPromises()
 
-    expect(mocks.confirmDialog).toHaveBeenCalledWith(
-      '已填写回款信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次回款登记？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    expect(mocks.confirmDiscardChanges).toHaveBeenCalledWith('close')
     expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
   })
 

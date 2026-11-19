@@ -52,14 +52,6 @@ export function licenseStatusLabel(
   return LICENSE_STATUS_LABELS[classifyLicenseStatus(expiryDate, licenseType, today)]
 }
 
-export function licenseStatusClass(
-  expiryDate: string | Date | null | undefined,
-  licenseType: string | null | undefined,
-  today?: Date
-): string {
-  return `license-badge--${classifyLicenseStatus(expiryDate, licenseType, today)}`
-}
-
 export interface LicenseSummary {
   primary: string
   secondary: string

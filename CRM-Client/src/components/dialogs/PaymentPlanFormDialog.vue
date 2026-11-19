@@ -9,16 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -144,7 +134,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 const title = computed<string>(() => isCreateMode.value ? '新建回款计划' : '编辑回款计划')
 const description = computed<string>(() => {
   if (isCreateMode.value && hasFixedContract.value) {
@@ -398,14 +387,6 @@ function handleOpenChange(open: boolean): void {
 
 function handleCancel(): void {
   closeGuard.requestClose()
-}
-
-function continueEditing(): void {
-  closeGuard.continueEditing()
-}
-
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
 }
 
 function contractOptionLabel(contract: PaymentPlanContractOption): string {
@@ -791,20 +772,6 @@ watch(
         </DialogFooter>
     </DialogContent>
   </Dialog>
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃填写回款计划？</AlertDialogTitle>
-        <AlertDialogDescription>
-          当前已填写或调整回款计划内容，关闭后这些未保存内容会丢失。
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

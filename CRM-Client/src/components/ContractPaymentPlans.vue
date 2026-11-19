@@ -37,6 +37,7 @@ import ListCard from '@/components/crmwolf/ListCard.vue'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import PaymentRecordList from '@/components/PaymentRecordList.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import { getStatusPresentation } from '@/utils/statusPresentation'
 import PaymentNextStepDialog from '@/components/PaymentNextStepDialog.vue'
 import EditRecordDialog from '@/components/dialogs/EditRecordDialog.vue'
 import PaymentPlanFormDialog from '@/components/dialogs/PaymentPlanFormDialog.vue'
@@ -171,16 +172,6 @@ function mapStatus(status: PaymentPlanStatus): string {
     COMPLETED: 'completed',
   }
   return Object.prototype.hasOwnProperty.call(statusMap, status) ? statusMap[status] : status
-}
-
-function getStatusToneClass(status: PaymentPlanStatus): string {
-  const toneMap: Record<PaymentPlanStatus, string> = {
-    PENDING: 'plan-status-pending',
-    OVERDUE: 'plan-status-overdue',
-    PARTIAL: 'plan-status-partial',
-    COMPLETED: 'plan-status-completed',
-  }
-  return toneMap[status]
 }
 
 function formatDate(dateStr: string | undefined): string {
@@ -500,7 +491,12 @@ watch(
     </template>
 
     <template #itemMain="{ item }">
-      <div class="plan-row" :class="getStatusToneClass(item.status)">
+      <div class="plan-row">
+        <span
+          class="plan-row-stripe"
+          :data-tone="getStatusPresentation('paymentPlan', mapStatus(item.status)).tone"
+          aria-hidden="true"
+        ></span>
         <div class="plan-row-main">
           <div class="plan-copy">
             <div class="plan-title-line">
@@ -699,30 +695,16 @@ watch(
   gap: $space-2;
   width: 100%;
   padding-left: $space-3;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: $space-1;
-    bottom: $space-1;
-    left: 0;
-    width: 3px;
-    border-radius: 9999px;
-    background: hsl(var(--border));
-  }
 }
 
-.plan-status-pending::before,
-.plan-status-partial::before {
-  background: hsl(var(--status-warning));
-}
-
-.plan-status-overdue::before {
-  background: hsl(var(--status-danger));
-}
-
-.plan-status-completed::before {
-  background: hsl(var(--status-success));
+.plan-row-stripe {
+  position: absolute;
+  top: $space-1;
+  bottom: $space-1;
+  left: 0;
+  width: 3px;
+  border-radius: 9999px;
+  background: hsl(var(--tone));
 }
 
 .plan-row-main {

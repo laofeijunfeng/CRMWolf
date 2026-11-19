@@ -264,7 +264,6 @@ const displayCustomerName = computed(() =>
 const displayJourneyName = computed(() => journeyDetail.value?.name ?? '业务旅程')
 const displayJourneyAmount = computed(() => journeyDetail.value?.amount ?? opportunity.value?.total_amount ?? 0)
 const displayPurchaseType = computed(() => journeyDetail.value?.purchase_type ?? opportunity.value?.purchase_type)
-const displayBoardStageLabel = computed(() => journeyDetail.value?.current_board_stage_label ?? '')
 const isJourneyApprovalRejected = computed(() => journeyDetail.value?.current_board_stage === 'approval_rejected')
 const NO_PRIMARY_OPPORTUNITY_COPY = emptyPrimaryOpportunityText
 
@@ -1009,46 +1008,6 @@ function mapOpportunityStatus(status: number): string {
   return String(status)
 }
 
-function getBoardStageClass(label: string): string {
-  if (label === '已完成') return 'status-success'
-  if (label === '已输单') return 'status-danger'
-  if (label === '即将签约' || label === '签约中' || label === '回款中' || label === '开票中') return 'status-info'
-  return 'status-warning'
-}
-
-
-function getApprovalPhaseText(phase: string | undefined): string {
-  const map: Record<string, string> = {
-    draft: '待提交',
-    pending_review: '审批中',
-    approved: '审批通过',
-    rejected: getStatusPresentation('businessJourney', 'approval_rejected').label
-  }
-  return phase === undefined ? '-' : (map[phase] ?? phase)
-}
-
-function getApprovalPhaseClass(phase: string | undefined): string {
-  const map: Record<string, string> = {
-    draft: 'status-default',
-    pending_review: 'status-warning',
-    approved: 'status-success',
-    rejected: `status-${getStatusPresentation('businessJourney', 'approval_rejected').tone}`
-  }
-  return phase === undefined ? '' : (map[phase] ?? '')
-}
-
-function getPurchaseTypeText(type: string | null | undefined): string {
-  if (type === undefined || type === null || type.trim() === '') return '-'
-  const map: Record<string, string> = { NEW: '新购', RENEWAL: '续购', EXPANSION: '增购' }
-  return map[type] ?? type
-}
-
-function getPurchaseTypeClass(type: string | null | undefined): string {
-  if (type === undefined || type === null || type.trim() === '') return ''
-  const map: Record<string, string> = { NEW: 'status-warning', RENEWAL: 'status-success', EXPANSION: 'status-info' }
-  return map[type] ?? ''
-}
-
 function getLicenseTypeText(type: string | undefined): string {
   if (type === undefined || type.trim() === '') return '-'
   return type === 'SUBSCRIPTION' ? '订阅制' : '买断制'
@@ -1123,13 +1082,8 @@ watch(approvalPhase, phase => {
             {{ displayJourneyName }}
           </h2>
           <div class="flex flex-wrap items-center gap-2 mt-1">
-            <StatusBadge v-if="isJourneyApprovalRejected" type="businessJourney" status="approval_rejected" />
-            <Badge v-else-if="displayBoardStageLabel" :class="['status-badge', getBoardStageClass(displayBoardStageLabel)]">
-              {{ displayBoardStageLabel }}
-            </Badge>
-            <Badge v-if="displayPurchaseType" :class="['status-badge', getPurchaseTypeClass(displayPurchaseType)]">
-              {{ getPurchaseTypeText(displayPurchaseType) }}
-            </Badge>
+            <StatusBadge v-if="journeyDetail?.current_board_stage" type="businessJourney" :status="journeyDetail.current_board_stage" />
+            <StatusBadge v-if="displayPurchaseType" type="procurementType" :status="displayPurchaseType" />
           </div>
         </div>
         <div v-if="journeyDetail" class="text-right">
@@ -1199,9 +1153,7 @@ watch(approvalPhase, phase => {
                   <div class="attribute-item">
                     <div class="attribute-label">审批状态</div>
                     <span class="attribute-value">
-                      <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
-                        {{ getApprovalPhaseText(opportunity.approval_phase) }}
-                      </Badge>
+                      <StatusBadge type="approvalPhase" :status="opportunity.approval_phase" />
                     </span>
                   </div>
 
@@ -1229,7 +1181,9 @@ watch(approvalPhase, phase => {
                     <span class="attribute-value">
                       <Badge
                         v-if="opportunity.current_stage_snapshot?.procurement_method?.name"
-                        class="status-badge status-info"
+                        variant="status"
+                        class="status-badge"
+                        data-tone="info"
                       >
                         {{ opportunity.current_stage_snapshot.procurement_method.name }}
                       </Badge>
@@ -1295,9 +1249,7 @@ watch(approvalPhase, phase => {
               <AccordionTrigger class="px-4 py-3 hover:no-underline">
                 <div class="flex items-center gap-2 w-full">
                   <span class="text-sm font-semibold text-foreground">审批进度</span>
-                  <Badge :class="['status-badge', getApprovalPhaseClass(opportunity.approval_phase)]">
-                    {{ getApprovalPhaseText(opportunity.approval_phase) }}
-                  </Badge>
+                  <StatusBadge type="approvalPhase" :status="opportunity.approval_phase" />
                 </div>
               </AccordionTrigger>
               <AccordionContent class="px-4 pb-4">
@@ -1398,7 +1350,7 @@ watch(approvalPhase, phase => {
                 <AccordionTrigger class="px-4 py-3 hover:no-underline">
                   <div class="flex items-center gap-2 w-full">
                     <span class="text-sm font-semibold text-foreground">商机进度</span>
-                    <Badge :class="['status-badge', isStageComplete ? 'status-success' : 'status-info']">
+                    <Badge variant="status" class="status-badge" :data-tone="isStageComplete ? 'success' : 'info'">
                       {{ stageProgressText }}
                     </Badge>
                   </div>
@@ -1783,31 +1735,6 @@ watch(approvalPhase, phase => {
   font-weight: 500;
   border-radius: 9999px;
   white-space: nowrap;
-}
-
-.status-default {
-  background: var(--wash-hover);
-  color: hsl(var(--muted-foreground));
-}
-
-.status-info {
-  background: var(--wash-hover);
-  color: hsl(var(--brand));
-}
-
-.status-warning {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.status-success {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.status-danger {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
 }
 
 @media (max-width: $bp-sm - 1) {

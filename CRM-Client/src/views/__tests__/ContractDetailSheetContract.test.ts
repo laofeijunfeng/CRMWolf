@@ -109,7 +109,7 @@ describe('approved contract amount changes', () => {
     expect(wrapper.text()).toContain('合同变更审批')
     const rows = wrapper.findAll('[data-testid="contract-change-history-row"]')
     expect(rows[0]?.text()).toContain('审批中')
-    expect(rows[1]?.text()).toContain('已驳回')
+    expect(rows[1]?.text()).toContain('审批拒绝')
     expect(rows[1]?.text()).toContain('金额填错')
     expect(rows.some(row => row.text().includes('重新提交') || row.text().includes('撤回'))).toBe(false)
   })

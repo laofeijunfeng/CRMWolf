@@ -9,16 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DateField,
@@ -165,7 +155,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 const defaultApprovedContract = computed<ContractListResponse | null>(() => {
   if (props.defaultContractId === null) return null
   return approvedContracts.value.find((contract) => contract.id === props.defaultContractId) ?? null
@@ -315,14 +304,6 @@ function handleOpenChange(open: boolean): void {
 
 function handleCancel(): void {
   closeGuard.requestClose()
-}
-
-function continueEditing(): void {
-  closeGuard.continueEditing()
-}
-
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
 }
 
 function handleAddDeployment(): void {
@@ -523,20 +504,6 @@ watch(
     @update:open="deploymentDialogOpen = $event"
     @success="handleDeploymentSuccess"
   />
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃填写 License 申请？</AlertDialogTitle>
-        <AlertDialogDescription>
-          当前已填写或调整 License 申请内容，关闭后这些未保存内容会丢失。
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">放弃填写</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

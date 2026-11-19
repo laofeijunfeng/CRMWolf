@@ -31,7 +31,7 @@ import {
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import SelectionSummary, { type SummaryItem } from '@/components/crmwolf/SelectionSummary.vue'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { getTodayLocalDate, formatLocalDate } from '@/utils/format'
 import { opportunityApi, type Opportunity } from '@/api/opportunity'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -117,11 +117,7 @@ const handleDialogOpenChange = async (open: boolean): Promise<void> => {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写赢单信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次标记？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) emit('update:open', false)
   } finally {
     closeGuardPending.value = false

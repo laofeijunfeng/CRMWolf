@@ -10,16 +10,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import {
   Form,
   FormField,
   FormItem,
@@ -37,6 +27,7 @@ import { entityParseApi, type LeadParsedInfo } from '@/api/entityParse'
 import { leadSchema, type LeadForm } from '@/schemas/lead-form'
 import { useAcquisitionSourceOptions } from '@/composables/useAcquisitionSourceOptions'
 import { productPublicIdFromIntent } from '@/utils/productIntent'
+import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
 
 interface Props {
   open: boolean
@@ -58,8 +49,11 @@ const emit = defineEmits<Emits>()
 const submitting = ref(false)
 const loading = ref(props.open && props.mode === 'edit' && props.lead?.id !== props.leadId)
 const initialValues = ref<Partial<LeadForm>>({})
-const isDirty = ref(false)
-const showConfirmDialog = ref(false)
+/** Exposed slice of the vee-validate `<Form>` instance this dialog reads. */
+interface LeadFormInstance {
+  meta: { dirty: boolean }
+}
+const formRef = ref<LeadFormInstance | null>(null)
 let loadRequestId = 0
 
 // 智能解析状态（仅创建模式展示）
@@ -68,9 +62,12 @@ const parsing = ref(false)
 const parseStatus = ref('')
 
 // 计算属性
-const visible = computed({
-  get: () => props.open,
-  set: (val) => emit('update:open', val)
+// Pasted raw text is user input too, even before it has been parsed into the form.
+const isDirty = computed(() => formRef.value?.meta.dirty === true || rawText.value.trim() !== '')
+const closeGuard = useDialogCloseGuard({
+  isDirty,
+  submitting,
+  emitOpen: (open) => emit('update:open', open),
 })
 
 const {
@@ -87,11 +84,6 @@ const companyScaleOptions: { value: NonNullable<LeadForm['company_scale']>; labe
   { value: '1000人以上', label: '1000人以上' }
 ]
 
-// 监听表单变化（UX 优化：Escape Route）
-watch(initialValues, (): void => {
-  isDirty.value = true
-}, { deep: true })
-
 function applyLeadDetail(lead: LeadDetail): void {
   ensureOption(lead.source_info)
   initialValues.value = {
@@ -103,8 +95,6 @@ function applyLeadDetail(lead: LeadDetail): void {
     contact_name: lead.contact_name,
     contact_phone: lead.contact_phone
   }
-  // Loading values is not a user edit.
-  isDirty.value = false
 }
 
 // 把解析结果覆盖进表单：后端已把来源/产品对成 public_id，直接可用
@@ -116,7 +106,6 @@ function applyParsedLead(info: LeadParsedInfo, formApi: { setFieldValue: (field:
   formApi.setFieldValue('company_scale', info.company_scale ?? undefined)
   formApi.setFieldValue('source_public_id', info.source_public_id ?? '')
   formApi.setFieldValue('product_public_id', info.product_public_id ?? '')
-  isDirty.value = true
 }
 
 async function handleParse(formApi: { setFieldValue: (field: string, value: unknown) => void }): Promise<void> {
@@ -151,13 +140,17 @@ watch([
   (): string | undefined => props.leadId,
   (): 'create' | 'edit' => props.mode,
   (): LeadDetail | null | undefined => props.lead,
-], async ([open, leadId, mode, prefetchedLead]): Promise<void> => {
+], async ([open, leadId, mode, prefetchedLead], previous): Promise<void> => {
   const requestId = ++loadRequestId
+  const wasOpen = previous?.[0] === true
 
   if (!open) {
     loading.value = false
+    if (wasOpen) closeGuard.handleParentClose()
     return
   }
+
+  if (!wasOpen) closeGuard.reset()
 
   if (mode === 'create') {
     loading.value = false
@@ -192,7 +185,8 @@ watch([
   } catch {
     if (requestId !== loadRequestId) return
     toast.error('加载线索详情失败')
-    visible.value = false
+    closeGuard.approveClose()
+    emit('update:open', false)
   } finally {
     if (requestId === loadRequestId) loading.value = false
   }
@@ -221,8 +215,8 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
       toast.success('线索更新成功')
     }
 
-    isDirty.value = false
-    visible.value = false
+    closeGuard.approveClose()
+    emit('update:open', false)
     emit('success')
   } catch {
     toast.error(props.mode === 'create' ? '创建线索失败' : '更新线索失败')
@@ -241,27 +235,12 @@ const handleSubmit = async (values: GenericObject): Promise<void> => {
 
 // 取消操作（UX 优化：Escape Route）
 const handleCancel = (): void => {
-  if (isDirty.value) {
-    showConfirmDialog.value = true
-  } else {
-    visible.value = false
-  }
-}
-
-// 确认放弃更改
-const confirmCancel = (): void => {
-  showConfirmDialog.value = false
-  visible.value = false
-}
-
-// 继续编辑
-const continueEditing = (): void => {
-  showConfirmDialog.value = false
+  closeGuard.requestClose()
 }
 </script>
 
 <template>
-  <Dialog v-model:open="visible">
+  <Dialog :open="props.open" @update:open="closeGuard.handleOpenChange">
     <DialogContent class="w-[calc(100vw-2rem)] px-[28px] sm:max-w-2xl max-h-[min(90vh,90dvh)] overflow-y-auto overscroll-contain [scroll-padding-bottom:calc(5rem+env(safe-area-inset-bottom,0px))]">
       <DialogHeader>
         <DialogTitle>{{ mode === 'create' ? '新建线索' : '编辑线索' }}</DialogTitle>
@@ -272,6 +251,7 @@ const continueEditing = (): void => {
       </div>
 
       <Form
+        ref="formRef"
         v-else
         v-slot="{ setFieldValue }"
         :schema="leadSchema"
@@ -427,24 +407,4 @@ const continueEditing = (): void => {
       </Form>
     </DialogContent>
   </Dialog>
-
-  <!-- UX 优化：Escape Route - 未保存更改确认对话框 -->
-  <AlertDialog v-model:open="showConfirmDialog">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
-        <AlertDialogDescription>
-          您有未保存的更改，确定要关闭吗？
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">
-          继续编辑
-        </AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">
-          放弃更改
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>

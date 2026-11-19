@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import StatusBadge from '@/components/StatusBadge.vue'
 import {
   Empty,
   EmptyDescription,
@@ -17,7 +17,7 @@ import {
   EmptyMedia,
   EmptyTitle
 } from '@/components/ui/empty'
-import type { PaymentConfirmationStatus, PaymentRecordInfo } from '@/api/payment'
+import type { PaymentRecordInfo } from '@/api/payment'
 import { formatLocalDate } from '@/utils/format'
 
 type PaymentRecordDeletePredicate = (record: PaymentRecordInfo) => boolean
@@ -42,18 +42,6 @@ const emit = defineEmits<{
   'delete-record': [record: PaymentRecordInfo]
   'view-approval': [record: PaymentRecordInfo]
 }>()
-
-const getStatusLabel = (status: PaymentConfirmationStatus | undefined): string => {
-  if (status === 'CONFIRMED') return '已确认'
-  if (status === 'DISPUTED') return '有争议'
-  return '待确认'
-}
-
-const getStatusClass = (status: PaymentConfirmationStatus | undefined): string => {
-  if (status === 'CONFIRMED') return 'record-status-success'
-  if (status === 'DISPUTED') return 'record-status-danger'
-  return 'record-status-warning'
-}
 
 const formatDate = (dateStr: string | undefined): string => {
   if (dateStr === undefined || dateStr.trim() === '') return '-'
@@ -156,13 +144,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
       <div class="record-main">
         <div class="record-title-line">
           <AmountText class="record-amount" :value="item.actual_amount" size="lg" />
-          <Badge
-            :class="['record-status-badge', getStatusClass(item.confirmation_status)]"
-            role="status"
-            :aria-label="getStatusLabel(item.confirmation_status)"
-          >
-            {{ getStatusLabel(item.confirmation_status) }}
-          </Badge>
+          <StatusBadge type="paymentConfirmation" :status="item.confirmation_status ?? 'PENDING'" />
         </div>
         <div class="record-meta-grid" aria-label="回款记录属性">
           <span>回款日期：{{ formatDate(item.payment_date) }}</span>
@@ -252,27 +234,6 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   align-items: center;
   gap: $space-2;
   flex-wrap: wrap;
-}
-
-.record-status-badge {
-  border: 0;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-}
-
-.record-status-warning {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.record-status-success {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.record-status-danger {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
 }
 
 .record-meta-grid {

@@ -50,6 +50,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ApprovalStatusBadge from '@/components/ApprovalStatusBadge.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
 import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
@@ -57,7 +58,6 @@ import type { FileAttachmentItem } from '@/types/fileAttachment'
 import paymentApi, {
   type ApprovalInfo,
   type ApprovalInfoLite,
-  type PaymentConfirmationStatus,
   type PaymentPlanStatusSummary,
   type PaymentRecordDetailResponse,
   type PaymentRecordInfo
@@ -199,14 +199,6 @@ const canEditRecord = computed<boolean>(() => {
   return record.creator_id === currentUserId.value
 })
 
-const confirmationStatusLabel = computed<string>(() => {
-  return getConfirmationStatusLabel(detailRecord.value?.confirmation_status)
-})
-
-const confirmationStatusClass = computed<string>(() => {
-  return getConfirmationStatusClass(detailRecord.value?.confirmation_status)
-})
-
 const approvalStatus = computed<string | undefined>(() => {
   const approval = detailApproval.value
   if (approval?.status !== undefined) return approval.status
@@ -236,18 +228,6 @@ const rejectionReason = computed<string>(() => {
 })
 
 // Helper functions
-function getConfirmationStatusLabel(status: PaymentConfirmationStatus | undefined): string {
-  if (status === 'CONFIRMED') return '已确认'
-  if (status === 'DISPUTED') return '有争议'
-  return '待确认'
-}
-
-function getConfirmationStatusClass(status: PaymentConfirmationStatus | undefined): string {
-  if (status === 'CONFIRMED') return 'status-success'
-  if (status === 'DISPUTED') return 'status-danger'
-  return 'status-warning'
-}
-
 function formatDate(dateStr: string | undefined): string {
   if (dateStr === undefined || dateStr === null || dateStr.trim() === '') return '-'
   const date = new Date(dateStr)
@@ -404,14 +384,11 @@ watch(
               {{ detailRecord?.record_number ?? '回款记录详情' }}
             </SheetTitle>
             <SheetDescription class="record-sheet-description">
-              <Badge
+              <StatusBadge
                 v-if="hasRecord"
-                :class="['record-status-badge', confirmationStatusClass]"
-                role="status"
-                :aria-label="confirmationStatusLabel"
-              >
-                {{ confirmationStatusLabel }}
-              </Badge>
+                type="paymentConfirmation"
+                :status="detailRecord?.confirmation_status ?? 'PENDING'"
+              />
               <Badge
                 v-if="hasRecord && isDraftApprovalPhase"
                 variant="status"
@@ -1044,27 +1021,6 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   flex-direction: column;
   gap: $space-4;
 }
-
-.record-status-badge {
-  white-space: nowrap;
-}
-
-.record-status-badge,
-.status-warning {
-  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-warning));
-}
-
-.status-success {
-  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-success));
-}
-
-.status-danger {
-  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
-  color: hsl(var(--status-danger));
-}
-
 
 .state-card-content {
   min-height: $record-empty-min-height;

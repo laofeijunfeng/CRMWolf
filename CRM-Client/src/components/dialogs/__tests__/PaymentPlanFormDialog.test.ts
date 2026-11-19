@@ -16,14 +16,6 @@ const passthrough = defineComponent({
   },
 })
 
-const DialogStub = defineComponent({
-  props: { open: Boolean },
-  emits: ['update:open'],
-  setup(_, { slots }): () => VNode {
-    return () => h('div', slots['default']?.())
-  },
-})
-
 const InputStub = defineComponent({
   inheritAttrs: false,
   props: {
@@ -82,14 +74,6 @@ const formStubs = {
   InputField: InputStub,
   DateField: DateFieldStub,
   TextareaField: InputStub,
-  AlertDialog: DialogStub,
-  AlertDialogContent: passthrough,
-  AlertDialogHeader: passthrough,
-  AlertDialogTitle: passthrough,
-  AlertDialogDescription: passthrough,
-  AlertDialogFooter: passthrough,
-  AlertDialogCancel: ButtonStub,
-  AlertDialogAction: ButtonStub,
   Button: ButtonStub,
 }
 

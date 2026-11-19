@@ -87,7 +87,7 @@ import type { ApprovalSourceContext } from '@/types/approvalSource'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import { usePermissionStore } from '@/stores/permissions'
 import { useUserStore } from '@/stores/user'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDialog, confirmDiscardChanges } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import { buildInvoiceDownloadFileName } from '@/utils/invoiceFileName'
 import {
@@ -804,11 +804,7 @@ const handleRedOffsetDialogOpenChange = async (open: boolean): Promise<void> => 
 
   redOffsetCloseGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写冲红信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次冲红？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) {
       redOffsetDialogOpen.value = false
       resetRedOffsetUploadForm()
@@ -1130,33 +1126,16 @@ onBeforeUnmount((): void => {
                 type="invoiceApplication"
               />
               <span v-if="invoiceInfo" class="type-badge">{{ getInvoiceTypeText(invoiceInfo.invoice_type) }}</span>
-              <Badge
+              <StatusBadge
                 v-if="invoiceInfo?.invoice_effective_status === 'RED_OFFSET'"
-                variant="status"
-                data-tone="success"
-                data-status-domain="invoiceEffectiveStatus"
-                data-status-value="RED_OFFSET"
-              >
-                已冲红
-              </Badge>
-              <Badge
-                v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING'"
-                variant="status"
-                data-tone="warning"
-                data-status-domain="invoiceReissueStatus"
-                data-status-value="REISSUE_PENDING"
-              >
-                重开处理中
-              </Badge>
-              <Badge
-                v-if="invoiceInfo?.reissue_status === 'REISSUED'"
-                variant="status"
-                data-tone="success"
-                data-status-domain="invoiceReissueStatus"
-                data-status-value="REISSUED"
-              >
-                已重开
-              </Badge>
+                type="invoiceEffectiveStatus"
+                status="RED_OFFSET"
+              />
+              <StatusBadge
+                v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING' || invoiceInfo?.reissue_status === 'REISSUED'"
+                type="invoiceEffectiveStatus"
+                :status="invoiceInfo.reissue_status"
+              />
               <span v-if="!invoiceInfo">{{ loading ? '正在加载发票申请' : '查看申请、审批与发票文件' }}</span>
             </SheetDescription>
           </div>

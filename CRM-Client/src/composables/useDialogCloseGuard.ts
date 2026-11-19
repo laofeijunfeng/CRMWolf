@@ -1,4 +1,5 @@
 import { nextTick, ref, type ComputedRef, type Ref } from 'vue'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 
 interface DialogCloseGuardOptions {
   isDirty: Ref<boolean> | ComputedRef<boolean>
@@ -7,41 +8,37 @@ interface DialogCloseGuardOptions {
 }
 
 interface DialogCloseGuard {
-  showConfirmDialog: Ref<boolean>
   handleOpenChange: (open: boolean) => void
   handleParentClose: () => boolean
-  handleConfirmOpenChange: (open: boolean) => void
   requestClose: () => void
-  continueEditing: () => void
-  confirmDiscard: () => void
   approveClose: () => void
   reset: () => void
 }
 
 /**
- * Keeps a controlled Dialog open while it has unsaved changes and provides a
- * consistent discard-confirmation flow for Escape, backdrop, close-button,
- * cancel-button, and parent-driven close requests.
+ * Keeps a controlled Dialog open while it has unsaved changes and routes every
+ * close path (Escape, backdrop, close button, cancel button, parent-driven
+ * close) through the shared discard confirmation (`confirmDiscardChanges`).
  */
 export function useDialogCloseGuard({
   isDirty,
   submitting,
   emitOpen,
 }: DialogCloseGuardOptions): DialogCloseGuard {
-  const showConfirmDialog = ref(false)
+  const confirming = ref(false)
   const closeApproved = ref(false)
   const suppressStaleOpen = ref(false)
-  const focusReturnTarget = ref<HTMLElement | null>(null)
+  let focusReturnTarget: HTMLElement | null = null
 
   function captureFocus(): void {
     if (typeof document === 'undefined') return
     const activeElement = document.activeElement
-    focusReturnTarget.value = activeElement instanceof HTMLElement ? activeElement : null
+    focusReturnTarget = activeElement instanceof HTMLElement ? activeElement : null
   }
 
   function restoreFocus(): void {
-    const target = focusReturnTarget.value
-    focusReturnTarget.value = null
+    const target = focusReturnTarget
+    focusReturnTarget = null
     if (target === null || !target.isConnected) return
 
     void nextTick(() => {
@@ -49,21 +46,36 @@ export function useDialogCloseGuard({
     })
   }
 
-  function openDiscardConfirmation(): void {
-    if (!showConfirmDialog.value) captureFocus()
-    showConfirmDialog.value = true
-  }
-
   function approveClose(): void {
     closeApproved.value = true
     suppressStaleOpen.value = true
   }
 
+  async function askDiscard(): Promise<void> {
+    confirming.value = true
+    captureFocus()
+    let discard = false
+    try {
+      discard = await confirmDiscardChanges('close')
+    } finally {
+      confirming.value = false
+    }
+
+    if (!discard) {
+      restoreFocus()
+      return
+    }
+
+    approveClose()
+    focusReturnTarget = null
+    emitOpen(false)
+  }
+
   function requestClose(): void {
-    if (submitting.value || showConfirmDialog.value) return
+    if (submitting.value || confirming.value) return
 
     if (isDirty.value) {
-      openDiscardConfirmation()
+      void askDiscard()
       return
     }
 
@@ -86,7 +98,7 @@ export function useDialogCloseGuard({
 
   /**
    * Handles a parent changing v-model:open directly to false. Re-open the
-   * Dialog before showing the discard confirmation so the parent cannot
+   * Dialog before asking for discard confirmation so the parent cannot
    * silently discard input.
    *
    * Returns true when the close was blocked and the caller must skip cleanup.
@@ -97,8 +109,7 @@ export function useDialogCloseGuard({
       // dialog. A successful close can be followed by unrelated prop updates
       // while `open` is still false; those updates must not be mistaken for a
       // new parent-driven close of dirty form state.
-      showConfirmDialog.value = false
-      focusReturnTarget.value = null
+      focusReturnTarget = null
       return false
     }
 
@@ -109,56 +120,24 @@ export function useDialogCloseGuard({
 
     if (isDirty.value) {
       emitOpen(true)
-      openDiscardConfirmation()
+      if (!confirming.value) void askDiscard()
       return true
     }
 
-    showConfirmDialog.value = false
-    focusReturnTarget.value = null
+    focusReturnTarget = null
     return false
   }
 
-  function continueEditing(): void {
-    showConfirmDialog.value = false
-    restoreFocus()
-  }
-
-  function confirmDiscard(): void {
-    showConfirmDialog.value = false
-    approveClose()
-    focusReturnTarget.value = null
-    emitOpen(false)
-  }
-
-  function handleConfirmOpenChange(open: boolean): void {
-    if (open) {
-      openDiscardConfirmation()
-      return
-    }
-
-    // Covers Escape and the AlertDialog overlay close. A dismissal of the
-    // confirmation is never treated as approval to discard the form.
-    if (showConfirmDialog.value) {
-      showConfirmDialog.value = false
-      restoreFocus()
-    }
-  }
-
   function reset(): void {
-    showConfirmDialog.value = false
     closeApproved.value = false
     suppressStaleOpen.value = false
-    focusReturnTarget.value = null
+    focusReturnTarget = null
   }
 
   return {
-    showConfirmDialog,
     handleOpenChange,
     handleParentClose,
-    handleConfirmOpenChange,
     requestClose,
-    continueEditing,
-    confirmDiscard,
     approveClose,
     reset,
   }

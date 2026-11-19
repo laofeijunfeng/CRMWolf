@@ -9,16 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -78,7 +68,6 @@ const closeGuard = useDialogCloseGuard({
   submitting,
   emitOpen: (open) => emit('update:open', open),
 })
-const showConfirmDialog = closeGuard.showConfirmDialog
 
 function clearErrors(): void {
   errors.deploymentName = ''
@@ -146,14 +135,6 @@ function handleOpenChange(open: boolean): void {
   closeGuard.handleOpenChange(open)
 }
 
-function confirmCancel(): void {
-  closeGuard.confirmDiscard()
-}
-
-function continueEditing(): void {
-  closeGuard.continueEditing()
-}
-
 watch(
   () => props.open,
   (open) => {
@@ -167,7 +148,6 @@ watch(
   },
   { immediate: true }
 )
-
 </script>
 
 <template>
@@ -221,21 +201,6 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
-
-  <AlertDialog :open="showConfirmDialog" @update:open="closeGuard.handleConfirmOpenChange">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>放弃更改？</AlertDialogTitle>
-        <AlertDialogDescription>
-          已填写部署信息，关闭后这些内容不会保存。
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel @click="continueEditing">继续编辑</AlertDialogCancel>
-        <AlertDialogAction @click="confirmCancel">放弃更改</AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>
 
 <style scoped lang="scss">

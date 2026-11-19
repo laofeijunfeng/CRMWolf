@@ -9,6 +9,7 @@ import { acquisitionSourceApi } from '@/api/acquisition-source'
 import productApi from '@/api/product'
 import { usePermissionStore } from '@/stores/permissions'
 import type { ProductResponse } from '@/schemas/product'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock('@/api/product', () => ({
   default: {
     list: vi.fn(),
   },
+}))
+
+vi.mock('@/utils/confirmDialog', () => ({
+  confirmDiscardChanges: vi.fn(),
 }))
 
 const product = (publicId: string, name: string): ProductResponse => ({
@@ -129,7 +134,6 @@ describe('LeadFormDialog product field', () => {
           DialogHeader: { template: '<div><slot /></div>' },
           DialogTitle: { template: '<h2><slot /></h2>' },
           DialogFooter: { template: '<div><slot /></div>' },
-          AlertDialog: { template: '<div></div>' },
           RouterLink: true,
         },
       },
@@ -217,7 +221,6 @@ describe('LeadFormDialog product field', () => {
           DialogHeader: { template: '<div><slot /></div>' },
           DialogTitle: { template: '<h2><slot /></h2>' },
           DialogFooter: { template: '<div><slot /></div>' },
-          AlertDialog: { template: '<div></div>' },
           RouterLink: true,
         },
       },
@@ -240,6 +243,50 @@ describe('LeadFormDialog product field', () => {
         product_public_id: 'prd_oa',
       }),
     )
+    wrapper.unmount()
+  })
+
+  it('asks the shared discard confirm before closing after the user typed, and stays open when declined', async () => {
+    setActivePinia(createPinia())
+    setPermissions(['product:view'])
+    vi.mocked(acquisitionSourceApi.listOptions).mockResolvedValue([])
+    vi.mocked(productApi.list).mockResolvedValue([])
+
+    const wrapper = mount(LeadFormDialog, {
+      props: { open: true, mode: 'create' },
+      global: {
+        stubs: {
+          DialogContent: { template: '<div><slot /></div>' },
+          DialogHeader: { template: '<div><slot /></div>' },
+          DialogTitle: { template: '<h2><slot /></h2>' },
+          DialogFooter: { template: '<div><slot /></div>' },
+          RouterLink: true,
+        },
+      },
+    })
+    await flushPromises()
+    const cancelButton = wrapper.findAll('button').find((button) => button.text() === '取消')
+    if (!cancelButton) throw new Error('cancel button not rendered')
+
+    await cancelButton.trigger('click')
+    await flushPromises()
+    expect(confirmDiscardChanges).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+
+    await wrapper.get('#lead-name').setValue('飞驰科技')
+    await flushPromises()
+
+    vi.mocked(confirmDiscardChanges).mockResolvedValueOnce(false)
+    await cancelButton.trigger('click')
+    await flushPromises()
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('update:open')).toEqual([[false]])
+
+    vi.mocked(confirmDiscardChanges).mockResolvedValueOnce(true)
+    await cancelButton.trigger('click')
+    await flushPromises()
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('update:open')).toEqual([[false], [false]])
     wrapper.unmount()
   })
 })

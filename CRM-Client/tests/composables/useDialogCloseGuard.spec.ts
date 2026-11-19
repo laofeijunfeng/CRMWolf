@@ -1,7 +1,10 @@
-import { defineComponent, h, nextTick, ref } from 'vue'
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { defineComponent, h, ref } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
+
+const confirmDiscardChanges = vi.hoisted(() => vi.fn<(kind?: 'close' | 'leave') => Promise<boolean>>())
+vi.mock('@/utils/confirmDialog', () => ({ confirmDiscardChanges }))
 
 function createHost(initialDirty = true) {
   const emittedOpen: boolean[] = []
@@ -23,50 +26,62 @@ function createHost(initialDirty = true) {
 }
 
 describe('useDialogCloseGuard', () => {
-  it('blocks a dirty close and confirms discard only after explicit action', async () => {
+  beforeEach(() => {
+    confirmDiscardChanges.mockReset()
+  })
+
+  it('closes dirty input only after the discard confirmation resolves true', async () => {
     const { wrapper, guard, emittedOpen } = createHost()
 
+    confirmDiscardChanges.mockResolvedValueOnce(false)
     guard.requestClose()
-    await nextTick()
-
-    expect(guard.showConfirmDialog.value).toBe(true)
+    await flushPromises()
+    expect(confirmDiscardChanges).toHaveBeenCalledWith('close')
     expect(emittedOpen).toEqual([])
 
-    guard.continueEditing()
-    expect(guard.showConfirmDialog.value).toBe(false)
-    expect(emittedOpen).toEqual([])
-
+    confirmDiscardChanges.mockResolvedValueOnce(true)
     guard.requestClose()
-    guard.confirmDiscard()
-    await nextTick()
-
+    await flushPromises()
     expect(emittedOpen).toEqual([false])
-    expect(guard.showConfirmDialog.value).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('asks once while a confirmation is already open', async () => {
+    const { wrapper, guard, emittedOpen } = createHost()
+    let resolve: (value: boolean) => void = () => {}
+    confirmDiscardChanges.mockReturnValueOnce(new Promise<boolean>((r) => { resolve = r }))
+
+    guard.requestClose()
+    guard.handleOpenChange(false)
+    guard.requestClose()
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(1)
+
+    resolve(false)
+    await flushPromises()
+    expect(emittedOpen).toEqual([])
     wrapper.unmount()
   })
 
   it('reopens the controlled dialog when the parent tries to close dirty input directly', async () => {
     const { wrapper, guard, emittedOpen } = createHost()
+    confirmDiscardChanges.mockResolvedValueOnce(false)
 
     expect(guard.handleParentClose()).toBe(true)
-    await nextTick()
+    await flushPromises()
 
     expect(emittedOpen).toEqual([true])
-    expect(guard.showConfirmDialog.value).toBe(true)
+    expect(confirmDiscardChanges).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
-  it('treats confirmation Escape or overlay dismissal as continue editing', async () => {
-    const { wrapper, guard, emittedOpen } = createHost()
+  it('closes clean input without asking', async () => {
+    const { wrapper, guard, emittedOpen } = createHost(false)
 
     guard.requestClose()
-    expect(guard.showConfirmDialog.value).toBe(true)
+    await flushPromises()
 
-    guard.handleConfirmOpenChange(false)
-    await nextTick()
-
-    expect(guard.showConfirmDialog.value).toBe(false)
-    expect(emittedOpen).toEqual([])
+    expect(confirmDiscardChanges).not.toHaveBeenCalled()
+    expect(emittedOpen).toEqual([false])
     wrapper.unmount()
   })
 
@@ -77,13 +92,13 @@ describe('useDialogCloseGuard', () => {
     guard.handleParentClose()
     guard.handleParentClose()
     guard.handleOpenChange(true)
-    await nextTick()
+    await flushPromises()
 
     expect(emittedOpen).toEqual([])
 
     guard.reset()
     guard.handleOpenChange(true)
-    await nextTick()
+    await flushPromises()
 
     expect(emittedOpen).toEqual([true])
     wrapper.unmount()

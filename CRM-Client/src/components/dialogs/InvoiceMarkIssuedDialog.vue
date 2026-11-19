@@ -29,7 +29,7 @@ import {
   InputField,
 } from '@/components/crmwolf'
 import invoiceApi from '@/api/invoice'
-import { confirmDialog } from '@/utils/confirmDialog'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { handleApiError } from '@/utils/errorHandler'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
@@ -178,11 +178,7 @@ const handleDialogClose = async (open: boolean): Promise<void> => {
 
   closeGuardPending.value = true
   try {
-    const confirmed = await confirmDialog(
-      '已填写或选择发票信息，关闭后这些内容不会保存。确定关闭吗？',
-      '放弃本次开票？',
-      { variant: 'destructive', confirmText: '放弃并关闭' },
-    )
+    const confirmed = await confirmDiscardChanges('close')
     if (confirmed) emit('update:open', false)
   } finally {
     closeGuardPending.value = false

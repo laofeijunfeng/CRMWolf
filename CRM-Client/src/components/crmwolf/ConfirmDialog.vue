@@ -6,8 +6,9 @@
  * 特性：
  * - 函数式调用（通过 confirmDialog）
  * - 支持键盘操作（Enter 确认，Escape 取消）
- * - Focus 自动聚焦到确认按钮
+ * - 打开时焦点默认落在取消按钮（reka AlertDialogContent 行为），避免误触危险操作
  * - 通过取消按钮或 Escape 取消，避免误触遮罩层
+ * - topmost 层（z-[1300]/[1301]）：表单弹窗内的放弃确认必须压过 elevated Dialog，不依赖挂载顺序
  */
 import { useConfirmDialogState, handleConfirm, handleCancel } from '@/utils/confirmDialogImpl'
 import {
@@ -19,6 +20,7 @@ import {
   AlertDialogCancel,
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog'
+import { buttonVariants } from '@/components/ui/button'
 
 const state = useConfirmDialogState()
 
@@ -38,7 +40,7 @@ const handleDialogOpenChange = (open: boolean): void => {
 
 <template>
   <AlertDialog :open="state.visible" @update:open="handleDialogOpenChange">
-    <AlertDialogContent>
+    <AlertDialogContent topmost>
       <AlertDialogTitle>{{ state.options.title }}</AlertDialogTitle>
       <AlertDialogDescription>
         {{ state.options.message }}
@@ -49,9 +51,7 @@ const handleDialogOpenChange = (open: boolean): void => {
           {{ state.options.cancelText }}
         </AlertDialogCancel>
         <AlertDialogAction
-          :class="{
-            'bg-danger hover:bg-danger/90': state.options.variant === 'destructive',
-          }"
+          :class="buttonVariants({ variant: state.options.variant })"
           @click="handleConfirm"
         >
           {{ state.options.confirmText }}

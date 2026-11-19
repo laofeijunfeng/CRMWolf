@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import type { VNode } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   getRoles: vi.fn(),
   getRole: vi.fn(),
   getAllPermissions: vi.fn(),
+  deleteRole: vi.fn(),
+  confirmDelete: vi.fn(),
 }))
 
 const { getRoles } = mocks
@@ -23,7 +25,12 @@ vi.mock('@/api/role', () => ({
   default: {
     getRoles: mocks.getRoles,
     getRole: mocks.getRole,
+    deleteRole: mocks.deleteRole,
   },
+}))
+
+vi.mock('@/utils/confirmDialog', () => ({
+  confirmDelete: mocks.confirmDelete,
 }))
 
 vi.mock('@/api/permissions', () => ({
@@ -48,6 +55,7 @@ const DataTableStub = defineComponent({
   setup(props): () => VNode {
     const getRowActions = props.getRowActions as (row: Record<string, unknown>) => {
       primaryActions?: { handler?: (value: Record<string, unknown>) => void }[]
+      secondaryActions?: { id?: string; handler?: (value: Record<string, unknown>) => void }[]
     }
     return () => h('div', { 'data-testid': 'roles-table' },
       (props.data as Record<string, unknown>[]).flatMap(row => {
@@ -59,6 +67,11 @@ const DataTableStub = defineComponent({
             'data-testid': `permissions-${row['id']}`,
             onClick: () => actions.primaryActions?.[0]?.handler?.(row),
           }, '配置权限'),
+          h('button', {
+            key: `delete-${row['id']}`,
+            'data-testid': `delete-${row['id']}`,
+            onClick: () => actions.secondaryActions?.find(action => action.id === 'delete')?.handler?.(row),
+          }, '删除'),
         ]
       }),
     )
@@ -185,6 +198,66 @@ describe('SettingsRolesPage', () => {
     expect(groupHeadings).not.toContain('回款记录')
     expect(wrapper.text()).toContain('导出回款记录')
     expect(wrapper.text()).toContain('payment:record:export')
+    wrapper.unmount()
+  })
+
+  const mountWithRole = (): VueWrapper => {
+    pinia = createPinia()
+    setActivePinia(pinia)
+    useTeamStore().currentTeam = {
+      id: 7, name: '演示团队', code: 'DEMO', owner_id: '42',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    useUserStore().userInfo = {
+      id: 42, name: '团队所有者', email: 'owner@example.com',
+      status: 'active', created_at: null, updated_at: null,
+    }
+    usePermissionStore().loadState = 'ready'
+    mocks.getRoles.mockResolvedValue([{
+      id: 3, code: 'SALES', name: '销售', description: null,
+      created_at: '2026-01-01T00:00:00Z',
+    }])
+    return mount(SettingsRolesPage, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          DataTable: DataTableStub,
+          TableRowActions: true,
+          SettingsContent: { template: '<main><slot /></main>' },
+          Dialog: { template: '<div><slot /></div>' },
+          DialogContent: { template: '<div><slot /></div>' },
+          DialogHeader: true, DialogTitle: true, DialogDescription: true, DialogFooter: true,
+          FormField: { template: '<div><slot :componentField="{}" /></div>' },
+        },
+      },
+    })
+  }
+
+  it('keeps the role when delete confirmation is cancelled', async () => {
+    mocks.confirmDelete.mockResolvedValue(false)
+    const wrapper = mountWithRole()
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="delete-3"]').exists()).toBe(true))
+
+    await wrapper.get('[data-testid="delete-3"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.confirmDelete).toHaveBeenCalledWith('角色"销售"')
+    expect(mocks.deleteRole).not.toHaveBeenCalled()
+    expect(mocks.getRoles).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('deletes the role and reloads the list after confirmation', async () => {
+    mocks.confirmDelete.mockResolvedValue(true)
+    mocks.deleteRole.mockResolvedValue(undefined)
+    const wrapper = mountWithRole()
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="delete-3"]').exists()).toBe(true))
+
+    await wrapper.get('[data-testid="delete-3"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.deleteRole).toHaveBeenCalledWith(3)
+    expect(mocks.getRoles).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

@@ -193,7 +193,7 @@ function setDisplayMode(value: string): void {
         <Badge
           variant="status"
           data-testid="business-journey-mobile-stage-badge"
-          :data-tone="businessJourneyStageTone[row.current_board_stage]"
+          :data-tone="businessJourneyStageTone(row.current_board_stage)"
         >
           {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
         </Badge>
@@ -238,7 +238,7 @@ function setDisplayMode(value: string): void {
       <Badge
         variant="status"
         data-testid="business-journey-stage-badge"
-        :data-tone="businessJourneyStageTone[row.current_board_stage]"
+        :data-tone="businessJourneyStageTone(row.current_board_stage)"
       >
         {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
       </Badge>

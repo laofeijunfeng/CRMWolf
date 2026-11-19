@@ -75,14 +75,6 @@ async function openDialog(): Promise<ReturnType<typeof mount>> {
         DialogTitle: defineComponent({ template: '<div><slot /></div>' }),
         DialogDescription: defineComponent({ template: '<div><slot /></div>' }),
         DialogFooter: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialog: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogContent: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogHeader: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogTitle: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogDescription: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogFooter: defineComponent({ template: '<div><slot /></div>' }),
-        AlertDialogAction: defineComponent({ template: '<button><slot /></button>' }),
-        AlertDialogCancel: defineComponent({ template: '<button><slot /></button>' }),
         FormField: defineComponent({
           props: { name: { type: String, required: true } },
           setup(_props, { slots }): () => VNode {
