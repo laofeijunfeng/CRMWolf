@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import ValidationError
 
 from app.schemas.assistant import AssistantTaskView
-from app.schemas.assistant_conversation import ConversationMessage
+from app.schemas.assistant_conversation import ConversationMessage, ConversationProjection
 from app.services.assistant.contracts import TaskDraft, TaskWaiting
 
 if TYPE_CHECKING:
@@ -113,6 +113,10 @@ def legacy_messages(task: AssistantTask, actions: list[AssistantAction], prefix:
                     task=frozen,
                     outcome="activity_written"
                     if action.event_type == "receipt" and data.get("activity_public_id")
+                    else None,
+                    projection=ConversationProjection(activity_public_id=data["activity_public_id"])
+                    if action.event_type == "receipt" and isinstance(data.get("activity_public_id"), str)
+                    and data["activity_public_id"]
                     else None,
                 )
             )

@@ -14,7 +14,12 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import ValidationError
 
-from app.schemas.assistant_conversation import ConversationBoundary, ConversationMessage
+from app.schemas.assistant_conversation import (
+    ConversationBoundary,
+    ConversationDispositionProjection,
+    ConversationMessage,
+    ConversationProjection,
+)
 from app.services.agent.ui.markdown import contains_raw_html, project_agent_markdown_to_plain_text
 from app.services.agent.ui.schemas import (
     ActionResultBlock,
@@ -119,18 +124,15 @@ def finalize_assistant_ui(
 ) -> None:
     """Attach UI envelopes, except for user text and host-only completion boundaries."""
 
+    _split_activity_disposition(messages)
     _ensure_current_waiting(messages, focused_task)
     _normalize_task_completions(messages)
     live_id = _live_waiting_message_id(messages, focused_task)
     submitted_kind = _resolved_activity_kind(focused_task)
-    receipts = _disposition_receipts(messages, live_id)
+    _project_coverage(messages, live_id)
     for message in messages:
         if message.role != "assistant":
             message.ui = None
-            continue
-        receipt = receipts.get(message.id)
-        if receipt is not None:
-            message.ui = _envelope(message, (receipt,), route="WORKFLOW")
             continue
         active_waiting = message.id == live_id
         active_boundary = (
@@ -236,41 +238,125 @@ def _disposition_items(message: ConversationMessage) -> list[dict[str, object]] 
     return cards or None
 
 
-def _disposition_receipts(messages: list[ConversationMessage], live_id: str | None) -> dict[str, NoticeBlock]:
-    """One disposition round shows one full card; every earlier message in it becomes a one-line receipt."""
-
-    groups: list[list[tuple[ConversationMessage, list[dict[str, object]]]]] = []
-    open_groups: dict[tuple[object, ...], int] = {}
+def _split_activity_disposition(messages: list[ConversationMessage]) -> None:
+    """Activity acceptance and task disposition have independent coverage lifetimes."""
+    known = {message.id for message in messages}
+    expanded: list[ConversationMessage] = []
     for message in messages:
-        items = _disposition_items(message)
-        if items is None or message.task is None:
+        expanded.append(message)
+        if message.outcome != "activity_written" or _disposition_items(message) is None:
             continue
-        key = (message.task.public_id, *((item.get("item_id"), item.get("title")) for item in items))
-        offer = all(item.get("state") in {"current", "waiting"} for item in items)
-        if offer or key not in open_groups:
-            open_groups[key] = len(groups)
-            groups.append([])
-        groups[open_groups[key]].append((message, items))
-    receipts: dict[str, NoticeBlock] = {}
-    for group in groups:
-        full = next((index for index, (message, _) in enumerate(group) if message.id == live_id), len(group) - 1)
-        latest = {item.get("item_id"): item for item in group[full][1]}
-        for index, (message, items) in enumerate(group):
-            if index == full:
-                continue
-            own = next((item for item in items if item.get("state") == "current"), None)
-            if own is None:
-                continue
-            title = str(own.get("title") or "跟进任务")
-            label = _receipt_label(latest.get(own.get("item_id"))) or _receipt_label(own) or "已处理"
-            short = title if len(title) <= 24 else f"{title[:24]}…"
-            receipts[message.id] = NoticeBlock(
-                id="b_notice_receipt",
-                type="notice",
-                tone="info",
-                text=f"{label} · {short}",
-            )
-    return receipts
+        identifier = f"{message.id}:disposition"
+        if identifier not in known:
+            expanded.append(message.model_copy(update={
+                "id": identifier, "outcome": "follow_up_disposition", "projection": None, "ui": None,
+                "text": "历史跟进任务",
+            }))
+            known.add(identifier)
+    messages[:] = expanded
+
+
+def _carrier_rank(message: ConversationMessage) -> tuple[int, int, str, str]:
+    disposition = message.projection.disposition if message.projection else None
+    return (
+        {"NONE": 0, "CURRENT": 1, "FINAL": 2}.get(disposition.card_role, 0) if disposition else 0,
+        message.task.version if message.task else 0, message.at, message.id,
+    )
+
+
+def _identified_disposition_items(message: ConversationMessage) -> dict[str, dict[str, object]] | None:
+    items = _disposition_items(message)
+    if not items:
+        return None
+    identified: dict[str, dict[str, object]] = {}
+    task_ids: set[str] = set()
+    for item in items:
+        item_id, task_id = item.get("item_id"), item.get("task_public_id")
+        if (
+            not isinstance(item_id, str) or not item_id.strip() or item_id in identified
+            or not isinstance(task_id, str) or not task_id.strip() or task_id in task_ids
+        ):
+            return None
+        identified[item_id] = item
+        task_ids.add(task_id)
+    return identified
+
+
+def _covers_disposition(carrier: ConversationMessage, source: ConversationMessage) -> bool:
+    latest = _identified_disposition_items(carrier)
+    source_items = _identified_disposition_items(source)
+    if latest is None or source_items is None:
+        return False
+    for item_id, item in source_items.items():
+        target = latest.get(item_id)
+        if target is None or item["task_public_id"] != target["task_public_id"]:
+            return False
+        if item.get("state") in _SETTLED_LABELS and any(
+            item.get(key) != target.get(key) for key in ("state", "result_title", "result_message")
+        ):
+            return False
+        if any(item.get(key) and item.get(key) != target.get(key) for key in ("evidence_quote", "evidence_reason")):
+            return False
+    return True
+
+
+def _project_coverage(messages: list[ConversationMessage], live_id: str | None) -> None:
+    activities: dict[str, list[ConversationMessage]] = {}
+    rounds: dict[tuple[str, str], list[ConversationMessage]] = {}
+    for message in messages:
+        prior = message.projection
+        if prior is not None and prior.visibility == "COVERED":
+            prior.visibility = "VISIBLE"
+            prior.covered_by = None
+        if message.role != "assistant" or message.outcome == "failure" or message.error_code:
+            continue
+        message.projection = None
+        if message.outcome == "activity_written":
+            activity_id = prior.activity_public_id if prior else None
+            if activity_id is None and message.task:
+                activity_id = next((receipt.public_id for receipt in message.task.committed
+                                    if receipt.kind == "customer_activity"), None)
+            if activity_id:
+                message.projection = ConversationProjection(activity_public_id=activity_id)
+                activities.setdefault(activity_id, []).append(message)
+            continue
+        items = _disposition_items(message)
+        task = message.task
+        payload = task.follow_up_disposition if task else None
+        if items is None or task is None or not isinstance(payload, dict):
+            continue
+        batch_id = payload.get("batch_id")
+        if not isinstance(batch_id, str) or not batch_id.strip() or len(items) > 100:
+            continue
+        role: Literal["NONE", "CURRENT", "FINAL"] = (
+            "FINAL" if payload.get("status") == "DONE" else "CURRENT" if message.id == live_id else "NONE"
+        )
+        message.projection = ConversationProjection(
+            visibility="FALLBACK_RECEIPT" if role == "NONE" else "VISIBLE",
+            disposition=ConversationDispositionProjection(
+                task_public_id=task.public_id, batch_id=batch_id,
+                item_ids=[item["item_id"] for item in items
+                          if isinstance(item.get("item_id"), str) and item["item_id"].strip()],
+                card_role=role, version=task.version,
+            ),
+        )
+        rounds.setdefault((task.public_id, batch_id), []).append(message)
+    for group in activities.values():
+        carrier = max(group, key=_carrier_rank)
+        for message in group:
+            if message is not carrier and message.projection:
+                message.projection.visibility = "COVERED"
+                message.projection.covered_by = carrier.id
+    for group in rounds.values():
+        full = [message for message in group if message.projection and message.projection.disposition
+                and message.projection.disposition.card_role != "NONE"]
+        if not full:
+            continue
+        carrier = max(full, key=_carrier_rank)
+        for message in group:
+            if message is not carrier and message.projection and _covers_disposition(carrier, message):
+                message.projection.visibility = "COVERED"
+                message.projection.covered_by = carrier.id
 
 
 def _receipt_label(item: dict[str, object] | None) -> str | None:
@@ -330,11 +416,18 @@ def project_assistant_message(
         return _project_failure(message)
     if _is_completion_only(message):
         return None
+    if (
+        message.projection is not None
+        and message.projection.disposition is not None
+        and message.projection.disposition.card_role == "NONE"
+        and _disposition_items(message) is not None
+    ):
+        return _project_disposition_receipt(message)
+    if message.outcome == "activity_written":
+        return _envelope(message, (_result_block(message),), route="WORKFLOW")
     disposition = _project_disposition(message, active_waiting=active_waiting)
     if disposition is not None:
         return disposition
-    if message.outcome == "activity_written":
-        return _envelope(message, (_result_block(message),), route="WORKFLOW")
     if message.boundary is not None:
         return _envelope(
             message,
@@ -416,6 +509,31 @@ def _reply_entry_id(message_id: str) -> str | None:
     return entry_id
 
 
+def _project_disposition_receipt(message: ConversationMessage) -> AgentUIEnvelope:
+    """Keep server-rendered, non-interactive facts available outside the carrier's page."""
+    details = [_plain(message.text) or "历史跟进任务"]
+    for item in _disposition_items(message) or []:
+        label = _receipt_label(item) or "待处理"
+        title = item.get("title")
+        parts = [f"{label} · {_plain(title) if isinstance(title, str) else '跟进任务'}"]
+        for key, prefix in (("result_message", ""), ("evidence_quote", "依据："), ("evidence_reason", "")):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                parts.append(f"{prefix}{_plain(value)}")
+        details.append("；".join(parts))
+    text = "\n".join(details)
+    # The existing batch allows 100 items. Preserve their facts without exceeding
+    # the per-notice 10k contract (the envelope supports 30 blocks).
+    notices = tuple(
+        NoticeBlock(
+            id=f"b_notice_disposition_receipt_{index // 10000}",
+            type="notice", tone="info", title="历史跟进任务", text=text[index:index + 10000],
+        )
+        for index in range(0, len(text), 10000)
+    )
+    return _envelope(message, notices, route="WORKFLOW")
+
+
 def _project_disposition(message: ConversationMessage, *, active_waiting: bool) -> AgentUIEnvelope | None:
     task = message.task
     if task is None or not isinstance(task.follow_up_disposition, dict):
@@ -473,16 +591,6 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
                 result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
             )
         )
-    customer = payload.get("customer_name") or ""
-    kind = payload.get("activity_kind_label") or ""
-    detail = " · ".join(part for part in (str(customer), str(kind)) if part)
-    notice = NoticeBlock(
-        id="b_notice_written",
-        type="notice",
-        tone="success",
-        title="本次跟进已写入",
-        text=detail or "已写入",
-    )
     summary = _plain(message.text) if not active and payload.get("status") == "DONE" else ""
     interaction = InteractionBlock(
         id="b_interaction_1",
@@ -502,7 +610,7 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         submit_on_select=active,
         submit_action_id=_action_id(waiting) if active and waiting is not None else None,
     )
-    return _envelope(message, (notice, interaction), route="WORKFLOW")
+    return _envelope(message, (interaction,), route="WORKFLOW")
 
 
 def _owner_line(raw: object) -> str | None:

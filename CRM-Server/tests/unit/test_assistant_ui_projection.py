@@ -1152,3 +1152,196 @@ def test_legacy_signal_is_not_promoted_to_an_unverified_comparison() -> None:
     assert {fact.key for fact in interaction.facts}.isdisjoint({"change_signal", "change_summary"})
     assert next(fact.value for fact in interaction.facts if fact.key == "opportunity") == "旧商机"
     assert interaction.submit_action_id is None
+
+
+def _round_task(*, batch_id="afb_one", version=1, done=False, title="核对采购安排", state="current"):
+    return _task(
+        version=version,
+        committed=[{"kind": "customer_activity", "public_id": "activity_one"}],
+        waiting=None if done else TaskWaiting(
+            type="FOLLOW_UP_DISPOSITION", field="follow_up_disposition", question_id="q_round",
+            action_id="action_round", expected_version=version, prompt="历史跟进任务",
+        ),
+        follow_up_disposition={
+            "batch_id": batch_id, "status": "DONE" if done else "ACTIVE",
+            "items": [{"item_id": "i1", "task_public_id": "fut_one", "title": title,
+                       "state": state, "related": True, "evidence_quote": "已核对采购安排",
+                       "result_title": "已完成" if state == "complete" else None}],
+        },
+    )
+
+
+def test_activity_carrier_is_not_swallowed_by_disposition_waiting():
+    task = _round_task()
+    messages = [_message("written", "活动已写入", task, outcome="activity_written")]
+    finalize_assistant_ui(messages, focused_task=task, pending_choice=None)
+    blocks = [block for message in messages if message.ui for block in message.ui.blocks]
+    assert sum(block.type == "action_result" and block.status == "SUCCESS" for block in blocks) == 1
+    assert sum(block.type == "interaction" for block in blocks) == 1
+    assert not any(block.type == "notice" and block.tone == "success" for block in blocks)
+
+
+def test_final_disposition_carrier_covers_older_round_despite_title_change():
+    early = _message("early", "历史跟进任务", _round_task(), outcome="follow_up_disposition")
+    final = _message(
+        "final",
+        "已完成 1 条",
+        _round_task(version=2, done=True, title="采购安排新标题", state="complete"),
+        outcome="follow_up_disposition",
+    )
+    messages = [early, final]
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    visible = [message for message in messages if not message.projection or message.projection.visibility != "COVERED"]
+    assert [message.id for message in visible] == ["final"]
+    interaction = next(block for block in final.ui.blocks if block.type == "interaction")
+    assert interaction.disposition_items[0].state == "complete"
+    assert interaction.state == "READ_ONLY" and interaction.submit_action_id is None
+
+
+def test_disposition_fallback_survives_without_loaded_final_carrier():
+    early = _message("early", "先放着", _round_task(state="hold"), outcome="follow_up_disposition")
+    messages = [early]
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    assert early.projection.visibility == "FALLBACK_RECEIPT"
+    assert early.ui is not None
+    assert all(block.type != "interaction" for block in early.ui.blocks)
+    assert any(block.type == "notice" and "先放着" in block.text for block in early.ui.blocks)
+
+def test_distinct_disposition_batches_do_not_cover_each_other():
+    messages = [
+        _message(
+            "one", "已完成", _round_task(batch_id="afb_one", done=True, state="complete"),
+            outcome="follow_up_disposition",
+        ),
+        _message(
+            "two", "已完成", _round_task(batch_id="afb_two", done=True, state="complete"),
+            outcome="follow_up_disposition",
+        ),
+    ]
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    assert all(message.projection.visibility != "COVERED" for message in messages)
+
+def test_malformed_disposition_identity_does_not_cover_a_source_card():
+    carrier = _message(
+        "carrier", "最终", _round_task(version=2, done=True, state="complete"),
+        outcome="follow_up_disposition",
+    )
+    source_task = _round_task(version=1, state="hold")
+    source_task.follow_up_disposition["items"][0]["item_id"] = None
+    source = _message("source", "先放着", source_task, outcome="follow_up_disposition")
+    messages = [source, carrier]
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    assert source.projection.visibility != "COVERED"
+
+def test_disposition_fallback_receipt_keeps_result_and_evidence():
+    task = _round_task(state="unknown")
+    item = task.follow_up_disposition["items"][0]
+    item.update({
+        "result_title": "结果待核对",
+        "result_message": "未确认是否已处理",
+        "evidence_quote": "客户要求人工核对",
+    })
+    message = _message("unknown", "历史跟进任务", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+    assert message.ui is not None
+    notice = next(block for block in message.ui.blocks if block.type == "notice")
+    assert "结果待核对" in notice.text
+    assert "未确认是否已处理" in notice.text
+    assert "客户要求人工核对" in notice.text
+
+
+def test_failure_with_stale_coverage_metadata_stays_visible():
+    from app.schemas.assistant_conversation import ConversationProjection
+
+    message = _message("failure", "权限拒绝", _round_task(), outcome="failure")
+    message.projection = ConversationProjection(visibility="COVERED", covered_by="success")
+    finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+    assert message.ui is not None
+    assert message.projection is None or message.projection.visibility == "VISIBLE"
+
+
+def test_covered_receipt_retains_server_rendered_read_only_ui():
+    source = _message("early", "先放着", _round_task(state="hold"), outcome="follow_up_disposition")
+    carrier = _message("final", "先放着 1 条", _round_task(version=2, done=True, state="hold"),
+                       outcome="follow_up_disposition")
+    finalize_assistant_ui([source, carrier], focused_task=None, pending_choice=None)
+    assert source.projection.visibility == "COVERED"
+    assert source.ui is not None
+    assert all(block.type != "interaction" or block.submit_action_id is None for block in source.ui.blocks)
+    assert any(block.type == "notice" and "核对采购安排" in block.text for block in source.ui.blocks)
+
+
+def test_missing_evidence_reason_in_carrier_preserves_fallback():
+    task = _round_task(state="hold")
+    task.follow_up_disposition["items"][0]["evidence_reason"] = "必须人工核对历史版本"
+    source = _message("source", "先放着", task, outcome="follow_up_disposition")
+    carrier = _message("final", "先放着 1 条", _round_task(version=2, done=True, state="hold"),
+                       outcome="follow_up_disposition")
+    finalize_assistant_ui([source, carrier], focused_task=None, pending_choice=None)
+    assert source.projection.visibility == "FALLBACK_RECEIPT"
+    assert any(block.type == "notice" and "必须人工核对历史版本" in block.text for block in source.ui.blocks)
+
+
+def test_duplicate_item_identities_in_carrier_do_not_cover_a_source():
+    task = _round_task(version=2, done=True, state="hold")
+    task.follow_up_disposition["items"].append(dict(task.follow_up_disposition["items"][0]))
+    source = _message("source", "先放着", _round_task(state="hold"), outcome="follow_up_disposition")
+    carrier = _message("final", "先放着 1 条", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([source, carrier], focused_task=None, pending_choice=None)
+    assert source.projection.visibility != "COVERED"
+
+
+def test_disposition_projection_rejects_empty_identity_strings():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.assistant_conversation import ConversationDispositionProjection
+
+    with pytest.raises(ValidationError):
+        ConversationDispositionProjection(task_public_id="ast_one", batch_id="afb_one", item_ids=[""])
+
+
+def test_large_fallback_preserves_every_task_without_exceeding_ui_contract():
+    from app.services.agent.ui.schemas import AgentUIEnvelope
+
+    task = _round_task(state="failed")
+    task.follow_up_disposition["items"] = [
+        {"item_id": f"i{index}", "task_public_id": f"fut_{index}", "title": f"任务{index:03d}" + "长" * 240,
+         "state": "failed", "related": True, "evidence_quote": "证" * 250,
+         "result_title": "未能完成", "result_message": "因" * 480}
+        for index in range(100)
+    ]
+    message = _message("large", "历史跟进任务", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+    assert message.ui is not None
+    AgentUIEnvelope.model_validate(message.ui.model_dump(mode="json"))
+    texts = "".join(block.text for block in message.ui.blocks if block.type == "notice")
+    assert all(f"任务{index:03d}" in texts for index in range(100))
+    assert len(message.ui.blocks) <= 30
+
+
+def test_activity_legacy_receipt_is_covered_but_retains_accepted_result_ui():
+    from app.schemas.assistant_conversation import ConversationProjection
+
+    accepted = _message("accepted", "已写入", _round_task(), outcome="activity_written")
+    legacy = _message("legacy", "旧回执", outcome="activity_written")
+    legacy.projection = ConversationProjection(activity_public_id="activity_one")
+    messages = [legacy, accepted]
+    finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+    visible = [message for message in messages if not message.projection or message.projection.visibility != "COVERED"]
+    assert sum(block.type == "action_result" for message in visible if message.ui for block in message.ui.blocks) == 1
+    assert legacy.projection.visibility == "COVERED"
+    assert legacy.ui.blocks[0].type == "action_result"
+
+
+def test_coverage_is_stable_on_reprojection_and_incoming_order():
+    for reverse in (True, False):
+        source = _message("source", "先放着", _round_task(state="hold"), outcome="follow_up_disposition")
+        carrier = _message("final", "先放着 1 条", _round_task(version=2, done=True, state="hold"),
+                           outcome="follow_up_disposition")
+        messages = [carrier, source] if reverse else [source, carrier]
+        finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+        first = [message.model_dump(mode="json") for message in messages]
+        finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+        assert [message.model_dump(mode="json") for message in messages] == first
+        assert source.projection.covered_by == "final"

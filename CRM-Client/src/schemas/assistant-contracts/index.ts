@@ -217,6 +217,8 @@ export const AssistantTaskViewSchema = z.object({
   processing_turn_status: AssistantTurnStatusSchema.nullable().optional(),
   reprocess_turn_id: z.string().min(1).nullable().optional(),
   follow_up_disposition: z.object({
+    batch_id: z.string().min(1).nullable().optional(),
+    activity_public_id: z.string().min(1).nullable().optional(),
     status: z.enum(['ACTIVE', 'DONE', 'OVERFLOW', 'QUERY_FAILED']),
     customer_name: z.string(),
     activity_kind_label: z.string(),
@@ -224,6 +226,7 @@ export const AssistantTaskViewSchema = z.object({
     current_index: z.number().int().positive().nullable(),
     items: z.array(z.object({
       item_id: z.string().min(1),
+      task_public_id: z.string().min(1).nullable().optional(),
       title: z.string().min(1),
       owner_line: z.string().nullable().optional(),
       related: z.boolean(),
@@ -264,11 +267,26 @@ export type SubmitInputResponse = z.infer<typeof SubmitInputResponseSchema>
 
 export const ConversationBoundarySchema = z.object({ entry_id: z.string().min(1), prompt: z.string().min(1) }).strict()
 export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
+export const ConversationDispositionProjectionSchema = z.object({
+  task_public_id: z.string().min(1),
+  batch_id: z.string().min(1),
+  item_ids: z.array(z.string().min(1)).max(100),
+  card_role: z.enum(['NONE', 'CURRENT', 'FINAL']),
+  version: z.number().int().nonnegative()
+}).strict()
+export type ConversationDispositionProjection = z.infer<typeof ConversationDispositionProjectionSchema>
+export const ConversationProjectionSchema = z.object({
+  visibility: z.enum(['VISIBLE', 'FALLBACK_RECEIPT', 'COVERED']),
+  covered_by: z.string().min(1).nullable().optional(),
+  activity_public_id: z.string().min(1).nullable().optional(),
+  disposition: ConversationDispositionProjectionSchema.nullable().optional()
+}).strict()
+export type ConversationProjection = z.infer<typeof ConversationProjectionSchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
   outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed']).nullable(),
-  ui: AgentUIEnvelopeSchema.nullable()
+  ui: AgentUIEnvelopeSchema.nullable(), projection: ConversationProjectionSchema.nullable().optional()
 }).strict()
 export const ConversationViewSchema = z.object({
   public_id: z.string().min(1), version: z.number().int().nonnegative(),
