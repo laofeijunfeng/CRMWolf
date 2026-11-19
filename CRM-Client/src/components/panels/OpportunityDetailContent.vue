@@ -660,7 +660,6 @@ watch(approvalPhase, phase => {
       <Button
         v-if="isActive && canWin && isApprovalApproved"
         variant="default"
-        class="bg-success hover:bg-success/90"
         @click="winDialogOpen = true"
       >
         <Trophy class="w-4 h-4 mr-2" />
@@ -669,7 +668,6 @@ watch(approvalPhase, phase => {
       <Button
         v-if="isActive && canLose && isApprovalApproved"
         variant="outline"
-        class="text-danger border-danger hover:bg-danger/12"
         @click="loseDialogOpen = true"
       >
         <XCircle class="w-4 h-4 mr-2" />

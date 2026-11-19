@@ -76,7 +76,8 @@ function optionId(value: string): string {
     >
       <RadioGroupItem
         :id="optionId(option.value)"
-        class="segmented-choice__radio !absolute !h-full !w-full !border-0 !bg-transparent !p-0 !opacity-0 !shadow-none !ring-0"
+        variant="bare"
+        class="segmented-choice__radio"
         :value="option.value"
       />
       <Label
@@ -112,7 +113,14 @@ function optionId(value: string): string {
 }
 
 .segmented-choice__radio {
+  position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
   margin: 0;
   cursor: pointer;
   z-index: 1;

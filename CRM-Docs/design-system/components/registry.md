@@ -73,6 +73,7 @@
 | LoadingSkeleton | crmwolf | candidate | 加载骨架 | — | 待补 |
 | LiveRegion | crmwolf | candidate | 读屏播报 | — | 待补 |
 | ConfirmDialog | crmwolf | candidate | 确认操作 | 原生 `confirm()` | [确认对话框](confirm-dialog.md) |
+| ActionOptionCard | crmwolf | candidate | 弹窗内带说明的下一步操作 | 手写整卡按钮 | [操作选项卡片](action-option-card.md) |
 | RenameDialog | crmwolf | candidate | 重命名 | — | 待补 |
 | FormErrorSummary | crmwolf | candidate | 表单错误汇总 | — | 待补 |
 

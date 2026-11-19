@@ -22,6 +22,7 @@
 | [模态框与抽屉](modal-sheet.md) | 承载临时上下文任务。 |
 | [详情抽屉](detail-sheet.md) | 页面级详情与编辑抽屉。 |
 | [确认对话框](confirm-dialog.md) | 确认、删除与放弃更改。 |
+| [操作选项卡片](action-option-card.md) | 弹窗内带说明的下一步操作。 |
 | [审批通知](approval-notification.md) | 审批入口和待办语义。 |
 
 页面如何组合这些组件见[页面模式](../patterns/README.md)。

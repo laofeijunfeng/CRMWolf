@@ -141,7 +141,7 @@ const handleSelect = (value: DateValue | undefined): void => {
       </Button>
     </PopoverTrigger>
     <PopoverContent
-      class="!w-auto !p-0"
+      class="w-auto p-0"
       align="start"
       @interact-outside="handleCalendarInteractOutside"
     >

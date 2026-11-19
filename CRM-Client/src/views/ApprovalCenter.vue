@@ -307,9 +307,8 @@
                   <Button
                     v-if="invoiceBillingType"
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
-                    class="border-brand/20 bg-brand/5 text-brand hover:bg-brand/10"
                     :disabled="invoiceBillingFields.length === 0"
                     @click="copyAllInvoiceBilling"
                   >

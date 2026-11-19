@@ -20,7 +20,6 @@ import {
   AlertDialogCancel,
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog'
-import { buttonVariants } from '@/components/ui/button'
 
 const state = useConfirmDialogState()
 
@@ -51,7 +50,7 @@ const handleDialogOpenChange = (open: boolean): void => {
           {{ state.options.cancelText }}
         </AlertDialogCancel>
         <AlertDialogAction
-          :class="buttonVariants({ variant: state.options.variant })"
+          :variant="state.options.variant"
           @click="handleConfirm"
         >
           {{ state.options.confirmText }}
