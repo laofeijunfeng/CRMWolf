@@ -908,14 +908,14 @@
       "file": "CRM-Client/src/views/TeamCreate.vue",
       "symbol": "} from '@/components/ui/form'",
       "category": "restricted-primitive",
-      "current": "alert-dialog 已清零（CMP-07）；ui/form 仍在引用",
+      "current": "改为 AuthShell + InputField + vee-validate defineField，ui/form 与 alert-dialog 均已清零（CMP-07 / CMP-12）",
       "target": "alert-dialog → ConfirmDialog / confirmDialog；form → crmwolf Field 系列",
       "exception": false,
       "owner": "frontend-platform",
       "batch": "阶段2",
       "risk": "浮层/表单交互回归",
       "verification": "npm run lint:design-system -- --worktree 对该文件无 restricted-primitive 命中",
-      "status": "pending",
+      "status": "fixed",
       "lastVerified": "2026-11-19"
     },
     {
@@ -923,14 +923,14 @@
       "file": "CRM-Client/src/views/TeamJoin.vue",
       "symbol": "} from '@/components/ui/form'",
       "category": "restricted-primitive",
-      "current": "alert-dialog 已清零（CMP-07）；ui/form 仍在引用",
+      "current": "改为 AuthShell + InputField + vee-validate defineField，ui/form 与 alert-dialog 均已清零（CMP-07 / CMP-12）",
       "target": "alert-dialog → ConfirmDialog / confirmDialog；form → crmwolf Field 系列",
       "exception": false,
       "owner": "frontend-platform",
       "batch": "阶段2",
       "risk": "浮层/表单交互回归",
       "verification": "npm run lint:design-system -- --worktree 对该文件无 restricted-primitive 命中",
-      "status": "pending",
+      "status": "fixed",
       "lastVerified": "2026-11-19"
     },
     {

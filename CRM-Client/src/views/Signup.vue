@@ -1,87 +1,52 @@
 <template>
-  <main class="auth-page">
-    <div class="auth-page__shell">
-      <div class="auth-page__brand">
-        <img src="/logo.png" alt="CRM Logo" class="auth-page__logo" />
-        <div class="auth-page__name">智能客户关系管理系统</div>
-      </div>
+  <AuthShell title="创建账号" description="注册后继续完成团队设置">
+    <form class="grid gap-space-4" novalidate @submit.prevent="handleRegister">
+      <InputField
+        id="signup-email"
+        v-model="registerForm.email"
+        label="邮箱"
+        type="email"
+        placeholder="name@example.com"
+        autocomplete="email"
+        required
+        :disabled="registering"
+        :error="registerErrors.email"
+      />
+      <InputField
+        id="signup-name"
+        v-model="registerForm.name"
+        label="姓名"
+        placeholder="请输入姓名"
+        autocomplete="name"
+        required
+        :disabled="registering"
+        :error="registerErrors.name"
+      />
+      <InputField
+        id="signup-password"
+        v-model="registerForm.password"
+        label="密码"
+        type="password"
+        placeholder="请设置密码"
+        autocomplete="new-password"
+        helper-text="密码长度为 6-50 个字符"
+        required
+        :disabled="registering"
+        :error="registerErrors.password"
+      />
+      <Button type="submit" size="lg" class="w-full" :disabled="registering">
+        <Loader2 v-if="registering" class="size-icon-sm animate-spin" aria-hidden="true" />
+        创建账号
+      </Button>
+    </form>
 
-      <Card class="auth-card">
-        <CardHeader class="auth-card__header">
-          <CardTitle class="auth-card__title">创建账号</CardTitle>
-          <CardDescription>注册后继续完成团队设置</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form class="auth-form" @submit.prevent="handleRegister">
-            <div class="auth-form__field">
-              <Label for="signup-email">邮箱</Label>
-              <Input
-                id="signup-email"
-                v-model="registerForm.email"
-                type="email"
-                placeholder="name@example.com"
-                autocomplete="email"
-                required
-                :disabled="registering"
-                :aria-invalid="registerErrors.email.length > 0"
-                aria-describedby="signup-email-error"
-              />
-              <p v-if="registerErrors.email" id="signup-email-error" class="auth-form__error">
-                {{ registerErrors.email }}
-              </p>
-            </div>
-
-            <div class="auth-form__field">
-              <Label for="signup-name">姓名</Label>
-              <Input
-                id="signup-name"
-                v-model="registerForm.name"
-                type="text"
-                placeholder="请输入姓名"
-                autocomplete="name"
-                required
-                :disabled="registering"
-                :aria-invalid="registerErrors.name.length > 0"
-                aria-describedby="signup-name-error"
-              />
-              <p v-if="registerErrors.name" id="signup-name-error" class="auth-form__error">
-                {{ registerErrors.name }}
-              </p>
-            </div>
-
-            <div class="auth-form__field">
-              <Label for="signup-password">密码</Label>
-              <Input
-                id="signup-password"
-                v-model="registerForm.password"
-                type="password"
-                placeholder="请设置密码"
-                autocomplete="new-password"
-                required
-                :disabled="registering"
-                :aria-invalid="registerErrors.password.length > 0"
-                aria-describedby="signup-password-hint signup-password-error"
-              />
-              <p id="signup-password-hint" class="auth-form__hint">密码长度为 6-50 个字符</p>
-              <p v-if="registerErrors.password" id="signup-password-error" class="auth-form__error">
-                {{ registerErrors.password }}
-              </p>
-            </div>
-
-            <Button type="submit" class="w-full" :disabled="registering">
-              <Loader2 v-if="registering" class="h-4 w-4 animate-spin" aria-hidden="true" />
-              创建账号
-            </Button>
-          </form>
-
-          <p class="auth-card__switch">
-            已有账号？
-            <RouterLink to="/login">登录</RouterLink>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  </main>
+    <template #footer>
+      <p class="m-0">
+        已有账号？
+        <RouterLink to="/login" class="font-medium text-brand hover:underline">登录</RouterLink>
+      </p>
+    </template>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
@@ -91,9 +56,8 @@ import { toast } from 'vue-sonner'
 import { Loader2 } from 'lucide-vue-next'
 import { authApi } from '@/api/auth'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { InputField } from '@/components/crmwolf'
+import AuthShell from '@/layouts/AuthShell.vue'
 import { registerFormSchema } from '@/schemas/auth'
 import { useUserStore } from '@/stores/user'
 import { handleApiError } from '@/utils/errorHandler'
@@ -174,97 +138,3 @@ async function handleRegister(): Promise<void> {
   }
 }
 </script>
-
-<style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.auth-page {
-  display: flex;
-  min-height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  background: hsl(var(--card));
-  padding: $space-6;
-}
-
-.auth-page__shell {
-  display: grid;
-  width: 100%;
-  max-width: 420px;
-  gap: $space-4;
-}
-
-.auth-page__brand {
-  display: grid;
-  justify-items: center;
-  gap: $space-2;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-}
-
-.auth-page__logo {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-}
-
-.auth-card {
-  width: 100%;
-  box-shadow: none;
-}
-
-.auth-card__header {
-  text-align: center;
-}
-
-.auth-card__title {
-  font-size: var(--font-size-body-strong);
-}
-
-.auth-form {
-  display: grid;
-  gap: $space-3;
-}
-
-.auth-form__field {
-  display: grid;
-  gap: $space-2;
-}
-
-.auth-form__hint {
-  margin: -2px 0 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-}
-
-.auth-form__error {
-  margin: 0;
-  color: hsl(var(--status-danger));
-  font-size: var(--font-size-caption);
-}
-
-.auth-card__switch {
-  margin: $space-4 0 0;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-
-  a {
-    color: hsl(var(--brand));
-    font-weight: 500;
-    text-decoration: none;
-
-    &:hover {
-      color: hsl(var(--brand));
-      text-decoration: underline;
-    }
-  }
-}
-
-@media (max-width: 767px) {
-  .auth-page {
-    padding: var(--page-padding);
-  }
-}
-</style>

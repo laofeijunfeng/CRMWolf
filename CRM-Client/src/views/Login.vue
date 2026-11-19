@@ -1,68 +1,41 @@
 <template>
-  <main class="auth-page">
-    <div class="auth-page__shell">
-      <div class="auth-page__brand">
-        <img src="/logo.png" alt="CRM Logo" class="auth-page__logo" />
-        <div class="auth-page__name">智能客户关系管理系统</div>
-      </div>
+  <AuthShell title="登录" description="使用邮箱和密码进入系统">
+    <form class="grid gap-space-4" novalidate @submit.prevent="handleLogin">
+      <InputField
+        id="login-email"
+        v-model="loginForm.email"
+        label="邮箱"
+        type="email"
+        placeholder="name@example.com"
+        autocomplete="email"
+        required
+        :disabled="loading"
+        :error="loginErrors.email"
+      />
+      <InputField
+        id="login-password"
+        v-model="loginForm.password"
+        label="密码"
+        type="password"
+        placeholder="请输入密码"
+        autocomplete="current-password"
+        required
+        :disabled="loading"
+        :error="loginErrors.password"
+      />
+      <Button type="submit" size="lg" class="w-full" :disabled="loading">
+        <Loader2 v-if="loading" class="size-icon-sm animate-spin" aria-hidden="true" />
+        登录
+      </Button>
+    </form>
 
-      <Card class="auth-card">
-        <CardHeader class="auth-card__header">
-          <CardTitle class="auth-card__title">登录</CardTitle>
-          <CardDescription>使用邮箱和密码进入系统</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form class="auth-form" @submit.prevent="handleLogin">
-            <div class="auth-form__field">
-              <Label for="login-email">邮箱</Label>
-              <Input
-                id="login-email"
-                v-model="loginForm.email"
-                type="email"
-                placeholder="name@example.com"
-                autocomplete="email"
-                required
-                :disabled="loading"
-                :aria-invalid="loginErrors.email.length > 0"
-                aria-describedby="login-email-error"
-              />
-              <p v-if="loginErrors.email" id="login-email-error" class="auth-form__error">
-                {{ loginErrors.email }}
-              </p>
-            </div>
-
-            <div class="auth-form__field">
-              <Label for="login-password">密码</Label>
-              <Input
-                id="login-password"
-                v-model="loginForm.password"
-                type="password"
-                placeholder="请输入密码"
-                autocomplete="current-password"
-                required
-                :disabled="loading"
-                :aria-invalid="loginErrors.password.length > 0"
-                aria-describedby="login-password-error"
-              />
-              <p v-if="loginErrors.password" id="login-password-error" class="auth-form__error">
-                {{ loginErrors.password }}
-              </p>
-            </div>
-
-            <Button type="submit" class="w-full" :disabled="loading">
-              <Loader2 v-if="loading" class="h-4 w-4 animate-spin" aria-hidden="true" />
-              登录
-            </Button>
-          </form>
-
-          <p class="auth-card__switch">
-            还没有账号？
-            <RouterLink to="/signup">创建账号</RouterLink>
-          </p>
-        </CardContent>
-      </Card>
-    </div>
-  </main>
+    <template #footer>
+      <p class="m-0">
+        还没有账号？
+        <RouterLink to="/signup" class="font-medium text-brand hover:underline">创建账号</RouterLink>
+      </p>
+    </template>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
@@ -72,9 +45,8 @@ import { toast } from 'vue-sonner'
 import { Loader2 } from 'lucide-vue-next'
 import { authApi } from '@/api/auth'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { InputField } from '@/components/crmwolf'
+import AuthShell from '@/layouts/AuthShell.vue'
 import { loginFormSchema } from '@/schemas/auth'
 import { useTeamStore } from '@/stores/team'
 import { useUserStore } from '@/stores/user'
@@ -171,91 +143,3 @@ async function handleLogin(): Promise<void> {
   }
 }
 </script>
-
-<style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.auth-page {
-  display: flex;
-  min-height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  background: hsl(var(--card));
-  padding: $space-6;
-}
-
-.auth-page__shell {
-  display: grid;
-  width: 100%;
-  max-width: 420px;
-  gap: $space-4;
-}
-
-.auth-page__brand {
-  display: grid;
-  justify-items: center;
-  gap: $space-2;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-}
-
-.auth-page__logo {
-  width: 48px;
-  height: 48px;
-  object-fit: contain;
-}
-
-.auth-card {
-  width: 100%;
-  box-shadow: none;
-}
-
-.auth-card__header {
-  text-align: center;
-}
-
-.auth-card__title {
-  font-size: var(--font-size-body-strong);
-}
-
-.auth-form {
-  display: grid;
-  gap: $space-3;
-}
-
-.auth-form__field {
-  display: grid;
-  gap: $space-2;
-}
-
-.auth-form__error {
-  margin: 0;
-  color: hsl(var(--status-danger));
-  font-size: var(--font-size-caption);
-}
-
-.auth-card__switch {
-  margin: $space-4 0 0;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-
-  a {
-    color: hsl(var(--brand));
-    font-weight: 500;
-    text-decoration: none;
-
-    &:hover {
-      color: hsl(var(--brand));
-      text-decoration: underline;
-    }
-  }
-}
-
-@media (max-width: 767px) {
-  .auth-page {
-    padding: var(--page-padding);
-  }
-}
-</style>
