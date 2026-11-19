@@ -1455,8 +1455,8 @@ defineExpose({
       <template v-if="activeTab !== 'public'" #tableTools>
         <Tabs :model-value="displayMode" class="ml-auto w-auto shrink-0" @update:model-value="setCustomerDisplayMode">
           <TabsList aria-label="客户展示" class="h-8 p-0.5">
-            <TabsTrigger value="table" class="h-7 px-3 py-0">列表</TabsTrigger>
-            <TabsTrigger value="chart" class="h-7 px-3 py-0">图表</TabsTrigger>
+            <TabsTrigger value="table" class="h-control-xs px-space-3 py-0">列表</TabsTrigger>
+            <TabsTrigger value="chart" class="h-control-xs px-space-3 py-0">图表</TabsTrigger>
           </TabsList>
         </Tabs>
       </template>

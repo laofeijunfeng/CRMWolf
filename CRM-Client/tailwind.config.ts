@@ -104,6 +104,7 @@ const config: Config = {
 		},
 			minHeight: {
 				'touch-target': 'var(--touch-target)',
+				'control-xs': 'var(--control-h-xs)',
 				control: 'var(--control-h-md)'
 			},
 		height: {
