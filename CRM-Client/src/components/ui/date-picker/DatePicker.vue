@@ -26,6 +26,7 @@ interface Props {
   ariaInvalid?: boolean | undefined
   /** 描述元素 id */
   ariaDescribedby?: string | undefined
+  ariaRequired?: boolean | undefined
   /** 自定义类名 */
   class?: string
 }
@@ -37,6 +38,7 @@ const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   ariaInvalid: undefined,
   ariaDescribedby: undefined,
+  ariaRequired: undefined,
 })
 
 const emit = defineEmits<{
@@ -124,6 +126,7 @@ const handleSelect = (value: DateValue | undefined): void => {
         :disabled="disabled"
         :aria-invalid="ariaInvalid"
         :aria-describedby="ariaDescribedby"
+        :aria-required="ariaRequired"
         :class="cn(
           'h-control min-h-control w-full justify-start rounded-md border border-input bg-card px-control text-body text-foreground transition-colors hover:border-ring-input disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-disabled aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:outline-destructive/50 text-left font-normal hover:bg-card',
           'max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
