@@ -1389,7 +1389,10 @@ defineExpose({
 </script>
 
 <template>
-  <div class="customers-page" :class="{ 'customers-page--chart': displayMode === 'chart' }">
+  <div
+    class="flex min-h-0 flex-1 flex-col gap-space-6 bg-card p-[var(--page-padding)]"
+    :class="{ 'h-auto overflow-visible': displayMode === 'chart' }"
+  >
     <!-- DataTable -->
     <DataTable
       column-config-enabled
@@ -1471,16 +1474,16 @@ defineExpose({
         />
       </template>
       <template #mobile-card="{ row }">
-        <div class="customer-mobile-card-header">
-          <div class="customer-mobile-card-title">
+        <div class="flex items-start justify-between gap-space-2">
+          <div class="min-w-0 text-body-strong font-semibold leading-normal text-foreground [overflow-wrap:anywhere]">
             {{ row.account_name }}
           </div>
-          <div class="customer-mobile-status">
+          <div class="inline-flex flex-col items-end gap-0.5">
             <StatusBadge :status="customerDerivedStatusKey(row)" type="customerDerived" />
-            <span v-if="row.derived_stage_hint" class="customer-status-stage-hint">{{ row.derived_stage_hint }}</span>
+            <span v-if="row.derived_stage_hint" class="customer-status-stage-hint text-caption leading-[var(--line-height-body)] text-muted-foreground">{{ row.derived_stage_hint }}</span>
           </div>
         </div>
-        <div class="customer-mobile-card-badges">
+        <div class="mt-space-2 flex flex-wrap gap-space-1">
           <StatusBadge
             v-if="industryLabel(row)"
             :status="industryLabel(row)"
@@ -1491,15 +1494,15 @@ defineExpose({
             :status="getAcquisitionSourceDisplayName(row, '')"
             type="source"
           />
-          <span class="license-summary">
+          <span class="inline-flex min-w-0 items-center gap-space-2">
             <span class="license-summary__bar" :data-tone="getLicenseBarTone(row)"></span>
-            <span class="license-summary__text">
+            <span class="grid min-w-0">
               <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
-              <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
+              <span class="text-caption text-muted-foreground">{{ getLicenseSummary(row).secondary }}</span>
             </span>
           </span>
         </div>
-        <div class="customer-mobile-card-meta">
+        <div class="mt-space-2 flex flex-wrap gap-x-space-3 gap-y-space-1 text-body text-muted-foreground">
           <span>{{ row.city || '-' }}</span>
           <span>{{ row.company_scale || '-' }}</span>
           <span>负责人：{{ row.owner_info?.name || '-' }}</span>
@@ -1514,18 +1517,18 @@ defineExpose({
       <!-- 客户名称（hover 旅程预览已移至状态列） -->
       <template #cell-account_name="{ row }">
         <div class="customer-name-cell data-table-stacked-cell">
-          <span class="customer-account-name" data-testid="customer-account-name" @click.stop="openCustomerDetail(row.id)">
+          <span class="customer-account-name block min-w-0 max-w-full cursor-pointer truncate font-semibold text-foreground" data-testid="customer-account-name" @click.stop="openCustomerDetail(row.id)">
             {{ row.account_name }}
           </span>
-          <span v-if="customerProfileMeta(row)" class="customer-name-meta">
+          <span v-if="customerProfileMeta(row)" class="customer-name-meta block min-w-0 max-w-full truncate text-caption font-normal text-muted-foreground">
             {{ customerProfileMeta(row) }}
           </span>
         </div>
       </template>
       <template #cell-primary_contact="{ row }">
         <div v-if="row.primary_contact_name || row.primary_contact_mobile" class="customer-contact-cell data-table-stacked-cell">
-          <span v-if="row.primary_contact_name" class="customer-contact-name">{{ row.primary_contact_name }}</span>
-          <span v-if="row.primary_contact_mobile" class="customer-contact-meta">{{ row.primary_contact_mobile }}</span>
+          <span v-if="row.primary_contact_name" class="customer-contact-name min-w-0 truncate text-body text-muted-foreground">{{ row.primary_contact_name }}</span>
+          <span v-if="row.primary_contact_mobile" class="customer-contact-meta min-w-0 truncate text-caption text-muted-foreground">{{ row.primary_contact_mobile }}</span>
         </div>
         <span v-else class="text-muted-foreground">-</span>
       </template>
@@ -1549,20 +1552,20 @@ defineExpose({
           @view-all="openCustomerJourneys(row.id)"
         >
           <template #trigger>
-            <div class="customer-status-cell" data-testid="customer-deal-journey-trigger">
+            <div class="inline-flex items-center gap-control whitespace-nowrap" data-testid="customer-deal-journey-trigger">
               <StatusBadge :status="customerDerivedStatusKey(row)" type="customerDerived" />
-              <span v-if="row.derived_stage_hint" class="customer-status-stage-hint">{{ row.derived_stage_hint }}</span>
+              <span v-if="row.derived_stage_hint" class="customer-status-stage-hint text-caption leading-[var(--line-height-body)] text-muted-foreground">{{ row.derived_stage_hint }}</span>
             </div>
           </template>
         </CustomerDealJourneyHoverCard>
       </template>
 
       <template #cell-license_expiry_date="{ row }">
-        <span class="license-summary">
+        <span class="inline-flex min-w-0 items-center gap-space-2">
           <span class="license-summary__bar" :data-tone="getLicenseBarTone(row)"></span>
-          <span class="license-summary__text">
+          <span class="grid min-w-0">
             <span class="license-summary__primary" :class="`is-${getLicenseSummary(row).tone}`">{{ getLicenseSummary(row).primary }}</span>
-            <span class="license-summary__secondary">{{ getLicenseSummary(row).secondary }}</span>
+            <span class="text-caption text-muted-foreground">{{ getLicenseSummary(row).secondary }}</span>
           </span>
         </span>
       </template>
@@ -1574,8 +1577,8 @@ defineExpose({
 
       <template #cell-owner="{ row }">
         <div class="customer-owner-cell data-table-stacked-cell">
-          <span class="customer-owner-name">{{ row.owner_info?.name || '-' }}</span>
-          <span v-if="collaboratorNames(row)" class="customer-owner-meta">{{ collaboratorNames(row) }}</span>
+          <span class="customer-owner-name min-w-0 truncate text-body text-muted-foreground">{{ row.owner_info?.name || '-' }}</span>
+          <span v-if="collaboratorNames(row)" class="customer-owner-meta min-w-0 truncate text-caption text-muted-foreground">{{ collaboratorNames(row) }}</span>
         </div>
       </template>
 
@@ -1706,138 +1709,19 @@ defineExpose({
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.customers-page {
-  padding: var(--page-padding) var(--page-padding) var(--page-padding);
-  background: hsl(var(--card));
-  display: flex;
-  flex-direction: column;
-  gap: $space-6;
-  min-height: 0;
-  flex: 1;
-}
-
-.customers-page--chart {
-  height: auto;
-  overflow: visible;
-}
-
-@media (max-width: $bp-sm - 1) {
-  .customers-page {
-    padding: var(--page-padding);
-  }
-}
-
-.customer-name-cell.data-table-stacked-cell {
+.data-table-stacked-cell {
   display: flex;
   min-width: 0;
   max-width: 100%;
   flex-direction: column;
   gap: 2px;
-}
-
-.customer-name-meta,
-.customer-account-name {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.customer-name-meta {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  font-weight: 400;
-  line-height: 16px;
-}
-
-.customer-account-name {
-  color: hsl(var(--foreground));
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.customer-contact-cell.data-table-stacked-cell {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.customer-contact-name,
-.customer-contact-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.customer-contact-name {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  line-height: 20px;
-}
-
-.customer-contact-meta {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 16px;
-}
-
-.customer-owner-cell.data-table-stacked-cell {
-  display: flex;
-  min-width: 0;
-  max-width: 100%;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.customer-owner-cell {
-  gap: 2px;
-}
-
-.customer-owner-name,
-.customer-owner-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.customer-owner-name {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  line-height: 20px;
-}
-
-.customer-owner-meta {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 16px;
-}
-
-
-.license-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
 }
 
 .license-summary__bar {
   width: 3px;
-  height: 28px;
+  height: var(--control-h-sm);
   border-radius: 999px;
   background: currentColor;
-}
-
-.license-summary__text {
-  display: grid;
-  min-width: 0;
 }
 
 .license-summary__primary {
@@ -1861,62 +1745,4 @@ defineExpose({
   color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground)));
   background-color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
-
-.license-summary__secondary {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 16px;
-}
-
-.customer-mobile-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: $space-2;
-}
-
-.customer-status-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.customer-status-stage-hint {
-  font-size: var(--font-size-caption);
-  color: hsl(var(--muted-foreground));
-}
-
-.customer-mobile-status {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-}
-
-.customer-mobile-card-title {
-  min-width: 0;
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.customer-mobile-card-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-1;
-  margin-top: $space-2;
-}
-
-.customer-mobile-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-1 $space-3;
-  margin-top: $space-2;
-  font-size: var(--font-size-body);
-  color: hsl(var(--muted-foreground));
-}
-
 </style>

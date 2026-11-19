@@ -854,7 +854,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="payment-records-page">
+  <div class="flex min-h-0 flex-1 flex-col gap-space-6 bg-card p-[var(--page-padding)]">
     <!-- DataTable -->
     <DataTable
       v-model:filters="activeFilters"
@@ -939,19 +939,19 @@ defineExpose({
         />
       </template>
       <template #mobile-card="{ row }">
-        <div class="payment-record-mobile-card-header">
-          <div class="payment-record-mobile-card-number">
+        <div class="flex items-start justify-between gap-space-2">
+          <div class="min-w-0 font-mono text-body font-medium text-brand [overflow-wrap:anywhere]">
             {{ row.record_number || `#${row.id}` }}
           </div>
           <StatusBadge :status="mapPaymentRecordStatus(row.confirmation_status ?? 'PENDING')" type="paymentRecord" />
         </div>
-        <div class="payment-record-mobile-card-customer">
+        <div class="mt-space-2 text-body-strong font-semibold leading-normal text-foreground [overflow-wrap:anywhere]">
           {{ row.customer_name || '-' }}
         </div>
-        <div class="payment-record-mobile-card-contract">
+        <div class="mt-space-1 text-body text-muted-foreground [overflow-wrap:anywhere]">
           {{ row.contract_name || '-' }}
         </div>
-        <div v-if="row.license_type" class="payment-record-mobile-card-badges">
+        <div v-if="row.license_type" class="mt-space-2 flex flex-wrap gap-space-1">
           <StatusBadge
             v-if="row.license_type"
             :status="row.license_type"
@@ -959,12 +959,12 @@ defineExpose({
             size="small"
           />
         </div>
-        <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
-        <div class="payment-record-mobile-card-purchases">
+        <AmountText class="mt-space-2" :value="row.actual_amount" size="lg" />
+        <div class="mt-space-2 grid gap-space-1">
           <div
             v-for="segment in purchaseSegmentsById.get(row.id)"
             :key="segment.key"
-            class="payment-record-mobile-card-purchase"
+            class="payment-record-mobile-card-purchase grid grid-cols-[auto_1fr_auto] items-center gap-space-2 tabular-nums"
           >
             <StatusBadge
               v-if="segment.purchaseType"
@@ -977,7 +977,7 @@ defineExpose({
             <AmountText :value="segment.amount" />
           </div>
         </div>
-        <div class="payment-record-mobile-card-meta">
+        <div class="mt-space-2 flex flex-wrap gap-x-space-3 gap-y-space-1 text-body text-muted-foreground">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
           <span>发票抬头：{{ row.invoice_title_text || '-' }}</span>
           <span>负责人：{{ row.owner_name || '-' }}</span>
@@ -993,7 +993,7 @@ defineExpose({
       <!-- 回款编号 -->
       <template #cell-record_number="{ row }">
         <span
-          class="record-number-cell record-number-link"
+          class="min-h-touch-target cursor-pointer text-left font-mono font-semibold tabular-nums text-foreground"
           @click.stop="handleViewDetail(row as PaymentRecordWithDetails)"
         >
           {{ row.record_number || '-' }}
@@ -1002,7 +1002,7 @@ defineExpose({
 
       <!-- 客户名称 -->
       <template #cell-customer_name="{ row }">
-        <span class="customer-name-link">{{ row.customer_name || '-' }}</span>
+        <span class="cursor-pointer font-medium text-brand">{{ row.customer_name || '-' }}</span>
       </template>
 
       <template #cell-actual_payer_name="{ row }">
@@ -1023,11 +1023,11 @@ defineExpose({
       </template>
 
       <template #cell-purchase_type="{ row }">
-        <div class="payment-record-purchase-lines">
+        <div class="payment-record-purchase-lines grid gap-space-1">
           <div
             v-for="segment in purchaseSegmentsById.get(row.id)"
             :key="segment.key"
-            class="payment-record-purchase-line"
+            class="min-h-space-4 content-center"
           >
             <StatusBadge
               v-if="segment.purchaseType"
@@ -1040,11 +1040,11 @@ defineExpose({
       </template>
 
       <template #cell-purchase_headcount="{ row }">
-        <div class="payment-record-purchase-lines">
+        <div class="payment-record-purchase-lines grid gap-space-1">
           <div
             v-for="segment in purchaseSegmentsById.get(row.id)"
             :key="segment.key"
-            class="payment-record-purchase-line"
+            class="min-h-space-4 content-center"
           >
             {{ segment.headcount === null ? '—' : `${segment.headcount} 人` }}
           </div>
@@ -1052,11 +1052,11 @@ defineExpose({
       </template>
 
       <template #cell-purchase_amount="{ row }">
-        <div class="payment-record-purchase-lines">
+        <div class="payment-record-purchase-lines grid gap-space-1">
           <div
             v-for="segment in purchaseSegmentsById.get(row.id)"
             :key="segment.key"
-            class="payment-record-purchase-line"
+            class="min-h-space-4 content-center"
           >
             <AmountText :value="segment.amount" />
           </div>
@@ -1109,133 +1109,3 @@ defineExpose({
     />
   </div>
 </template>
-
-<style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.payment-records-page {
-  padding: var(--page-padding) var(--page-padding) var(--page-padding);
-  background: hsl(var(--card));
-  display: flex;
-  flex-direction: column;
-  gap: $space-6;
-  min-height: 0;
-  flex: 1;
-}
-
-@media (max-width: $bp-sm - 1) {
-  .payment-records-page {
-    padding: var(--page-padding);
-  }
-}
-
-// 客户名称链接
-.customer-name-link {
-  color: hsl(var(--brand));
-  font-weight: 500;
-  cursor: pointer;
-
-  &:hover {
-    color: hsl(var(--brand));
-  }
-}
-
-// 记录编号单元格
-.record-number-cell {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.record-number-link {
-  min-height: var(--touch-target);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: hsl(var(--foreground));
-  cursor: pointer;
-  font-weight: 600;
-  text-align: left;
-
-  &:focus-visible {
-    outline: 2px solid hsl(var(--ring) / 0.5);
-    outline-offset: 2px;
-    border-radius: var(--radius-md);
-  }
-}
-
-.payment-record-purchase-lines {
-  display: grid;
-  gap: $space-1;
-}
-
-.payment-record-purchase-line {
-  min-height: $space-4;
-  align-content: center;
-}
-
-.payment-record-mobile-card-purchases {
-  display: grid;
-  gap: $space-1;
-  margin-top: $space-2;
-}
-
-.payment-record-mobile-card-purchase {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: $space-2;
-  font-variant-numeric: tabular-nums;
-}
-
-.payment-record-mobile-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: $space-2;
-}
-
-.payment-record-mobile-card-number {
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--font-size-body);
-  font-weight: 500;
-  color: hsl(var(--brand));
-  overflow-wrap: anywhere;
-}
-
-.payment-record-mobile-card-customer {
-  margin-top: $space-2;
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.payment-record-mobile-card-contract {
-  margin-top: $space-1;
-  font-size: var(--font-size-body);
-  color: hsl(var(--muted-foreground));
-  overflow-wrap: anywhere;
-}
-
-.payment-record-mobile-card-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-1;
-  margin-top: $space-2;
-}
-
-.payment-record-mobile-card-amount {
-  margin-top: $space-2;
-}
-
-.payment-record-mobile-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-1 $space-3;
-  margin-top: $space-2;
-  font-size: var(--font-size-body);
-  color: hsl(var(--muted-foreground));
-}
-</style>

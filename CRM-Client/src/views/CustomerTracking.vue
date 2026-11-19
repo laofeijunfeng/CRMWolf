@@ -235,6 +235,27 @@ const rows = computed<TrackingRow[]>(() => tasks.value.map((task) => ({
 
 const selectedCustomerId = computed(() => selectedTask.value?.customer?.id ?? selectedTask.value?.customer?.public_id ?? null)
 const selectedPendingConfirmation = computed(() => firstPendingConfirmation(selectedTask.value))
+const selectedTaskAttributes = computed(() => {
+  const task = selectedTask.value
+  if (!task) return []
+  return [
+    { label: '客户', value: task.customer?.name ?? '-' },
+    { label: '产品', value: task.customer?.product_name ?? '-' },
+    { label: '负责人', value: task.owner_info?.name ?? task.owner_id },
+    { label: '状态', value: selectedPendingConfirmation.value ? '需确认' : statusLabel(task.status), status: true },
+    { label: '追踪时间', value: formatDateTime(task.due_at) },
+    { label: '完成时间', value: formatDateTime(task.completed_at) },
+    { label: '关闭时间', value: formatDateTime(task.cancelled_at) },
+  ]
+})
+const selectedSourceAttributes = computed(() => {
+  const activity = selectedTask.value?.source_activity
+  const nextAction = activity?.next_action
+  return [
+    { label: '下一步', value: nextAction === undefined || nextAction === null || nextAction === '' ? '-' : nextAction },
+    { label: '发生时间', value: formatDateTime(activity?.occurred_at) },
+  ]
+})
 
 function taskStatusForTab(tab: string): FollowUpTaskStatusFilter {
   if (isCustomFilterViewTab(tab)) return 'all'
@@ -883,7 +904,7 @@ watchEffect(() => {
 </script>
 
 <template>
-  <div class="customer-tracking-page">
+  <div class="flex min-h-0 flex-1 flex-col gap-space-6 bg-card p-[var(--page-padding)]">
     <DataTable
       :export-enabled="canExportFollowUpTasks"
       export-title="客户追踪列表"
@@ -942,7 +963,7 @@ watchEffect(() => {
       @retry="fetchTasks"
     >
       <template #cell-customer_name="{ row }">
-        <span class="tracking-cell-strong">{{ row.customer_name }}</span>
+        <span class="cursor-pointer font-semibold text-foreground">{{ row.customer_name }}</span>
       </template>
 
       <template #cell-product_name="{ row }">
@@ -950,25 +971,27 @@ watchEffect(() => {
       </template>
 
       <template #cell-tracking_content="{ row }">
-        <div class="tracking-content-cell">
+        <div class="flex min-w-0 flex-col gap-space-1">
           <button
             type="button"
-            class="tracking-content-trigger"
+            class="group block min-w-0 max-w-full cursor-pointer text-left focus-visible:rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/50"
             :aria-label="`查看客户追踪详情，追踪内容：${row.tracking_content}`"
             @click.stop="openDetail(row)"
           >
-            <span class="tracking-content">{{ row.tracking_content }}</span>
+            <span class="block max-w-full truncate underline-offset-2 group-hover:text-brand group-hover:underline group-focus-visible:text-brand group-focus-visible:underline">
+              {{ row.tracking_content }}
+            </span>
           </button>
           <div
             v-if="firstPendingConfirmation(row)"
-            class="tracking-confirmation-inline"
+            class="flex min-w-0 items-start gap-space-1 text-caption leading-normal text-muted-foreground"
             role="status"
           >
-            <span class="tracking-confirmation-label">需确认</span>
-            <span class="tracking-confirmation-question">
+            <span class="shrink-0 font-semibold text-warning">需确认</span>
+            <span class="min-w-0 whitespace-normal [overflow-wrap:anywhere]">
               {{ firstPendingConfirmation(row)?.question_text }}
             </span>
-            <span v-if="(row.pending_confirmations?.length ?? 0) > 1" class="tracking-confirmation-more">
+            <span v-if="(row.pending_confirmations?.length ?? 0) > 1" class="shrink-0">
               另有 {{ (row.pending_confirmations?.length ?? 1) - 1 }} 条
             </span>
           </div>
@@ -986,14 +1009,14 @@ watchEffect(() => {
               {{ row.tracking_time }}
             </span>
           </template>
-          <div class="tracking-time-hover-content">
+          <div class="grid gap-space-1">
             <div
               v-for="item in row.tracking_time_tooltip_rows"
               :key="item.label"
-              class="tracking-time-hover-row"
+              class="tracking-time-hover-row grid gap-space-2 text-caption leading-normal text-muted-foreground"
             >
               <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
+              <strong class="font-medium [overflow-wrap:anywhere]">{{ item.value }}</strong>
             </div>
           </div>
         </HoverInfo>
@@ -1001,20 +1024,24 @@ watchEffect(() => {
 
 
       <template #mobile-card="{ row }">
-        <div class="tracking-mobile-card-header">
-          <div class="tracking-mobile-card-title">
+        <div class="flex items-start justify-between gap-space-2">
+          <div class="min-w-0 text-body-strong font-semibold text-brand [overflow-wrap:anywhere]">
             {{ row.customer_name }}
           </div>
           <Badge :variant="statusVariant(row.status, hasPendingConfirmation(row))">{{ row.status_label }}</Badge>
         </div>
-        <div class="tracking-mobile-card-content">
+        <div class="mt-space-2 text-body text-foreground [overflow-wrap:anywhere]">
           {{ row.tracking_content }}
         </div>
-        <div v-if="firstPendingConfirmation(row)" class="tracking-confirmation-inline" role="status">
-          <span class="tracking-confirmation-label">需确认</span>
-          <span class="tracking-confirmation-question">{{ firstPendingConfirmation(row)?.question_text }}</span>
+        <div
+          v-if="firstPendingConfirmation(row)"
+          class="flex min-w-0 items-start gap-space-1 text-caption leading-normal text-muted-foreground"
+          role="status"
+        >
+          <span class="shrink-0 font-semibold text-warning">需确认</span>
+          <span class="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{{ firstPendingConfirmation(row)?.question_text }}</span>
         </div>
-        <div class="tracking-mobile-card-meta">
+        <div class="mt-space-2 flex flex-wrap gap-x-space-3 gap-y-space-1 text-body text-muted-foreground">
           <span class="tracking-time-badge" :class="`tracking-time-badge--${row.tracking_time_tone}`">
             {{ row.tracking_time }}
           </span>
@@ -1036,9 +1063,9 @@ watchEffect(() => {
       @closed="handleTrackingSheetClosed"
     >
       <DetailSheetContent>
-        <DetailSheetHeader class="tracking-sheet-header p-6 border-b border-border">
-          <div class="tracking-sheet-title">
-            <FileText class="tracking-sheet-icon" aria-hidden="true" />
+        <DetailSheetHeader class="tracking-sheet-header flex-row items-center justify-between gap-space-3 border-b border-border p-6 max-sm:flex-col max-sm:items-start">
+          <div class="flex min-w-0 items-center gap-space-2">
+            <FileText class="size-icon-sm" aria-hidden="true" />
             <DetailSheetTitle class="truncate">客户追踪详情</DetailSheetTitle>
           </div>
           <Button
@@ -1046,93 +1073,66 @@ watchEffect(() => {
             size="sm"
             @click="followUpDialogOpen = true"
           >
-            <Plus class="tracking-button-icon" aria-hidden="true" />
+            <Plus class="size-icon-sm" aria-hidden="true" />
             添加跟进记录
           </Button>
         </DetailSheetHeader>
 
         <ScrollArea class="flex-1">
-          <div class="tracking-sheet-content">
-            <div v-if="detailLoading" class="tracking-sheet-muted">正在加载...</div>
-            <div v-else-if="selectedTask" class="tracking-detail">
-              <div v-if="selectedPendingConfirmation" class="tracking-confirmation-detail" role="status">
-                <span class="tracking-confirmation-label">需确认</span>
-                <p class="tracking-confirmation-detail-question">{{ selectedPendingConfirmation.question_text }}</p>
+          <div class="p-space-6 max-sm:p-space-4">
+            <div v-if="detailLoading" class="text-muted-foreground">正在加载...</div>
+            <div v-else-if="selectedTask" class="flex flex-col gap-space-4">
+              <div v-if="selectedPendingConfirmation" class="flex items-baseline gap-space-2 px-space-1" role="status">
+                <span class="shrink-0 font-semibold text-warning">需确认</span>
+                <p class="text-body text-muted-foreground">{{ selectedPendingConfirmation.question_text }}</p>
               </div>
 
-              <Card class="tracking-info-card">
+              <Card class="rounded-lg">
                 <CardContent class="p-0">
-                  <div class="tracking-card-header">
-                    <h3 class="tracking-card-title">追踪内容</h3>
+                  <div class="border-b border-border p-space-4">
+                    <h3 class="text-body font-semibold text-foreground">追踪内容</h3>
                   </div>
-                  <div class="tracking-card-body">
-                    <p class="tracking-description">{{ selectedTask.title || '-' }}</p>
-                    <p v-if="selectedTask.description" class="tracking-description tracking-description--secondary">
+                  <div class="p-space-4">
+                    <p class="whitespace-pre-wrap text-body font-medium text-muted-foreground [overflow-wrap:anywhere]">{{ selectedTask.title || '-' }}</p>
+                    <p v-if="selectedTask.description" class="mt-space-2 whitespace-pre-wrap text-caption leading-[var(--line-height-body)] text-muted-foreground [overflow-wrap:anywhere]">
                       {{ selectedTask.description }}
                     </p>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card class="tracking-info-card">
+              <Card class="rounded-lg">
                 <CardContent class="p-0">
-                  <div class="tracking-card-header">
-                    <h3 class="tracking-card-title">基本信息</h3>
+                  <div class="border-b border-border p-space-4">
+                    <h3 class="text-body font-semibold text-foreground">基本信息</h3>
                   </div>
-                  <div class="tracking-card-body">
-                    <div class="tracking-attributes-grid">
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">客户</div>
-                        <div class="tracking-attribute-value">{{ selectedTask.customer?.name ?? '-' }}</div>
+                  <div class="p-space-4">
+                    <dl class="grid grid-cols-2 gap-x-space-4 gap-y-space-3 max-sm:grid-cols-1">
+                      <div v-for="attribute in selectedTaskAttributes" :key="attribute.label" class="flex min-w-0 flex-col gap-space-1">
+                        <dt class="text-caption font-medium leading-[var(--line-height-body)] text-muted-foreground">{{ attribute.label }}</dt>
+                        <dd class="min-w-0 text-body font-medium text-muted-foreground [overflow-wrap:anywhere]">
+                          <Badge v-if="attribute.status" :variant="statusVariant(selectedTask.status, selectedPendingConfirmation !== null)">{{ attribute.value }}</Badge>
+                          <template v-else>{{ attribute.value }}</template>
+                        </dd>
                       </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">产品</div>
-                        <div class="tracking-attribute-value">{{ selectedTask.customer?.product_name ?? '-' }}</div>
-                      </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">负责人</div>
-                        <div class="tracking-attribute-value">{{ selectedTask.owner_info?.name ?? selectedTask.owner_id }}</div>
-                      </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">状态</div>
-                        <div class="tracking-attribute-value">
-                          <Badge :variant="statusVariant(selectedTask.status, selectedPendingConfirmation !== null)">{{ selectedPendingConfirmation ? '需确认' : statusLabel(selectedTask.status) }}</Badge>
-                        </div>
-                      </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">追踪时间</div>
-                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.due_at) }}</div>
-                      </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">完成时间</div>
-                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.completed_at) }}</div>
-                      </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">关闭时间</div>
-                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.cancelled_at) }}</div>
-                      </div>
-                    </div>
+                    </dl>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card class="tracking-info-card">
+              <Card class="rounded-lg">
                 <CardContent class="p-0">
-                  <div class="tracking-card-header">
-                    <h3 class="tracking-card-title">来源跟进</h3>
+                  <div class="border-b border-border p-space-4">
+                    <h3 class="text-body font-semibold text-foreground">来源跟进</h3>
                   </div>
-                  <div class="tracking-card-body">
-                    <p class="tracking-description">{{ selectedTask.source_activity?.summary || selectedTask.source_activity?.title || '-' }}</p>
-                    <div class="tracking-source-meta">
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">下一步</div>
-                        <div class="tracking-attribute-value">{{ selectedTask.source_activity?.next_action || '-' }}</div>
+                  <div class="p-space-4">
+                    <p class="whitespace-pre-wrap text-body font-medium text-muted-foreground [overflow-wrap:anywhere]">{{ selectedTask.source_activity?.summary || selectedTask.source_activity?.title || '-' }}</p>
+                    <dl class="mt-space-4 grid grid-cols-2 gap-x-space-4 gap-y-space-3 border-t border-border pt-space-4 max-sm:grid-cols-1">
+                      <div v-for="attribute in selectedSourceAttributes" :key="attribute.label" class="flex min-w-0 flex-col gap-space-1">
+                        <dt class="text-caption font-medium leading-[var(--line-height-body)] text-muted-foreground">{{ attribute.label }}</dt>
+                        <dd class="min-w-0 text-body font-medium text-muted-foreground [overflow-wrap:anywhere]">{{ attribute.value }}</dd>
                       </div>
-                      <div class="tracking-attribute-item">
-                        <div class="tracking-attribute-label">发生时间</div>
-                        <div class="tracking-attribute-value">{{ formatDateTime(selectedTask.source_activity?.occurred_at) }}</div>
-                      </div>
-                    </div>
+                    </dl>
                   </div>
                 </CardContent>
               </Card>
@@ -1140,7 +1140,7 @@ watchEffect(() => {
           </div>
         </ScrollArea>
 
-        <DetailSheetFooter class="tracking-sheet-footer p-4 border-t border-border">
+        <DetailSheetFooter class="flex-row flex-wrap justify-end gap-space-2 border-t border-border p-4 sm:gap-x-space-2 max-sm:[&_button]:grow max-sm:[&_button]:basis-full">
           <Button variant="outline" @click="selectedTaskId = null">关闭</Button>
           <template v-if="selectedTask && selectedPendingConfirmation">
             <Button
@@ -1195,7 +1195,7 @@ watchEffect(() => {
           <DialogTitle>{{ postponeConfirmationCaseId ? '确认延期' : '延期客户追踪' }}</DialogTitle>
           <DialogDescription class="sr-only">选择新的追踪时间</DialogDescription>
         </DialogHeader>
-        <div class="tracking-postpone-form">
+        <div class="flex flex-col gap-space-3">
           <DateField
             id="tracking-postpone-date"
             v-model="postponeDate"
@@ -1221,124 +1221,6 @@ watchEffect(() => {
 
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
-
-.customer-tracking-page {
-  padding: var(--page-padding) var(--page-padding) var(--page-padding);
-  background: hsl(var(--card));
-  display: flex;
-  flex-direction: column;
-  gap: $space-6;
-  min-height: 0;
-  flex: 1;
-}
-
-@media (max-width: $bp-sm - 1) {
-  .customer-tracking-page {
-    padding: var(--page-padding);
-  }
-}
-
-.tracking-cell-strong {
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  cursor: pointer;
-}
-
-.tracking-content-trigger {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover .tracking-content,
-  &:focus-visible .tracking-content {
-    color: hsl(var(--brand));
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  &:focus-visible {
-    outline: 2px solid hsl(var(--ring) / 0.5);
-    outline-offset: 2px;
-    border-radius: var(--radius-md);
-  }
-}
-
-.tracking-content {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tracking-content-cell {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: $space-1;
-}
-
-.tracking-confirmation-inline {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: $space-1;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 18px;
-}
-
-.tracking-confirmation-label {
-  flex: 0 0 auto;
-  color: hsl(var(--status-warning));
-  font-weight: 600;
-}
-
-.tracking-confirmation-question {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
-.tracking-confirmation-more {
-  flex: 0 0 auto;
-  color: hsl(var(--muted-foreground));
-}
-
-.tracking-confirmation-detail {
-  display: flex;
-  align-items: baseline;
-  gap: $space-2;
-  padding: 0 $space-1;
-}
-
-.tracking-confirmation-detail-question {
-  margin: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  line-height: 20px;
-}
-
-:global(.tracking-content-hover-card) {
-  width: 360px;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: $space-2 $space-3;
-}
-
-.tracking-content-hover-text {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 18px;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
 
 .tracking-time-badge {
   display: inline-flex;
@@ -1375,221 +1257,21 @@ watchEffect(() => {
   color: hsl(var(--brand));
 }
 
-.tracking-time-badge--future,
-.tracking-time-badge--closed,
-.tracking-time-badge--empty {
-  border-color: hsl(var(--border));
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-}
-
 :global(.tracking-time-hover-card) {
   width: 280px;
   max-width: min(280px, calc(100vw - 32px));
   padding: $space-2 $space-3;
 }
 
-.tracking-time-hover-content {
-  display: grid;
-  gap: $space-1;
-}
-
 .tracking-time-hover-row {
-  display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  gap: $space-2;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 18px;
-}
-
-.tracking-time-hover-row strong {
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-
-.tracking-mobile-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: $space-2;
-}
-
-.tracking-mobile-card-title {
-  min-width: 0;
-  color: hsl(var(--brand));
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.tracking-mobile-card-content {
-  margin-top: $space-2;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-  line-height: 20px;
-  overflow-wrap: anywhere;
-}
-
-.tracking-mobile-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-1 $space-3;
-  margin-top: $space-2;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
 }
 
 .tracking-sheet-header {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: $space-3;
   padding-right: 72px;
 
   @media (max-width: $bp-sm - 1) {
-    align-items: flex-start;
-    flex-direction: column;
     padding: $space-4 56px $space-4 $space-4;
   }
 }
-
-.tracking-sheet-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: $space-2;
-}
-
-.tracking-sheet-icon,
-.tracking-button-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.tracking-sheet-content {
-  padding: $space-6;
-
-  @media (max-width: $bp-sm - 1) {
-    padding: $space-4;
-  }
-}
-
-.tracking-sheet-muted {
-  color: hsl(var(--muted-foreground));
-}
-
-.tracking-detail {
-  display: flex;
-  flex-direction: column;
-  gap: $space-4;
-}
-
-.tracking-info-card {
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-lg);
-  background: hsl(var(--card));
-}
-
-.tracking-card-header {
-  padding: $space-4;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.tracking-card-title {
-  margin: 0;
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  line-height: 20px;
-}
-
-.tracking-card-body {
-  padding: $space-4;
-}
-
-.tracking-description {
-  margin: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  font-weight: 500;
-  line-height: 20px;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.tracking-description--secondary {
-  margin-top: $space-2;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  font-weight: 400;
-}
-
-.tracking-attributes-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $space-3 $space-4;
-
-  @media (max-width: $bp-sm - 1) {
-    grid-template-columns: 1fr;
-  }
-}
-
-.tracking-attribute-item {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: $space-1;
-}
-
-.tracking-attribute-label {
-  font-size: var(--font-size-caption);
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-}
-
-.tracking-attribute-value {
-  min-width: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-
-.tracking-source-meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: $space-3 $space-4;
-  margin-top: $space-4;
-  padding-top: $space-4;
-  border-top: 1px solid hsl(var(--border));
-
-  @media (max-width: $bp-sm - 1) {
-    grid-template-columns: 1fr;
-  }
-}
-
-.tracking-sheet-footer {
-  display: flex;
-  flex-direction: row;
-  justify-content: flex-end;
-  gap: $space-2;
-  flex-wrap: wrap;
-
-  @media (max-width: $bp-sm - 1) {
-    :deep(button) {
-      flex: 1 1 100%;
-    }
-  }
-}
-
-.tracking-postpone-form {
-  display: flex;
-  flex-direction: column;
-  gap: $space-3;
-}
-
 </style>

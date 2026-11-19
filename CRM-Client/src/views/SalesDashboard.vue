@@ -150,20 +150,20 @@ const formatFollowUpTooltip = (datum: Record<string, unknown>): string => {
   const point = datum as unknown as SalesDashboardFollowUpTrendPoint & { label: string }
   const members = Array.isArray(point.members) ? point.members.slice(0, 6) : []
   const memberRows = members.map((member) => (
-    `<div class="sales-follow-tooltip__member">
-      <span>${escapeHtml(member.name)}</span>
-      <strong>${formatCount(member.total)}</strong>
+    `<div class="grid grid-cols-[minmax(0,1fr)_minmax(44px,max-content)] items-center gap-space-4 text-caption leading-[1.6] text-muted-foreground">
+      <span class="min-w-0 truncate">${escapeHtml(member.name)}</span>
+      <strong class="justify-self-end font-mono font-semibold tabular-nums text-foreground">${formatCount(member.total)}</strong>
     </div>`
   )).join('')
   const memberSection = memberRows
-    ? `<div class="sales-follow-tooltip__members">${memberRows}</div>`
-    : '<div class="sales-follow-tooltip__empty">无成员明细</div>'
+    ? `<div class="flex min-w-0 flex-col gap-0.5">${memberRows}</div>`
+    : '<div class="text-caption text-muted-foreground">无成员明细</div>'
 
-  return `<div class="area-trend-tooltip sales-follow-tooltip">
+  return `<div class="area-trend-tooltip">
     <div class="area-trend-tooltip__title">${escapeHtml(point.date)}</div>
     <div class="area-trend-tooltip__row"><span><i style="background:hsl(var(--chart-1))"></i>跟进总数</span><strong>${formatCount(point.total)}</strong></div>
     <div class="area-trend-tooltip__row"><span><i style="background:hsl(var(--chart-4))"></i>有效跟进</span><strong>${formatCount(point.valid)}</strong></div>
-    <div class="sales-follow-tooltip__divider"></div>
+    <div class="my-space-2 h-px bg-border/80"></div>
     ${memberSection}
   </div>`
 }
@@ -276,8 +276,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="sales-dashboard-page">
-    <div class="dashboard-toolbar" aria-label="销售漏斗工具栏">
+  <div class="box-border flex h-full min-h-0 flex-col overflow-hidden bg-background p-[var(--page-padding)] max-sm:pb-[calc(var(--page-padding)+var(--safe-bottom))]">
+    <div class="mb-space-3 flex min-h-control items-center justify-start gap-space-2" aria-label="销售漏斗工具栏">
       <ListFilterPopover
         :model-value="activeFilters"
         :fields="filterFields"
@@ -285,39 +285,51 @@ onMounted(() => {
         @apply="handleFilterApply"
       />
       <TableToolbarButton
-        class="refresh-button"
+        class="shrink-0 grow-0 [&_svg]:size-icon-xs"
         :disabled="loading"
         aria-label="刷新销售看板"
         @click="loadDashboard"
       >
-        <RefreshCw class="refresh-icon" :class="{ spinning: loading }" aria-hidden="true" />
+        <RefreshCw :class="{ 'animate-spin motion-reduce:animate-none': loading }" aria-hidden="true" />
         刷新
       </TableToolbarButton>
     </div>
 
-    <div v-if="ownerFilterError" class="dashboard-inline-error dashboard-inline-error--toolbar" role="status">
-      <AlertCircle class="error-icon" aria-hidden="true" />
+    <div
+      v-if="ownerFilterError"
+      class="dashboard-banner -mt-space-2 mb-space-3 flex shrink-0 items-center gap-space-2 rounded-md border border-destructive/[0.16] bg-destructive/[0.06] px-space-3 text-caption leading-[var(--line-height-body)] text-destructive"
+      role="status"
+    >
+      <AlertCircle class="size-icon-sm" aria-hidden="true" />
       <span>{{ ownerFilterError }}</span>
-      <TableToolbarButton class="dashboard-inline-retry" @click="fetchOwnerFilterOptions">
+      <TableToolbarButton class="ml-auto" @click="fetchOwnerFilterOptions">
         重试
       </TableToolbarButton>
     </div>
 
-    <div class="dashboard-scroll">
-      <section class="dashboard-summary" aria-label="销售漏斗概览">
-        <div v-if="errorMessage" class="dashboard-error" role="alert">
-          <AlertCircle class="error-icon" aria-hidden="true" />
+    <div class="min-h-0 flex-1 overflow-y-auto pb-space-2">
+      <section class="flex flex-col gap-space-4" aria-label="销售漏斗概览">
+        <div
+          v-if="errorMessage"
+          class="dashboard-banner flex items-center gap-space-2 rounded-md border border-destructive/[0.18] bg-destructive/10 px-space-3 text-caption leading-[var(--line-height-body)] text-destructive"
+          role="alert"
+        >
+          <AlertCircle class="size-icon-sm" aria-hidden="true" />
           <span>{{ errorMessage }}</span>
         </div>
 
-        <div v-if="funnelError" class="dashboard-inline-error" role="status">
-          <AlertCircle class="error-icon" aria-hidden="true" />
+        <div
+          v-if="funnelError"
+          class="dashboard-banner mb-space-2 flex items-center gap-space-2 rounded-md border border-destructive/[0.16] bg-destructive/[0.06] px-space-3 text-caption leading-[var(--line-height-body)] text-destructive"
+          role="status"
+        >
+          <AlertCircle class="size-icon-sm" aria-hidden="true" />
           <span>{{ funnelError }}</span>
-          <TableToolbarButton class="dashboard-inline-retry" @click="loadDashboard">
+          <TableToolbarButton class="ml-auto" @click="loadDashboard">
             重试
           </TableToolbarButton>
         </div>
-        <div class="metric-grid" :class="{ loading }">
+        <div class="grid grid-cols-1 gap-space-3 sm:grid-cols-2 md:grid-cols-3 md:gap-space-4">
           <template v-if="metrics.length > 0">
             <MetricCard
               v-for="metric in metrics"
@@ -337,20 +349,20 @@ onMounted(() => {
                   tone="success"
                   size="sm"
                 />
-                <strong v-else-if="hasText(metric.secondary_label)" class="metric-secondary-value">
+                <strong v-else-if="hasText(metric.secondary_label)" class="font-mono font-semibold tabular-nums text-success">
                   {{ formatCount(metric.secondary_value) }}
                 </strong>
               </template>
               <template #footer>
                 <strong
                   v-if="hasText(metric.extra_secondary_label)"
-                  class="metric-footer-title"
+                  class="min-w-0 font-semibold text-foreground"
                 >
                   {{ getMetricExtraFooter(metric) }}
                 </strong>
                 <strong
                   v-else-if="hasText(metric.rate_label)"
-                  class="metric-footer-title"
+                  class="min-w-0 font-semibold text-foreground"
                 >
                   {{ getMetricFooter(metric) }}
                 </strong>
@@ -370,11 +382,15 @@ onMounted(() => {
         </div>
       </section>
 
-      <section class="dashboard-trend" aria-label="客户活动趋势">
-        <div v-if="trendError" class="dashboard-inline-error" role="status">
-          <AlertCircle class="error-icon" aria-hidden="true" />
+      <section class="mt-space-4" aria-label="客户活动趋势">
+        <div
+          v-if="trendError"
+          class="dashboard-banner mb-space-2 flex items-center gap-space-2 rounded-md border border-destructive/[0.16] bg-destructive/[0.06] px-space-3 text-caption leading-[var(--line-height-body)] text-destructive"
+          role="status"
+        >
+          <AlertCircle class="size-icon-sm" aria-hidden="true" />
           <span>{{ trendError }}</span>
-          <TableToolbarButton class="dashboard-inline-retry" @click="loadDashboard">
+          <TableToolbarButton class="ml-auto" @click="loadDashboard">
             重试
           </TableToolbarButton>
         </div>
@@ -391,7 +407,10 @@ onMounted(() => {
         >
           <template #actions>
             <Select v-model="trendRange" @update:model-value="handleTrendRangeChange">
-              <SelectTrigger class="trend-range-select" aria-label="选择跟进趋势范围">
+              <SelectTrigger
+                class="trend-range-select border-border/95 text-caption leading-[var(--line-height-body)] text-muted-foreground"
+                aria-label="选择跟进趋势范围"
+              >
                 <SelectValue placeholder="选择范围" />
               </SelectTrigger>
               <SelectContent>
@@ -414,203 +433,20 @@ onMounted(() => {
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 
-.sales-dashboard-page {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  padding: var(--page-padding);
-  background: hsl(var(--background));
+// 40px 横幅高度暂无令牌
+.dashboard-banner {
+  min-height: 40px;
 }
 
-.dashboard-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: $space-2;
-}
-
-.dashboard-summary {
-  display: flex;
-  flex-direction: column;
-  gap: $space-4;
-}
-
-.dashboard-trend {
-  margin-top: $space-4;
-}
-
+// 覆盖 SelectTrigger 移动端 touch-target 高度，保持 32px
 .trend-range-select {
   width: 104px;
-  height: 32px;
-  border-color: hsl(var(--border) / 0.95);
-  background: hsl(var(--card));
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-}
-
-.dashboard-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: $space-2;
-  min-height: 32px;
-  margin-bottom: $space-3;
-  background: transparent;
-}
-
-.refresh-button {
-  flex: 0 0 auto;
-}
-
-.refresh-icon {
-  width: 14px;
-  height: 14px;
-}
-
-.refresh-icon.spinning {
-  animation: spin 0.8s linear infinite;
-}
-
-.dashboard-error {
-  display: flex;
-  align-items: center;
-  gap: $space-2;
-  min-height: 40px;
-  padding: 0 $space-3;
-  color: hsl(var(--destructive));
-  background: hsl(var(--destructive) / 0.1);
-  border: 1px solid hsl(var(--destructive) / 0.18);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-caption);
-}
-
-.error-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.dashboard-inline-error {
-  display: flex;
-  align-items: center;
-  gap: $space-2;
-  min-height: 40px;
-  margin-bottom: $space-2;
-  padding: 0 $space-3;
-  color: hsl(var(--destructive));
-  background: hsl(var(--destructive) / 0.06);
-  border: 1px solid hsl(var(--destructive) / 0.16);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-caption);
-}
-
-.dashboard-inline-error--toolbar {
-  flex: 0 0 auto;
-  margin: calc(-1 * #{$space-2}) 0 $space-3;
-}
-
-.dashboard-inline-retry {
-  margin-left: auto;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: stretch;
-  gap: $space-4;
-}
-
-.metric-secondary-value {
-  color: hsl(var(--status-success));
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.metric-footer-title {
-  min-width: 0;
-  color: hsl(var(--foreground));
-  font-weight: 600;
-}
-
-:global(.sales-follow-tooltip__member) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(44px, max-content);
-  align-items: center;
-  gap: 16px;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  line-height: 1.6;
-}
-
-:global(.sales-follow-tooltip__member span) {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global(.sales-follow-tooltip__member strong) {
-  justify-self: end;
-  color: hsl(var(--foreground));
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-:global(.sales-follow-tooltip__divider) {
-  height: 1px;
-  margin: 8px 0;
-  background: hsl(var(--border) / 0.8);
-}
-
-:global(.sales-follow-tooltip__members) {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-:global(.sales-follow-tooltip__empty) {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (max-width: $bp-md) {
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: $space-3;
-  }
+  height: var(--control-h-md);
 }
 
 @media (max-width: $bp-sm) {
-  .sales-dashboard-page {
-    height: 100%;
-    min-height: 0;
-    padding: var(--page-padding);
-    padding-bottom: calc(var(--page-padding) + var(--safe-bottom));
-  }
-
-  .metric-grid {
-    grid-template-columns: 1fr;
-  }
-
   .trend-range-select {
     width: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .refresh-icon.spinning {
-    animation: none;
   }
 }
 </style>

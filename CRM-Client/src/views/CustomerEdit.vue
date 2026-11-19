@@ -300,13 +300,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="customer-edit-page">
+  <div class="min-h-full bg-card">
     <!-- Loading State -->
-    <div v-if="loading" class="loading-container" aria-busy="true" aria-live="polite">
-      <div class="loading-spinner" />
+    <div v-if="loading" class="loading-container flex items-center justify-center p-[var(--page-padding)]" aria-busy="true" aria-live="polite">
+      <div class="loading-spinner animate-spin rounded-full border-border border-t-brand" />
     </div>
 
-    <div v-else-if="loadError" class="state-container">
+    <div v-else-if="loadError" class="flex justify-center p-[var(--page-padding)]">
       <ErrorState
         :variant="loadError.variant ?? 'error'"
         :title="loadError.title"
@@ -321,16 +321,16 @@ onUnmounted(() => {
     </div>
 
     <!-- Form Content -->
-    <div v-else class="form-container">
-      <div v-if="optionsError" class="form-feedback" role="alert">
+    <div v-else class="p-[var(--page-padding)]">
+      <div v-if="optionsError" class="mb-space-4" role="alert">
         <ErrorState
           :variant="optionsError.variant ?? 'error'"
           :title="optionsError.title"
           :description="optionsError.description"
         >
           <template #action>
-            <div class="options-error-action">
-              <span v-if="optionsErrorFields.length > 0" class="options-error-fields">
+            <div class="flex flex-col items-start gap-space-2">
+              <span v-if="optionsErrorFields.length > 0" class="text-body text-muted-foreground">
                 受影响字段：{{ optionsErrorFields.map(field => optionFieldLabels[field] ?? field).join('、') }}
               </span>
               <Button v-if="optionsError.retryable !== false" type="button" variant="outline" size="sm" @click="fetchOptions">
@@ -340,10 +340,10 @@ onUnmounted(() => {
           </template>
         </ErrorState>
       </div>
-      <div v-if="submitError" class="submit-feedback" role="alert">
+      <div v-if="submitError" class="mb-space-4 flex flex-col gap-space-1 rounded-md border border-danger bg-danger/[0.08] p-space-3 text-foreground" role="alert">
         <strong>{{ submitError.title }}</strong>
         <span>{{ submitError.description }}</span>
-        <div v-if="submitError.kind === 'conflict'" class="submit-feedback__actions">
+        <div v-if="submitError.kind === 'conflict'" class="mt-space-2 flex flex-wrap gap-space-2">
           <Button type="button" variant="outline" size="sm" @click="refreshConflict(false)">
             使用最新数据
           </Button>
@@ -352,19 +352,19 @@ onUnmounted(() => {
           </Button>
         </div>
       </div>
-      <div v-if="errorSummary.length > 0" class="form-error-summary" role="alert" aria-live="assertive">
+      <div v-if="errorSummary.length > 0" class="mb-space-4 rounded-md border border-danger bg-danger/[0.08] p-space-3 text-foreground" role="alert" aria-live="assertive">
         <strong>请先修正以下内容</strong>
-        <ul>
+        <ul class="mt-space-1 pl-space-4">
           <li v-for="error in errorSummary" :key="error.field">
             {{ getFieldLabel(error.field) }}：{{ error.message }}
           </li>
         </ul>
       </div>
       <!-- Basic Info Card -->
-      <div class="form-card">
-        <div class="card-title">基本信息</div>
+      <div class="mb-space-4 rounded-lg bg-card p-space-4 shadow-1 max-sm:p-space-3">
+        <div class="mb-space-4 flex items-center justify-between border-b border-border pb-space-2 text-body-strong leading-[var(--line-height-body)] font-semibold text-foreground">基本信息</div>
         <form id="customer-edit-form" class="space-y-4" @submit="onSubmit">
-          <div class="form-grid">
+          <div class="grid grid-cols-2 gap-space-4 max-sm:grid-cols-1">
             <!-- Customer Name -->
             <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="account_name">
               <InputField
@@ -396,7 +396,7 @@ onUnmounted(() => {
             </Field>
           </div>
 
-          <div class="form-grid">
+          <div class="grid grid-cols-2 gap-space-4 max-sm:grid-cols-1">
             <!-- Source -->
             <Field v-slot="{ value, handleChange, errorMessage }" name="source_public_id">
               <div class="grid gap-space-1">
@@ -412,13 +412,13 @@ onUnmounted(() => {
                   :error="errorMessage ?? ''"
                   @update:model-value="handleChange"
                 />
-                <p v-if="optionsErrorFields.includes('source_public_id')" class="form-option-error">
+                <p v-if="optionsErrorFields.includes('source_public_id')" class="mt-space-1 text-body text-danger">
                   获客来源加载失败，请点击上方“重试加载选项”。
                 </p>
               </div>
             </Field>
 
-            <div class="form-grid-full">
+            <div class="col-span-full">
               <Field v-slot="{ value, handleChange, errorMessage }" name="product_public_id">
                 <div class="grid gap-space-1">
                   <ProductIntentPicker
@@ -450,7 +450,7 @@ onUnmounted(() => {
             </Field>
           </div>
 
-          <div class="form-grid">
+          <div class="grid grid-cols-2 gap-space-4 max-sm:grid-cols-1">
             <!-- Default Procurement Method -->
             <Field v-slot="{ value, handleChange, errorMessage }" name="default_procurement_method_id">
               <div class="grid gap-space-1">
@@ -466,7 +466,7 @@ onUnmounted(() => {
                   :error="errorMessage ?? ''"
                   @update:model-value="handleChange(Number($event))"
                 />
-                <p v-if="optionsErrorFields.includes('default_procurement_method_id')" class="form-option-error">
+                <p v-if="optionsErrorFields.includes('default_procurement_method_id')" class="mt-space-1 text-body text-danger">
                   采购方式加载失败，请点击上方“重试加载选项”。
                 </p>
               </div>
@@ -490,7 +490,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Form Actions -->
-      <div class="form-actions-card">
+      <div class="flex justify-end gap-space-2 rounded-lg bg-card p-space-4 shadow-1 max-sm:flex-col-reverse">
         <Button variant="outline" type="button" @click="handleGoBack">
           取消
         </Button>
@@ -508,163 +508,13 @@ onUnmounted(() => {
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/tokens.scss' as *;
-
-.customer-edit-page {
-  padding: 0;
-  background: hsl(var(--card));
-  min-height: 100%;
-}
-
-// Loading state
 .loading-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
   min-height: 400px;
-  padding: var(--page-padding);
-}
-
-.state-container {
-  display: flex;
-  justify-content: center;
-  padding: var(--page-padding);
-}
-
-.form-feedback {
-  margin-bottom: $space-4;
-}
-
-.options-error-action {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: $space-2;
-}
-
-.options-error-fields {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-}
-
-.form-option-error {
-  margin-top: $space-1;
-  color: hsl(var(--status-danger));
-  font-size: var(--font-size-body);
-}
-
-.submit-feedback {
-  display: flex;
-  flex-direction: column;
-  gap: $space-1;
-  margin-bottom: $space-4;
-  padding: $space-3;
-  border: 1px solid hsl(var(--status-danger));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, hsl(var(--status-danger)) 8%, transparent);
-  color: hsl(var(--foreground));
-}
-
-.submit-feedback__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-2;
-  margin-top: $space-2;
-}
-
-.form-error-summary {
-  margin-bottom: $space-4;
-  padding: $space-3;
-  border: 1px solid hsl(var(--status-danger));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, hsl(var(--status-danger)) 8%, transparent);
-  color: hsl(var(--foreground));
-}
-
-.form-error-summary ul {
-  margin: $space-1 0 0;
-  padding-left: $space-4;
 }
 
 .loading-spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid hsl(var(--border));
-  border-top-color: hsl(var(--brand));
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-// Form container (full width)
-.form-container {
-  padding: var(--page-padding);
-}
-
-// Form card (full width)
-.form-card {
-  background: hsl(var(--card));
-  border-radius: var(--radius-lg);
-  padding: $space-4;
-  margin-bottom: $space-4;
-  box-shadow: var(--shadow-1);
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-  color: hsl(var(--foreground));
-  margin-bottom: $space-4;
-  padding-bottom: $space-2;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-// Form grid (two columns)
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: $space-4;
-}
-
-.form-grid-full {
-  grid-column: 1 / -1;
-}
-
-// Form actions card
-.form-actions-card {
-  background: hsl(var(--card));
-  border-radius: var(--radius-lg);
-  padding: $space-4;
-  box-shadow: var(--shadow-1);
-  display: flex;
-  justify-content: flex-end;
-  gap: $space-2;
-}
-
-// Responsive
-@media (max-width: 768px) {
-  .form-container {
-    padding: var(--page-padding);
-  }
-
-  .form-card {
-    padding: $space-3;
-  }
-
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .form-actions-card {
-    flex-direction: column-reverse;
-  }
+  border-width: 3px;
 }
 </style>

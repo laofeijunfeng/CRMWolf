@@ -21,7 +21,7 @@
   性能优化：列表只调 1 次 listApprovals；详情走单点 getApprovalDetail。
 -->
 <template>
-  <div class="approval-center">
+  <div class="flex min-h-0 flex-1 flex-col gap-space-6 bg-card p-[var(--page-padding)]">
     <!-- DataTable 负责列表读取错误、空状态和刷新状态；失败时保留已成功加载的数据 -->
     <!-- DataTable（桌面 + 移动端卡片） -->
       <DataTable
@@ -119,7 +119,7 @@
 
 
         <template #mobile-card="{ row }">
-          <div :class="cn('approval-mobile-card', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
+          <div :class="cn('approval-mobile-card min-w-0', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
             <div class="flex justify-between items-center mb-3">
               <CopyableText
                 :value="row.application_number"
@@ -152,12 +152,12 @@
         </template>
 
         <template #mobile-actions="{ row, index }">
-          <div class="approval-mobile-actions" v-if="activeTab === 'pending'">
+          <div class="flex w-full flex-wrap gap-space-2" v-if="activeTab === 'pending'">
             <Button
               v-if="hasAttachment(row)"
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-preview-btn"
               data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
@@ -168,7 +168,7 @@
             <Button
               variant="destructive"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-reject-btn"
               data-action-id="reject"
               :loading="quickRejectPendingId === row.id"
@@ -180,7 +180,7 @@
             <Button
               variant="default"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-approve-btn"
               data-action-id="approve"
               :loading="quickApprovePendingId === row.id"
@@ -193,7 +193,7 @@
               v-if="!hasAttachment(row)"
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-detail-btn"
               data-action-id="detail"
               @click.stop="openDetail(row, index)"
@@ -201,11 +201,11 @@
               查看详情
             </Button>
           </div>
-          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED' && row.business_type !== 'CONTRACT_CHANGE'">
+          <div class="flex w-full flex-wrap gap-space-2" v-else-if="activeTab === 'submitted' && row.status === 'REJECTED' && row.business_type !== 'CONTRACT_CHANGE'">
             <Button
               variant="default"
               size="lg"
-              class="approval-mobile-action approval-mobile-action-wide"
+              class="min-h-touch-target min-w-0 flex-[1_1_100%]"
               data-testid="mobile-resubmit-btn"
               data-action-id="resubmit"
               :loading="resubmitPendingId === row.id"
@@ -214,11 +214,11 @@
               修改并重新提交
             </Button>
           </div>
-          <div class="approval-mobile-actions" v-else-if="activeTab === 'submitted' && row.status === 'PENDING'">
+          <div class="flex w-full flex-wrap gap-space-2" v-else-if="activeTab === 'submitted' && row.status === 'PENDING'">
             <Button
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-remind-btn"
               data-action-id="remind"
               :loading="remindPendingId === row.id"
@@ -231,7 +231,7 @@
               v-if="hasAttachment(row)"
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-preview-btn"
               data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
@@ -242,7 +242,7 @@
             <Button
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-detail-btn"
               data-action-id="detail"
               @click.stop="openDetail(row, index)"
@@ -250,12 +250,12 @@
               查看详情
             </Button>
           </div>
-          <div class="approval-mobile-actions" v-else>
+          <div class="flex w-full flex-wrap gap-space-2" v-else>
             <Button
               v-if="hasAttachment(row)"
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-preview-btn"
               data-action-id="preview"
               :loading="attachmentPreviewPendingId === row.id"
@@ -266,7 +266,7 @@
             <Button
               variant="outline"
               size="lg"
-              class="approval-mobile-action"
+              class="min-h-touch-target min-w-0 flex-[1_1_30%]"
               data-testid="mobile-detail-btn"
               data-action-id="detail"
               @click.stop="openDetail(row, index)"
@@ -300,7 +300,7 @@
         <ScrollArea class="flex-1 min-h-0 min-w-0">
           <div class="p-6 space-y-6 min-h-[400px]">
             <!-- 申请主体信息：优先展示审批关联业务内容 -->
-            <Card v-if="selectedApproval" class="info-card">
+            <Card v-if="selectedApproval" class="rounded-lg">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
                   <h3 class="text-sm font-semibold text-foreground">{{ approvalSubjectTitle }}</h3>
@@ -318,28 +318,28 @@
                   </Button>
                 </div>
                 <div class="p-4">
-                  <div class="attributes-grid">
+                  <div class="grid grid-cols-1 gap-x-space-4 gap-y-space-3 sm:grid-cols-2 md:grid-cols-4">
                     <div
                       v-for="field in approvalSubjectFields"
                       :key="field.key"
-                      :class="cn('attribute-item', field.wide && 'attribute-item-wide')"
+                      :class="cn('attribute-item flex flex-col gap-space-1', field.wide && 'sm:col-span-2')"
                     >
-                      <div class="attribute-label">{{ field.label }}</div>
-                      <div v-if="field.type === 'copy' && hasFieldValue(field.value)" class="attribute-value">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">{{ field.label }}</div>
+                      <div v-if="field.type === 'copy' && hasFieldValue(field.value)" class="break-all text-body font-medium text-muted-foreground">
                         <CopyableText :value="String(field.value)" :label="field.label" />
                       </div>
                       <button
                         v-else-if="field.type === 'link' && hasFieldDrilldown(field)"
                         type="button"
-                        class="attribute-value attribute-value-link text-left"
+                        class="break-all text-body font-medium cursor-pointer border-0 bg-transparent p-0 text-left text-brand hover:underline"
                         @click="openFieldDrilldown(field)"
                       >
                         {{ displayFieldValue(field.value) }}
                       </button>
-                      <div v-else-if="field.type === 'amount'" class="attribute-value">
+                      <div v-else-if="field.type === 'amount'" class="break-all text-body font-medium text-muted-foreground">
                         <AmountText :value="field.value" tone="warning" />
                       </div>
-                      <div v-else-if="field.statusDomain" class="attribute-value">
+                      <div v-else-if="field.statusDomain" class="break-all text-body font-medium text-muted-foreground">
                         <Badge
                           variant="status"
                           :data-tone="getStatusPresentation(field.statusDomain, field.value?.toString()).tone"
@@ -351,11 +351,11 @@
                           {{ getStatusPresentation(field.statusDomain, field.value?.toString()).label }}
                         </Badge>
                       </div>
-                      <div v-else-if="field.type === 'status'" class="attribute-value">
+                      <div v-else-if="field.type === 'status'" class="break-all text-body font-medium text-muted-foreground">
                         <Badge variant="outline">{{ displayFieldValue(field.value) }}</Badge>
                       </div>
-                      <div v-else-if="field.type === 'mono'" class="attribute-value font-mono text-sm">{{ displayFieldValue(field.value) }}</div>
-                      <div v-else class="attribute-value">{{ displayFieldValue(field.value) }}</div>
+                      <div v-else-if="field.type === 'mono'" class="break-all font-mono text-sm font-medium text-muted-foreground">{{ displayFieldValue(field.value) }}</div>
+                      <div v-else class="break-all text-body font-medium text-muted-foreground">{{ displayFieldValue(field.value) }}</div>
                     </div>
                   </div>
                   <section v-if="invoiceBillingType" class="mt-5 border-t border-dashed border-border pt-5 min-w-0" aria-label="开票信息">
@@ -385,7 +385,7 @@
                 </div>
               </CardContent>
             </Card>
-            <Card v-if="selectedApproval?.business_type === 'CONTRACT_CHANGE' && contractChangeFiles.length > 0" class="info-card">
+            <Card v-if="selectedApproval?.business_type === 'CONTRACT_CHANGE' && contractChangeFiles.length > 0" class="rounded-lg">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border">
                   <h3 class="text-sm font-semibold text-foreground">变更附件</h3>
@@ -402,36 +402,36 @@
               </CardContent>
             </Card>
 
-            <Card v-if="approvalCustomerInfo" class="info-card">
+            <Card v-if="approvalCustomerInfo" class="rounded-lg">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border">
                   <h3 class="text-sm font-semibold text-foreground">关联客户</h3>
                 </div>
                 <div class="p-4">
-                  <div class="attributes-grid">
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户名称</div>
-                      <div class="attribute-value"><button type="button" class="attribute-value-link text-left" @click="openDrilldown('customer', approvalCustomerInfo.id)">{{ approvalCustomerInfo.account_name }}</button></div>
+                  <div class="grid grid-cols-1 gap-x-space-4 gap-y-space-3 sm:grid-cols-2 md:grid-cols-4">
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">客户名称</div>
+                      <div class="break-all text-body font-medium text-muted-foreground"><button type="button" class="cursor-pointer border-0 bg-transparent p-0 text-left text-brand hover:underline" @click="openDrilldown('customer', approvalCustomerInfo.id)">{{ approvalCustomerInfo.account_name }}</button></div>
                     </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户详情</div>
-                      <div class="attribute-value"><button type="button" class="attribute-value-link text-left" @click="openDrilldown('customer', approvalCustomerInfo.id)">查看客户详情</button></div>
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">客户详情</div>
+                      <div class="break-all text-body font-medium text-muted-foreground"><button type="button" class="cursor-pointer border-0 bg-transparent p-0 text-left text-brand hover:underline" @click="openDrilldown('customer', approvalCustomerInfo.id)">查看客户详情</button></div>
                     </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">所在城市</div>
-                      <div class="attribute-value">{{ approvalCustomerInfo.city || '-' }}</div>
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">所在城市</div>
+                      <div class="break-all text-body font-medium text-muted-foreground">{{ approvalCustomerInfo.city || '-' }}</div>
                     </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">所属行业</div>
-                      <div class="attribute-value">{{ approvalCustomerInfo.industry || '-' }}</div>
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">所属行业</div>
+                      <div class="break-all text-body font-medium text-muted-foreground">{{ approvalCustomerInfo.industry || '-' }}</div>
                     </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户来源</div>
-                      <div class="attribute-value">{{ getAcquisitionSourceDisplayName(approvalCustomerInfo) }}</div>
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">客户来源</div>
+                      <div class="break-all text-body font-medium text-muted-foreground">{{ getAcquisitionSourceDisplayName(approvalCustomerInfo) }}</div>
                     </div>
-                    <div class="attribute-item">
-                      <div class="attribute-label">客户状态</div>
-                      <div class="attribute-value">{{ customerStatusLabel(approvalCustomerInfo.status) }}</div>
+                    <div class="attribute-item flex flex-col gap-space-1">
+                      <div class="attribute-label text-caption leading-[var(--line-height-body)] font-medium text-muted-foreground">客户状态</div>
+                      <div class="break-all text-body font-medium text-muted-foreground">{{ customerStatusLabel(approvalCustomerInfo.status) }}</div>
                     </div>
                   </div>
                 </div>
@@ -439,7 +439,7 @@
             </Card>
 
             <!-- 审批流程卡片（组件内部处理加载/错误/空态） -->
-            <Card v-if="selectedApproval && selectedApprovalEntityId !== null" class="info-card">
+            <Card v-if="selectedApproval && selectedApprovalEntityId !== null" class="rounded-lg">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border">
                   <h3 class="text-sm font-semibold text-foreground">审批流程</h3>
@@ -1935,16 +1935,6 @@ watch(rows, async () => {
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 
-.approval-center {
-  padding: var(--page-padding) var(--page-padding) var(--page-padding);
-  background: hsl(var(--card));
-  display: flex;
-  flex-direction: column;
-  gap: $space-6;
-  min-height: 0;
-  flex: 1;
-}
-
 // 超时徽章（DataTable 内使用 Badge 组件）
 .overdue-badge-inline {
   display: inline-flex;
@@ -1959,102 +1949,14 @@ watch(rows, async () => {
   border: none;
 }
 
-.approval-mobile-card {
-  min-width: 0;
-}
-
-.approval-mobile-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-2;
-  width: 100%;
-}
-
-.approval-mobile-action {
-  flex: 1 1 30%;
-  min-width: 0;
-  min-height: var(--touch-target);
-}
-
-.approval-mobile-action-wide {
-  flex-basis: 100%;
-}
-
-
 // 移动端卡片警告边框样式
 @media (max-width: 768px) {
-  .approval-center {
-    padding: var(--page-padding);
-  }
-
   :deep(.data-table-mobile-card:has(.approval-mobile-card.is-overdue)) {
     border-color: hsl(var(--status-warning));
     border-width: 1px;
   }
 }
 
-// ===== Sheet 内部样式（参考 LeadDetailSheet） =====
-
-// 信息卡片
-.info-card {
-  background: hsl(var(--card));
-  border-radius: var(--radius-lg);
-  border: 1px solid hsl(var(--border));
-}
-
-// 属性网格
-.attributes-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: $space-3 $space-4;
-
-  @media (max-width: $bp-md - 1) {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  @media (max-width: $bp-sm - 1) {
-    grid-template-columns: 1fr;
-  }
-}
-
-.attribute-item {
-  display: flex;
-  flex-direction: column;
-  gap: $space-1;
-}
-
-.attribute-item-wide {
-  grid-column: span 2;
-
-  @media (max-width: $bp-sm - 1) {
-    grid-column: span 1;
-  }
-}
-
-.attribute-label {
-  font-size: var(--font-size-caption);
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-}
-
-.attribute-value {
-  font-size: var(--font-size-body);
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-  word-break: break-all;
-}
-
-.attribute-value-link {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: hsl(var(--brand));
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
 .billing-copy-value {
   max-width: 100%;
   padding: 2px 0;
