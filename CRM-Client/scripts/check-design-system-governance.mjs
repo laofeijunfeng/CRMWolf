@@ -136,7 +136,7 @@ const RULES = [
     category: 'geometry-token',
     incremental: true,
     appliesTo: (filePath) => /\.(?:vue|s?css)$/.test(filePath) && !filePath.startsWith(UI) && !filePath.startsWith(STYLES),
-    test: (text) => GEOMETRY_LITERALS.some((pattern) => pattern.test(text)) || (/Content\b/.test(text) && CONTENT_PX_WIDTH.test(text)),
+    test: (text, _filePath, tag) => GEOMETRY_LITERALS.some((pattern) => pattern.test(text)) || ((/Content\b/.test(text) || /Content$/.test(tag)) && CONTENT_PX_WIDTH.test(text)),
     message: '宽度、字号、高度、圆角、内边距走令牌：弹窗用 size，其余用 --control-h-* / --radius-* / 字号令牌，见 foundations/token-values.md。',
   },
   {
@@ -219,16 +219,22 @@ function ruleApplies(rule, filePath, { full }) {
   return rule.appliesTo ? rule.appliesTo(filePath) : true
 }
 
-function ruleMatches(rule, text, filePath) {
+function ruleMatches(rule, text, filePath, tag) {
   const scanText = text.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '')
-  return rule.test ? rule.test(scanText, filePath) : rule.pattern.test(scanText)
+  return rule.test ? rule.test(scanText, filePath, tag) : rule.pattern.test(scanText)
 }
 
-function inspectLine(filePath, line, text, exceptions, options) {
+// 行落在多行开始标签内部时返回该标签名（如 `<DialogContent` 换行写 class），否则为空串。
+function enclosingTag(lines, index) {
+  const before = lines.slice(Math.max(0, index - 30), index).join('\n')
+  return /<([A-Za-z][\w.-]*)\b[^<>]*$/.exec(before)?.[1] ?? ''
+}
+
+function inspectLine(filePath, line, text, exceptions, options, tag = '') {
   const violations = []
   for (const rule of RULES) {
     if (!ruleApplies(rule, filePath, options)) continue
-    if (!ruleMatches(rule, text, filePath)) continue
+    if (!ruleMatches(rule, text, filePath, tag)) continue
     if (exceptions.some((exception) => exceptionMatches(exception, filePath, rule.category, text))) continue
     violations.push({ category: rule.category, file: filePath, line, message: rule.message, text: text.trim() })
   }
@@ -267,12 +273,23 @@ function validateGovernanceFiles() {
   return violations
 }
 
+// 暂存模式读 index 中的内容（与本次提交一致），否则读工作区。
+function readSourceLines(filePath, { staged = true } = {}) {
+  const content = staged ? runGit(['show', `:${filePath}`]) : ''
+  if (content) return content.split('\n')
+  const absolutePath = path.join(repoRoot, filePath)
+  return fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf8').split('\n') : []
+}
+
 export function inspectLines(files, options = {}) {
   const exceptions = readJson(exceptionsPath).exceptions ?? []
   const violations = []
   for (const filePath of files) {
-    for (const { line, text } of collectAddedLines(filePath, options)) {
-      violations.push(...inspectLine(filePath, line, text, exceptions, { full: false }))
+    const added = collectAddedLines(filePath, options)
+    if (added.length === 0) continue
+    const source = readSourceLines(filePath, options)
+    for (const { line, text } of added) {
+      violations.push(...inspectLine(filePath, line, text, exceptions, { full: false }, enclosingTag(source, line - 1)))
     }
   }
   return violations
@@ -282,7 +299,7 @@ export function inspectLines(files, options = {}) {
  * 检查给定内容。默认按增量模式运行全部规则；{ full: true } 与 --all 一致，跳过 incremental 规则。
  */
 export function inspectContent(filePath, lines, exceptions = readJson(exceptionsPath).exceptions ?? [], { full = false } = {}) {
-  return lines.flatMap((text, index) => inspectLine(filePath, index + 1, text, exceptions, { full }))
+  return lines.flatMap((text, index) => inspectLine(filePath, index + 1, text, exceptions, { full }, enclosingTag(lines, index)))
 }
 
 export function inspectAll(files) {
@@ -371,14 +388,34 @@ export function findIconOnlyButtons(filePath, content, exceptions = []) {
   return violations
 }
 
-function inspectRepository() {
-  const exceptions = readJson(exceptionsPath).exceptions ?? []
+// 暂存模式只看 index：未跟踪或未暂存的半成品不能阻断本次提交。
+function readRepositorySources({ staged }) {
   const sources = new Map()
+  if (staged) {
+    const entries = runGit(['ls-files', '-s', '--', SRC]).split('\n').filter(Boolean)
+      .map((entry) => { const [meta, filePath] = entry.split('\t'); return { sha: meta.split(' ')[1], filePath } })
+      .filter(({ filePath }) => sourceExtensions.has(path.extname(filePath)) && !isTestFile(filePath))
+    const batch = execFileSync('git', ['cat-file', '--batch'], { cwd: repoRoot, input: entries.map(({ sha }) => sha).join('\n') + '\n', maxBuffer: 1 << 30 })
+    let offset = 0
+    for (const { filePath } of entries) {
+      const headerEnd = batch.indexOf(10, offset)
+      const size = Number(batch.toString('utf8', offset, headerEnd).split(' ')[2])
+      sources.set(filePath, batch.toString('utf8', headerEnd + 1, headerEnd + 1 + size))
+      offset = headerEnd + 1 + size + 1
+    }
+    return sources
+  }
   for (const filePath of runGit(['ls-files', '--cached', '--others', '--exclude-standard', SRC]).split('\n')) {
     if (!sourceExtensions.has(path.extname(filePath)) || isTestFile(filePath)) continue
     const absolutePath = path.join(repoRoot, filePath)
     if (fs.existsSync(absolutePath)) sources.set(filePath, fs.readFileSync(absolutePath, 'utf8'))
   }
+  return sources
+}
+
+function inspectRepository({ staged }) {
+  const exceptions = readJson(exceptionsPath).exceptions ?? []
+  const sources = readRepositorySources({ staged })
   const measured = measureViewStyles(sources)
   const baseline = readJson(ratchetPath)
   for (const [key, value] of Object.entries(measured)) {
@@ -398,7 +435,7 @@ function main() {
   const files = collectChangedPaths({ staged })
   const configViolations = validateGovernanceFiles()
   if (configViolations.length) printViolations(configViolations)
-  const repositoryViolations = inspectRepository()
+  const repositoryViolations = inspectRepository({ staged: staged && !all })
   printViolations(repositoryViolations)
   const blocked = configViolations.length > 0 || repositoryViolations.length > 0
 

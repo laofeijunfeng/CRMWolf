@@ -228,6 +228,19 @@ test('GATE-06 rejects new geometry literals outside ui and styles', () => {
   )
 })
 
+test('GATE-06 rejects pixel max-w inside a multi-line *Content opening tag only', () => {
+  assert.deepEqual(categories('CRM-Client/src/components/dialogs/A.vue', [
+    '<DialogContent',
+    '  size="sm"',
+    '  class="max-w-[600px]"',
+    '>',
+  ]), ['geometry-token'])
+  assert.deepEqual(categories('CRM-Client/src/components/dialogs/A.vue', [
+    '<DialogContent size="sm">',
+    '  <div class="max-w-[600px]">',
+  ]), [])
+})
+
 test('GATE-10 rejects form primitives imported by views only', () => {
   assert.deepEqual(categories('CRM-Client/src/views/Leads.vue', ["import { Input } from '@/components/ui/input'"]), ['page-form-primitive'])
   assert.deepEqual(categories('CRM-Client/src/components/crmwolf/InputField.vue', ["import { Input } from '@/components/ui/input'"]), [])
