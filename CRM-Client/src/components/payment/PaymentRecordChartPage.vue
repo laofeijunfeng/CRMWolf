@@ -79,7 +79,7 @@ interface ArrDatum {
   ratioText: string
 }
 
-const arrMargin = { top: 16, right: 8, bottom: 28, left: 48 }
+const arrMargin = { top: 16, right: 16, bottom: 28, left: 48 }
 const arrYDomain: [number, number] = [0, 100]
 
 const selectedCard = ref<PaymentRecordChartCard | null>(null)
@@ -89,6 +89,7 @@ watch(() => props.resetToken, () => {
   selectedCard.value = null
   selectedBucket.value = null
   arrHover.value = null
+  monthHover.value = null
 })
 
 const population = computed(() => props.chart?.population ?? 0)
@@ -193,21 +194,20 @@ const monthConfig = {
   summary: { label: '金额', color: CHART_COLOR },
 } satisfies ChartConfig
 
-function monthData(card: PaymentRecordChartCard): MonthDatum[] {
-  return card.buckets.map((bucket, index) => ({
-    index,
-    label: bucket.label,
-    count: bucket.count,
-    amount: bucket.amount,
-    summary: formatCurrency(bucket.amount),
-  }))
-}
-
 function monthTooltip(): Record<string, (datum: unknown, x: number | Date) => string> {
   const template = componentToString(monthConfig, ChartTooltipContent, { labelKey: 'label' })
   if (template === undefined) return {}
   return { [Area.selectors.area]: template }
 }
+
+const monthData = computed<MonthDatum[]>(() => (monthCard.value?.buckets ?? []).map((bucket, index) => ({
+  index,
+  label: bucket.label,
+  count: bucket.count,
+  amount: bucket.amount,
+  summary: formatCurrency(bucket.amount),
+})))
+
 
 const arrConfig = {
   annualizedText: { label: '年化订阅', color: CHART_COLOR },
@@ -215,48 +215,27 @@ const arrConfig = {
   ratioText: { label: '占比', color: CHART_COLOR },
 } satisfies ChartConfig
 
-function arrData(card: PaymentRecordChartCard): ArrDatum[] {
-  return card.buckets.map((bucket, index) => {
-    const ratio = bucket.plotted_ratio ?? null
-    const annualized = bucket.annualized_subscription ?? null
-    const buyout = bucket.buyout_amount ?? null
-    return {
-      index,
-      key: bucket.key,
-      label: bucket.label,
-      ratio,
-      annualizedText: annualized === null ? '' : formatSummaryAmount(annualized),
-      buyoutText: buyout === null ? '' : formatSummaryAmount(buyout),
-      ratioText: ratio === null ? '' : `${ratio}%`,
-    }
-  })
-}
+const arrData = computed<ArrDatum[]>(() => (arrCard.value?.buckets ?? []).map((bucket, index) => {
+  const ratio = bucket.plotted_ratio ?? null
+  const annualized = bucket.annualized_subscription ?? null
+  const buyout = bucket.buyout_amount ?? null
+  return {
+    index,
+    key: bucket.key,
+    label: bucket.label,
+    ratio,
+    annualizedText: annualized === null ? '' : formatSummaryAmount(annualized),
+    buyoutText: buyout === null ? '' : formatSummaryAmount(buyout),
+    ratioText: ratio === null ? '' : `${ratio}%`,
+  }
+}))
 
-function arrActions(card: PaymentRecordChartCard): readonly (ChartBucketAction & { datum: ArrDatum })[] {
-  return arrData(card).map((datum) => ({
-    key: datum.key,
-    label: datum.label,
-    value: datum.ratioText || '未定义',
-    disabled: datum.ratio === null,
-    datum,
-  }))
-}
 
 const arrXDomain = computed((): [number, number] => {
   const count = arrCard.value?.buckets.length ?? 1
   return [0, Math.max(count - 1, 0)]
 })
 
-function arrLabelLeft(index: number, count: number): string {
-  const span = Math.max(count - 1, 1)
-  const horizontal = arrMargin.left + arrMargin.right
-  return `calc(${arrMargin.left}px + (100% - ${horizontal}px) * ${index / span})`
-}
-
-function arrLabelTop(ratio: number): string {
-  const vertical = arrMargin.top + arrMargin.bottom
-  return `calc(${arrMargin.top}px + (100% - ${vertical}px) * ${(100 - ratio) / 100})`
-}
 
 function openArr(datum: ArrDatum): void {
   const card = arrCard.value
@@ -268,26 +247,61 @@ function openArr(datum: ArrDatum): void {
   emit('view-bucket', card, bucket)
 }
 
+const monthHover = ref<MonthDatum | null>(null)
+const monthHoverStyle = ref({ left: '0px', top: '0px' })
 const arrHover = ref<ArrDatum | null>(null)
 const arrHoverStyle = ref({ left: '0px', top: '0px' })
 
-function arrIndexFromClientX(clientX: number, plot: HTMLElement): number | null {
-  const count = arrCard.value?.buckets.length ?? 0
+function chartIndexFromClientX(clientX: number, plot: HTMLElement, count: number, leftMargin = 0, rightMargin = 0): number | null {
   if (count <= 0) return null
   const rect = plot.getBoundingClientRect()
-  const plotLeft = rect.left + arrMargin.left
-  const plotWidth = rect.width - arrMargin.left - arrMargin.right
+  const plotLeft = rect.left + leftMargin
+  const plotWidth = rect.width - leftMargin - rightMargin
   if (plotWidth <= 0) return null
   const span = Math.max(count - 1, 1)
   const index = Math.round(((clientX - plotLeft) / plotWidth) * span)
-  if (index < 0 || index >= count) return null
-  return index
+  return index >= 0 && index < count ? index : null
+}
+
+function monthIndexFromClientX(clientX: number, plot: HTMLElement): number | null {
+  return chartIndexFromClientX(clientX, plot, monthData.value.length, arrMargin.left, arrMargin.right)
+}
+
+function monthPointAt(index: number): MonthDatum | null {
+  return monthData.value[index] ?? null
+}
+
+function onMonthMove(event: MouseEvent): void {
+  const plot = event.currentTarget
+  if (!(plot instanceof HTMLElement)) return
+  const index = monthIndexFromClientX(event.clientX, plot)
+  const point = index === null ? null : monthPointAt(index)
+  if (point === null) {
+    monthHover.value = null
+    return
+  }
+  const rect = plot.getBoundingClientRect()
+  const localX = event.clientX - rect.left
+  const tooltipWidth = 190
+  const left = localX + tooltipWidth + 16 > rect.width ? localX - tooltipWidth - 8 : localX + 12
+  monthHover.value = point
+  monthHoverStyle.value = {
+    left: `${Math.max(left, 8)}px`,
+    top: `${Math.max(event.clientY - rect.top - 72, 8)}px`,
+  }
+}
+
+function onMonthLeave(): void {
+  monthHover.value = null
+}
+
+
+function arrIndexFromClientX(clientX: number, plot: HTMLElement): number | null {
+  return chartIndexFromClientX(clientX, plot, arrCard.value?.buckets.length ?? 0, arrMargin.left, arrMargin.right)
 }
 
 function arrPointAt(index: number): ArrDatum | null {
-  const card = arrCard.value
-  if (card === null) return null
-  return arrData(card)[index] ?? null
+  return arrData.value[index] ?? null
 }
 
 function onArrMove(event: MouseEvent): void {
@@ -295,7 +309,7 @@ function onArrMove(event: MouseEvent): void {
   if (!(plot instanceof HTMLElement)) return
   const index = arrIndexFromClientX(event.clientX, plot)
   const point = index === null ? null : arrPointAt(index)
-  if (point === null || point.ratio === null) {
+  if (point === null) {
     arrHover.value = null
     return
   }
@@ -318,11 +332,20 @@ function onArrClick(event: MouseEvent): void {
   const plot = event.currentTarget
   if (!(plot instanceof HTMLElement)) return
   const index = arrIndexFromClientX(event.clientX, plot)
-  if (index === null) return
-  const point = arrPointAt(index)
-  if (point === null) return
-  openArr(point)
+  const point = index === null ? null : arrPointAt(index)
+  if (point !== null) openArr(point)
 }
+function arrLabelLeft(index: number, count: number): string {
+  const span = Math.max(count - 1, 1)
+  const horizontal = arrMargin.left + arrMargin.right
+  return `calc(${arrMargin.left}px + (100% - ${horizontal}px) * ${index / span})`
+}
+
+function arrLabelTop(ratio: number): string {
+  const vertical = arrMargin.top + arrMargin.bottom
+  return `calc(${arrMargin.top}px + (100% - ${vertical}px) * ${(100 - ratio) / 100})`
+}
+
 
 function barWidth(card: PaymentRecordChartCard, bucket: PaymentRecordChartBucket): string {
   const maxAmount = Math.max(...card.buckets.map((item) => Math.max(item.amount, 0)), 0)
@@ -342,6 +365,16 @@ function openMonth(card: PaymentRecordChartCard | null, datum: MonthDatum): void
   const bucket = card.buckets[datum.index]
   if (bucket === undefined) return
   openBucket(card, bucket)
+}
+
+function onMonthAreaClick(_datum: unknown, event: MouseEvent): void {
+  const target = event.currentTarget
+  if (!(target instanceof Element)) return
+  const plot = target.closest<HTMLElement>('.payment-record-chart__month-plot')
+  if (plot === null) return
+  const index = monthIndexFromClientX(event.clientX, plot)
+  const point = index === null ? null : monthPointAt(index)
+  if (point !== null) openMonth(monthCard.value, point)
 }
 
 function openPie(card: PaymentRecordChartCard, datum: PieDatum): void {
@@ -474,23 +507,23 @@ function retryBucket(): void {
           test-id-prefix="payment-chart-card"
         >
           <template #content>
-            <ChartContainer :config="monthConfig" class="aspect-auto h-[240px]">
-              <VisXYContainer :data="monthData(monthCard)" :height="220">
-                <VisArea :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.amount" :color="monthConfig.summary.color" :opacity="0.4" :events="{ [Area.selectors.area]: { click: (datum: MonthDatum) => openMonth(monthCard, datum) } }" />
-                <VisLine :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.amount" :color="monthConfig.summary.color" :line-width="1" />
-                <VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :num-ticks="monthCard.buckets.length" :tick-values="monthData(monthCard).map((datum) => datum.index)" :tick-format="(value: number) => monthCard?.buckets[Math.round(value)]?.label ?? ''" />
-                <VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" />
-                <ChartTooltip />
-                <ChartCrosshair :template="monthTooltip()[Area.selectors.area]" :color="monthConfig.summary.color" />
-              </VisXYContainer>
-            </ChartContainer>
-            <ChartBucketActionList
-              :actions="actionsFor(monthCard)"
-              test-id-prefix="payment-chart-month"
-              :aria-label="monthCard.title"
-              class="payment-record-chart__month-actions"
-              @activate="openBucket(monthCard, $event.bucket)"
-            />
+            <div class="payment-record-chart__month-plot" @mousemove="onMonthMove" @mouseleave="onMonthLeave">
+              <ChartContainer :config="monthConfig" class="aspect-auto h-[240px]">
+                <VisXYContainer :data="monthData" :height="240" :auto-margin="false" :margin="arrMargin">
+                  <VisArea :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.amount" :color="monthConfig.summary.color" :opacity="0.4" :min-height="8" :events="{ [Area.selectors.area]: { click: onMonthAreaClick } }" />
+                  <VisLine :x="(datum: MonthDatum) => datum.index" :y="(datum: MonthDatum) => datum.amount" :color="monthConfig.summary.color" :line-width="1" />
+                  <VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :num-ticks="monthData.length" :tick-values="monthData.map((datum) => datum.index)" :tick-format="(value: number) => monthData[Math.round(value)]?.label ?? ''" />
+                  <VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" />
+                  <ChartTooltip />
+                  <ChartCrosshair :template="monthTooltip()[Area.selectors.area]" :color="monthConfig.summary.color" />
+                </VisXYContainer>
+              </ChartContainer>
+              <div v-if="monthHover" class="payment-record-chart__arr-tooltip" :style="monthHoverStyle" data-testid="payment-chart-month-tooltip">
+                <strong>{{ monthHover.label }}</strong>
+                <span><em>回款笔数</em><b>{{ monthHover.count }} 笔</b></span>
+                <span><em>回款金额</em><b>{{ monthHover.summary }}</b></span>
+              </div>
+            </div>
           </template>
         </ChartCardFrame>
 
@@ -504,71 +537,67 @@ function retryBucket(): void {
           <template #content>
             <div class="payment-record-chart__arr-plot" @mousemove="onArrMove" @mouseleave="onArrLeave" @click="onArrClick">
               <ChartContainer :config="arrConfig" class="payment-record-chart__arr-layer payment-record-chart__arr-axis aspect-auto h-[240px]">
-                <VisXYContainer :data="arrData(arrCard)" :height="220" :x-domain="arrXDomain" :y-domain="arrYDomain" :auto-margin="false" :margin="arrMargin">
-                  <VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :num-ticks="arrCard.buckets.length" :tick-values="arrData(arrCard).map((datum) => datum.index)" :tick-format="(value: number) => arrCard?.buckets[Math.round(value)]?.label ?? ''" />
+                <VisXYContainer :data="arrData" :height="240" :x-domain="arrXDomain" :y-domain="arrYDomain" :auto-margin="false" :margin="arrMargin">
+                  <VisAxis type="x" :tick-line="false" :domain-line="false" :grid-line="false" :num-ticks="arrData.length" :tick-values="arrData.map((datum) => datum.index)" :tick-format="(value: number) => arrData[Math.round(value)]?.label ?? ''" />
                   <VisAxis type="y" :num-ticks="3" :tick-line="false" :domain-line="false" :tick-format="(value: number) => `${Math.round(value)}%`" />
                 </VisXYContainer>
               </ChartContainer>
-              <ChartContainer v-if="arrLinePoints(arrData(arrCard)).length > 0" :config="arrConfig" class="payment-record-chart__arr-layer payment-record-chart__arr-series aspect-auto h-[240px]" :cursor="true">
-                <VisXYContainer :data="arrLinePoints(arrData(arrCard))" :height="220" :x-domain="arrXDomain" :y-domain="arrYDomain" :auto-margin="false" :margin="arrMargin">
+              <ChartContainer v-if="arrLinePoints(arrData).length > 0" :config="arrConfig" class="payment-record-chart__arr-layer payment-record-chart__arr-series aspect-auto h-[240px]" :cursor="true">
+                <VisXYContainer :data="arrLinePoints(arrData)" :height="240" :x-domain="arrXDomain" :y-domain="arrYDomain" :auto-margin="false" :margin="arrMargin">
                   <VisArea :x="(datum: ArrDatum) => datum.index" :y="(datum: ArrDatum) => datum.ratio ?? 0" :color="arrConfig.ratioText.color" :opacity="0.4" />
                   <VisLine :x="(datum: ArrDatum) => datum.index" :y="(datum: ArrDatum) => datum.ratio ?? 0" :color="arrConfig.ratioText.color" :line-width="1" />
-                  <VisScatter v-if="arrShowsMarker(arrData(arrCard))" :x="(datum: ArrDatum) => datum.index" :y="(datum: ArrDatum) => datum.ratio ?? 0" :color="arrConfig.ratioText.color" :size="8" />
+                  <VisScatter v-if="arrShowsMarker(arrData)" :x="(datum: ArrDatum) => datum.index" :y="(datum: ArrDatum) => datum.ratio ?? 0" :color="arrConfig.ratioText.color" :size="8" />
                 </VisXYContainer>
               </ChartContainer>
-              <div v-if="arrHover" class="payment-record-chart__arr-tooltip" :style="arrHoverStyle" data-testid="payment-chart-arr-tooltip"><strong>{{ arrHover.label }}</strong><span><em>年化订阅</em><b>{{ arrHover.annualizedText }}</b></span><span><em>买断</em><b>{{ arrHover.buyoutText }}</b></span><span><em>占比</em><b>{{ arrHover.ratioText }}</b></span></div>
-              <span v-for="point in arrData(arrCard).filter((item) => item.ratio !== null)" :key="point.key" class="payment-record-chart__arr-label" :data-testid="`payment-chart-arr-label-${point.key}`" :style="{ left: arrLabelLeft(point.index, arrCard.buckets.length), top: arrLabelTop(point.ratio ?? 0) }">{{ point.ratio }}%</span>
+              <div v-if="arrHover" class="payment-record-chart__arr-tooltip" :style="arrHoverStyle" data-testid="payment-chart-arr-tooltip"><strong>{{ arrHover.label }}</strong><span><em>年化订阅</em><b>{{ arrHover.annualizedText || '未定义' }}</b></span><span><em>买断</em><b>{{ arrHover.buyoutText || '未定义' }}</b></span><span><em>占比</em><b>{{ arrHover.ratioText || '未定义' }}</b></span></div>
+              <span v-for="point in arrData.filter((item) => item.ratio !== null)" :key="point.key" class="payment-record-chart__arr-label" :data-testid="`payment-chart-arr-label-${point.key}`" :style="{ left: arrLabelLeft(point.index, arrData.length), top: arrLabelTop(point.ratio ?? 0) }">{{ point.ratio }}%</span>
             </div>
-            <ChartBucketActionList
-              :actions="arrActions(arrCard)"
-              test-id-prefix="payment-chart-arr"
-              :aria-label="arrCard.title"
-              class="payment-record-chart__month-actions"
-              @activate="openArr($event.datum)"
-            />
+            <p class="payment-record-chart__arr-explanation">未定义：该月份没有可比较的有效 ARR 金额，不代表 0% 或系统报错。</p>
           </template>
         </ChartCardFrame>
-    </template>
-    <template #overlays>
-      <ChartBucketDialog
-        :open="dialogOpen"
-        :title="selectedBucket?.label ?? '回款'"
-        :description="`${selectedCard?.title ?? ''} · 共 ${dialogTotal} 笔`"
-        :loading="bucketLoading || awaitingPage"
-        :error="bucketError || null"
-        :has-items="dialogItems.length > 0"
-        :reset-key="resetToken"
-        test-id-prefix="payment-chart"
-        class="max-w-lg"
-        @update:open="handleDialogChange"
-        @retry="retryBucket"
-      >
-        <template #loading>正在读取这一段回款…</template>
-        <template #error>{{ bucketError }}</template>
-        <template #empty>这一段没有回款。</template>
-        <template #items>
-          <div class="payment-record-chart__dialog-list">
-            <button v-for="item in dialogItems" :key="item.id" type="button" @click="emit('open-record', item.id)">
-              <span><strong>{{ item.record_number || `#${item.id}` }}</strong><small>{{ item.customer_name || '未关联客户' }} · {{ item.payment_date || '-' }}</small></span>
-              <span>{{ formatCurrency(item.amount) }}</span>
-            </button>
-          </div>
-        </template>
-        <template #footer>
-          <Button v-if="fullRecordsMatch && dialogItems.length < dialogTotal" type="button" variant="outline" size="sm" data-testid="payment-chart-view-more" :disabled="bucketLoading" @click="emit('load-more')">{{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}</Button>
-        </template>
-      </ChartBucketDialog>
-    </template>
+      </template>
+      <template #overlays>
+        <ChartBucketDialog
+          :open="dialogOpen"
+          :title="selectedBucket?.label ?? '回款'"
+          :description="`${selectedCard?.title ?? ''} · 共 ${dialogTotal} 笔`"
+          :loading="bucketLoading || awaitingPage"
+          :error="bucketError || null"
+          :has-items="dialogItems.length > 0"
+          :reset-key="resetToken"
+          test-id-prefix="payment-chart"
+          class="max-w-lg"
+          @update:open="handleDialogChange"
+          @retry="retryBucket"
+        >
+          <template #loading>正在读取这一段回款…</template>
+          <template #error>{{ bucketError }}</template>
+          <template #empty>这一段没有回款。</template>
+          <template #items>
+            <div class="payment-record-chart__dialog-list">
+              <button v-for="item in dialogItems" :key="item.id" type="button" @click="emit('open-record', item.id)">
+                <span><strong>{{ item.record_number || `#${item.id}` }}</strong><small>{{ item.customer_name || '未关联客户' }} · {{ item.payment_date || '-' }}</small></span>
+                <span>{{ formatCurrency(item.amount) }}</span>
+              </button>
+            </div>
+          </template>
+          <template #footer>
+            <Button v-if="fullRecordsMatch && dialogItems.length < dialogTotal" type="button" variant="outline" size="sm" data-testid="payment-chart-view-more" :disabled="bucketLoading" @click="emit('load-more')">{{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}</Button>
+          </template>
+        </ChartBucketDialog>
+      </template>
   </ChartPageShell>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables-v2.scss' as *;
 
-.payment-record-chart__month-actions {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  margin-top: $wolf-space-md-v2;
+.payment-record-chart__arr-explanation {
+  margin-top: 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 14px;
 }
+
 
 .payment-record-chart__state {
   display: flex;
@@ -596,6 +625,7 @@ function retryBucket(): void {
 }
 
 
+.payment-record-chart__month-plot,
 .payment-record-chart__arr-plot {
   position: relative;
   height: 240px;
@@ -618,14 +648,6 @@ function retryBucket(): void {
   cursor: pointer;
 }
 
-.payment-record-chart__arr-label {
-  position: absolute;
-  color: $wolf-text-primary-v2;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  transform: translate(-50%, -170%);
-  white-space: nowrap;
-}
 
 .payment-record-chart__arr-tooltip {
   position: absolute;
@@ -652,10 +674,18 @@ function retryBucket(): void {
   justify-content: space-between;
   gap: 12px;
 }
-
 .payment-record-chart__arr-tooltip em {
   color: $wolf-text-tertiary-v2;
   font-style: normal;
+}
+
+.payment-record-chart__arr-label {
+  position: absolute;
+  color: $wolf-text-primary-v2;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transform: translate(-50%, -170%);
+  white-space: nowrap;
 }
 
 .payment-record-chart__donut-body {

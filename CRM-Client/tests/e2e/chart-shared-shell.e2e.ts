@@ -132,7 +132,10 @@ const paymentChart = {
     { key: 'license_type', title: '授权模式', description: '按授权模式汇总。', buckets: [bucket('SUBSCRIPTION', '订阅', 10, previewPayment(77, 'PAY202611020001')), bucket('PERPETUAL', '买断', 0, previewPayment(78, 'PAY202611020002'))] },
     { key: 'purchase_type', title: '采购类型', description: '按采购类型汇总。', buckets: [bucket('RENEWAL', '续购', 11, previewPayment(79, 'PAY202611020003'))] },
     { key: 'amount_band', title: '金额档', description: '按回款金额分档。', buckets: [bucket('100000_500000', '10万-50万', 11, previewPayment(80, 'PAY202611020004'))] },
-    { key: 'payment_month', title: '回款月份', description: '按回款月份汇总。', buckets: [bucket('2026-01', '2026年1月', 0, previewPayment(81, 'PAY202611020005'))] },
+    { key: 'payment_month', title: '回款月份', description: '按回款月份汇总。', buckets: [
+      bucket('2026-01', '2026年1月', 1, previewPayment(81, 'PAY202611020005')),
+      bucket('2026-02', '2026年2月', 0, previewPayment(84, 'PAY202611020008'), 0),
+    ] },
     { key: 'arr_ratio', title: 'ARR 比例', description: '按 ARR 比例汇总。', buckets: [
       { ...bucket('2026-10', '2026年10月', 11, previewPayment(82, 'PAY202611020006')), plotted_ratio: null, annualized_subscription: null, buyout_amount: 0 },
       { ...bucket('2026-11', '2026年11月', 11, previewPayment(83, 'PAY202611020007')), plotted_ratio: 0, annualized_subscription: 0, buyout_amount: 0 },
@@ -526,39 +529,77 @@ test.describe('fixture-backed chart shared shell regression', () => {
     await expect(unscheduled).toBeFocused()
   })
 
-  test('payments: zero-count month opens while ARR null cannot open and zero percent can', async ({ page }) => {
+  test('payments: month and ARR details use hover while chart clicks preserve drill-down', async ({ page }) => {
     const state: FixtureState = { requests: [], chartFailures: {}, bucketFailures: {} }
     await installApi(page, state)
     await page.setViewportSize({ width: 1440, height: 1200 })
     await page.goto('/payments/records')
     await page.getByRole('tab', { name: '图表', exact: true }).click()
-    const zeroMonth = page.getByTestId('payment-chart-month-2026-01')
-    await expect(zeroMonth).toBeEnabled()
-    await zeroMonth.focus()
-    await zeroMonth.press('Enter')
+
+    const monthCard = page.getByTestId('payment-chart-card-payment_month')
+    const monthPlot = monthCard.locator('.payment-record-chart__month-plot')
+    await expect(monthCard).toBeVisible()
+    await expect(monthCard.locator('[data-testid^="payment-chart-month-"]:not([data-testid="payment-chart-month-tooltip"])')).toHaveCount(0)
+    await monthPlot.hover({ position: { x: 48, y: 100 } })
+    const monthTooltip = page.getByTestId('payment-chart-month-tooltip')
+    await expect(monthTooltip).toContainText('2026年1月')
+    await expect(monthTooltip).toContainText('1 笔')
+    await expect(monthTooltip).toContainText('¥120,000.00')
+    const monthArea = monthPlot.locator('path[class*="area"]').first()
+    await expect(monthArea).toBeVisible()
+    const areaBounds = await monthArea.boundingBox()
+    if (!areaBounds) throw new Error('missing payment month area bounds')
+    await monthArea.click({ position: { x: 8, y: areaBounds.height - 12 } })
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
     expect(state.requests.filter((request) => request.pathname.endsWith('/chart/records')).at(-1)?.query).toMatchObject({ chart: 'payment_month', bucket: '2026-01' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(zeroMonth).toBeFocused()
+
+    await monthArea.evaluate((path) => {
+      const plot = path.closest<HTMLElement>('.payment-record-chart__month-plot')
+      if (!plot) throw new Error('missing month plot')
+      const bounds = plot.getBoundingClientRect()
+      path.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: bounds.right - 17, clientY: bounds.bottom - 20, view: window }))
+    })
+    await expect(dialog).toBeVisible()
+    expect(state.requests.filter((request) => request.pathname.endsWith('/chart/records')).at(-1)?.query).toMatchObject({ chart: 'payment_month', bucket: '2026-02' })
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+
+    const requestsBeforeBackgroundClick = state.requests.filter((request) => request.pathname.endsWith('/chart/records')).length
+    await monthPlot.click({ position: { x: 4, y: 4 } })
+    await expect(dialog).toHaveCount(0)
+    expect(state.requests.filter((request) => request.pathname.endsWith('/chart/records')).length).toBe(requestsBeforeBackgroundClick)
 
     const arrCard = page.getByTestId('payment-chart-card-arr_ratio')
-    const nullRatio = page.getByTestId('payment-chart-arr-2026-10')
-    const zeroRatio = page.getByTestId('payment-chart-arr-2026-11')
-    await expect(nullRatio).toBeDisabled()
-    await expect(zeroRatio).toBeEnabled()
-    await expect(page.getByTestId('payment-chart-arr-label-2026-10')).toHaveCount(0)
-    await expect(page.getByTestId('payment-chart-arr-label-2026-11')).toHaveText('0%')
-    await zeroRatio.focus()
-    await zeroRatio.press('Enter')
+    const arrPlot = arrCard.locator('.payment-record-chart__arr-plot')
+    await expect(arrCard.locator('[data-testid^="payment-chart-arr-"]:not([data-testid="payment-chart-arr-tooltip"]):not([data-testid^="payment-chart-arr-label-"])')).toHaveCount(0)
+    await expect(arrCard.locator('.payment-record-chart__arr-label')).toHaveCount(1)
+    await expect(arrCard.getByTestId('payment-chart-arr-label-2026-11')).toHaveText('0%')
+    const bounds = await arrPlot.boundingBox()
+    if (!bounds) throw new Error('missing ARR bounds')
+    await arrPlot.hover({ position: { x: 48, y: 100 } })
+    const arrTooltip = page.getByTestId('payment-chart-arr-tooltip')
+    await expect(arrTooltip).toContainText('2026年10月')
+    await expect(arrTooltip).toContainText('年化订阅')
+    await expect(arrTooltip).toContainText('买断')
+    await expect(arrTooltip).toContainText('占比')
+    await expect(arrTooltip).toContainText('未定义')
+    const requestsBeforeNullClick = state.requests.filter((request) => request.pathname.endsWith('/chart/records')).length
+    await arrPlot.click({ position: { x: 48, y: 100 } })
+    expect(state.requests.filter((request) => request.pathname.endsWith('/chart/records')).length).toBe(requestsBeforeNullClick)
+
+    await arrPlot.hover({ position: { x: bounds.width - 8, y: 100 } })
+    await expect(arrTooltip).toContainText('2026年11月')
+    await expect(arrTooltip).toContainText('0%')
+    await arrPlot.click({ position: { x: bounds.width - 8, y: 100 } })
     await expect(dialog).toBeVisible()
     expect(state.requests.filter((request) => request.pathname.endsWith('/chart/records')).at(-1)?.query).toMatchObject({ chart: 'arr_ratio', bucket: '2026-11' })
     await expect(dialog.getByText('PAY001', { exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
-    await expect(zeroRatio).toBeFocused()
-    await expect(arrCard).toBeVisible()
+    await expect(page.getByTestId('payment-chart-card-arr_ratio')).toBeVisible()
   })
 
   test('contracts: selected status and applied search reach chart and bucket requests', async ({ page }) => {

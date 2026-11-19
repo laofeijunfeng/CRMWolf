@@ -14,7 +14,7 @@ vi.mock('@unovis/vue', () => ({
   VisSingleContainer: { name: 'VisSingleContainer', template: '<div><slot /></div>' },
   VisDonut: { name: 'VisDonut', template: '<div />' },
   VisXYContainer: { name: 'VisXYContainer', template: '<div><slot /></div>' },
-  VisArea: { name: 'VisArea', template: '<div />' },
+  VisArea: { name: 'VisArea', props: ['events'], template: '<div />' },
   VisLine: { name: 'VisLine', template: '<div />' },
   VisScatter: { name: 'VisScatter', template: '<div />' },
   VisAxis: { name: 'VisAxis', template: '<div />' },
@@ -192,21 +192,99 @@ describe('PaymentRecordChartPage', () => {
     wrapper.unmount()
   })
 
-  it('opens a zero-payment month through its accessible bucket action', async () => {
-    const wrapper = mountChart()
-    const action = wrapper.get('[data-testid="payment-chart-month-2026-01"]')
+  it('removes fixed month action lists while preserving ARR curve labels', () => {
+    const wrapper = mountChart({
+      ...chart,
+      cards: [...chart.cards, {
+        key: 'arr_ratio', title: 'ARR 占比', description: '',
+        buckets: [{ ...bucket('2026-01', '1月', 1, 200000), plotted_ratio: 53 }],
+      }],
+    })
 
-    expect(action.attributes('disabled')).toBeUndefined()
-    await action.trigger('click')
+    expect(wrapper.find('[data-testid^="payment-chart-month-"]:not([data-testid="payment-chart-month-tooltip"])').exists()).toBe(false)
+    expect(wrapper.find('[data-testid^="payment-chart-arr-"]:not([data-testid="payment-chart-arr-tooltip"]):not([data-testid^="payment-chart-arr-label-"])').exists()).toBe(false)
+    expect(wrapper.find('.payment-record-chart__month-actions').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-01"]').text()).toBe('53%')
+    wrapper.unmount()
+  })
+
+  it('shows month, count, and amount while hovering the payment month chart', async () => {
+    const months = emptyMonths()
+    months[0] = bucket('2026-01', '1月', 2, 125000)
+    const wrapper = mountChart({ ...chart, cards: chart.cards.map((card) => card.key === 'payment_month' ? { ...card, buckets: months } : card) })
+    const plot = wrapper.get('.payment-record-chart__month-plot')
+    vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
+
+    await plot.trigger('mousemove', { clientX: 48, clientY: 100 })
+
+    expect(wrapper.get('[data-testid="payment-chart-month-tooltip"]').text()).toContain('1月')
+    expect(wrapper.get('[data-testid="payment-chart-month-tooltip"]').text()).toContain('2 笔')
+    expect(wrapper.get('[data-testid="payment-chart-month-tooltip"]').text()).toContain('¥125,000.00')
+    wrapper.unmount()
+  })
+
+  it('opens a zero-payment month through the plotted area event', async () => {
+    const months = emptyMonths()
+    months[0] = bucket('2026-01', '1月', 0, 0)
+    months[1] = bucket('2026-02', '2月', 1, 125000)
+    const wrapper = mountChart({ ...chart, cards: chart.cards.map((card) => card.key === 'payment_month' ? { ...card, buckets: months } : card) })
+    const plot = wrapper.get('.payment-record-chart__month-plot')
+    vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
+    const area = wrapper.findAllComponents({ name: 'VisArea' })[0]
+    expect(area).toBeDefined()
+    const events = area?.props('events') as Record<string, { click: (datum: unknown, event: MouseEvent) => void }> | undefined
+    const target = document.createElement('path')
+    plot.element.append(target)
+    const event = new MouseEvent('click', { bubbles: true, clientX: 48, clientY: 100 })
+    Object.defineProperty(event, 'currentTarget', { value: target })
+    events?.['area']?.click([months[0]], event)
+    await wrapper.vm.$nextTick()
+
     expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
       { key: 'payment_month' },
       { key: '2026-01', count: 0 },
     ])
+    wrapper.unmount()
+  })
 
-    await wrapper.setProps({
-      bucketRecords: { chart: 'payment_month', bucket: '2026-01', total: 0, records: [] },
+  it('shows all ARR details while hovering an undefined month', async () => {
+    const wrapper = mountChart({
+      ...chart,
+      cards: [...chart.cards, {
+        key: 'arr_ratio', title: 'ARR 占比', description: '',
+        buckets: [{ ...bucket('2026-01', '1月', 0, 0), plotted_ratio: null }, { ...bucket('2026-02', '2月', 1, 200000), plotted_ratio: 0 }],
+      }],
     })
-    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('这一段没有回款。')
+    const plot = wrapper.get('.payment-record-chart__arr-plot')
+    vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
+
+    await plot.trigger('mousemove', { clientX: 48, clientY: 100 })
+
+    const tooltip = wrapper.get('[data-testid="payment-chart-arr-tooltip"]')
+    expect(tooltip.text()).toContain('1月')
+    expect(tooltip.text()).toContain('未定义')
+    wrapper.unmount()
+  })
+
+  it('opens only defined ARR months, including a valid zero percent', async () => {
+    const wrapper = mountChart({
+      ...chart,
+      cards: [...chart.cards, {
+        key: 'arr_ratio', title: 'ARR 占比', description: '',
+        buckets: [{ ...bucket('2026-01', '1月', 0, 0), plotted_ratio: null }, { ...bucket('2026-02', '2月', 1, 200000), plotted_ratio: 0 }],
+      }],
+    })
+    const plot = wrapper.get('.payment-record-chart__arr-plot')
+    vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
+
+    await plot.trigger('click', { clientX: 48, clientY: 100 })
+    expect(wrapper.emitted('view-bucket')).toBeUndefined()
+    await plot.trigger('click', { clientX: 248, clientY: 100 })
+    expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
+      { key: 'arr_ratio' },
+      { key: '2026-02', plotted_ratio: 0 },
+    ])
+    wrapper.unmount()
   })
 
   it('renders paged record details and keeps loaded rows during load-more errors', async () => {
@@ -241,80 +319,43 @@ describe('PaymentRecordChartPage', () => {
     expect(document.body.querySelector('[data-testid="payment-chart-view-more"]')?.textContent).toContain('读取更多失败')
   })
 
-  it('ignores undefined ARR months but opens a defined zero-percent month', async () => {
+  it('shows defined ARR values in the hover detail', async () => {
     const wrapper = mountChart({
       ...chart,
       cards: [...chart.cards, {
         key: 'arr_ratio', title: 'ARR 占比', description: '',
-        buckets: [bucket('2026-01', '1月', 0, 0), { ...bucket('2026-02', '2月', 1, 200000), plotted_ratio: 0 }],
+        buckets: [{
+          ...bucket('2026-01', '1月', 1, 200000),
+          plotted_ratio: 53,
+          annualized_subscription: 100000,
+          buyout_amount: 200000,
+        }],
       }],
     })
     const plot = wrapper.get('.payment-record-chart__arr-plot')
     vi.spyOn(plot.element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 256, 240))
 
-    await plot.trigger('click', { clientX: 48, clientY: 100 })
-    expect(wrapper.emitted('view-bucket')).toBeUndefined()
-    await plot.trigger('click', { clientX: 248, clientY: 100 })
-    expect(wrapper.emitted('view-bucket')?.[0]).toMatchObject([
-      { key: 'arr_ratio' }, { key: '2026-02', plotted_ratio: 0 },
-    ])
+    await plot.trigger('mousemove', { clientX: 48, clientY: 100 })
+
+    const tooltip = wrapper.get('[data-testid="payment-chart-arr-tooltip"]')
+    expect(tooltip.text()).toContain('1月')
+    expect(tooltip.text()).toContain('¥ 10 万')
+    expect(tooltip.text()).toContain('¥ 20 万')
+    expect(tooltip.text()).toContain('53%')
+    wrapper.unmount()
   })
 
-  it('places the ARR card under the month chart and labels only defined months', async () => {
-    const months = Array.from({ length: 12 }, (_item, index) => {
-      const key = `2026-${String(index + 1).padStart(2, '0')}`
-      const label = `${index + 1}月`
-      if (index === 1) return bucket(key, label, 0, 0)
-      if (index === 3) {
-        return {
-          ...bucket(key, label, 0, 200000),
-          plotted_ratio: 0,
-          annualized_subscription: 0,
-          buyout_amount: 200000,
-        }
-      }
-      if (index === 9) {
-        return {
-          ...bucket(key, label, 4, 720000),
-          plotted_ratio: 57,
-          annualized_subscription: 260000,
-          buyout_amount: 200000,
-        }
-      }
-      return {
-        ...bucket(key, label, 1, 100000),
-        plotted_ratio: 40,
-        annualized_subscription: 100000,
-        buyout_amount: 150000,
-      }
-    })
-    const withArr: PaymentRecordChartResponse = {
+  it('keeps the month and ARR cards ordered without persistent month details', () => {
+    const wrapper = mountChart({
       ...chart,
-      cards: [
-        ...chart.cards,
-        {
-          key: 'arr_ratio',
-          title: 'ARR 占比',
-          description: '和回款月份同一种面积加线。纵轴是占比。没有回款的月份也连过去，不写成 0%。只有买断落到 0%。',
-          buckets: months,
-        },
-      ],
-    }
-    const wrapper = mountChart(withArr)
+      cards: [...chart.cards, { key: 'arr_ratio', title: 'ARR 占比', description: '', buckets: [] }],
+    })
     const month = wrapper.get('[data-testid="payment-chart-card-payment_month"]')
     const arr = wrapper.get('[data-testid="payment-chart-card-arr_ratio"]')
     expect(month.element.compareDocumentPosition(arr.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(arr.text()).toContain('ARR 占比')
-    expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-04"]').text()).toBe('0%')
-    expect(wrapper.get('[data-testid="payment-chart-arr-label-2026-10"]').text()).toBe('57%')
-    expect(wrapper.find('[data-testid="payment-chart-arr-label-2026-02"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="payment-chart-arr-2026-04"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-testid="payment-chart-arr-2026-02"]').attributes('disabled')).toBeDefined()
-    await wrapper.get('[data-testid="payment-chart-arr-2026-04"]').trigger('click')
-    const viewBuckets = wrapper.emitted('view-bucket') ?? []
-    expect(viewBuckets[viewBuckets.length - 1]).toMatchObject([
-      { key: 'arr_ratio' }, { key: '2026-04', plotted_ratio: 0 },
-    ])
+    expect(arr.find('.payment-record-chart__month-actions').exists()).toBe(false)
+    expect(arr.find('.payment-record-chart__arr-label').exists()).toBe(false)
     wrapper.unmount()
   })
 })
