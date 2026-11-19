@@ -1,3 +1,5 @@
+> 历史需求，规则以 design-system 为准
+
 # P1-PKG-01 财务与高风险操作风险验证 TRD
 
 - **文档类型**：Technical Requirements Document（技术需求文档）

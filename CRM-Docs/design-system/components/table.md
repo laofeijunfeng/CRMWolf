@@ -24,3 +24,19 @@
 排序、选择、展开和行级操作必须有可理解的名称、状态和键盘路径。桌面 DataTable 不恢复完整的多按钮操作列；行尾保留紧凑操作区，仅显示当前状态下最多两个主操作及可见的「更多」按钮。右键和键盘菜单键 / Shift+F10 作为同一套操作的快捷入口。查看详情由行点击承担，高风险操作必须通过明确入口进入统一确认流程。遵循[无障碍](../foundations/accessibility.md)的表格语义、焦点和动态反馈规则。
 
 窄视口优先保留任务所需列，行操作改到卡片底部，不依赖桌面操作列。超出空间时仅表格容器可横向滚动，页面主体不得横向滚动。遵循[响应式与移动端](../foundations/responsive-mobile.md)。悬停与状态变化遵循[动效与性能](../foundations/motion-performance.md)。
+
+## 数值引用
+
+表格行与表头最小高度、单元格内边距、行悬停 `--wash-hover`、选中 `--wash-selected` 均见[令牌数值](../foundations/token-values.md#间距与布局)；数值列用 `tabular-nums`（或 `td[data-numeric]`）。行尾仅图标按钮只限编辑、更多、删除等通用动作，必须带 `aria-label`，见[按钮](button.md)。
+
+## 实现契约
+
+页面表格只用 crmwolf `DataTable`；`ui/table` 为受限原件，见[受限原件](registry.md#受限原件)。
+
+- **字段：**`fields`（列、筛选、排序、字段配置的唯一来源）、`data`、`rowKey`、`total`、`page`、`pageSize`。不再接收 `columns`、`filterFields`、`sortFields`。
+- **读取状态：**优先 `viewState`（loading / error / empty / ready）配合 `loadError`、`emptyReason`；`loading` 布尔值仅为兼容。空、错、加载由内置的 [DataViewStatePanel](data-view-state-panel.md) 呈现，页面不另写状态块。
+- **行操作：**`getRowActions` 返回当前行动作集，同时驱动行尾操作区与右键 / 键盘菜单；`rowInteractive` + `row-click` 承担查看详情。
+- **筛选、排序、搜索、视图：**`filters`·`sorts`·`search` 受控，配合 `update:filters`、`filter-apply`、`update:sorts`、`sort-apply`、`update:search`、`search-apply` 等事件；字段配置走 `viewKey`、`columnConfigEnabled`。
+- **高度与滚动：**新页面用 `heightStrategy` 与 `scrollMode`，不写固定 `height`。
+- **插槽：**`cell-<key>`（`row`、`value`）、`mobile-card`、`mobile-actions`、`tableTools`、`replacement`。
+- **分页与选择：**`update:page`、`update:page-size`、`update:selectedRowKeys`；`retry` 由失败状态触发。

@@ -20,10 +20,10 @@
 
 颜色遵循[颜色令牌](../foundations/color-tokens.md)。圆角、阴影和叠放遵循[圆角与层级](../foundations/radius-elevation.md)：
 
-- Menu 与 Panel 使用 overlay 圆角和 overlay 阴影。
-- Tooltip 使用控件圆角和 hover 阴影。
-- Modal 使用 overlay 圆角和 modal 阴影。
-- 只有向上展开的底部面板才使用 dropdown 阴影。
+- Menu 与 Panel 使用 `--radius-xl` 与 `--shadow-2`；Menu 最小宽度 `--menu-min-width`。
+- Tooltip 使用 `--radius-md` 与 `--shadow-2`。
+- Modal 使用 `--radius-xl` 与 `--shadow-3`。
+- 数值见[令牌数值](../foundations/token-values.md#圆角与阴影)。
 
 Menu 容器使用紧凑内边距；Panel 容器内边距为 0 时，内部 chrome 使用模块内间距。标题使用正文半粗，菜单项使用正文中等，辅助信息使用说明字号，均见[排版](../foundations/typography.md)。图标使用 `--icon-sm`，与文字间距使用关联元素间距。
 

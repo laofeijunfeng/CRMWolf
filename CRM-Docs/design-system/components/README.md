@@ -8,6 +8,7 @@
 | [按钮](button.md) | 触发明确操作。 |
 | [输入](input.md) | 收集、校验和反馈输入。 |
 | [表格](table.md) | 展示信息密集型数据。 |
+| [数据视图状态面板](data-view-state-panel.md) | 加载、失败与空状态。 |
 | [卡片](card.md) | 分组独立内容。 |
 | [列表卡片](list-card.md) | 展示紧凑、可操作的同类型列表项。 |
 | [徽标](badge.md) | 展示短文本元信息。 |
@@ -19,6 +20,8 @@
 | [状态徽标](status-badge.md) | 表达业务状态。 |
 | [浮层表面](overlay.md) | 统一菜单、面板、提示和模态外壳。 |
 | [模态框与抽屉](modal-sheet.md) | 承载临时上下文任务。 |
+| [详情抽屉](detail-sheet.md) | 页面级详情与编辑抽屉。 |
+| [确认对话框](confirm-dialog.md) | 确认、删除与放弃更改。 |
 | [审批通知](approval-notification.md) | 审批入口和待办语义。 |
 
 页面如何组合这些组件见[页面模式](../patterns/README.md)。

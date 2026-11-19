@@ -1,3 +1,5 @@
+> 历史需求，规则以 design-system 为准
+
 # P1-PKG-02 统一任务状态与结果反馈 TRD
 
 - **文档类型**：Technical Requirements Document（技术需求文档）

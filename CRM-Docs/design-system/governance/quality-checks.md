@@ -59,7 +59,7 @@ node CRM-Docs/scripts/check-design-system-docs.js
 | 孤儿代码行数 | 约 5,443 | 约 5,443 | 0 |
 | 手拼表单的 views | 20 | 20 | 0 或已登记 |
 | 详情浮层轨数 | 4 | — | 1（detail-sheet） |
-| 弹窗宽度不同取值 | 约 20 | — | ≤ 5 |
+| 弹窗宽度不同取值 | 约 20 | 5（sm·md·lg·xl·full） | ≤ 5 |
 | views 私有 CSS 行数 | 3,118 | — | 下降 ≥ 50% |
 | 任意 px 字号 | 26 | — | 0 或已登记 |
 | 有契约文档的 crmwolf 组件 | 0 / 51 | 6 | 全部 stable 件 |
@@ -67,4 +67,4 @@ node CRM-Docs/scripts/check-design-system-docs.js
 | 过期迁移文档 | 4 | 0 | 0 |
 | `lint:design-system:all` | 未启用 | 增量通过 | 返回 0 |
 
-每次阶段验收另记三项：任意值类名数量、裸 px 字号数量、正文使用 `--font-size-control-sm` 的数量。只采样亮色主题。
+每次阶段验收另记三项：任意值类名数量、裸 px 字号数量、正文使用 `--font-size-control-sm` 的数量。

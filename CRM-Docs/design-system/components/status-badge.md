@@ -23,6 +23,7 @@
 
 ## 实现契约
 
+- 组件属性：`status`（原始值）、`type`（领域，缺省 generic）、`size`（default / small）；渲染为 `Badge variant="status"` 并输出 `data-tone`、`role="status"` 与 `aria-label`。ApprovalStatusBadge 为审批领域的带图标版本，规则相同。
 - 状态展示映射的唯一来源是 `CRM-Client/src/utils/statusPresentation.ts`。页面和面板只做 API 值到领域 key 的适配，不复制文案或颜色表。
 - `invoiceApplication`、`licenseApplication` 与 `approval` 是相互独立的领域。申请的“已批准”与通用审批的“已通过”共享 success 语义，但不合并业务枚举。
 - 未知状态显示“未知状态”，使用 neutral 语义，并通过 `title`、`data-status-domain` 和 `data-status-value` 保留原始值；不得回退成合法状态。属性类动态来源、行业名称继续显示原值。

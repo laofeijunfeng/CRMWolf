@@ -19,8 +19,7 @@
 | `--border` / `--input` | `#e2e8f0` | 描边与输入框边框。 |
 | `--primary` | `#17191b` | 主操作按钮。 |
 | `--brand` | `#0472c3` | 链接、活动导航、选中、品牌标识。 |
-| `--ring` | `= --brand` | 全局焦点环，50% 不透明度。 |
-| 焦点轮廓 | `2px` 实线，外偏移 `2px` | `*:focus-visible` 全站唯一焦点样式。 |
+| `--ring` / 焦点轮廓 | `= --brand` / `2px` 实线，外偏移 `2px` | 全局焦点环，50% 不透明度；`*:focus-visible` 全站唯一焦点样式。 |
 | `--ring-input` | `#1f8aff` | 输入与选择控件获焦边框。 |
 | `--accent` | `#f5f5f6` | 白底上的悬停等值色。 |
 | `--wash-hover` / `--wash-selected` | 前景色 4% / 8% 半透明 | 行悬停 / 选中；叠白 = `#f5f5f6` / `#ebebec`。 |
@@ -68,7 +67,9 @@
 | `text-display` / `var(--font-size-display)` | `24/32px · 600` | 展示标题。 |
 | `text-title` / `var(--font-size-title)` | `18/28px · 600` | 页面主标题、浮层标题（Dialog/Sheet/AlertDialog）。 |
 | `text-body-strong` / `var(--font-size-body-strong)` | `16/24px · 500` | 区块标题、卡片标题。 |
-| `text-body` / `var(--font-size-body)` | `14/20px · 400` | 正文；sm 控件内文字 13px（`var(--font-size-control-sm)`）。scoped SCSS 字号必须用 `var(--font-size-*)` / `var(--line-height-*)`，不得写裸 px。Label 与列表主字段用 body + `font-medium`。 |
+| `text-body` / `var(--font-size-body)` | `14/20px · 400` | 正文；正文不得使用 13px。scoped SCSS 字号必须用 `var(--font-size-*)` / `var(--line-height-*)`，不得写裸 px。Label 与列表主字段用 body + `font-medium`。 |
+| `var(--font-size-control-sm)` | `13px` | 仅限 sm 控件内文字（筛选栏、工具栏、Tabs），不得用于正文。 |
+| 数值列 / 正文行长 | `tabular-nums` / ≤ 72 字符 | 金额、数量、日期列等宽数字（`td[data-numeric]` 自动生效）/ 说明、帮助文字等长段落最大行长。 |
 | `text-caption` / `var(--font-size-caption)` | `12/16px · 400` | 次要备注。 |
 | `--disabled-opacity` | `0.5` | 所有禁用态。 |
 
@@ -89,11 +90,11 @@
 | `$space-1/2/3/4/6/8`（Tailwind `*-space-N` 档，如 `p-space-1`） | `4` / `8` / `12` / `16` / `24` / `32px` | 间距尺度。根字号 14px 下 Tailwind rem 档（`p-1`、`gap-2`）会缩放为 3.5 / 7px，新代码不得使用。 |
 | `--page-padding` | `24px`（<768px 为 `16px`） | 页面内边距，含列表页顶部。 |
 | `--sidebar-width` | `220px` | 桌面侧栏宽度。 |
-| `--topbar-height` / `--bottom-nav-height` | `56px` / `56px` | 顶栏 / 移动端底部导航。 |
-| `--context-tabs-height` | `36px` | 上下文标签栏。 |
+| `--topbar-height` / `--bottom-nav-height` / `--context-tabs-height` | `56px` / `56px` / `36px` | 顶栏 / 移动端底部导航 / 上下文标签栏。 |
 | 卡片内边距 / 卡片间距 / 模块间距 | `$space-4` / `$space-4` / `$space-6`（移动端 `$space-3` / `$space-4` / `$space-4`） | 容器节奏。 |
 | 表格行 / 表头最小高度 | `44px` | 数据表格。 |
+| 列表 / 菜单行高 | `36px`（单行）/ `52px`（双行） | 菜单项、紧凑列表行；双行含主次两行文字。 |
+| 标签与控件间距 / 字段组间距 | `8px` / `16px` | 表单 Label 与控件、相邻字段组。 |
 | 表格单元格内边距 | 纵 `12px` / 横 `8px`（移动端 `8px 4px`） | 数据表格。 |
 | `$bp-xs/sm/md/lg` | `375` / `768` / `1024` / `1440px` | 断点，与 Tailwind `screens` 一致。 |
-| `--safe-top` / `--safe-bottom` | `env(safe-area-inset-top/bottom, 0px)` | 安全区域。 |
-| 移动端视口高度 | `min(100vh, 100dvh)` | 动态视口。 |
+| `--safe-top` / `--safe-bottom`；移动端视口高度 | `env(safe-area-inset-top/bottom, 0px)`；`min(100vh, 100dvh)` | 安全区域；动态视口。 |

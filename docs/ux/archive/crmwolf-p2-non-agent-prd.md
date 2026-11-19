@@ -1,3 +1,5 @@
+> 历史需求，规则以 design-system 为准
+
 # CRMWolf 非 Agent P2 UX 优化 PRD
 
 - **文档状态**：PRD 初稿，基于当前代码审计整理，待产品、设计、研发和业务负责人评审

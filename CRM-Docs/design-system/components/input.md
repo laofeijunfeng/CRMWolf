@@ -19,6 +19,16 @@
 
 ## 响应式与视觉
 
-表单输入、选择、日期选择和同等数据录入控件桌面默认使用 md 高度（`--control-h-md`），行内用 xs、紧凑场景用 sm、强调场景用 lg，由组件 `size` 声明，不得在业务表单中局部手写高度。窄视口下统一抬高到 `--touch-target`，保证弹窗、Sheet 和表单页的可点区域。数值见[令牌数值](../foundations/token-values.md#控件与版式)。
+表单输入、选择、日期选择和同等数据录入控件桌面默认使用 md 高度（`--control-h-md`），列表筛选栏与工具栏内的字段统一用 sm，行内用 xs、强调场景用 lg，由组件 `size` 声明，不得在业务表单中局部手写高度。窄视口下统一抬高到 `--touch-target`，保证弹窗、Sheet 和表单页的可点区域。数值见[令牌数值](../foundations/token-values.md#控件与版式)。
 
 字段间距遵循[间距与布局](../foundations/spacing-layout.md)，圆角遵循[圆角与层级](../foundations/radius-elevation.md)。窄视口的输入文字和可触达尺寸遵循[排版](../foundations/typography.md)与[响应式与移动端](../foundations/responsive-mobile.md)。状态过渡和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
+
+## 实现契约
+
+页面表单只用 crmwolf `InputField`、`SelectField`、`TextareaField`、`DateField`、`SearchableSelectField`；`ui/form` 只在 Field 内部使用，页面不得直接导入，见[受限原件](registry.md#受限原件)。
+
+- **共同属性：**`modelValue`、`id`、`label`、`placeholder`、`helperText`、`error`、`required`、`disabled`、`class`；单行、多行、日期另有 `controlClass`，两种选择另有 `triggerClass`、`contentClass`。`controlClass` 等只用于布局，不得改高度、圆角或字号。
+- **值类型：**InputField / TextareaField 为字符串或数字，DateField 为 `Date | null`，两种选择均回传字符串。
+- **事件：**全部发出 `update:modelValue`；SelectField 另有 `add`（配合 `addActionLabel`、`addActionDisabled`）与 `ariaLabel`；SearchableSelectField 另有 `searchValue` / `update:searchValue`、`update:open`、`loading`、`emptyText`、`loadingText`、`searchPlaceholder`。
+- **校验：**用 vee-validate 的 `Field` 或 `defineField` 绑定值，把错误文本传给 `error`；有 `error` 时 `aria-describedby` 指向错误，否则指向 `helperText`。不得在页面手拼 Label + 控件 + 错误文本。
+- **选项：**`options` 为 `{ value, label, disabled?, disabledReason? }`；禁用项必须给出原因。

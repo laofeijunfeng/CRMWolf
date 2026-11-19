@@ -1,3 +1,5 @@
+> 历史需求，规则以 design-system 为准
+
 # CRMWolf 非 Agent P1 UX 改造 PRD
 
 - **文档状态**：PRD 初稿，待产品、设计、研发和业务负责人评审
@@ -387,7 +389,7 @@ CRMWolf 当前已经具备统一导航、DataTable、Dialog / Sheet、移动端�
 
 ## 12. 参考
 
-- `docs/ux/crmwolf-ux-problem-map.md`；
+- `docs/ux/archive/crmwolf-ux-problem-map.md`；
 - `docs/ux/crmwolf-ux-requirements.md`；
 - 飞书文档《UX 规范：基于〈Laws of UX〉的设计原则》及其子文档；
 - `CRM-Docs/design-system/` 相关设计系统、组件和无障碍规范；

@@ -31,7 +31,7 @@
 
 列表卡片使用[卡片](card.md)的基础层级：白色背景、圆角、轻量边框。标题栏与列表项之间以分隔线区分。
 
-标题栏包含标题文字和操作按钮（如"新建"），高度遵循[间距与布局](../foundations/spacing-layout.md)。列表项最小高度不低于 `--touch-target` 以满足触摸目标要求，内边距与标题栏保持一致节奏。
+标题栏包含标题文字和操作按钮（如"新建"），高度遵循[间距与布局](../foundations/spacing-layout.md)。列表项最小高度不低于 `--touch-target` 以满足触摸目标要求；宽视口单行 / 双行列表行高见[令牌数值](../foundations/token-values.md#间距与布局)的列表行高，悬停与选中用 `--wash-hover` / `--wash-selected`，内边距与标题栏保持一致节奏。
 
 列表项之间以轻量分隔线组织，不使用斑马纹背景。悬停仅用于可点击项的视觉反馈，使用[颜色令牌](../foundations/color-tokens.md)的语义背景色。
 

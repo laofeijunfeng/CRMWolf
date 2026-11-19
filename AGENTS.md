@@ -28,6 +28,7 @@ Use the default mattpocock triage label vocabulary. See `docs/agents/triage-labe
 ### Domain Docs
 
 This repo uses a single-context domain doc layout: root `CONTEXT.md` plus ADRs in `docs/adr/`. See `docs/agents/domain.md`.
+- `docs/ux` and `docs/superpowers` are process docs (requirements, plans, reports), not specs; rules live in `CRM-Docs/design-system`.
 
 ## Skill Operating Rules
 

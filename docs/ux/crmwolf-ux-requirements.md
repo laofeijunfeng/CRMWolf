@@ -275,6 +275,6 @@ P3 事项在 P1/P2 稳定后推进：
 ## 11. 参考
 
 - 飞书文档：《UX 规范：基于〈Laws of UX〉的设计原则》及其核心交互、体验视觉、复杂度性能、落地伦理子文档；
-- `docs/ux/crmwolf-ux-problem-map.md`；
+- `docs/ux/archive/crmwolf-ux-problem-map.md`；
 - `CRM-Docs/design-system/README.md` 及相关 patterns/components/migration 文档；
 - CRMWolf 前端当前实现：导航、DataTable、Customers、CustomerEdit、CustomerDetailSheet、Agent 和异步任务相关组件。

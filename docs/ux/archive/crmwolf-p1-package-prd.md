@@ -1,3 +1,5 @@
+> 历史需求，规则以 design-system 为准
+
 # CRMWolf P1 UX 改造包拆分 PRD（非 Agent）
 
 - **文档状态**：实施拆分版 PRD，待评审后进入 Issue / Ticket

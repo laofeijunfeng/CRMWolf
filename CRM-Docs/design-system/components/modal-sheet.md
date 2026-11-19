@@ -3,7 +3,7 @@
 - **用途：**在保留当前页面上下文时承载临时任务或补充内容。
 - **适用范围：**components 领域。
 - **权威性：**本主题是模态框、抽屉的任务边界与焦点管理的唯一事实来源。
-- **相关规范：**[组件索引](README.md) · [颜色令牌](../foundations/color-tokens.md) · [圆角与层级](../foundations/radius-elevation.md) · [浮层表面](overlay.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md) · [响应式与移动端](../foundations/responsive-mobile.md)
+- **相关规范：**[组件索引](README.md) · [确认对话框](confirm-dialog.md) · [详情抽屉](detail-sheet.md) · [颜色令牌](../foundations/color-tokens.md) · [圆角与层级](../foundations/radius-elevation.md) · [浮层表面](overlay.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md) · [响应式与移动端](../foundations/responsive-mobile.md)
 
 ## 选择承载方式
 
@@ -11,13 +11,15 @@
 
 每个浮层有明确标题、关闭方式和任务结果。不可逆操作说明影响并取得确认；提交期间避免关闭或重复提交造成数据不确定。关闭前应在必要时提示未保存内容。
 
-放弃未保存内容统一文案：标题「放弃未保存的更改？」，正文「关闭后，本次修改不会保存。」（离开页面时用「离开后，本次修改不会保存。」），确认「放弃更改」（destructive），取消「继续编辑」，默认焦点在「继续编辑」。
+放弃未保存内容一律调用 `confirmDiscardChanges`，文案与按钮见[确认对话框](confirm-dialog.md#放弃更改文案)；页面级详情抽屉用[详情抽屉](detail-sheet.md)。
+
+底栏每个区域只有一个主操作，危险操作用 destructive，取消在主操作左侧，见[按钮](button.md#变体与内容)。
 
 ## 焦点与层级
 
 打开后焦点进入浮层，交互范围保持在浮层内；关闭后焦点返回启动它的元素。可通过明确的关闭操作和键盘关闭，且不得只依赖点击遮罩。遵循[无障碍](../foundations/accessibility.md)的名称、焦点和动态反馈规则。
 
-颜色遵循[颜色令牌](../foundations/color-tokens.md)，圆角、遮罩和浮层层级遵循[圆角与层级](../foundations/radius-elevation.md)。外壳分档遵循[浮层表面](overlay.md)的 Modal。进入、退出和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
+颜色遵循[颜色令牌](../foundations/color-tokens.md)，圆角、遮罩和浮层层级遵循[圆角与层级](../foundations/radius-elevation.md)。外壳分档遵循[浮层表面](overlay.md)的 Modal：圆角 `--radius-xl`、阴影 `--shadow-3`。进入、退出和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
 
 ## 宽度
 
