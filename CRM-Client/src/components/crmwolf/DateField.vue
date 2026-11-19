@@ -41,10 +41,10 @@ const datePlaceholder = computed(() => props.placeholder ?? '选择日期')
 const isDisabled = computed(() => props.disabled === true)
 const descriptionId = computed(() => `${dateId.value}-description`)
 const errorId = computed(() => `${dateId.value}-error`)
+// 出错时保留说明文字的引用：用户最需要规则提示的正是校验失败时。
 const describedBy = computed(() => {
-  if (props.error) return errorId.value
-  if (props.helperText) return descriptionId.value
-  return undefined
+  const ids = [props.error && errorId.value, props.helperText && descriptionId.value].filter(Boolean)
+  return ids.length ? ids.join(' ') : undefined
 })
 </script>
 
@@ -61,13 +61,14 @@ const describedBy = computed(() => {
       :disabled="isDisabled"
       :aria-invalid="error !== ''"
       :aria-describedby="describedBy"
+      :aria-required="required || undefined"
       :class="cn('', controlClass)"
       @update:model-value="emit('update:modelValue', $event)"
     />
     <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
+    <p v-if="helperText" :id="descriptionId" :class="cn('m-0 text-caption text-muted-foreground', error && 'sr-only')">
       {{ helperText }}
     </p>
   </div>

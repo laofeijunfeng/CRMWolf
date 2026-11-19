@@ -75,10 +75,10 @@ const emit = defineEmits<{
 const selectId = computed(() => props.id ?? `searchable-select-field-${Math.random().toString(36).slice(2, 9)}`)
 const descriptionId = computed(() => `${selectId.value}-description`)
 const errorId = computed(() => `${selectId.value}-error`)
+// 出错时保留说明文字的引用：用户最需要规则提示的正是校验失败时。
 const describedBy = computed(() => {
-  if (props.error) return errorId.value
-  if (props.helperText) return descriptionId.value
-  return undefined
+  const ids = [props.error.trim() && errorId.value, props.helperText.trim() && descriptionId.value].filter(Boolean)
+  return ids.length ? ids.join(' ') : undefined
 })
 const normalizedValue = computed(() => props.modelValue === undefined || props.modelValue === null ? '' : String(props.modelValue))
 const normalizedSearchValue = computed(() => props.searchValue ?? '')
@@ -180,6 +180,7 @@ function handleOpenChange(value: boolean): void {
             :aria-expanded="comboboxOpen"
             :aria-invalid="error !== ''"
             :aria-describedby="describedBy"
+            :aria-required="required || undefined"
             :disabled="selectDisabled"
             :class="cn(
               'h-control min-h-control w-full justify-between rounded-sm border-border bg-card px-3 text-left text-body font-normal text-foreground shadow-none hover:bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
@@ -232,7 +233,7 @@ function handleOpenChange(value: boolean): void {
     <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="helperText" :id="descriptionId" class="m-0 text-caption text-muted-foreground">
+    <p v-if="helperText" :id="descriptionId" :class="cn('m-0 text-caption text-muted-foreground', error && 'sr-only')">
       {{ helperText }}
     </p>
   </div>
