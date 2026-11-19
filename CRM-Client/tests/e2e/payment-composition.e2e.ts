@@ -37,6 +37,7 @@ const paymentRecord = () => ({
   confirmation_status: 'PENDING',
   license_type: 'SUBSCRIPTION',
   purchase_type: 'RENEWAL',
+  contract_user_count: 100,
   customer_id: 'cus_xinghe',
   customer_name: '星河科技',
   contract_id: 3,
@@ -261,13 +262,110 @@ test('同一笔回款可以记下续购和增购', async ({ page }) => {
   await dialog.screenshot({ path: path.join(evidence, '03-register-balanced.png') })
 
   await page.goto('/payments/records')
-  await expect(page.getByRole('columnheader', { name: '续购人数' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: '100', exact: true })).toBeVisible()
-  await page.screenshot({ path: path.join(evidence, '04-record-list.png'), fullPage: true })
+  await expect(page.getByRole('columnheader', { name: '采购类型', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '采购人数', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '采购金额', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '回款金额', exact: true })).toBeVisible()
+  for (const title of ['续购人数', '续购金额', '增购人数', '增购金额']) {
+    await expect(page.getByRole('columnheader', { name: title, exact: true })).toHaveCount(0)
+  }
+  const recordRow = page.locator('tbody tr').filter({ hasText: 'PAY202611020001' })
+  await expect(recordRow).toHaveCount(1)
+  await expect(recordRow.locator('.payment-record-purchase-lines').nth(0)).toHaveText(/续购\s*增购/)
+  await expect(recordRow.locator('.payment-record-purchase-lines').nth(1)).toHaveText(/100\s*人\s*50\s*人/)
+  await expect(recordRow.locator('.payment-record-purchase-lines').nth(2)).toHaveText(/¥100,000\.00\s*¥50,000\.00/)
+  await expect(recordRow.getByText('¥150,000.00', { exact: true })).toHaveCount(1)
+  const purchaseTypeHeader = page.getByRole('columnheader', { name: '采购类型', exact: true })
+  const tableContent = page.locator('.data-table-content')
+  await purchaseTypeHeader.scrollIntoViewIfNeeded()
+  await tableContent.evaluate((content, title) => {
+    const header = Array.from(content.querySelectorAll('thead th')).find((candidate) => candidate.textContent?.trim() === title)
+    const fixedHeader = content.querySelector('thead th.fixed-left')
+    if (!(header instanceof HTMLElement) || !(fixedHeader instanceof HTMLElement)) {
+      throw new Error('无法定位采购类型或固定回款编号表头')
+    }
+    const contentRect = content.getBoundingClientRect()
+    const headerRect = header.getBoundingClientRect()
+    const targetContentLeft = headerRect.left - contentRect.left + content.scrollLeft
+    content.scrollLeft = Math.max(0, targetContentLeft - fixedHeader.getBoundingClientRect().width - 8)
+  }, '采购类型')
+  for (const title of ['采购类型', '采购人数', '采购金额', '回款金额']) {
+    await expect(page.getByRole('columnheader', { name: title, exact: true })).toBeInViewport()
+  }
+  const contentBox = await tableContent.boundingBox()
+  const fixedHeaderBox = await page.getByRole('columnheader', { name: '回款编号', exact: true }).boundingBox()
+  const purchaseHeaderBoxes = await Promise.all(
+    ['采购类型', '采购人数', '采购金额', '回款金额'].map((title) =>
+      page.getByRole('columnheader', { name: title, exact: true }).boundingBox(),
+    ),
+  )
+  if (contentBox === null || fixedHeaderBox === null || purchaseHeaderBoxes.some((box) => box === null)) {
+    throw new Error('采购列或固定回款编号列缺少可见几何边界')
+  }
+  const visiblePurchaseHeaderBoxes = purchaseHeaderBoxes.filter((box): box is NonNullable<typeof box> => box !== null)
+  expect(visiblePurchaseHeaderBoxes[0].x).toBeGreaterThanOrEqual(fixedHeaderBox.x + fixedHeaderBox.width - 1)
+  for (let index = 1; index < visiblePurchaseHeaderBoxes.length; index += 1) {
+    expect(visiblePurchaseHeaderBoxes[index].x).toBeGreaterThanOrEqual(visiblePurchaseHeaderBoxes[index - 1].x + visiblePurchaseHeaderBoxes[index - 1].width - 1)
+  }
+  expect(visiblePurchaseHeaderBoxes.at(-1)?.x ?? 0).toBeLessThanOrEqual(contentBox.x + contentBox.width + 1)
+  await tableContent.screenshot({ path: path.join(evidence, '04-record-list.png') })
+  for (const width of [1440, 1280]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.screenshot({ path: path.join(evidence, `04-record-list-aligned-${width}.png`), timeout: 10000 })
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  await page.goto('/payments/records')
+  const mobileCard = page.locator('.data-table-mobile-card').filter({ hasText: 'PAY202611020001' })
+  await expect(mobileCard).toHaveCount(1)
+  const mobilePurchases = mobileCard.locator('.payment-record-mobile-card-purchase')
+  await expect(mobilePurchases).toHaveCount(2)
+  await expect(mobilePurchases.nth(0)).toHaveText(/续购.*100\s*人.*¥100,000\.00/)
+  await expect(mobilePurchases.nth(1)).toHaveText(/增购.*50\s*人.*¥50,000\.00/)
+  await expect(mobileCard.getByText('¥150,000.00', { exact: true })).toHaveCount(1)
+  await page.screenshot({ path: path.join(evidence, '04-record-list-mobile.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 1440, height: 1200 })
+  await page.goto('/payments/records')
   await page.getByRole('table').getByText('PAY202611020001', { exact: true }).click()
   const sheet = page.getByRole('dialog').last()
   await expect(sheet.getByText('构成')).toBeVisible()
+  await expect(sheet.getByText('回款金额')).toBeVisible()
+  const summaryAlignment = await sheet.locator('.amount-summary-item').evaluate((item) => {
+    const label = item.querySelector('.amount-summary-label')
+    const amount = item.querySelector('.amount-text')
+    if (!(label instanceof HTMLElement) || !(amount instanceof HTMLElement)) {
+      throw new Error('无法定位回款金额卡片中的标题和金额')
+    }
+    const labelText = document.createRange()
+    labelText.selectNodeContents(label)
+    const amountText = document.createRange()
+    amountText.selectNodeContents(amount)
+    return {
+      labelLeft: labelText.getBoundingClientRect().left,
+      amountLeft: amountText.getBoundingClientRect().left,
+    }
+  })
+  expect(Math.abs(summaryAlignment.amountLeft - summaryAlignment.labelLeft)).toBeLessThanOrEqual(1)
   await expect(sheet.getByText('续购人数')).toBeVisible()
+  const measureAttributeAmounts = (items: Element[]) => items.flatMap((item) => {
+    const label = item.querySelector('.attribute-label')
+    const amount = item.querySelector('.amount-text')
+    if (!(label instanceof HTMLElement) || !(amount instanceof HTMLElement)) return []
+    const labelText = document.createRange()
+    labelText.selectNodeContents(label)
+    const amountText = document.createRange()
+    amountText.selectNodeContents(amount)
+    return [{
+      label: label.textContent?.trim() ?? '',
+      offset: Math.abs(amountText.getBoundingClientRect().left - labelText.getBoundingClientRect().left),
+    }]
+  })
+  const detailAmounts = await sheet.locator('.attribute-item').evaluateAll(measureAttributeAmounts)
+  expect(detailAmounts.map(item => item.label)).toEqual(['续购金额', '增购金额', '计划金额', '已回款', '剩余金额'])
+  for (const item of detailAmounts) {
+    expect(item.offset, `${item.label} 金额应与标签左对齐`).toBeLessThanOrEqual(1)
+  }
   await sheet.screenshot({ path: path.join(evidence, '05-record-detail.png') })
 
   await page.goto('/approvals')
@@ -275,5 +373,8 @@ test('同一笔回款可以记下续购和增购', async ({ page }) => {
   const approval = page.getByRole('dialog').last()
   await expect(approval.getByText('回款金额')).toBeVisible()
   await expect(approval.getByText('关联合同')).toBeVisible()
+  const approvalAmounts = await approval.locator('.attribute-item').evaluateAll(measureAttributeAmounts)
+  expect(approvalAmounts.map(item => item.label)).toEqual(['回款金额'])
+  expect(approvalAmounts[0].offset).toBeLessThanOrEqual(1)
   await approval.screenshot({ path: path.join(evidence, '06-approval-detail.png') })
 })

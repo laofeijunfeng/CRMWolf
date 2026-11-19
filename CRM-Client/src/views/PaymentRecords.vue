@@ -157,6 +157,28 @@ const fields: ListFieldDefinition[] = [
     sort: true,
   },
   {
+    key: 'purchase_headcount',
+    label: '采购人数',
+    type: 'number',
+    column: { align: 'right', width: '110px' },
+    filter: false,
+    sort: false,
+    export: false,
+    filterDisabledReason: '采购人数由回款构成或历史合同投影派生，不提供筛选',
+    sortDisabledReason: '采购人数由回款构成或历史合同投影派生，不提供排序',
+  },
+  {
+    key: 'purchase_amount',
+    label: '采购金额',
+    type: 'number',
+    column: { align: 'right', width: '140px' },
+    filter: false,
+    sort: false,
+    export: false,
+    filterDisabledReason: '采购金额由回款构成或历史回款金额派生，不提供筛选',
+    sortDisabledReason: '采购金额由回款构成或历史回款金额派生，不提供排序',
+  },
+  {
     key: 'actual_amount',
     label: '回款金额',
     type: 'number',
@@ -168,41 +190,45 @@ const fields: ListFieldDefinition[] = [
     key: 'renewal_headcount',
     label: '续购人数',
     type: 'number',
-    column: { align: 'right', width: '110px' },
+    column: false,
     filter: false,
     sort: false,
-    filterDisabledReason: '构成只在列表里查看，不提供筛选',
-    sortDisabledReason: '构成只在列表里查看，不提供排序',
+    export: true,
+    filterDisabledReason: '构成只在导出中保留，不提供筛选',
+    sortDisabledReason: '构成只在导出中保留，不提供排序',
   },
   {
     key: 'renewal_amount',
     label: '续购金额',
     type: 'number',
-    column: { align: 'right', width: '140px' },
+    column: false,
     filter: false,
     sort: false,
-    filterDisabledReason: '构成只在列表里查看，不提供筛选',
-    sortDisabledReason: '构成只在列表里查看，不提供排序',
+    export: true,
+    filterDisabledReason: '构成只在导出中保留，不提供筛选',
+    sortDisabledReason: '构成只在导出中保留，不提供排序',
   },
   {
     key: 'expansion_headcount',
     label: '增购人数',
     type: 'number',
-    column: { align: 'right', width: '110px' },
+    column: false,
     filter: false,
     sort: false,
-    filterDisabledReason: '构成只在列表里查看，不提供筛选',
-    sortDisabledReason: '构成只在列表里查看，不提供排序',
+    export: true,
+    filterDisabledReason: '构成只在导出中保留，不提供筛选',
+    sortDisabledReason: '构成只在导出中保留，不提供排序',
   },
   {
     key: 'expansion_amount',
     label: '增购金额',
     type: 'number',
-    column: { align: 'right', width: '140px' },
+    column: false,
     filter: false,
     sort: false,
-    filterDisabledReason: '构成只在列表里查看，不提供筛选',
-    sortDisabledReason: '构成只在列表里查看，不提供排序',
+    export: true,
+    filterDisabledReason: '构成只在导出中保留，不提供筛选',
+    sortDisabledReason: '构成只在导出中保留，不提供排序',
   },
   { key: 'owner_name', label: '负责人', type: 'text', column: { width: '110px' }, filter: true, sort: true },
   { key: 'commission_member_name', label: '团队成员', type: 'text', column: { width: '110px' }, filter: true, sort: true },
@@ -225,6 +251,39 @@ const fields: ListFieldDefinition[] = [
     filter: true
   },
 ]
+type PurchaseDisplayType = NonNullable<PaymentRecordWithDetails['purchase_type']>
+
+interface PurchaseDisplaySegment {
+  key: 'renewal' | 'expansion' | 'legacy'
+  purchaseType: PurchaseDisplayType | null
+  headcount: number | null
+  amount: number
+}
+
+const isPositiveInteger = (value: unknown): value is number => (
+  typeof value === 'number' && Number.isInteger(value) && value > 0
+)
+
+const purchaseSegments = (row: PaymentRecordWithDetails): PurchaseDisplaySegment[] => {
+  if (row.composition !== null && row.composition !== undefined) {
+    const segments: PurchaseDisplaySegment[] = [
+      { key: 'renewal', purchaseType: 'RENEWAL', ...row.composition.renewal },
+      { key: 'expansion', purchaseType: 'EXPANSION', ...row.composition.expansion },
+    ]
+    return segments.filter((segment) => segment.headcount !== 0 || segment.amount !== 0)
+  }
+
+  return [{
+    key: 'legacy',
+    purchaseType: row.purchase_type ?? null,
+    headcount: isPositiveInteger(row.contract_user_count) ? row.contract_user_count : null,
+    amount: row.actual_amount,
+  }]
+}
+
+const purchaseSegmentsById = computed(() => new Map(
+  tableData.value.map((row) => [row.id, purchaseSegments(row)]),
+))
 
 // ==================== 权限 ====================
 const canCreateRecord = computed(() => permissionStore.hasPermission('payment:create'))
@@ -1028,27 +1087,32 @@ defineExpose({
         <div class="payment-record-mobile-card-contract">
           {{ row.contract_name || '-' }}
         </div>
-        <div v-if="row.license_type || row.purchase_type" class="payment-record-mobile-card-badges">
+        <div v-if="row.license_type" class="payment-record-mobile-card-badges">
           <StatusBadge
             v-if="row.license_type"
             :status="row.license_type"
             type="authorizationMode"
             size="small"
           />
-          <StatusBadge
-            v-if="row.purchase_type"
-            :status="row.purchase_type"
-            type="procurementType"
-            size="small"
-          />
         </div>
         <AmountText class="payment-record-mobile-card-amount" :value="row.actual_amount" size="lg" />
-        <p v-if="row.composition" class="payment-record-mobile-card-composition">
-          续购 {{ row.composition.renewal.headcount }} 人
-          <AmountText :value="row.composition.renewal.amount" />
-          ，增购 {{ row.composition.expansion.headcount }} 人
-          <AmountText :value="row.composition.expansion.amount" />
-        </p>
+        <div class="payment-record-mobile-card-purchases">
+          <div
+            v-for="segment in purchaseSegmentsById.get(row.id)"
+            :key="segment.key"
+            class="payment-record-mobile-card-purchase"
+          >
+            <StatusBadge
+              v-if="segment.purchaseType"
+              :status="segment.purchaseType"
+              type="procurementType"
+              size="small"
+            />
+            <span v-else class="text-muted-foreground">—</span>
+            <span>{{ segment.headcount === null ? '—' : `${segment.headcount} 人` }}</span>
+            <AmountText :value="segment.amount" />
+          </div>
+        </div>
         <div class="payment-record-mobile-card-meta">
           <span>付款方：{{ row.actual_payer_name || '-' }}</span>
           <span>发票抬头：{{ row.invoice_title_text || '-' }}</span>
@@ -1095,12 +1159,44 @@ defineExpose({
       </template>
 
       <template #cell-purchase_type="{ row }">
-        <StatusBadge
-          v-if="row.purchase_type"
-          :status="row.purchase_type"
-          type="procurementType"
-        />
-        <span v-else class="text-muted-foreground">-</span>
+        <div class="payment-record-purchase-lines">
+          <div
+            v-for="segment in purchaseSegmentsById.get(row.id)"
+            :key="segment.key"
+            class="payment-record-purchase-line"
+          >
+            <StatusBadge
+              v-if="segment.purchaseType"
+              :status="segment.purchaseType"
+              type="procurementType"
+            />
+            <span v-else class="text-muted-foreground">—</span>
+          </div>
+        </div>
+      </template>
+
+      <template #cell-purchase_headcount="{ row }">
+        <div class="payment-record-purchase-lines">
+          <div
+            v-for="segment in purchaseSegmentsById.get(row.id)"
+            :key="segment.key"
+            class="payment-record-purchase-line"
+          >
+            {{ segment.headcount === null ? '—' : `${segment.headcount} 人` }}
+          </div>
+        </div>
+      </template>
+
+      <template #cell-purchase_amount="{ row }">
+        <div class="payment-record-purchase-lines">
+          <div
+            v-for="segment in purchaseSegmentsById.get(row.id)"
+            :key="segment.key"
+            class="payment-record-purchase-line"
+          >
+            <AmountText :value="segment.amount" />
+          </div>
+        </div>
       </template>
 
       <template #cell-owner_name="{ row }">
@@ -1114,18 +1210,6 @@ defineExpose({
       <!-- 回款金额 -->
       <template #cell-actual_amount="{ row }">
         <AmountText :value="row.actual_amount" />
-      </template>
-      <template #cell-renewal_headcount="{ row }">
-        <span v-if="row.composition">{{ row.composition.renewal.headcount }}</span>
-      </template>
-      <template #cell-renewal_amount="{ row }">
-        <AmountText v-if="row.composition" :value="row.composition.renewal.amount" />
-      </template>
-      <template #cell-expansion_headcount="{ row }">
-        <span v-if="row.composition">{{ row.composition.expansion.headcount }}</span>
-      </template>
-      <template #cell-expansion_amount="{ row }">
-        <AmountText v-if="row.composition" :value="row.composition.expansion.amount" />
       </template>
 
       <template #cell-created_time="{ row }">
@@ -1213,6 +1297,30 @@ defineExpose({
     outline-offset: $wolf-focus-ring-offset-v2;
     border-radius: $wolf-radius-control-v2;
   }
+}
+
+.payment-record-purchase-lines {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+}
+
+.payment-record-purchase-line {
+  min-height: $wolf-space-lg-v2;
+  align-content: center;
+}
+
+.payment-record-mobile-card-purchases {
+  display: grid;
+  gap: $wolf-space-xs-v2;
+  margin-top: $wolf-space-sm-v2;
+}
+
+.payment-record-mobile-card-purchase {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: $wolf-space-sm-v2;
+  font-variant-numeric: tabular-nums;
 }
 
 .payment-record-mobile-card-header {
