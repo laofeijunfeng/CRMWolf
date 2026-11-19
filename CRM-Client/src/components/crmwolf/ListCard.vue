@@ -144,7 +144,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 }
 
 .list-card-title {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   color: hsl(var(--foreground));
   margin: 0; // Reset default margin
@@ -229,7 +229,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 .list-card-empty-state {
   width: 100%;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   color: hsl(var(--muted-foreground));
   text-align: center;
@@ -287,7 +287,7 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 
 .list-card-item-meta {
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;

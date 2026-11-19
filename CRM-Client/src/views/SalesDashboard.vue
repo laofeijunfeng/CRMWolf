@@ -458,7 +458,7 @@ onMounted(() => {
   border-color: hsl(var(--border) / 0.95);
   background: hsl(var(--card));
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .dashboard-toolbar {
@@ -494,7 +494,7 @@ onMounted(() => {
   background: hsl(var(--destructive) / 0.1);
   border: 1px solid hsl(var(--destructive) / 0.18);
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .error-icon {
@@ -513,7 +513,7 @@ onMounted(() => {
   background: hsl(var(--destructive) / 0.06);
   border: 1px solid hsl(var(--destructive) / 0.16);
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .dashboard-inline-error--toolbar {
@@ -531,7 +531,7 @@ onMounted(() => {
   display: grid;
   place-items: center;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .metric-grid {
@@ -560,7 +560,7 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.6;
 }
 
@@ -594,7 +594,7 @@ onMounted(() => {
 
 :global(.sales-follow-tooltip__empty) {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 @keyframes spin {

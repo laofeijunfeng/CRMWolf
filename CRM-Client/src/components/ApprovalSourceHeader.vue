@@ -69,7 +69,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: $space-2;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 

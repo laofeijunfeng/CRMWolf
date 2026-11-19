@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 .settings-content__description {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 
@@ -59,12 +59,12 @@ const props = withDefaults(defineProps<Props>(), {
   grid-template-columns: 120px minmax(0, 1fr) 120px minmax(0, 1fr);
   gap: $space-3 $space-6;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 :deep(.settings-dl dt) {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 :deep(.settings-dl dd) {

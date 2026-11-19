@@ -1911,7 +1911,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .invoice-sheet-title {
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 24px;
   word-break: break-word;
@@ -1935,7 +1935,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   border-radius: var(--radius-sm);
   background: var(--wash-hover);
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1989,7 +1989,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .section-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 
@@ -2027,7 +2027,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   align-items: center;
   gap: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 
   svg {
@@ -2039,7 +2039,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .attribute-value {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   overflow-wrap: anywhere;
@@ -2074,7 +2074,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .invoice-detail-group-title {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 20px;
 }
@@ -2105,7 +2105,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .reissue-card-meta {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
   white-space: nowrap;
 }
@@ -2149,7 +2149,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .red-offset-context__heading {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
@@ -2168,13 +2168,13 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .red-offset-context__item > span {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .red-offset-context__item > strong {
   overflow: hidden;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2183,14 +2183,14 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .red-offset-context__impact {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
 .form-error {
   margin: 0;
   color: hsl(var(--status-danger));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 20px;
 }
@@ -2218,7 +2218,7 @@ $invoice-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .field-optional {
   margin-left: 2px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 400;
 }
 

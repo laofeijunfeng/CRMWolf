@@ -301,14 +301,14 @@ onBeforeUnmount(() => {
 .sort-field-priority {
   margin-left: auto;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
 }
 
 .sort-field-icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+  flex: 0 0 var(--icon-xs);
   color: hsl(var(--muted-foreground));
 }
 
@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
   width: 100%;
   align-items: center;
   justify-content: space-between;
-  min-height: 32px;
+  min-height: var(--control-h-md);
   padding: 0 $space-2;
   border: 0;
   border-radius: var(--radius-md);
@@ -332,7 +332,7 @@ onBeforeUnmount(() => {
 .sort-direction-button-active,
 .sort-field-button:hover,
 .sort-direction-button:hover {
-  background: hsl(var(--muted));
+  background: var(--wash-hover);
 }
 
 .sort-direction-button-active {
@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
 
 .sort-direction-panel h3 {
   margin: 0 0 $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 

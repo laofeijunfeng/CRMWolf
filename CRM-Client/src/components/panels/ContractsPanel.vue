@@ -262,7 +262,7 @@ const formatDate = (dateStr: string | null): string => {
 .contract-action-hover-text {
   display: inline-flex;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   color: hsl(var(--foreground));
 }

@@ -1303,7 +1303,7 @@ defineExpose({
 
 .opportunity-mobile-card-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--foreground));
   line-height: 1.5;
@@ -1312,7 +1312,7 @@ defineExpose({
 
 .opportunity-mobile-card-customer {
   margin-top: $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
@@ -1342,7 +1342,7 @@ defineExpose({
 
 .opportunity-product-modules {
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.4;
   color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
@@ -1353,7 +1353,7 @@ defineExpose({
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 </style>

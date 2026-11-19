@@ -115,7 +115,7 @@ const itemClasses = computed((): string =>
 }
 
 .bottom-nav-label {
-  font-size: 12px;  // 12px
+  font-size: var(--font-size-caption);  // 12px
   line-height: 1.2;
 }
 </style>

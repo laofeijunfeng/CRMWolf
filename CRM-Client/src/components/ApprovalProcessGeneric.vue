@@ -603,7 +603,7 @@ watch(
 }
 
 .approval-process-generic__title {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   color: hsl(var(--foreground));
   line-height: 20px;
@@ -617,14 +617,14 @@ watch(
   background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
   color: hsl(var(--status-danger));
   border-radius: var(--radius-sm);
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .approval-process-generic__current-node {
   display: flex;
   align-items: center;
   gap: $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 
   .approval-process-generic__current-node-value {

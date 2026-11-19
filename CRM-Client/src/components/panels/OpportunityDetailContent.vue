@@ -841,13 +841,13 @@ watch(approvalPhase, phase => {
 }
 
 .attribute-label {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
 }
 
 .attribute-value {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
   word-break: break-all;
@@ -871,7 +871,7 @@ watch(approvalPhase, phase => {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   border-radius: 9999px;
   white-space: nowrap;

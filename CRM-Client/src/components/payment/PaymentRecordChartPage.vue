@@ -595,7 +595,7 @@ function retryBucket(): void {
 .payment-record-chart__arr-explanation {
   margin-top: 12px;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 
@@ -609,7 +609,7 @@ function retryBucket(): void {
 .payment-record-chart__heading h2 {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   line-height: 1.25;
 }
 
@@ -660,7 +660,7 @@ function retryBucket(): void {
   background: hsl(var(--card));
   padding: 8px 10px;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   pointer-events: none;
   box-shadow: var(--shadow-2);
 }
@@ -682,7 +682,7 @@ function retryBucket(): void {
 .payment-record-chart__arr-label {
   position: absolute;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
   transform: translate(-50%, -170%);
   white-space: nowrap;
@@ -733,7 +733,7 @@ function retryBucket(): void {
   background: transparent;
   padding: 2px 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   text-align: left;
 }
 
@@ -743,8 +743,8 @@ function retryBucket(): void {
 }
 
 .payment-record-chart__legend :deep(button i) {
-  width: 8px;
-  height: 8px;
+  width: $space-2;
+  height: $space-2;
   border-radius: 50%;
 }
 

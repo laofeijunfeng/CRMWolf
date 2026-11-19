@@ -512,7 +512,7 @@ watch(
   min-height: 36px;
   padding: 0 $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .edit-record-dialog__supplement-icon {

@@ -348,7 +348,7 @@ const previewAllowsDownload = computed(() =>
 .file-attachment__title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 20px;
 }
@@ -360,7 +360,7 @@ const previewAllowsDownload = computed(() =>
 .file-attachment__description {
   margin: $space-1 0 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -427,7 +427,7 @@ const previewAllowsDownload = computed(() =>
 
 .file-attachment__name {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   overflow: hidden;
@@ -442,7 +442,7 @@ const previewAllowsDownload = computed(() =>
   border-radius: var(--radius-sm);
   color: hsl(var(--muted-foreground));
   background: hsl(var(--muted));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -452,7 +452,7 @@ const previewAllowsDownload = computed(() =>
   flex-wrap: wrap;
   gap: $space-2;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -471,7 +471,7 @@ const previewAllowsDownload = computed(() =>
   gap: $space-1;
   margin: 0;
   color: hsl(var(--status-danger));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -520,7 +520,7 @@ const previewAllowsDownload = computed(() =>
   border-radius: var(--radius-md);
   color: hsl(var(--muted-foreground));
   background: var(--wash-hover);
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .file-attachment__empty-icon {
@@ -564,7 +564,7 @@ const previewAllowsDownload = computed(() =>
 
   .file-attachment__name {
     color: hsl(var(--status-success));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
     font-weight: 500;
   }
 

@@ -797,7 +797,7 @@ watch(
 
 .invoice-application-dialog__label {
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 }
 
@@ -813,7 +813,7 @@ watch(
 .invoice-application-dialog__error,
 .invoice-application-dialog__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -839,12 +839,12 @@ watch(
 
   span {
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
   }
 
   strong {
     color: hsl(var(--foreground));
-    font-size: 14px;
+    font-size: var(--font-size-body);
     font-weight: 500;
     overflow-wrap: anywhere;
   }

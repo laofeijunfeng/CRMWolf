@@ -124,7 +124,7 @@ withDefaults(defineProps<Props>(), {
 .metric-card__label {
   min-width: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -141,7 +141,7 @@ withDefaults(defineProps<Props>(), {
   border-radius: 9999px;
   color: hsl(var(--card-foreground));
   background: hsl(var(--background) / 0.72);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 22px;
   box-shadow: none;
@@ -177,7 +177,7 @@ withDefaults(defineProps<Props>(), {
   min-width: 0;
   min-height: 20px;
   color: hsl(var(--card-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.4;
 }
 
@@ -193,7 +193,7 @@ withDefaults(defineProps<Props>(), {
   min-width: 0;
   gap: 3px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.45;
 }
 

@@ -685,13 +685,13 @@ onUnmounted(() => {
 
 .options-error-fields {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .form-option-error {
   margin-top: $space-1;
   color: hsl(var(--status-danger));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .submit-feedback {
@@ -764,7 +764,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--foreground));
   margin-bottom: $space-4;

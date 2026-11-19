@@ -1334,13 +1334,13 @@ watch(() => props.targetPanel, (panel): void => {
 }
 
 .attribute-label {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
 }
 
 .attribute-value {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
 }
@@ -1354,7 +1354,7 @@ watch(() => props.targetPanel, (panel): void => {
   padding: 0 $space-2;
   border-radius: var(--radius-md);
   border: 1px solid transparent;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;

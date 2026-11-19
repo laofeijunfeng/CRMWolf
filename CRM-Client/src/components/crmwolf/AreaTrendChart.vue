@@ -262,7 +262,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 .area-trend-card__title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 1.4;
   letter-spacing: 0;
@@ -271,7 +271,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 .area-trend-card__description {
   margin-top: 2px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.4;
 }
 
@@ -290,7 +290,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   align-items: center;
   gap: 6px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -329,7 +329,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   gap: 6px;
   min-width: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -344,7 +344,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 .area-trend-card__summary strong {
   color: hsl(var(--foreground));
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -356,7 +356,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 
 .area-trend-chart {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .area-trend-tooltip-host {
@@ -382,7 +382,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   border: 1px dashed color-mix(in srgb, hsl(var(--border)) 80%, transparent);
   border-radius: var(--radius-md);
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .area-trend-card__skeleton {
@@ -414,7 +414,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
 :global(.area-trend-tooltip__title) {
   margin-bottom: 8px;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 1.4;
 }
@@ -424,7 +424,7 @@ const handleChartMouseMove = (event: MouseEvent): void => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.6;
 }
 

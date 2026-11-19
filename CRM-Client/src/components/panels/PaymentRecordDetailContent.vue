@@ -792,7 +792,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .record-sheet-title {
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 24px;
 }
@@ -808,7 +808,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .stage-name {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .amount-summary {
@@ -835,7 +835,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   strong {
     color: hsl(var(--status-success));
     font-family: var(--font-mono);
-    font-size: 14px;
+    font-size: var(--font-size-body);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
@@ -843,7 +843,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .amount-summary-label {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .sheet-body {
@@ -887,7 +887,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .section-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 
@@ -930,7 +930,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   align-items: center;
   gap: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 }
 
@@ -942,7 +942,7 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .attribute-value {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   word-break: break-word;
@@ -1008,13 +1008,13 @@ $record-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .voucher-hint {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .notes-text {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
   white-space: pre-wrap;
   word-break: break-word;

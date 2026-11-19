@@ -64,7 +64,7 @@ async function focusField(item: FormErrorSummaryItem): Promise<void> {
   border-radius: 0.375rem;
   background: hsl(var(--status-danger) / 0.05);
   color: hsl(var(--destructive));
-  font-size: 0.875rem;
+  font-size: var(--font-size-body);
 }
 
 .form-error-summary__title {

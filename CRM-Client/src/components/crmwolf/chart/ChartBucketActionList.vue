@@ -79,12 +79,12 @@ function activate(action: T): void {
 }
 
 .chart-bucket-actions__action:not(:disabled):hover {
-  background: hsl(var(--muted));
+  background: var(--wash-hover);
 }
 
 .chart-bucket-actions__color {
-  width: 8px;
-  height: 8px;
+  width: $space-2;
+  height: $space-2;
   flex: 0 0 auto;
   border-radius: 50%;
 }

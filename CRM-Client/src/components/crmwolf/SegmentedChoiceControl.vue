@@ -132,7 +132,7 @@ function optionId(value: string): string {
   border-radius: var(--radius-md);
   background: hsl(var(--card));
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;

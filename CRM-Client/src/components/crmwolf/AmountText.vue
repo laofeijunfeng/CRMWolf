@@ -50,19 +50,19 @@ const displayValue = computed(() => (isEmpty.value ? props.placeholder : formatC
 }
 
 .amount-text--sm {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .amount-text--md {
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .amount-text--lg {
-  font-size: 18px;
+  font-size: var(--font-size-title);
 }
 
 .amount-text--xl {
-  font-size: 24px;
+  font-size: var(--font-size-display);
 }
 
 .amount-text--default {

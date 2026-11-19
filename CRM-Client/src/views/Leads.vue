@@ -972,7 +972,7 @@ watchEffect(() => {
 
 .lead-mobile-card-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--foreground));
   line-height: 1.5;
@@ -984,7 +984,7 @@ watchEffect(() => {
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 
@@ -993,7 +993,7 @@ watchEffect(() => {
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 </style>

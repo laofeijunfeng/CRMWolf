@@ -504,7 +504,7 @@ watch(
 .customer-transfer-dialog__context-item strong {
   overflow: hidden;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   text-overflow: ellipsis;
@@ -513,7 +513,7 @@ watch(
 
 .customer-transfer-dialog__context-label {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -530,7 +530,7 @@ watch(
 .customer-transfer-dialog__hint {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -543,7 +543,7 @@ watch(
   border-radius: var(--radius-md);
   background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -589,14 +589,14 @@ watch(
 
 .customer-transfer-dialog__scope-label {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
 }
 
 .customer-transfer-dialog__scope-description {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -609,7 +609,7 @@ watch(
   border-radius: var(--radius-md);
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -627,7 +627,7 @@ watch(
   border-radius: var(--radius-md);
   background: var(--wash-hover);
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 
@@ -641,7 +641,7 @@ watch(
 
 .customer-transfer-dialog__impact-heading {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 

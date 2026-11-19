@@ -143,7 +143,7 @@ function updateField(field: keyof PaymentCompositionForm, value: string | number
 .payment-composition__title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
@@ -152,7 +152,7 @@ function updateField(field: keyof PaymentCompositionForm, value: string | number
 .payment-composition__status {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .payment-composition__table {
@@ -168,7 +168,7 @@ function updateField(field: keyof PaymentCompositionForm, value: string | number
 
 .payment-composition__row {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 

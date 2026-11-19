@@ -249,7 +249,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
           :wide="isWideCard(card)"
           test-id-prefix="opportunity-chart-card"
           :class="cardClass(card)"
-          :content-class="metaFor(card).presentation === 'donut' ? 'grid min-w-0 grid-cols-1 items-center gap-6 pb-6 md:grid-cols-[220px_minmax(0,1fr)]' : ''"
+          :content-class="metaFor(card).presentation === 'donut' ? 'grid min-w-0 grid-cols-1 items-center gap-space-6 pb-space-6 md:grid-cols-[220px_minmax(0,1fr)]' : ''"
         >
           <template #content>
             <template v-if="metaFor(card).presentation === 'donut'">
@@ -383,12 +383,12 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 @use '@/styles/tokens.scss' as *;
 
 .opportunity-chart-page { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; flex-direction: column; gap: $space-3; overflow: auto; padding: $space-3; }
-.opportunity-chart-summary h2 { margin: 0; color: hsl(var(--foreground)); font-size: 16px; line-height: 1.25; }
+.opportunity-chart-summary h2 { margin: 0; color: hsl(var(--foreground)); font-size: var(--font-size-body-strong); line-height: 1.25; }
 .opportunity-chart-summary p { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); }
 .opportunity-chart-state, .opportunity-chart-refreshing, .opportunity-chart-dialog-state { display: flex; align-items: center; justify-content: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
 .opportunity-chart-state { min-height: 320px; flex-direction: column; text-align: center; }
-.opportunity-chart-refreshing { justify-content: flex-start; min-height: 28px; font-size: 13px; }
-.opportunity-chart-inline-error { display: flex; align-items: center; gap: $space-2; margin: 0; color: hsl(var(--status-danger)); font-size: 13px; }
+.opportunity-chart-refreshing { justify-content: flex-start; min-height: var(--control-h-sm); font-size: var(--font-size-control-sm); }
+.opportunity-chart-inline-error { display: flex; align-items: center; gap: $space-2; margin: 0; color: hsl(var(--status-danger)); font-size: var(--font-size-control-sm); }
 .opportunity-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .opportunity-chart-card { min-width: 0; }
 .opportunity-chart-card--wide { grid-column: 1 / -1; }
@@ -398,26 +398,26 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-legend { display: grid; gap: $space-2; }
 .opportunity-chart-bar-actions { gap: $space-2; }
 .opportunity-chart-bar-actions :deep(.opportunity-chart-bar-row) { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; align-items: center; gap: 12px; text-align: left; }
-.opportunity-chart-legend :deep(.opportunity-chart-legend-row) { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: $space-2; width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: 2px 0; font-size: 14px; text-align: left; }
-.opportunity-chart-legend :deep(.opportunity-chart-legend-row:not(:disabled):hover) { background: hsl(var(--muted)); }
+.opportunity-chart-legend :deep(.opportunity-chart-legend-row) { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: $space-2; width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: 2px 0; font-size: var(--font-size-body); text-align: left; }
+.opportunity-chart-legend :deep(.opportunity-chart-legend-row:not(:disabled):hover) { background: var(--wash-hover); }
 .opportunity-chart-legend :deep(.opportunity-chart-legend-row:disabled) { cursor: default; opacity: .65; }
-.opportunity-chart-legend :deep(.opportunity-chart-legend-row i) { width: 8px; height: 8px; border-radius: 50%; }
+.opportunity-chart-legend :deep(.opportunity-chart-legend-row i) { width: $space-2; height: $space-2; border-radius: 50%; }
 .opportunity-chart-legend-label { overflow: hidden; color: hsl(var(--foreground)); text-overflow: ellipsis; white-space: nowrap; }
 .opportunity-chart-legend-value { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .opportunity-chart-bar-fill { display: block; min-width: 0; }
-.opportunity-chart-card-empty { padding: 12px 0; color: hsl(var(--muted-foreground)); font-size: 13px; text-align: center; }
+.opportunity-chart-card-empty { padding: $space-3 0; color: hsl(var(--muted-foreground)); font-size: var(--font-size-control-sm); text-align: center; }
 .opportunity-chart-dialog-state { min-height: 120px; }
 .opportunity-chart-opportunity-list { display: grid; gap: 2px; }
 .opportunity-chart-opportunity { display: flex; width: 100%; min-height: 52px; justify-content: space-between; gap: 16px; padding: 8px 10px; text-align: left; }
 .opportunity-chart-opportunity > span:first-child { min-width: 0; }
 .opportunity-chart-opportunity strong, .opportunity-chart-opportunity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opportunity-chart-opportunity strong { color: hsl(var(--foreground)); }
-.opportunity-chart-opportunity small { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: 12px; }
+.opportunity-chart-opportunity small { margin-top: 3px; color: hsl(var(--muted-foreground)); font-size: var(--font-size-caption); }
 
 .opportunity-chart-forecast-chart { width: 100%; height: 240px; min-height: 240px; }
 .opportunity-chart-forecast { min-height: 0; padding: 0; }
 .opportunity-chart-forecast-plot { display: grid; grid-template-columns: 58px minmax(0, 1fr); min-height: 0; }
-.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 18px 0; color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1; text-align: right; }
+.opportunity-chart-forecast-y-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4px 10px 18px 0; color: hsl(var(--muted-foreground)); font-size: var(--font-size-caption); line-height: 1; text-align: right; }
 .opportunity-chart-forecast-plot-area { position: relative; min-width: 0; padding: 4px 0 0; }
 .opportunity-chart-forecast-grid { position: absolute; inset: 4px 0 18px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
 .opportunity-chart-forecast-grid span { border-top: 1px solid hsl(var(--border)); }
@@ -427,9 +427,9 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-forecast-track { display: flex; width: 100%; min-height: 0; height: 100%; flex-direction: column; align-items: center; justify-content: flex-end; }
 .opportunity-chart-forecast-fill { display: block; width: min(42px, 72%); min-width: 0; min-height: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; transition: height .2s ease; }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column:disabled .opportunity-chart-forecast-fill) { background: hsl(var(--muted)) !important; }
-.opportunity-chart-forecast-label { min-height: 16px; overflow-wrap: anywhere; color: hsl(var(--foreground)); font-size: 12px; font-weight: 500; line-height: 1.2; text-align: center; }
+.opportunity-chart-forecast-label { min-height: 16px; overflow-wrap: anywhere; color: hsl(var(--foreground)); font-size: var(--font-size-caption); font-weight: 500; line-height: 1.2; text-align: center; }
 .opportunity-chart-forecast-baseline { position: absolute; right: 0; bottom: 18px; left: 0; z-index: 2; border-top: 1px solid hsl(var(--border)); pointer-events: none; }
-.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:not(:disabled):hover) { background: hsl(var(--muted)); }
+.opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:not(:disabled):hover) { background: var(--wash-hover); }
 .opportunity-chart-forecast-columns :deep(.opportunity-chart-bar-row--forecast:focus-visible) { outline: 2px solid hsl(var(--ring) / 0.5); outline-offset: 2px; }
 
 @media (max-width: 900px) {
@@ -438,10 +438,10 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 
 @media (max-width: 600px) {
   .opportunity-chart-forecast-plot { grid-template-columns: 44px minmax(0, 1fr); }
-  .opportunity-chart-forecast-y-axis { padding-right: 6px; font-size: 10px; }
+  .opportunity-chart-forecast-y-axis { padding-right: 6px; font-size: var(--font-size-caption); }
   .opportunity-chart-forecast-columns { gap: $space-1; }
   .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column) { padding-right: 1px; padding-left: 1px; }
   .opportunity-chart-forecast-columns :deep(.opportunity-chart-forecast-column--unscheduled) { margin-left: 0; padding-left: $space-1; }
-  .opportunity-chart-forecast-label { font-size: 11px; }
+  .opportunity-chart-forecast-label { font-size: var(--font-size-caption); }
 }
 </style>

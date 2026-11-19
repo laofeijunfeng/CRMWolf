@@ -275,7 +275,7 @@ const formatDateTime = (iso: string): string => {
 }
 
 .approval-stepper__title {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   text-align: left;
   line-height: 20px;
@@ -283,7 +283,7 @@ const formatDateTime = (iso: string): string => {
 
 .approval-stepper__meta {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .approval-stepper__meta {
@@ -300,7 +300,7 @@ const formatDateTime = (iso: string): string => {
   border-radius: var(--radius-sm);
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 1.5;
   white-space: pre-line;
 }

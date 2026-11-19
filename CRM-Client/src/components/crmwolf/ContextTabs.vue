@@ -131,7 +131,7 @@ function handleTabChange(value: string): void {
   padding: $space-1 $space-2;
   border-radius: var(--radius-md);
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 
   &[data-state="active"] {
@@ -155,7 +155,7 @@ function handleTabChange(value: string): void {
     height: 44px;
     flex-shrink: 0;
     padding: 8px 16px;
-    font-size: 16px;
+    font-size: var(--font-size-body-strong);
   }
 }
 

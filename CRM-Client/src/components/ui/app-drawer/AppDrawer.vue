@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
 .app-drawer__title {
   min-width: 0;
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 24px;
 }
@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
 
 .app-drawer__description {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
 }
 

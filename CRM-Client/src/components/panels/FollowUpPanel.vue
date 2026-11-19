@@ -145,7 +145,7 @@ const handleProcess = (followUp: FollowUp): void => {
 }
 
 .panel-title {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   color: hsl(var(--foreground));
 }
@@ -171,7 +171,7 @@ const handleProcess = (followUp: FollowUp): void => {
   max-width: 300px;
   display: grid;
   gap: $space-1;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 

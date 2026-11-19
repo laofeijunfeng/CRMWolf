@@ -239,7 +239,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  gap: 16px;
+  gap: $space-3;
+  padding: $space-3; // 与图表视图 .journey-chart 同一内缩
 }
 
 .business-board-error,
@@ -250,7 +251,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   min-height: 40px;
   padding: 0 $space-3;
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .business-board-error {
@@ -271,8 +272,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .refreshing-icon,
 .error-icon {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   flex-shrink: 0;
 }
 
@@ -292,12 +293,12 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .business-board-blocking-error strong {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .blocking-error-icon {
-  width: 24px;
-  height: 24px;
+  width: $space-6;
+  height: $space-6;
   color: hsl(var(--status-danger));
 }
 
@@ -305,7 +306,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   flex: 1;
   min-height: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   box-shadow: none;
 }
@@ -353,8 +354,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
+  gap: $space-2;
+  padding: $space-3;
   border: 0;
   background: transparent;
   flex-shrink: 0;
@@ -363,7 +364,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 .column-header h2 {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 15px;
+  font-size: var(--font-size-body-strong);
   line-height: 1.35;
   font-weight: 700;
 }
@@ -415,7 +416,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .journey-age {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -428,7 +429,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 .journey-title {
   color: hsl(var(--foreground));
   text-align: left;
-  font-size: 15px;
+  font-size: var(--font-size-body);
   line-height: 1.4;
   font-weight: 700;
 }
@@ -437,7 +438,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   min-width: 0;
   overflow: hidden;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -452,7 +453,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .journey-main-metric span {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .journey-tag-row {
@@ -467,15 +468,15 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   max-width: 100%;
   gap: 5px;
   border: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1.35;
 }
 
 .tag-icon,
 .empty-icon {
-  width: 14px;
-  height: 14px;
+  width: var(--icon-xs);
+  height: var(--icon-xs);
   flex-shrink: 0;
 }
 
@@ -489,7 +490,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   border-radius: 8px;
   color: hsl(var(--muted-foreground));
   background: hsl(var(--card) / 0.64);
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
 }
 
 .spinning {

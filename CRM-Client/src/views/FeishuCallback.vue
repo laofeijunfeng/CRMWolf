@@ -117,7 +117,7 @@ onMounted(() => {
   h1 {
     margin: 0;
     color: hsl(var(--foreground));
-    font-size: 18px;
+    font-size: var(--font-size-title);
     font-weight: 600;
   }
 }

@@ -216,7 +216,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
             <CardDescription>{{ card.description }}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div v-if="card.graphic === 'pie'" class="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-6">
+            <div v-if="card.graphic === 'pie'" class="grid grid-cols-[220px_minmax(0,1fr)] items-center gap-space-6">
               <ChartContainer
                 :config="pieConfig(card)"
                 class="aspect-square h-[220px] w-[220px]"
@@ -395,7 +395,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-summary h2 {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   line-height: 1.25;
 }
 
@@ -403,7 +403,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-note {
   margin: $space-1 0 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .journey-chart-grid {
@@ -448,7 +448,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-preview small,
 :global(.journey-chart-segment-items small) {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .journey-chart-state,
@@ -483,7 +483,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
   border-bottom: 1px solid hsl(var(--border));
   padding: $space-2 0;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .journey-chart-preview__more {

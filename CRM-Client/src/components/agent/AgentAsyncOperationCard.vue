@@ -142,7 +142,7 @@ const retryNotice = computed(() => {
 .agent-async-operation {
   width: 100%;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.5;
 }
 

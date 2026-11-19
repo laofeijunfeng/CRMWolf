@@ -116,7 +116,7 @@ onMounted(() => {
   gap: $space-2;
   min-height: 44px;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .invite-login__team {

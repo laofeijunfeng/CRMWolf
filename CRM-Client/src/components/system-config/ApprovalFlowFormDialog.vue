@@ -747,7 +747,7 @@ watch(
 .loading-state,
 .empty-nodes {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   padding: $space-6;
   text-align: center;
 }
@@ -771,7 +771,7 @@ watch(
 
 .section-title {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 24px;
   margin: 0 0 $space-3;
@@ -800,7 +800,7 @@ watch(
 }
 
 .field-error {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
   margin: 0;
 }
@@ -839,7 +839,7 @@ watch(
 
 .node-order {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
@@ -894,7 +894,7 @@ watch(
 
 .notify-user__name {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
@@ -902,7 +902,7 @@ watch(
 .notify-empty,
 .notify-hint {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 }
 

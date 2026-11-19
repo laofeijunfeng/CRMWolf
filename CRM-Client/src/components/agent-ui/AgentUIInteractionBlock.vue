@@ -1079,7 +1079,7 @@ const submit = async (): Promise<void> => {
   min-width: 0;
   color: hsl(var(--card-foreground));
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 22px;
   font-weight: 400;
 }
@@ -1097,7 +1097,7 @@ const submit = async (): Promise<void> => {
   margin: 0;
   min-width: 0;
   color: hsl(var(--foreground));
-  font-size: 15px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 22px;
 }
@@ -1133,7 +1133,7 @@ const submit = async (): Promise<void> => {
 .activity-kind-editor-head span:first-child {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 600;
   line-height: 20px;
 }
@@ -1142,7 +1142,7 @@ const submit = async (): Promise<void> => {
 .activity-kind-editor-head {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 400;
   line-height: 20px;
 }
@@ -1151,20 +1151,20 @@ const submit = async (): Promise<void> => {
 .activity-kind-name,
 .activity-time-value {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 22px;
 }
 
 .activity-time-status {
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
 }
 
 .activity-body {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 400;
   line-height: 22px;
 }
@@ -1188,7 +1188,7 @@ const submit = async (): Promise<void> => {
   margin: 0;
   padding-top: 1px;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 400;
   line-height: 20px;
 }
@@ -1197,7 +1197,7 @@ const submit = async (): Promise<void> => {
   margin: 0;
   min-width: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 400;
   line-height: 22px;
 }
@@ -1210,7 +1210,7 @@ const submit = async (): Promise<void> => {
   background: transparent;
   padding: 0;
   color: hsl(var(--brand));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 500;
   line-height: 20px;
   text-decoration: underline;
@@ -1223,7 +1223,7 @@ const submit = async (): Promise<void> => {
 .activity-actions-hint {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 400;
   line-height: 18px;
 }
@@ -1238,7 +1238,7 @@ const submit = async (): Promise<void> => {
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 20px;
   max-width: 100%;
@@ -1296,7 +1296,7 @@ const submit = async (): Promise<void> => {
   background: hsl(var(--background));
   padding: 8px 12px;
   color: hsl(var(--foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 500;
   line-height: 20px;
   cursor: pointer;
@@ -1333,7 +1333,7 @@ const submit = async (): Promise<void> => {
 .activity-reference-quote h4,
 .activity-reference-quote p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   line-height: 20px;
 }
 
@@ -1353,7 +1353,7 @@ const submit = async (): Promise<void> => {
   margin: 0;
   padding: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   line-height: 20px;
   list-style: none;
 }
@@ -1371,7 +1371,7 @@ const submit = async (): Promise<void> => {
   min-height: 44px;
   padding: 8px 0;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 500;
   line-height: 20px;
   list-style: none;
@@ -1431,7 +1431,7 @@ const submit = async (): Promise<void> => {
   border-radius: 6px;
   padding-right: 16px;
   padding-left: 16px;
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
   font-weight: 500;
   line-height: 20px;
 }

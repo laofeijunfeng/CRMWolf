@@ -592,14 +592,14 @@ watch(open, (isOpen) => {
 .filter-field-count {
   margin-left: auto;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
 }
 
 .filter-field-icon {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+  flex: 0 0 var(--icon-xs);
   color: hsl(var(--muted-foreground));
 }
 
@@ -610,7 +610,7 @@ watch(open, (isOpen) => {
   width: 100%;
   align-items: center;
   justify-content: space-between;
-  min-height: 32px;
+  min-height: var(--control-h-md);
   padding: 0 $space-2;
   border: 0;
   border-radius: var(--radius-md);
@@ -623,7 +623,7 @@ watch(open, (isOpen) => {
 .filter-operator-button-active,
 .filter-field-button:hover,
 .filter-operator-button:hover {
-  background: hsl(var(--muted));
+  background: var(--wash-hover);
 }
 
 .filter-operator-button-active {
@@ -653,7 +653,7 @@ watch(open, (isOpen) => {
 
 .filter-field-panel h3 {
   margin: 0 0 $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
@@ -688,10 +688,10 @@ watch(open, (isOpen) => {
 }
 
 .filter-option-row :deep(button) {
-  width: 16px;
-  height: 16px;
-  min-width: 16px;
-  min-height: 16px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  min-width: var(--icon-sm);
+  min-height: var(--icon-sm);
 }
 
 .filter-field-panel :deep(.date-picker-calendar__cell-trigger),

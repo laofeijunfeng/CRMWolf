@@ -568,7 +568,7 @@ watch(
 .license-application-dialog__label {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 }
 

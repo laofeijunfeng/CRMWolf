@@ -1952,7 +1952,7 @@ watch(rows, async () => {
   gap: $space-1;
   padding: $space-1 $space-2;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   color: hsl(var(--status-warning));
   background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
@@ -2032,13 +2032,13 @@ watch(rows, async () => {
 }
 
 .attribute-label {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
 }
 
 .attribute-value {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
   word-break: break-all;
@@ -2060,7 +2060,7 @@ watch(rows, async () => {
   padding: 2px 0;
   color: hsl(var(--brand));
   text-align: left;
-  font-size: 0.875rem;
+  font-size: var(--font-size-body);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   text-decoration-line: underline;

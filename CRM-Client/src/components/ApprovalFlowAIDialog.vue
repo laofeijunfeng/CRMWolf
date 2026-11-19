@@ -784,7 +784,7 @@ watch(visible, (val): void => {
   gap: $space-2;
   padding: $space-3;
   border-radius: var(--radius-md);
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .input-hint,
@@ -807,7 +807,7 @@ watch(visible, (val): void => {
   }
 
   .input-tip {
-    font-size: 12px;
+    font-size: var(--font-size-caption);
     color: hsl(var(--muted-foreground));
     margin-top: $space-2;
   }
@@ -846,7 +846,7 @@ watch(visible, (val): void => {
     gap: $space-3;
     margin-top: $space-2;
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
   }
 
   .thinking-section {
@@ -859,7 +859,7 @@ watch(visible, (val): void => {
     gap: $space-1;
     margin-bottom: $space-2;
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
   }
 
   .thinking-scroll {
@@ -871,7 +871,7 @@ watch(visible, (val): void => {
     border-radius: var(--radius-sm);
     background: hsl(var(--muted));
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
     line-height: 1.6;
     white-space: pre-wrap;
   }
@@ -964,7 +964,7 @@ watch(visible, (val): void => {
 
 .form-label {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 
   .required {
@@ -974,7 +974,7 @@ watch(visible, (val): void => {
 
 .error-message {
   color: hsl(var(--status-danger));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .dialog-input,
@@ -1004,14 +1004,14 @@ watch(visible, (val): void => {
 
 .section-title {
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 
 .section-subtitle {
   margin-top: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .node-list {
@@ -1043,7 +1043,7 @@ watch(visible, (val): void => {
   border-radius: var(--radius-sm);
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
 }
 
@@ -1069,7 +1069,7 @@ watch(visible, (val): void => {
   gap: $space-2;
   height: var(--control-h-md);
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   white-space: nowrap;
 }
 
@@ -1097,7 +1097,7 @@ watch(visible, (val): void => {
   border: 1px dashed hsl(var(--border));
   border-radius: var(--radius-md);
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .preview-actions {
@@ -1147,7 +1147,7 @@ watch(visible, (val): void => {
   .dialog-select,
   .input-textarea {
     min-height: var(--touch-target);
-    font-size: 16px;
+    font-size: var(--font-size-body-strong);
   }
 }
 

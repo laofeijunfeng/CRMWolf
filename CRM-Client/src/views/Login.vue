@@ -196,7 +196,7 @@ async function handleLogin(): Promise<void> {
   justify-items: center;
   gap: $space-2;
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
 }
 
@@ -216,7 +216,7 @@ async function handleLogin(): Promise<void> {
 }
 
 .auth-card__title {
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
 }
 
 .auth-form {
@@ -232,14 +232,14 @@ async function handleLogin(): Promise<void> {
 .auth-form__error {
   margin: 0;
   color: hsl(var(--status-danger));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .auth-card__switch {
   margin: $space-4 0 0;
   text-align: center;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 
   a {
     color: hsl(var(--brand));

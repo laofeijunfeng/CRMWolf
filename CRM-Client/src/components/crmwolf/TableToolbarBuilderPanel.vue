@@ -69,14 +69,14 @@ const emit = defineEmits<{
 }
 
 .table-toolbar-builder-title {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   color: hsl(var(--foreground));
 }
 
 .table-toolbar-builder-subtitle {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
 }
 

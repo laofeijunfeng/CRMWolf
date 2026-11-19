@@ -1755,7 +1755,7 @@ defineExpose({
 
 .customer-name-meta {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 400;
   line-height: 16px;
 }
@@ -1784,13 +1784,13 @@ defineExpose({
 
 .customer-contact-name {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
 }
 
 .customer-contact-meta {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 16px;
 }
 
@@ -1816,13 +1816,13 @@ defineExpose({
 
 .customer-owner-name {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
 }
 
 .customer-owner-meta {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 16px;
 }
 
@@ -1870,7 +1870,7 @@ defineExpose({
 
 .license-summary__secondary {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 16px;
 }
 
@@ -1894,7 +1894,7 @@ defineExpose({
 }
 
 .customer-status-stage-hint {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
 }
 
@@ -1907,7 +1907,7 @@ defineExpose({
 
 .customer-mobile-card-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--foreground));
   line-height: 1.5;
@@ -1926,7 +1926,7 @@ defineExpose({
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 

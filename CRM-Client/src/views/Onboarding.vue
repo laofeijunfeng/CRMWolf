@@ -122,7 +122,7 @@ const confirmLogout = (): void => {
   top: calc($space-4 + var(--safe-top));
   right: $space-4;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   // UI/UX Pro Max: Touch target ≥44px
   min-height: var(--touch-target);
 }
@@ -156,7 +156,7 @@ const confirmLogout = (): void => {
   }
 
   .welcome-subtitle {
-    font-size: 14px;
+    font-size: var(--font-size-body);
     color: hsl(var(--muted-foreground));
     margin: 0;
   }
@@ -172,14 +172,14 @@ const confirmLogout = (): void => {
 .action-btn {
   width: 100%;
   height: var(--control-h-lg); // 48px - UI/UX Pro Max touch target
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 
 .tip-text {
   text-align: center;
   margin-top: $space-8;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
 }
 
@@ -201,7 +201,7 @@ const confirmLogout = (): void => {
   }
 
   .welcome-text h1 {
-    font-size: 18px;
+    font-size: var(--font-size-title);
   }
 }
 </style>

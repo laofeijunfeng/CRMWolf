@@ -183,7 +183,7 @@ const handleClick = (): void => {
   color: hsl(var(--primary-foreground));
 
   // 字体
-  font-size: 10px;
+  font-size: var(--font-size-caption);
   font-weight: 600;  // 600
   line-height: 1;
 

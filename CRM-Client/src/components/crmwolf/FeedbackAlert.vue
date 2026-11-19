@@ -108,7 +108,7 @@ const feedbackAlertClass = computed(() => [
 
 .feedback-alert__meta {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .feedback-alert__actions {
@@ -127,7 +127,7 @@ const feedbackAlertClass = computed(() => [
 
   .feedback-alert__body {
     gap: 2px;
-    font-size: 12px;
+    font-size: var(--font-size-caption);
   }
 }
 </style>

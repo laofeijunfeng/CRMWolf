@@ -924,7 +924,7 @@ watchEffect(() => {
 .invoice-mobile-card-number {
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--brand));
   line-height: 1.5;
@@ -933,14 +933,14 @@ watchEffect(() => {
 
 .invoice-mobile-card-customer {
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--foreground));
   overflow-wrap: anywhere;
 }
 
 .invoice-mobile-card-contract {
   margin-top: $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
@@ -954,7 +954,7 @@ watchEffect(() => {
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 

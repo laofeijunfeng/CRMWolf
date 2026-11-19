@@ -257,13 +257,13 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
 
 .customer-chart-page__state,
 .customer-chart-page__refresh-error { display: flex; align-items: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
-.customer-chart-page__heading h2 { margin: 0; font-size: 16px; line-height: 1.25; }
+.customer-chart-page__heading h2 { margin: 0; font-size: var(--font-size-body-strong); line-height: 1.25; }
 .customer-chart-page__heading p,
 .customer-chart-page__refresh-error { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); }
 .customer-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .customer-chart-dialog-list { display: flex; flex-direction: column; }
 .customer-chart-dialog-list button { display: flex; justify-content: space-between; gap: $space-3; border: 0; border-bottom: 1px solid hsl(var(--border)); background: transparent; padding: $space-2 0; text-align: left; }
-:deep(.customer-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; }
+:deep(.customer-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: $space-6; padding-bottom: $space-6; }
 .customer-chart-dialog { max-width: 32rem; }
 .customer-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }
 .customer-chart-page__grid :deep(.chart-bucket-actions__value) { white-space: normal; overflow-wrap: anywhere; }

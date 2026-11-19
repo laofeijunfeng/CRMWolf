@@ -335,14 +335,14 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
 .license-action-hover-text {
   display: inline-flex;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   white-space: nowrap;
 }
 
 .license-applications-empty {
   width: 100%;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   color: hsl(var(--muted-foreground));
   text-align: center;

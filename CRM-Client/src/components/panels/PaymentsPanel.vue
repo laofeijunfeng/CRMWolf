@@ -253,7 +253,7 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
   align-items: center;
   padding: 2px 8px;
   border-radius: 9999px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -317,7 +317,7 @@ const hasActions = (plan: PaymentPlanResponse): boolean =>
 
 .payment-plan-action-hover-text {
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   white-space: nowrap;
 }

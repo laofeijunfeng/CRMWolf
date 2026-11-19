@@ -90,7 +90,7 @@ const isActive = (key: string): boolean => {
 
 // shadcn-vue Sidebar 样式覆盖
 :deep([data-sidebar="menu-button"]) {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 
   &:hover {

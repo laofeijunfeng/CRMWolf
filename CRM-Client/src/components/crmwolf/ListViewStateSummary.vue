@@ -146,7 +146,7 @@ function getFilterSummaryTitle(filter: FilterSummaryItem): string {
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   flex-shrink: 0;
 }
 

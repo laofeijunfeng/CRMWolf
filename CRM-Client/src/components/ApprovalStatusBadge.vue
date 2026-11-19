@@ -64,7 +64,7 @@ const title = computed(() => isUnknown.value ? `approval: ${presentation.value.t
   height: 22px;
   padding: 4px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1.5;
   white-space: nowrap;
@@ -82,6 +82,6 @@ const title = computed(() => isUnknown.value ? `approval: ${presentation.value.t
 .approval-status-badge--small {
   height: 18px;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 </style>

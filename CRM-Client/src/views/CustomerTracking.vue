@@ -1292,7 +1292,7 @@ watchEffect(() => {
   align-items: flex-start;
   gap: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -1323,7 +1323,7 @@ watchEffect(() => {
 .tracking-confirmation-detail-question {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
 }
 
@@ -1335,7 +1335,7 @@ watchEffect(() => {
 
 .tracking-content-hover-text {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -1352,7 +1352,7 @@ watchEffect(() => {
   border-radius: var(--radius-md);
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -1400,7 +1400,7 @@ watchEffect(() => {
   grid-template-columns: 64px minmax(0, 1fr);
   gap: $space-2;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -1420,7 +1420,7 @@ watchEffect(() => {
 .tracking-mobile-card-title {
   min-width: 0;
   color: hsl(var(--brand));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -1429,7 +1429,7 @@ watchEffect(() => {
 .tracking-mobile-card-content {
   margin-top: $space-2;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
   overflow-wrap: anywhere;
 }
@@ -1440,7 +1440,7 @@ watchEffect(() => {
   gap: $space-1 $space-3;
   margin-top: $space-2;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .tracking-sheet-header {
@@ -1502,7 +1502,7 @@ watchEffect(() => {
 
 .tracking-card-title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   color: hsl(var(--foreground));
   line-height: 20px;
@@ -1515,7 +1515,7 @@ watchEffect(() => {
 .tracking-description {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   overflow-wrap: anywhere;
@@ -1525,7 +1525,7 @@ watchEffect(() => {
 .tracking-description--secondary {
   margin-top: $space-2;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 400;
 }
 
@@ -1547,7 +1547,7 @@ watchEffect(() => {
 }
 
 .tracking-attribute-label {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   color: hsl(var(--muted-foreground));
   font-weight: 500;
 }
@@ -1555,7 +1555,7 @@ watchEffect(() => {
 .tracking-attribute-value {
   min-width: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   overflow-wrap: anywhere;
 }

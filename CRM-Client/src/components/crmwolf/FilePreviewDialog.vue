@@ -532,7 +532,7 @@ const contentClass = computed(() => cn(
 
 .file-preview__title {
   overflow: hidden;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -540,7 +540,7 @@ const contentClass = computed(() => cn(
 }
 
 .file-preview__meta {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .file-preview__header-actions,
@@ -573,7 +573,7 @@ const contentClass = computed(() => cn(
 .file-preview__scale {
   min-width: 64px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -663,13 +663,13 @@ const contentClass = computed(() => cn(
 .file-preview__state-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .file-preview__state-hint {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .file-preview__state-actions {

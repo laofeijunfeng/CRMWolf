@@ -360,7 +360,7 @@ onMounted(() => {
 
   @media (max-width: $bp-sm) {
     &__profile { gap: $space-3; }
-    &__password-input :deep(input) { min-height: var(--touch-target); padding-inline: $space-4; font-size: 16px; }
+    &__password-input :deep(input) { min-height: var(--touch-target); padding-inline: $space-4; font-size: var(--font-size-body-strong); }
     &__password-input :deep(button) { min-height: var(--touch-target); }
   }
 }

@@ -851,7 +851,7 @@ $payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .payment-sheet-title {
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   line-height: 24px;
 }
@@ -889,7 +889,7 @@ $payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
   strong {
     color: hsl(var(--foreground));
     font-family: var(--font-mono);
-    font-size: 14px;
+    font-size: var(--font-size-body);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
@@ -905,7 +905,7 @@ $payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .amount-summary-label {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .sheet-body {
@@ -958,7 +958,7 @@ $payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 .section-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 
@@ -998,14 +998,14 @@ $payment-empty-min-height: calc(#{var(--touch-target)} * 6 + #{$space-4});
 
 .attribute-label {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 }
 
 .attribute-value,
 .attribute-link {
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   line-height: 20px;
   word-break: break-word;

@@ -202,7 +202,7 @@ watch(isCompactToolbar, async (compact) => {
 .list-advanced-tools-heading {
   padding: 4px 8px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .list-advanced-tools-items {

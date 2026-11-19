@@ -613,7 +613,7 @@ watch(
 
 .entity-name {
   color: hsl(var(--foreground));
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
 }
 
@@ -624,7 +624,7 @@ watch(
   border-radius: var(--radius-sm);
   background: var(--wash-hover);
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .attribute-item {
@@ -636,13 +636,13 @@ watch(
 
 .attribute-label {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .attribute-value {
   overflow: hidden;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -656,7 +656,7 @@ watch(
 .form-section-title {
   margin: 0 0 $space-3;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 

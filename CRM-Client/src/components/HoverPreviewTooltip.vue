@@ -49,7 +49,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 .hover-preview-tooltip {
   max-width: 380px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .tooltip-row {

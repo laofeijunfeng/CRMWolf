@@ -286,7 +286,7 @@ watch(
   gap: 8px;
   min-height: 72px;
   color: hsl(var(--muted-foreground));
-  font-size: 13px;
+  font-size: var(--font-size-control-sm);
 }
 
 .customer-member-dialog__form {

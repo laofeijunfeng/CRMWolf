@@ -193,7 +193,7 @@ const confirmLogout = (): void => {
   top: calc($space-4 + var(--safe-top));
   right: $space-4;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   min-height: var(--touch-target);
 }
 
@@ -236,7 +236,7 @@ const confirmLogout = (): void => {
   }
 
   p {
-    font-size: 14px;
+    font-size: var(--font-size-body);
     color: hsl(var(--muted-foreground));
     margin: 0;
   }
@@ -250,14 +250,14 @@ const confirmLogout = (): void => {
 .submit-btn {
   width: 100%;
   height: var(--control-h-lg);
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 500;
   margin-top: $space-3;
 }
 
 .back-link {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   min-height: var(--touch-target);
 }
 
@@ -279,7 +279,7 @@ const confirmLogout = (): void => {
   }
 
   .header h1 {
-    font-size: 18px;
+    font-size: var(--font-size-title);
   }
 }
 </style>

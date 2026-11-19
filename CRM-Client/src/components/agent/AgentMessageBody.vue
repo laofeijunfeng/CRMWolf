@@ -73,7 +73,7 @@ const normalizeMarkdownForDisplay = (content: string): string => {
 .agent-message-body--markdown :deep(h4) {
   margin-bottom: $space-1;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 20px;
 }

@@ -48,7 +48,7 @@ const emit = defineEmits<{
   border-radius: var(--radius-md);
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 1.6;
 }
 

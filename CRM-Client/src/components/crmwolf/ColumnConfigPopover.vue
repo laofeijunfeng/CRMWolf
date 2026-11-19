@@ -115,7 +115,7 @@ watch(() => props.scope, (scope) => {
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
       <TableToolbarButton :active="isActive" :count="normalizedActiveCount">
-        <Settings2 class="w-4 h-4" aria-hidden="true" />
+        <Settings2 class="size-icon-sm" aria-hidden="true" />
         <span>{{ viewConfigTriggerLabel }}</span>
       </TableToolbarButton>
     </PopoverTrigger>
@@ -132,7 +132,7 @@ watch(() => props.scope, (scope) => {
             :variant="selectedScope === 'personal' ? 'default' : 'outline'"
             @click="selectedScope = 'personal'"
           >
-            <User class="w-4 h-4" aria-hidden="true" />
+            <User class="size-icon-sm" aria-hidden="true" />
             <span>仅自己</span>
           </Button>
           <Button
@@ -141,7 +141,7 @@ watch(() => props.scope, (scope) => {
             :variant="selectedScope === 'team' ? 'default' : 'outline'"
             @click="selectedScope = 'team'"
           >
-            <Users class="w-4 h-4" aria-hidden="true" />
+            <Users class="size-icon-sm" aria-hidden="true" />
             <span>同步团队</span>
           </Button>
         </div>
@@ -176,8 +176,8 @@ watch(() => props.scope, (scope) => {
                 :aria-label="column.visible ? `隐藏${column.title}` : `显示${column.title}`"
                 @click="updateVisible(column.key, !column.visible)"
               >
-                <Eye v-if="column.visible" class="w-4 h-4" aria-hidden="true" />
-                <EyeOff v-else class="w-4 h-4" aria-hidden="true" />
+                <Eye v-if="column.visible" class="size-icon-sm" aria-hidden="true" />
+                <EyeOff v-else class="size-icon-sm" aria-hidden="true" />
               </Button>
               <Lock v-else class="column-config-lock-icon" aria-hidden="true" />
             </div>
@@ -217,7 +217,7 @@ watch(() => props.scope, (scope) => {
 
 .column-config-state {
   padding: $space-6;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   text-align: center;
 }
@@ -227,14 +227,19 @@ watch(() => props.scope, (scope) => {
   grid-template-columns: var(--control-h-sm) minmax(0, 1fr) var(--control-h-sm);
   align-items: center;
   gap: $space-2;
-  min-height: var(--touch-target);
+  min-height: var(--control-h-md);
   padding: 0 $space-2;
   border-radius: var(--radius-md);
   color: hsl(var(--foreground));
   cursor: grab;
+  transition: background var(--duration-base) var(--ease-standard);
 
   &:hover {
-    background: hsl(var(--muted));
+    background: var(--wash-hover);
+  }
+
+  @media (max-width: $bp-sm - 1) {
+    min-height: var(--touch-target);
   }
 
   &.is-locked {
@@ -249,8 +254,8 @@ watch(() => props.scope, (scope) => {
 
 .column-config-drag-icon,
 .column-config-lock-icon {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   color: hsl(var(--muted-foreground));
   justify-self: center;
 }
@@ -273,6 +278,6 @@ watch(() => props.scope, (scope) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 </style>

@@ -105,7 +105,7 @@ watch(
 }
 
 .rename-dialog__error {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
   color: hsl(var(--status-danger));
 }

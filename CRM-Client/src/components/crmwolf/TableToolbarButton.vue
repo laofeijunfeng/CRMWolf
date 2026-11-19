@@ -43,10 +43,10 @@ const props = withDefaults(defineProps<{
   border-radius: var(--radius-md);
   background: transparent;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
 
   &:hover {
-    background: hsl(var(--muted));
+    background: var(--wash-hover);
     color: hsl(var(--foreground));
   }
 }
@@ -68,7 +68,7 @@ const props = withDefaults(defineProps<{
   border-radius: 999px;
   background: hsl(var(--brand));
   color: hsl(var(--primary-foreground));
-  font-size: 11px;
+  font-size: var(--font-size-caption);
   line-height: 16px;
   text-align: center;
 }

@@ -72,7 +72,7 @@ const statusTitle = computed(() => {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   border-radius: 9999px;
   white-space: nowrap;
@@ -90,6 +90,6 @@ const statusTitle = computed(() => {
 
 .status-badge--small {
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 </style>

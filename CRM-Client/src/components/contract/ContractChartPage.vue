@@ -101,15 +101,15 @@ function openMonthFromDatum(datum: MonthDatum): void {
 <style scoped lang="scss">
 @use '@/styles/tokens.scss' as *;
 .contract-chart-page__state,.contract-chart-page__refresh-error { display: flex; align-items: center; gap: $space-2; color: hsl(var(--muted-foreground)); }
-.contract-chart-page__heading h2 { margin: 0; font-size: 16px; line-height: 1.25; }
-.contract-chart-page__heading p,.contract-chart-page__refresh-error { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); font-size: 14px; }
+.contract-chart-page__heading h2 { margin: 0; font-size: var(--font-size-body-strong); line-height: 1.25; }
+.contract-chart-page__heading p,.contract-chart-page__refresh-error { margin: $space-1 0 0; color: hsl(var(--muted-foreground)); font-size: var(--font-size-body); }
 .contract-chart-page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: $space-3; }
 .contract-chart-dialog-list { display: flex; flex-direction: column; }
 .contract-chart-dialog-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; border-bottom: 1px solid hsl(var(--border)); background: transparent; padding: $space-2 0; text-align: left; }
 .contract-chart-dialog-list small { color: hsl(var(--muted-foreground)); }
 .contract-chart-page__grid :deep(.chart-bucket-actions__action) { min-width: 0; }
 .contract-chart-page__grid :deep(.chart-bucket-actions__value) { white-space: normal; overflow-wrap: anywhere; }
-:deep(.contract-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 1.5rem; padding-bottom: 1.5rem; }
+:deep(.contract-chart-page__donut-content) { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: $space-6; padding-bottom: $space-6; }
 .contract-chart-dialog { max-width: 32rem; }
 @media (max-width: 720px) { .contract-chart-page__grid { grid-template-columns: minmax(0, 1fr); } :deep(.contract-chart-page__donut-content) { grid-template-columns: minmax(0, 1fr); } }
 .contract-chart-page__month-actions:focus-within { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; clip-path: none; white-space: normal; }

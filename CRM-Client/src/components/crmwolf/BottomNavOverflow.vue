@@ -167,7 +167,7 @@ const overflowButtonClasses = computed((): string =>
 }
 
 .bottom-nav-label {
-  font-size: 12px;  // 12px
+  font-size: var(--font-size-caption);  // 12px
   line-height: 1.2;
 }
 
@@ -230,6 +230,6 @@ const overflowButtonClasses = computed((): string =>
 }
 
 .overflow-label {
-  font-size: 14px;  // 14px
+  font-size: var(--font-size-body);  // 14px
 }
 </style>

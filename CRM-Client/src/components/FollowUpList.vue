@@ -726,7 +726,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 .follow-up-content {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
   font-weight: 500;
   overflow: hidden;
@@ -766,7 +766,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
   &:hover {
     color: hsl(var(--muted-foreground));
-    background: hsl(var(--muted)) !important;
+    background: var(--wash-hover) !important;
   }
 }
 
@@ -800,7 +800,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 .follow-up-hover-text {
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -811,7 +811,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 .follow-up-meta-card {
   display: grid;
   gap: $space-1;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -840,7 +840,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   grid-template-columns: 40px minmax(0, 1fr);
   gap: $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -859,7 +859,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 
 .processing-error {
   color: hsl(var(--status-danger));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -923,7 +923,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .effectiveness-card {
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 18px;
 }
 
@@ -950,7 +950,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   gap: $space-1;
   min-width: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 16px;
   white-space: nowrap;
   overflow: hidden;
@@ -995,7 +995,7 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
 }
 
 .process-btn:hover {
-  background: hsl(var(--muted)) !important;
+  background: var(--wash-hover) !important;
 }
 
 .delete-icon {

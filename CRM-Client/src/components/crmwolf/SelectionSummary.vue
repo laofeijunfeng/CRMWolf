@@ -159,13 +159,13 @@ const skeletonCount = computed(() => Math.max(
 
   span {
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--font-size-caption);
   }
 
   strong {
     overflow: hidden;
     color: hsl(var(--foreground));
-    font-size: 14px;
+    font-size: var(--font-size-body);
     font-weight: 500;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -184,12 +184,12 @@ const skeletonCount = computed(() => Math.max(
     gap: $space-1;
 
     span {
-      font-size: 12px;
+      font-size: var(--font-size-caption);
       line-height: 20px;
     }
 
     strong {
-      font-size: 14px;
+      font-size: var(--font-size-body);
       line-height: 20px;
     }
   }
@@ -230,7 +230,7 @@ const skeletonCount = computed(() => Math.max(
   min-height: 36px;
   padding: 0 $space-1;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .selection-summary__details-icon {

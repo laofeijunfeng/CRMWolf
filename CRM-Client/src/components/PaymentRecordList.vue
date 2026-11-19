@@ -231,7 +231,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 .record-card-title {
   margin: 0;
   color: hsl(var(--foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   font-weight: 600;
 }
 
@@ -256,7 +256,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 
 .record-status-badge {
   border: 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
 }
 
@@ -280,7 +280,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: $space-1 $space-3;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 20px;
 
   @media (max-width: $bp-sm - 1) {
@@ -291,7 +291,7 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
 .record-notes {
   margin: 0;
   color: hsl(var(--muted-foreground));
-  font-size: 14px;
+  font-size: var(--font-size-body);
   line-height: 20px;
   word-break: break-word;
 }

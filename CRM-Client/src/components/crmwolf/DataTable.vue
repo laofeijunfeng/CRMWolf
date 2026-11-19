@@ -1305,7 +1305,7 @@ onBeforeUnmount(() => {
               v-for="(row, index) in data"
               :key="getRowKey(row, index)"
               class="data-table-row"
-              :class="{ 'is-interactive': rowInteractive }"
+              :class="{ 'is-interactive': rowInteractive, 'is-context-open': rowMenuOpen && rowMenuRow === row }"
               @click="handleRowClick(row, index)"
               @contextmenu="handleRowContextMenu($event, row, index)"
               @keydown="handleRowKeydown($event, row, index)"
@@ -1457,7 +1457,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   border-bottom: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .data-table-refreshing-indicator {
@@ -1491,7 +1491,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   min-width: 0;
   flex-direction: column;
   gap: $space-1;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 
 .data-table-inline-error-copy span {
@@ -1614,7 +1614,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   border-radius: var(--radius-md);
   background: hsl(var(--card));
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -1667,7 +1667,8 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   background: hsl(var(--card));
 }
 
-.data-table-row:hover .data-table-selection-cell {
+.data-table-row:hover .data-table-selection-cell,
+.data-table-row.is-context-open .data-table-selection-cell {
   background: $sticky-row-hover-bg;
 }
 
@@ -1693,7 +1694,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
 .data-table-mobile-card-title {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--font-size-body-strong);
   font-weight: 600;
   color: hsl(var(--foreground));
   overflow-wrap: anywhere;
@@ -1701,13 +1702,13 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
 .data-table-mobile-card-status {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 
 .data-table-mobile-card-subtitle {
   margin-top: $space-1;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
@@ -1717,7 +1718,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   flex-wrap: wrap;
   gap: $space-1 $space-3;
   margin-top: $space-2;
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
 }
 
@@ -1756,7 +1757,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   top: 0;
   z-index: 30;
   background: hsl(var(--muted));
-  font-size: 13px;  // 表头字号（list-page.md 3.2）
+  font-size: var(--font-size-control-sm);  // 表头字号（list-page.md 3.2）
   font-weight: 600;  // 表头字重（list-page.md 3.2）
   color: hsl(var(--muted-foreground));   // 表头文字色（list-page.md 3.2）
   padding: 12px 16px;
@@ -1813,7 +1814,9 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   transition: background 150ms ease;
   border-bottom: 1px solid hsl(var(--border));  // 行分割线（list-page.md 3.2）
 
-  &:hover {
+  // 右键菜单打开期间保留 hover 态，标明菜单作用的行
+  &:hover,
+  &.is-context-open {
     background: var(--wash-hover);  // Hover 背景（list-page.md 3.2）
   }
 
@@ -1833,7 +1836,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
 // 表格单元格
 .data-table-cell {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   height: var(--touch-target);
   padding: 0 $space-3;
@@ -1859,7 +1862,9 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
   // hover 时固定列背景同步
   .data-table-row:hover &.fixed-left,
-  .data-table-row:hover &.fixed-right {
+  .data-table-row:hover &.fixed-right,
+  .data-table-row.is-context-open &.fixed-left,
+  .data-table-row.is-context-open &.fixed-right {
     background: $sticky-row-hover-bg;
   }
 
@@ -1900,7 +1905,8 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
   background: hsl(var(--muted));
 }
 
-.data-table-row:hover .data-table-actions-cell {
+.data-table-row:hover .data-table-actions-cell,
+.data-table-row.is-context-open .data-table-actions-cell {
   background: $sticky-row-hover-bg;
 }
 
@@ -1940,7 +1946,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 }
 
 .total-text {
-  font-size: 14px;
+  font-size: var(--font-size-body);
   color: hsl(var(--muted-foreground));
   white-space: nowrap; // 防止换行
   flex-shrink: 0; // 不压缩宽度
@@ -1954,7 +1960,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 .page-size-select {
   min-height: var(--touch-target);
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   cursor: pointer;
 
   &:focus-visible {

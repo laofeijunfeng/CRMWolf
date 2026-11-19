@@ -230,7 +230,7 @@ const handleViewAll = (): void => {
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   border-radius: 9999px;
   white-space: nowrap;
