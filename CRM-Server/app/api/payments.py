@@ -379,6 +379,12 @@ def _iter_payment_plan_export_rows(
 
 
 
+def _positive_contract_user_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _build_payment_record_list_items(
     projection_db: Session,
     records: list[PaymentRecord],
@@ -399,12 +405,18 @@ def _build_payment_record_list_items(
     plan_ids = list({record.payment_plan_id for record in records})
     plans = {
         plan.id: plan
-        for plan in projection_db.query(PaymentPlan).filter(PaymentPlan.id.in_(plan_ids)).all()
+        for plan in projection_db.query(PaymentPlan).filter(
+            PaymentPlan.team_id == team_id,
+            PaymentPlan.id.in_(plan_ids),
+        ).all()
     } if plan_ids else {}
     contract_ids = {plan.contract_id for plan in plans.values() if plan.contract_id}
     contracts = {
         contract.id: contract
-        for contract in projection_db.query(Contract).filter(Contract.id.in_(contract_ids)).all()
+        for contract in projection_db.query(Contract).filter(
+            Contract.team_id == team_id,
+            Contract.id.in_(contract_ids),
+        ).all()
     } if contract_ids else {}
     customer_ids = {contract.customer_id for contract in contracts.values() if contract.customer_id}
     customers = {
@@ -420,7 +432,8 @@ def _build_payment_record_list_items(
     opportunities = {
         opportunity.id: opportunity
         for opportunity in projection_db.query(Opportunity).filter(
-            Opportunity.id.in_(opportunity_ids)
+            Opportunity.team_id == team_id,
+            Opportunity.id.in_(opportunity_ids),
         ).all()
     } if opportunity_ids else {}
 
@@ -542,6 +555,9 @@ def _build_payment_record_list_items(
             "last_modified_time": _payment_record_last_modified_time(record).isoformat(),
             "contract_id": plan.contract_id if plan is not None else None,
             "contract_name": contract.contract_name if contract is not None else None,
+            "contract_user_count": _positive_contract_user_count(
+                contract.user_count if contract is not None else None
+            ),
             "stage_name": plan.stage_name if plan is not None else None,
             "customer_id": customer.public_id if customer is not None else None,
             "customer_name": customer.account_name if customer is not None else None,

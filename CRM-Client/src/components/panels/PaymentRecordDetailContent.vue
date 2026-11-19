@@ -825,6 +825,7 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
 .amount-summary-item {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: $wolf-space-xs-v2;
   padding: $wolf-space-sm-v2 $wolf-space-md-v2;
   border: $record-border-width solid $wolf-border-light-v2;
@@ -945,6 +946,10 @@ $record-empty-min-height: ($wolf-touch-target-min-v2 * 6) + $wolf-space-lg-v2;
   font-weight: $wolf-font-weight-medium-v2;
   line-height: $wolf-line-height-body-v2;
   word-break: break-word;
+}
+
+.attribute-item > :deep(.amount-text) {
+  align-self: flex-start;
 }
 
 .mono-value {
