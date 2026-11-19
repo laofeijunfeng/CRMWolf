@@ -87,7 +87,7 @@
 
 ## 已知问题
 
-- `crmwolf/index.ts` 尾部转导出约 30 组 `ui` 原件，违反 barrel 规则，已登记待清理；不为这些原件建行。
+- `crmwolf/index.ts` 只导出 crmwolf 组件；`ui` 原件从 `@/components/ui/*` 直接引用。
 - FeedbackAlert、ListAdvancedTools、ListViewStateSummary、TableRowContextMenuContent 存在但未导出，按需登记。
 - 页面空、错、加载状态统一用 DataViewStatePanel，不另建 EmptyState。
 

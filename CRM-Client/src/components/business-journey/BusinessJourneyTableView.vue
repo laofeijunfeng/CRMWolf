@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, useSlots } from 'vue'
-import { AmountText, Badge, DataTable, Progress, StatusBadge } from '@/components/crmwolf'
+import { AmountText, DataTable, StatusBadge } from '@/components/crmwolf'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ViewDisplayMode, ViewPreferenceConfig } from '@/api/viewPreference'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'

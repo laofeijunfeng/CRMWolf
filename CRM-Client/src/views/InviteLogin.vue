@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Building2, Loader2, LogIn } from 'lucide-vue-next'
-import { Button, Card, CardContent } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import { oauthApi, type InviteLoginOptionsResponse } from '@/api/oauth'
 import { handleApiError } from '@/utils/errorHandler'
 

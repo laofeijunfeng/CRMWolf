@@ -1,14 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { AlertCircle, CheckCircle2, RefreshCw, UserRound } from 'lucide-vue-next'
-import {
-  AmountText,
-  Badge,
-  Card,
-  CardContent,
-  Skeleton,
-  TableToolbarButton
-} from '@/components/crmwolf'
+import { AmountText, TableToolbarButton } from '@/components/crmwolf'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import type {
   BusinessJourneyBoardCard,
   BusinessJourneyBoardResponse

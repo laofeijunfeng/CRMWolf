@@ -4,29 +4,15 @@ import { storeToRefs } from 'pinia'
 import { toTypedSchema } from '@vee-validate/zod'
 import { ErrorMessage, useForm } from 'vee-validate'
 import { toast } from 'vue-sonner'
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CopyableText,
-  DataViewStatePanel,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Skeleton,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/crmwolf'
-import { CardTitle } from '@/components/ui/card'
+import { CopyableText, DataViewStatePanel } from '@/components/crmwolf'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { CardTitle, Card, CardContent, CardHeader } from '@/components/ui/card'
 import { FormControl, FormDescription, FormField, FormItem, FormLabel } from '@/components/ui/form'
 import { authApi } from '@/api/auth'
 import { oauthApi, type OAuthBindingStatusResponse } from '@/api/oauth'

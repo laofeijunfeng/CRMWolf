@@ -2,18 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import {
-  AmountText,
-  AreaTrendChart,
-  ListFilterPopover,
-  MetricCard,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  TableToolbarButton
-} from '@/components/crmwolf'
+import { AmountText, AreaTrendChart, ListFilterPopover, MetricCard, TableToolbarButton } from '@/components/crmwolf'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import salesDashboardApi, {
   type SalesDashboardFollowUpTrendPoint,

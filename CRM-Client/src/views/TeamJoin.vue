@@ -5,7 +5,9 @@ import { toast } from 'vue-sonner'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useForm } from 'vee-validate'
 import { ArrowLeft, LogOut } from 'lucide-vue-next'
-import { Button, Card, CardContent, Input } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
   FormControl,
   FormField,

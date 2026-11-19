@@ -218,14 +218,14 @@
       "file": "CRM-Client/src/components/crmwolf/index.ts",
       "symbol": "export { Button } from '@/components/ui/button'",
       "category": "barrel-reexport",
-      "current": "40 处命中，行 83, 84, 85, 86, 89, 90, 91, 92, 95, 96, 97, 100, 101, 102, 103, 104, 105, 108, 109, 110, 111, 112, 113, 116, 117, 118, 119, 120, 121, 122, 123, 126, 127, 128, 131, 134, 137, 138, 141, 144",
+      "current": "barrel 仅导出 crmwolf 组件，消费方改为直接引用 @/components/ui/*（CMP-05）",
       "target": "移除 ui 转出；消费方改用 crmwolf 封装或直接引用 ui",
       "exception": false,
       "owner": "frontend-platform",
       "batch": "阶段2",
       "risk": "大面积引用路径变更",
       "verification": "npm run lint:design-system -- --worktree 对该文件无 barrel-reexport 命中",
-      "status": "pending",
+      "status": "fixed",
       "lastVerified": "2026-11-19"
     },
     {

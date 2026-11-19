@@ -62,7 +62,8 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Plus, Link, LogOut } from 'lucide-vue-next'
-import { Button, Card, CardContent } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   AlertDialog,
   AlertDialogAction,

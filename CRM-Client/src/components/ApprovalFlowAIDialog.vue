@@ -361,20 +361,12 @@ import {
   Trash2,
   WandSparkles
 } from 'lucide-vue-next'
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  InputField,
-  Progress,
-  ScrollArea,
-  SelectField,
-  TextareaField
-} from '@/components/crmwolf'
+import { InputField, SelectField, TextareaField } from '@/components/crmwolf'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useUserStore } from '@/stores/user'
 import {
   approvalAiApi,

@@ -15,16 +15,13 @@ const opportunityApi = vi.hoisted(() => ({
 vi.mock('@/api/dealJourney', () => ({ dealJourneyApi, default: dealJourneyApi }))
 vi.mock('@/api/opportunity', () => ({ opportunityApi }))
 
-vi.mock('@/components/crmwolf', () => ({
-  AmountText: defineComponent({
-    name: 'AmountText',
-    props: { value: [Number, String], size: String },
-    setup: (props) => () => h('span', `金额 ${String(props.value)}`),
-  }),
+vi.mock('@/components/ui/badge', () => ({
   Badge: defineComponent({
     name: 'Badge',
     setup: (_, { attrs, slots }) => () => h('span', attrs, slots.default?.()),
   }),
+}))
+vi.mock('@/components/ui/button', () => ({
   Button: defineComponent({
     name: 'Button',
     props: { type: String, variant: String, size: String, disabled: Boolean },
@@ -33,6 +30,28 @@ vi.mock('@/components/crmwolf', () => ({
       type: props.type ?? 'button',
       disabled: props.disabled,
     }, slots.default?.()),
+  }),
+}))
+vi.mock('@/components/ui/progress', () => ({
+  Progress: defineComponent({
+    name: 'Progress',
+    props: {
+      modelValue: Number,
+    },
+    setup: (props, { attrs }) => () => h('div', {
+      ...attrs,
+      'data-progress': String(props.modelValue),
+    }),
+  }),
+}))
+vi.mock('@/components/ui/skeleton', () => ({
+  Skeleton: defineComponent({ name: 'Skeleton', setup: () => () => h('div') }),
+}))
+vi.mock('@/components/crmwolf', () => ({
+  AmountText: defineComponent({
+    name: 'AmountText',
+    props: { value: [Number, String], size: String },
+    setup: (props) => () => h('span', `金额 ${String(props.value)}`),
   }),
   HoverInfo: defineComponent({
     name: 'HoverInfo',
@@ -51,16 +70,6 @@ vi.mock('@/components/crmwolf', () => ({
       slots.default?.(),
     ]),
   }),
-  Progress: defineComponent({
-    name: 'Progress',
-    props: {
-      modelValue: Number,
-    },
-    setup: (props, { attrs }) => () => h('div', {
-      ...attrs,
-      'data-progress': String(props.modelValue),
-    }),
-  }),
   DataViewStatePanel: defineComponent({
     name: 'DataViewStatePanel',
     inheritAttrs: false,
@@ -78,7 +87,6 @@ vi.mock('@/components/crmwolf', () => ({
       return h('div', attrs, slots.default?.())
     },
   }),
-  Skeleton: defineComponent({ name: 'Skeleton', setup: () => () => h('div') }),
 }))
 
 vi.mock('@/components/ui/empty', () => {

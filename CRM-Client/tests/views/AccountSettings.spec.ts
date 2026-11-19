@@ -45,12 +45,14 @@ vi.mock('@/utils/confirmDialog', () => ({ confirmDialog }))
 vi.mock('vue-sonner', () => ({ toast }))
 vi.mock('vue-router', () => ({ useRouter: vi.fn(), useRoute: vi.fn() }))
 
-vi.mock('@/components/crmwolf', async () => {
+const stubs = await vi.hoisted(async () => {
   const { defineComponent, h } = await import('vue')
   const passthrough = (name: string) => defineComponent({ name, template: '<div><slot /></div>' })
   const button = defineComponent({ name: 'Button', inheritAttrs: false, template: '<button v-bind="$attrs"><slot /></button>' })
-  const { Input } = await import('@/components/ui/input')
   const avatarImage = defineComponent({ name: 'AvatarImage', inheritAttrs: false, template: '<img v-bind="$attrs" />' })
+  const dialog = defineComponent({
+    name: 'Dialog', props: { open: Boolean }, setup: (props, { slots }) => () => props.open ? h('div', { role: 'dialog' }, slots.default?.()) : null,
+  })
   const dataViewStatePanel = defineComponent({
     name: 'DataViewStatePanel',
     inheritAttrs: false,
@@ -64,20 +66,27 @@ vi.mock('@/components/crmwolf', async () => {
           ? slots['empty-action']?.()
           : slots.default?.()),
   })
-
-  return {
-    CopyableText,
-    Alert: passthrough('Alert'), AlertDescription: passthrough('AlertDescription'), AlertTitle: passthrough('AlertTitle'),
-    Avatar: passthrough('Avatar'), AvatarFallback: passthrough('AvatarFallback'), AvatarImage: avatarImage,
-    Badge: passthrough('Badge'), Button: button, Card: passthrough('Card'), CardContent: passthrough('CardContent'),
-    CardHeader: passthrough('CardHeader'), DataViewStatePanel: dataViewStatePanel, Dialog: defineComponent({
-      name: 'Dialog', props: { open: Boolean }, setup: (props, { slots }) => () => props.open ? h('div', { role: 'dialog' }, slots.default?.()) : null,
-    }),
-    DialogContent: passthrough('DialogContent'), DialogFooter: passthrough('DialogFooter'), DialogHeader: passthrough('DialogHeader'),
-    DialogTitle: passthrough('DialogTitle'), Input, Label: passthrough('Label'), Skeleton: passthrough('Skeleton'),
-    Tooltip: passthrough('Tooltip'), TooltipContent: passthrough('TooltipContent'), TooltipTrigger: passthrough('TooltipTrigger'),
-  }
+  return { passthrough, button, avatarImage, dialog, dataViewStatePanel }
 })
+
+vi.mock('@/components/crmwolf', () => ({ CopyableText, DataViewStatePanel: stubs.dataViewStatePanel }))
+vi.mock('@/components/ui/avatar', () => ({
+  Avatar: stubs.passthrough('Avatar'), AvatarFallback: stubs.passthrough('AvatarFallback'), AvatarImage: stubs.avatarImage,
+}))
+vi.mock('@/components/ui/badge', () => ({ Badge: stubs.passthrough('Badge') }))
+vi.mock('@/components/ui/button', () => ({ Button: stubs.button }))
+vi.mock('@/components/ui/card', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/components/ui/card')>(),
+  Card: stubs.passthrough('Card'), CardContent: stubs.passthrough('CardContent'), CardHeader: stubs.passthrough('CardHeader'),
+}))
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: stubs.dialog, DialogContent: stubs.passthrough('DialogContent'), DialogFooter: stubs.passthrough('DialogFooter'),
+  DialogHeader: stubs.passthrough('DialogHeader'), DialogTitle: stubs.passthrough('DialogTitle'),
+}))
+vi.mock('@/components/ui/skeleton', () => ({ Skeleton: stubs.passthrough('Skeleton') }))
+vi.mock('@/components/ui/tooltip', () => ({
+  Tooltip: stubs.passthrough('Tooltip'), TooltipContent: stubs.passthrough('TooltipContent'), TooltipTrigger: stubs.passthrough('TooltipTrigger'),
+}))
 
 import AccountSettings from '@/views/AccountSettings.vue'
 

@@ -18,7 +18,9 @@
  * - Toast container at root level - §8 toast-accessibility
  * - z-index: 1000 (highest) - §5 z-index-management
  */
-import { Toast, ConfirmDialog, RenameDialog, TooltipProvider } from '@/components/crmwolf'
+import { ConfirmDialog, RenameDialog } from '@/components/crmwolf'
+import { Toast } from '@/components/ui/toast'
+import { TooltipProvider } from '@/components/ui/tooltip'
 </script>
 
 <style>
