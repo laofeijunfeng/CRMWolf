@@ -200,7 +200,17 @@ export interface PaymentPlanStatusSummary {
   last_modified_time: string
 }
 
-export interface PaymentRecordDetailResponse extends PaymentRecordWithDetails {
+export interface PaymentRecordSharedDetails extends PaymentRecordResponse {
+  contract_name?: string
+  stage_name?: string
+  customer_name?: string
+  approval_id?: number
+  approval?: ApprovalInfoLite
+  invoice_application_count?: number
+  confirmation_status?: PaymentConfirmationStatus
+}
+
+export interface PaymentRecordDetailResponse extends PaymentRecordSharedDetails {
   updated_time?: string | null
   payment_plan: PaymentPlanStatusSummary
 }
@@ -308,15 +318,8 @@ export interface PaymentRecordChartBucketParams extends Omit<PaymentRecordListPa
   limit?: number
 }
 
-export interface PaymentRecordWithDetails extends PaymentRecordResponse {
-  contract_name?: string
-  stage_name?: string
-  customer_name?: string
-  // Task 7.2: Approval and invoice info (nested structure matching backend)
-  approval_id?: number
-  approval?: ApprovalInfoLite
-  invoice_application_count?: number
-  confirmation_status?: PaymentConfirmationStatus
+export interface PaymentRecordWithDetails extends PaymentRecordSharedDetails {
+  contract_user_count?: number | null
 }
 
 export interface BadgeCounts {

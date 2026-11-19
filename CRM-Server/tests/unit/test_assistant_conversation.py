@@ -733,6 +733,72 @@ def test_proposal_confirmation_does_not_forge_another_activity_written_receipt(d
     assert next(m for m in messages if m.text == "结果1").outcome is None
 
 
+def test_structured_disposition_event_preserves_batch_projection_and_activity_receipt(db):
+    from app.crud import assistant_conversation as crud
+    from app.services.assistant.presentation import task_view
+
+    old = task(
+        db,
+        version=4,
+        authority_json={
+            "open_follow_up_batch": {
+                "disposition_batch_id": "afb_stable",
+                "status": "DONE",
+                "activity_id": "act_source",
+                "items": [
+                    {"item_id": "i1", "task_public_id": "fut_one", "disposition": "complete"},
+                    {"item_id": "i2", "task_public_id": "fut_two", "disposition": "hold"},
+                ],
+            },
+            "activity_public_id": "act_source",
+        },
+        committed_json=[{"kind": "customer_activity", "public_id": "act_source"}],
+    )
+    service = ConversationService(classifier=Classifier(decision()))
+    service.open(db, team_id=1, user_id=2)
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    request = AssistantRequest(
+        team_id=1, user_id=2, client_request_id="projection-event", input_fingerprint="x", task_id=old.id
+    )
+    db.add(request)
+    db.flush()
+    turn = AssistantTurn(
+        team_id=1, user_id=2, task_id=old.id, request_id=request.id,
+        input_json={"kind": "confirm"}, status="SUCCEEDED",
+    )
+    db.add(turn)
+    db.flush()
+    db.add(
+        AssistantConversationEntry(
+            conversation_id=conv.id, team_id=1, user_id=2,
+            client_request_id="projection-entry", input_fingerprint="x",
+            user_text="确认", state="READY", command_json={"waiting_field": "follow_up_disposition"},
+            task_public_id=old.public_id, turn_public_id=turn.public_id,
+        )
+    )
+    db.add(
+        AssistantTurnEvent(
+            turn_id=turn.id, seq=1, event="waiting",
+            data_json={
+                "task": task_view(old, db).model_dump(mode="json"),
+                "message": "跟进结果",
+                "card": "follow_up_disposition",
+            },
+        )
+    )
+    db.commit()
+
+    message = next(m for m in service.read(db, team_id=1, user_id=2).messages if m.text == "跟进结果")
+    assert message.projection is not None
+    assert message.projection.activity_public_id is None
+    assert message.projection.disposition is not None
+    assert message.projection.disposition.task_public_id == old.public_id
+    assert message.projection.disposition.batch_id == "afb_stable"
+    assert message.projection.disposition.item_ids == ["i1", "i2"]
+    assert message.projection.disposition.card_role == "FINAL"
+    assert message.projection.disposition.version == 4
+
+
 async def test_reclaimed_lease_fences_the_original_root_worker_before_task_dispatch(db):
     from datetime import timedelta
 

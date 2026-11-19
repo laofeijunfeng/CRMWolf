@@ -17,8 +17,10 @@ from app.schemas.assistant_conversation import (
     ConversationChoiceRequest,
     ConversationCommandRequest,
     ConversationDecision,
+    ConversationDispositionProjection,
     ConversationKindRequest,
     ConversationMessage,
+    ConversationProjection,
     ConversationReply,
     ConversationTextRequest,
     ConversationView,
@@ -173,6 +175,12 @@ class ConversationService:
                     error_code = data.get("code") if event.event == "error" else None
                     retryable = data.get("retryable") if event.event == "error" else None
                     card = data.get("card")
+                    is_activity = (
+                        snapshot is not None
+                        and row.command_json.get("waiting_field") == "activity_write"
+                        and any(r.kind == "customer_activity" for r in snapshot.committed)
+                        and turn.input_json.get("kind") == "confirm"
+                    )
                     result.append(
                         ConversationMessage(
                             id=f"{row.public_id}:{turn.public_id}:{event.seq}",
@@ -183,10 +191,7 @@ class ConversationService:
                             outcome="failure"
                             if event.event == "error"
                             else "activity_written"
-                            if snapshot
-                            and row.command_json.get("waiting_field") == "activity_write"
-                            and any(r.kind == "customer_activity" for r in snapshot.committed)
-                            and turn.input_json.get("kind") == "confirm"
+                            if is_activity
                             else "follow_up_disposition"
                             if card == "follow_up_disposition"
                             else "task_completed"
@@ -194,6 +199,7 @@ class ConversationService:
                             else None,
                             error_code=error_code if isinstance(error_code, str) else None,
                             retryable=retryable if isinstance(retryable, bool) else None,
+                            projection=self._structured_projection(snapshot, card=card, is_activity=is_activity),
                         )
                     )
                     followup = data.get("next_turn_id")
@@ -211,6 +217,59 @@ class ConversationService:
                         )
                     )
         return result
+
+    @staticmethod
+    def _activity_projection(snapshot: AssistantTaskView | None) -> ConversationProjection | None:
+        if snapshot is None:
+            return None
+        activity_id = next(
+            (receipt.public_id for receipt in snapshot.committed if receipt.kind == "customer_activity"),
+            None,
+        )
+        return ConversationProjection(activity_public_id=activity_id) if activity_id else None
+
+    @classmethod
+    def _structured_projection(
+        cls, snapshot: AssistantTaskView | None, *, card: object, is_activity: bool
+    ) -> ConversationProjection | None:
+        """Project only durable activity receipts and minted disposition batches."""
+        activity = cls._activity_projection(snapshot) if is_activity else None
+        disposition = None
+        if snapshot is not None and card == "follow_up_disposition":
+            payload = snapshot.follow_up_disposition
+            if isinstance(payload, dict):
+                batch_id = payload.get("batch_id")
+                items = payload.get("items")
+                if isinstance(batch_id, str) and batch_id.strip() and isinstance(items, list):
+                    item_ids = [
+                        item["item_id"]
+                        for item in items
+                        if isinstance(item, dict)
+                        and isinstance(item.get("item_id"), str)
+                        and item["item_id"].strip()
+                    ]
+                    role = (
+                        "FINAL"
+                        if payload.get("status") == "DONE"
+                        else "CURRENT"
+                        if snapshot.status == "ACTIVE"
+                        and snapshot.waiting is not None
+                        and snapshot.waiting.type == "FOLLOW_UP_DISPOSITION"
+                        else "NONE"
+                    )
+                    disposition = ConversationDispositionProjection(
+                        task_public_id=snapshot.public_id,
+                        batch_id=batch_id,
+                        item_ids=item_ids,
+                        card_role=role,
+                        version=snapshot.version,
+                    )
+        if activity is None and disposition is None:
+            return None
+        return ConversationProjection(
+            activity_public_id=activity.activity_public_id if activity is not None else None,
+            disposition=disposition,
+        )
 
     @staticmethod
     def _unavailable_messages(row: AssistantConversationEntry) -> list[ConversationMessage]:

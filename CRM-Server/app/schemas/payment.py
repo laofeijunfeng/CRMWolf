@@ -303,14 +303,20 @@ class ApprovalInfo(BaseModel):
     nodes: List[ApprovalNodeInfo] = Field(default_factory=list)
 
 
-class PaymentRecordListItem(PaymentRecordResponse):
-    """回款记录列表项（含审批信息）"""
+class PaymentRecordApprovalResponse(PaymentRecordResponse):
+    """回款记录共有的审批信息。"""
     confirmation_status: PaymentConfirmationStatusEnum = Field(..., description="确认状态")
     approval_id: Optional[int] = Field(None, description="审批ID")
     approval: Optional[ApprovalInfo] = Field(None, description="审批信息")
 
 
-class PaymentRecordDetailResponse(PaymentRecordListItem):
+class PaymentRecordListItem(PaymentRecordApprovalResponse):
+    """回款列表专用关联投影。"""
+
+    contract_user_count: int | None = Field(None, description="同团队关联合同的有效采购人数")
+
+
+class PaymentRecordDetailResponse(PaymentRecordApprovalResponse):
     """回款记录详情，支持超时后的最终状态确认。"""
 
     payment_plan: PaymentPlanStatusSummary

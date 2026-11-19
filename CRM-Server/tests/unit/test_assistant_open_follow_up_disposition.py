@@ -1,6 +1,7 @@
 """Open follow-up tasks are listed and settled one at a time after a follow-up write."""
 # ruff: noqa: RUF001
 
+from copy import deepcopy
 from datetime import datetime
 
 import pytest
@@ -17,6 +18,7 @@ from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
 from app.services.assistant.open_follow_up_disposition import (
     advance_open_follow_up,
+    public_disposition,
     relate_title,
     settle_open_follow_up,
 )
@@ -300,3 +302,146 @@ async def test_stale_evidence_and_overflow_do_not_offer_a_partial_list(db_sessio
     assert overflow is not None and overflow.start_followup is True
     assert overflow.task.authority_json["open_follow_up_batch"]["status"] == "OVERFLOW"
     assert overflow.task.authority_json["open_follow_up_batch"]["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_batch_identity_survives_restore_settlement_and_reload(db_session, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.assistant.open_follow_up_disposition._permission_codes",
+        lambda db, task: set(),
+    )
+    activity = _activity(db_session)
+    _follow_up(db_session, public_id="fut_first", title="联系客户确认采购安排")
+    _follow_up(db_session, public_id="fut_second", title="补充安全测评报告")
+    task = _task(db_session, activity)
+    task_id = task.id
+
+    offered = await advance_open_follow_up(db_session, task)
+    batch_id = offered.task.authority_json["open_follow_up_batch"]["disposition_batch_id"]
+    assert batch_id.startswith("afb_")
+    assert len(batch_id) == 36
+    restored = await advance_open_follow_up(db_session, offered.task)
+    assert restored.task.authority_json["open_follow_up_batch"]["disposition_batch_id"] == batch_id
+    held = await settle_open_follow_up(db_session, restored.task, "i1:hold")
+    assert public_disposition(held.task)["batch_id"] == batch_id
+    await settle_open_follow_up(db_session, held.task, "i2:skip")
+    db_session.expire_all()
+    reloaded = db_session.get(AssistantTask, task_id)
+    card = public_disposition(reloaded)
+    assert reloaded.authority_json["open_follow_up_batch"]["disposition_batch_id"] == batch_id
+    assert card["batch_id"] == batch_id
+    assert card["activity_public_id"] == str(activity.id)
+    assert card["status"] == "DONE"
+    assert [(item["item_id"], item["task_public_id"], item["state"]) for item in card["items"]] == [
+        ("i1", "fut_first", "hold"),
+        ("i2", "fut_second", "skip"),
+    ]
+    assert all("owner_id" not in item and "idempotency_key" not in item for item in card["items"])
+    assert all(row.status == FollowUpTaskStatus.OPEN for row in db_session.query(FollowUpTask).all())
+
+    another_round = _task(db_session, activity)
+    reopened = await advance_open_follow_up(db_session, another_round)
+    assert public_disposition(reopened.task)["batch_id"] != batch_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["DONE", "OVERFLOW", "QUERY_FAILED"])
+async def test_terminal_batch_identity_is_persisted_once(db_session, monkeypatch, status):
+    monkeypatch.setattr(
+        "app.services.assistant.open_follow_up_disposition._permission_codes",
+        lambda db, task: set(),
+    )
+    if status == "OVERFLOW":
+        monkeypatch.setattr(
+            "app.services.assistant.open_follow_up_disposition._build_batch", lambda db, task, activity: None,
+        )
+    elif status == "QUERY_FAILED":
+        def fail_query(db, task, activity):
+            raise PermissionError("cannot query")
+
+        monkeypatch.setattr("app.services.assistant.open_follow_up_disposition._build_batch", fail_query)
+    task = _task(db_session, _activity(db_session))
+    task_id = task.id
+    await advance_open_follow_up(db_session, task)
+    db_session.expire_all()
+    reloaded = db_session.get(AssistantTask, task_id)
+    card = public_disposition(reloaded)
+    assert card["status"] == status
+    assert card["items"] == []
+    batch_id = reloaded.authority_json["open_follow_up_batch"]["disposition_batch_id"]
+    assert batch_id.startswith("afb_") and len(batch_id) == 36
+    assert card["batch_id"] == batch_id
+    assert card["activity_public_id"] == "1"
+    version = reloaded.version
+    assert await advance_open_follow_up(db_session, reloaded) is None
+    assert reloaded.version == version
+    assert public_disposition(reloaded)["batch_id"] == batch_id
+
+
+@pytest.fixture
+def legacy_disposition_task():
+    return AssistantTask(
+        public_id="ast_legacy",
+        authority_json={
+            "activity_public_id": "1",
+            "open_follow_up_batch": {
+                "status": "ACTIVE",
+                "activity_id": 1,
+                "activity_revision": 3,
+                "source_sha256": "a" * 64,
+                "items": [{"item_id": "i1", "task_public_id": "fut_legacy", "owner_id": "private"}],
+            },
+        },
+        committed_json=[{"kind": "customer_activity", "public_id": "1"}],
+    )
+
+
+def test_legacy_batch_identity_is_read_only_stable_and_round_specific(legacy_disposition_task):
+    task = legacy_disposition_task
+    before = deepcopy(task.authority_json)
+    original = public_disposition(task)
+    assert original["batch_id"] is not None
+    assert public_disposition(task)["batch_id"] == original["batch_id"]
+    assert task.authority_json == before
+    item = task.authority_json["open_follow_up_batch"]["items"][0]
+    item.update({"title": "changed display text", "disposition": "hold", "result_title": "先放着"})
+    task.authority_json["open_follow_up_batch"]["status"] = "DONE"
+    assert public_disposition(task)["batch_id"] == original["batch_id"]
+    task.authority_json["open_follow_up_batch"]["activity_revision"] = 4
+    assert public_disposition(task)["batch_id"] != original["batch_id"]
+    task.authority_json = before
+    task.public_id = "ast_another"
+    assert public_disposition(task)["batch_id"] != original["batch_id"]
+
+
+@pytest.mark.parametrize("unsafe", [
+    "no_receipt", "mismatched_receipt", "mismatched_authority", "no_revision", "invalid_hash",
+    "no_task_identity", "duplicate_item_identity", "empty_batch",
+])
+def test_legacy_batch_identity_is_null_without_proven_round(legacy_disposition_task, unsafe):
+    task = legacy_disposition_task
+    batch = task.authority_json["open_follow_up_batch"]
+    if unsafe == "no_receipt":
+        task.committed_json = []
+    elif unsafe == "mismatched_receipt":
+        task.committed_json = [{"kind": "customer_activity", "public_id": "2"}]
+    elif unsafe == "mismatched_authority":
+        task.authority_json["activity_public_id"] = "2"
+    elif unsafe == "no_revision":
+        batch.pop("activity_revision")
+    elif unsafe == "invalid_hash":
+        batch["source_sha256"] = "invalid"
+    elif unsafe == "no_task_identity":
+        batch["items"][0].pop("task_public_id")
+    elif unsafe == "duplicate_item_identity":
+        batch["items"].append(deepcopy(batch["items"][0]))
+    else:
+        batch["items"] = []
+    before = deepcopy(task.authority_json)
+    card = public_disposition(task)
+    assert card["batch_id"] is None
+    assert task.authority_json == before
+    if unsafe in {"no_receipt", "mismatched_receipt", "mismatched_authority"}:
+        assert card["activity_public_id"] is None
+    if unsafe == "no_task_identity":
+        assert card["items"][0]["task_public_id"] is None

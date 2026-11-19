@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,6 +62,21 @@ class ConversationBoundary(ConversationModel):
     prompt: str
 
 
+class ConversationDispositionProjection(ConversationModel):
+    task_public_id: str = Field(min_length=1)
+    batch_id: str = Field(min_length=1)
+    item_ids: list[Annotated[str, Field(min_length=1)]] = Field(default_factory=list, max_length=100)
+    card_role: Literal["NONE", "CURRENT", "FINAL"] = "NONE"
+    version: int = Field(default=0, ge=0)
+
+
+class ConversationProjection(ConversationModel):
+    visibility: Literal["VISIBLE", "FALLBACK_RECEIPT", "COVERED"] = "VISIBLE"
+    covered_by: str | None = Field(default=None, min_length=1)
+    activity_public_id: str | None = Field(default=None, min_length=1)
+    disposition: ConversationDispositionProjection | None = None
+
+
 class ConversationMessage(ConversationModel):
     id: str
     role: Literal["user", "assistant"]
@@ -71,6 +86,7 @@ class ConversationMessage(ConversationModel):
     boundary: ConversationBoundary | None = None
     outcome: Literal["activity_written", "failure", "follow_up_disposition", "task_completed"] | None = None
     ui: AgentUIEnvelope | None = None
+    projection: ConversationProjection | None = None
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.
     error_code: str | None = Field(default=None, exclude=True)
     retryable: bool | None = Field(default=None, exclude=True)

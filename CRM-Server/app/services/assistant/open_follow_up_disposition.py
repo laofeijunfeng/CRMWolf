@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from json import dumps
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, true
@@ -20,6 +21,7 @@ from app.services.assistant.activity_channel import FOLLOW_UP_KINDS
 from app.services.assistant.contracts import TaskWaiting
 from app.services.assistant.crm_proposal_commands import source_activity
 from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority
+from app.utils.public_id import generate_public_id
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -55,6 +57,7 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
     items = batch.get("items")
     if not isinstance(items, list):
         return None
+    activity_id = _accepted_activity_id(task, batch)
     current = next((item for item in items if isinstance(item, dict) and item.get("disposition") is None), None)
     projected: list[dict[str, object]] = []
     for item in items:
@@ -69,6 +72,8 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
             state = str(disposition)
         projected.append({
             "item_id": item.get("item_id"),
+            "task_public_id": item.get("task_public_id")
+            if isinstance(item.get("task_public_id"), str) and item["task_public_id"].strip() else None,
             "title": item.get("title"),
             "owner_line": item.get("owner_line"),
             "related": bool(item.get("related")),
@@ -84,6 +89,8 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
             index for index, item in enumerate(projected, start=1) if item["item_id"] == current.get("item_id")
         )
     return {
+        "batch_id": _public_batch_id(task, batch, activity_id),
+        "activity_public_id": activity_id,
         "status": batch.get("status"),
         "customer_name": batch.get("customer_name") or "",
         "activity_kind_label": batch.get("activity_kind_label") or "",
@@ -91,6 +98,66 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
         "current_index": current_index,
         "items": projected,
     }
+
+
+def _accepted_activity_id(task: AssistantTask, batch: dict[str, object]) -> str | None:
+    committed_id = next(
+        (
+            item.get("public_id")
+            for item in reversed(task.committed_json or [])
+            if isinstance(item, dict) and item.get("kind") == "customer_activity"
+        ),
+        None,
+    )
+    if not isinstance(committed_id, str) or not committed_id.strip():
+        return None
+    authority_id = (task.authority_json or {}).get("activity_public_id")
+    if authority_id is not None and str(authority_id) != committed_id:
+        return None
+    # source_activity resolves the accepted receipt's string ID to CustomerActivity.id.
+    activity_id = batch.get("activity_id")
+    if not isinstance(activity_id, (int, str)) or isinstance(activity_id, bool) or str(activity_id) != committed_id:
+        return None
+    return committed_id
+
+
+def _public_batch_id(task: AssistantTask, batch: dict[str, object], activity_id: str | None) -> str | None:
+    batch_id = batch.get("disposition_batch_id")
+    if isinstance(batch_id, str) and batch_id.strip():
+        return batch_id
+    # Old snapshots have no minted identity. Only a complete frozen fingerprint
+    # can relate them; never allocate or persist an identity while reading.
+    revision = batch.get("activity_revision")
+    source_hash = batch.get("source_sha256")
+    if (
+        not isinstance(task.public_id, str) or not task.public_id.strip()
+        or activity_id is None
+        or not isinstance(revision, int) or isinstance(revision, bool) or revision < 1
+        or not isinstance(source_hash, str) or len(source_hash) != 64
+        or any(char not in "0123456789abcdef" for char in source_hash)
+    ):
+        return None
+    items = batch.get("items")
+    if not isinstance(items, list) or not items:
+        return None
+    identities: list[tuple[str, str]] = []
+    item_ids: set[str] = set()
+    task_ids: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        item_id = item.get("item_id")
+        task_id = item.get("task_public_id")
+        if (
+            not isinstance(item_id, str) or not item_id.strip() or item_id in item_ids
+            or not isinstance(task_id, str) or not task_id.strip() or task_id in task_ids
+        ):
+            return None
+        identities.append((item_id, task_id))
+        item_ids.add(item_id)
+        task_ids.add(task_id)
+    fingerprint = dumps([task.public_id, activity_id, revision, source_hash, sorted(identities)], separators=(",", ":"))
+    return f"afb_legacy_{sha256(fingerprint.encode()).hexdigest()[:32]}"
 
 
 def relate_title(title: str, source: str) -> tuple[str, str, str] | None:
@@ -131,6 +198,7 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
             task,
             {
                 "status": "QUERY_FAILED",
+                "disposition_batch_id": generate_public_id("afb"),
                 "activity_id": activity.id,
                 "customer_name": "",
                 "activity_kind_label": "",
@@ -145,6 +213,7 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
             task,
             {
                 "status": "OVERFLOW",
+                "disposition_batch_id": generate_public_id("afb"),
                 "activity_id": activity.id,
                 "activity_revision": activity.activity_revision,
                 "source_sha256": _source_hash(activity.source_content or ""),
@@ -349,6 +418,7 @@ def _build_batch(db: Session, task: AssistantTask, activity: object) -> dict[str
         })
     return {
         "status": "ACTIVE",
+        "disposition_batch_id": generate_public_id("afb"),
         "activity_id": activity.id,
         "activity_revision": activity.activity_revision,
         "source_sha256": _source_hash(source),

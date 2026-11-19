@@ -401,6 +401,102 @@ def test_payment_record_list_projects_contract_license_and_purchase_type(
     assert {item.get("license_type") for item in items} == {"PERPETUAL"}
     assert {item.get("purchase_type") for item in items} == {"RENEWAL"}
 
+def test_payment_record_list_exposes_contract_user_count_and_legacy_composition(
+    client, db_session, seed_contract_plan, seed_payment_records, patched_deps
+):
+    contract, _plan = seed_contract_plan
+    # Distinguish the contract count from the opportunity's original count.
+    contract.user_count = 17
+    db_session.commit()
+    patched_deps(["payment:view:all"])
+
+    response = client.get("/v1/payments/payment-records")
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert items
+    assert {item["contract_user_count"] for item in items} == {17}
+    assert all(item["composition"] is None for item in items)
+
+
+@pytest.mark.parametrize("user_count", [0, -3])
+def test_payment_record_list_normalizes_non_positive_contract_user_count(
+    client, db_session, seed_contract_plan, seed_payment_records, patched_deps, user_count
+):
+    contract, _plan = seed_contract_plan
+    contract.user_count = user_count
+    db_session.commit()
+    patched_deps(["payment:view:all"])
+
+    response = client.get("/v1/payments/payment-records")
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    assert items
+    assert {item["contract_user_count"] for item in items} == {None}
+
+
+@pytest.mark.parametrize("foreign_association", ["plan", "contract", "opportunity"])
+def test_payment_record_list_does_not_project_foreign_team_associations(
+    client,
+    db_session,
+    seed_contract_plan,
+    seed_payment_records,
+    patched_deps,
+    foreign_association,
+):
+    contract, plan = seed_contract_plan
+    _state, record = seed_payment_records[0]
+    if foreign_association == "plan":
+        plan.team_id = 2
+    elif foreign_association == "contract":
+        contract.team_id = 2
+    else:
+        contract.opportunity.team_id = 2
+    db_session.commit()
+    patched_deps(["payment:view:all"])
+
+    response = client.get(
+        "/v1/payments/payment-records",
+        params={"record_number": record.record_number},
+    )
+
+    assert response.status_code == 200, response.text
+    items = response.json()["items"]
+    # Preserve the record population; only foreign association data is hidden.
+    assert len(items) == 1
+    item = items[0]
+    assert item["id"] == record.id
+    assert item["purchase_type"] is None
+    assert item["opportunity_name"] is None
+    if foreign_association == "opportunity":
+        assert item["contract_name"] == contract.contract_name
+        assert item["contract_user_count"] == contract.user_count
+    else:
+        assert item["contract_name"] is None
+        assert item["contract_user_count"] is None
+
+
+def test_payment_record_detail_and_resolve_do_not_expose_contract_user_count(
+    client, db_session, seed_payment_records, patched_deps
+):
+    _state, record = seed_payment_records[0]
+    record.idempotency_key = "crm135-detail-resolve"
+    db_session.commit()
+    patched_deps(["payment:view:all"])
+
+    detail = client.get(f"/v1/payments/payment-records/{record.id}")
+    resolved = client.get(
+        "/v1/payments/payment-records/resolve",
+        params={"idempotency_key": "crm135-detail-resolve"},
+    )
+
+    assert detail.status_code == 200, detail.text
+    assert resolved.status_code == 200, resolved.text
+    assert "contract_user_count" not in detail.json()
+    assert "contract_user_count" not in resolved.json()
+
+
 def test_payment_record_list_includes_record_number(
     client, patched_deps, monkeypatch
 ):
@@ -443,6 +539,8 @@ def test_payment_record_list_includes_record_number(
     assert item["license_type"] is None
     assert "purchase_type" in item
     assert item["purchase_type"] is None
+    assert item["contract_user_count"] is None
+    assert item["composition"] is None
 
 
 def test_payment_record_list_uses_updated_time_for_last_modified_time(
