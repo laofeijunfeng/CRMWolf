@@ -8,13 +8,7 @@
 import { nextTick, watch } from 'vue'
 import { Plus } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import {
-  Empty,
-  EmptyContent,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import AmountText from '@/components/crmwolf/AmountText.vue'
 import ListCard from '@/components/crmwolf/ListCard.vue'
 import type { DealJourney } from '@/api/dealJourney'
@@ -87,16 +81,9 @@ watch(
       </template>
 
       <template #empty>
-        <Empty class="deal-journeys-empty">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Plus class="h-5 w-5" aria-hidden="true" />
-            </EmptyMedia>
-            <EmptyTitle class="text-sm font-medium">暂无业务旅程</EmptyTitle>
-          </EmptyHeader>
-          <EmptyContent>
+        <DataViewStatePanel state="empty" class="w-full" empty-title="暂无业务旅程">
+          <template v-if="showAdd" #empty-action>
             <Button
-              v-if="showAdd"
               type="button"
               size="sm"
               data-testid="empty-create-opportunity"
@@ -105,8 +92,8 @@ watch(
               <Plus class="w-4 h-4 mr-1" />
               新建商机
             </Button>
-          </EmptyContent>
-        </Empty>
+          </template>
+        </DataViewStatePanel>
       </template>
 
       <template #itemMain="{ item }">
@@ -131,11 +118,5 @@ watch(
 
 .deal-journeys-panel {
   min-width: 0;
-}
-
-.deal-journeys-empty {
-  min-height: 160px;
-  border: 0;
-  padding: 0;
 }
 </style>

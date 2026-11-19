@@ -112,6 +112,11 @@ vi.mock('@/components/crmwolf', () => ({
       onClick: () => emit('update:activeTab', tab.key),
     }, tab.label))),
   }),
+  DataViewStatePanel: defineComponent({
+    name: 'DataViewStatePanel',
+    props: { state: String, emptyTitle: String },
+    setup: (props, { slots }) => () => h('div', props.state === 'ready' ? slots.default?.() : [props.emptyTitle, slots['empty-action']?.()]),
+  }),
 }))
 
 vi.mock('@/components/ui/sheet', () => {

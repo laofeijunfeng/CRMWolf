@@ -50,7 +50,7 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
-import { AmountText, FileAttachment } from '@/components/crmwolf'
+import { AmountText, DataViewStatePanel, FileAttachment } from '@/components/crmwolf'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ApprovalSourceFooter from '@/components/ApprovalSourceFooter.vue'
 import ApprovalSourceHeader from '@/components/ApprovalSourceHeader.vue'
@@ -1479,15 +1479,11 @@ onBeforeUnmount((): void => {
           <template v-else>
             <Card class="state-card">
               <CardContent class="state-card-content">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FileText aria-hidden="true" />
-                    </EmptyMedia>
-                    <EmptyTitle>暂无发票申请信息</EmptyTitle>
-                    <EmptyDescription>请选择一条发票申请查看详情。</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
+                <DataViewStatePanel
+                  state="empty"
+                  empty-title="暂无发票申请信息"
+                  empty-description="请选择一条发票申请查看详情。"
+                />
               </CardContent>
             </Card>
           </template>

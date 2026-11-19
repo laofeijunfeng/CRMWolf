@@ -15,6 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Button } from '@/components/ui/button'
 import { entityParseApi, type CustomerParsedInfo, type CustomerParsedContact } from '@/api/entityParse'
 import {
+  DataViewStatePanel,
   DateField,
   IndustryHierarchySelectField,
   InputField,
@@ -706,9 +707,7 @@ function handleCancel(): void { closeGuard.requestClose() }
 
       <div class="customer-form-dialog__body">
 
-      <div v-if="loading" class="flex justify-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
-      </div>
+      <DataViewStatePanel v-if="loading" state="loading" loading-type="list" />
 
       <ErrorState
         v-else-if="loadError"

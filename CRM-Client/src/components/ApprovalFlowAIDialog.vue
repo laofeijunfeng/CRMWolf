@@ -220,7 +220,11 @@
               </Button>
             </div>
 
-            <div v-if="flowForm.nodes.length" class="node-list">
+            <DataViewStatePanel
+              :state="flowForm.nodes.length ? 'ready' : 'empty'"
+              class="node-list"
+              empty-title="暂无审批节点"
+            >
               <div
                 v-for="(node, index) in flowForm.nodes"
                 :key="`${node.node_code}-${index}`"
@@ -312,14 +316,12 @@
                   </Button>
                 </div>
               </div>
-            </div>
-
-            <div v-else class="empty-nodes">
-              <span>暂无审批节点</span>
-              <Button variant="outline" size="sm" class="compact-button" @click="handleAddNode">
-                添加节点
-              </Button>
-            </div>
+              <template #empty-action>
+                <Button variant="outline" size="sm" class="compact-button" @click="handleAddNode">
+                  添加节点
+                </Button>
+              </template>
+            </DataViewStatePanel>
           </div>
 
           <div class="preview-actions">
@@ -361,7 +363,7 @@ import {
   Trash2,
   WandSparkles
 } from 'lucide-vue-next'
-import { InputField, SelectField, TextareaField } from '@/components/crmwolf'
+import { DataViewStatePanel, InputField, SelectField, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -1076,18 +1078,6 @@ watch(visible, (val): void => {
 
 .danger-button {
   color: hsl(var(--status-danger));
-}
-
-.empty-nodes {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $space-3;
-  padding: $space-4;
-  border: 1px dashed hsl(var(--border));
-  border-radius: var(--radius-md);
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
 }
 
 .preview-actions {

@@ -52,6 +52,7 @@ describe('LeadFormDialog edit initialization', () => {
         stubs: {
           Dialog: DialogSlotStub,
           DialogContent: DialogSlotStub,
+          DataViewStatePanel: false,
         },
       },
       props: {
@@ -62,7 +63,7 @@ describe('LeadFormDialog edit initialization', () => {
     })
     await nextTick()
 
-    const initiallyShowedLoading = wrapper.find('.animate-spin').exists()
+    const initiallyShowedLoading = wrapper.find('[role="status"][aria-busy="true"]').exists()
     const initiallyShowedForm = wrapper.find('form-stub').exists()
 
     resolveSourceOptions?.()
@@ -82,6 +83,7 @@ describe('LeadFormDialog edit initialization', () => {
         stubs: {
           Dialog: DialogSlotStub,
           DialogContent: DialogSlotStub,
+          DataViewStatePanel: false,
         },
       },
       props: {
@@ -99,7 +101,7 @@ describe('LeadFormDialog edit initialization', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    expect(wrapper.find('[role="status"][aria-busy="true"]').exists()).toBe(false)
     expect(wrapper.find('form-stub').exists()).toBe(true)
     expect(leadApi.getLeadDetail).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -115,6 +117,7 @@ describe('LeadFormDialog edit initialization', () => {
         stubs: {
           Dialog: DialogSlotStub,
           DialogContent: DialogSlotStub,
+          DataViewStatePanel: false,
         },
       },
       props: {
@@ -128,7 +131,7 @@ describe('LeadFormDialog edit initialization', () => {
     await flushPromises()
 
     expect(getLeadDetail).not.toHaveBeenCalled()
-    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    expect(wrapper.find('[role="status"][aria-busy="true"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

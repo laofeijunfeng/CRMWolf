@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { Donut } from '@unovis/ts'
 import { VisDonut, VisSingleContainer } from '@unovis/vue'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import ChartBucketActionList, { type ChartBucketAction } from '@/components/crmwolf/chart/ChartBucketActionList.vue'
 import ChartBucketDialog from '@/components/crmwolf/chart/ChartBucketDialog.vue'
 import ChartCardFrame from '@/components/crmwolf/chart/ChartCardFrame.vue'
@@ -218,10 +219,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
       </div>
     </template>
     <template #empty>
-      <div class="opportunity-chart-state">
-        <strong>暂无可展示的商机数据</strong>
-        <Button v-if="error" type="button" variant="outline" :disabled="loading" @click="emit('retry')">重试</Button>
-      </div>
+      <DataViewStatePanel state="empty" empty-title="暂无可展示的商机数据" />
     </template>
     <template #summary>
       <header class="opportunity-chart-summary">
@@ -277,7 +275,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                     />
                   </VisSingleContainer>
                 </div>
-                <div v-else class="opportunity-chart-card-empty">暂无分布数据</div>
+                <DataViewStatePanel v-else state="empty" empty-title="暂无分布数据" />
               </ChartContainer>
               <ChartBucketActionList
                 v-if="hasData(card)"
@@ -311,7 +309,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                   <span class="text-muted-foreground tabular-nums">{{ action.value }}</span>
                 </template>
               </ChartBucketActionList>
-              <div v-else class="opportunity-chart-card-empty">暂无分布数据</div>
+              <DataViewStatePanel v-else state="empty" empty-title="暂无分布数据" />
             </template>
             <ChartContainer v-else :config="chartConfig" class="opportunity-chart-forecast-chart aspect-auto h-[240px]">
               <div v-if="hasData(card)" class="opportunity-chart-forecast" :aria-label="`${metaFor(card).title}，按预计金额比较`">
@@ -341,7 +339,7 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
                   </div>
                 </div>
               </div>
-              <div v-else class="opportunity-chart-card-empty">暂无预测数据</div>
+              <DataViewStatePanel v-else state="empty" empty-title="暂无预测数据" />
             </ChartContainer>
           </template>
         </ChartCardFrame>
@@ -405,7 +403,6 @@ function openBucket(card: OpportunityChartCard, bucket: OpportunityChartBucket):
 .opportunity-chart-legend-label { overflow: hidden; color: hsl(var(--foreground)); text-overflow: ellipsis; white-space: nowrap; }
 .opportunity-chart-legend-value { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .opportunity-chart-bar-fill { display: block; min-width: 0; }
-.opportunity-chart-card-empty { padding: $space-3 0; color: hsl(var(--muted-foreground)); font-size: var(--font-size-control-sm); text-align: center; }
 .opportunity-chart-dialog-state { min-height: 120px; }
 .opportunity-chart-opportunity-list { display: grid; gap: 2px; }
 .opportunity-chart-opportunity { display: flex; width: 100%; min-height: 52px; justify-content: space-between; gap: 16px; padding: 8px 10px; text-align: left; }

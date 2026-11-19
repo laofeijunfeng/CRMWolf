@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { AmountText, AreaTrendChart, ListFilterPopover, MetricCard, TableToolbarButton } from '@/components/crmwolf'
+import { AmountText, AreaTrendChart, DataViewStatePanel, ListFilterPopover, MetricCard, TableToolbarButton } from '@/components/crmwolf'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { ListFilterCondition, ListFilterField } from '@/components/crmwolf/listFilterTypes'
 import salesDashboardApi, {
@@ -366,7 +366,7 @@ onMounted(() => {
               loading
             />
           </template>
-          <div v-else class="dashboard-empty">暂无销售漏斗数据</div>
+          <DataViewStatePanel v-else state="empty" empty-title="暂无销售漏斗数据" class="col-span-full" />
         </div>
       </section>
 
@@ -513,15 +513,6 @@ onMounted(() => {
 
 .dashboard-inline-retry {
   margin-left: auto;
-}
-
-.dashboard-empty {
-  grid-column: 1 / -1;
-  min-height: 120px;
-  display: grid;
-  place-items: center;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
 }
 
 .metric-grid {

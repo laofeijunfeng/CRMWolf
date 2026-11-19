@@ -13,12 +13,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import { handleApiError } from '@/utils/errorHandler'
 
@@ -37,7 +31,7 @@ import { getSettingsNavigationItem } from '@/settingsNavigation'
 
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { AmountText, DataTable, TableRowActions } from '@/components/crmwolf'
+import { AmountText, DataTable, DataViewStatePanel, TableRowActions } from '@/components/crmwolf'
 import type { ActionConfig, TableRowActionSet } from '@/components/crmwolf'
 import { defineListFields } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
@@ -439,35 +433,32 @@ watch([hasAccess, teamId], (): void => {
         <!-- 审批节点 -->
         <div class="space-y-3">
           <div class="text-sm font-semibold">审批节点</div>
-          <div v-if="currentFlow.nodes && currentFlow.nodes.length > 0" class="space-y-3">
-            <div
-              v-for="node in getSortedNodes(currentFlow.nodes)"
-              :key="node.id"
-              class="p-4 rounded-lg border bg-card"
-            >
-              <div class="flex items-center justify-between mb-2">
-                <div class="flex items-center gap-2">
-                  <Badge variant="outline">{{ node.node_order }}</Badge>
-                  <span class="font-medium">{{ node.node_name }}</span>
-                  <Badge v-if="node.is_required" variant="destructive" class="text-xs">必须</Badge>
-                  <Badge v-else variant="secondary" class="text-xs">可选</Badge>
+          <DataViewStatePanel
+            :state="currentFlow.nodes && currentFlow.nodes.length > 0 ? 'ready' : 'empty'"
+            empty-title="暂无审批节点"
+          >
+            <div class="space-y-3">
+              <div
+                v-for="node in getSortedNodes(currentFlow.nodes)"
+                :key="node.id"
+                class="p-4 rounded-lg border bg-card"
+              >
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-2">
+                    <Badge variant="outline">{{ node.node_order }}</Badge>
+                    <span class="font-medium">{{ node.node_name }}</span>
+                    <Badge v-if="node.is_required" variant="destructive" class="text-xs">必须</Badge>
+                    <Badge v-else variant="secondary" class="text-xs">可选</Badge>
+                  </div>
+                </div>
+                <div class="text-sm text-muted-foreground space-y-1">
+                  <div>编码：{{ node.node_code }}</div>
+                  <div>审批角色：{{ node.approve_role }}</div>
+                  <div v-if="node.description">描述：{{ node.description }}</div>
                 </div>
               </div>
-              <div class="text-sm text-muted-foreground space-y-1">
-                <div>编码：{{ node.node_code }}</div>
-                <div>审批角色：{{ node.approve_role }}</div>
-                <div v-if="node.description">描述：{{ node.description }}</div>
-              </div>
             </div>
-          </div>
-          <Empty v-else class="min-h-[160px] border-0 py-6">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <Plus class="h-5 w-5" aria-hidden="true" />
-              </EmptyMedia>
-              <EmptyTitle class="text-sm font-medium">暂无审批节点</EmptyTitle>
-            </EmptyHeader>
-          </Empty>
+          </DataViewStatePanel>
         </div>
       </div>
     </DialogContent>

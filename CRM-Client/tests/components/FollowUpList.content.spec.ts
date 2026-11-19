@@ -30,10 +30,10 @@ vi.mock('@/components/crmwolf', () => ({
     name: 'HoverInfo',
     setup: (_, { slots }) => () => h('div', [slots.trigger?.(), slots.default?.()]),
   }),
-}))
-
-vi.mock('@/components/ui/skeleton', () => ({
-  Skeleton: defineComponent({ name: 'Skeleton', setup: () => () => h('div') }),
+  DataViewStatePanel: defineComponent({
+    name: 'DataViewStatePanel',
+    setup: (_, { slots }) => () => h('div', slots.default?.()),
+  }),
 }))
 
 vi.mock('@/components/ui/button', () => ({
@@ -42,17 +42,6 @@ vi.mock('@/components/ui/button', () => ({
     setup: (_, { slots, attrs }) => () => h('button', attrs, slots.default?.()),
   }),
 }))
-
-vi.mock('@/components/ui/empty', () => {
-  const passthrough = (name: string) => defineComponent({ name, setup: (_, { slots }) => () => h('div', slots.default?.()) })
-  return {
-    Empty: passthrough('Empty'),
-    EmptyHeader: passthrough('EmptyHeader'),
-    EmptyMedia: passthrough('EmptyMedia'),
-    EmptyTitle: passthrough('EmptyTitle'),
-    EmptyDescription: passthrough('EmptyDescription'),
-  }
-})
 
 vi.mock('@/utils/confirmDialog', () => ({ confirmDelete: vi.fn() }))
 

@@ -131,8 +131,11 @@ describe('BusinessJourneyBoardView', () => {
       errorMessage: '旅程看板加载失败，请重试',
     })
 
-    expect(wrapper.get('.business-board-blocking-error').text()).toContain('旅程看板加载失败，请重试')
-    await wrapper.get('.business-board-blocking-error button').trigger('click')
+    expect(wrapper.text()).toContain('旅程看板加载失败，请重试')
+    expect(wrapper.find('.journey-card').exists()).toBe(false)
+    const retry = wrapper.findAll('button').find(button => button.text() === '重新加载')
+    expect(retry).toBeDefined()
+    await retry?.trigger('click')
     expect(wrapper.emitted('retry')).toHaveLength(1)
   })
 

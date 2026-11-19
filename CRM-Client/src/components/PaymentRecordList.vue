@@ -10,13 +10,7 @@ import {
   CardTitle
 } from '@/components/ui/card'
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import type { PaymentRecordInfo } from '@/api/payment'
 import { formatLocalDate } from '@/utils/format'
 
@@ -107,15 +101,11 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
       </Button>
     </CardHeader>
     <CardContent>
-      <Empty class="record-empty-state">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ReceiptText aria-hidden="true" />
-          </EmptyMedia>
-          <EmptyTitle>暂无回款记录</EmptyTitle>
-          <EmptyDescription>登记实际到账金额后，可在这里跟踪审批与开票关联。</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <DataViewStatePanel
+        state="empty"
+        empty-title="暂无回款记录"
+        empty-description="登记实际到账金额后，可在这里跟踪审批与开票关联。"
+      />
     </CardContent>
   </Card>
 
@@ -215,11 +205,6 @@ const handleViewApproval = (record: PaymentRecordInfo): void => {
   color: hsl(var(--foreground));
   font-size: var(--font-size-body);
   font-weight: 600;
-}
-
-.record-empty-state {
-  border: 0;
-  padding: $space-6 $space-4;
 }
 
 .record-main {

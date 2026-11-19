@@ -8,7 +8,7 @@
 import { toast } from 'vue-sonner'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { AlertCircle, Download, FileText, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
+import { AlertCircle, Download, Pencil, ReceiptText, RefreshCw, X } from 'lucide-vue-next'
 import { DetailSheetHeader, DetailSheetTitle, DetailSheetDescription, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import {
   Dialog,
@@ -42,7 +42,7 @@ import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ContractPaymentPlans from '@/components/ContractPaymentPlans.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
-import { AmountText, FileAttachment, InputField, TextareaField } from '@/components/crmwolf'
+import { AmountText, DataViewStatePanel, FileAttachment, InputField, TextareaField } from '@/components/crmwolf'
 import contractApi, {
   type ContractChangeResponse,
   type ContractResponse,
@@ -831,15 +831,11 @@ onBeforeUnmount((): void => {
           <template v-else>
             <Card class="state-card">
               <CardContent class="state-card-content">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FileText class="w-10 h-10" />
-                    </EmptyMedia>
-                  </EmptyHeader>
-                  <EmptyTitle>暂无合同信息</EmptyTitle>
-                  <EmptyDescription>请选择一个合同查看详情。</EmptyDescription>
-                </Empty>
+                <DataViewStatePanel
+                  state="empty"
+                  empty-title="暂无合同信息"
+                  empty-description="请选择一个合同查看详情。"
+                />
               </CardContent>
             </Card>
           </template>

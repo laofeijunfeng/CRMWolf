@@ -23,12 +23,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import approvalFlowApi, {
   type ApprovalFlow,
   type ApprovalFlowDetail,
@@ -435,9 +430,7 @@ watch(
       </DialogHeader>
 
       <div class="dialog-body">
-        <div v-if="loadingDetail" class="loading-state">加载审批流程...</div>
-
-        <template v-else>
+        <DataViewStatePanel :state="loadingDetail ? 'loading' : 'ready'" loading-type="list">
           <section class="form-section">
             <h3 class="section-title">基本信息</h3>
             <div class="form-grid">
@@ -563,16 +556,11 @@ watch(
 
             <p v-if="errors.nodes" class="field-error">{{ errors.nodes }}</p>
 
-            <Empty v-if="form.nodes.length === 0" class="empty-nodes">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Plus class="h-5 w-5" aria-hidden="true" />
-                </EmptyMedia>
-                <EmptyTitle class="text-sm font-medium">暂无审批节点</EmptyTitle>
-              </EmptyHeader>
-            </Empty>
-
-            <div v-else class="nodes-list">
+            <DataViewStatePanel
+              :state="form.nodes.length === 0 ? 'empty' : 'ready'"
+              class="nodes-list"
+              empty-title="暂无审批节点"
+            >
               <div
                 v-for="(node, index) in form.nodes"
                 :key="node.id ?? index"
@@ -712,9 +700,9 @@ watch(
                   />
                 </div>
               </div>
-            </div>
+            </DataViewStatePanel>
           </section>
-        </template>
+        </DataViewStatePanel>
       </div>
 
       <DialogFooter>
@@ -737,14 +725,6 @@ watch(
   overflow-y: auto;
   padding-left: calc(2px + 2px);
   padding-right: $space-1;
-}
-
-.loading-state,
-.empty-nodes {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-body);
-  padding: $space-6;
-  text-align: center;
 }
 
 .form-section {

@@ -4,6 +4,7 @@ import { Area, Donut } from '@unovis/ts'
 import { VisArea, VisAxis, VisDonut, VisLine, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { Button } from '@/components/ui/button'
 import { ChartContainer, ChartCrosshair, ChartTooltip, ChartTooltipContent, componentToString, type ChartConfig } from '@/components/ui/chart'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import ChartBucketActionList, { type ChartBucketAction } from '@/components/crmwolf/chart/ChartBucketActionList.vue'
 import ChartBucketDialog from '@/components/crmwolf/chart/ChartBucketDialog.vue'
 import ChartCardFrame from '@/components/crmwolf/chart/ChartCardFrame.vue'
@@ -140,7 +141,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
         <Button type="button" variant="outline" size="sm" @click="emit('retry')">重试</Button>
       </div>
     </template>
-    <template #empty><div class="customer-chart-page__state">暂无客户图表</div></template>
+    <template #empty><DataViewStatePanel state="empty" empty-title="暂无客户图表" /></template>
     <template #summary>
       <header class="customer-chart-page__heading">
         <h2>{{ population }} 家</h2>

@@ -1,31 +1,12 @@
 <template>
   <div class="follow-up-list-container">
-    <!-- Loading Skeleton -->
-    <div v-if="loading && followUps.length === 0" class="follow-up-skeleton">
-      <div class="skeleton-wrapper">
-        <Skeleton class="skeleton-line skeleton-line-1" />
-        <Skeleton class="skeleton-line skeleton-line-2" />
-        <Skeleton class="skeleton-line skeleton-line-3" />
-      </div>
-    </div>
-
-    <!-- Empty State -->
-    <div v-else-if="followUps.length === 0" class="follow-up-empty">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <MessageSquare class="empty-icon" />
-          </EmptyMedia>
-          <EmptyTitle>暂无{{ recordLabel }}</EmptyTitle>
-          <EmptyDescription>
-            点击上方按钮添加新的{{ recordLabel }}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    </div>
-
-    <!-- Follow-up List -->
-    <div v-else class="follow-up-list">
+    <DataViewStatePanel
+      :state="viewState"
+      loading-type="list"
+      :empty-title="`暂无${recordLabel}`"
+      :empty-description="`点击上方按钮添加新的${recordLabel}`"
+    >
+    <div class="follow-up-list">
       <div
         v-for="followUp in followUps"
         :key="followUp.id"
@@ -201,23 +182,16 @@
         </div>
       </div>
     </div>
+    </DataViewStatePanel>
   </div>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Component, ComponentPublicInstance } from 'vue'
 import { CalendarClock, ChevronDown, ChevronUp, Loader2, Mail, MessageCircle, MessageSquare, Phone, RefreshCw, ThumbsDown, ThumbsUp, Trash2, User, Users } from 'lucide-vue-next'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { HoverInfo } from '@/components/crmwolf'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-  EmptyDescription,
-} from '@/components/ui/empty'
+import { DataViewStatePanel, HoverInfo, type DataViewState } from '@/components/crmwolf'
 import { confirmDialog } from '@/utils/confirmDialog'
 
 interface FollowUp {
@@ -272,6 +246,10 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<Emits>()
 const recordLabel = props.recordLabel
+const viewState = computed<DataViewState>(() => {
+  if (props.followUps.length > 0) return 'ready'
+  return props.loading ? 'loading' : 'empty'
+})
 const expandedContentIds = ref<Set<number>>(new Set())
 const overflowingContentIds = ref<Set<number>>(new Set())
 const contentElements = new Map<number, HTMLElement>()
@@ -623,43 +601,6 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   display: flex;
   flex-direction: column;
   background: transparent;
-}
-
-.follow-up-skeleton {
-  padding: $space-4;
-}
-
-.skeleton-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: $space-2;
-}
-
-.skeleton-line {
-  height: 16px;
-}
-
-.skeleton-line-1 {
-  width: 60%;
-}
-
-.skeleton-line-2 {
-  width: 80%;
-}
-
-.skeleton-line-3 {
-  width: 40%;
-}
-
-.follow-up-empty {
-  padding: $space-8 0;
-  text-align: center;
-}
-
-.empty-icon {
-  width: 24px;
-  height: 24px;
-  opacity: 0.5;
 }
 
 .follow-up-list {

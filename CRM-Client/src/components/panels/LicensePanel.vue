@@ -11,7 +11,7 @@ import { Plus, Server, FileText, Download, Calendar, Hash, Loader2, Trash2 } fro
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import ListCard from '@/components/crmwolf/ListCard.vue'
-import { HoverInfo } from '@/components/crmwolf'
+import { DataViewStatePanel, HoverInfo } from '@/components/crmwolf'
 import licenseApplicationApi, { type LicenseApplicationResponse, type LicenseType } from '@/api/licenseApplication'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { toast } from 'vue-sonner'
@@ -203,12 +203,10 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       empty-text="暂无许可证申请"
     >
       <template #empty>
-        <div
-          class="license-applications-empty"
-          :role="loadError ? 'alert' : 'status'"
-        >
-          {{ loadError ? '许可证申请加载失败' : '暂无许可证申请' }}
+        <div v-if="loadError" class="license-applications-error" role="alert">
+          许可证申请加载失败
         </div>
+        <DataViewStatePanel v-else state="empty" class="w-full" empty-title="暂无许可证申请" />
       </template>
       <template #headerActions>
         <Button v-if="showApply" size="sm" @click="handleApply">
@@ -340,7 +338,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
   white-space: nowrap;
 }
 
-.license-applications-empty {
+.license-applications-error {
   width: 100%;
   font-size: var(--font-size-body);
   font-weight: 500;

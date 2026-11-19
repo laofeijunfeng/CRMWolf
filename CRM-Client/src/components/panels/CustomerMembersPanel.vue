@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { Plus, Pencil, Trash2, Loader2, Users } from 'lucide-vue-next'
+import { Plus, Pencil, Trash2, Loader2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import ListCard from '@/components/crmwolf/ListCard.vue'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import customerApi, {
   type CustomerMemberAccessLevel,
   type CustomerMemberCandidate,
@@ -178,10 +179,7 @@ watch(
       </template>
 
       <template #empty>
-        <div class="customer-members-panel__empty">
-          <Users class="w-5 h-5" />
-          <span>暂无协作成员</span>
-        </div>
+        <DataViewStatePanel state="empty" class="w-full" empty-title="暂无协作成员" />
       </template>
 
       <template #itemMain="{ item }">
@@ -277,16 +275,6 @@ watch(
 <style scoped lang="scss">
 .customer-members-panel {
   margin-top: 0;
-}
-
-.customer-members-panel__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 72px;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
 }
 
 .customer-member-dialog__form {

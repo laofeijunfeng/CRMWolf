@@ -47,7 +47,7 @@ import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
-import { AmountText, FilePreviewDialog } from '@/components/crmwolf'
+import { AmountText, DataViewStatePanel, FilePreviewDialog } from '@/components/crmwolf'
 import { getFilePreviewKind } from '@/components/crmwolf/filePreview'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 import paymentApi, {
@@ -658,15 +658,11 @@ watch(
           <template v-else>
             <Card class="state-card">
               <CardContent class="state-card-content">
-                <Empty>
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <FileText aria-hidden="true" />
-                    </EmptyMedia>
-                    <EmptyTitle>暂无回款记录信息</EmptyTitle>
-                    <EmptyDescription>请选择一个回款记录查看详情。</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
+                <DataViewStatePanel
+                  state="empty"
+                  empty-title="暂无回款记录信息"
+                  empty-description="请选择一个回款记录查看详情。"
+                />
               </CardContent>
             </Card>
           </template>

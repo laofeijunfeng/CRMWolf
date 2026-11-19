@@ -5,7 +5,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 
 import { z } from 'zod'
 import { toast } from 'vue-sonner'
-import { Search, Loader2, Plus } from 'lucide-vue-next'
+import { Search, Plus } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -38,8 +38,8 @@ import { getSettingsNavigationItem } from '@/settingsNavigation'
 
 import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
-import { DataTable, TableRowActions } from '@/components/crmwolf'
-import type { ActionConfig, TableRowActionSet } from '@/components/crmwolf'
+import { DataTable, DataViewStatePanel, TableRowActions } from '@/components/crmwolf'
+import type { ActionConfig, DataViewState, TableRowActionSet } from '@/components/crmwolf'
 import { defineListFields } from '@/components/crmwolf/listFieldCatalog'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
 import { settingsListColumn } from '@/views/settings/settingsListCatalog'
@@ -67,6 +67,9 @@ const inviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const searchResults = ref<UserSearchResult[]>([])
 const hasSearched = ref(false)
+const inviteSearchViewState = computed<DataViewState>(() =>
+  searchLoading.value ? 'loading' : searchResults.value.length === 0 ? 'empty' : 'ready',
+)
 
 const roleDialogOpen = ref(false)
 const selectedMember = ref<TeamMemberResponse | null>(null)
@@ -523,41 +526,38 @@ watch([hasAccess, teamId], (): void => {
           </Button>
         </div>
 
-        <!-- 搜索加载 -->
-        <div v-if="searchLoading" class="flex items-center justify-center py-8">
-          <Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
-          <span class="ml-2 text-muted-foreground">搜索中...</span>
-        </div>
-
         <!-- 搜索结果 -->
-        <div v-else-if="hasSearched && searchResults.length > 0" class="space-y-2">
-          <div class="text-sm text-muted-foreground">找到以下用户:</div>
-          <div
-            v-for="user in searchResults"
-            :key="user.id"
-            class="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
-          >
-            <div class="flex items-center gap-3">
-              <div v-if="user.avatar_url" class="w-10 h-10 rounded-full overflow-hidden">
-                <img :src="user.avatar_url" alt="头像" class="w-full h-full object-cover" />
+        <DataViewStatePanel
+          v-if="searchLoading || hasSearched"
+          :state="inviteSearchViewState"
+          loading-type="list"
+          :loading-rows="2"
+          empty-title="未找到该用户"
+        >
+          <div class="space-y-2">
+            <div class="text-sm text-muted-foreground">找到以下用户:</div>
+            <div
+              v-for="user in searchResults"
+              :key="user.id"
+              class="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+            >
+              <div class="flex items-center gap-3">
+                <div v-if="user.avatar_url" class="w-10 h-10 rounded-full overflow-hidden">
+                  <img :src="user.avatar_url" alt="头像" class="w-full h-full object-cover" />
+                </div>
+                <div v-else class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
+                  {{ user.name?.charAt(0) || 'U' }}
+                </div>
+                <div>
+                  <div class="font-medium">{{ user.name }}</div>
+                  <div class="text-sm text-muted-foreground">{{ user.email }}</div>
+                </div>
               </div>
-              <div v-else class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
-                {{ user.name?.charAt(0) || 'U' }}
-              </div>
-              <div>
-                <div class="font-medium">{{ user.name }}</div>
-                <div class="text-sm text-muted-foreground">{{ user.email }}</div>
-              </div>
+              <Badge v-if="isInTeam(user.id)" variant="secondary">已在团队中</Badge>
+              <Button v-else size="sm" @click="handleInviteUser(user)">邀请</Button>
             </div>
-            <Badge v-if="isInTeam(user.id)" variant="secondary">已在团队中</Badge>
-            <Button v-else size="sm" @click="handleInviteUser(user)">邀请</Button>
           </div>
-        </div>
-
-        <!-- 无结果 -->
-        <div v-else-if="hasSearched && searchResults.length === 0" class="text-center py-8 text-muted-foreground">
-          未找到该用户
-        </div>
+        </DataViewStatePanel>
       </div>
 
       <DialogFooter>

@@ -389,7 +389,8 @@ describe('OpportunityChartPage', () => {
     expect(wrapper.text()).toContain('¥ 0 万')
     expect(wrapper.find('.opportunity-chart-state').exists()).toBe(false)
     expect(wrapper.findAll('.opportunity-chart-card')).toHaveLength(7)
-    expect(wrapper.findAll('.opportunity-chart-card-empty')).toHaveLength(7)
+    const cardEmptyStates = wrapper.findAll('[role="status"]').filter((node) => /^暂无(分布|预测)数据$/.test(node.text().trim()))
+    expect(cardEmptyStates).toHaveLength(7)
     for (const title of ['状态', '采购类型', '授权模式', '金额档', '产品', '赢率', '预计成交']) {
       expect(wrapper.text()).toContain(title)
     }

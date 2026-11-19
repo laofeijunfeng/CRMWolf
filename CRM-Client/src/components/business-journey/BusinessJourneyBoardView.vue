@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { AlertCircle, CheckCircle2, RefreshCw, UserRound } from 'lucide-vue-next'
-import { AmountText, TableToolbarButton } from '@/components/crmwolf'
+import { AmountText, DataViewStatePanel, TableToolbarButton, type DataViewState } from '@/components/crmwolf'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -32,6 +32,10 @@ const emit = defineEmits<{
 }>()
 const columns = computed(() => props.board?.columns ?? [])
 const hasBoardData = computed(() => props.board !== null)
+const viewState = computed<DataViewState>(() => {
+  if (hasBoardData.value) return 'ready'
+  return props.loading ? 'loading' : 'error'
+})
 
 const getStageAge = (value: string | null | undefined): string => {
   if (value === null || value === undefined || value === '') return '-'
@@ -117,25 +121,24 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
     <Card class="business-board-surface">
       <CardContent class="business-board-surface-content">
         <div class="business-board-scroll">
-          <div v-if="loading && !hasBoardData" class="business-board-skeleton" aria-label="旅程看板加载中">
-            <section v-for="index in 5" :key="index" class="business-board-column">
-              <Skeleton class="h-8 w-24" />
-              <Skeleton class="h-28 w-full" />
-              <Skeleton class="h-28 w-full" />
-              <Skeleton class="h-28 w-full" />
-            </section>
-          </div>
+          <DataViewStatePanel
+            :state="viewState"
+            :error-title="errorMessage || '旅程看板暂时无法加载'"
+            error-description="请检查网络连接后重试。"
+            @retry="emit('retry')"
+          >
+            <template #loading>
+              <div class="business-board-skeleton" aria-label="旅程看板加载中">
+                <section v-for="index in 5" :key="index" class="business-board-column">
+                  <Skeleton class="h-8 w-24" />
+                  <Skeleton class="h-28 w-full" />
+                  <Skeleton class="h-28 w-full" />
+                  <Skeleton class="h-28 w-full" />
+                </section>
+              </div>
+            </template>
 
-          <div v-else-if="!hasBoardData" class="business-board-blocking-error" role="alert">
-            <AlertCircle class="blocking-error-icon" aria-hidden="true" />
-            <strong>{{ errorMessage || '旅程看板暂时无法加载' }}</strong>
-            <span>请检查网络连接后重试。</span>
-            <TableToolbarButton :disabled="loading" @click="emit('retry')">
-              {{ loading ? '加载中…' : '重新加载' }}
-            </TableToolbarButton>
-          </div>
-
-          <div v-else class="business-board-columns">
+          <div class="business-board-columns">
             <section
               v-for="column in columns"
               :key="column.key"
@@ -221,6 +224,7 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
               </div>
             </section>
           </div>
+          </DataViewStatePanel>
         </div>
       </CardContent>
     </Card>
@@ -271,31 +275,6 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   width: var(--icon-sm);
   height: var(--icon-sm);
   flex-shrink: 0;
-}
-
-.business-board-blocking-error {
-  display: flex;
-  flex: 1;
-  min-width: 280px;
-  min-height: 240px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: $space-2;
-  padding: $space-6;
-  color: hsl(var(--muted-foreground));
-  text-align: center;
-}
-
-.business-board-blocking-error strong {
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-}
-
-.blocking-error-icon {
-  width: $space-6;
-  height: $space-6;
-  color: hsl(var(--status-danger));
 }
 
 .business-board-surface {

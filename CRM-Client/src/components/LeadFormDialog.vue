@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import {
+  DataViewStatePanel,
   InputField,
   ProductIntentPicker,
   SelectField,
@@ -240,9 +241,7 @@ const handleCancel = (): void => {
         <DialogTitle>{{ mode === 'create' ? '新建线索' : '编辑线索' }}</DialogTitle>
       </DialogHeader>
 
-      <div v-if="loading" class="flex justify-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
-      </div>
+      <DataViewStatePanel v-if="loading" state="loading" loading-type="list" />
 
       <Form
         ref="formRef"

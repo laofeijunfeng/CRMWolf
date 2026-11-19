@@ -21,12 +21,7 @@ import {
   StepperTitle,
   StepperSeparator
 } from '@/components/ui/stepper'
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle
-} from '@/components/ui/empty'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import type { ApprovalRecord } from '@/schemas/approvalGeneric'
 
 // ==================== Types ====================
@@ -110,22 +105,12 @@ const formatDateTime = (iso: string): string => {
 
 <template>
   <div class="approval-stepper">
-    <!-- 无记录时显示空状态 -->
-    <Empty
-      v-if="records.length === 0"
-      class="min-h-[72px] border-0 py-3"
+    <DataViewStatePanel
+      :state="records.length === 0 ? 'empty' : 'ready'"
+      empty-title="暂无审批记录"
     >
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <Clock class="h-5 w-5" aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle class="text-sm font-medium">暂无审批记录</EmptyTitle>
-      </EmptyHeader>
-    </Empty>
-
     <!-- Stepper 流程 -->
     <Stepper
-      v-else
       :model-value="isPending && currentNodeName ? records.length + 1 : records.length"
       class="approval-stepper__timeline"
       orientation="vertical"
@@ -199,6 +184,7 @@ const formatDateTime = (iso: string): string => {
         </div>
       </StepperItem>
     </Stepper>
+    </DataViewStatePanel>
   </div>
 </template>
 

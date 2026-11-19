@@ -5,6 +5,7 @@ import { Donut, GroupedBar } from '@unovis/ts'
 import { VisAxis, VisDonut, VisGroupedBar, VisSingleContainer, VisXYContainer } from '@unovis/vue'
 import { Button } from '@/components/ui/button'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, componentToString, type ChartConfig } from '@/components/ui/chart'
+import { DataViewStatePanel } from '@/components/crmwolf'
 import ChartBucketActionList, { type ChartBucketAction } from '@/components/crmwolf/chart/ChartBucketActionList.vue'
 import ChartBucketDialog from '@/components/crmwolf/chart/ChartBucketDialog.vue'
 import ChartCardFrame from '@/components/crmwolf/chart/ChartCardFrame.vue'
@@ -80,7 +81,7 @@ function openMonthFromDatum(datum: MonthDatum): void {
   <ChartPageShell :state="loading && !chart ? 'loading' : error && !chart ? 'error' : chart ? 'ready' : 'empty'" aria-label="合同图表">
     <template #loading>正在整理合同图表…</template>
     <template #error><div class="contract-chart-page__state" role="alert"><span>{{ error }}</span><Button type="button" variant="outline" size="sm" @click="emit('retry')">重试</Button></div></template>
-    <template #empty><div class="contract-chart-page__state">暂无合同图表</div></template>
+    <template #empty><DataViewStatePanel state="empty" empty-title="暂无合同图表" /></template>
     <template #summary><header class="contract-chart-page__heading"><h2>{{ population }} 份 · {{ moneyText(totalAmount) }}</h2><p>当前筛选范围内的合同。金额是合同金额。</p></header></template>
     <template #inline-error><p v-if="error" class="contract-chart-page__refresh-error" role="alert">{{ error }}</p></template>
     <div v-if="chart" class="contract-chart-page__grid">
