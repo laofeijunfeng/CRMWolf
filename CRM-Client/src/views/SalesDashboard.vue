@@ -542,7 +542,7 @@ onMounted(() => {
 }
 
 .metric-secondary-value {
-  color: hsl(var(--success));
+  color: hsl(var(--status-success));
   font-family: $wolf-font-mono-v2;
   font-weight: $wolf-font-weight-semibold-v2;
   font-variant-numeric: tabular-nums;

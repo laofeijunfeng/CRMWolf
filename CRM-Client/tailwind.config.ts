@@ -110,13 +110,13 @@ const config: Config = {
 			'wash-selected': 'var(--wash-selected)',
 			wolf: {
 				primary: {
-					DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
-					hover: 'hsl(var(--primary-hover) / <alpha-value>)',
-					active: 'hsl(var(--primary-active) / <alpha-value>)',
-					light: 'hsl(var(--primary) / 0.1)'
+					DEFAULT: 'hsl(var(--brand) / <alpha-value>)',
+					hover: 'hsl(var(--brand) / <alpha-value>)',
+					active: 'hsl(var(--brand) / <alpha-value>)',
+					light: 'var(--wash-hover)'
 				},
-				secondary: 'hsl(var(--info) / <alpha-value>)',
-				accent: 'hsl(var(--success) / <alpha-value>)',
+				secondary: 'hsl(var(--status-info) / <alpha-value>)',
+				accent: 'hsl(var(--status-success) / <alpha-value>)',
 				bg: {
 					page: 'hsl(var(--background) / <alpha-value>)',
 					card: 'hsl(var(--card) / <alpha-value>)',
@@ -131,8 +131,8 @@ const config: Config = {
 					tertiary: 'hsl(var(--muted-foreground) / <alpha-value>)',
 					placeholder: 'hsl(var(--muted-foreground) / <alpha-value>)',
 					inverse: 'hsl(var(--primary-foreground) / <alpha-value>)',
-					link: 'hsl(var(--primary) / <alpha-value>)',
-					'link-hover': 'hsl(var(--primary-hover) / <alpha-value>)'
+					link: 'hsl(var(--brand) / <alpha-value>)',
+					'link-hover': 'hsl(var(--brand) / <alpha-value>)'
 				},
 				border: {
 					'default': 'hsl(var(--border) / <alpha-value>)',
@@ -141,28 +141,28 @@ const config: Config = {
 					divider: 'hsl(var(--border) / <alpha-value>)'
 				},
 				success: {
-					DEFAULT: 'hsl(var(--success) / <alpha-value>)',
-					text: 'hsl(var(--success) / <alpha-value>)',
-					bg: 'hsl(var(--success) / 0.1)',
-					border: 'hsl(var(--success) / <alpha-value>)'
+					DEFAULT: 'hsl(var(--status-success) / <alpha-value>)',
+					text: 'hsl(var(--status-success) / <alpha-value>)',
+					bg: 'color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent)',
+					border: 'hsl(var(--status-success) / <alpha-value>)'
 				},
 				warning: {
-					DEFAULT: 'hsl(var(--warning) / <alpha-value>)',
-					text: 'hsl(var(--warning) / <alpha-value>)',
-					bg: 'hsl(var(--warning) / 0.1)',
-					border: 'hsl(var(--warning) / <alpha-value>)'
+					DEFAULT: 'hsl(var(--status-warning) / <alpha-value>)',
+					text: 'hsl(var(--status-warning) / <alpha-value>)',
+					bg: 'color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent)',
+					border: 'hsl(var(--status-warning) / <alpha-value>)'
 				},
 				danger: {
 					DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
 					text: 'hsl(var(--destructive) / <alpha-value>)',
-					bg: 'hsl(var(--destructive) / 0.1)',
+					bg: 'color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent)',
 					border: 'hsl(var(--destructive) / <alpha-value>)'
 				},
 				info: {
-					DEFAULT: 'hsl(var(--info) / <alpha-value>)',
-					text: 'hsl(var(--info) / <alpha-value>)',
-					bg: 'hsl(var(--info) / 0.1)',
-					border: 'hsl(var(--info) / <alpha-value>)'
+					DEFAULT: 'hsl(var(--status-info) / <alpha-value>)',
+					text: 'hsl(var(--status-info) / <alpha-value>)',
+					bg: 'color-mix(in srgb, hsl(var(--status-info)) var(--status-bg-mix), transparent)',
+					border: 'hsl(var(--status-info) / <alpha-value>)'
 				}
 			},
 			sidebar: {
@@ -172,8 +172,6 @@ const config: Config = {
 				'primary-foreground': 'hsl(var(--sidebar-primary-foreground) / <alpha-value>)',
 				accent: 'hsl(var(--sidebar-accent) / <alpha-value>)',
 				'accent-foreground': 'hsl(var(--sidebar-accent-foreground) / <alpha-value>)',
-				active: 'hsl(var(--sidebar-active) / <alpha-value>)',
-				'active-foreground': 'hsl(var(--sidebar-active-foreground) / <alpha-value>)',
 				border: 'hsl(var(--sidebar-border) / <alpha-value>)',
 				ring: 'hsl(var(--sidebar-ring) / <alpha-value>)'
 			}
@@ -254,6 +252,8 @@ const config: Config = {
 			'body-strong': ['16px', { lineHeight: '24px', fontWeight: '500' }],
 			body: ['14px', { lineHeight: '20px' }],
 			caption: ['12px', { lineHeight: '16px' }],
+			// 13px 只用于 sm 控件内文字
+			'control-sm': ['13px', { lineHeight: '20px' }],
 			// 根字号为 14px，rem 档会缩放；Tailwind 同名字号档固定为 px，对齐 token 字阶
 			xs: ['12px', { lineHeight: '16px' }],
 			sm: ['14px', { lineHeight: '20px' }],
@@ -312,9 +312,7 @@ const config: Config = {
 		},
 			minHeight: {
 				'touch-target': 'var(--touch-target)',
-				control: 'var(--control-h-md)',
-				'input-desktop': '36px',
-				'input-mobile': '44px'
+				control: 'var(--control-h-md)'
 			},
 		height: {
 			'touch-target': 'var(--touch-target)',
@@ -323,11 +321,6 @@ const config: Config = {
 			control: 'var(--control-h-md)',
 			'control-lg': 'var(--control-h-lg)',
 			'context-tabs': 'var(--context-tabs-height)',
-				'button-sm': '32px',
-				'button-md': '36px',
-				'button-lg': '40px',
-				'input-desktop': '36px',
-				'input-mobile': '44px',
 			'wolf-icon-xs': '16px',
 			'wolf-icon-sm': '20px',
 			'wolf-icon-md': '24px',
@@ -337,7 +330,23 @@ const config: Config = {
 		minWidth: {
 			'touch-target': 'var(--touch-target)'
 		},
+		padding: {
+			'control-xs': 'var(--control-px-xs)',
+			'control-sm': 'var(--control-px-sm)',
+			control: 'var(--control-px-md)',
+			'control-lg': 'var(--control-px-lg)'
+		},
+		gap: {
+			'control-sm': 'var(--control-gap-sm)',
+			control: 'var(--control-gap-md)'
+		},
+		opacity: {
+			disabled: 'var(--disabled-opacity)'
+		},
 		size: {
+			'control-sm': 'var(--control-h-sm)',
+			control: 'var(--control-h-md)',
+			'control-lg': 'var(--control-h-lg)',
 			'icon-xs': 'var(--icon-xs)',
 			'icon-sm': 'var(--icon-sm)',
 			'icon-lg': 'var(--icon-lg)'

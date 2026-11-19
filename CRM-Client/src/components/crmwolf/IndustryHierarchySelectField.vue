@@ -162,7 +162,7 @@ function handleOpenChange(value: boolean): void {
             :aria-describedby="describedBy"
             :disabled="selectDisabled"
             :class="cn(
-              'h-input-desktop min-h-input-desktop w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile',
+              'h-control min-h-control w-full justify-between rounded-wolf-sm border-wolf-border-default bg-wolf-bg-card px-3 text-left text-wolf-body font-wolf-regular text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
               selectedLabel === '' && 'text-wolf-text-placeholder',
               props.error.trim() !== '' && 'border-wolf-danger focus-visible:ring-wolf-danger/15',
               props.triggerClass,
@@ -181,7 +181,7 @@ function handleOpenChange(value: boolean): void {
             :model-value="searchTerm"
             placeholder="搜索行业"
             :disabled="selectDisabled"
-            class="h-input-desktop min-h-input-desktop border-0 bg-transparent shadow-none focus-visible:ring-0 max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile"
+            class="h-control min-h-control border-0 bg-transparent shadow-none focus-visible:ring-0 max-[767px]:h-touch-target max-[767px]:min-h-touch-target"
             @update:model-value="searchTerm = String($event ?? '')"
           />
         </div>

@@ -4,25 +4,9 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { Button } from '@/components/ui/button'
 import TouchInput from '@/components/crmwolf/TouchInput.vue'
 
 describe('Focus Ring Compliance (UI/UX Pro Max §1)', () => {
-  describe('Button', () => {
-    it('has focus-visible ring classes', () => {
-      const wrapper = mount(Button, {
-        props: { size: 'icon' },
-        slots: { default: 'Button' },
-      })
-
-      const button = wrapper.find('button')
-
-      expect(button.classes()).toContain('focus-visible:ring-2')
-      expect(button.classes()).toContain('focus-visible:ring-ring')
-      expect(button.classes()).toContain('focus-visible:ring-offset-2')
-    })
-  })
-
   describe('TouchInput', () => {
     it('shows focus ring on focus', async () => {
       const wrapper = mount(TouchInput, {

@@ -779,10 +779,10 @@ watchEffect(() => {
         </div>
         <AmountText class="invoice-mobile-card-amount" :value="row.invoice_amount" size="lg" tone="warning" />
         <div class="invoice-mobile-card-meta">
-          <Badge variant="status" :data-status-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
+          <Badge variant="status" :data-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
             {{ getInvoiceTypeText(row.invoice_type) }}
           </Badge>
-          <Badge variant="status" :data-status-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
+          <Badge variant="status" :data-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
             {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
           </Badge>
           <span>申请人：{{ row.applicant_name || '-' }}</span>
@@ -815,7 +815,7 @@ watchEffect(() => {
 
       <!-- 发票类型 -->
       <template #cell-invoice_type="{ row }">
-        <Badge variant="status" :data-status-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
+        <Badge variant="status" :data-tone="getInvoiceTypeTone(row.invoice_type)" data-status-domain="invoiceType" :data-status-value="row.invoice_type">
           {{ getInvoiceTypeText(row.invoice_type) }}
         </Badge>
       </template>
@@ -837,7 +837,7 @@ watchEffect(() => {
 
       <!-- 发票状态 -->
       <template #cell-invoice_effective_status="{ row }">
-        <Badge variant="status" :data-status-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
+        <Badge variant="status" :data-tone="getInvoiceEffectiveStatusTone(row.invoice_effective_status)" data-status-domain="invoiceEffectiveStatus" :data-status-value="row.invoice_effective_status">
           {{ getInvoiceEffectiveStatusText(row.invoice_effective_status) }}
         </Badge>
       </template>

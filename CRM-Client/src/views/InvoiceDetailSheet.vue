@@ -1133,7 +1133,7 @@ onBeforeUnmount((): void => {
               <Badge
                 v-if="invoiceInfo?.invoice_effective_status === 'RED_OFFSET'"
                 variant="status"
-                data-status-tone="success"
+                data-tone="success"
                 data-status-domain="invoiceEffectiveStatus"
                 data-status-value="RED_OFFSET"
               >
@@ -1142,7 +1142,7 @@ onBeforeUnmount((): void => {
               <Badge
                 v-if="invoiceInfo?.reissue_status === 'REISSUE_PENDING'"
                 variant="status"
-                data-status-tone="warning"
+                data-tone="warning"
                 data-status-domain="invoiceReissueStatus"
                 data-status-value="REISSUE_PENDING"
               >
@@ -1151,7 +1151,7 @@ onBeforeUnmount((): void => {
               <Badge
                 v-if="invoiceInfo?.reissue_status === 'REISSUED'"
                 variant="status"
-                data-status-tone="success"
+                data-tone="success"
                 data-status-domain="invoiceReissueStatus"
                 data-status-value="REISSUED"
               >

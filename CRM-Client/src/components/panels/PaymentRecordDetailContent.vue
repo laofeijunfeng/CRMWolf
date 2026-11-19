@@ -415,7 +415,7 @@ watch(
               <Badge
                 v-if="hasRecord && isDraftApprovalPhase"
                 variant="status"
-                data-status-tone="neutral"
+                data-tone="neutral"
                 data-status-domain="paymentApprovalPhase"
                 data-status-value="draft"
                 role="status"

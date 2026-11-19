@@ -1931,13 +1931,13 @@ defineExpose({
 }
 
 .license-summary__primary.is-soon {
-  color: var(--status-warning-foreground);
-  background-color: var(--status-warning-background);
+  color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground)));
+  background-color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
 }
 
 .license-summary__primary.is-urgent {
-  color: var(--status-danger-foreground);
-  background-color: var(--status-danger-background);
+  color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground)));
+  background-color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .license-summary__secondary {
@@ -1946,10 +1946,10 @@ defineExpose({
   line-height: 16px;
 }
 
-.license-badge--official { color: var(--status-success-foreground); }
-.license-badge--trial { color: var(--status-warning-foreground); }
-.license-badge--expired { color: var(--status-danger-foreground); }
-.license-badge--none { color: var(--status-neutral-foreground); }
+.license-badge--official { color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground))); }
+.license-badge--trial { color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground))); }
+.license-badge--expired { color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground))); }
+.license-badge--none { color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground))); }
 
 .customer-mobile-card-header {
   display: flex;

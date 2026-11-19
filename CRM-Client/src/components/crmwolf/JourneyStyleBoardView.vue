@@ -102,7 +102,7 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
           :key="column.key"
           class="journey-board__column"
           :data-column-key="column.key"
-          :data-tone="column.tone"
+          :data-column-tone="column.tone"
         >
           <header class="journey-board__header">
             <h2>{{ column.label }}</h2>
@@ -214,19 +214,19 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
   background: hsl(var(--muted));
 }
 
-.journey-board__column[data-tone='info'] {
-  background: hsl(var(--info) / 0.12);
+.journey-board__column[data-column-tone='info'] {
+  background: hsl(var(--status-info) / 0.12);
 }
 
-.journey-board__column[data-tone='success'] {
-  background: hsl(var(--success) / 0.12);
+.journey-board__column[data-column-tone='success'] {
+  background: hsl(var(--status-success) / 0.12);
 }
 
-.journey-board__column[data-tone='warning'] {
-  background: hsl(var(--warning) / 0.14);
+.journey-board__column[data-column-tone='warning'] {
+  background: hsl(var(--status-warning) / 0.14);
 }
 
-.journey-board__column[data-tone='danger'] {
+.journey-board__column[data-column-tone='danger'] {
   background: hsl(var(--destructive) / 0.1);
 }
 
@@ -253,19 +253,19 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
   line-height: 1.4;
 }
 
-.journey-board__column[data-tone='info'] .journey-board__count {
-  color: hsl(var(--info));
+.journey-board__column[data-column-tone='info'] .journey-board__count {
+  color: hsl(var(--status-info));
 }
 
-.journey-board__column[data-tone='success'] .journey-board__count {
-  color: hsl(var(--success));
+.journey-board__column[data-column-tone='success'] .journey-board__count {
+  color: hsl(var(--status-success));
 }
 
-.journey-board__column[data-tone='warning'] .journey-board__count {
-  color: hsl(var(--warning));
+.journey-board__column[data-column-tone='warning'] .journey-board__count {
+  color: hsl(var(--status-warning));
 }
 
-.journey-board__column[data-tone='danger'] .journey-board__count {
+.journey-board__column[data-column-tone='danger'] .journey-board__count {
   color: hsl(var(--destructive));
 }
 
@@ -315,8 +315,8 @@ function activateCard(column: JourneyBoardColumn, card: JourneyBoardCard): void 
 
 .journey-board__owner {
   border-color: transparent;
-  background: hsl(var(--info) / 0.12);
-  color: hsl(var(--info));
+  background: hsl(var(--status-info) / 0.12);
+  color: hsl(var(--status-info));
   font-weight: 500;
 }
 

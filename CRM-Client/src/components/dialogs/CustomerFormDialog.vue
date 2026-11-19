@@ -980,7 +980,7 @@ function continueEditing(): void { closeGuard.continueEditing() }
             <button
               id="customer-more-info-trigger"
               type="button"
-              class="flex h-input-mobile min-h-input-mobile w-full items-center justify-between rounded-wolf-lg border border-blue-200 bg-blue-50/60 px-3 text-left text-sm font-semibold text-blue-900"
+              class="flex h-touch-target min-h-touch-target w-full items-center justify-between rounded-wolf-lg border border-blue-200 bg-blue-50/60 px-3 text-left text-sm font-semibold text-blue-900"
               :aria-expanded="moreInfoOpen"
               aria-controls="customer-more-info-content"
             >
@@ -1108,13 +1108,13 @@ function continueEditing(): void { closeGuard.continueEditing() }
 
 .customer-form-dialog .customer-license-type {
   .segmented-choice__option--warning {
-    --license-type-foreground: var(--status-warning-foreground);
-    --license-type-background: var(--status-warning-background);
+    --license-type-foreground: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground)));
+    --license-type-background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
   }
 
   .segmented-choice__option--success {
-    --license-type-foreground: var(--status-success-foreground);
-    --license-type-background: var(--status-success-background);
+    --license-type-foreground: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground)));
+    --license-type-background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
   }
 
   .segmented-choice__radio:not(:disabled) + .segmented-choice__option {
@@ -1128,8 +1128,8 @@ function continueEditing(): void { closeGuard.continueEditing() }
   }
 }
 
-.customer-license-status.license-badge--official { color: var(--status-success-foreground); }
-.customer-license-status.license-badge--trial { color: var(--status-warning-foreground); }
-.customer-license-status.license-badge--expired { color: var(--status-danger-foreground); }
-.customer-license-status.license-badge--none { color: var(--status-neutral-foreground); }
+.customer-license-status.license-badge--official { color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground))); }
+.customer-license-status.license-badge--trial { color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground))); }
+.customer-license-status.license-badge--expired { color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground))); }
+.customer-license-status.license-badge--none { color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground))); }
 </style>

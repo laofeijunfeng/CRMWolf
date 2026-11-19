@@ -15,7 +15,7 @@ import type {
   BusinessJourneyChartSegment
 } from '@/schemas/dealJourney'
 
-const CHART_COLOR = 'hsl(var(--primary))'
+const CHART_COLOR = 'hsl(var(--chart-1))'
 const MUTED_COLOR = 'hsl(var(--muted-foreground))'
 const CHART_COLORS = [
   'hsl(var(--chart-1))',
@@ -437,7 +437,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 .journey-chart-bars button.is-selected,
 .journey-chart-legend button.is-selected {
   border-radius: $wolf-radius-v2;
-  background: hsl(var(--primary) / 0.08);
+  background: hsl(var(--brand) / 0.08);
 }
 
 .journey-chart-closing-plot {
@@ -487,7 +487,7 @@ function openJourney(item: BusinessJourneyChartPreview): void {
 }
 
 .journey-chart-preview__more {
-  color: hsl(var(--primary));
+  color: hsl(var(--brand));
 }
 
 .journey-chart-sheet {

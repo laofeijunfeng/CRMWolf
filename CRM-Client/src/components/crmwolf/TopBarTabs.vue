@@ -198,7 +198,7 @@ function handleDelete(tab: TabItem): void {
   height: 28px;
   min-height: 28px;
   margin-left: -4px;
-  color: hsl(var(--primary));
+  color: hsl(var(--brand));
 }
 
 :global(.tab-menu-content) {
@@ -262,7 +262,7 @@ function handleDelete(tab: TabItem): void {
   // 选中时文字显示系统主题色
   &[data-state="active"] {
     // 文字主色
-    color: hsl(var(--primary));
+    color: hsl(var(--brand));
 
     // 字重加粗
     font-weight: $wolf-font-weight-semibold-v2;  // 600
@@ -276,7 +276,7 @@ function handleDelete(tab: TabItem): void {
     // Hover 时保持激活态样式
     &:hover {
       background: transparent;
-      color: hsl(var(--primary));
+      color: hsl(var(--brand));
     }
   }
 

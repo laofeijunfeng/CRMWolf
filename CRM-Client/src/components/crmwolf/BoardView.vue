@@ -219,7 +219,7 @@ function metricValueType(valueType: BoardValueType): string {
           :key="column.key"
           class="board-column"
           :data-column-key="column.key"
-          :data-tone="column.tone"
+          :data-column-tone="column.tone"
         >
           <header class="board-column__header">
             <h2>{{ column.label }}</h2>

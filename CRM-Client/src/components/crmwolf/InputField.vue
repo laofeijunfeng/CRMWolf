@@ -69,7 +69,7 @@ const describedBy = computed(() => {
       :autocomplete="autocomplete"
       :aria-invalid="error !== ''"
       :aria-describedby="describedBy"
-      :class="cn('h-input-desktop min-h-input-desktop max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile', controlClass)"
+      :class="cn('h-control min-h-control max-[767px]:h-touch-target max-[767px]:min-h-touch-target', controlClass)"
       @update:model-value="emit('update:modelValue', $event)"
     />
     <p v-if="error" :id="errorId" class="m-0 text-wolf-caption font-wolf-medium text-wolf-danger" role="alert">

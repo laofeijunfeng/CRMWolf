@@ -17,7 +17,7 @@ describe('TouchInput', () => {
     })
 
     const inputWrapper = wrapper.find('.input-wrapper')
-    expect(inputWrapper.classes().some(c => c.includes('h-input-mobile') || c.includes('h-touch-target'))).toBe(true)
+    expect(inputWrapper.classes().some(c => c.includes('h-touch-target') || c.includes('h-touch-target'))).toBe(true)
   })
 
   // Focus Ring Tests

@@ -125,8 +125,8 @@ const handleSelect = (value: DateValue | undefined): void => {
         :aria-invalid="ariaInvalid"
         :aria-describedby="ariaDescribedby"
         :class="cn(
-          'h-input-desktop min-h-input-desktop w-full justify-start rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md text-left text-wolf-body font-wolf font-wolf-normal text-wolf-text-primary ring-offset-wolf transition-colors duration-wolf hover:border-wolf-border-hover hover:bg-wolf-bg-card focus-visible:ring-wolf-primary disabled:cursor-not-allowed disabled:bg-wolf-bg-muted disabled:text-wolf-text-tertiary disabled:opacity-60 aria-[invalid=true]:border-wolf-danger aria-[invalid=true]:ring-wolf-danger',
-          'max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile max-[767px]:px-wolf-xl',
+          'h-control min-h-control w-full justify-start rounded-md border border-input bg-card px-control text-body text-foreground transition-colors hover:border-ring-input disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-disabled aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:outline-destructive/50 text-left font-normal hover:bg-card',
+          'max-[767px]:h-touch-target max-[767px]:min-h-touch-target',
           !dateValue && 'text-wolf-text-placeholder',
           props.class
         )"

@@ -6,16 +6,16 @@
 // ==================== CSS 变量兼容层 ====================
 
 :root {
-  --wolf-primary: hsl(var(--primary));
-  --wolf-primary-hover: hsl(var(--primary-hover));
-  --wolf-primary-active: hsl(var(--primary-active));
-  --wolf-primary-light: hsl(var(--primary) / 0.1);
+  --wolf-primary: hsl(var(--brand));
+  --wolf-primary-hover: hsl(var(--brand));
+  --wolf-primary-active: hsl(var(--brand));
+  --wolf-primary-light: var(--wash-hover);
 
   --wolf-bg-page: hsl(var(--background));
   --wolf-bg-card: hsl(var(--card));
   --wolf-bg-sidebar: hsl(var(--sidebar-background));
   --wolf-bg-hover: hsl(var(--accent));
-  --wolf-bg-active: hsl(var(--primary-active) / 0.12);
+  --wolf-bg-active: var(--wash-selected);
   --wolf-bg-muted: hsl(var(--muted));
   --wolf-bg-elevated: hsl(var(--popover));
 
@@ -24,8 +24,8 @@
   --wolf-text-tertiary: hsl(var(--muted-foreground));
   --wolf-text-placeholder: hsl(var(--muted-foreground));
   --wolf-text-disabled: #{$wolf-disabled-text-v2};
-  --wolf-text-link: hsl(var(--primary));
-  --wolf-text-link-hover: hsl(var(--primary-hover));
+  --wolf-text-link: hsl(var(--brand));
+  --wolf-text-link-hover: hsl(var(--brand));
   --wolf-text-inverse: hsl(var(--primary-foreground));
 
   --wolf-border-default: hsl(var(--border));
@@ -33,10 +33,10 @@
   --wolf-border-light: hsl(var(--muted));
   --wolf-border-divider: hsl(var(--border));
 
-  --wolf-success-text: hsl(var(--success));
-  --wolf-success-bg: hsl(var(--success) / 0.1);
-  --wolf-warning-text: hsl(var(--warning));
-  --wolf-warning-bg: hsl(var(--warning) / 0.1);
+  --wolf-success-text: hsl(var(--status-success));
+  --wolf-success-bg: hsl(var(--status-success) / 0.1);
+  --wolf-warning-text: hsl(var(--status-warning));
+  --wolf-warning-bg: hsl(var(--status-warning) / 0.1);
   --wolf-danger-text: hsl(var(--destructive));
   --wolf-danger-bg: hsl(var(--destructive) / 0.1);
 
@@ -80,10 +80,10 @@
   --wolf-transition-duration: #{$wolf-motion-state-duration-v2};
   --wolf-reduced-motion-duration: #{$wolf-reduced-motion-duration-v2};
 
-  --wolf-approval-pending-text: hsl(var(--warning));
-  --wolf-approval-pending-bg: hsl(var(--warning) / 0.1);
-  --wolf-approval-approved-text: hsl(var(--success));
-  --wolf-approval-approved-bg: hsl(var(--success) / 0.1);
+  --wolf-approval-pending-text: hsl(var(--status-warning));
+  --wolf-approval-pending-bg: hsl(var(--status-warning) / 0.1);
+  --wolf-approval-approved-text: hsl(var(--status-success));
+  --wolf-approval-approved-bg: hsl(var(--status-success) / 0.1);
   --wolf-approval-rejected-text: hsl(var(--destructive));
   --wolf-approval-rejected-bg: hsl(var(--destructive) / 0.1);
   --wolf-approval-cancelled-text: hsl(var(--muted-foreground));

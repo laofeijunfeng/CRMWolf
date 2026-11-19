@@ -86,7 +86,7 @@ describe('BusinessJourneyChartView', () => {
     expect(pieData[0]?.amount).toBe(5900000)
 
     const closingConfig = containers[1]?.props('config') as Record<string, { color?: string }>
-    expect(closingConfig.amount?.color).toBe('hsl(var(--primary))')
+    expect(closingConfig.amount?.color).toBe('hsl(var(--chart-1))')
     const closingData = wrapper.findComponent(VisXYContainer).props('data') as Array<{ key: string; fill: string }>
     expect(closingData.at(-1)).toMatchObject({ key: 'unscheduled', fill: 'hsl(var(--muted-foreground))' })
   })

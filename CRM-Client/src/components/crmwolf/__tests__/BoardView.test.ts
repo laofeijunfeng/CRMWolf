@@ -57,7 +57,7 @@ const projection: BoardProjection = {
     title: '近六月趋势',
     description: '按完整月份统计',
     points: [{ month: '2026-09', values: { count: 2, amount: '800.00', month: 'not-a-month' } }],
-    series: [{ key: 'count', label: '数量', color: 'hsl(var(--primary))' }],
+    series: [{ key: 'count', label: '数量', color: 'hsl(var(--chart-1))' }],
   },
 }
 
@@ -216,7 +216,7 @@ describe('BoardView', () => {
     for (const tone of tones) {
       const column = wrapper.get(`[data-column-key="${tone}"]`)
       expect(column.text()).toContain(`${tone}状态`)
-      expect(column.attributes('data-tone')).toBe(tone)
+      expect(column.attributes('data-column-tone')).toBe(tone)
     }
 
   })

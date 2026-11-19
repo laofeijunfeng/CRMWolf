@@ -257,7 +257,7 @@ const formatDate = (value: string | null): string => {
       <template #itemBadges="{ item }">
         <Badge
           variant="status"
-          :data-status-tone="getStatusInfo(item.status).tone"
+          :data-tone="getStatusInfo(item.status).tone"
           data-status-domain="invoiceApplication"
           :data-status-value="item.status"
           :title="getStatusInfo(item.status).traceValue === undefined ? undefined : `invoiceApplication: ${item.status}`"

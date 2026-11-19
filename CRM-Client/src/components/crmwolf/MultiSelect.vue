@@ -62,7 +62,7 @@ function toggleValue(value: string): void {
         variant="outline"
         role="combobox"
         :disabled="props.disabled"
-        class="h-input-desktop min-h-input-desktop w-full justify-between rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md py-0 !text-wolf-body font-wolf font-normal text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile max-[767px]:px-wolf-xl"
+        class="h-control min-h-control w-full justify-between rounded-wolf border-wolf-border-default bg-wolf-bg-card px-wolf-md py-0 !text-wolf-body font-wolf font-normal text-wolf-text-primary shadow-none hover:bg-wolf-bg-card max-[767px]:h-touch-target max-[767px]:min-h-touch-target max-[767px]:px-wolf-xl"
       >
         <span class="min-w-0 truncate" :class="selectedValues.length === 0 ? 'text-muted-foreground' : ''">
           {{ selectedSummary }}

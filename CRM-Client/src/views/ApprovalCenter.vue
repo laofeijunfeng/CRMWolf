@@ -342,7 +342,7 @@
                       <div v-else-if="field.statusDomain" class="attribute-value">
                         <Badge
                           variant="status"
-                          :data-status-tone="getStatusPresentation(field.statusDomain, field.value?.toString()).tone"
+                          :data-tone="getStatusPresentation(field.statusDomain, field.value?.toString()).tone"
                           :data-status-domain="field.statusDomain"
                           :data-status-value="field.value"
                           :title="field.value == null || getStatusPresentation(field.statusDomain, field.value.toString()).traceValue !== undefined ? `${field.statusDomain}: ${String(field.value)}` : undefined"
@@ -2058,18 +2058,18 @@ watch(rows, async () => {
 .billing-copy-value {
   max-width: 100%;
   padding: 2px 0;
-  color: hsl(var(--primary));
+  color: hsl(var(--brand));
   text-align: left;
   font-size: 0.875rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   text-decoration-line: underline;
   text-decoration-style: dashed;
-  text-decoration-color: hsl(var(--primary) / 0.35);
+  text-decoration-color: hsl(var(--brand) / 0.35);
   text-underline-offset: 5px;
   border-radius: 2px;
 
-  &:hover { background: hsl(var(--primary) / 0.05); }
+  &:hover { background: hsl(var(--brand) / 0.05); }
   &:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
 }
 

@@ -93,8 +93,8 @@ const inputWrapperClasses = computed((): string =>
     'input-wrapper',
     'relative flex items-center',
     {
-      'h-input-desktop': props.size === 'default',
-      'h-input-mobile': props.size === 'mobile',
+      'h-control': props.size === 'default',
+      'h-touch-target': props.size === 'mobile',
       'focus-ring': isFocused.value,
       'border-wolf-danger': hasError.value,
       'disabled-state': props.disabled,

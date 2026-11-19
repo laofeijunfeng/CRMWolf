@@ -1320,7 +1320,7 @@ watch(approvalPhase, phase => {
             <CardContent class="p-4">
               <div class="flex items-center gap-2">
                 <h3 class="text-sm font-semibold text-wolf-text-primary-v2">商机进度</h3>
-                <Badge variant="status" :data-status-tone="getStatusPresentation('businessJourney', 'approval_rejected').tone">0%</Badge>
+                <Badge variant="status" :data-tone="getStatusPresentation('businessJourney', 'approval_rejected').tone">0%</Badge>
               </div>
               <p class="mt-2 text-sm text-wolf-text-secondary-v2">暂停销售推进，修改并重新提交审批通过后继续。</p>
             </CardContent>

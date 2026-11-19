@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import BusinessJourneyBoardView from '@/components/business-journey/BusinessJourneyBoardView.vue'
-import { businessJourneyStagePresentation } from '@/components/business-journey/businessJourneyStagePresentation'
 
 const journeyPublicId = `djy_${'a'.repeat(32)}`
 const board = {
@@ -74,67 +73,38 @@ function mountBoard(props: Record<string, unknown> = {}) {
 }
 
 describe('BusinessJourneyBoardView', () => {
-  it('defines the canonical presentation for every journey stage', () => {
-    expect(businessJourneyStagePresentation).toEqual({
-      early_communication: {
-        columnClass: 'business-board-stage--sky',
-        badgeClass: 'bg-sky-50 text-sky-700 border-sky-100',
-        emphasisBadgeClass: 'bg-sky-600 text-white border-transparent',
-      },
-      active_progress: {
-        columnClass: 'business-board-stage--blue',
-        badgeClass: 'bg-blue-50 text-blue-700 border-blue-100',
-        emphasisBadgeClass: 'bg-blue-600 text-white border-transparent',
-      },
-      closing_soon: {
-        columnClass: 'business-board-stage--emerald',
-        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-        emphasisBadgeClass: 'bg-emerald-600 text-white border-transparent',
-      },
-      contract_processing: {
-        columnClass: 'business-board-stage--violet',
-        badgeClass: 'bg-violet-50 text-violet-700 border-violet-100',
-        emphasisBadgeClass: 'bg-violet-600 text-white border-transparent',
-      },
-      payment_processing: {
-        columnClass: 'business-board-stage--amber',
-        badgeClass: 'bg-amber-50 text-amber-700 border-amber-100',
-        emphasisBadgeClass: 'bg-amber-600 text-white border-transparent',
-      },
-      invoice_processing: {
-        columnClass: 'business-board-stage--cyan',
-        badgeClass: 'bg-cyan-50 text-cyan-700 border-cyan-100',
-        emphasisBadgeClass: 'bg-cyan-600 text-white border-transparent',
-      },
-      approval_rejected: {
-        columnClass: 'business-board-stage--warning',
-        badgeClass: 'status-warning',
-        emphasisBadgeClass: 'status-warning',
-      },
-      completed: {
-        columnClass: 'business-board-stage--slate',
-        badgeClass: 'bg-slate-50 text-slate-700 border-slate-100',
-        emphasisBadgeClass: 'bg-slate-600 text-white border-transparent',
-      },
-      lost: {
-        columnClass: 'business-board-stage--rose',
-        badgeClass: 'bg-rose-50 text-rose-700 border-rose-100',
-        emphasisBadgeClass: 'bg-rose-600 text-white border-transparent',
-      },
-    })
-  })
-
-  it('preserves stage palette classes and age tones', () => {
-    vi.setSystemTime(new Date('2026-09-21T12:00:00'))
+  it.each([
+    ['2026-09-17T12:00:00', '7天', undefined],
+    ['2026-09-21T12:00:00', '11天', 'warning'],
+    ['2026-09-26T12:00:00', '16天', 'danger'],
+  ])('tones stage age by freshness at %s', (now, label, tone) => {
+    vi.setSystemTime(new Date(now))
     const wrapper = mountBoard()
 
-    expect(wrapper.get('.business-board-column').classes()).toContain('business-board-stage--blue')
-    expect(wrapper.get('.journey-age').text()).toBe('11天')
-    expect(wrapper.get('.journey-age').classes()).toEqual(expect.arrayContaining([
-      'bg-yellow-50',
-      'text-yellow-700',
-      'border-yellow-100',
-    ]))
+    const age = wrapper.get('.journey-age')
+    expect(age.text()).toBe(label)
+    expect(age.attributes('data-tone')).toBe(tone)
+    expect(wrapper.find('.journey-stage-tag').exists()).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ['lost', '已输单', 'danger'],
+    ['completed', '已完成', 'success'],
+    ['approval_rejected', '审批未通过 · 0%', 'warning'],
+  ] as const)('shows %s cards with an end-state tone and no freshness', (stage, label, tone) => {
+    vi.setSystemTime(new Date('2026-12-01T12:00:00'))
+    const column = board.columns[0]
+    const wrapper = mountBoard({
+      board: {
+        ...board,
+        columns: [{ ...column, key: stage, cards: [{ ...column.cards[0], current_board_stage: stage }] }],
+      },
+    })
+
+    expect(wrapper.find('.journey-age').exists()).toBe(false)
+    const status = wrapper.findAll('.journey-info-tag').find(tag => tag.text() === label)
+    expect(status?.attributes('data-tone')).toBe(tone)
     vi.useRealTimers()
   })
 

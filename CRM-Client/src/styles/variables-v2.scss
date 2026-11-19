@@ -11,10 +11,10 @@
 
 // ==================== 主色调（Tailwind blue）====================
 
-$wolf-primary-v2: hsl(var(--primary));           // 主色（blue-600）
-$wolf-primary-hover-v2: hsl(var(--primary-hover));     // hover态（blue-700）
-$wolf-primary-active-v2: hsl(var(--primary-active));    // active态（blue-800）
-$wolf-primary-light-v2: rgba(#2563EB, 0.1);  // 浅底色、选中背景
+$wolf-primary-v2: hsl(var(--brand));           // 主色（blue-600）
+$wolf-primary-hover-v2: hsl(var(--brand));     // hover态（blue-700）
+$wolf-primary-active-v2: hsl(var(--brand));    // active态（blue-800）
+$wolf-primary-light-v2: var(--wash-hover);  // 浅底色、选中背景
 
 // 次要色（同色系）
 $wolf-secondary-v2: #3B82F6;         // 次色（blue-500）
@@ -43,25 +43,25 @@ $wolf-text-placeholder-v2: hsl(var(--muted-foreground));  // placeholder色
 $wolf-text-inverse-v2: #FFFFFF;      // 反色文字
 
 // 链接色
-$wolf-text-link-v2: hsl(var(--primary));
-$wolf-text-link-hover-v2: hsl(var(--primary-hover));
+$wolf-text-link-v2: hsl(var(--brand));
+$wolf-text-link-hover-v2: hsl(var(--brand));
 
 // ==================== 边框色（V2）====================
 
 $wolf-border-default-v2: hsl(var(--border));    // 输入框默认边框、控件边框
-$wolf-border-hover-v2: hsl(var(--primary));      // hover态边框
+$wolf-border-hover-v2: hsl(var(--brand));      // hover态边框
 $wolf-border-light-v2: #F1F5F9;      // 极浅分割线
 $wolf-border-divider-v2: hsl(var(--border));    // 分割线
 
 // ==================== 功能色（状态标签）====================
 // 规则: 必须搭配浅底色+同色系文字，禁止纯色填充
 
-$wolf-success-v2: hsl(var(--success));           // 成功色
-$wolf-success-text-v2: hsl(var(--success));      // 成功文字色
+$wolf-success-v2: hsl(var(--status-success));           // 成功色
+$wolf-success-text-v2: hsl(var(--status-success));      // 成功文字色
 $wolf-success-bg-v2: rgba(#10B981, 0.1);  // 成功背景色
 
-$wolf-warning-v2: hsl(var(--warning));           // 警告色
-$wolf-warning-text-v2: hsl(var(--warning));      // 警告文字色
+$wolf-warning-v2: hsl(var(--status-warning));           // 警告色
+$wolf-warning-text-v2: hsl(var(--status-warning));      // 警告文字色
 $wolf-warning-bg-v2: rgba(#F59E0B, 0.1);  // 警告背景色
 
 $wolf-danger-v2: #DC2626;            // 危险色

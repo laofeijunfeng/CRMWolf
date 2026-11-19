@@ -116,7 +116,7 @@ function handleUpdate(value: unknown): void {
         v-bind="triggerBindings"
         :aria-invalid="error !== ''"
         :aria-describedby="describedBy"
-        :class="cn('h-input-desktop min-h-input-desktop max-[767px]:h-input-mobile max-[767px]:min-h-input-mobile', triggerClass)"
+        :class="cn('h-control min-h-control max-[767px]:h-touch-target max-[767px]:min-h-touch-target', triggerClass)"
       >
         <SelectValue :placeholder="selectPlaceholder" />
       </SelectTrigger>

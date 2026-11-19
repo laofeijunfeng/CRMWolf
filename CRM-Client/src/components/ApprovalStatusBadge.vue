@@ -2,7 +2,7 @@
  * ApprovalStatusBadge — generic approval status badge.
  *
  * The public props and icon cues remain stable while the visual base and
- * semantic presentation are shared with other business-status badges.
+ * semantic presentation are shared with other status badges.
  */
 <script setup lang="ts">
 import { computed, type Component } from 'vue'
@@ -42,7 +42,7 @@ const title = computed(() => isUnknown.value ? `approval: ${presentation.value.t
     variant="status"
     class="approval-status-badge"
     :class="size === 'small' ? 'approval-status-badge--small' : ''"
-    :data-status-tone="tone"
+    :data-tone="tone"
     data-status-domain="approval"
     :data-status-value="status"
     :title="title"

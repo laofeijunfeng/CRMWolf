@@ -32,7 +32,7 @@ interface PieDatum { key: string, label: string, amount: number, fill: string }
 interface MonthDatum { index: number, label: string, count: number, amount: number, key: string }
 interface ContractBucketAction extends ChartBucketAction { card: ContractChartCard, bucket: ContractChartBucket }
 const CHART_COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))']
-const MONTH_COLOR = 'hsl(var(--primary))'
+const MONTH_COLOR = 'hsl(var(--chart-1))'
 const isNarrow = useMediaQuery('(max-width: 720px)')
 const population = computed(() => props.chart?.population ?? 0)
 const totalAmount = computed(() => props.chart?.total_amount ?? 0)

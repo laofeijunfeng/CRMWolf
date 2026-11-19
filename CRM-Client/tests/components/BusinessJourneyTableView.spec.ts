@@ -159,21 +159,18 @@ describe('BusinessJourneyTableView layout', () => {
     const wrapper = mountJourneyTable([journeyFixture])
     const progressCell = wrapper.get('.data-table tbody [data-testid="business-journey-progress"]')
     const progress = progressCell.get('[role="progressbar"]')
-    const indicator = progressCell.get('[role="progressbar"] > div')
 
     expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
     expect(progress.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
     expect(progressCell.text()).toContain('75%')
     expect(progressCell.classes()).toContain('items-center')
     expect(progress.classes()).toContain('h-1.5')
-    expect(indicator.classes()).toContain('bg-cyan-500')
   })
   it('renders API cumulative progress in mobile cards without changing the current stage', () => {
     const wrapper = mountJourneyTable([journeyFixture])
     const card = wrapper.get('.data-table-mobile-card')
     const progressCell = card.get('[data-testid="business-journey-progress"]')
     const progress = progressCell.get('[role="progressbar"]')
-    const indicator = progress.get(':scope > div')
 
     expect(card.text()).toContain('华东续约旅程')
     expect(card.text()).toContain('示例科技')
@@ -181,22 +178,18 @@ describe('BusinessJourneyTableView layout', () => {
     expect(progressCell.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
     expect(progressCell.text()).toContain('75%')
     expect(progress.attributes('aria-label')).toBe('华东续约旅程 累计进度 75%')
-    expect(indicator.classes()).toContain('bg-cyan-500')
   })
 
   it.each([
-    ['early_communication', ['bg-sky-50', 'text-sky-700', 'border-sky-100']],
-    ['active_progress', ['bg-blue-50', 'text-blue-700', 'border-blue-100']],
-    ['closing_soon', ['bg-emerald-50', 'text-emerald-700', 'border-emerald-100']],
-    ['contract_processing', ['bg-violet-50', 'text-violet-700', 'border-violet-100']],
-    ['payment_processing', ['bg-amber-50', 'text-amber-700', 'border-amber-100']],
-    ['invoice_processing', ['bg-cyan-50', 'text-cyan-700', 'border-cyan-100']],
-    ['completed', ['bg-slate-50', 'text-slate-700', 'border-slate-100']],
-    ['lost', ['bg-rose-50', 'text-rose-700', 'border-rose-100']],
-  ] as const)('uses the board palette for %s', (stage, classes) => {
+    ['early_communication', 'neutral'],
+    ['invoice_processing', 'neutral'],
+    ['completed', 'success'],
+    ['lost', 'danger'],
+    ['approval_rejected', 'warning'],
+  ] as const)('tones the %s stage badge as %s', (stage, tone) => {
     const wrapper = mountJourneyTable([{ ...journeyFixture, current_board_stage: stage }])
     const badge = wrapper.get('[data-testid="business-journey-stage-badge"]')
-    expect(badge.classes()).toEqual(expect.arrayContaining([...classes]))
+    expect(badge.attributes('data-tone')).toBe(tone)
   })
 
   it('offers list, board, and chart modes from the shared DataTable toolbar', () => {

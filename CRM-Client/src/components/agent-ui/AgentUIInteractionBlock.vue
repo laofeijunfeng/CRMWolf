@@ -1209,7 +1209,7 @@ const submit = async (): Promise<void> => {
   border: 0;
   background: transparent;
   padding: 0;
-  color: hsl(var(--primary));
+  color: hsl(var(--brand));
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
@@ -1246,20 +1246,20 @@ const submit = async (): Promise<void> => {
 
 .activity-pill.is-info,
 .activity-card :deep(.is-info) {
-  border-color: hsl(var(--primary) / 0.2);
-  background: hsl(var(--primary) / 0.08);
-  color: hsl(var(--primary));
+  border-color: hsl(var(--brand) / 0.2);
+  background: hsl(var(--brand) / 0.08);
+  color: hsl(var(--brand));
 }
 
 .activity-pill.is-success {
-  border-color: hsl(var(--success) / 0.3);
-  background: hsl(var(--success) / 0.08);
+  border-color: hsl(var(--status-success) / 0.3);
+  background: hsl(var(--status-success) / 0.08);
   color: hsl(var(--foreground));
 }
 
 .activity-pill.is-warning {
-  border-color: hsl(var(--warning) / 0.4);
-  background: hsl(var(--warning) / 0.12);
+  border-color: hsl(var(--status-warning) / 0.4);
+  background: hsl(var(--status-warning) / 0.12);
   color: hsl(var(--foreground));
 }
 
@@ -1275,9 +1275,9 @@ const submit = async (): Promise<void> => {
 
 .activity-kind-editor {
   margin-top: 8px;
-  border: 1px solid hsl(var(--primary) / 0.2);
+  border: 1px solid hsl(var(--brand) / 0.2);
   border-radius: 12px;
-  background: hsl(var(--primary) / 0.08);
+  background: hsl(var(--brand) / 0.08);
   padding: 12px;
 }
 
@@ -1303,8 +1303,8 @@ const submit = async (): Promise<void> => {
 }
 
 .activity-kind-option.is-selected {
-  border-color: hsl(var(--primary));
-  background: hsl(var(--primary));
+  border-color: hsl(var(--brand));
+  background: hsl(var(--brand));
   color: hsl(var(--primary-foreground));
 }
 

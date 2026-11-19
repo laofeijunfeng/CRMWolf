@@ -23,7 +23,7 @@ const handleClick = (): void => {
   <button
     type="button"
     :class="[
-      'copyable-text -mx-0.5 inline cursor-pointer rounded-sm px-0.5 text-left text-[hsl(var(--primary))] underline decoration-primary/40 decoration-dashed decoration-1 underline-offset-4 transition-colors [overflow-wrap:anywhere] hover:bg-primary/10 hover:decoration-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      'copyable-text -mx-0.5 inline cursor-pointer rounded-sm px-0.5 text-left text-brand underline decoration-brand/40 decoration-dashed decoration-1 underline-offset-4 transition-colors [overflow-wrap:anywhere] hover:bg-wash-hover hover:decoration-brand',
       { 'font-mono': props.mono },
     ]"
     :aria-label="`复制${props.label} ${props.value}`"

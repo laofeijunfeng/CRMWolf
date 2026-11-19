@@ -1361,27 +1361,27 @@ watch(() => props.targetPanel, (panel): void => {
 }
 
 .license-badge--official {
-  color: var(--status-success-foreground);
-  background: var(--status-success-background);
-  border-color: var(--status-success-background);
+  color: color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground)));
+  background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
+  border-color: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
 }
 
 .license-badge--trial {
-  color: var(--status-warning-foreground);
-  background: var(--status-warning-background);
-  border-color: var(--status-warning-background);
+  color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground)));
+  background: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
+  border-color: color-mix(in srgb, hsl(var(--status-warning)) var(--status-bg-mix), transparent);
 }
 
 .license-badge--expired {
-  color: var(--status-danger-foreground);
-  background: var(--status-danger-background);
-  border-color: var(--status-danger-background);
+  color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground)));
+  background: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
+  border-color: color-mix(in srgb, hsl(var(--status-danger)) var(--status-bg-mix), transparent);
 }
 
 .license-badge--none {
-  color: var(--status-neutral-foreground);
-  background: var(--status-neutral-background);
-  border-color: var(--status-neutral-background);
+  color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-fg-mix), hsl(var(--foreground)));
+  background: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-bg-mix), transparent);
+  border-color: color-mix(in srgb, hsl(var(--status-neutral)) var(--status-bg-mix), transparent);
 }
 
 </style>

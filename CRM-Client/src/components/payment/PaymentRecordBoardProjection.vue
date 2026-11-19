@@ -60,8 +60,8 @@ const trendSeries: BoardTrendSeriesPresentation[] = [
   {
     key: 'count',
     label: '回款笔数',
-    color: 'hsl(var(--primary))',
-    fillColor: 'hsl(var(--primary) / 0.16)',
+    color: 'hsl(var(--chart-1))',
+    fillColor: 'hsl(var(--chart-1) / 0.16)',
   },
   {
     key: 'actual_amount',

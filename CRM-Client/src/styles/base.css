@@ -13,32 +13,32 @@
 
 :root {
   /* ---------- 中性色 ---------- */
-  --background: 0 0% 100%;
+  --background: 240 20% 99%; /* #fcfcfd 页面与侧栏 */
   --foreground: 222.2 84% 4.9%; /* #020817 */
   --card: 0 0% 100%; /* #fff */
   --card-foreground: var(--foreground);
   --popover: 0 0% 100%;
   --popover-foreground: var(--foreground);
   --muted: 210 40% 96.1%; /* #f1f5f9 */
-  --muted-foreground: 215.4 16.3% 46.9%;
+  --muted-foreground: 215.3 19.3% 34.5%; /* #475569 */
   --secondary: var(--muted);
-  --secondary-foreground: 222.2 47.4% 11.2%;
+  --secondary-foreground: var(--foreground);
   --border: 214.3 31.8% 91.4%; /* #e2e8f0 */
   --input: var(--border);
 
   /* ---------- 主操作 ---------- */
-  --primary: 221.2 83.2% 53.3%;
+  --primary: 210 8% 9.8%; /* #17191b */
   --primary-foreground: 0 0% 100%;
 
   /* ---------- 品牌：链接、活动导航、选中、焦点 ---------- */
   --brand: 205.4 96% 39%; /* #0472c3 */
   --brand-foreground: 0 0% 100%;
-  --ring: var(--primary);
+  --ring: var(--brand);
   --ring-input: 211.3 100% 56.1%; /* #1f8aff */
 
   /* ---------- 悬停 / 选中水洗 ---------- */
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
+  --accent: 240 5.3% 96.3%; /* #f5f5f6 = 前景 4% 叠白 */
+  --accent-foreground: var(--foreground);
   --wash-hover: color-mix(in srgb, hsl(var(--foreground)) 4%, transparent);
   --wash-selected: color-mix(in srgb, hsl(var(--foreground)) 8%, transparent);
 
@@ -50,32 +50,32 @@
   --status-neutral: var(--muted-foreground);
   --status-bg-mix: 12%;
   --status-fg-mix: 72%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
+  --destructive: var(--status-danger);
+  --destructive-foreground: 0 0% 100%;
 
-  /* ---------- 侧栏 ---------- */
-  --sidebar-background: 210 40% 98%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-primary: var(--primary);
+  /* ---------- 侧栏：与页面同一表面体系 ---------- */
+  --sidebar-background: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 
-  /* ---------- 图表 ---------- */
-  --chart-1: 221.2 83.2% 53.3%;
-  --chart-2: 212 95% 68%;
-  --chart-3: 217 91% 60%;
-  --chart-4: 224 76% 48%;
-  --chart-5: 226 71% 40%;
+  /* ---------- 图表：品牌蓝 + 状态色 ---------- */
+  --chart-1: var(--brand);
+  --chart-2: var(--status-success);
+  --chart-3: var(--status-warning);
+  --chart-4: var(--status-info);
+  --chart-5: var(--muted-foreground);
 
-  /* ---------- 圆角 ---------- */
-  --radius: 0.5rem;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  /* ---------- 圆角：根值 10px，其余档位派生 ---------- */
+  --radius: 10px;
+  --radius-sm: calc(var(--radius) * 0.6); /* 6 */
+  --radius-md: calc(var(--radius) * 0.8); /* 8 control */
+  --radius-lg: var(--radius); /* 10 surface */
+  --radius-xl: calc(var(--radius) * 1.4); /* 14 overlay */
 
   /* ---------- 阴影：3 档；内容容器用描边、不加阴影 ---------- */
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.05);
@@ -121,25 +121,6 @@
   --bottom-nav-height: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-
-  /* ---------- 迁移期遗留（随代码迁移删除） ---------- */
-  --primary-hover: 224.3 76.3% 48%;
-  --primary-active: 225.9 70.7% 40.2%;
-  --success: 160.1 84.1% 39.4%;
-  --warning: 37.7 92.1% 50.2%;
-  --info: 217.2 91.2% 59.8%;
-  --sidebar-active: 214.3 100% 96.9%;
-  --sidebar-active-foreground: 224.3 76.3% 48%;
-  --status-neutral-foreground: hsl(215.294118 19.318182% 34.509804%);
-  --status-neutral-background: hsl(210 40% 96.078431%);
-  --status-info-foreground: hsl(224.278075 76.326531% 48.039216%);
-  --status-info-background: hsl(213.75 100% 96.862745%);
-  --status-warning-foreground: hsl(25.964912 90.47619% 37.058824%);
-  --status-warning-background: hsl(48 100% 96.078431%);
-  --status-success-foreground: hsl(162.931034 93.548387% 24.313725%);
-  --status-success-background: hsl(151.764706 80.952381% 95.882353%);
-  --status-danger-foreground: hsl(0 73.70892% 41.764706%);
-  --status-danger-background: hsl(0 85.714286% 97.254902%);
 }
 
 @media (max-width: 767px) {
@@ -148,31 +129,16 @@
   }
 }
 
-.business-status {
-  color: var(--status-neutral-foreground);
-  background-color: var(--status-neutral-background);
-  white-space: nowrap;
+/* ---------- 状态语气：缺省中性，success/warning/danger/info 四种 ---------- */
+[data-tone] {
+  --tone: var(--status-neutral);
+  color: color-mix(in srgb, hsl(var(--tone)) var(--status-fg-mix), hsl(var(--foreground)));
+  background-color: color-mix(in srgb, hsl(var(--tone)) var(--status-bg-mix), transparent);
 }
-
-.business-status[data-status-tone='info'] {
-  color: var(--status-info-foreground);
-  background-color: var(--status-info-background);
-}
-
-.business-status[data-status-tone='warning'] {
-  color: var(--status-warning-foreground);
-  background-color: var(--status-warning-background);
-}
-
-.business-status[data-status-tone='success'] {
-  color: var(--status-success-foreground);
-  background-color: var(--status-success-background);
-}
-
-.business-status[data-status-tone='danger'] {
-  color: var(--status-danger-foreground);
-  background-color: var(--status-danger-background);
-}
+[data-tone='success'] { --tone: var(--status-success); }
+[data-tone='warning'] { --tone: var(--status-warning); }
+[data-tone='danger'] { --tone: var(--status-danger); }
+[data-tone='info'] { --tone: var(--status-info); }
 
 @layer base {
   * {
@@ -180,6 +146,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 20px;
   }
   *:focus-visible {
     outline: 2px solid hsl(var(--ring) / 0.5);
@@ -193,7 +162,16 @@
   select {
     font-family: var(--font-sans);
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 20px;
+  }
+  input:focus-visible,
+  textarea:focus-visible,
+  [role='combobox']:focus-visible {
+    outline-color: hsl(var(--ring-input));
+  }
+  .tabular-nums,
+  td[data-numeric] {
+    font-variant-numeric: tabular-nums;
   }
   @media (max-width: 767px) {
     button,
@@ -248,7 +226,7 @@
     outline-offset: 2px;
   }
   .disabled-state {
-    opacity: 0.4;
+    opacity: var(--disabled-opacity);
     cursor: not-allowed;
     pointer-events: none;
   }

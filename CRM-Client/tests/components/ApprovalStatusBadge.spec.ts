@@ -27,7 +27,7 @@ describe('ApprovalStatusBadge', () => {
   it('uses the shared status base and traces unknown backend values', () => {
     const wrapper = mountBadge({ status: 'ARCHIVED' })
     expect(wrapper.text()).toContain('未知状态')
-    expect(wrapper.attributes('data-status-tone')).toBe('neutral')
+    expect(wrapper.attributes('data-tone')).toBe('neutral')
     expect(wrapper.attributes('data-status-domain')).toBe('approval')
     expect(wrapper.attributes('data-status-value')).toBe('ARCHIVED')
     expect(wrapper.attributes('title')).toBe('approval: ARCHIVED')

@@ -8,9 +8,8 @@ import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import type { BusinessJourneyListItem } from '@/schemas/dealJourney'
 import type { FeedbackError } from '@/types/feedback'
-import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
+import { businessJourneyStageTone } from './businessJourneyStagePresentation'
 import { getStatusPresentation } from '@/utils/statusPresentation'
-import { dealJourneyProgressColorClass } from '@/utils/dealJourney'
 
 interface Props {
   fields: ListFieldDefinition[]
@@ -92,9 +91,6 @@ const handleRowClick = (row: BusinessJourneyListItem): void => {
 }
 const getJourneyProgressPercent = (row: BusinessJourneyListItem): number =>
   row.cumulative_progress_percent
-
-const getJourneyProgressColorClass = (row: BusinessJourneyListItem): string =>
-  dealJourneyProgressColorClass(getJourneyProgressPercent(row))
 
 const slots = useSlots()
 
@@ -195,9 +191,9 @@ function setDisplayMode(value: string): void {
           {{ row.name }}
         </div>
         <Badge
-          variant="outline"
+          variant="status"
           data-testid="business-journey-mobile-stage-badge"
-          :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
+          :data-tone="businessJourneyStageTone[row.current_board_stage]"
         >
           {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
         </Badge>
@@ -213,7 +209,6 @@ function setDisplayMode(value: string): void {
       >
         <Progress
           :model-value="getJourneyProgressPercent(row)"
-          :indicator-class="getJourneyProgressColorClass(row)"
           class="h-1.5 min-w-0 flex-1 bg-secondary"
           :aria-label="getJourneyProgressLabel(row)"
         />
@@ -241,9 +236,9 @@ function setDisplayMode(value: string): void {
     </template>
     <template #cell-current_board_stage="{ row }">
       <Badge
-        variant="outline"
+        variant="status"
         data-testid="business-journey-stage-badge"
-        :class="businessJourneyStagePresentation[row.current_board_stage].badgeClass"
+        :data-tone="businessJourneyStageTone[row.current_board_stage]"
       >
         {{ getStageLabel(row.current_board_stage, row.current_board_stage_label) }}
       </Badge>
@@ -257,7 +252,6 @@ function setDisplayMode(value: string): void {
       >
         <Progress
           :model-value="getJourneyProgressPercent(row)"
-          :indicator-class="getJourneyProgressColorClass(row)"
           class="h-1.5 min-w-0 flex-1 bg-secondary"
           :aria-label="getJourneyProgressLabel(row)"
         />
@@ -340,10 +334,5 @@ function setDisplayMode(value: string): void {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
-}
-.status-warning {
-  color: var(--status-warning-foreground);
-  background-color: var(--status-warning-background);
-  border-color: var(--status-warning-background);
 }
 </style>

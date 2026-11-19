@@ -33,7 +33,7 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
-  <Card class="metric-card" :data-tone="tone" :aria-busy="loading ? 'true' : undefined">
+  <Card class="metric-card" :data-trend="tone" :aria-busy="loading ? 'true' : undefined">
     <CardHeader class="metric-card__header">
       <div class="metric-card__topline">
         <CardDescription class="metric-card__label">{{ title }}</CardDescription>
@@ -80,7 +80,7 @@ withDefaults(defineProps<Props>(), {
   border-color: hsl(var(--border) / 0.9);
   border-radius: $wolf-radius-xl-v2;
   background:
-    linear-gradient(0deg, hsl(var(--primary) / 0.06) 0%, hsl(var(--primary) / 0.025) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(0deg, hsl(var(--brand) / 0.06) 0%, hsl(var(--brand) / 0.025) 34%, hsl(var(--background) / 0) 70%),
     linear-gradient(135deg, hsl(var(--muted) / 0.88) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
   box-shadow: 0 1px 2px hsl(var(--foreground) / 0.03);
 }
@@ -94,15 +94,15 @@ withDefaults(defineProps<Props>(), {
   box-shadow: inset 0 1px 0 hsl(var(--background) / 0.85);
 }
 
-.metric-card[data-tone='positive'] {
+.metric-card[data-trend='positive'] {
   background:
-    linear-gradient(0deg, hsl(var(--primary) / 0.06) 0%, hsl(var(--primary) / 0.025) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(0deg, hsl(var(--brand) / 0.06) 0%, hsl(var(--brand) / 0.025) 34%, hsl(var(--background) / 0) 70%),
     linear-gradient(135deg, hsl(var(--muted) / 0.92) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
 }
 
-.metric-card[data-tone='negative'] {
+.metric-card[data-trend='negative'] {
   background:
-    linear-gradient(0deg, hsl(var(--primary) / 0.055) 0%, hsl(var(--primary) / 0.022) 34%, hsl(var(--background) / 0) 70%),
+    linear-gradient(0deg, hsl(var(--brand) / 0.055) 0%, hsl(var(--brand) / 0.022) 34%, hsl(var(--background) / 0) 70%),
     linear-gradient(135deg, hsl(var(--muted) / 0.92) 0%, hsl(var(--card)) 46%, hsl(var(--card)) 100%);
 }
 
@@ -147,13 +147,13 @@ withDefaults(defineProps<Props>(), {
   box-shadow: none;
 }
 
-.metric-card[data-tone='positive'] .metric-card__badge {
-  color: hsl(var(--success));
-  background: hsl(var(--success) / 0.1);
-  border-color: hsl(var(--success) / 0.24);
+.metric-card[data-trend='positive'] .metric-card__badge {
+  color: hsl(var(--status-success));
+  background: hsl(var(--status-success) / 0.1);
+  border-color: hsl(var(--status-success) / 0.24);
 }
 
-.metric-card[data-tone='negative'] .metric-card__badge {
+.metric-card[data-trend='negative'] .metric-card__badge {
   color: hsl(var(--destructive));
   background: hsl(var(--destructive) / 0.1);
   border-color: hsl(var(--destructive) / 0.24);

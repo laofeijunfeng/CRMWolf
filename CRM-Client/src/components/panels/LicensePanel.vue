@@ -247,12 +247,12 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
       </template>
 
       <template #itemBadges="{ item }">
-        <Badge variant="status" :data-status-tone="getLicenseTypeInfo(item.license_type).tone" class="text-xs">
+        <Badge variant="status" :data-tone="getLicenseTypeInfo(item.license_type).tone" class="text-xs">
           {{ getLicenseTypeInfo(item.license_type).label }}
         </Badge>
         <Badge
           variant="status"
-          :data-status-tone="getStatusPresentation('licenseApplication', item.status).tone"
+          :data-tone="getStatusPresentation('licenseApplication', item.status).tone"
           data-status-domain="licenseApplication"
           :data-status-value="item.status"
           :title="item.status == null || getStatusPresentation('licenseApplication', item.status).traceValue !== undefined ? `licenseApplication: ${String(item.status)}` : undefined"
@@ -264,7 +264,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
         <Badge
           v-if="isExpired(item.expiry_date)"
           variant="status"
-          data-status-tone="danger"
+          data-tone="danger"
           class="text-xs"
         >
           已过期

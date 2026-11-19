@@ -55,7 +55,7 @@ const statusTitle = computed(() => {
   <Badge
     variant="status"
     :class="statusClasses"
-    :data-status-tone="statusTone"
+    :data-tone="statusTone"
     :data-status-domain="domain"
     :data-status-value="status"
     :title="statusTitle"

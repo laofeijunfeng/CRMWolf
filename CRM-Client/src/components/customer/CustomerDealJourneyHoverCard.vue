@@ -5,11 +5,7 @@ import { AmountText, Badge, Button, DataViewStatePanel, HoverInfo, Progress, Ske
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
-import {
-  dealJourneyProgressColorClass,
-  type DealJourneyBoardStage
-} from '@/utils/dealJourney'
-import { getStatusPresentation } from '@/utils/statusPresentation'
+import { businessJourneyStageTone } from '@/components/business-journey/businessJourneyStagePresentation'
 
 const PREVIEW_LIMIT = 3
 const HIDDEN_JOURNEY_STATUSES = new Set(['LOST', 'ARCHIVED'])
@@ -40,26 +36,8 @@ const getProductName = (journey: DealJourney): string =>
 const getJourneyProgressPercent = (journey: DealJourney): number =>
   journey.cumulative_progress_percent
 
-const getJourneyProgressColorClass = (journey: DealJourney): string =>
-  dealJourneyProgressColorClass(getJourneyProgressPercent(journey))
-
 const getJourneyProgressLabel = (journey: DealJourney): string =>
   `${journey.name} 累计进度 ${getJourneyProgressPercent(journey)}%`
-
-const boardStageBadgeClass = (stage: DealJourneyBoardStage): string => {
-  if (stage === 'lost') return 'status-danger'
-  if (stage === 'completed') return 'status-success'
-  if (stage === 'approval_rejected') return `status-${getStatusPresentation('businessJourney', stage).tone}`
-  if (
-    stage === 'closing_soon'
-    || stage === 'contract_processing'
-    || stage === 'payment_processing'
-    || stage === 'invoice_processing'
-  ) {
-    return 'status-info'
-  }
-  return 'status-warning'
-}
 
 const loadJourneys = async (): Promise<void> => {
   if (loading.value || loaded.value) return
@@ -125,7 +103,8 @@ const handleViewAll = (): void => {
         </h3>
         <Badge
           v-if="loaded"
-          class="status-badge status-neutral shrink-0"
+          class="status-badge shrink-0"
+          data-tone="neutral"
           data-testid="customer-deal-journey-total"
         >
           共 {{ total }} 个
@@ -193,8 +172,7 @@ const handleViewAll = (): void => {
                   <div class="mt-wolf-md flex items-center gap-wolf-sm">
                     <Progress
                       :model-value="getJourneyProgressPercent(journey)"
-                      :indicator-class="getJourneyProgressColorClass(journey)"
-                      class="h-1.5 min-w-0 flex-1 bg-wolf-bg-card"
+                      class="h-1.5 min-w-0 flex-1 bg-muted"
                       :aria-label="getJourneyProgressLabel(journey)"
                     />
                     <span class="shrink-0 tabular-nums text-wolf-caption text-wolf-text-tertiary-v2">
@@ -203,7 +181,8 @@ const handleViewAll = (): void => {
                   </div>
                   <span class="mt-wolf-sm flex items-center justify-between gap-wolf-md">
                     <Badge
-                      :class="['status-badge', 'shrink-0', boardStageBadgeClass(journey.current_board_stage)]"
+                      :data-tone="businessJourneyStageTone[journey.current_board_stage]"
+                      class="status-badge shrink-0"
                       :data-testid="`customer-deal-journey-stage-${journey.public_id}`"
                       :title="`业务旅程当前状态：${journey.current_board_stage_label}`"
                     >
@@ -250,35 +229,10 @@ const handleViewAll = (): void => {
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: $wolf-font-weight-medium-v2;
   border-radius: $wolf-radius-full-v2;
   white-space: nowrap;
   border: none;
-}
-
-.status-neutral {
-  background: $wolf-bg-hover-v2;
-  color: $wolf-text-tertiary-v2;
-}
-
-.status-warning {
-  background: $wolf-warning-bg-v2;
-  color: $wolf-warning-text-v2;
-}
-
-.status-info {
-  background: $wolf-primary-light-v2;
-  color: $wolf-primary-v2;
-}
-
-.status-success {
-  background: $wolf-success-bg-v2;
-  color: $wolf-success-text-v2;
-}
-
-.status-danger {
-  background: $wolf-danger-bg-v2;
-  color: $wolf-danger-text-v2;
 }
 </style>

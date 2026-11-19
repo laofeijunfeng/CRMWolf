@@ -13,7 +13,11 @@ import type {
   BusinessJourneyBoardCard,
   BusinessJourneyBoardResponse
 } from '@/schemas/dealJourney'
-import { businessJourneyStagePresentation } from './businessJourneyStagePresentation'
+import {
+  businessJourneyStageTone,
+  isBusinessJourneyEndStage
+} from './businessJourneyStagePresentation'
+import { DEAL_JOURNEY_BOARD_STAGE_LABELS } from '@/utils/dealJourney'
 
 interface Props {
   board: BusinessJourneyBoardResponse | null
@@ -42,27 +46,31 @@ const getStageAge = (value: string | null | undefined): string => {
   return `${days}天`
 }
 
-const getStageAgeTone = (value: string | null | undefined): string => {
-  if (value === null || value === undefined || value === '') {
-    return 'bg-slate-50 text-slate-600 border-slate-100'
-  }
+// 新鲜度：0–7 天无色，8–15 天警告，≥16 天危险；结束态不计
+const getStageAgeTone = (card: BusinessJourneyBoardCard): 'warning' | 'danger' | undefined => {
+  if (isBusinessJourneyEndStage(card.current_board_stage)) return undefined
+  const value = card.last_event_at
+  if (value === null || value === undefined || value === '') return undefined
   const start = new Date(value)
-  if (Number.isNaN(start.getTime())) {
-    return 'bg-slate-50 text-slate-600 border-slate-100'
-  }
+  if (Number.isNaN(start.getTime())) return undefined
   const days = Math.max(Math.floor((Date.now() - start.getTime()) / 86400000), 0)
-  if (days <= 7) return 'bg-emerald-50 text-emerald-700 border-emerald-100'
-  if (days <= 15) return 'bg-yellow-50 text-yellow-700 border-yellow-100'
-  return 'bg-rose-50 text-rose-700 border-rose-100'
+  if (days <= 7) return undefined
+  if (days <= 15) return 'warning'
+  return 'danger'
 }
+
+const shouldShowStageAge = (card: BusinessJourneyBoardCard): boolean =>
+  !isBusinessJourneyEndStage(card.current_board_stage)
+
+const getEndStageLabel = (card: BusinessJourneyBoardCard): string =>
+  card.current_board_stage === 'approval_rejected'
+    ? '审批未通过 · 0%'
+    : DEAL_JOURNEY_BOARD_STAGE_LABELS[card.current_board_stage]
 
 type BoardCard = BusinessJourneyBoardCard
 
 const shouldShowOpportunityStage = (card: BoardCard): boolean =>
   ['early_communication', 'active_progress', 'closing_soon'].includes(card.current_board_stage)
-
-const getCardStageName = (card: BoardCard): string =>
-  card.primary_opportunity?.current_stage_name ?? '未记录阶段'
 
 const getWinProbability = (card: BoardCard): string => {
   const value = card.primary_opportunity?.win_probability
@@ -136,11 +144,10 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
               v-for="column in columns"
               :key="column.key"
               class="business-board-column"
-              :class="businessJourneyStagePresentation[column.key].columnClass"
             >
               <header class="column-header">
                 <h2>{{ column.title }}</h2>
-                <Badge variant="outline" :class="businessJourneyStagePresentation[column.key].badgeClass">
+                <Badge variant="status" data-tone="neutral">
                   {{ column.count }}
                 </Badge>
               </header>
@@ -160,13 +167,19 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
                   <CardContent class="journey-card-content">
                     <div class="journey-card-topline">
                       <span class="journey-customer">{{ card.customer_name ?? '-' }}</span>
-                      <Badge
-                        variant="outline"
-                        class="journey-age"
-                        :class="getStageAgeTone(card.last_event_at)"
-                      >
-                        {{ getStageAge(card.last_event_at) }}
-                      </Badge>
+                      <template v-if="shouldShowStageAge(card)">
+                        <Badge
+                          v-if="getStageAgeTone(card)"
+                          variant="status"
+                          class="journey-age"
+                          :data-tone="getStageAgeTone(card)"
+                        >
+                          {{ getStageAge(card.last_event_at) }}
+                        </Badge>
+                        <span v-else class="journey-age journey-age--plain">
+                          {{ getStageAge(card.last_event_at) }}
+                        </span>
+                      </template>
                     </div>
 
                     <div class="journey-title">{{ card.journey_name }}</div>
@@ -177,35 +190,31 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
                     <div class="journey-tag-row">
                       <Badge
-                        v-if="card.current_board_stage === 'approval_rejected'"
-                        variant="outline"
-                        class="journey-info-tag status-warning"
+                        v-if="isBusinessJourneyEndStage(card.current_board_stage)"
+                        variant="status"
+                        class="journey-info-tag"
+                        :data-tone="businessJourneyStageTone[card.current_board_stage]"
                       >
-                        审批未通过 · 0%
+                        {{ getEndStageLabel(card) }}
                       </Badge>
                       <Badge
                         v-if="shouldShowOpportunityStage(card)"
-                        variant="outline"
-                        class="journey-info-tag bg-emerald-50 text-emerald-700 border-emerald-100"
+                        variant="status"
+                        class="journey-info-tag"
+                        data-tone="neutral"
                       >
                         赢率 {{ getWinProbability(card) }}
                       </Badge>
                       <Badge
-                        variant="outline"
-                        class="journey-info-tag bg-blue-50 text-blue-700 border-blue-100"
+                        variant="status"
+                        class="journey-info-tag"
+                        data-tone="neutral"
                       >
                         <UserRound class="tag-icon" aria-hidden="true" />
                         {{ card.owner?.name ?? '-' }}
                       </Badge>
                     </div>
 
-                    <Badge
-                      v-if="shouldShowOpportunityStage(card)"
-                      class="journey-stage-tag"
-                      :class="businessJourneyStagePresentation[column.key].emphasisBadgeClass"
-                    >
-                      {{ getCardStageName(card) }}
-                    </Badge>
                   </CardContent>
                 </Card>
 
@@ -336,8 +345,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   min-height: 0;
   overflow: hidden;
   border: 0;
-  border-radius: 8px;
-  background: var(--column-bg);
+  border-radius: var(--radius-lg);
+  background: hsl(var(--muted));
 }
 
 .column-header {
@@ -372,8 +381,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .journey-card {
   flex-shrink: 0;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-lg);
   background: hsl(var(--card));
   box-shadow: none;
   cursor: pointer;
@@ -382,8 +391,8 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
 
 .journey-card:hover,
 .journey-card:focus-within {
-  border-color: $wolf-border-hover-v2;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+  border-color: hsl(var(--ring-input));
+  box-shadow: var(--shadow-1);
 }
 
 .journey-card-content {
@@ -409,6 +418,11 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   font-size: 12px;
   font-weight: 600;
   line-height: 1.25;
+}
+
+.journey-age--plain {
+  color: hsl(var(--muted-foreground));
+  font-weight: 400;
 }
 
 .journey-title {
@@ -465,13 +479,6 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   flex-shrink: 0;
 }
 
-.journey-stage-tag {
-  align-self: flex-start;
-  max-width: 100%;
-  border: 0;
-  font-weight: 500;
-}
-
 .column-empty {
   display: flex;
   align-items: center;
@@ -483,22 +490,6 @@ const cardAriaLabel = (card: BoardCard): string => `查看业务旅程：${card.
   color: hsl(var(--muted-foreground));
   background: hsl(var(--card) / 0.64);
   font-size: 13px;
-}
-
-.business-board-stage--sky { --column-bg: rgb(240 249 255); }
-.business-board-stage--blue { --column-bg: rgb(239 246 255); }
-.business-board-stage--violet { --column-bg: rgb(245 243 255); }
-.business-board-stage--amber { --column-bg: rgb(255 251 235); }
-.business-board-stage--cyan { --column-bg: rgb(236 254 255); }
-.business-board-stage--emerald { --column-bg: rgb(236 253 245); }
-.business-board-stage--slate { --column-bg: rgb(248 250 252); }
-.business-board-stage--rose { --column-bg: rgb(255 241 242); }
-.business-board-stage--warning { --column-bg: var(--status-warning-background); }
-
-.status-warning {
-  color: var(--status-warning-foreground);
-  background-color: var(--status-warning-background);
-  border-color: var(--status-warning-background);
 }
 
 .spinning {
