@@ -30,5 +30,5 @@
 - **共同属性：**`modelValue`、`id`、`label`、`placeholder`、`helperText`、`error`、`required`、`disabled`、`class`；单行、多行、日期另有 `controlClass`，两种选择另有 `triggerClass`、`contentClass`。`controlClass` 等只用于布局，不得改高度、圆角或字号。
 - **值类型：**InputField / TextareaField 为字符串或数字，DateField 为 `Date | null`，两种选择均回传字符串。
 - **事件：**全部发出 `update:modelValue`；SelectField 另有 `add`（配合 `addActionLabel`、`addActionDisabled`）与 `ariaLabel`；SearchableSelectField 另有 `searchValue` / `update:searchValue`、`update:open`、`loading`、`emptyText`、`loadingText`、`searchPlaceholder`。
-- **校验：**用 vee-validate 的 `Field` 或 `defineField` 绑定值，把错误文本传给 `error`；有 `error` 时 `aria-describedby` 指向错误，否则指向 `helperText`。不得在页面手拼 Label + 控件 + 错误文本。
-- **选项：**`options` 为 `{ value, label, disabled?, disabledReason? }`；禁用项必须给出原因。
+- **校验：**用 vee-validate 的 `Field` 或 `defineField` 绑定值，把错误文本传给 `error`；`aria-describedby` 依次指向错误与 `helperText`，出错时说明文字只对读屏保留；`required` 同时输出 `aria-required`。不得在页面手拼 Label + 控件 + 错误文本。
+- **选项：**`options` 为 `{ value, label, disabled? }`；SelectField 另支持 `disabledReason`，禁用项必须给出原因。
