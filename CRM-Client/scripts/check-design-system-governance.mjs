@@ -227,7 +227,7 @@ function ruleMatches(rule, text, filePath, tag) {
 // 行落在多行开始标签内部时返回该标签名（如 `<DialogContent` 换行写 class），否则为空串。
 function enclosingTag(lines, index) {
   const before = lines.slice(Math.max(0, index - 30), index).join('\n')
-  return /<([A-Za-z][\w.-]*)\b[^<>]*$/.exec(before)?.[1] ?? ''
+  return /<([A-Za-z][\w.-]*)\b(?:[^<>"']|"[^"]*"|'[^']*')*$/.exec(before)?.[1] ?? ''
 }
 
 function inspectLine(filePath, line, text, exceptions, options, tag = '') {

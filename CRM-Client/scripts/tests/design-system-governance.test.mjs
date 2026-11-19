@@ -232,6 +232,7 @@ test('GATE-06 rejects pixel max-w inside a multi-line *Content opening tag only'
   assert.deepEqual(categories('CRM-Client/src/components/dialogs/A.vue', [
     '<DialogContent',
     '  size="sm"',
+    '  @interact-outside="(event) => event.preventDefault()"',
     '  class="max-w-[600px]"',
     '>',
   ]), ['geometry-token'])
