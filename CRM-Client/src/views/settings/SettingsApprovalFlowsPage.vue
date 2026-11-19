@@ -28,7 +28,7 @@ import approvalFlowApi, {
   type ApprovalFlowListItem,
   type ApprovalNode
 } from '@/api/approvalFlow'
-import ApprovalFlowFormDialog from '@/components/system-config/ApprovalFlowFormDialog.vue'
+import ApprovalFlowFormDialog from '@/components/dialogs/ApprovalFlowFormDialog.vue'
 import ApprovalFlowAIDialog from '@/components/ApprovalFlowAIDialog.vue'
 import { usePermissionStore } from '@/stores/permissions'
 import { useTeamStore } from '@/stores/team'
