@@ -380,7 +380,7 @@ describe('AgentUIMessage', () => {
       const buttons = wrapper.findAll('button')
 
       expect(buttons).toHaveLength(0)
-      const historyTags = wrapper.findAll('span').filter(span => span.text() === '历史')
+      const historyTags = wrapper.findAll('[role="status"]').filter(tag => tag.text() === '历史')
       expect(historyTags).toHaveLength(state === 'READ_ONLY' ? 1 : 0)
       expect(wrapper.emitted('interaction')).toBeUndefined()
     },

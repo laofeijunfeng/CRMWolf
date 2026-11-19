@@ -29,7 +29,7 @@ const iconClassesByTone = {
 <template>
   <p
     v-if="block.title === null"
-    class="m-0 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-[13px] text-muted-foreground"
+    class="m-0 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-body text-muted-foreground"
     :aria-label="block.text"
   >
     {{ block.text }}
@@ -44,8 +44,8 @@ const iconClassesByTone = {
       <component :is="iconByTone[block.tone]" class="h-3.5 w-3.5" />
     </span>
     <div class="flex min-w-0 flex-wrap items-baseline gap-x-2">
-      <strong class="text-[13px] text-foreground">{{ block.title }}</strong>
-      <p class="m-0 text-[12px] text-muted-foreground">{{ block.text }}</p>
+      <strong class="text-body text-foreground">{{ block.title }}</strong>
+      <p class="m-0 text-caption text-muted-foreground">{{ block.text }}</p>
     </div>
   </aside>
 </template>

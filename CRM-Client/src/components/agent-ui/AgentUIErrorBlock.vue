@@ -14,9 +14,9 @@ defineProps<{ block: ErrorBlock }>()
       <AlertCircle class="h-3.5 w-3.5" />
     </span>
     <div>
-      <strong class="text-[13px] text-foreground">{{ block.title }}</strong>
-      <p class="mb-0 mt-1 text-[12px] text-muted-foreground">{{ block.message }}</p>
-      <p class="mb-0 mt-1 text-[11px] text-muted-foreground">{{ block.retryable ? '可以重试' : '不能盲目重试' }}</p>
+      <strong class="text-body text-foreground">{{ block.title }}</strong>
+      <p class="mb-0 mt-1 text-caption text-muted-foreground">{{ block.message }}</p>
+      <p class="mb-0 mt-1 text-caption text-muted-foreground">{{ block.retryable ? '可以重试' : '不能盲目重试' }}</p>
       <small v-if="block.trace_id" class="text-muted-foreground">追踪编号：{{ block.trace_id }}</small>
     </div>
   </aside>

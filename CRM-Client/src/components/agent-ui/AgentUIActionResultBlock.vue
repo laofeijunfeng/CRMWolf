@@ -30,15 +30,15 @@ const classesByStatus = {
 
 <template>
   <section class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border p-3" :class="block.status === 'SUCCESS' ? 'border-success/30 bg-success/5' : classesByStatus[block.status]">
-    <span class="grid size-[22px] place-items-center rounded-md text-[11px] font-semibold" :class="block.status === 'SUCCESS' ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground'" aria-hidden="true">
+    <span class="grid size-[22px] place-items-center rounded-md text-caption font-semibold" :class="block.status === 'SUCCESS' ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground'" aria-hidden="true">
       <component :is="iconByStatus[block.status]" class="h-3.5 w-3.5" />
     </span>
     <div>
-      <strong class="text-[13px] text-foreground">{{ block.title }}</strong>
+      <strong class="text-body text-foreground">{{ block.title }}</strong>
       <template v-if="multiline">
         <p v-for="(line, index) in messageLines" :key="index" class="mb-0 mt-1 text-sm text-foreground">{{ line }}</p>
       </template>
-      <p v-else class="mb-0 mt-1 text-[12px] text-muted-foreground">{{ block.message }}</p>
+      <p v-else class="mb-0 mt-1 text-caption text-muted-foreground">{{ block.message }}</p>
       <button
         v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
         type="button"

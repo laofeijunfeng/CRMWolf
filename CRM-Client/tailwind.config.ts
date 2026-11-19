@@ -91,8 +91,7 @@ const config: Config = {
 			xs: ['var(--font-size-caption)', { lineHeight: 'var(--line-height-caption)' }],
 			sm: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
 			base: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
-			lg: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)' }],
-			xl: ['20px', { lineHeight: '28px' }]
+			lg: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)' }]
 		},
 		transitionDuration: {
 			DEFAULT: 'var(--duration-base)',

@@ -4,6 +4,7 @@ import { isAxiosError } from 'axios'
 import { ArrowUp, X } from 'lucide-vue-next'
 import { assistantApi, submitInputStream, type AssistantTurn, type StageName } from '@/api/assistant'
 import type { SubmitAssistantInput } from '@/api/assistant'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -282,11 +283,11 @@ const reprocessAllowed = ref(false)
 const processingInFlight = computed(() => processing.value.active || autoRecovering.value || processingRecovery.value !== null)
 const showProcessCard = computed(() => processing.value.stages.length > 0
   && !(processing.value.authoritativeWrite && !processingInFlight.value))
-const processChip = computed((): string => {
-  if (!showProcessCard.value) return ''
-  if (processingInFlight.value) return '处理中'
-  if (processing.value.settlement === 'failed' || processing.value.settlement === 'unknown') return ''
-  return '已更新'
+const processChipStatus = computed((): 'processing' | 'updated' | null => {
+  if (!showProcessCard.value) return null
+  if (processingInFlight.value) return 'processing'
+  if (processing.value.settlement === 'failed' || processing.value.settlement === 'unknown') return null
+  return 'updated'
 })
 const seenEventKeys = new Set<string>()
 const RECOVERY_POLLS = 90
@@ -1334,7 +1335,7 @@ void loadConversation()
             <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
           </div>
           <div v-else class="flex gap-2.5">
-            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-brand/12 text-[11px] font-semibold text-brand">AI</div>
+            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-brand/12 text-caption font-semibold text-brand">AI</div>
             <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
               <AgentUIMessage
                 v-if="entry.ui"
@@ -1363,15 +1364,15 @@ void loadConversation()
     <div v-if="showProcessCard" class="mt-2 rounded-lg border border-border bg-white px-3.5 py-3">
       <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
       <p v-if="longOrganize" class="mb-2 text-sm text-foreground">正在整理，内容较长，预计需要约 1 分钟</p>
-      <div class="mb-2 flex items-center justify-between gap-2 text-[13px] font-semibold">
+      <div class="mb-2 flex items-center justify-between gap-2 text-body font-semibold">
         <span>执行过程</span>
-        <span v-if="processChip" class="rounded-full border border-brand/30 bg-wash-selected px-2 py-0.5 text-[11px] font-medium text-brand">{{ processChip }}</span>
+        <StatusBadge v-if="processChipStatus" :status="processChipStatus" type="agentInteraction" size="small" />
       </div>
       <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-success' : stageItem.status === 'running' ? 'font-medium text-brand' : stageItem.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
         <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-success bg-success' : stageItem.status === 'running' ? 'border-brand bg-card' : stageItem.status === 'failed' ? 'border-destructive bg-destructive' : 'border-border'"></span>
         <span>{{ STAGE_LABELS[stageItem.name] }}</span>
         <span v-if="stageItem.status === 'done' && stageItem.ms !== undefined" class="text-xs text-muted-foreground">{{ (stageItem.ms / 1000).toFixed(1) }}s</span>
-        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-md border bg-muted/50 px-1.5 py-0.5 text-[11px] text-success">{{ stageItem.score }} 分</span>
+        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-md border bg-muted/50 px-1.5 py-0.5 text-caption text-success">{{ stageItem.score }} 分</span>
         <span v-if="stageItem.status === 'running'" class="text-xs font-normal text-muted-foreground">进行中…</span>
         <span v-else-if="stageItem.status === 'failed'" class="text-xs font-normal text-destructive">失败</span>
         <span v-else-if="stageItem.status === 'awaiting'" class="text-xs font-normal text-muted-foreground">待确认</span>

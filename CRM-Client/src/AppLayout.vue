@@ -533,7 +533,7 @@ $z-index-bottom-nav: 100;
 }
 
 .app-page-title {
-  font-size: 16px;  // 16px → 20px（MASTER.md 6.2）
+  font-size: var(--font-size-body-strong);
   font-weight: 600;  // 600
   letter-spacing: -0.02em;
   color: hsl(var(--foreground));
@@ -712,7 +712,7 @@ $z-index-bottom-nav: 100;
   }
 
   .app-page-title {
-    font-size: 18px;
+    font-size: var(--font-size-title);
     line-height: 24px;
     letter-spacing: 0;
   }

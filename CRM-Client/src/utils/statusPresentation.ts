@@ -27,6 +27,8 @@ export type StatusDomain =
   | 'licenseStatus'
   | 'paymentState'
   | 'paymentConfirmation'
+  | 'agentInteraction'
+  | 'agentFact'
 
 interface StatusConfig {
   readonly label: string
@@ -157,6 +159,16 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     trial: { label: LICENSE_STATUS_LABELS.trial, tone: 'warning' },
     official: { label: LICENSE_STATUS_LABELS.official, tone: 'success' },
   },
+  agentInteraction: {
+    pending: { label: '待处理', tone: 'info' },
+    processing: { label: '处理中', tone: 'info' },
+    done: { label: '已处理', tone: 'info' },
+    updated: { label: '已更新', tone: 'success' },
+    failed: { label: '提交失败', tone: 'danger' },
+    expired: { label: '已过期', tone: 'neutral' },
+    cancelled: { label: '已取消', tone: 'neutral' },
+    history: { label: '历史', tone: 'neutral' },
+  },
   generic: {
     active: { label: '启用', tone: 'success' },
     inactive: { label: '禁用', tone: 'neutral' },
@@ -183,6 +195,13 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
   },
 }
 
+// 文本即标签的域：值原样显示。agentFact 为服务端给出的事实状态短语（≤40 字）。
+const passThroughTones: Partial<Record<StatusDomain, StatusTone>> = {
+  source: 'neutral',
+  industry: 'neutral',
+  agentFact: 'info',
+}
+
 const unknownPresentation = (value: string | null | undefined): StatusPresentation => ({
   label: '未知状态',
   tone: 'neutral',
@@ -193,10 +212,11 @@ export const getStatusPresentation = (
   domain: StatusDomain,
   value: string | null | undefined,
 ): StatusPresentation => {
-  if (domain === 'source' || domain === 'industry') {
+  const passThroughTone = passThroughTones[domain]
+  if (passThroughTone !== undefined) {
     return value === undefined || value === null || value === ''
       ? unknownPresentation(value)
-      : { label: value, tone: 'neutral' }
+      : { label: value, tone: passThroughTone }
   }
 
   const map = statusMaps[domain]

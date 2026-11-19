@@ -2,6 +2,7 @@
 import { CheckCircle2, Circle, Loader2 } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
 
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -129,23 +130,17 @@ const compactStateLabel = computed(() => {
   })[props.block.state]
 })
 
-const stateLabel = computed(() => {
-  if (props.notice?.kind === 'expired') return '已过期'
-  if (props.notice?.kind === 'failed') return '提交失败'
-  if (submitting.value) return '处理中'
+const stateStatus = computed(() => {
+  if (props.notice?.kind === 'expired') return 'expired'
+  if (props.notice?.kind === 'failed') return 'failed'
+  if (submitting.value) return 'processing'
   return ({
-    ACTIVE: '待处理',
-    SUBMITTED: '已处理',
-    EXPIRED: '已过期',
-    CANCELLED: '已取消',
-    READ_ONLY: '历史'
+    ACTIVE: 'pending',
+    SUBMITTED: 'done',
+    EXPIRED: 'expired',
+    CANCELLED: 'cancelled',
+    READ_ONLY: 'history'
   })[props.block.state]
-})
-
-const stateLabelClass = computed(() => {
-  if (props.notice?.kind === 'failed') return 'border-danger/30 bg-danger/12 text-foreground'
-  if (props.notice?.kind === 'expired') return 'border-border bg-muted text-foreground'
-  return 'border-brand/30 bg-brand/10 text-foreground'
 })
 
 const controlsDisabled = computed(() => (
@@ -538,7 +533,7 @@ const submit = async (): Promise<void> => {
       <h4 :id="`${block.id}-prompt`" class="m-0 text-sm font-semibold text-foreground">历史跟进任务</h4>
       <span class="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-2 text-xs font-semibold leading-5 text-foreground" :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`">{{ dispositionProgress }}</span>
     </header>
-    <p v-if="block.hint" class="m-0 mt-2 text-[13px] leading-5 text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
+    <p v-if="block.hint" class="m-0 mt-2 text-body leading-5 text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
     <ol class="m-0 mt-2.5 grid list-none gap-0 border-t border-border p-0">
       <li
         v-for="(item, index) in dispositionItems"
@@ -587,7 +582,7 @@ const submit = async (): Promise<void> => {
             :key="option.value"
             type="button"
             :class="optionSelected(option.value) ? 'border-brand bg-accent text-accent-foreground' : 'border-input bg-background text-foreground disabled:bg-muted disabled:text-muted-foreground'"
-            class="min-h-touch-target h-auto whitespace-normal break-words rounded-md border px-2.5 py-1.5 text-center text-[13px] transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
+            class="min-h-touch-target h-auto whitespace-normal break-words rounded-md border px-2.5 py-1.5 text-center text-control-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
             :disabled="controlsDisabled || option.disabled"
             :aria-pressed="optionSelected(option.value)"
             @click="handleOptionClick(option.value)"
@@ -722,10 +717,10 @@ const submit = async (): Promise<void> => {
     </template>
     <header v-if="!isActivityConfirmation" class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-2">
-        <span class="grid size-5 shrink-0 place-items-center rounded-sm bg-brand/10 text-[11px] font-semibold text-foreground" aria-hidden="true">?</span>
-        <p :id="`${block.id}-prompt`" class="m-0 text-[13px] font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
+        <span class="grid size-5 shrink-0 place-items-center rounded-sm bg-brand/10 text-caption font-semibold text-foreground" aria-hidden="true">?</span>
+        <p :id="`${block.id}-prompt`" class="m-0 text-body font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
       </div>
-      <span class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium" :class="stateLabelClass">{{ stateLabel }}</span>
+      <StatusBadge class="shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
     </header>
 
     <div v-if="!isActivityConfirmation && block.facts.length > 0" class="grid gap-3" data-agent-ui-confirmation-facts>
@@ -738,11 +733,11 @@ const submit = async (): Promise<void> => {
               class="min-w-0 rounded-md border border-border bg-card px-2.5 py-2"
             >
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <dt class="text-[11px] text-muted-foreground">{{ fact.label }}</dt>
-                <span v-if="fact.status_label" class="rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[11px] text-foreground">{{ fact.status_label }}</span>
+                <dt class="text-caption text-muted-foreground">{{ fact.label }}</dt>
+                <StatusBadge v-if="fact.status_label" :status="fact.status_label" type="agentFact" size="small" />
               </div>
               <dd class="m-0 mt-0.5 text-xs font-semibold text-foreground" :class="group === 'activity_kind' ? '' : 'truncate'" :title="fact.value">{{ fact.value }}</dd>
-              <p v-if="fact.source" class="m-0 mt-1 text-[11px] leading-5 text-muted-foreground">{{ fact.source }}</p>
+              <p v-if="fact.source" class="m-0 mt-1 text-caption leading-5 text-muted-foreground">{{ fact.source }}</p>
               <div v-if="(fact.options?.length ?? 0) > 0" class="mt-2 grid gap-2">
                 <button
                   v-if="fact.status_label !== '未识别 · 需要确认'"
@@ -831,12 +826,12 @@ const submit = async (): Promise<void> => {
         class="col-span-full rounded-md border border-border bg-muted px-3 py-2"
         data-agent-ui-kind-hint
       >
-        <p class="m-0 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <p class="m-0 flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
           <span>原文提到：</span>
           <span
             v-for="channel in kindHintChannels"
             :key="channel"
-            class="rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground"
+            class="rounded border border-border bg-background px-1.5 py-0.5 text-caption text-foreground"
           >{{ channel }}</span>
           <span v-if="kindHintChannels.length === 0">{{ block.hint }}</span>
         </p>
@@ -845,7 +840,7 @@ const submit = async (): Promise<void> => {
         </p>
       </div>
       <template v-for="(group, groupIndex) in choiceGroups" :key="`${group.name ?? ''}#${groupIndex}`">
-        <p v-if="group.name" class="col-span-full m-0 mt-1 text-[11px] font-medium text-muted-foreground">{{ group.name }}</p>
+        <p v-if="group.name" class="col-span-full m-0 mt-1 text-caption font-medium text-muted-foreground">{{ group.name }}</p>
         <Button
           v-for="entry in group.entries"
           :key="entry.option.value"
@@ -885,7 +880,7 @@ const submit = async (): Promise<void> => {
         </p>
       </div>
       <div v-if="block.business_action === 'resolve_temporal_choice'" class="grid gap-1.5">
-        <label class="text-[13px] font-semibold text-foreground" :for="`${block.id}-manual-date`">手动输入其他日期</label>
+        <label class="text-body font-semibold text-foreground" :for="`${block.id}-manual-date`">手动输入其他日期</label>
         <input
           :id="`${block.id}-manual-date`"
           v-model="manualDate"
@@ -895,7 +890,7 @@ const submit = async (): Promise<void> => {
           :disabled="controlsDisabled"
           @keydown.enter.prevent="submitManualDate"
         />
-        <p class="m-0 text-[11px] text-muted-foreground">选择候选或输入完整日期后继续。</p>
+        <p class="m-0 text-caption text-muted-foreground">选择候选或输入完整日期后继续。</p>
       </div>
     </template>
     <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
