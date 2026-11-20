@@ -270,7 +270,7 @@ async def test_run_sends_pending_notification_through_feishu_service(job_session
         "app.services.outbound_notification_job_service.get_approval_customer_name",
         lambda db, business_type, entity: "客户A",
     )
-    monkeypatch.setattr("app.services.outbound_notification_job_service.get_approval_type_name", lambda business_type: "回款")
+    monkeypatch.setattr("app.services.outbound_notification_job_service.get_approval_type_name", lambda business_type, entity=None: "回款")
     monkeypatch.setattr(
         "app.services.outbound_notification_job_service.feishu_notification_service.notify_approval_pending",
         fake_notify,
@@ -385,7 +385,7 @@ async def test_failed_delivery_retries_then_exhausts(job_session_factory, monkey
         "app.services.outbound_notification_job_service.get_approval_customer_name",
         lambda db, business_type, entity: None,
     )
-    monkeypatch.setattr("app.services.outbound_notification_job_service.get_approval_type_name", lambda business_type: "回款")
+    monkeypatch.setattr("app.services.outbound_notification_job_service.get_approval_type_name", lambda business_type, entity=None: "回款")
     monkeypatch.setattr(
         "app.services.outbound_notification_job_service.approval_crud.get_by_id",
         lambda db, approval_id, team_id: _approval(status=ApprovalStatus.APPROVED),

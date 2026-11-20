@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import httpx
 from sqlalchemy.orm import Session
 
-from app.constants.business_types import BUSINESS_TYPE_DISPLAY_NAMES
+from app.constants.business_types import BUSINESS_TYPE_DISPLAY_NAMES, BusinessType
 from app.core.config import get_settings
 from app.crud.oauth import oauth_provider_config_crud, user_oauth_account_crud
 
@@ -130,6 +130,7 @@ class FeishuNotificationService:
         detail_fields: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         fields = detail_fields or self._fallback_approval_fields(
             approval_type_name=approval_type_name,
             entity_name=entity_name,
@@ -137,7 +138,7 @@ class FeishuNotificationService:
         )
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"{submitter_name or '有人'}有个{approval_type_name}需要你审批",
+            title=f"{submitter_name or '有人'}{sep}有个{sep}{approval_type_name}需要你审批",
             template="blue",
             fields=fields,
             button_text="去处理",
@@ -154,12 +155,14 @@ class FeishuNotificationService:
         entity_name: str,
         business_id: Optional[int] = None,
         detail_fields: Optional[Dict[str, str]] = None,
+        approval_type_name: Optional[str] = None,
         button_path: Optional[str] = None,
     ) -> Dict[str, int]:
-        approval_type_name = self._entity_type_label(entity_type)
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"你的{approval_type_name}已通过",
+            title=f"你的{sep}{approval_type_name}已通过",
             template="green",
             fields=detail_fields or self._fallback_approval_fields(
                 approval_type_name=approval_type_name,
@@ -180,12 +183,14 @@ class FeishuNotificationService:
         reject_reason: str,
         business_id: Optional[int] = None,
         detail_fields: Optional[Dict[str, str]] = None,
+        approval_type_name: Optional[str] = None,
         button_path: Optional[str] = None,
     ) -> Dict[str, int]:
-        approval_type_name = self._entity_type_label(entity_type)
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"你的{approval_type_name}被驳回了",
+            title=f"你的{sep}{approval_type_name}被驳回了",
             template="red",
             fields=detail_fields or self._fallback_approval_fields(
                 approval_type_name=approval_type_name,
@@ -208,9 +213,10 @@ class FeishuNotificationService:
         detail_fields: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"{submitter_name or '有人'}撤回了{approval_type_name}的审批申请",
+            title=f"{submitter_name or '有人'}{sep}撤回了{sep}{approval_type_name}的审批申请",
             template="yellow",
             fields=detail_fields or self._fallback_approval_fields(
                 approval_type_name=approval_type_name,
@@ -227,12 +233,14 @@ class FeishuNotificationService:
         entity_type: str,
         entity_name: str,
         detail_fields: Optional[Dict[str, str]] = None,
+        approval_type_name: Optional[str] = None,
         button_path: Optional[str] = None,
     ) -> Dict[str, int]:
-        approval_type_name = self._entity_type_label(entity_type)
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"你的{approval_type_name}文件已下发",
+            title=f"你的{sep}{approval_type_name}文件已下发",
             template="blue",
             fields=detail_fields or self._fallback_approval_fields(
                 approval_type_name=approval_type_name,
@@ -257,6 +265,7 @@ class FeishuNotificationService:
         detail_fields: Optional[Dict[str, str]] = None,
     ) -> Dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
         fields = detail_fields or self._fallback_approval_fields(
             approval_type_name=approval_type_name,
             entity_name=entity_name,
@@ -266,7 +275,7 @@ class FeishuNotificationService:
 
         content = self._approval_card(
             entity_type=entity_type,
-            title=f"{submitter_name or '提交人'}催你处理{approval_type_name}审批",
+            title=f"{submitter_name or '提交人'}{sep}催你处理{sep}{approval_type_name}审批",
             template="orange",
             fields=fields,
             button_text="去审批",
@@ -458,6 +467,11 @@ class FeishuNotificationService:
             ),
             template="red",
         )
+
+    @staticmethod
+    def _title_separator(entity_type: str) -> str:
+        # License 卡片标题按产品要求在中英文之间加空格，其他单据保持原写法
+        return " " if entity_type == BusinessType.LICENSE else ""
 
     def _approval_card(
         self,

@@ -449,7 +449,11 @@ def get_adapter(business_type: str) -> ApprovalEntityAdapter:
     return adapter
 
 
-def get_approval_type_name(business_type: str) -> str:
+def get_approval_type_name(business_type: str, entity: Any = None) -> str:
+    if business_type == BusinessType.LICENSE:
+        # License 卡片标题按产品要求使用中英文间空格：「Hifox 的 License 申请」
+        product_name = (getattr(entity, "product_name", None) or "").strip()
+        return f"{product_name} 的 License 申请" if product_name else "License 申请"
     return _BUSINESS_TYPE_DISPLAY_NAMES.get(business_type, "审批")
 
 
@@ -559,6 +563,7 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
         deployment_info = getattr(entity, "deployment_info", None)
         return {
             "客户名称": _customer_name(db, business_type, entity),
+            "产品": getattr(entity, "product_name", None),
             "授权类型": _license_application_type_label(getattr(entity, "license_type", None)),
             "服务地址": getattr(deployment_info, "server_address", None),
             "使用人数": _format_count(getattr(entity, "authorized_users", None)),

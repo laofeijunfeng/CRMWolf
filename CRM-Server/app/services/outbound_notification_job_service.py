@@ -605,6 +605,7 @@ class OutboundNotificationJobService:
                 entity_type=card["entity_type"],
                 entity_name=card["entity_name"],
                 business_id=card["business_id"],
+                approval_type_name=card["approval_type_name"],
                 detail_fields=card["detail_fields"],
                 button_path=_optional_str(payload.get("button_path")) or get_approval_action_path(card["entity_type"]),
             )
@@ -617,6 +618,7 @@ class OutboundNotificationJobService:
                 entity_name=card["entity_name"],
                 reject_reason=_optional_str(payload.get("reject_reason")) or "无",
                 business_id=card["business_id"],
+                approval_type_name=card["approval_type_name"],
                 detail_fields=card["detail_fields"],
                 button_path=_optional_str(payload.get("button_path")) or get_approval_action_path(card["entity_type"]),
             )
@@ -638,6 +640,7 @@ class OutboundNotificationJobService:
                 user_id=recipients[0],
                 entity_type=card["entity_type"],
                 entity_name=card["entity_name"],
+                approval_type_name=card["approval_type_name"],
                 detail_fields=card["detail_fields"],
                 button_path=_optional_str(payload.get("button_path")),
             )
@@ -809,7 +812,7 @@ class OutboundNotificationJobService:
             "node_name": current_node.node_name if current_node is not None else "",
             "business_id": business_id,
             "submitter_name": approval.submitter_name if approval is not None else None,
-            "approval_type_name": get_approval_type_name(business_type),
+            "approval_type_name": get_approval_type_name(business_type, entity),
             "customer_name": get_approval_customer_name(db, business_type, entity),
             "detail_fields": get_approval_card_fields(db, business_type, entity),
         }

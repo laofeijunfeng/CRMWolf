@@ -139,3 +139,14 @@ def test_invoice_card_shows_remark_or_none():
 
     assert get_approval_card_fields(None, BusinessType.INVOICE, filled)["备注"] == "请把发票备注栏写上合同号"
     assert get_approval_card_fields(None, BusinessType.INVOICE, empty)["备注"] == "无"
+
+
+def test_license_approval_type_name_includes_product():
+    from types import SimpleNamespace
+
+    from app.services.approval_adapter import get_approval_type_name
+
+    assert get_approval_type_name(BusinessType.LICENSE, SimpleNamespace(product_name=" Hifox ")) == "Hifox 的 License 申请"
+    assert get_approval_type_name(BusinessType.LICENSE, SimpleNamespace(product_name="  ")) == "License 申请"
+    assert get_approval_type_name(BusinessType.LICENSE, SimpleNamespace(product_name=None)) == "License 申请"
+    assert get_approval_type_name(BusinessType.PAYMENT, SimpleNamespace(product_name="Hifox")) == "回款登记"
