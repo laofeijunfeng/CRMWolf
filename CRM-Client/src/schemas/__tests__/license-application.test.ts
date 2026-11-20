@@ -74,6 +74,7 @@ describe('LicenseApplicationCreateSchema', () => {
     customer_id: '103',
     deployment_info_id: null,
     contract_id: null,
+    product_public_id: 'prd_apifox',
     authorized_users: 10,
     expiry_date: getDateAfterDays(14),
     license_type: 'TRIAL' as const,

@@ -29,6 +29,8 @@ class LicenseApplication(Base):
     customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
     deployment_info_id = Column(BigInteger, ForeignKey('crm_deployment_infos.id', ondelete='SET NULL'), nullable=True, comment="关联部署信息ID")
     contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID")
+    product_id = Column(BigInteger, ForeignKey('crm_products.id', ondelete='SET NULL'), nullable=True, comment="申请产品ID")
+    product_name = Column(String(100), nullable=True, comment="申请产品名称快照（授权文件标题）")
 
     expiry_date = Column(Date, nullable=False, comment="到期时间")
     license_type = Column(String(20), nullable=False, comment="License 类型")
@@ -66,11 +68,13 @@ class LicenseApplication(Base):
     customer = relationship("Customer", back_populates="license_applications")
     deployment_info = relationship("DeploymentInfo", back_populates="license_applications")
     contract = relationship("Contract", back_populates="license_applications")
+    product = relationship("Product")
     approval = relationship("Approval", foreign_keys=[approval_id])
 
     __table_args__ = (
         Index('idx_license_customer_id', 'customer_id'),
         Index('idx_license_contract_id', 'contract_id'),
+        Index('idx_license_product_id', 'product_id'),
         Index('idx_license_status', 'status'),
         Index('idx_license_approval_id', 'approval_id'),
         {'comment': 'License 申请表'}

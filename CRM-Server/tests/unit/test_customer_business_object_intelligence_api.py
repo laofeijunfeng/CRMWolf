@@ -234,6 +234,9 @@ def _license_application() -> SimpleNamespace:
         application_number="LIC-202608-001",
         deployment_info_id=901,
         contract_id=401,
+        product_id=None,
+        product_name="Apifox",
+        product=None,
         authorized_users=80,
         expiry_date=date(2027, 8, 2),
         license_type="OFFICIAL",
@@ -1455,6 +1458,7 @@ def test_create_license_application_enqueues_business_object_intelligence(monkey
             customer_id="cus_101",
             deployment_info_id=901,
             contract_id=401,
+            product_public_id="prd_1",
             license_type="OFFICIAL",
             authorized_users=80,
             expiry_date=date(2027, 8, 2),
@@ -1499,6 +1503,7 @@ def test_create_license_application_converts_public_customer_id_to_internal_sche
             customer_id="cus_101",
             deployment_info_id=901,
             contract_id=401,
+            product_public_id="prd_1",
             license_type="OFFICIAL",
             authorized_users=80,
             expiry_date=date(2027, 8, 2),
@@ -1513,6 +1518,7 @@ def test_create_license_application_converts_public_customer_id_to_internal_sche
     assert len(captured) == 1
     assert isinstance(captured[0], LicenseApplicationInternalCreate)
     assert captured[0].customer_id == 101
+    assert captured[0].product_public_id == "prd_1"
 
 
 def test_create_license_application_value_error_returns_bad_request_without_enqueue(monkeypatch):
@@ -1543,6 +1549,7 @@ def test_create_license_application_value_error_returns_bad_request_without_enqu
                 customer_id="cus_101",
                 deployment_info_id=901,
                 contract_id=401,
+                product_public_id="prd_1",
                 license_type="OFFICIAL",
                 authorized_users=80,
                 expiry_date=date(2027, 8, 2),

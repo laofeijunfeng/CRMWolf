@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LicenseApplicationFormDialog from '@/components/dialogs/LicenseApplicationFormDialog.vue'
 import type { DeploymentInfoResponse } from '@/api/deployment'
+import type { ProductResponse } from '@/schemas/product'
 
 const licenseApplicationApi = vi.hoisted(() => ({
   create: vi.fn(),
@@ -11,6 +12,23 @@ const licenseApplicationApi = vi.hoisted(() => ({
 
 vi.mock('@/api/licenseApplication', () => ({
   default: licenseApplicationApi,
+}))
+
+const apifox: ProductResponse = {
+  id: 'prd_apifox',
+  public_id: 'prd_apifox',
+  name: 'Apifox',
+  description: null,
+  is_active: true,
+  created_by: 'u',
+  updated_by: null,
+  created_time: '2026-01-01T00:00:00',
+  updated_time: '2026-01-01T00:00:00',
+  modules: [],
+}
+
+vi.mock('@/api/product', () => ({
+  default: { list: vi.fn(() => Promise.resolve([apifox])) },
 }))
 
 const DialogStub = defineComponent({
@@ -65,6 +83,15 @@ const DateFieldStub = defineComponent({
   template: '<div :data-testid="id">{{ error }}</div>',
 })
 
+const ProductIntentPickerStub = defineComponent({
+  name: 'ProductIntentPicker',
+  props: {
+    modelValue: { type: String, default: '' },
+  },
+  emits: ['update:modelValue'],
+  template: '<div data-testid="license-product" />',
+})
+
 const formStubs = {
   Dialog: DialogStub,
   DialogContent: PassthroughStub,
@@ -80,6 +107,7 @@ const formStubs = {
   TextareaField: PassthroughStub,
   SelectionSummary: PassthroughStub,
   DeploymentInfoFormDialog: DeploymentInfoFormDialogStub,
+  ProductIntentPicker: ProductIntentPickerStub,
 }
 
 const productionDeployment: DeploymentInfoResponse = {
@@ -176,6 +204,8 @@ describe('LicenseApplicationFormDialog', () => {
     const tomorrow = new Date()
     tomorrow.setDate(tomorrow.getDate() + 1)
 
+    await flushPromises()
+    await dialog.getComponent(ProductIntentPickerStub).vm.$emit('update:modelValue', apifox.public_id)
     await dialog.getComponent(DateFieldStub).vm.$emit('update:modelValue', tomorrow)
     await dialog.find('form').trigger('submit')
     await flushPromises()

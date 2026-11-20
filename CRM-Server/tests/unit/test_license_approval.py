@@ -15,6 +15,9 @@ from app.constants.business_types import BusinessType
 from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode
 from app.models.customer import Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.contract import Contract
+from app.models.opportunity import Opportunity
+from app.models.product import Product, ProductModule
 from app.models.license_application import LicenseApplicationStatus
 from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
@@ -34,13 +37,27 @@ def db():
     tables = [
         Customer.__table__,
         CustomerLegacySourceProgress.__table__,
+        Product.__table__,
+        ProductModule.__table__,
+        Opportunity.__table__,
+        Contract.__table__,
         LicenseApplication.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
@@ -111,6 +128,19 @@ def test_customer(db):
     return customer
 
 
+def _product(db, *, code: str, name: str, is_active: bool = True) -> Product:
+    product = Product(team_id=1, code=code, name=name, is_active=is_active, created_by="test_user_001")
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@pytest.fixture
+def test_product(db):
+    return _product(db, code="APIFOX", name="Apifox")
+
+
 @pytest.fixture
 def test_team(db):
     """创建测试团队"""
@@ -127,7 +157,7 @@ def test_user(db):
     })()
 
 
-def test_license_application_submit_creates_approval(db, test_team, test_user, test_customer):
+def test_license_application_submit_creates_approval(db, test_team, test_user, test_customer, test_product):
     """测试 License 提交时创建审批实例"""
     # 1. 创建审批流程配置（LICENSE 类型）
     flow = approval_flow_crud.create(
@@ -161,6 +191,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
         LicenseApplicationInternalCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            product_public_id=test_product.public_id,
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
             remark="测试申请"
@@ -203,7 +234,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
     assert application.status == LicenseApplicationStatus.PENDING_REVIEW
 
 
-def test_license_application_without_flow_direct_approval(db, test_team, test_user, test_customer):
+def test_license_application_without_flow_direct_approval(db, test_team, test_user, test_customer, test_product):
     """测试 License 申请未匹配审批流程时返回配置错误"""
     # 1. 创建 License 申请（草稿）
     application = license_application_crud.create(
@@ -213,6 +244,7 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
         LicenseApplicationInternalCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            product_public_id=test_product.public_id,
             authorized_users=10,
             expiry_date=date(2026, 12, 31),
             remark="测试申请（免审批）"
@@ -236,7 +268,7 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
     assert application.status == LicenseApplicationStatus.DRAFT
 
 
-def test_license_approval_flow_visible_in_approval_center(db, test_team, test_user, test_customer):
+def test_license_approval_flow_visible_in_approval_center(db, test_team, test_user, test_customer, test_product):
     """测试 License 审批在审批中心可见"""
     # 1. 创建审批流程配置
     flow = approval_flow_crud.create(
@@ -266,6 +298,7 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
         LicenseApplicationInternalCreate(
             customer_id=test_customer.id,
             license_type="TRIAL",
+            product_public_id=test_product.public_id,
             authorized_users=10,
             expiry_date=date(2027, 12, 31),
             remark="试用License申请"
@@ -438,3 +471,74 @@ def test_issue_locks_customer_before_changing_application(db, test_customer, mon
     assert db.query(CustomerLegacySourceProgress).filter_by(
         team_id=1, customer_id=test_customer.id,
     ).one().eligible_revision == 1
+
+
+def _official_contract(db, customer, product):
+    opportunity = Opportunity(
+        team_id=1, opportunity_number="OPP-LIC-1", opportunity_name="私有化采购", customer_id=customer.id,
+        product_id=product.id if product is not None else None, total_amount=100000, user_count=50,
+        unit_price=2000, license_type="SUBSCRIPTION", purchase_type="NEW",
+        expected_closing_date=date(2026, 12, 1), owner_id="test_user_001", creator_id="test_user_001",
+    )
+    db.add(opportunity)
+    db.flush()
+    contract = Contract(
+        team_id=1, contract_number="CON-LIC-1", contract_name="私有化合同", customer_id=customer.id,
+        opportunity_id=opportunity.id, user_count=50, total_amount=100000, license_type="SUBSCRIPTION",
+        standard_unit_price=2000, owner_id="test_user_001", creator_id="test_user_001",
+    )
+    db.add(contract)
+    db.commit()
+    return contract
+
+
+def _create(db, customer, **overrides):
+    fields = {
+        "customer_id": customer.id,
+        "license_type": "TRIAL",
+        "authorized_users": 10,
+        "expiry_date": date(2027, 12, 31),
+    } | overrides
+    return license_application_crud.create(db, 1, "test_user_001", LicenseApplicationInternalCreate(**fields))
+
+
+def test_official_license_follows_contract_opportunity_product_even_if_inactive(db, test_customer, test_product):
+    contract_product = _product(db, code="IDP", name="IDP 平台", is_active=False)
+    contract = _official_contract(db, test_customer, contract_product)
+
+    application = _create(
+        db, test_customer, license_type="OFFICIAL", contract_id=contract.id, product_public_id=test_product.public_id,
+    )
+
+    assert (application.product_id, application.product_name) == (contract_product.id, "IDP 平台")
+
+
+def test_official_license_without_opportunity_product_uses_selected_product(db, test_customer, test_product):
+    contract = _official_contract(db, test_customer, None)
+
+    with pytest.raises(ValueError, match="请选择产品"):
+        _create(db, test_customer, license_type="OFFICIAL", contract_id=contract.id)
+    application = _create(
+        db, test_customer, license_type="OFFICIAL", contract_id=contract.id, product_public_id=test_product.public_id,
+    )
+
+    assert application.product_name == "Apifox"
+
+
+def test_trial_license_requires_an_active_product(db, test_customer):
+    with pytest.raises(ValueError, match="团队还没有可用产品"):
+        _create(db, test_customer)
+    inactive = _product(db, code="OLD", name="旧产品", is_active=False)
+    with pytest.raises(ValueError, match="请选择启用中的产品"):
+        _create(db, test_customer, product_public_id=inactive.public_id)
+    with pytest.raises(ValueError, match="产品不存在"):
+        _create(db, test_customer, product_public_id="prd_missing")
+
+
+def test_license_product_name_snapshot_survives_product_rename(db, test_customer, test_product):
+    application = _create(db, test_customer, product_public_id=test_product.public_id)
+    test_product.name = "Apifox 新版"
+    db.commit()
+    db.refresh(application)
+
+    assert application.product_name == "Apifox"

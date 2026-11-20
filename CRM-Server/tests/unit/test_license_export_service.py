@@ -41,3 +41,28 @@ def test_export_license_document_omits_enterprise_id_line():
     assert "试用 License（80人）" in paragraph_text
     assert "企业编号" not in paragraph_text
     assert "15739" not in paragraph_text
+
+
+
+def _export_title(product_name: str | None) -> str:
+    application = LicenseApplication(
+        customer=Customer(account_name="测试客户"),
+        authorized_users=10,
+        expiry_date=date(2027, 12, 31),
+        license_type=LicenseType.TRIAL,
+        product_name=product_name,
+    )
+    file_path = export_license_document(application)
+    try:
+        return Document(file_path).paragraphs[0].text
+    finally:
+        Path(file_path).unlink(missing_ok=True)
+
+
+def test_export_title_uses_application_product_name():
+    assert _export_title("IDP 平台") == "IDP 平台私有化授权文件"
+
+
+def test_export_title_without_product_is_generic():
+    assert _export_title(None) == "私有化授权文件"
+    assert _export_title("   ") == "私有化授权文件"

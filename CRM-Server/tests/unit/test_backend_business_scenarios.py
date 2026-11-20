@@ -1000,6 +1000,9 @@ def run_payment_record_update_pending_forbidden(env):
 
 def run_license_create_and_list(env):
     customer = seed_customer(env)
+    product = Product(team_id=1, code="EchoAPI", name="EchoAPI", created_by="1")
+    env.db.add(product)
+    env.db.commit()
     response = env.client.post(
         "/v1/license-applications/",
         json={
@@ -1008,12 +1011,13 @@ def run_license_create_and_list(env):
             "authorized_users": 10,
             "expiry_date": "2027-12-31",
             "remark": "客户试用申请",
+            "product_public_id": product.public_id,
         },
     )
     assert response.status_code == 201, response.text
     list_response = env.client.get(f"/v1/license-applications/?customer_id={customer.public_id}")
     assert list_response.status_code == 200, list_response.text
-    assert len(list_response.json()) == 1
+    assert [item["product_name"] for item in list_response.json()] == ["EchoAPI"]
 
 
 def run_license_submit_creates_approval(env):

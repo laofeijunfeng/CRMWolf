@@ -49,8 +49,9 @@ def export_license_document(application: LicenseApplication) -> str:
     doc = Document()
     _set_document_font(doc)
 
-    # 标题
-    doc.add_heading('Apifox私有化授权文件', 0)
+    # 标题：使用申请时的产品名称快照；无产品时使用通用标题
+    product_name = (application.product_name or "").strip()
+    doc.add_heading(f"{product_name}私有化授权文件" if product_name else "私有化授权文件", 0)
 
     # 企业信息
     doc.add_paragraph(f"企业名称: {application.customer.account_name}")

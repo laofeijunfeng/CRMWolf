@@ -14,6 +14,9 @@ from app.models.license_application import (
 from app.models.customer import Customer
 from app.models.deployment import DeploymentInfo
 from app.models.contract import Contract
+from app.models.opportunity import Opportunity
+from app.models.product import Product
+from app.crud.product_intent import resolve_writable_product
 from app.constants.business_types import BusinessType
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
@@ -148,6 +151,7 @@ class LicenseApplicationCRUD:
                 raise ValueError("部署信息不存在或不属于该客户")
 
         # 验证合同存在（如果提供）
+        contract: Optional[Contract] = None
         if obj_in.contract_id:
             contract = db.query(Contract).filter(
                 Contract.id == obj_in.contract_id,
@@ -156,6 +160,8 @@ class LicenseApplicationCRUD:
             ).first()
             if not contract:
                 raise ValueError("合同不存在或不属于该客户")
+
+        product = self._resolve_product(db, team_id, obj_in, contract)
 
         # 生成申请单号
         application_number = self.generate_application_number(db)
@@ -167,6 +173,8 @@ class LicenseApplicationCRUD:
             customer_id=customer.id,
             deployment_info_id=obj_in.deployment_info_id,
             contract_id=obj_in.contract_id,
+            product_id=product.id,
+            product_name=product.name,
             expiry_date=obj_in.expiry_date,
             license_type=obj_in.license_type.value,
             authorized_users=obj_in.authorized_users,
@@ -178,6 +186,29 @@ class LicenseApplicationCRUD:
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    @staticmethod
+    def _resolve_product(
+        db: Session,
+        team_id: int,
+        obj_in: LicenseApplicationInternalCreate,
+        contract: Optional[Contract],
+    ) -> Product:
+        """正式版跟随合同对应商机的产品（历史成交事实，不校验启用状态）；否则按申请人选择解析。"""
+        if obj_in.license_type == LicenseType.OFFICIAL and contract is not None:
+            derived = (
+                db.query(Product)
+                .join(Opportunity, Opportunity.product_id == Product.id)
+                .filter(
+                    Opportunity.id == contract.opportunity_id,
+                    Opportunity.team_id == team_id,
+                    Product.team_id == team_id,
+                )
+                .first()
+            )
+            if derived is not None:
+                return derived
+        return resolve_writable_product(db, team_id, obj_in.product_public_id)
 
     def get(
         self,

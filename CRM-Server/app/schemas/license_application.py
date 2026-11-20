@@ -71,6 +71,7 @@ class LicenseApplicationBase(BaseModel):
 class LicenseApplicationCreate(LicenseApplicationBase):
     """创建 License 申请请求模型"""
     contract_id: Optional[int] = Field(None, description="关联合同ID（正式版必填）")
+    product_public_id: Optional[str] = Field(None, description="申请产品对外ID（正式版跟随合同对应商机的产品）")
 
     @model_validator(mode='after')
     def validate_contract_for_official(self):
@@ -119,6 +120,8 @@ class LicenseApplicationResponse(BaseModel):
     customer_id: str = Field(..., description="关联客户对外ID")
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     contract_id: Optional[int] = Field(None, description="关联合同ID")
+    product_public_id: Optional[str] = Field(None, description="申请产品对外ID（产品删除后为空）")
+    product_name: Optional[str] = Field(None, description="申请产品名称快照")
     expiry_date: date = Field(..., description="到期时间")
     license_type: str = Field(..., description="License 类型")
     authorized_users: int = Field(..., description="本次申请使用人数")

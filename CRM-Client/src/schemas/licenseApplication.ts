@@ -51,6 +51,8 @@ export const LicenseApplicationSchema = z.object({
   customer_id: z.string().min(1),
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
+  product_public_id: OptionalNullableStringSchema,
+  product_name: OptionalNullableStringSchema,
   authorized_users: z.number().int().positive('使用人数必须大于0'),
   expiry_date: BusinessDateStringSchema,
   license_type: LicenseTypeSchema,
@@ -94,10 +96,12 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
   last_modified_time: true,
   customer_name: true,
   deployment_name: true,
-  contract_name: true
+  contract_name: true,
+  product_name: true
 }).extend({
   // 正式版必须关联合同（通过 refine 验证）
   contract_id: z.number().int().nullable(),
+  product_public_id: z.string().min(1, '请选择产品'),
   expiry_date: FutureBusinessDateStringSchema,
   // 补充需求：备注字段
   remark: z.string().nullable()

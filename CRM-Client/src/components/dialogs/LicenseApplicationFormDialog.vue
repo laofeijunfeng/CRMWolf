@@ -18,6 +18,7 @@ import {
   TextareaField,
 } from '@/components/crmwolf'
 import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
+import ProductIntentPicker from '@/components/crmwolf/ProductIntentPicker.vue'
 import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
 import licenseApplicationApi, { type LicenseType } from '@/api/licenseApplication'
 import type { LicenseApplicationCreate } from '@/schemas/licenseApplication'
@@ -25,8 +26,10 @@ import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
+import { useProductCatalog } from '@/composables/useProductCatalog'
 
 const APPROVED_CONTRACT_STATUSES = ['SIGNED']
+const LOCKED_PRODUCT_HINT = '产品跟随关联合同对应的商机，不可修改'
 
 interface Props {
   elevated?: boolean
@@ -38,6 +41,9 @@ interface Props {
   defaultContractId?: number | null
   fixedContractId?: number | null
   canCreateDeployment?: boolean
+  /** 当前商机的产品，作为默认产品；正式版关联合同时锁定为该产品 */
+  opportunityProductPublicId?: string | null
+  opportunityProductName?: string | null
 }
 
 interface Emits {
@@ -50,6 +56,7 @@ interface LicenseForm {
   deploymentId: string
   licenseType: LicenseType
   contractId: string
+  productPublicId: string
   authorizedUsers: string
   expiryDate: string
   remark: string
@@ -58,6 +65,7 @@ interface LicenseForm {
 interface LicenseFormErrors {
   deploymentId: string
   contractId: string
+  productPublicId: string
   authorizedUsers: string
   expiryDate: string
 }
@@ -67,17 +75,21 @@ const props = withDefaults(defineProps<Props>(), {
   defaultContractId: null,
   fixedContractId: null,
   canCreateDeployment: false,
+  opportunityProductPublicId: null,
+  opportunityProductName: null,
 })
 const emit = defineEmits<Emits>()
 
 const submitting = ref(false)
 const deploymentDialogOpen = ref(false)
 const locallyCreatedDeployments = ref<DeploymentInfoResponse[]>([])
+const productCatalog = useProductCatalog()
 
 const form = reactive<LicenseForm>({
   deploymentId: '',
   licenseType: 'TRIAL',
   contractId: '',
+  productPublicId: '',
   authorizedUsers: '1',
   expiryDate: '',
   remark: '',
@@ -88,6 +100,7 @@ const initialForm = ref<LicenseForm>({ ...form })
 const errors = reactive<LicenseFormErrors>({
   deploymentId: '',
   contractId: '',
+  productPublicId: '',
   authorizedUsers: '',
   expiryDate: '',
 })
@@ -144,6 +157,21 @@ const selectedDeploymentSummaryItems = computed(() => {
 
 const hasDeployments = computed<boolean>(() => availableDeployments.value.length > 0)
 const hasFixedContract = computed<boolean>(() => props.fixedContractId !== null)
+const productLocked = computed<boolean>(() =>
+  form.licenseType === 'OFFICIAL'
+  && form.contractId !== ''
+  && (props.opportunityProductPublicId ?? '') !== ''
+)
+const productFallbackName = computed<string>(() =>
+  form.productPublicId !== '' && form.productPublicId === props.opportunityProductPublicId
+    ? (props.opportunityProductName ?? '').trim()
+    : ''
+)
+const productBlocked = computed<boolean>(() => {
+  if (productCatalog.loading.value) return true
+  if (productCatalog.forbidden.value) return productFallbackName.value === ''
+  return productCatalog.empty.value && !productLocked.value
+})
 const hasFormChanges = computed<boolean>(() => {
   return Object.keys(form).some((key) => {
     const field = key as keyof LicenseForm
@@ -167,6 +195,7 @@ const licenseTypeOptions: { value: LicenseType, label: string, tone: 'success' |
 function clearErrors(): void {
   errors.deploymentId = ''
   errors.contractId = ''
+  errors.productPublicId = ''
   errors.authorizedUsers = ''
   errors.expiryDate = ''
 }
@@ -227,6 +256,7 @@ function resetForm(): void {
     : availableDeployments.value[0] !== undefined ? String(availableDeployments.value[0].id) : ''
   form.licenseType = initialLicenseType
   form.contractId = initialContractId
+  form.productPublicId = props.opportunityProductPublicId ?? ''
   form.authorizedUsers = getInitialAuthorizedUsers(initialContractId)
   form.expiryDate = ''
   form.remark = ''
@@ -243,6 +273,10 @@ function validateForm(): boolean {
 
   if (form.licenseType === 'OFFICIAL' && form.contractId === '') {
     errors.contractId = '正式 License 必须关联合同'
+  }
+
+  if (form.productPublicId === '' && !productBlocked.value) {
+    errors.productPublicId = '请选择产品'
   }
 
   const authorizedUsers = Number(form.authorizedUsers)
@@ -267,17 +301,19 @@ function validateForm(): boolean {
 
   return errors.deploymentId === ''
     && errors.contractId === ''
+    && errors.productPublicId === ''
     && errors.expiryDate === ''
 }
 
 async function handleSubmit(): Promise<void> {
-  if (submitting.value || !validateForm()) return
+  if (submitting.value || productBlocked.value || !validateForm()) return
 
   const payload: LicenseApplicationCreate = {
     customer_id: props.customerId,
     deployment_info_id: Number(form.deploymentId),
     license_type: form.licenseType,
     contract_id: form.licenseType === 'OFFICIAL' ? Number(form.contractId) : null,
+    product_public_id: form.productPublicId,
     authorized_users: Number(form.authorizedUsers),
     expiry_date: form.expiryDate,
     remark: form.remark.trim() === '' ? null : form.remark.trim(),
@@ -331,6 +367,43 @@ function contractOptionLabel(contract: ContractListResponse): string {
   return `${contract.contract_name} · ${contract.contract_number}`
 }
 
+/** 可编辑时不保留已停用或不在目录中的产品，避免提交后才被后端拒绝 */
+function clearUnselectableProduct(): void {
+  if (productLocked.value || form.productPublicId === '') return
+  if (productCatalog.loading.value || productCatalog.forbidden.value) return
+  const selected = productCatalog.products.value.find(product => product.public_id === form.productPublicId)
+  if (selected?.is_active === true) return
+  if (initialForm.value.productPublicId === form.productPublicId) {
+    initialForm.value = { ...initialForm.value, productPublicId: '' }
+  }
+  form.productPublicId = ''
+}
+
+watch(
+  productLocked,
+  (locked) => {
+    if (locked) {
+      form.productPublicId = props.opportunityProductPublicId ?? ''
+    } else {
+      clearUnselectableProduct()
+    }
+  }
+)
+
+watch(
+  () => productCatalog.loading.value,
+  (loading) => {
+    if (!loading) clearUnselectableProduct()
+  }
+)
+
+watch(
+  () => form.productPublicId,
+  () => {
+    errors.productPublicId = ''
+  }
+)
+
 watch(
   () => form.licenseType,
   (type) => {
@@ -365,11 +438,14 @@ watch(
     props.fixedContractId,
     props.defaultContractId,
     props.defaultLicenseType,
+    props.opportunityProductPublicId,
+    props.opportunityProductName,
   ] as const,
   ([open]) => {
     if (open) {
       closeGuard.reset()
       resetForm()
+      void productCatalog.load()
     } else {
       if (closeGuard.handleParentClose()) return
       deploymentDialogOpen.value = false
@@ -429,23 +505,44 @@ watch(
           :items="selectedDeploymentSummaryItems"
         />
 
-        <div class="license-application-dialog__grid">
-          <SelectField
-            v-if="form.licenseType === 'OFFICIAL'"
-            id="license-contract"
-            v-model="form.contractId"
-            class="license-application-dialog__field"
-            label="关联合同"
-            required
-            :options="contractOptions"
-            :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署合同'"
-            :disabled="submitting || hasFixedContract || approvedContracts.length === 0"
-            :error="errors.contractId"
-            :title="selectedContractLabel || undefined"
-            trigger-class="license-application-dialog__contract-trigger"
-            content-class="license-application-dialog__contract-content"
-          />
+        <SelectField
+          v-if="form.licenseType === 'OFFICIAL'"
+          id="license-contract"
+          v-model="form.contractId"
+          class="license-application-dialog__field"
+          label="关联合同"
+          required
+          :options="contractOptions"
+          :placeholder="approvedContracts.length > 0 ? '请选择合同' : '暂无可关联的已签署合同'"
+          :disabled="submitting || hasFixedContract || approvedContracts.length === 0"
+          :error="errors.contractId"
+          :title="selectedContractLabel || undefined"
+          trigger-class="license-application-dialog__contract-trigger"
+          content-class="license-application-dialog__contract-content"
+        />
 
+        <div class="license-application-dialog__field">
+          <ProductIntentPicker
+            v-model="form.productPublicId"
+            id-prefix="license-product"
+            :catalog="productCatalog"
+            :locked="productLocked"
+            :fallback-name="productFallbackName"
+            :hint="productLocked ? LOCKED_PRODUCT_HINT : ''"
+            :disabled="submitting"
+            :invalid="errors.productPublicId !== ''"
+          />
+          <p
+            v-if="errors.productPublicId !== ''"
+            id="license-product-error"
+            class="text-caption text-danger"
+            role="alert"
+          >
+            {{ errors.productPublicId }}
+          </p>
+        </div>
+
+        <div class="license-application-dialog__grid">
           <DateField
             id="license-expiry-date"
             :model-value="parseLocalDate(form.expiryDate)"
@@ -491,7 +588,7 @@ watch(
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
             取消
           </Button>
-          <Button type="submit" form="license-application-form" :disabled="submitting || !hasDeployments">
+          <Button type="submit" form="license-application-form" :disabled="submitting || !hasDeployments || productBlocked">
             {{ submitting ? '提交中...' : '提交申请' }}
           </Button>
         </DialogFooter>

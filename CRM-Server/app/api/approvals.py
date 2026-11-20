@@ -1878,6 +1878,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
         return {
             "application_number": license_application.application_number,
             "license_type": license_application.license_type,
+            "product_name": license_application.product_name,
             "expiry_date": license_application.expiry_date,
             "status": license_application.status,
             "deployment_name": deployment.deployment_name if deployment else None,
