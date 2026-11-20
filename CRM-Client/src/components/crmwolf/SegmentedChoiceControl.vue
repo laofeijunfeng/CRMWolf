@@ -112,7 +112,8 @@ function optionId(value: string): string {
   min-height: var(--control-h-md);
 }
 
-.segmented-choice__radio {
+// reka 的 Radio 以 Fragment 渲染按钮，拿不到本组件的 scope id；以按钮为末段的选择器必须经 :deep 命中
+.segmented-choice__item :deep(.segmented-choice__radio) {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -172,8 +173,11 @@ function optionId(value: string): string {
   outline-offset: 2px;
 }
 
-.segmented-choice__radio:disabled + .segmented-choice__option {
+.segmented-choice__item :deep(.segmented-choice__radio:disabled) {
   cursor: not-allowed;
+}
+
+.segmented-choice__radio:disabled + .segmented-choice__option {
   color: hsl(var(--muted-foreground));
   opacity: 0.72;
 }
