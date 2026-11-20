@@ -81,6 +81,7 @@ def _license_application_response(application: LicenseApplication) -> LicenseApp
         "product_public_id": application.product.public_id if application.product else None,
         "product_name": application.product_name,
         "expiry_date": application.expiry_date,
+        "is_permanent": bool(application.is_permanent),
         "license_type": application.license_type,
         "authorized_users": application.authorized_users,
         "enterprise_id": application.enterprise_id,
@@ -139,6 +140,7 @@ def create_application(
         product_public_id=application.product_public_id,
         license_type=application.license_type,
         authorized_users=application.authorized_users,
+        is_permanent=application.is_permanent,
         expiry_date=application.expiry_date,
         remark=application.remark,
     )

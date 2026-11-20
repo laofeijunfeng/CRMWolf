@@ -17,6 +17,7 @@ import type { DeploymentInfoResponse } from '@/api/deployment'
 import { toast } from 'vue-sonner'
 import { handleApiError } from '@/utils/errorHandler'
 import { getTodayLocalDate } from '@/utils/format'
+import { LICENSE_PERMANENT_TEXT } from '@/utils/licenseStatus'
 import { getStatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 
 // ==================== Props & Emits ====================
@@ -113,13 +114,13 @@ const handleDownload = async (item: LicenseApplicationResponse): Promise<void> =
   }
 }
 
-const isExpired = (expiryDate: string): boolean => expiryDate < getTodayLocalDate()
+// 永久 License 没有到期日期，不会过期。
+const isExpired = (expiryDate: string | null): boolean => expiryDate !== null && expiryDate < getTodayLocalDate()
 
-const formatDate = (dateStr: string): string => {
-  if (dateStr === null || dateStr === undefined || dateStr === '') {
-    return '-'
-  }
-  const date = new Date(`${dateStr}T00:00:00`)
+const formatExpiry = (item: LicenseApplicationResponse): string => {
+  if (item.is_permanent) return LICENSE_PERMANENT_TEXT
+  if (item.expiry_date === null || item.expiry_date === '') return '-'
+  const date = new Date(`${item.expiry_date}T00:00:00`)
   if (Number.isNaN(date.getTime())) {
     return '-'
   }
@@ -233,7 +234,7 @@ const getDeploymentName = (deploymentId: number | null, deployments: DeploymentI
           :class="{ 'text-danger': isExpired(item.expiry_date) }"
         >
           <Calendar class="w-3 h-3" />
-          到期: {{ formatDate(item.expiry_date) }}
+          到期: {{ formatExpiry(item) }}
         </span>
         <span> · 使用人数: {{ item.authorized_users }} 人</span>
         <span v-if="item.contract_name"> · </span>

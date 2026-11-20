@@ -148,6 +148,7 @@ export interface CustomerCreate {
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
   license_expiry_date?: string | null
+  license_is_permanent?: boolean | null
   license_authorized_users?: number | null
   primary_contact?: ContactCreate | null
 }
@@ -164,6 +165,7 @@ export interface CustomerUpdate {
   status?: CustomerLifecycleStatus
   license_type?: CustomerLicenseType | null
   license_expiry_date?: string | null
+  license_is_permanent?: boolean | null
   license_authorized_users?: number | null
   product_public_id?: string | null
 }
@@ -177,6 +179,7 @@ export interface CustomerLicenseSnapshotUpdate {
   expected_version: number
   license_type: 'TRIAL' | 'OFFICIAL' | null
   license_expiry_date: string | null
+  license_is_permanent?: boolean | null
 }
 
 export type CustomerStatus = 0 | 1 | 2 | 3
@@ -230,6 +233,7 @@ export interface CustomerResponse {
   last_modified_time: string
   version: number
   license_expiry_date: string | null
+  license_is_permanent: boolean
   license_authorized_users: number | null
   license_type: string | null
   owner_info?: UserBasicInfo
@@ -296,6 +300,7 @@ export interface CustomerDetailResponse {
   last_modified_time: string
   version: number
   license_expiry_date: string | null
+  license_is_permanent: boolean
   license_authorized_users: number | null
   license_type: string | null
   contacts: ContactResponse[]

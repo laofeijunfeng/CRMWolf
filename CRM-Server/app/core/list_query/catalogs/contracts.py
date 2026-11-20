@@ -67,6 +67,9 @@ CONTRACTS_LIST_QUERY_CATALOG = ListQueryCatalog(
             type="date",
             expression=latest_official_issued_license(LicenseApplication.expiry_date),
             date_kind="date",
+            null_present_expression_builder=lambda _ctx: latest_official_issued_license(
+                LicenseApplication.is_permanent
+            ),
         ),
         ListQueryField(key="status", type="enum", expression=Contract.status),
         ListQueryField(key="signing_date", type="date", expression=Contract.signing_date, date_kind="date"),

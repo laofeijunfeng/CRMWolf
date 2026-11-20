@@ -2,30 +2,27 @@
 
 提供 License 申请的数据库操作。
 """
-from sqlalchemy.orm import Session
-from typing import Optional, List, Tuple, Dict
-from datetime import date, datetime
+from typing import Dict, List, Optional, Tuple
 
-from app.models.license_application import (
-    LicenseApplication,
-    LicenseApplicationStatus,
-    LicenseType
-)
+from sqlalchemy.orm import Session
+
+from app.constants.business_types import BusinessType
+from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.deployment import DeploymentInfo
-from app.models.contract import Contract
+from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.opportunity import Opportunity
 from app.models.product import Product
 from app.crud.product_intent import resolve_writable_product
-from app.constants.business_types import BusinessType
-from app.services.business_number_generator import BusinessNumberGenerator
-from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.schemas.license_application import (
+    LicenseApplicationApprove,
+    LicenseApplicationApproveFull,
     LicenseApplicationInternalCreate,
     LicenseApplicationUpdate,
-    LicenseApplicationApprove,
-    LicenseApplicationApproveFull
+    resolve_license_term,
 )
+from app.services.business_number_generator import BusinessNumberGenerator
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
 
 
@@ -176,6 +173,7 @@ class LicenseApplicationCRUD:
             product_id=product.id,
             product_name=product.name,
             expiry_date=obj_in.expiry_date,
+            is_permanent=obj_in.is_permanent,
             license_type=obj_in.license_type.value,
             authorized_users=obj_in.authorized_users,
             remark=obj_in.remark,  # 补充需求：备注字段
@@ -364,6 +362,17 @@ class LicenseApplicationCRUD:
 
         update_data = obj_in.model_dump(exclude_unset=True)
 
+        # 期限跨字段校验：以已存储的 license_type 为准（License 类型不可编辑）
+        if 'is_permanent' in update_data or 'expiry_date' in update_data:
+            is_permanent = update_data.get('is_permanent')
+            if is_permanent is None:
+                is_permanent = bool(application.is_permanent)
+            expiry_date = update_data.get('expiry_date', application.expiry_date)
+            update_data['is_permanent'] = is_permanent
+            update_data['expiry_date'] = resolve_license_term(
+                application.license_type, is_permanent, expiry_date
+            )
+
         # 验证部署信息存在（如果提供）
         if 'deployment_info_id' in update_data and update_data['deployment_info_id']:
             deployment = db.query(DeploymentInfo).filter(
@@ -467,9 +476,9 @@ class LicenseApplicationCRUD:
         Raises:
             ValueError: 申请状态不是 DRAFT 或审批流程未匹配
         """
-        from app.crud.approval import approval_flow_crud, approval_crud
-        from app.services.approval_adapter import get_adapter
         from app.constants.business_types import BusinessType
+        from app.crud.approval import approval_flow_crud
+        from app.services.approval_adapter import get_adapter
 
         application = self.get(db, team_id, application_id)
         if not application:
@@ -635,28 +644,6 @@ class LicenseApplicationCRUD:
     ) -> Optional[LicenseApplication]:
         raise ValueError("License驳回请使用通用审批接口")
 
-    def update_customer_license_expiry(
-        self,
-        db: Session,
-        team_id: int,
-        customer_id: int,
-        expiry_date: date
-    ) -> bool:
-        """Update a customer's latest License expiry in its owning team."""
-        with db.no_autoflush:
-            customer = db.query(Customer).filter_by(
-                id=customer_id, team_id=team_id
-            ).populate_existing().with_for_update().one_or_none()
-        if customer is None:
-            return False
-
-        if customer.license_expiry_date is None or expiry_date > customer.license_expiry_date:
-            customer.license_expiry_date = expiry_date
-            db.commit()
-            return True
-
-        return False
-
     def update_customer_license_info(
         self,
         db: Session,
@@ -692,6 +679,7 @@ class LicenseApplicationCRUD:
                     LicenseApplication.status == LicenseApplicationStatus.ISSUED,
                 )
                 .order_by(
+                    LicenseApplication.is_permanent.desc(),
                     LicenseApplication.expiry_date.desc(),
                     LicenseApplication.last_modified_time.desc(),
                     LicenseApplication.id.desc(),
@@ -703,19 +691,24 @@ class LicenseApplicationCRUD:
                 customer.license_type,
                 customer.license_authorized_users,
                 customer.license_expiry_date,
+                bool(customer.license_is_permanent),
             )
-            previous_expiry = customer.license_expiry_date
             if selected_application is None:
-                selected_values = (None, None, None)
+                selected_values = (None, None, None, False)
             else:
                 selected_values = (
                     selected_application.license_type,
                     selected_application.authorized_users,
-                    selected_application.expiry_date,
+                    None if selected_application.is_permanent else selected_application.expiry_date,
+                    bool(selected_application.is_permanent),
                 )
 
-            customer.license_type, customer.license_authorized_users, customer.license_expiry_date = selected_values
-            selected_expiry = selected_values[2]
+            (
+                customer.license_type,
+                customer.license_authorized_users,
+                customer.license_expiry_date,
+                customer.license_is_permanent,
+            ) = selected_values
             if commit and selected_values != previous_values:
                 db.commit()
 

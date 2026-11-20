@@ -13,6 +13,7 @@ const baselineSnapshot: CustomerEditableSnapshot = {
   industry: 'internet_saas',
   license_type: 'TRIAL',
   license_expiry_date: '2026-12-31',
+  license_is_permanent: false,
   license_authorized_users: null,
 }
 
@@ -37,6 +38,7 @@ describe('buildCustomerUpdatePayload', () => {
       expected_version: 12,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
+      license_is_permanent: false,
     })
   })
 
@@ -50,6 +52,43 @@ describe('buildCustomerUpdatePayload', () => {
       expected_version: 12,
       license_type: null,
       license_expiry_date: null,
+      license_is_permanent: false,
+    })
+  })
+
+  it('sends an official permanent license with a null expiry date', () => {
+    const current: CustomerEditableSnapshot = {
+      ...baselineSnapshot,
+      license_type: 'OFFICIAL',
+      license_expiry_date: '2026-12-31',
+      license_is_permanent: true,
+    }
+    expect(buildCustomerUpdatePayload(current, baselineSnapshot, 12)).toEqual({
+      expected_version: 12,
+      license_type: 'OFFICIAL',
+      license_expiry_date: null,
+      license_is_permanent: true,
+    })
+  })
+
+  it('clears permanent when switching back to a dated license', () => {
+    const baseline: CustomerEditableSnapshot = {
+      ...baselineSnapshot,
+      license_type: 'OFFICIAL',
+      license_expiry_date: null,
+      license_is_permanent: true,
+    }
+    const current: CustomerEditableSnapshot = {
+      ...baseline,
+      license_type: 'TRIAL',
+      license_expiry_date: '2027-01-31',
+      license_is_permanent: false,
+    }
+    expect(buildCustomerUpdatePayload(current, baseline, 12)).toEqual({
+      expected_version: 12,
+      license_type: 'TRIAL',
+      license_expiry_date: '2027-01-31',
+      license_is_permanent: false,
     })
   })
 
@@ -103,6 +142,7 @@ describe('buildCustomerUpdatePayload', () => {
       expected_version: 12,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
+      license_is_permanent: false,
     })
   })
 })

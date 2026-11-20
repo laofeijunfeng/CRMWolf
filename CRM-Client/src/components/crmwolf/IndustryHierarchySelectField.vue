@@ -133,13 +133,15 @@ function handleOpenChange(value: boolean): void {
 </script>
 <template>
   <div :class="cn('grid gap-1', props.class)">
-    <Label
-      v-if="props.label"
-      :for="selectId"
-      class="text-caption font-medium text-foreground"
-    >
-      {{ props.label }}
-    </Label>
+    <div v-if="props.label || $slots['label-action']" class="flex h-5 items-center justify-between gap-2">
+      <Label
+        :for="selectId"
+        class="text-caption font-medium text-foreground"
+      >
+        {{ props.label }}
+      </Label>
+      <slot name="label-action" />
+    </div>
     <Combobox
       :open="comboboxOpen"
       :model-value="normalizedModelValue"

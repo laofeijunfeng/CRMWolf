@@ -74,7 +74,7 @@ import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import { serializeListQuery } from '@/utils/listQuery'
 import { isCustomerPublicId } from '@/utils/customerRoutes'
 import { isDealJourneyPublicId } from '@/utils/dealJourney'
-import { LICENSE_STATUS_LABELS, classifyLicenseStatus, formatLicenseSummary, type LicenseSummary } from '@/utils/licenseStatus'
+import { LICENSE_STATUS_LABELS, formatLicenseSummary, licenseDisplayStatus, type LicenseSummary } from '@/utils/licenseStatus'
 import { getStatusPresentation, type StatusTone } from '@/utils/statusPresentation'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
 import type { FormSuccessPayload } from '@/types/actionOutcome'
@@ -1307,11 +1307,11 @@ const formatDateTime = (dateStr?: string): string => {
 }
 
 const getLicenseSummary = (row: CustomerResponse): LicenseSummary => {
-  return formatLicenseSummary(row.license_expiry_date, row.license_type, row.license_authorized_users)
+  return formatLicenseSummary(row)
 }
 
 const getLicenseBarTone = (row: CustomerResponse): StatusTone =>
-  getStatusPresentation('licenseStatus', classifyLicenseStatus(row.license_expiry_date, row.license_type)).tone
+  getStatusPresentation('licenseStatus', licenseDisplayStatus(row)).tone
 
 // 派生客户状态（后端 derived_status;旧数据/接口降级时按 legacy status 兜底）
 const customerDerivedStatusKey = (row: CustomerResponse): string => {

@@ -140,6 +140,7 @@ def customer_license_status_expression(context: ListQueryContext):
     return license_status_expression(
         Customer.license_expiry_date,
         Customer.license_type,
+        Customer.license_is_permanent,
         context.business_today(),
     )
 

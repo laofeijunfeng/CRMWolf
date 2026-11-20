@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -224,6 +224,8 @@ CustomerLifecycleStatus = Literal[0, 1]
 CustomerLicenseType = Literal["TRIAL", "OFFICIAL"]
 _AUTHORIZED_USERS_MESSAGE = "请输入大于 0 的整数"
 _AUTHORIZED_USERS_MAX = 2_147_483_647
+LICENSE_TYPE_REQUIRED_MESSAGE = "授权到期日期不为空时必须选择授权类型"
+PERMANENT_REQUIRES_OFFICIAL_MESSAGE = "试用授权必须填写到期日，不能设为永久。"
 
 
 def _validate_license_authorized_users(value: object) -> int | None:
@@ -235,10 +237,40 @@ def _validate_license_authorized_users(value: object) -> int | None:
         raise ValueError(_AUTHORIZED_USERS_MESSAGE)
     return value
 
+
+class CustomerLicensePermanentError(ValueError):
+    """A permanent customer License was requested for a non-OFFICIAL type."""
+
+
+_LicenseTypeT = TypeVar("_LicenseTypeT", bound=str)
+
+
+def normalize_customer_license_pair(
+    license_type: Optional[_LicenseTypeT],
+    license_expiry_date: Optional[date],
+    license_is_permanent: Optional[bool],
+) -> tuple[Optional[_LicenseTypeT], Optional[date], bool]:
+    """Normalize a customer License snapshot to (type, expiry, permanent).
+
+    Permanent ⇒ OFFICIAL with no expiry date. Otherwise a missing date clears the
+    type and a present date requires a type.
+    """
+    if license_is_permanent:
+        if license_type != "OFFICIAL":
+            raise CustomerLicensePermanentError(PERMANENT_REQUIRES_OFFICIAL_MESSAGE)
+        return license_type, None, True
+    if license_expiry_date is None:
+        return None, None, False
+    if license_type is None:
+        raise ValueError(LICENSE_TYPE_REQUIRED_MESSAGE)
+    return license_type, license_expiry_date, False
+
+
 class CustomerCreate(CustomerBase):
     status: CustomerLifecycleStatus = Field(0, description="客户快捷状态：0跟进中，1已成交")
     license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_is_permanent: Optional[bool] = Field(None, description="客户 License 是否永久（仅正式）")
     license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     owner_id: Optional[str] = Field(None, description="负责人系统用户ID，不传则默认为创建人")
     default_procurement_method_id: Optional[int] = Field(None, description="默认采购方式ID")
@@ -270,10 +302,11 @@ class CustomerCreate(CustomerBase):
 
     @model_validator(mode="after")
     def normalize_license_pair(self) -> "CustomerCreate":
-        if self.license_expiry_date is None:
-            self.license_type = None
-        elif self.license_type is None:
-            raise ValueError("授权到期日期不为空时必须选择授权类型")
+        self.license_type, self.license_expiry_date, self.license_is_permanent = (
+            normalize_customer_license_pair(
+                self.license_type, self.license_expiry_date, self.license_is_permanent
+            )
+        )
         return self
 
 
@@ -294,6 +327,7 @@ class CustomerUpdate(BaseModel):
     status: Optional[CustomerLifecycleStatus] = Field(None, description="客户快捷状态：0跟进中，1已成交")
     license_type: Optional[CustomerLicenseType] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_is_permanent: Optional[bool] = Field(None, description="客户 License 是否永久（仅正式）")
     license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
 
@@ -330,13 +364,15 @@ class CustomerLicenseSnapshotUpdate(BaseModel):
     expected_version: int = Field(..., ge=1)
     license_type: Optional[Literal["TRIAL", "OFFICIAL"]] = None
     license_expiry_date: Optional[date] = None
+    license_is_permanent: Optional[bool] = None
 
     @model_validator(mode="after")
     def normalize_license_pair(self):
-        if self.license_expiry_date is None:
-            self.license_type = None
-        elif self.license_type is None:
-            raise ValueError("授权到期日期不为空时必须选择授权类型")
+        self.license_type, self.license_expiry_date, self.license_is_permanent = (
+            normalize_customer_license_pair(
+                self.license_type, self.license_expiry_date, self.license_is_permanent
+            )
+        )
         return self
 
 
@@ -374,6 +410,7 @@ class CustomerResponse(BaseModel):
     version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_is_permanent: bool = Field(False, description="客户 License 是否永久")
     license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
@@ -539,6 +576,7 @@ class CustomerDetailResponse(BaseModel):
     customer_intelligence_has_inputs: bool = Field(False, description="是否存在可用于整理客户智能档案的业务输入")
     # License 授权字段
     license_expiry_date: Optional[date] = Field(None, description="客户 License 最晚到期时间")
+    license_is_permanent: bool = Field(False, description="客户 License 是否永久")
     license_authorized_users: Optional[int] = Field(None, description="客户 License 授权人数")
     license_type: Optional[str] = Field(None, description="客户 License 类型：TRIAL/OFFICIAL")
     product_public_id: Optional[str] = Field(None, description="意向产品对外ID")

@@ -43,6 +43,9 @@ const FutureBusinessDateStringSchema = BusinessDateStringSchema.refine(
   '到期时间必须晚于今天'
 )
 
+export const TRIAL_PERMANENT_ERROR = '试用 License 不能设为永久'
+export const TRIAL_EXPIRY_REQUIRED_ERROR = '试用 License 必须填到期日期，且要晚于今天。'
+
 // ===== License 申请基础类型（含补充字段）=====
 export const LicenseApplicationSchema = z.object({
   id: z.number().int().positive(),
@@ -54,7 +57,9 @@ export const LicenseApplicationSchema = z.object({
   product_public_id: OptionalNullableStringSchema,
   product_name: OptionalNullableStringSchema,
   authorized_users: z.number().int().positive('使用人数必须大于0'),
-  expiry_date: BusinessDateStringSchema,
+  // 永久仅限正式版，且永久时到期时间为空
+  expiry_date: BusinessDateStringSchema.nullable(),
+  is_permanent: z.boolean().default(false),
   license_type: LicenseTypeSchema,
   // 补充需求字段
   enterprise_id: z.string().nullable(),
@@ -102,22 +107,32 @@ export const LicenseApplicationCreateSchema = LicenseApplicationSchema.omit({
   // 正式版必须关联合同（通过 refine 验证）
   contract_id: z.number().int().nullable(),
   product_public_id: z.string().min(1, '请选择产品'),
-  expiry_date: FutureBusinessDateStringSchema,
+  expiry_date: BusinessDateStringSchema.nullable(),
+  is_permanent: z.boolean(),
   // 补充需求：备注字段
   remark: z.string().nullable()
-}).refine(
-  (data) => {
-    // 正式版必须关联合同
-    if (data.license_type === 'OFFICIAL' && data.contract_id === null) {
-      return false
-    }
-    return true
-  },
-  {
-    message: '正式版 License 必须关联合同',
-    path: ['contract_id']
+}).superRefine((data, context) => {
+  // 正式版必须关联合同
+  if (data.license_type === 'OFFICIAL' && data.contract_id === null) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: '正式版 License 必须关联合同', path: ['contract_id'] })
   }
-)
+  if (data.is_permanent) {
+    if (data.license_type !== 'OFFICIAL') {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: TRIAL_PERMANENT_ERROR, path: ['is_permanent'] })
+    }
+    if (data.expiry_date !== null) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: '永久 License 不能填写到期时间', path: ['expiry_date'] })
+    }
+    return
+  }
+  if (data.expiry_date === null || data.expiry_date <= getTodayLocalDate()) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: data.license_type === 'TRIAL' ? TRIAL_EXPIRY_REQUIRED_ERROR : '到期时间必须晚于今天',
+      path: ['expiry_date']
+    })
+  }
+})
 
 export type LicenseApplicationCreate = z.infer<typeof LicenseApplicationCreateSchema>
 
@@ -126,6 +141,7 @@ export const LicenseApplicationUpdateSchema = z.object({
   deployment_info_id: z.number().int().nullable(),
   contract_id: z.number().int().nullable(),
   authorized_users: z.number().int().positive('使用人数必须大于0'),
+  is_permanent: z.boolean().optional(),
   expiry_date: FutureBusinessDateStringSchema.nullable(),
   remark: z.string().nullable()
 })

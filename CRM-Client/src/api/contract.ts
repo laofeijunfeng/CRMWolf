@@ -58,6 +58,7 @@ export interface ContractListResponse {
   subscription_years: number | null
   license_authorized_users?: number | null
   license_expiry_date?: string | null
+  license_is_permanent?: boolean
   standard_unit_price: string
   status: ContractStatus
   approval_phase?: ApprovalPhase | null | undefined
@@ -275,6 +276,7 @@ const ContractListItemSchema = z.object({
   subscription_years: z.number().nullable(),
   license_authorized_users: z.number().nullable().optional(),
   license_expiry_date: z.string().nullable().optional(),
+  license_is_permanent: z.boolean().optional(),
   standard_unit_price: AmountStringSchema,
   status: ContractStatusSchema,
   approval_phase: z.enum(['draft', 'pending_review', 'approved', 'rejected']).nullable().optional(),

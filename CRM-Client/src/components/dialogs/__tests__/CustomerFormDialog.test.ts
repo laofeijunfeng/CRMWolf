@@ -197,6 +197,7 @@ const customerDetail: CustomerDetailResponse = {
   last_modified_time: '2026-09-04T00:00:00Z',
   version: 3,
   license_expiry_date: null,
+  license_is_permanent: false,
   license_authorized_users: null,
   license_type: null,
   contacts: [],
@@ -730,10 +731,67 @@ describe('CustomerFormDialog progressive edit sections', () => {
       account_name: '更新客户',
       license_type: 'TRIAL',
       license_expiry_date: '2026-12-31',
+      license_is_permanent: false,
     })
     expect(wrapper.emitted('refresh')).toBeUndefined()
     expect(wrapper.emitted('success')).toHaveLength(1)
     expect(wrapper.emitted('update:open')).toContainEqual([false])
+    wrapper.unmount()
+  })
+
+  it('saves an official permanent license with a null date and resets permanent when switching to trial', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer').mockResolvedValue({ ...customerDetail, license_type: 'OFFICIAL', license_is_permanent: true, version: 4 })
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseExpiryDateValue: string | null
+      licenseIsPermanentValue: boolean
+      handleLicenseTypeChange: (value: string) => void
+      handleLicensePermanentChange: (value: boolean) => void
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.handleLicenseTypeChange('OFFICIAL')
+    vm.licenseExpiryDateValue = '2026-12-31'
+    vm.handleLicensePermanentChange(true)
+    expect(vm.licenseExpiryDateValue).toBeNull()
+
+    vm.handleLicenseTypeChange('TRIAL')
+    expect(vm.licenseIsPermanentValue).toBe(false)
+
+    vm.handleLicenseTypeChange('OFFICIAL')
+    vm.handleLicensePermanentChange(true)
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).toHaveBeenCalledWith('customer-1', {
+      expected_version: 3,
+      license_type: 'OFFICIAL',
+      license_expiry_date: null,
+      license_is_permanent: true,
+    })
+    wrapper.unmount()
+  })
+
+  it('rejects a permanent flag on a trial license', async () => {
+    vi.spyOn(procurementApi, 'getProcurementMethodOptions').mockResolvedValue([])
+    vi.spyOn(acquisitionSourceApi, 'listOptions').mockResolvedValue([])
+    const updateCustomer = vi.spyOn(customerApi, 'updateCustomer')
+    const wrapper = mountEdit()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      licenseTypeValue: 'TRIAL' | 'OFFICIAL' | null
+      licenseIsPermanentValue: boolean
+      errors: Record<string, string | undefined>
+      onSubmit: (event: Event) => Promise<void>
+    }
+    vm.licenseTypeValue = 'TRIAL'
+    vm.licenseIsPermanentValue = true
+    await vm.onSubmit(new Event('submit'))
+    await flushPromises()
+    expect(updateCustomer).not.toHaveBeenCalled()
+    expect(vm.errors['license_is_permanent']).toBe('试用授权必须填写到期日，不能设为永久。')
     wrapper.unmount()
   })
 
@@ -1033,6 +1091,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
       expected_version: 3,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
+      license_is_permanent: false,
     })
     expect(wrapper.props('open')).toBe(true)
     expect(wrapper.get('#customer-license-type').attributes('modelvalue')).toBe('OFFICIAL')
@@ -1091,6 +1150,7 @@ describe('CustomerFormDialog recovery and close guards', () => {
       expected_version: 11,
       license_type: 'OFFICIAL',
       license_expiry_date: '2026-12-31',
+      license_is_permanent: false,
     })
     wrapper.unmount()
   })

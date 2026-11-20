@@ -36,6 +36,7 @@ const customerResponse = {
   last_modified_time: '2026-01-01T00:00:00',
   version: 3,
   license_expiry_date: null,
+  license_is_permanent: false,
   license_type: null,
   license_authorized_users: null
 }

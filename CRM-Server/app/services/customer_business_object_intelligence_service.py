@@ -739,6 +739,7 @@ def _license_application_payload(_db: Session | None, application: object) -> Js
         "status": _enum_or_string(_raw_attr(application, "status")),
         "approval_phase": _enum_or_string(_raw_attr(application, "approval_phase")),
         "expiry_date": _date_iso_attr(application, "expiry_date"),
+        "is_permanent": bool(_raw_attr(application, "is_permanent")),
         "deployment_info_id": _int_attr(application, "deployment_info_id"),
         "contract_id": _int_attr(application, "contract_id"),
         "has_enterprise_id": _has_attr_value(application, "enterprise_id"),

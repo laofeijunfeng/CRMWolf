@@ -70,6 +70,7 @@ class ChartCustomer:
     company_scale: str | None
     license_expiry_date: date | None
     license_type: str | None
+    license_is_permanent: bool
     created_time: date
     derived: DerivedCustomerStatus | None
 
@@ -146,6 +147,7 @@ def _chart_rows(db: Session, team_id: int, customers: Sequence[Any]) -> list[Cha
             company_scale=customer.company_scale,
             license_expiry_date=customer.license_expiry_date,
             license_type=customer.license_type,
+            license_is_permanent=bool(customer.license_is_permanent),
             created_time=created.date() if hasattr(created, "date") else created,
             derived=derived.get(int(customer.id)),
         ))
@@ -169,8 +171,14 @@ def _status_segments(rows: Sequence[ChartCustomer]) -> list[tuple[str, str, list
 def _license_segments(rows: Sequence[ChartCustomer], today: date) -> list[tuple[str, str, list[ChartCustomer]]]:
     grouped: dict[str, list[ChartCustomer]] = defaultdict(list)
     for row in rows:
-        grouped[classify_license_status(row.license_expiry_date, row.license_type, today)].append(row)
+        grouped[_license_status(row, today)].append(row)
     return [(key, label, grouped.get(key, [])) for key, label in LICENSE_ORDER]
+
+
+def _license_status(row: ChartCustomer, today: date) -> str:
+    return classify_license_status(
+        row.license_expiry_date, row.license_type, today, is_permanent=row.license_is_permanent,
+    )
 
 
 def _scale_card(rows: Sequence[ChartCustomer], owners: dict[str, str]) -> ChartCard:
@@ -267,7 +275,7 @@ def _bucket_key(
     if chart_key == "status":
         return row.derived.status.value if row.derived is not None else BLANK_KEY
     if chart_key == "license":
-        return classify_license_status(row.license_expiry_date, row.license_type, today)
+        return _license_status(row, today)
     if chart_key == "scale":
         scale = (row.company_scale or "").strip()
         if scale == "":

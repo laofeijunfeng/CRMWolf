@@ -16,6 +16,24 @@ export const LICENSE_STATUS_LABELS: Record<LicenseStatusValue, string> = {
   official: '正式'
 }
 
+/** 展示态：永久正式授权在列表/详情徽标上单独呈现，但不是筛选/后端状态值。 */
+export const LICENSE_DISPLAY_STATUS_PERMANENT = 'permanent'
+export type LicenseDisplayStatusValue = LicenseStatusValue | typeof LICENSE_DISPLAY_STATUS_PERMANENT
+
+export const LICENSE_PERMANENT_TEXT = '永久'
+
+/** 客户/合同授权汇总字段（与 API 字段同名，可直接传入响应行）。 */
+export interface LicenseSnapshot {
+  license_expiry_date?: string | Date | null | undefined
+  license_type?: string | null | undefined
+  license_is_permanent?: boolean | null | undefined
+}
+
+/** 永久仅对正式授权成立（permanent ⇒ OFFICIAL 且无到期日）。 */
+export function isPermanentLicense(license: LicenseSnapshot): boolean {
+  return license.license_is_permanent === true && license.license_type === 'OFFICIAL'
+}
+
 function toDateOnly(value: string | Date): Date | null {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null
@@ -29,10 +47,11 @@ function toDateOnly(value: string | Date): Date | null {
 }
 
 export function classifyLicenseStatus(
-  expiryDate: string | Date | null | undefined,
-  licenseType: string | null | undefined,
+  license: LicenseSnapshot,
   today: Date = new Date()
 ): LicenseStatusValue {
+  if (isPermanentLicense(license)) return LICENSE_STATUS_OFFICIAL
+  const expiryDate = license.license_expiry_date
   if (expiryDate === null || expiryDate === undefined || expiryDate === '') {
     return LICENSE_STATUS_NONE
   }
@@ -40,16 +59,31 @@ export function classifyLicenseStatus(
   if (expiry === null) return LICENSE_STATUS_NONE
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
   if (expiry < todayDate) return LICENSE_STATUS_EXPIRED
-  if (licenseType === 'TRIAL') return LICENSE_STATUS_TRIAL
+  if (license.license_type === 'TRIAL') return LICENSE_STATUS_TRIAL
   return LICENSE_STATUS_OFFICIAL
 }
 
+export function licenseDisplayStatus(
+  license: LicenseSnapshot,
+  today?: Date
+): LicenseDisplayStatusValue {
+  return isPermanentLicense(license) ? LICENSE_DISPLAY_STATUS_PERMANENT : classifyLicenseStatus(license, today)
+}
+
 export function licenseStatusLabel(
-  expiryDate: string | Date | null | undefined,
-  licenseType: string | null | undefined,
+  license: LicenseSnapshot,
   today?: Date
 ): string {
-  return LICENSE_STATUS_LABELS[classifyLicenseStatus(expiryDate, licenseType, today)]
+  return LICENSE_STATUS_LABELS[classifyLicenseStatus(license, today)]
+}
+
+/** 授权到期展示文本：永久 → 「永久」，否则日期（YYYY-MM-DD）；无授权为空。 */
+export function formatLicenseExpiry(license: LicenseSnapshot): string {
+  if (isPermanentLicense(license)) return LICENSE_PERMANENT_TEXT
+  const expiryDate = license.license_expiry_date
+  if (expiryDate === null || expiryDate === undefined || expiryDate === '') return ''
+  const expiry = toDateOnly(expiryDate)
+  return expiry === null ? '' : formatDateOnly(expiry)
 }
 
 export interface LicenseSummary {
@@ -67,11 +101,18 @@ function formatDateOnly(value: Date): string {
 }
 
 export function formatLicenseSummary(
-  expiryDate: string | Date | null | undefined,
-  licenseType: string | null | undefined,
-  authorizedUsers: number | null | undefined,
+  license: LicenseSnapshot & { license_authorized_users?: number | null | undefined },
   today: Date = new Date()
 ): LicenseSummary {
+  const userText = `${license.license_authorized_users ?? '-'} 人`
+  if (isPermanentLicense(license)) {
+    return {
+      primary: LICENSE_PERMANENT_TEXT,
+      secondary: `${LICENSE_STATUS_LABELS.official} · ${userText}`,
+      tone: 'normal'
+    }
+  }
+  const expiryDate = license.license_expiry_date
   const expiry = expiryDate === null || expiryDate === undefined || expiryDate === ''
     ? null
     : toDateOnly(expiryDate)
@@ -82,7 +123,6 @@ export function formatLicenseSummary(
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
   const days = Math.round((expiry.getTime() - todayDate.getTime()) / 86_400_000)
   const expiryText = formatDateOnly(expiry)
-  const userText = `${authorizedUsers ?? '-'} 人`
   if (days < 0) {
     return {
       primary: `已过期 ${-days} 天`,
@@ -91,7 +131,7 @@ export function formatLicenseSummary(
     }
   }
 
-  const statusText = licenseStatusLabel(expiry, licenseType, today)
+  const statusText = licenseStatusLabel({ license_expiry_date: expiry, license_type: license.license_type }, today)
   return {
     primary: days < RENEWAL_WINDOW_DAYS ? `${days} 天后到期` : expiryText,
     secondary: `${statusText} · ${userText}`,

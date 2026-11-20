@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from sqlalchemy.sql.elements import ColumnElement
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, case, or_
 
 from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.errors import ListQueryError
@@ -93,6 +93,10 @@ def apply_sorts(
         if expression is None:
             raise ListQueryError(f"字段 {field.key} 未配置排序表达式")
         query = _apply_joins(query, field.sort_joins or field.joins, joined_keys)
+        null_present = field.null_present_expression(ctx)
+        if null_present is not None:
+            # Direction-independent: NULL-but-present rows always follow every non-null value.
+            query = query.order_by(case((null_present, 1), else_=0).asc())
         query = query.order_by(expression.desc() if sort.direction == "desc" else expression.asc())
     return query
 
@@ -353,14 +357,18 @@ def parse_date_value(value: object) -> datetime | None:
 
 
 def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any, context: ListQueryContext):
-    if op == "is_empty":
+    if op in EMPTY_OPS:
+        null_present = field.null_present_expression(context)
         if field.treats_blank_as_empty():
-            return or_(expression.is_(None), expression == "")
-        return expression.is_(None)
-    if op == "is_not_empty":
-        if field.treats_blank_as_empty():
-            return and_(expression.is_not(None), expression != "")
-        return expression.is_not(None)
+            empty = or_(expression.is_(None), expression == "")
+            not_empty = and_(expression.is_not(None), expression != "")
+        else:
+            empty = expression.is_(None)
+            not_empty = expression.is_not(None)
+        if null_present is not None:
+            empty = and_(empty, ~null_present)
+            not_empty = or_(not_empty, null_present)
+        return empty if op == "is_empty" else not_empty
 
     if field.type == "date" and op in DATE_PRESET_OPS:
         return _date_preset_clause(field, expression, op, context)

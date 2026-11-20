@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 import pytest
-from sqlalchemy import Column, Date, DateTime, Integer, String, create_engine
+from sqlalchemy import Boolean, Column, Date, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -32,6 +32,7 @@ class Item(Base):
     owner_id = Column(String)
     license_expiry_date = Column(Date)
     license_type = Column(String)
+    license_is_permanent = Column(Boolean, default=False)
     category_id = Column(Integer)
 
 
@@ -80,8 +81,16 @@ def _catalog() -> ListQueryCatalog:
                 expression_builder=lambda ctx: license_status_expression(
                     Item.license_expiry_date,
                     Item.license_type,
+                    Item.license_is_permanent,
                     ctx.business_today(),
                 ),
+            ),
+            ListQueryField(
+                key="license_expiry_date",
+                type="date",
+                expression=Item.license_expiry_date,
+                date_kind="date",
+                null_present_expression_builder=lambda _ctx: Item.license_is_permanent,
             ),
             ListQueryField(
                 key="category_title",
@@ -552,10 +561,50 @@ def test_license_status_case_matches_classifier(db_session):
     )
     rows = query.all()
     assert [row.name for row in rows] == ["Trial Co"]
-    assert classify_license_status(rows[0].license_expiry_date, rows[0].license_type, today) == "trial"
-    assert classify_license_status(None, None, today) == "none"
-    assert classify_license_status(date(2026, 8, 1), "OFFICIAL", today) == "expired"
-    assert classify_license_status(date(2026, 8, 30), "OFFICIAL", today) == "official"
+    trial = rows[0]
+    assert classify_license_status(trial.license_expiry_date, trial.license_type, today, is_permanent=False) == "trial"
+    assert classify_license_status(None, None, today, is_permanent=False) == "none"
+    assert classify_license_status(date(2026, 8, 1), "OFFICIAL", today, is_permanent=False) == "expired"
+    assert classify_license_status(date(2026, 8, 30), "OFFICIAL", today, is_permanent=False) == "official"
+    assert classify_license_status(None, "OFFICIAL", today, is_permanent=True) == "official"
+
+
+def _add_permanent_item(session):
+    session.add(
+        Item(id=4, name="Forever Co", license_type="OFFICIAL", license_expiry_date=None, license_is_permanent=True)
+    )
+    session.flush()
+
+
+def test_license_status_permanent_is_official_never_expired(db_session):
+    _add_permanent_item(db_session)
+    context = ListQueryContext(today=date(2026, 8, 19))
+    assert _names(db_session, [{"field": "license_status", "op": "eq", "value": "official"}], context=context) == [
+        "Forever Co"
+    ]
+    assert "Forever Co" not in _names(
+        db_session, [{"field": "license_status", "op": "in", "value": ["expired", "none"]}], context=context
+    )
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_license_expiry_sort_puts_permanent_after_dated_rows(db_session, direction):
+    _add_permanent_item(db_session)
+    query = db_session.query(Item).filter(Item.license_type.is_not(None))
+    query = apply_sorts(query, _catalog(), [{"field": "license_expiry_date", "direction": direction}])
+    names = [row.name for row in query.all()]
+    dated = ["Beta Co", "Trial Co"] if direction == "asc" else ["Trial Co", "Beta Co"]
+    assert names == [*dated, "Forever Co"]
+
+
+def test_license_expiry_empty_ops_treat_permanent_as_present(db_session):
+    _add_permanent_item(db_session)
+    assert _names(db_session, [{"field": "license_expiry_date", "op": "is_empty"}]) == ["Acme"]
+    assert sorted(_names(db_session, [{"field": "license_expiry_date", "op": "is_not_empty"}])) == [
+        "Beta Co",
+        "Forever Co",
+        "Trial Co",
+    ]
 
 
 def test_join_is_applied_once_for_filter_and_sort(db_session):

@@ -14,7 +14,7 @@ CONTRACTS_LIST_EXPORT_CATALOG = ListExportCatalog(
         ListExportField("subscription_years", "采购年限", "number"),
         ListExportField("license_authorized_users", "授权数量", "number"),
         ListExportField("standard_unit_price", "客单价", "currency"),
-        ListExportField("license_expiry_date", "授权时间", "date"),
+        ListExportField("license_expiry_date", "授权时间", "text"),
         ListExportField("signing_date", "签署日期", "date"),
         ListExportField("created_time", "创建时间", "datetime"),
         ListExportField("owner", "负责人", "text"),

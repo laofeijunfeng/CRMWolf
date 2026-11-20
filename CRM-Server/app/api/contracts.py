@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.list_query.license_status import license_expiry_text
 from app.core.list_query import (
     enforce_owner_view_scope,
     optional_request_list_query,
@@ -199,7 +200,7 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
         return None
 
     license_data = db.execute(text("""
-        SELECT authorized_users, expiry_date
+        SELECT authorized_users, expiry_date, is_permanent
         FROM crm_license_applications
         WHERE contract_id = :contract_id
           AND license_type = 'OFFICIAL'
@@ -214,6 +215,7 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
     return {
         "authorized_users": license_data[0],
         "expiry_date": license_data[1],
+        "is_permanent": bool(license_data[2]),
     }
 
 
@@ -280,6 +282,7 @@ def _contract_list_response_dict(
             latest_license["authorized_users"] if latest_license else contract.user_count
         ),
         "license_expiry_date": latest_license["expiry_date"] if latest_license else None,
+        "license_is_permanent": bool(latest_license and latest_license["is_permanent"]),
         "customer_info": customer_info,
         "opportunity_info": (
             {
@@ -806,7 +809,7 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
     if contract_ids:
         placeholders = ','.join(f':contract_{i}' for i in range(len(contract_ids)))
         license_rows = projection_db.execute(text(f"""
-            SELECT contract_id, authorized_users, expiry_date
+            SELECT contract_id, authorized_users, expiry_date, is_permanent
             FROM crm_license_applications
             WHERE contract_id IN ({placeholders})
               AND license_type = 'OFFICIAL'
@@ -814,7 +817,9 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
             ORDER BY last_modified_time DESC, id DESC
         """), {f'contract_{i}': cid for i, cid in enumerate(contract_ids)}).fetchall()
         for row in license_rows:
-            latest_licenses.setdefault(row[0], {"authorized_users": row[1], "expiry_date": row[2]})
+            latest_licenses.setdefault(
+                row[0], {"authorized_users": row[1], "expiry_date": row[2], "is_permanent": bool(row[3])}
+            )
 
     result = []
     for contract in contracts:
@@ -845,6 +850,7 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
                 latest_license["authorized_users"] if latest_license else contract.user_count
             ),
             "license_expiry_date": latest_license["expiry_date"] if latest_license else None,
+            "license_is_permanent": bool(latest_license and latest_license["is_permanent"]),
             "customer_info": customer_info,
             "opportunity_info": (
                 {"id": opportunity_info["id"], "opportunity_name": opportunity_info["opportunity_name"]}
@@ -876,7 +882,7 @@ def _contract_export_row(item: ContractListResponse) -> dict[str, object]:
         "subscription_years": item.subscription_years,
         "license_authorized_users": item.license_authorized_users,
         "standard_unit_price": item.standard_unit_price,
-        "license_expiry_date": item.license_expiry_date,
+        "license_expiry_date": license_expiry_text(item.license_expiry_date, item.license_is_permanent),
         "signing_date": item.signing_date,
         "created_time": item.created_time,
         "owner": item.owner_info.name if item.owner_info else None,

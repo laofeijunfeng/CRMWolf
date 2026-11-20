@@ -59,6 +59,7 @@ export const CustomerResponseSchema = z.object({
   last_modified_time: z.string(), // 放宽日期格式验证
   version: z.number().int().nonnegative(),
   license_expiry_date: z.string().nullable().optional(),
+  license_is_permanent: z.boolean().default(false),
   license_authorized_users: z.number().int().nullable().optional(),
   license_type: z.string().nullable().optional()
 })
@@ -144,7 +145,8 @@ export const CustomerCreateSchema = z.object({
   default_procurement_method_id: z.number().int().optional(),
   status: CustomerLifecycleStatusSchema.optional(),
   license_type: CustomerLicenseTypeSchema.nullable().optional(),
-  license_expiry_date: z.string().nullable().optional()
+  license_expiry_date: z.string().nullable().optional(),
+  license_is_permanent: z.boolean().nullable().optional()
 })
 
 export type CustomerCreate = z.infer<typeof CustomerCreateSchema>

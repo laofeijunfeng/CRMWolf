@@ -235,6 +235,7 @@ class ContractListResponse(ContractResponse):
     purchase_type: Optional[str] = Field(None, description="采购类型：NEW/RENEWAL/EXPANSION")
     license_authorized_users: Optional[int] = Field(None, description="最新正式 License 授权数量；无 License 时回退合同采购用户数")
     license_expiry_date: Optional[date] = Field(None, description="最新正式 License 到期日期")
+    license_is_permanent: bool = Field(False, description="最新正式 License 是否永久")
     customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
     opportunity_info: Optional[OpportunityBasicInfo] = Field(None, description="商机基本信息")
     owner_info: Optional[OwnerBasicInfo] = Field(None, description="负责人信息")

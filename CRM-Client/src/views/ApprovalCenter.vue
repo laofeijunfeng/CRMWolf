@@ -638,6 +638,7 @@ import { usePageTitle } from '@/composables/usePageTitle'
 import { useTopBarRegistration } from '@/composables/useTopBarRegistration'
 import { useDataTableExport } from '@/composables/useDataTableExport'
 import { formatDateRelative } from '@/utils/format'
+import { LICENSE_PERMANENT_TEXT } from '@/utils/licenseStatus'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { getStatusOptions, getStatusPresentation } from '@/utils/statusPresentation'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
@@ -1144,7 +1145,7 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
       { key: 'status', label: '签发状态', value: activeApprovalDetail.value?.license_status ?? selected.license_status, type: 'status', statusDomain: 'licenseApplication' }, customerField,
       { key: 'deployment', label: '部署名称', value: detail('deployment_name') },
       { key: 'users', label: '使用人数', value: detail('authorized_users') },
-      { key: 'expiry', label: '到期时间', value: formatDateValue(detail('expiry_date')) },
+      { key: 'expiry', label: '到期时间', value: entityDetail?.['is_permanent'] === true ? LICENSE_PERMANENT_TEXT : formatDateValue(detail('expiry_date')) },
     ]
     case 'OPPORTUNITY': return [
       { key: 'number', label: '商机编号', value: detail('opportunity_number') ?? subjectNumber.value, type: 'copy' },

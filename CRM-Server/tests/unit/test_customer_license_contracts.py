@@ -57,7 +57,7 @@ def test_customer_export_exposes_authorized_users_between_license_fields():
     assert [(field.key, field.label, field.cell_type) for field in selected] == [
         ("license_status", "授权状态", "text"),
         ("license_authorized_users", "授权人数", "number"),
-        ("license_expiry_date", "授权到期", "date"),
+        ("license_expiry_date", "授权到期", "text"),
     ]
 
 

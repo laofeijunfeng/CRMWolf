@@ -102,10 +102,13 @@ function handleUpdate(value: unknown): void {
 
 <template>
   <div :class="cn('grid gap-1', props.class)">
-    <Label v-if="label" :for="selectId" class="text-caption font-medium text-foreground">
-      {{ label }}
-      <span v-if="required" class="text-danger" aria-hidden="true">*</span>
-    </Label>
+    <div v-if="label || $slots['label-action']" class="flex h-5 items-center justify-between gap-2">
+      <Label :for="selectId" class="text-caption font-medium text-foreground">
+        {{ label }}
+        <span v-if="required" class="text-danger" aria-hidden="true">*</span>
+      </Label>
+      <slot name="label-action" />
+    </div>
     <Select
       :model-value="normalizedValue"
       :disabled="selectDisabled"

@@ -11,6 +11,7 @@ export interface CustomerEditableSnapshot {
   industry: string | null
   license_type: 'TRIAL' | 'OFFICIAL' | null
   license_expiry_date: string | null
+  license_is_permanent: boolean
   license_authorized_users: number | null
 }
 
@@ -52,15 +53,20 @@ function normalizeProcurementId(value: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+// 永久授权只对正式类型成立且没有到期日；其余情况无到期日即无授权类型。
 function normalizeLicense(snapshot: CustomerEditableSnapshot): {
   license_type: 'TRIAL' | 'OFFICIAL' | null
   license_expiry_date: string | null
+  license_is_permanent: boolean
 } {
+  if (snapshot.license_is_permanent && snapshot.license_type === 'OFFICIAL') {
+    return { license_type: 'OFFICIAL', license_expiry_date: null, license_is_permanent: true }
+  }
   const normalizedExpiry = normalizeDate(snapshot.license_expiry_date)
-  const normalizedType = normalizedExpiry === null ? null : snapshot.license_type
   return {
-    license_type: normalizedType,
+    license_type: normalizedExpiry === null ? null : snapshot.license_type,
     license_expiry_date: normalizedExpiry,
+    license_is_permanent: false,
   }
 }
 
@@ -154,9 +160,11 @@ export function buildCustomerUpdatePayload(
         if (
           currentLicense.license_type !== baselineLicense.license_type
           || currentLicense.license_expiry_date !== baselineLicense.license_expiry_date
+          || currentLicense.license_is_permanent !== baselineLicense.license_is_permanent
         ) {
           payload.license_type = currentLicense.license_type
           payload.license_expiry_date = currentLicense.license_expiry_date
+          payload.license_is_permanent = currentLicense.license_is_permanent
           hasChanges = true
         }
         break

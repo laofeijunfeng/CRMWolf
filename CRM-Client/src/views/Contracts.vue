@@ -17,6 +17,7 @@
  */
 import { ref, reactive, computed, onMounted, watch, watchEffect } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
+import { LICENSE_PERMANENT_TEXT } from '@/utils/licenseStatus'
 import { toast } from 'vue-sonner'
 import { Plus, Eye, Pencil, Send, Trash2 } from 'lucide-vue-next'
 import { AmountText, DataTable, TableRowActions, type TableRowActionSet } from '@/components/crmwolf'
@@ -930,7 +931,7 @@ defineExpose({
           <span>年限：{{ getPurchaseYearsText(row) }}</span>
           <span>授权：{{ row.license_authorized_users ?? row.user_count ?? '-' }}</span>
           <span>客单价：<AmountText :value="row.standard_unit_price" size="sm" /></span>
-          <span>授权时间：{{ formatDate(row.license_expiry_date) }}</span>
+          <span>授权时间：{{ row.license_is_permanent === true ? LICENSE_PERMANENT_TEXT : formatDate(row.license_expiry_date) }}</span>
         </div>
       </template>
 
@@ -1009,7 +1010,7 @@ defineExpose({
 
       <!-- 授权时间 -->
       <template #cell-license_expiry_date="{ row }">
-        {{ formatDate(row.license_expiry_date) }}
+        {{ row.license_is_permanent === true ? LICENSE_PERMANENT_TEXT : formatDate(row.license_expiry_date) }}
       </template>
 
       <!-- 签署日期 -->

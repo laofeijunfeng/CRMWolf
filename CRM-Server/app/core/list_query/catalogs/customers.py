@@ -90,6 +90,7 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
             type="date",
             expression=Customer.license_expiry_date,
             date_kind="date",
+            null_present_expression_builder=lambda _ctx: Customer.license_is_permanent,
         ),
         ListQueryField(
             key="default_procurement_method",

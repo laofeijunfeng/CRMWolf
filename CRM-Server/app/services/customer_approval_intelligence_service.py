@@ -94,6 +94,7 @@ class CustomerApprovalIntelligenceService:
             "status": entity.status,
             "approval_phase": getattr(entity.approval_phase, "value", entity.approval_phase),
             "expiry_date": entity.expiry_date.isoformat() if entity.expiry_date else None,
+            "is_permanent": bool(entity.is_permanent),
             "deployment_info_id": int(entity.deployment_info_id) if entity.deployment_info_id else None,
             "contract_id": int(entity.contract_id) if entity.contract_id else None,
             "has_enterprise_id": bool(entity.enterprise_id),

@@ -22,6 +22,7 @@ def _customer(**overrides: object) -> SimpleNamespace:
         "status": 0,
         "license_type": "TRIAL",
         "license_expiry_date": date(2026, 1, 1),
+        "license_is_permanent": False,
         "license_authorized_users": 20,
     }
     values.update(overrides)

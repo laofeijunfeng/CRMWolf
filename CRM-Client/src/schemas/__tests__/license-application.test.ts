@@ -19,6 +19,7 @@ function buildLicenseApplication(
     contract_id: null,
     authorized_users: 10,
     expiry_date: getDateAfterDays(14),
+    is_permanent: false,
     license_type: 'TRIAL',
     enterprise_id: null,
     supported_modules: null,
@@ -77,6 +78,7 @@ describe('LicenseApplicationCreateSchema', () => {
     product_public_id: 'prd_apifox',
     authorized_users: 10,
     expiry_date: getDateAfterDays(14),
+    is_permanent: false,
     license_type: 'TRIAL' as const,
     remark: null
   }
@@ -94,6 +96,30 @@ describe('LicenseApplicationCreateSchema', () => {
       ...validCreate,
       expiry_date: getDateAfterDays(-1)
     }).success).toBe(false)
+  })
+
+  it('requires the trial expiry copy when a trial has no future date', () => {
+    const result = LicenseApplicationCreateSchema.safeParse({ ...validCreate, expiry_date: null })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map(issue => issue.message)).toEqual([
+      '试用 License 必须填到期日期，且要晚于今天。'
+    ])
+  })
+
+  it('accepts a permanent official license without an expiry date', () => {
+    expect(LicenseApplicationCreateSchema.safeParse({
+      ...validCreate,
+      license_type: 'OFFICIAL',
+      contract_id: 7,
+      is_permanent: true,
+      expiry_date: null
+    }).success).toBe(true)
+  })
+
+  it('rejects a permanent trial license', () => {
+    const result = LicenseApplicationCreateSchema.safeParse({ ...validCreate, is_permanent: true, expiry_date: null })
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map(issue => issue.message)).toEqual(['试用 License 不能设为永久'])
   })
 })
 

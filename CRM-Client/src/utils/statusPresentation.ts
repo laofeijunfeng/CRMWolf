@@ -1,5 +1,5 @@
 import { DEAL_JOURNEY_BOARD_STAGE_LABELS } from '@/utils/dealJourney'
-import { LICENSE_STATUS_LABELS } from '@/utils/licenseStatus'
+import { LICENSE_PERMANENT_TEXT, LICENSE_STATUS_LABELS } from '@/utils/licenseStatus'
 
 export type StatusTone = 'neutral' | 'info' | 'warning' | 'success' | 'danger'
 
@@ -158,6 +158,7 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     expired: { label: LICENSE_STATUS_LABELS.expired, tone: 'danger' },
     trial: { label: LICENSE_STATUS_LABELS.trial, tone: 'warning' },
     official: { label: LICENSE_STATUS_LABELS.official, tone: 'success' },
+    permanent: { label: `${LICENSE_STATUS_LABELS.official} · ${LICENSE_PERMANENT_TEXT}`, tone: 'success' },
   },
   agentInteraction: {
     pending: { label: '待处理', tone: 'info' },

@@ -17,6 +17,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
+from app.core.list_query.license_status import LICENSE_PERMANENT_LABEL
 from app.models.contract import Contract, ContractStatus
 from app.models.payment import PaymentPlan, PaymentRecord, PaymentConfirmationStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceReissueApplicationStatus
@@ -567,7 +568,11 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
             "授权类型": _license_application_type_label(getattr(entity, "license_type", None)),
             "服务地址": getattr(deployment_info, "server_address", None),
             "使用人数": _format_count(getattr(entity, "authorized_users", None)),
-            "到期日期": _format_date(getattr(entity, "expiry_date", None)),
+            "到期日期": (
+                LICENSE_PERMANENT_LABEL
+                if getattr(entity, "is_permanent", False)
+                else _format_date(getattr(entity, "expiry_date", None))
+            ),
             "备注": getattr(entity, "remark", None),
         }
 

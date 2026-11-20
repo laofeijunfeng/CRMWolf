@@ -42,7 +42,7 @@ import { handleApiError } from '@/utils/errorHandler'
 import { formatProductIntentName } from '@/utils/productIntent'
 import customerApi, { type CustomerDetailResponse, type ContactResponse, type CustomerMemberResponse } from '@/api/customer'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
-import { classifyLicenseStatus } from '@/utils/licenseStatus'
+import { isPermanentLicense, LICENSE_PERMANENT_TEXT, licenseDisplayStatus } from '@/utils/licenseStatus'
 import customerActivityApi, { type CustomerActivityResponse } from '@/api/customerActivity'
 import { dealJourneyApi, type DealJourney } from '@/api/dealJourney'
 import invoiceApi, { type InvoiceTitleResponse } from '@/api/invoice'
@@ -927,7 +927,7 @@ watch(() => props.targetPanel, (panel): void => {
                         <div class="attribute-value">
                           <StatusBadge
                             type="licenseStatus"
-                            :status="classifyLicenseStatus(customer?.license_expiry_date, customer?.license_type)"
+                            :status="licenseDisplayStatus(customer ?? {})"
                           />
                         </div>
                       </div>
@@ -937,7 +937,7 @@ watch(() => props.targetPanel, (panel): void => {
                       </div>
                       <div class="attribute-item">
                         <div class="attribute-label">授权到期</div>
-                        <div class="attribute-value">{{ formatDate(customer?.license_expiry_date) }}</div>
+                        <div class="attribute-value">{{ isPermanentLicense(customer ?? {}) ? LICENSE_PERMANENT_TEXT : formatDate(customer?.license_expiry_date) }}</div>
                       </div>
                       <div class="attribute-item">
                         <div class="attribute-label">创建人</div>

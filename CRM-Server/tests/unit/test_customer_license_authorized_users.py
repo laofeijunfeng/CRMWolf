@@ -8,7 +8,6 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.crud import crud_license_application as license_crud_module
 from app.crud.crud_license_application import license_application_crud
 from app.models.customer import Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
@@ -88,16 +87,6 @@ def customer(db):
     return row
 
 
-def _disable_progress_side_effect(monkeypatch):
-    monkeypatch.setattr(license_crud_module, "advance_eligible_progress", lambda *args, **kwargs: None)
-
-
-def _progress(db, customer_id=1, team_id=1):
-    return db.query(CustomerLegacySourceProgress).filter_by(
-        team_id=team_id, customer_id=customer_id
-    ).one_or_none()
-
-
 def test_customer_model_exposes_nullable_license_authorized_users(db):
     customer = _customer()
     db.add(customer)
@@ -112,7 +101,6 @@ def test_snapshot_ignores_non_issued_and_accepts_trial_and_official(db, customer
         _application("official", status=LicenseApplicationStatus.ISSUED, license_type="OFFICIAL", users=20, expiry=date(2028, 1, 1)),
     ])
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(
         db, 1, db.query(LicenseApplication).filter_by(application_number="trial").one()
@@ -144,7 +132,6 @@ def test_snapshot_prefers_later_expiry_then_last_modified_then_id(db, customer, 
         same_expiry_same_time_high_id,
     ])
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, same_expiry_older_time)
     db.refresh(customer)
@@ -163,7 +150,6 @@ def test_snapshot_takes_all_values_from_selected_application(db, customer, monke
     )
     db.add_all([selected, competing])
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, competing)
     db.refresh(customer)
@@ -179,7 +165,6 @@ def test_cross_team_issued_application_leaves_customer_unchanged(db, customer, m
     )
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, application)
     db.refresh(customer)
@@ -191,12 +176,10 @@ def test_missing_customer_is_a_noop(db, monkeypatch):
     application = _application("missing", customer_id=999, license_type="TRIAL", users=7, expiry=date(2029, 1, 1))
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, application)
 
     assert db.query(Customer).count() == 0
-    assert db.query(CustomerLegacySourceProgress).count() == 0
 
 
 def test_no_issued_applications_clear_all_snapshot_fields(db, customer, monkeypatch):
@@ -206,7 +189,6 @@ def test_no_issued_applications_clear_all_snapshot_fields(db, customer, monkeypa
     application = _application("now-rejected", status="REJECTED", license_type="TRIAL", users=5, expiry=date(2029, 1, 1))
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, application)
     db.refresh(customer)
@@ -220,7 +202,6 @@ def test_older_issued_application_does_not_replace_newer_snapshot(db, customer, 
     db.add_all([newer, older])
     db.commit()
     license_application_crud.update_customer_license_info(db, 1, newer)
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, older)
     db.refresh(customer)
@@ -239,7 +220,6 @@ def test_older_application_recomputes_snapshot_after_prior_winner_is_no_longer_e
     db.refresh(customer)
     newer.status = "REJECTED"
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, older)
     db.refresh(customer)
@@ -249,13 +229,7 @@ def test_older_application_recomputes_snapshot_after_prior_winner_is_no_longer_e
     )
 
 
-def test_equal_expiry_type_and_user_change_does_not_advance_progress_twice(db, customer, monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        license_crud_module,
-        "advance_eligible_progress",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
-    )
+def test_equal_expiry_newer_application_replaces_type_and_users(db, customer):
     first = _application("first", license_type="TRIAL", users=5, expiry=date(2028, 1, 1), modified=datetime(2026, 1, 1))
     db.add(first)
     db.commit()
@@ -273,7 +247,6 @@ def test_equal_expiry_type_and_user_change_does_not_advance_progress_twice(db, c
     license_application_crud.update_customer_license_info(db, 1, second)
     db.refresh(customer)
 
-    assert len(calls) == 1
     assert (customer.license_type, customer.license_authorized_users, customer.license_expiry_date) == (
         "OFFICIAL", 20, date(2028, 1, 1)
     )
@@ -285,7 +258,6 @@ def test_commit_true_does_not_commit_unrelated_pending_changes_when_snapshot_is_
     application = _application("unchanged", license_type="OFFICIAL", users=20, expiry=date(2028, 1, 1))
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     customer.license_type = "OFFICIAL"
     customer.license_authorized_users = 20
@@ -310,7 +282,6 @@ def test_commit_false_defers_snapshot_persistence_until_commit(db, customer, mon
     application = _application("deferred", license_type="TRIAL", users=5, expiry=date(2028, 1, 1))
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, application, commit=False)
     db.rollback()
@@ -333,7 +304,6 @@ def test_snapshot_includes_in_memory_issued_application_before_outer_commit(db, 
     )
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     application.status = LicenseApplicationStatus.ISSUED
     with db.no_autoflush:
@@ -352,7 +322,6 @@ def test_commit_true_persists_snapshot(db, customer, monkeypatch):
     application = _application("committed", license_type="OFFICIAL", users=20, expiry=date(2028, 1, 1))
     db.add(application)
     db.commit()
-    _disable_progress_side_effect(monkeypatch)
 
     license_application_crud.update_customer_license_info(db, 1, application, commit=True)
     db.expire_all()

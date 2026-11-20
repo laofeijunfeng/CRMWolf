@@ -4,6 +4,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import false, func
+
 from app.core.list_query.types import (
     DEFAULT_OPS,
     DateKind,
@@ -41,6 +43,15 @@ class ListQueryField:
     predicate_builder: PredicateBuilder | None = None
     expression_builder: ExpressionBuilder | None = None
     sort_expression_builder: ExpressionBuilder | None = None
+    # Opt-in: boolean expression marking rows whose NULL `expression` still means "has a value"
+    # (e.g. a permanent License has no expiry date). Such rows are not empty and sort after all
+    # non-null values in both directions.
+    null_present_expression_builder: ExpressionBuilder | None = None
+
+    def null_present_expression(self, context: ListQueryContext | None = None) -> Any:
+        if self.null_present_expression_builder is None:
+            return None
+        return func.coalesce(self.null_present_expression_builder(context or ListQueryContext()), false())
 
     def ops(self) -> frozenset[str]:
         if self.allowed_ops is not None:

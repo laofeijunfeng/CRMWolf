@@ -27,6 +27,16 @@ const licensePairIssue = {
   path: ['license_expiry_date'] as (string | number)[],
 }
 
+export const CUSTOMER_TRIAL_PERMANENT_ERROR = '试用授权必须填写到期日，不能设为永久。'
+
+const rejectPermanentWithoutOfficial = (values: Record<string, unknown>): boolean =>
+  values['license_is_permanent'] !== true || values['license_type'] === 'OFFICIAL'
+
+const permanentLicenseIssue = {
+  message: CUSTOMER_TRIAL_PERMANENT_ERROR,
+  path: ['license_is_permanent'] as (string | number)[],
+}
+
 export const AUTHORIZED_USERS_MESSAGE = '请输入大于 0 的整数'
 const AUTHORIZED_USERS_MAX = 2147483647
 
@@ -80,20 +90,21 @@ const customerFormObjectSchema = z.object({
   industry: z.string().max(100).optional().or(z.literal('')),
   license_type: customerLicenseTypeSchema,
   license_expiry_date: customerLicenseExpirySchema,
+  license_is_permanent: z.boolean().optional(),
   license_authorized_users: z.string().optional().or(z.literal('')),
 })
 
 export const customerFormSchema = customerFormObjectSchema.refine(
   rejectExpiryWithoutLicenseType,
   licensePairIssue,
-).refine(acceptAuthorizedUsers, authorizedUsersIssue)
+).refine(rejectPermanentWithoutOfficial, permanentLicenseIssue).refine(acceptAuthorizedUsers, authorizedUsersIssue)
 
 // Edit schema accepts unset profile fields and preserves non-empty legacy values.
 export const customerEditSchema = customerFormObjectSchema.extend({
   company_scale: z.string().max(50, '公司规模不能超过50个字符').optional().or(z.literal('')),
   source_public_id: z.string().optional().or(z.literal('')),
   default_procurement_method_id: z.number().int().positive('请选择采购方式').optional(),
-}).refine(rejectExpiryWithoutLicenseType, licensePairIssue).refine(acceptAuthorizedUsers, authorizedUsersIssue)
+}).refine(rejectExpiryWithoutLicenseType, licensePairIssue).refine(rejectPermanentWithoutOfficial, permanentLicenseIssue).refine(acceptAuthorizedUsers, authorizedUsersIssue)
 
 export type CustomerForm = z.infer<typeof customerFormSchema>
 export type CustomerEditForm = z.infer<typeof customerEditSchema>
@@ -110,6 +121,7 @@ export const customerCreateSchema = customerFormObjectSchema.pick({
   industry: true,
   license_type: true,
   license_expiry_date: true,
+  license_is_permanent: true,
   license_authorized_users: true,
 }).extend({
   company_scale: z.enum([
@@ -132,6 +144,6 @@ export const customerCreateSchema = customerFormObjectSchema.pick({
     required_error: '请选择性别',
     invalid_type_error: '请选择性别'
   })
-}).refine(rejectExpiryWithoutLicenseType, licensePairIssue).refine(acceptAuthorizedUsers, authorizedUsersIssue)
+}).refine(rejectExpiryWithoutLicenseType, licensePairIssue).refine(rejectPermanentWithoutOfficial, permanentLicenseIssue).refine(acceptAuthorizedUsers, authorizedUsersIssue)
 
 export type CustomerCreateForm = z.infer<typeof customerCreateSchema>

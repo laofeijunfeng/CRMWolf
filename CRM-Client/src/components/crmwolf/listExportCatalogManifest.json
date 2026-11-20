@@ -76,7 +76,7 @@
     },
     "license_expiry_date": {
       "label": "授权时间",
-      "type": "date"
+      "type": "text"
     },
     "signing_date": {
       "label": "签署日期",
@@ -138,7 +138,7 @@
     },
     "license_expiry_date": {
       "label": "授权到期",
-      "type": "date"
+      "type": "text"
     },
     "default_procurement_method": {
       "label": "默认采购方式",

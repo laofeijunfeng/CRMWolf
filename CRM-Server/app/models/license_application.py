@@ -1,4 +1,5 @@
-from sqlalchemy import Column, BigInteger, Integer, String, DateTime, Date, Text, ForeignKey, Index
+from sqlalchemy import Boolean, Column, BigInteger, Integer, String, DateTime, Date, Text, ForeignKey, Index
+from sqlalchemy.sql import expression
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.constants.approval_phase import ApprovalPhase
@@ -32,7 +33,14 @@ class LicenseApplication(Base):
     product_id = Column(BigInteger, ForeignKey('crm_products.id', ondelete='SET NULL'), nullable=True, comment="申请产品ID")
     product_name = Column(String(100), nullable=True, comment="申请产品名称快照（授权文件标题）")
 
-    expiry_date = Column(Date, nullable=False, comment="到期时间")
+    expiry_date = Column(Date, nullable=True, comment="到期时间")
+    is_permanent = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
+        comment="是否永久授权（仅正式 License，永久时到期时间为空）",
+    )
     license_type = Column(String(20), nullable=False, comment="License 类型")
     authorized_users = Column(Integer, nullable=False, comment="本次申请使用人数")
 

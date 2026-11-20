@@ -42,6 +42,7 @@ export { default as TableToolbarBuilderPanel } from './TableToolbarBuilderPanel.
 export { default as TableRowActions } from './TableRowActions.vue'
 export { default as DesktopTableRowActions } from './DesktopTableRowActions.vue'
 export { default as HoverInfo } from './HoverInfo.vue'
+export { default as FieldHelpTip } from './FieldHelpTip.vue'
 export { default as StatusBadge } from './StatusBadge.vue'
 export { default as ApprovalStatusBadge } from './ApprovalStatusBadge.vue'
 export { default as DataTableExportDialog } from './DataTableExportDialog.vue'

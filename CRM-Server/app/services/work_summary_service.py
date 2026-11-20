@@ -966,6 +966,7 @@ class WorkSummaryService:
                         "status": application.status,
                         "approval_phase": application.approval_phase,
                         "expiry_date": application.expiry_date.isoformat() if application.expiry_date else None,
+                        "is_permanent": bool(application.is_permanent),
                     },
                     title=f"License 申请 {application.application_number}",
                     business_key=application.application_number,

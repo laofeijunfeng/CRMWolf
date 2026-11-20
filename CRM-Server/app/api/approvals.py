@@ -1880,6 +1880,7 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             "license_type": license_application.license_type,
             "product_name": license_application.product_name,
             "expiry_date": license_application.expiry_date,
+            "is_permanent": license_application.is_permanent,
             "status": license_application.status,
             "deployment_name": deployment.deployment_name if deployment else None,
             "server_address": deployment.server_address if deployment else None,

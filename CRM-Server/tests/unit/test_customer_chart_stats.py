@@ -30,6 +30,7 @@ def _customer(**overrides):
         "company_scale": "1-50人",
         "license_expiry_date": None,
         "license_type": None,
+        "license_is_permanent": False,
         "created_time": datetime(2026, 10, 2),
         "status": 0,
     }

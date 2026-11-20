@@ -10,6 +10,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   DateField,
   InputField,
@@ -19,9 +21,10 @@ import {
 } from '@/components/crmwolf'
 import SelectionSummary from '@/components/crmwolf/SelectionSummary.vue'
 import ProductIntentPicker from '@/components/crmwolf/ProductIntentPicker.vue'
+import FieldHelpTip from '@/components/crmwolf/FieldHelpTip.vue'
 import DeploymentInfoFormDialog from '@/components/dialogs/DeploymentInfoFormDialog.vue'
 import licenseApplicationApi, { type LicenseType } from '@/api/licenseApplication'
-import type { LicenseApplicationCreate } from '@/schemas/licenseApplication'
+import { TRIAL_EXPIRY_REQUIRED_ERROR, type LicenseApplicationCreate } from '@/schemas/licenseApplication'
 import type { ContractListResponse } from '@/api/contract'
 import type { DeploymentInfoResponse } from '@/api/deployment'
 import { handleApiError } from '@/utils/errorHandler'
@@ -59,6 +62,7 @@ interface LicenseForm {
   productPublicId: string
   authorizedUsers: string
   expiryDate: string
+  isPermanent: boolean
   remark: string
 }
 
@@ -92,6 +96,7 @@ const form = reactive<LicenseForm>({
   productPublicId: '',
   authorizedUsers: '1',
   expiryDate: '',
+  isPermanent: false,
   remark: '',
 })
 
@@ -219,6 +224,13 @@ function handleExpiryDateChange(date: Date | null): void {
   form.expiryDate = date !== null ? formatLocalDate(date) : ''
 }
 
+// 永久与到期日期互斥：切换任一方向都清空日期，关闭永久后需重新选择。
+function handlePermanentChange(value: boolean): void {
+  form.isPermanent = value
+  form.expiryDate = ''
+  errors.expiryDate = ''
+}
+
 function getInitialLicenseType(): LicenseType {
   if (hasFixedContract.value) return 'OFFICIAL'
   if (props.defaultLicenseType === 'OFFICIAL' && defaultApprovedContract.value !== null) return 'OFFICIAL'
@@ -259,6 +271,7 @@ function resetForm(): void {
   form.productPublicId = props.opportunityProductPublicId ?? ''
   form.authorizedUsers = getInitialAuthorizedUsers(initialContractId)
   form.expiryDate = ''
+  form.isPermanent = false
   form.remark = ''
   clearErrors()
   initialForm.value = { ...form }
@@ -284,18 +297,18 @@ function validateForm(): boolean {
     errors.authorizedUsers = '请输入大于 0 的整数'
   }
 
-  if (form.expiryDate === '') {
-    errors.expiryDate = '请选择到期日期'
-  } else {
-    const expiryDate = parseLocalDate(form.expiryDate)
-    if (expiryDate === null) {
+  if (!form.isPermanent) {
+    const expiryDate = form.expiryDate === '' ? null : parseLocalDate(form.expiryDate)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (form.licenseType === 'TRIAL' && (expiryDate === null || expiryDate <= today)) {
+      errors.expiryDate = TRIAL_EXPIRY_REQUIRED_ERROR
+    } else if (form.expiryDate === '') {
+      errors.expiryDate = '请选择到期日期'
+    } else if (expiryDate === null) {
       errors.expiryDate = '请选择有效日期'
-    } else {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      if (expiryDate <= today) {
-        errors.expiryDate = '到期日期必须晚于今天'
-      }
+    } else if (expiryDate <= today) {
+      errors.expiryDate = '到期日期必须晚于今天'
     }
   }
 
@@ -315,7 +328,8 @@ async function handleSubmit(): Promise<void> {
     contract_id: form.licenseType === 'OFFICIAL' ? Number(form.contractId) : null,
     product_public_id: form.productPublicId,
     authorized_users: Number(form.authorizedUsers),
-    expiry_date: form.expiryDate,
+    is_permanent: form.isPermanent,
+    expiry_date: form.isPermanent ? null : form.expiryDate,
     remark: form.remark.trim() === '' ? null : form.remark.trim(),
   }
 
@@ -418,6 +432,7 @@ watch(
     }
     if (type === 'TRIAL') {
       form.contractId = ''
+      form.isPermanent = false
     }
   }
 )
@@ -485,7 +500,7 @@ watch(
           />
 
           <div class="license-application-dialog__field">
-            <p id="license-type-label" class="license-application-dialog__label">
+            <p id="license-type-label" class="license-application-dialog__label license-application-dialog__label-row">
               License 类型
               <span class="license-application-dialog__required" aria-hidden="true">*</span>
             </p>
@@ -545,15 +560,29 @@ watch(
         <div class="license-application-dialog__grid">
           <DateField
             id="license-expiry-date"
-            :model-value="parseLocalDate(form.expiryDate)"
             class="license-application-dialog__field"
             label="到期日期"
             required
-            placeholder="请选择到期日期"
-            :disabled="submitting"
+            :model-value="form.isPermanent ? null : parseLocalDate(form.expiryDate)"
+            :placeholder="form.isPermanent ? '永久有效' : '请选择到期日期'"
+            :disabled="submitting || form.isPermanent"
             :error="errors.expiryDate"
             @update:model-value="handleExpiryDateChange"
-          />
+          >
+            <template #label-action>
+              <div v-if="form.licenseType === 'OFFICIAL'" class="license-application-dialog__permanent">
+                <Switch
+                  id="license-permanent"
+                  size="sm"
+                  :model-value="form.isPermanent"
+                  :disabled="submitting"
+                  @update:model-value="handlePermanentChange"
+                />
+                <Label for="license-permanent" class="license-application-dialog__label">永久</Label>
+              </div>
+              <FieldHelpTip v-else label="试用到期日期规则">{{ TRIAL_EXPIRY_REQUIRED_ERROR }}</FieldHelpTip>
+            </template>
+          </DateField>
 
           <InputField
             id="license-authorized-users"
@@ -630,6 +659,18 @@ watch(
   color: hsl(var(--foreground));
   font-size: var(--font-size-caption);
   font-weight: 500;
+}
+
+.license-application-dialog__label-row {
+  display: flex;
+  align-items: center;
+  height: 1.25rem;
+}
+
+.license-application-dialog__permanent {
+  display: flex;
+  align-items: center;
+  gap: $space-1;
 }
 
 .license-application-dialog__contract-trigger {

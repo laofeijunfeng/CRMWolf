@@ -245,7 +245,7 @@ describe('LicenseApplicationFormDialog', () => {
     await wrapper.find('form').trigger('submit')
     await nextTick()
 
-    expect(dateField.text()).toContain('到期日期必须晚于今天')
+    expect(dateField.text()).toContain('试用 License 必须填到期日期，且要晚于今天。')
     expect(licenseApplicationApi.create).not.toHaveBeenCalled()
 
     const yesterday = new Date(today)
@@ -254,7 +254,7 @@ describe('LicenseApplicationFormDialog', () => {
     await wrapper.find('form').trigger('submit')
     await nextTick()
 
-    expect(dateField.text()).toContain('到期日期必须晚于今天')
+    expect(dateField.text()).toContain('试用 License 必须填到期日期，且要晚于今天。')
     expect(licenseApplicationApi.create).not.toHaveBeenCalled()
   })
 })

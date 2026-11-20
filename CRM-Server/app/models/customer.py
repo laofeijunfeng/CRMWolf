@@ -1,5 +1,6 @@
 from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Date, Index, ForeignKey, Text, event, Boolean
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import expression
 from enum import Enum as PyEnum
 from app.core.database import Base
 from app.utils.time import business_now
@@ -96,6 +97,13 @@ class Customer(Base):
         Integer,
         nullable=True,
         comment="客户 License 授权人数（自动更新）",
+    )
+    license_is_permanent = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=expression.false(),
+        comment="客户 License 是否永久（自动更新，永久时到期时间为空）",
     )
 
     contacts = relationship("Contact", back_populates="customer", cascade="all, delete-orphan")

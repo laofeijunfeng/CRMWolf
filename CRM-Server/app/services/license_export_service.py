@@ -7,6 +7,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 import tempfile
 
+from app.core.list_query.license_status import license_expiry_text
 from app.models.license_application import LicenseApplication, LicenseType
 from app.utils.time import business_now
 
@@ -55,7 +56,8 @@ def export_license_document(application: LicenseApplication) -> str:
 
     # 企业信息
     doc.add_paragraph(f"企业名称: {application.customer.account_name}")
-    doc.add_paragraph(f"到期时间: {application.expiry_date.strftime('%Y-%m-%d')}")
+    expiry_text = license_expiry_text(application.expiry_date, application.is_permanent)
+    doc.add_paragraph(f"到期时间: {expiry_text or '未填写'}")
 
     # 授权人数来自本次 License 申请，服务器地址来自部署信息。
     doc.add_paragraph(f"授权人数: {application.authorized_users}")

@@ -39,6 +39,7 @@ from app.schemas.customer import (
     CustomerLicenseSnapshotUpdate,
     CustomerStatusEnum,
     CustomerUpdate,
+    normalize_customer_license_pair,
 )
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
 from app.utils.time import business_now
@@ -473,17 +474,25 @@ class CustomerCRUD:
                 raise ValueError("仅允许更新跟进中或已成交客户的状态")
             proposed["status"] = obj_in.status
 
-        if "license_type" in fields_set or "license_expiry_date" in fields_set:
+        license_fields = ("license_type", "license_expiry_date", "license_is_permanent")
+        if any(field in fields_set for field in license_fields):
             license_type = obj_in.license_type if "license_type" in fields_set else locked_customer.license_type
             license_expiry_date = (
                 obj_in.license_expiry_date if "license_expiry_date" in fields_set else locked_customer.license_expiry_date
             )
-            if license_expiry_date is None:
-                license_type = None
-            elif license_type is None:
-                raise ValueError("授权到期日期不为空时必须选择授权类型")
+            if "license_is_permanent" in fields_set:
+                license_is_permanent = bool(obj_in.license_is_permanent)
+            elif "license_expiry_date" in fields_set and obj_in.license_expiry_date is not None:
+                # An explicit date means the License is no longer permanent.
+                license_is_permanent = False
+            else:
+                license_is_permanent = bool(locked_customer.license_is_permanent)
+            license_type, license_expiry_date, license_is_permanent = normalize_customer_license_pair(
+                license_type, license_expiry_date, license_is_permanent
+            )
             proposed["license_type"] = license_type
             proposed["license_expiry_date"] = license_expiry_date
+            proposed["license_is_permanent"] = license_is_permanent
 
         if "license_authorized_users" in fields_set:
             proposed["license_authorized_users"] = obj_in.license_authorized_users
@@ -530,6 +539,7 @@ class CustomerCRUD:
             "status",
             "license_type",
             "license_expiry_date",
+            "license_is_permanent",
             "license_authorized_users",
             "product_public_id",
         )
@@ -553,8 +563,8 @@ class CustomerCRUD:
         def _field_was_requested(field: str) -> bool:
             if field == "source_public_id":
                 return "source_public_id" in fields_set or "source" in fields_set
-            if field in ("license_type", "license_expiry_date"):
-                return "license_type" in fields_set or "license_expiry_date" in fields_set
+            if field in license_fields:
+                return any(name in fields_set for name in license_fields)
             return field in fields_set
 
         before: dict[str, Any] = {}
@@ -620,18 +630,26 @@ class CustomerCRUD:
         before = {
             "license_type": locked_customer.license_type,
             "license_expiry_date": locked_customer.license_expiry_date,
+            "license_is_permanent": bool(locked_customer.license_is_permanent),
         }
-        if before == {"license_type": obj_in.license_type, "license_expiry_date": obj_in.license_expiry_date}:
+        requested = {
+            "license_type": obj_in.license_type,
+            "license_expiry_date": obj_in.license_expiry_date,
+            "license_is_permanent": bool(obj_in.license_is_permanent),
+        }
+        if before == requested:
             locked_customer.version += 1
             db.commit()
             db.refresh(locked_customer)
             return locked_customer, before, before.copy()
         locked_customer.license_type = obj_in.license_type
         locked_customer.license_expiry_date = obj_in.license_expiry_date
+        locked_customer.license_is_permanent = bool(obj_in.license_is_permanent)
         locked_customer.version += 1
         after = {
             "license_type": locked_customer.license_type,
             "license_expiry_date": locked_customer.license_expiry_date,
+            "license_is_permanent": bool(locked_customer.license_is_permanent),
         }
         db.commit()
         db.refresh(locked_customer)

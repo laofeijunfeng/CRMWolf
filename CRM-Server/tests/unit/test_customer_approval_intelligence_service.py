@@ -25,6 +25,7 @@ def test_customer_approval_intelligence_enqueues_license_change(monkeypatch) -> 
         deployment_info_id=901,
         contract_id=401,
         expiry_date=date(2027, 8, 2),
+        is_permanent=False,
         license_type="OFFICIAL",
         enterprise_id=None,
         supported_modules="desktop,web",

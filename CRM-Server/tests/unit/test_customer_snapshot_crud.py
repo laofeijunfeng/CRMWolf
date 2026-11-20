@@ -6,14 +6,14 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import ConflictException
 from app.crud.customer import customer_crud
 from app.models.customer import Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
-from app.schemas.customer import CustomerLicenseSnapshotUpdate, CustomerUpdate
+from app.schemas.customer import CustomerLicensePermanentError, CustomerLicenseSnapshotUpdate, CustomerUpdate
 
 
 @compiles(BigInteger, "sqlite")
@@ -21,23 +21,14 @@ def _bigint_to_sqlite_int(element, compiler, **kwargs):  # noqa: ARG001
     return "INTEGER"
 
 
-@pytest.fixture(autouse=True)
-def _mock_progress_for_mocked_sessions(monkeypatch):
-    from app.crud import customer as customer_module
-
-    real_advance = customer_module.advance_eligible_progress
-
-    def advance(db, **kwargs):
-        if isinstance(db, Session):
-            return real_advance(db, **kwargs)
-
-    monkeypatch.setattr(customer_module, "advance_eligible_progress", advance)
-
-
 def _locked_customer(db, customer):
     locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
     locked_query.first.return_value = customer
     return locked_query
+
+
+def _locked_query(root: MagicMock) -> MagicMock:
+    return root.filter.return_value.populate_existing.return_value.with_for_update.return_value
 
 
 def _locked_customer_for_update(db: MagicMock, **overrides: object) -> SimpleNamespace:
@@ -56,11 +47,12 @@ def _locked_customer_for_update(db: MagicMock, **overrides: object) -> SimpleNam
         "status": 0,
         "license_type": "TRIAL",
         "license_expiry_date": date(2026, 1, 1),
+        "license_is_permanent": False,
     }
     values.update(overrides)
     customer = SimpleNamespace(**values)
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
-    locked_query.first.return_value = customer
+    for root in (db.query.return_value, db.query.return_value.options.return_value):
+        _locked_query(root).first.return_value = customer
     return customer
 
 
@@ -97,6 +89,7 @@ def test_update_license_snapshot_updates_pair_and_increments_version_once():
         version=4,
         license_type="TRIAL",
         license_expiry_date=date(2026, 1, 1),
+        license_is_permanent=False,
     )
     _locked_customer(db, customer)
     payload = CustomerLicenseSnapshotUpdate(
@@ -108,8 +101,8 @@ def test_update_license_snapshot_updates_pair_and_increments_version_once():
     updated, before, after = customer_crud.update_license_snapshot(db, customer, payload)
 
     assert updated is customer
-    assert before == {"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1)}
-    assert after == {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)}
+    assert before == {"license_type": "TRIAL", "license_expiry_date": date(2026, 1, 1), "license_is_permanent": False}
+    assert after == {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1), "license_is_permanent": False}
     assert customer.license_type == "OFFICIAL"
     assert customer.license_expiry_date == date(2027, 1, 1)
     assert customer.version == 5
@@ -125,6 +118,7 @@ def test_update_license_snapshot_rejects_stale_version_before_mutation():
         version=4,
         license_type="TRIAL",
         license_expiry_date=date(2026, 1, 1),
+        license_is_permanent=False,
     )
     _locked_customer(db, customer)
     payload = CustomerLicenseSnapshotUpdate(
@@ -150,22 +144,55 @@ def test_update_license_snapshot_clears_type_when_expiry_is_none():
         version=4,
         license_type="OFFICIAL",
         license_expiry_date=date(2027, 1, 1),
+        license_is_permanent=False,
     )
     _locked_customer(db, customer)
     payload = CustomerLicenseSnapshotUpdate(expected_version=4, license_expiry_date=None)
 
     _, before, after = customer_crud.update_license_snapshot(db, customer, payload)
 
-    assert before == {"license_type": "OFFICIAL", "license_expiry_date": date(2027, 1, 1)}
-    assert after == {"license_type": None, "license_expiry_date": None}
+    assert before == {
+        "license_type": "OFFICIAL",
+        "license_expiry_date": date(2027, 1, 1),
+        "license_is_permanent": False,
+    }
+    assert after == {"license_type": None, "license_expiry_date": None, "license_is_permanent": False}
     assert customer.license_type is None
     assert customer.license_expiry_date is None
+
+
+def test_update_license_snapshot_permanent_official_stores_null_date():
+    db = MagicMock()
+    customer = SimpleNamespace(
+        id=1,
+        team_id=9,
+        version=4,
+        license_type="OFFICIAL",
+        license_expiry_date=date(2027, 1, 1),
+        license_is_permanent=False,
+    )
+    _locked_customer(db, customer)
+    payload = CustomerLicenseSnapshotUpdate(
+        expected_version=4,
+        license_type="OFFICIAL",
+        license_expiry_date=date(2027, 1, 1),
+        license_is_permanent=True,
+    )
+
+    _, _, after = customer_crud.update_license_snapshot(db, customer, payload)
+
+    assert after == {"license_type": "OFFICIAL", "license_expiry_date": None, "license_is_permanent": True}
+
+
+def test_license_snapshot_payload_rejects_permanent_trial():
+    with pytest.raises(ValueError, match="试用授权必须填写到期日，不能设为永久。"):
+        CustomerLicenseSnapshotUpdate(expected_version=4, license_type="TRIAL", license_is_permanent=True)
 
 
 def test_customer_update_rejects_unknown_industry_before_mutation(monkeypatch):
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, industry="old", city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = _locked_query(db.query.return_value.options.return_value)
     locked_query.first.return_value = current
     monkeypatch.setattr(
         "app.crud.industry.industry_crud.get_by_code_with_parent",
@@ -182,7 +209,7 @@ def test_customer_update_rejects_unknown_industry_before_mutation(monkeypatch):
 def test_customer_update_retains_current_inactive_industry_code(monkeypatch):
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, industry="legacy", city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = _locked_query(db.query.return_value.options.return_value)
     locked_query.first.return_value = current
     monkeypatch.setattr(
         "app.crud.industry.industry_crud.get_by_code_with_parent",
@@ -205,7 +232,7 @@ def test_customer_update_retains_current_inactive_industry_code(monkeypatch):
 def test_customer_update_accepts_active_industry_code(monkeypatch):
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, industry="old", city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = _locked_query(db.query.return_value.options.return_value)
     locked_query.first.return_value = current
     monkeypatch.setattr(
         "app.crud.industry.industry_crud.get_by_code_with_parent",
@@ -223,7 +250,7 @@ def test_customer_update_accepts_active_industry_code(monkeypatch):
 def test_customer_update_rejects_new_inactive_industry_code_before_mutation(monkeypatch):
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, industry="old", city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = _locked_query(db.query.return_value.options.return_value)
     locked_query.first.return_value = current
     monkeypatch.setattr(
         "app.crud.industry.industry_crud.get_by_code_with_parent",
@@ -350,6 +377,47 @@ def test_update_with_audit_rejects_effective_license_pair_without_type() -> None
     assert customer.license_expiry_date is None
     assert customer.version == 4
     db.commit.assert_not_called()
+
+
+def test_update_with_audit_rejects_permanent_trial_license_without_mutation() -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db)
+
+    with pytest.raises(CustomerLicensePermanentError, match="试用授权必须填写到期日，不能设为永久。"):
+        customer_crud.update_with_audit(
+            db,
+            customer,
+            CustomerUpdate(expected_version=4, license_is_permanent=True),
+        )
+
+    assert customer.license_is_permanent is False
+    assert customer.license_expiry_date == date(2026, 1, 1)
+    db.commit.assert_not_called()
+
+
+def test_update_with_audit_permanent_official_clears_date_and_new_date_clears_permanent() -> None:
+    db = MagicMock()
+    customer = _locked_customer_for_update(db, license_type="OFFICIAL", license_expiry_date=date(2027, 1, 1))
+
+    _, before, after = customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=4, license_is_permanent=True, license_expiry_date=date(2028, 1, 1)),
+    )
+    assert (customer.license_type, customer.license_expiry_date, customer.license_is_permanent) == (
+        "OFFICIAL",
+        None,
+        True,
+    )
+    assert after == {"license_expiry_date": None, "license_is_permanent": True}
+    assert before == {"license_expiry_date": date(2027, 1, 1), "license_is_permanent": False}
+
+    customer_crud.update_with_audit(
+        db,
+        customer,
+        CustomerUpdate(expected_version=5, license_expiry_date=date(2029, 1, 1)),
+    )
+    assert (customer.license_expiry_date, customer.license_is_permanent) == (date(2029, 1, 1), False)
 
 
 def test_update_with_audit_does_not_increment_version_for_no_actual_change() -> None:

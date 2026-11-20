@@ -27,6 +27,7 @@ const licenseApplication = (status: LicenseApplicationResponse['status']): Licen
   contract_id: null,
   authorized_users: 10,
   expiry_date: '2026-12-31',
+  is_permanent: false,
   license_type: 'TRIAL',
   enterprise_id: null,
   supported_modules: null,
@@ -55,6 +56,8 @@ const ListCardStub = defineComponent({
       h('h3', props.title),
       ...(props.items as DeploymentInfoResponse[]).map((item): VNode => h('div', { class: 'list-card-item-stub' }, [
         slots['itemMain']?.({ item }),
+        slots['itemMeta']?.({ item }),
+        slots['itemBadges']?.({ item }),
         slots['itemActions']?.({ item })
       ]))
     ])
@@ -136,5 +139,24 @@ describe('LicensePanel license application actions', () => {
     })
 
     expect(wrapper.find('[aria-label="删除许可证申请 LIC-20260820-0001"]').exists()).toBe(false)
+  })
+})
+
+describe('LicensePanel expiry display', () => {
+  it('shows 永久 without an expired badge for a permanent official application', () => {
+    const wrapper = mountPanel({
+      licenseApplications: [{ ...licenseApplication('ISSUED'), license_type: 'OFFICIAL', contract_id: 3, is_permanent: true, expiry_date: null }]
+    })
+
+    expect(wrapper.text()).toContain('到期: 永久')
+    expect(wrapper.text()).not.toContain('已过期')
+  })
+
+  it('flags a past expiry date as expired', () => {
+    const wrapper = mountPanel({
+      licenseApplications: [{ ...licenseApplication('ISSUED'), expiry_date: '2020-01-01' }]
+    })
+
+    expect(wrapper.text()).toContain('已过期')
   })
 })

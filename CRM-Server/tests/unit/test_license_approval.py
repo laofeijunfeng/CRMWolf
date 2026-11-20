@@ -371,16 +371,43 @@ def test_license_info_advances_with_newer_snapshot_only(db, test_customer):
     assert (test_customer.license_expiry_date, test_customer.license_type) == (date(2027, 12, 31), "OFFICIAL")
 
 
-def test_license_expiry_requires_owning_team_and_advances_only_on_change(db, test_customer):
-    assert license_application_crud.update_customer_license_expiry(db, 2, test_customer.id, date(2028, 1, 1)) is False
-    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2028, 1, 1)) is True
-    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2028, 1, 1)) is False
-    assert license_application_crud.update_customer_license_expiry(db, 1, test_customer.id, date(2027, 1, 1)) is False
+def test_permanent_issued_license_wins_over_later_dated_license(db, test_customer):
+    permanent = LicenseApplication(
+        team_id=1,
+        application_number="LIC-PERMANENT",
+        customer_id=test_customer.id,
+        expiry_date=None,
+        is_permanent=True,
+        license_type="OFFICIAL",
+        authorized_users=50,
+        applicant_id="tester",
+        status=LicenseApplicationStatus.ISSUED,
+    )
+    db.add(permanent)
+    db.commit()
+    license_application_crud.update_customer_license_info(db, 1, permanent)
+
+    dated = LicenseApplication(
+        team_id=1,
+        application_number="LIC-DATED-LATER",
+        customer_id=test_customer.id,
+        expiry_date=date(2099, 12, 31),
+        license_type="OFFICIAL",
+        authorized_users=10,
+        applicant_id="tester",
+        status=LicenseApplicationStatus.ISSUED,
+    )
+    db.add(dated)
+    db.commit()
+    license_application_crud.update_customer_license_info(db, 1, dated)
+
     db.refresh(test_customer)
-    assert test_customer.license_expiry_date == date(2028, 1, 1)
-    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=test_customer.id).one()
-    assert progress.eligible_revision == 1
-    assert db.query(CustomerLegacySourceProgress).filter_by(team_id=2).count() == 0
+    assert (
+        test_customer.license_type,
+        test_customer.license_authorized_users,
+        test_customer.license_expiry_date,
+        test_customer.license_is_permanent,
+    ) == ("OFFICIAL", 50, None, True)
 
 
 def test_license_info_rejects_cross_team_application(db, test_customer):

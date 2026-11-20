@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Query, Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func
 from typing import Optional, List, Tuple
 from decimal import Decimal
 from datetime import date, datetime
@@ -220,6 +220,13 @@ class ContractCRUD:
         ).order_by(
             LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc(),
         ).limit(1).correlate(Contract).scalar_subquery()
+        latest_license_is_permanent = db.query(LicenseApplication.is_permanent).filter(
+            LicenseApplication.contract_id == Contract.id,
+            LicenseApplication.license_type == "OFFICIAL",
+            LicenseApplication.status == "ISSUED",
+        ).order_by(
+            LicenseApplication.last_modified_time.desc(), LicenseApplication.id.desc(),
+        ).limit(1).correlate(Contract).scalar_subquery()
         displayed_authorized_users = func.coalesce(latest_license_authorized_users, Contract.user_count)
         customer_name_sort = db.query(Customer.account_name).filter(
             Customer.id == Contract.customer_id,
@@ -324,6 +331,9 @@ class ContractCRUD:
         }
         if order_by in sort_columns and order_dir:
             column = sort_columns[order_by]
+            if order_by == "license_expiry_date":
+                # Permanent Licenses have no expiry date; they follow every dated row in both directions.
+                query = query.order_by(case((func.coalesce(latest_license_is_permanent, False), 1), else_=0).asc())
             query = query.order_by(column.desc() if order_dir.lower() == "desc" else column.asc())
         else:
             query = query.order_by(Contract.created_time.desc())

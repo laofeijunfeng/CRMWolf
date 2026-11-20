@@ -3,7 +3,7 @@
 定义 License 申请相关的 Pydantic 模型。
 """
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
-from typing import Optional
+from typing import Optional, Self
 from datetime import date, datetime
 from enum import Enum
 
@@ -42,22 +42,49 @@ class LicenseType(str, Enum):
         return descriptions.get(self.value, self.value)
 
 
+TRIAL_PERMANENT_ERROR = "试用 License 不能设为永久"
+TRIAL_EXPIRY_REQUIRED_ERROR = "试用 License 必须填到期日期，且要晚于今天。"
+OFFICIAL_EXPIRY_FUTURE_ERROR = "到期时间必须晚于今天"
+
+
+def resolve_license_term(
+    license_type: str,
+    is_permanent: bool,
+    expiry_date: Optional[date],
+) -> Optional[date]:
+    """校验 License 期限并返回应存储的到期时间。
+
+    不变量：永久 ⇒ OFFICIAL 且到期时间为空（传入的日期会被丢弃）；
+    非永久 ⇒ 到期时间必填且晚于今天。
+    """
+    if is_permanent:
+        if license_type != LicenseType.OFFICIAL.value:
+            raise ValueError(TRIAL_PERMANENT_ERROR)
+        return None
+    if expiry_date is None or expiry_date <= date.today():
+        if license_type == LicenseType.TRIAL.value:
+            raise ValueError(TRIAL_EXPIRY_REQUIRED_ERROR)
+        raise ValueError(OFFICIAL_EXPIRY_FUTURE_ERROR)
+    return expiry_date
+
+
 class LicenseApplicationBase(BaseModel):
     """License 申请基础模型"""
     customer_id: str = Field(..., description="关联客户对外ID")
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     license_type: LicenseType = Field(..., description="License 类型")
     authorized_users: int = Field(..., gt=0, description="本次申请使用人数")
-    expiry_date: date = Field(..., description="到期时间")
+    is_permanent: bool = Field(False, description="是否永久（仅正式 License）")
+    expiry_date: Optional[date] = Field(None, description="到期时间（永久时为空）")
     remark: Optional[str] = Field(None, description="备注（申请时填写）")
 
-    @field_validator('expiry_date')
-    @classmethod
-    def validate_expiry_date(cls, v: date) -> date:
-        """验证到期时间必须晚于今天"""
-        if v <= date.today():
-            raise ValueError('到期时间必须晚于今天')
-        return v
+    @model_validator(mode='after')
+    def validate_license_term(self) -> Self:
+        """永久仅限正式版且无到期时间；非永久必须填写晚于今天的到期时间"""
+        self.expiry_date = resolve_license_term(
+            self.license_type.value, self.is_permanent, self.expiry_date
+        )
+        return self
 
     @field_validator('license_type')
     @classmethod
@@ -89,6 +116,7 @@ class LicenseApplicationUpdate(BaseModel):
     deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     authorized_users: Optional[int] = Field(None, gt=0, description="本次申请使用人数")
+    is_permanent: Optional[bool] = Field(None, description="是否永久（仅正式 License）")
     expiry_date: Optional[date] = Field(None, description="到期时间")
     remark: Optional[str] = Field(None, description="备注")
 
@@ -97,7 +125,7 @@ class LicenseApplicationUpdate(BaseModel):
     def validate_expiry_date(cls, v: Optional[date]) -> Optional[date]:
         """验证到期时间必须晚于今天"""
         if v is not None and v <= date.today():
-            raise ValueError('到期时间必须晚于今天')
+            raise ValueError(OFFICIAL_EXPIRY_FUTURE_ERROR)
         return v
 
 
@@ -122,7 +150,8 @@ class LicenseApplicationResponse(BaseModel):
     contract_id: Optional[int] = Field(None, description="关联合同ID")
     product_public_id: Optional[str] = Field(None, description="申请产品对外ID（产品删除后为空）")
     product_name: Optional[str] = Field(None, description="申请产品名称快照")
-    expiry_date: date = Field(..., description="到期时间")
+    expiry_date: Optional[date] = Field(None, description="到期时间（永久时为空）")
+    is_permanent: bool = Field(False, description="是否永久")
     license_type: str = Field(..., description="License 类型")
     authorized_users: int = Field(..., description="本次申请使用人数")
     # 补充需求字段

@@ -15,7 +15,7 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
-from app.core.list_query.license_status import classify_license_status
+from app.core.list_query.license_status import classify_license_status, license_expiry_text
 from app.core.database import SessionLocal
 from app.schemas.list_export import CustomerListExportRequest
 from app.utils.time import business_now
@@ -83,6 +83,7 @@ from app.schemas.customer import (
     CustomerIntelligenceRetryDueResponse,
     CustomerIntelligenceRunDiagnosticListResponse,
     CustomerIntelligenceRunDiagnosticResponse,
+    CustomerLicensePermanentError,
     CustomerLicenseSnapshotUpdate,
     CustomerLifecycleStatusUpdate,
     CustomerListResponse,
@@ -488,6 +489,7 @@ def _customer_response(db: Session, customer) -> CustomerResponse:
         "last_modified_time": customer.last_modified_time,
         "version": customer.version,
         "license_expiry_date": customer.license_expiry_date,
+        "license_is_permanent": bool(customer.license_is_permanent),
         "license_authorized_users": customer.license_authorized_users,
         "license_type": customer.license_type,
         **product_intent_payload(customer.product_links),
@@ -1749,6 +1751,7 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
             'last_modified_time': customer.last_modified_time,
             'version': customer.version,
             'license_expiry_date': customer.license_expiry_date,
+            'license_is_permanent': bool(customer.license_is_permanent),
             'license_authorized_users': customer.license_authorized_users,
             'license_type': customer.license_type,
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,
@@ -1783,7 +1786,12 @@ LICENSE_STATUS_LABELS = {
 
 
 def customer_license_status_label(item: CustomerListResponse) -> str:
-    status = classify_license_status(item.license_expiry_date, item.license_type, business_now().date())
+    status = classify_license_status(
+        item.license_expiry_date,
+        item.license_type,
+        business_now().date(),
+        is_permanent=item.license_is_permanent,
+    )
     return LICENSE_STATUS_LABELS[status]
 
 
@@ -1800,7 +1808,7 @@ def _customer_export_row(item: CustomerListResponse) -> dict[str, object]:
         "status": CUSTOMER_STATUS_LABELS[CustomerStatus(item.status)],
         "license_status": customer_license_status_label(item),
         "license_authorized_users": item.license_authorized_users,
-        "license_expiry_date": item.license_expiry_date,
+        "license_expiry_date": license_expiry_text(item.license_expiry_date, item.license_is_permanent),
         "default_procurement_method": item.default_procurement_method_info.name if item.default_procurement_method_info else None,
         "industry": item.industry_info.name if item.industry_info else None,
         "source": item.source_info.name if item.source_info else item.source,
@@ -2303,8 +2311,9 @@ async def update_customer_license_snapshot(
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    license_audit_fields = ("license_type", "license_expiry_date", "license_is_permanent")
     changed_fields = [
-        field for field in ("license_type", "license_expiry_date")
+        field for field in license_audit_fields
         if before.get(field) != after.get(field)
     ]
 
@@ -2321,8 +2330,8 @@ async def update_customer_license_snapshot(
         operator_name=getattr(current_user, "name", None),
         team_id=team_id,
         content={
-            "before": {field: _audit_value(before.get(field)) for field in ("license_type", "license_expiry_date")},
-            "after": {field: _audit_value(after.get(field)) for field in ("license_type", "license_expiry_date")},
+            "before": {field: _audit_value(before.get(field)) for field in license_audit_fields},
+            "after": {field: _audit_value(after.get(field)) for field in license_audit_fields},
             "changed_fields": changed_fields,
             "actor_id": str(current_user.id),
             "team_id": team_id,
@@ -2451,6 +2460,8 @@ def update_customer(
         _raise_source_error(exc)
     except ProductNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CustomerLicensePermanentError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
