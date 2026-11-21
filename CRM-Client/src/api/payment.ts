@@ -46,7 +46,9 @@ export interface ApprovalNodeInfo {
   id: number
   node_order: number
   node_name: string
-  approve_role: string
+  node_type: 'APPROVAL' | 'CC'
+  approver_ids: number[]
+  approver_names: string[]
   status: 'PENDING' | 'APPROVE' | 'APPROVED' | 'REJECT' | 'REJECTED' | 'SUBMIT'
   approver_id?: string
   approver_name?: string

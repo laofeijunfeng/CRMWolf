@@ -92,6 +92,8 @@ class ApprovalListItemResponse(BaseModel):
     created_time: str = Field(..., description="提交时间 ISO8601")
     updated_time: str = Field(..., description="最后更新时间 ISO8601")
     overdue_hours: Optional[int] = Field(None, description="超时小时数（now - created_time），仅 PENDING 行有意义")
+    cc_node_name: Optional[str] = Field(None, description="最近一次抄送当前用户的节点名称")
+    cc_time: Optional[str] = Field(None, description="最近一次抄送当前用户的时间 ISO8601")
 
 
 class ApprovalInvoiceBillingSnapshotResponse(BaseModel):
@@ -147,6 +149,17 @@ class GenericApprovalDetailResponse(ApprovalListItemResponse):
     flow_disabled_warning: Optional[str] = None
     entity_detail: ApprovalEntityDetailResponse
     records: List[ApprovalRecordResponse]
+
+
+class ApprovalCcDeliveryResponse(BaseModel):
+    id: int
+    node_id: int
+    node_name: Optional[str] = None
+    created_time: datetime
+
+
+class ApprovalCcDetailResponse(GenericApprovalDetailResponse):
+    cc_deliveries: List[ApprovalCcDeliveryResponse]
 
 
 class ApprovalGenericListResponse(BaseModel):

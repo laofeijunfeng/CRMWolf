@@ -40,7 +40,15 @@ from app.models.agent import (
 from app.models.agent_async_operation import AgentAsyncOperation, AgentAsyncOperationEvent
 from app.models.agent_persistence import AgentQueryResultSet, AgentUIAction
 from app.models.ai_config import AIConfig
-from app.models.approval import Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
+from app.models.approval import (
+    Approval,
+    ApprovalAction,
+    ApprovalFlow,
+    ApprovalNode,
+    ApprovalParticipant,
+    ApprovalRecord,
+    ApprovalStatus,
+)
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
@@ -167,6 +175,7 @@ def scenario_env(monkeypatch):
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
         Approval.__table__,
+        ApprovalParticipant.__table__,
         ApprovalRecord.__table__,
         OutboundNotificationJob.__table__,
         AgentSession.__table__,
@@ -204,6 +213,7 @@ def scenario_env(monkeypatch):
     db.add_all(
         [
             User(id=1, email="finance@example.com", name="财务张", status=UserStatus.ACTIVE),
+            User(id=2, email="sales@example.com", name="销售李", status=UserStatus.ACTIVE),
             AIConfig(
                 id=1,
                 team_id=1,
@@ -431,21 +441,17 @@ def seed_flow(env, business_type, role_code="FINANCE", flow_code=None):
         node_name="财务审批",
         node_code=role_code,
         node_order=1,
-        approve_role=role_code,
-        is_required=1,
+        approver_roles=[role_code],
+        approver_users=[],
     )
     env.db.add(node)
+    seed_role_for_user(env, 2 if role_code == "SALES_MEMBER" else 1, role_code)
     env.db.commit()
     return flow, node
 
 
 def seed_role(env, role_code="FINANCE"):
-    role = Role(name=role_code, code=role_code)
-    env.db.add(role)
-    env.db.flush()
-    env.db.add(UserRole(user_id=1, role_id=role.id, team_id=1))
-    env.db.commit()
-    return role
+    return seed_role_for_user(env, 1, role_code)
 
 
 def seed_role_for_user(env, user_id, role_code):
@@ -454,9 +460,13 @@ def seed_role_for_user(env, user_id, role_code):
         role = Role(name=role_code, code=role_code)
         env.db.add(role)
         env.db.flush()
-    env.db.add(UserRole(user_id=user_id, role_id=role.id, team_id=1))
+    membership = env.db.query(UserRole).filter_by(user_id=user_id, role_id=role.id, team_id=1).first()
+    if membership is None:
+        env.db.add(UserRole(user_id=user_id, role_id=role.id, team_id=1))
     env.db.commit()
     return role
+
+
 
 
 def seed_sales_owned_invoice_created_by_team_owner(env):
@@ -860,17 +870,8 @@ def run_approval_optimistic_lock_conflict(env):
     submit_approval(env, "INVOICE", invoice.id)
     approval = current_approval(env, BusinessType.INVOICE, invoice.id)
     original_updated_time = approval.updated_time
-    approvals_api.approval_crud.approve(
-        env.db,
-        approval,
-        ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="他人已处理", updated_time=original_updated_time),
-        approver_id="2",
-        approver_name="其他财务",
-    )
-    env.db.refresh(approval)
-    if approval.updated_time == original_updated_time:
-        approval.updated_time = original_updated_time + timedelta(seconds=1)
-        env.db.commit()
+    approval.updated_time = original_updated_time + timedelta(seconds=1)
+    env.db.commit()
     response = env.client.post(
         "/v1/approvals/bulk-approve",
         json={
@@ -906,8 +907,8 @@ def run_opportunity_approval_starts_business_journey_board(env):
         env.db,
         approval,
         ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="同意"),
-        approver_id="2",
-        approver_name="销售总监",
+        approver_id="1",
+        approver_name="财务张",
     )
 
     event = (
@@ -959,6 +960,13 @@ def run_payment_record_update_after_withdraw_allowed(env):
         status=ApprovalStatus.CANCELLED,
         submitter_id="1",
         submitter_name="财务张",
+        nodes_snapshot=[{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": "APPROVAL",
+            "user_ids": [1],
+        }],
     )
     env.db.add(approval)
     env.db.flush()
@@ -985,6 +993,13 @@ def run_payment_record_update_pending_forbidden(env):
         status=ApprovalStatus.PENDING,
         submitter_id="1",
         submitter_name="财务张",
+        nodes_snapshot=[{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": "APPROVAL",
+            "user_ids": [1],
+        }],
     )
     env.db.add(approval)
     env.db.flush()

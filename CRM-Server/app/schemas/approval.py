@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -43,13 +43,47 @@ class ApprovalActionEnum(str, Enum):
         return descriptions.get(self.value, self.value)
 
 
-class ApprovalNodeCreate(BaseModel):
+class ApprovalNodeTypeEnum(str, Enum):
+    """节点类型：审批节点需有人通过；抄送节点到达即发卡片并自动流转。"""
+    APPROVAL = "APPROVAL"
+    CC = "CC"
+
+
+class ApproverUser(BaseModel):
+    """指定成员：role 为选择该成员时所在角色，提交时成员须仍属于该角色。"""
+    role: str = Field(..., min_length=1, description="成员所属角色代码")
+    user_id: int = Field(..., gt=0, description="成员用户ID")
+
+
+class _NodeApproversMixin(BaseModel):
+    approver_roles: Optional[List[str]] = Field(
+        None, description="整角色：角色内任一成员可审批/被抄送"
+    )
+    approver_users: Optional[List[ApproverUser]] = Field(
+        None, description="指定成员：仅这些人可审批/被抄送"
+    )
+
+
+def _validate_nodes(nodes: list[Any]) -> list[Any]:
+    """首个节点必须是审批节点；每个节点至少选择一个角色或成员。"""
+    ordered = sorted(nodes, key=lambda n: n.node_order or 0)
+    if ordered and (ordered[0].node_type or ApprovalNodeTypeEnum.APPROVAL) != ApprovalNodeTypeEnum.APPROVAL:
+        raise ValueError("抄送节点需位于审批节点之后")
+    for index, node in enumerate(ordered, start=1):
+        if node.approver_roles is None and node.approver_users is None and getattr(node, "id", None):
+            continue  # 更新已有节点且未修改人员
+        if not (node.approver_roles or node.approver_users):
+            raise ValueError(f"第 {index} 个节点未选择审批人员")
+    return nodes
+
+
+class ApprovalNodeCreate(_NodeApproversMixin):
     """审批节点创建模型"""
     node_name: str = Field(
         ...,
         min_length=1,
         max_length=100,
-        description="审批节点名称，如：部门经理审批、财务审批、总经理审批"
+        description="节点名称，如：部门经理审批、抄送财务"
     )
     node_code: str = Field(
         ...,
@@ -60,29 +94,18 @@ class ApprovalNodeCreate(BaseModel):
     node_order: int = Field(
         ...,
         gt=0,
-        description="审批顺序，从1开始连续编号，按顺序依次流转，如：1,2,3"
+        description="节点顺序，从1开始连续编号，按顺序依次流转，如：1,2,3"
     )
     description: Optional[str] = Field(
         None,
         description="节点描述，说明该节点的审批职责和要求"
     )
-    approve_role: str = Field(
-        ...,
-        description="审批角色代码，拥有该角色的用户才能审批，如：SALES_MANAGER、FINANCE、GENERAL_MANAGER"
-    )
-    notify_user_ids: Optional[List[int]] = Field(
-        None,
-        description="通知对象用户ID列表；为空时默认通知该审批角色下所有成员"
-    )
-    is_required: int = Field(
-        1,
-        ge=0,
-        le=1,
-        description="是否必须审批，1-必须，0-可选（预留字段，当前版本默认为必须）"
+    node_type: ApprovalNodeTypeEnum = Field(
+        ApprovalNodeTypeEnum.APPROVAL, description="节点类型：APPROVAL 审批 / CC 抄送"
     )
 
 
-class ApprovalNodeUpdate(BaseModel):
+class ApprovalNodeUpdate(_NodeApproversMixin):
     """审批节点更新模型"""
     id: Optional[int] = Field(
         None,
@@ -92,7 +115,7 @@ class ApprovalNodeUpdate(BaseModel):
         None,
         min_length=1,
         max_length=100,
-        description="审批节点名称"
+        description="节点名称"
     )
     node_code: Optional[str] = Field(
         None,
@@ -103,25 +126,14 @@ class ApprovalNodeUpdate(BaseModel):
     node_order: Optional[int] = Field(
         None,
         gt=0,
-        description="审批顺序"
+        description="节点顺序"
     )
     description: Optional[str] = Field(
         None,
         description="节点描述"
     )
-    approve_role: Optional[str] = Field(
-        None,
-        description="审批角色代码"
-    )
-    notify_user_ids: Optional[List[int]] = Field(
-        None,
-        description="通知对象用户ID列表；为空时默认通知该审批角色下所有成员"
-    )
-    is_required: Optional[int] = Field(
-        None,
-        ge=0,
-        le=1,
-        description="是否必须审批"
+    node_type: Optional[ApprovalNodeTypeEnum] = Field(
+        None, description="节点类型：APPROVAL 审批 / CC 抄送"
     )
 
 
@@ -133,11 +145,16 @@ class ApprovalNodeResponse(BaseModel):
     node_code: str = Field(..., description="节点编码，英文唯一标识")
     node_order: int = Field(..., description="节点顺序，决定审批流转顺序")
     description: Optional[str] = Field(None, description="节点描述，说明审批职责")
-    approve_role: str = Field(..., description="审批角色代码，如：SALES_MANAGER")
-    notify_user_ids: Optional[List[int]] = Field(None, description="通知对象用户ID列表")
-    is_required: int = Field(..., description="是否必须审批，1-必须，0-可选")
+    node_type: str = Field("APPROVAL", description="节点类型：APPROVAL 审批 / CC 抄送")
+    approver_roles: List[str] = Field(default_factory=list, description="整角色代码列表")
+    approver_users: List[ApproverUser] = Field(default_factory=list, description="指定成员列表")
     created_time: datetime = Field(..., description="创建时间，节点创建时间")
-    
+
+    @field_validator("approver_roles", "approver_users", mode="before")
+    @classmethod
+    def _none_to_list(cls, v: object) -> object:
+        return v or []
+
     class Config:
         from_attributes = True
 
@@ -183,6 +200,11 @@ class ApprovalFlowCreate(BaseModel):
         min_items=1,
         description="审批节点列表，至少包含一个节点，按node_order顺序流转"
     )
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_nodes(cls, v: list[ApprovalNodeCreate]) -> list[ApprovalNodeCreate]:
+        return _validate_nodes(v)
 
     @field_validator("business_type")
     @classmethod
@@ -234,6 +256,13 @@ class ApprovalFlowUpdate(BaseModel):
         None,
         description="审批节点列表，更新时会完全替换原有节点"
     )
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_nodes(cls, v: list[ApprovalNodeUpdate] | None) -> list[ApprovalNodeUpdate] | None:
+        # Node updates are partial; ApprovalFlowCRUD validates the merged final
+        # node set after applying these patches to persisted nodes.
+        return v
 
     @field_validator("business_type")
     @classmethod

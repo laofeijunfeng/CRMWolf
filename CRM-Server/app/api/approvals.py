@@ -32,10 +32,18 @@ from app.schemas.list_export import ApprovalListExportRequest
 from app.crud.contract import contract_crud
 from app.crud.opportunity import opportunity_crud
 from app.crud.role import role_crud
-from app.models.approval import Approval, ApprovalAction, ApprovalRecord, ApprovalStatus
+from app.models.approval import (
+    Approval,
+    ApprovalAction,
+    ApprovalParticipant,
+    ApprovalParticipantKind,
+    ApprovalRecord,
+    ApprovalStatus,
+)
 from app.models.contract import ContractStatus
 from app.models.payment import PaymentRecord
 from app.models.user import User
+from app.models.user_role import UserRole
 from app.schemas.approval import (
     ApprovalActionEnum,
     ApprovalActionRequest,
@@ -51,6 +59,7 @@ from app.schemas.approval import (
     OverdueApprovalResponse,
 )
 from app.schemas.approval_generic import (
+    ApprovalCcDetailResponse,
     ApprovalGenericListResponse,
     ApprovalListItemResponse,
     GenericApprovalDetailResponse,
@@ -59,6 +68,7 @@ from app.schemas.approval_generic import (
 from app.schemas.approval_generic import (
     ApprovalSubmitRequest as GenericApprovalSubmitRequest,
 )
+from app.services.approval_routing import current_approver_ids, snapshot_entry_for_node, is_participant
 from app.services.approval_adapter import get_adapter, get_approval_customer_id
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.customer_approval_intelligence_service import (
@@ -80,6 +90,32 @@ APPROVAL_STATUS_LABELS = {
     "REJECTED": "已驳回",
     "CANCELLED": "已撤回",
 }
+
+
+def _approval_node_name(
+    approval: Approval,
+    node_id: Optional[int],
+    legacy_node_name: Optional[str] = None,
+) -> Optional[str]:
+    entry = snapshot_entry_for_node(approval, node_id)
+    if approval.nodes_snapshot is not None:
+        return (entry or {}).get("node_name")
+    return legacy_node_name
+
+
+def _approval_current_node_name(approval: Approval) -> Optional[str]:
+    if approval.nodes_snapshot is not None:
+        return _approval_node_name(
+            approval,
+            int(approval.current_node_id) if approval.current_node_id is not None else None,
+        )
+    return _approval_node_name(
+        approval,
+        approval.current_node_id,
+        approval.current_node.node_name if approval.current_node else None,
+    )
+
+
 APPROVAL_TYPE_LABELS = {
     "PAYMENT": "回款",
     "INVOICE": "发票",
@@ -93,6 +129,7 @@ APPROVAL_TAB_STEMS = {
     "pending": "待我审批",
     "processed": "我已处理",
     "submitted": "我提交的",
+    "cc": "抄送我",
 }
 
 
@@ -154,12 +191,10 @@ def export_approvals(
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    user_roles = [role.code for role in role_crud.get_user_roles(db, current_user.id, team_id)]
     query, _needs_summary_filter = run_or_400(lambda: approval_crud.build_list_query(
         db,
         team_id=team_id,
         user_id=current_user.id,
-        user_roles=user_roles,
         tab=request.tab,
         search=request.search,
         filters=request.filters,
@@ -455,7 +490,8 @@ def get_overdue_approvals(
 - nodes: 审批节点列表
   - node_id: 节点ID
   - node_name: 节点名称
-  - approve_role: 审批角色
+  - node_type: 审批或抄送
+  - approver_roles / approver_users: 整角色 / 指定成员
   - node_order: 节点顺序
   - is_active: 是否启用
 """)
@@ -498,7 +534,8 @@ def get_approval_flow(
 - is_active: 是否启用
 - nodes: 审批节点列表
   - node_name: 节点名称
-  - approve_role: 审批角色
+  - node_type: 审批或抄送
+  - approver_roles / approver_users: 整角色 / 指定成员
   - node_order: 节点顺序
 
 **注意事项：**
@@ -631,7 +668,14 @@ def update_approval_flow(
     try:
         updated_flow = approval_flow_crud.update(db, flow, flow_data)
         return updated_flow
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新审批流程失败: {str(e)}"
@@ -703,34 +747,6 @@ async def submit_contract_approval(
             detail=error_msg or "未找到匹配的审批流程，请联系管理员配置"
         )
 
-    # 检查第一个审批节点是否有审批人
-    from app.models.approval import ApprovalNode
-    first_node = db.query(ApprovalNode).filter(
-        ApprovalNode.flow_id == flow.id,
-        ApprovalNode.node_order == 1
-    ).first()
-
-    if first_node:
-        has_approvers = approval_flow_crud.check_node_has_approvers(db, first_node.id, team_id)
-        if not has_approvers:
-            # 记录系统告警日志
-            log_with_fields(
-                logger,
-                level=30,  # WARNING
-                message="[Approval Config Error] 审批节点无审批人",
-                flow_id=flow.id,
-                flow_name=flow.flow_name,
-                node_id=first_node.id,
-                node_name=first_node.node_name,
-                approve_role=first_node.approve_role or "",
-                team_id=team_id,
-                contract_id=contract_id
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"审批流程配置错误：节点「{first_node.node_name}」无审批人，请联系管理员"
-            )
-
     try:
         approval = approval_crud.create_approval(
             db,
@@ -746,14 +762,14 @@ async def submit_contract_approval(
             approval_id=approval.id,
             contract_id=contract_id,
             flow_name=flow.flow_name,
-            node_name=approval.current_node.node_name if approval.current_node else None,
+            node_name=_approval_current_node_name(approval),
             operator=current_user.name,
             flow_direction="submitted"
         )
 
         notification_status = "skipped"
 
-        if approval.current_node:
+        if approval.current_node_id is not None:
             try:
                 request = outbound_notification_job_service.enqueue_pending_for_approval(
                     db,
@@ -775,7 +791,7 @@ async def submit_contract_approval(
                 approval_id=approval.id,
                 contract_id=contract_id,
                 flow_name=flow.flow_name,
-                node_name=approval.current_node.node_name,
+                node_name=_approval_current_node_name(approval),
                 operator=current_user.name,
                 flow_direction="submitted",
                 notification_status=notification_status
@@ -831,11 +847,11 @@ async def submit_contract_approval(
 - comment: 审批意见（必填）
 
 **权限要求：**
-- 必须是当前审批节点的审批角色
+- 必须是提交时确定的当前节点审批人
 - 如审批自己创建的合同，需要额外权限：contract:approve:own
 
 **业务规则：**
-- 只有当前节点对应的审批角色才能操作
+- 只有当前节点审批人才能操作
 - 通过后流转到下一审批节点
 - 全部节点通过后合同状态变为已审批
 - 拒绝后流程终止，合同回到草稿状态
@@ -859,7 +875,7 @@ async def approve_contract(
             detail="审批流程不存在"
         )
 
-    if not approval.current_node:
+    if approval.current_node_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="当前审批节点不存在"
@@ -877,20 +893,9 @@ async def approve_contract(
         entity_type=BusinessType.CONTRACT, entity_id=contract_id,
     )
 
-    # 如果是审批通过操作，检查下一节点是否有审批人
-    if action_request.action.value == ApprovalAction.APPROVE:
-        _check_next_node_has_approvers(
-            db, approval, team_id,
-            detail_suffix="无成员，系统已通知管理员",
-            log_extra={
-                "contract_id": contract_id,
-                "current_node": approval.current_node.node_name,
-            },
-        )
-
     try:
         # 记录当前节点（审批前的状态）
-        current_node_name = approval.current_node.node_name if approval.current_node else ""
+        current_node_name = _approval_current_node_name(approval) or ""
         flow_name = approval.flow.flow_name if approval.flow else ""
 
         approval = approval_crud.approve(
@@ -922,10 +927,10 @@ async def approve_contract(
                     logger.error(
                         f"[Approval] Approve notification failed: contract_id={contract_id}, error={str(notify_error)}"
                     )
-            elif approval.current_node:
-                # 流转到下一节点
+            elif approval.current_node_id is not None:
+                # 流转到下一节点；名称来自提交时冻结的快照。
                 flow_direction = "next_node"
-                next_node = approval.current_node.node_name
+                next_node = _approval_current_node_name(approval)
                 try:
                     request = outbound_notification_job_service.enqueue_pending_for_approval(
                         db,
@@ -1073,17 +1078,14 @@ async def cancel_approval(
         )
 
     # 记录撤回前的状态
-    current_node_name = approval.current_node.node_name if approval.current_node else ""
+    current_node_name = _approval_current_node_name(approval) or ""
     flow_name = approval.flow.flow_name if approval.flow else ""
-    current_node = approval.current_node
     contract = contract_crud.get_by_id(db, contract_id, team_id)
-    notify_user_ids = []
-    if current_node:
-        notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
+    approver_ids = current_approver_ids(db, approval)
 
     notify_request = None
     notification_status = "skipped"
-    if notify_user_ids:
+    if approver_ids:
         try:
             notify_request = outbound_notification_job_service.enqueue_cancelled(
                 db,
@@ -1091,7 +1093,7 @@ async def cancel_approval(
                 team_id=team_id,
                 actor_id=str(current_user.id),
                 actor_name=current_user.name,
-                recipient_user_ids=notify_user_ids,
+                recipient_user_ids=approver_ids,
             )
             notification_status = "queued" if notify_request is not None else "skipped"
         except Exception as notify_error:
@@ -1206,14 +1208,18 @@ def get_approval_detail(
             detail="审批流程不存在"
         )
 
+    _check_approval_detail_permissions(db, approval, current_user, team_id)
     # 获取审批记录并填充审批人状态信息
-    records = approval_crud.get_records(db, approval.id)
+    records = approval_crud.get_records(db, int(approval.id), int(approval.team_id))
 
-    # 收集所有审批人ID，批量查询用户状态
-    approver_ids = [int(r.approver_id) for r in records if r.approver_id]
+    # 收集所有审批人ID，批量查询用户状态；实例数据始终限定在审批团队内。
+    approver_ids = [int(r.approver_id) for r in records if r.approver_id and str(r.approver_id).isdigit()]
     users = {}
     if approver_ids:
-        user_list = db.query(User).filter(User.id.in_(approver_ids)).all()
+        user_list = db.query(User).join(UserRole, UserRole.user_id == User.id).filter(
+            User.id.in_(approver_ids),
+            UserRole.team_id == approval.team_id,
+        ).distinct().all()
         users = {str(u.id): u for u in user_list}
 
     # 构建审批记录响应（含审批人状态）
@@ -1242,7 +1248,11 @@ def get_approval_detail(
                 id=record.id,
                 approval_id=record.approval_id,
                 node_id=record.node_id,
-                node_name=record.node.node_name if record.node else None,
+                node_name=_approval_node_name(
+                    approval,
+                    int(record.node_id) if record.node_id is not None else None,
+                    record.node.node_name if record.node else None,
+                ),
                 approver_id=record.approver_id,
                 approver_name=approver_name,
                 approver_status=approver_status,
@@ -1269,39 +1279,53 @@ def get_approval_detail(
         flow_id=approval.flow_id,
         flow_name=approval.flow.flow_name if approval.flow else None,
         current_node_id=approval.current_node_id,
-        current_node_name=approval.current_node.node_name if approval.current_node else None,
+        current_node_name=_approval_current_node_name(approval),
         status=approval.status,
         submitter_id=approval.submitter_id,
         submitter_name=approval.submitter_name,
         created_time=approval.created_time,
         updated_time=approval.updated_time,
-        flow=approval.flow,
+        flow=_approval_flow_detail_payload(approval),
         flow_is_active=flow_is_active,
         flow_disabled_warning=flow_disabled_warning,
         records=record_responses
     )
 
 
-def get_approvers_by_role(db: Session, role_code: str, team_id: Optional[int] = None):
-    role = role_crud.get_by_code(db, role_code)
-    if not role:
-        return []
-
-    users = role_crud.get_role_users(db, role.id, team_id)
-    return users
-
-
-def get_notification_users_for_node(db: Session, node, team_id: int):
-    if not node or not node.approve_role:
-        return []
-
-    approvers = get_approvers_by_role(db, node.approve_role, team_id)
-    notify_user_ids = node.notify_user_ids or []
-    if not notify_user_ids:
-        return approvers
-
-    notify_id_set = {int(user_id) for user_id in notify_user_ids}
-    return [user for user in approvers if int(user.id) in notify_id_set]
+def _approval_flow_detail_payload(approval: Approval) -> ApprovalFlowDetailResponse | None:
+    flow = approval.flow
+    if not flow:
+        return None
+    if approval.nodes_snapshot is None:
+        return ApprovalFlowDetailResponse.model_validate(flow)
+    return ApprovalFlowDetailResponse.model_validate({
+        "id": flow.id,
+        "flow_name": flow.flow_name,
+        "flow_code": flow.flow_code,
+        "description": flow.description,
+        "min_amount": flow.min_amount,
+        "max_amount": flow.max_amount,
+        "license_type": flow.license_type,
+        "is_active": flow.is_active,
+        "business_type": flow.business_type,
+        "created_time": flow.created_time,
+        "last_modified_time": flow.last_modified_time,
+        "nodes": [
+            {
+                "id": node.get("node_id"),
+                "flow_id": flow.id,
+                "node_name": node.get("node_name") or "",
+                "node_code": node.get("node_code") or "",
+                "node_order": index,
+                "description": None,
+                "node_type": node.get("node_type") or "APPROVAL",
+                "approver_roles": [],
+                "approver_users": [],
+                "created_time": approval.created_time,
+            }
+            for index, node in enumerate(approval.nodes_snapshot, start=1)
+        ],
+    })
 
 
 def _feishu_notification_status(result: dict) -> str:
@@ -1388,20 +1412,19 @@ def _check_approve_permissions(
 ) -> None:
     """审批权限校验（旧 `/contracts/{id}/approve` 与新 generic approve 共用）。
 
-    - 角色校验：current_node.approve_role 不在 current_user 角色集 → 403
+    - 当前节点冻结审批人校验 → 403
     - 自审追加：current_user 是单据提交人时需 `<resource>:approve:own` 权限 → 403
       （CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY 均校验，泛化自原 CONTRACT-only 逻辑，M-3）
 
     旧合同端点传 entity_type=BusinessType.CONTRACT / entity_id=contract_id；
     新通用端点传路由参数 entity_type / entity_id。
     """
-    user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
-    role_codes = {r.code for r in user_roles}
-
-    if approval.current_node.approve_role not in role_codes:
+    if approval.team_id != team_id or not is_participant(
+        db, approval, current_user.id, ApprovalParticipantKind.APPROVER
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"您没有权限进行此操作，需要角色: {approval.current_node.approve_role}",
+            detail="您不是当前节点的审批人",
         )
 
     # 自审追加权限校验（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY 通用）
@@ -1418,6 +1441,8 @@ def _check_approval_detail_permissions(
     team_id: int,
 ) -> None:
     """审批详情允许提交人、当前审批人、已处理人、团队管理员，以及可查看该客户的人只读。"""
+    if approval.team_id != team_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审批流程不存在")
     user_id_str = str(current_user.id)
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -1428,14 +1453,13 @@ def _check_approval_detail_permissions(
     if approval.submitter_id == user_id_str:
         return
 
-    if (
-        approval.status == ApprovalStatus.PENDING
-        and approval.current_node
-        and approval.current_node.approve_role in role_codes
+    if is_participant(db, approval, current_user.id, ApprovalParticipantKind.APPROVER) or is_participant(
+        db, approval, int(current_user.id), ApprovalParticipantKind.CC,
     ):
         return
 
     has_processed_record = db.query(ApprovalRecord.id).filter(
+        ApprovalRecord.team_id == team_id,
         ApprovalRecord.approval_id == approval.id,
         ApprovalRecord.approver_id == user_id_str,
         ApprovalRecord.action != ApprovalAction.SUBMIT,
@@ -1458,62 +1482,14 @@ def _check_approval_detail_permissions(
     )
 
 
-def _check_next_node_has_approvers(
-    db: Session,
-    approval: Approval,
-    team_id: int,
-    *,
-    detail_suffix: str = "无成员",
-    log_extra: Optional[dict] = None,
-) -> None:
-    """APPROVE 时检查下一节点是否有审批人（旧 `approve_contract` 与新 generic approve 共用）。
-
-    查询 node_order+1 的下一节点；若存在但无审批成员 → 记 WARNING 日志 + 400。
-    log_extra 用于补充两处调用方各自的上下文字段（旧端点写 contract_id/current_node，
-    新端点写 business_type/business_id）。
-    """
-    from app.models.approval import ApprovalNode
-
-    next_node = db.query(ApprovalNode).filter(
-        ApprovalNode.flow_id == approval.flow_id,
-        ApprovalNode.node_order == approval.current_node.node_order + 1,
-    ).first()
-
-    if not next_node:
-        return
-
-    if approval_flow_crud.check_node_has_approvers(db, next_node.id, team_id):
-        return
-
-    log_with_fields(
-        logger,
-        level=30,  # WARNING
-        message="[Approval Config Error] 审批节点无审批人",
-        flow_id=approval.flow_id,
-        flow_name=approval.flow.flow_name if approval.flow else "",
-        node_id=next_node.id,
-        node_name=next_node.node_name,
-        approve_role=next_node.approve_role or "",
-        team_id=team_id,
-        **(log_extra or {}),
-    )
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"无法流转到下一节点：审批角色「{next_node.node_name}」{detail_suffix}",
-    )
-
-
 # ============================================================================
 # 通用审批 API 端点（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 统一入口）
 # ============================================================================
 # 设计要点：
 # - 新端点 prefix 沿用既有 router 的 `/v1/approvals`
 # - entity_type 用 is_valid_business_type（A1）校验，非法 → 400
-# - submit：取 adapter.get_entity → None 时 404；match_flow_generic 未匹配统一报错；
-#   建 Approval（create_approval_generic）；通知留 TODO 由 Task A8 泛化
-# - approve：get_by_entity 取审批实例 → 复用既有 :611-619 角色校验逻辑
-#   → approval_crud.approve(...) → D3 端点回写：business_type==INVOICE 时
-#   由端点补写 reviewer_id / review_comment 两字段（不扩适配器签名）
+# - submit：创建审批实例，由事务管理器入队当前节点审批通知。
+# - approve：校验冻结的当前 APPROVER 参与人；发票额外回写 reviewer_id / review_comment。
 # - cancel：approval_crud.cancel 内部校验 submitter_id==user_id
 # - detail：get_by_entity → 序列化返回
 # - 旧 `/contracts/{contract_id}/submit|approve|cancel|detail` 保留为 wrapper，
@@ -1530,7 +1506,7 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
     """
     from app.models.user import UserStatus
 
-    records = approval_crud.get_records(db, approval.id)
+    records = approval_crud.get_records(db, int(approval.id), int(approval.team_id))
 
     approver_ids = []
     for r in records:
@@ -1538,7 +1514,10 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
             approver_ids.append(int(r.approver_id))
     users: dict = {}
     if approver_ids:
-        user_list = db.query(User).filter(User.id.in_(approver_ids)).all()
+        user_list = db.query(User).join(UserRole, UserRole.user_id == User.id).filter(
+            User.id.in_(approver_ids),
+            UserRole.team_id == approval.team_id,
+        ).distinct().all()
         users = {str(u.id): u for u in user_list}
 
     status_display_map = {
@@ -1562,7 +1541,11 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
             "id": record.id,
             "approval_id": record.approval_id,
             "node_id": record.node_id,
-            "node_name": record.node.node_name if record.node else None,
+            "node_name": _approval_node_name(
+                approval,
+                int(record.node_id) if record.node_id is not None else None,
+                record.node.node_name if record.node else None,
+            ),
             "approver_id": record.approver_id,
             "approver_name": approver_name,
             "approver_status": approver_status,
@@ -1591,17 +1574,23 @@ def _serialize_generic_approval(approval: Approval, db: Session) -> dict:
         "id": approval.id,
         "business_type": approval.business_type,
         "business_id": approval.business_id,
+        "business_public_id": summary.get("business_public_id") if summary else None,
         "original_invoice_application_id": summary.get("original_invoice_application_id") if summary else None,
         "contract_id": approval.contract_id,
         "flow_id": approval.flow_id,
         "flow_name": approval.flow.flow_name if approval.flow else None,
         "current_node_id": approval.current_node_id,
-        "current_node_name": approval.current_node.node_name if approval.current_node else None,
+        "current_node_name": _approval_current_node_name(approval),
         "status": approval.status,
         "submitter_id": approval.submitter_id,
         "submitter_name": approval.submitter_name,
         "created_time": approval.created_time,
         "updated_time": approval.updated_time,
+        "overdue_hours": (
+            int((datetime.now() - approval.created_time).total_seconds() // 3600)
+            if approval.status == ApprovalStatus.PENDING and approval.created_time
+            else None
+        ),
         "flow_is_active": flow_is_active,
         "flow_disabled_warning": flow_disabled_warning,
         "application_number": summary.get("application_number") if summary else f"{approval.business_type}-{approval.business_id}",
@@ -1729,7 +1718,10 @@ def _build_approval_entity_detail_unsafe(approval: Approval, db: Session) -> dic
             return {}
         contact = None
         if contract.signing_contact_id:
-            contact = db.query(Contact).filter(Contact.id == contract.signing_contact_id).first()
+            contact = db.query(Contact).filter(
+                Contact.id == contract.signing_contact_id,
+                Contact.team_id == team_id,
+            ).first()
         return {
             "contract_number": contract.contract_number,
             "contract_name": contract.contract_name,
@@ -1949,7 +1941,15 @@ async def bulk_approve(
             if not approval:
                 failed.append({"id": entity_id, "reason": "审批流程不存在"})
                 continue
-            if not approval.current_node:
+            updated_time = (request.updated_times or {}).get(str(entity_id))
+            if approval.status != ApprovalStatus.PENDING:
+                _check_approval_detail_permissions(db, approval, current_user, team_id)
+                if updated_time is not None and approval.updated_time != updated_time:
+                    failed.append({"id": entity_id, "reason": "已被他人处理"})
+                else:
+                    failed.append({"id": entity_id, "reason": "当前审批已结束，无法进行审批操作"})
+                continue
+            if approval.current_node_id is None:
                 failed.append({"id": entity_id, "reason": "当前审批节点不存在"})
                 continue
 
@@ -1961,21 +1961,12 @@ async def bulk_approve(
                 entity_type=request.entity_type,
                 entity_id=entity_id,
             )
-            if request.action.value == ApprovalAction.APPROVE:
-                _check_next_node_has_approvers(
-                    db,
-                    approval,
-                    team_id,
-                    detail_suffix="无成员",
-                    log_extra={"business_type": request.entity_type, "business_id": entity_id},
-                )
-
             action_request = ApprovalActionRequest(
                 action=request.action,
                 comment=request.comment,
-                updated_time=(request.updated_times or {}).get(str(entity_id)),
+                updated_time=updated_time,
             )
-            approval_crud.approve(
+            approval = approval_crud.approve(
                 db,
                 approval,
                 action_request,
@@ -1983,6 +1974,24 @@ async def bulk_approve(
                 current_user.name,
             )
             success_count += 1
+            try:
+                if request.action.value == ApprovalAction.REJECT:
+                    notification = outbound_notification_job_service.enqueue_rejected(
+                        db, approval=approval, team_id=team_id, actor_id=str(current_user.id),
+                        reject_reason=request.comment or "无",
+                    )
+                elif approval.status == ApprovalStatus.APPROVED:
+                    notification = outbound_notification_job_service.enqueue_approved(
+                        db, approval=approval, team_id=team_id, actor_id=str(current_user.id),
+                    )
+                else:
+                    notification = outbound_notification_job_service.enqueue_pending_for_approval(
+                        db, approval=approval, team_id=team_id, actor_id=str(current_user.id),
+                    )
+                _queue_outbound_notification(db, notification)
+            except Exception:
+                db.rollback()
+                logger.exception("批量审批通知入队失败 approval_id=%s", approval.id)
         except HTTPException as exc:
             db.rollback()
             failed.append({"id": entity_id, "reason": exc.detail})
@@ -2060,18 +2069,18 @@ async def submit_generic_approval(
             operation="Submit",
             approval_id=ap.id,
             flow_name=ap.flow.flow_name if ap.flow else None,
-            node_name=ap.current_node.node_name if ap.current_node else None,
+            node_name=_approval_current_node_name(ap),
             operator=current_user.name,
             flow_direction="submitted",
             business_type=entity_type,
             business_id=resolved_entity_id,
         )
-        if ap.current_node:
+        if ap.current_node_id is not None:
             log_approval_operation(
                 operation="Submit",
                 approval_id=ap.id,
                 flow_name=ap.flow.flow_name if ap.flow else None,
-                node_name=ap.current_node.node_name,
+                node_name=_approval_current_node_name(ap),
                 operator=current_user.name,
                 flow_direction="submitted",
                 notification_status="queued",
@@ -2091,12 +2100,12 @@ async def submit_generic_approval(
 **功能说明：**
 - get_by_entity 取审批实例；不存在 → 404
 - OPPORTUNITY 路由参数必须传商机对外 ID（opp_...），接口内部解析为数据库 ID
-- 复用既有 :611-619 角色校验：current_node.approve_role 不在用户角色集 → 403
+- 只有提交时确定的当前节点审批人可操作，否则返回 403
 - approval_crud.approve(...) 内部已调适配器 on_approved/on_rejected 切单据状态
   （INVOICE 写 status / reviewed_time；PAYMENT 写 confirmation_status；CONTRACT/LICENSE 写 status）
 - **D3 端点回写**：business_type==INVOICE 时，由本端点补写 reviewer_id / review_comment
   两字段（不扩适配器签名，Pre-Flight 定案）
-- 通知由 Task A8 泛化，本端点暂不发送
+- 按审批结果入队下一节点的待审批通知或审批结果通知；抄送由审批流程推进时入队。
 """,
 )
 async def approve_generic_approval(
@@ -2118,27 +2127,19 @@ async def approve_generic_approval(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="审批流程不存在",
         )
-    if not approval.current_node:
+    if approval.current_node_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="当前审批节点不存在",
         )
 
-    # 角色校验 + CONTRACT 自审追加权限校验（与既有 approve_contract 共用 helper）
+    # 校验冻结的当前节点审批人及自审权限（与合同端点共用）。
     _check_approve_permissions(
         db, approval, current_user, team_id,
         entity_type=entity_type, entity_id=resolved_entity_id,
     )
 
-    # APPROVE 时检查下一节点是否有审批人（与既有 approve_contract 共用 helper）
-    if action_request.action.value == ApprovalAction.APPROVE:
-        _check_next_node_has_approvers(
-            db, approval, team_id,
-            detail_suffix="无成员",
-            log_extra={"business_type": entity_type, "business_id": resolved_entity_id},
-        )
-
-    current_node_name = approval.current_node.node_name if approval.current_node else ""
+    current_node_name = _approval_current_node_name(approval) or ""
     flow_name = approval.flow.flow_name if approval.flow else ""
 
     try:
@@ -2191,7 +2192,7 @@ async def approve_generic_approval(
                 db.rollback()
 
     flow_direction_str = ("completed" if approval.status == ApprovalStatus.APPROVED else
-                     "next_node" if approval.current_node else "terminated")
+                     "next_node" if approval.current_node_id is not None else "terminated")
 
     # 通知泛化：按审批结果入队 pending/approved/rejected
     notification_status = "skipped"
@@ -2217,7 +2218,7 @@ async def approve_generic_approval(
                     team_id=team_id,
                     actor_id=str(current_user.id),
                 )
-            elif approval.current_node:
+            elif approval.current_node_id is not None:
                 request = outbound_notification_job_service.enqueue_pending_for_approval(
                     db,
                     approval=approval,
@@ -2290,17 +2291,13 @@ async def cancel_generic_approval(
             detail="合同变更审批不支持撤回",
         )
 
-    current_node_name = approval.current_node.node_name if approval.current_node else ""
+    current_node_name = _approval_current_node_name(approval) or ""
     flow_name = approval.flow.flow_name if approval.flow else ""
-    current_node = approval.current_node
-    adapter = get_adapter(entity_type)
-    notify_user_ids = []
-    if current_node:
-        notify_user_ids = [user.id for user in get_notification_users_for_node(db, current_node, team_id)]
+    approver_ids = current_approver_ids(db, approval)
 
     notify_request = None
     notification_status = "skipped"
-    if notify_user_ids:
+    if approver_ids:
         try:
             notify_request = outbound_notification_job_service.enqueue_cancelled(
                 db,
@@ -2308,14 +2305,13 @@ async def cancel_generic_approval(
                 team_id=team_id,
                 actor_id=str(current_user.id),
                 actor_name=current_user.name,
-                recipient_user_ids=notify_user_ids,
+                recipient_user_ids=approver_ids,
             )
             notification_status = "queued" if notify_request is not None else "skipped"
         except Exception as notify_error:
             notification_status = "failed"
             logger.error(
-                f"[Approval] Generic cancel notification failed: entity_type={entity_type}, "
-                f"business_id={resolved_entity_id}, error={str(notify_error)}"
+                f"[Approval] Cancel notification failed: approval_id={approval.id}, error={str(notify_error)}"
             )
 
     try:
@@ -2335,7 +2331,7 @@ async def cancel_generic_approval(
             detail=str(e),
         )
     outbound_notification_job_service.kick(notify_request)
-    entity = adapter.get_entity(db, resolved_entity_id, team_id)
+    entity = get_adapter(entity_type).get_entity(db, resolved_entity_id, team_id)
     if entity is not None:
         _enqueue_customer_approval_intelligence(
             db,
@@ -2394,7 +2390,7 @@ async def remind_generic_approval(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="只能催办自己提交的审批",
         )
-    if not approval.current_node:
+    if approval.current_node_id is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="当前审批节点不存在",
@@ -2408,8 +2404,8 @@ async def remind_generic_approval(
             detail="业务单据不存在",
         )
 
-    notify_users = get_notification_users_for_node(db, approval.current_node, team_id)
-    if not notify_users:
+    approver_ids = current_approver_ids(db, approval)
+    if not approver_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="当前审批节点没有可通知的审批人",
@@ -2422,7 +2418,7 @@ async def remind_generic_approval(
             approval=approval,
             team_id=team_id,
             actor_id=str(current_user.id),
-            recipient_user_ids=[user.id for user in notify_users],
+            recipient_user_ids=approver_ids,
         )
         result = _queue_outbound_notification(db, request)
         notification_status = _feishu_notification_status(result)
@@ -2437,7 +2433,7 @@ async def remind_generic_approval(
         operation="Remind",
         approval_id=approval.id,
         flow_name=approval.flow.flow_name if approval.flow else "",
-        node_name=approval.current_node.node_name,
+        node_name=_approval_current_node_name(approval) or "",
         operator=current_user.name,
         flow_direction="manual_reminder",
         notification_status=notification_status,
@@ -2486,31 +2482,38 @@ def detail_generic_approval(
     return _serialize_generic_approval(approval, db)
 
 
-@router.get(
-    "/{entity_type}/{entity_id}/file",
-    summary="预览或下载审批附件（通用）",
-    description="在审批上下文中读取合同附件或发票文件，权限与审批详情保持一致。",
-)
-def download_generic_approval_file(
-    entity_type: str,
-    entity_id: str,
+@router.get("/cc/{approval_id}", response_model=ApprovalCcDetailResponse, summary="查看抄送审批详情")
+def detail_cc_approval(
+    approval_id: int,
     db: Session = Depends(get_db),
     team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-):
-    _validate_entity_type(entity_type)
-    resolved_entity_id = _resolve_generic_entity_id(
-        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
-    )
+    current_user: User = Depends(get_current_active_user),
+) -> dict[str, object]:
+    approval = approval_crud.get_by_id(db, approval_id, team_id)
+    if approval is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="抄送审批不存在")
+    deliveries = db.query(ApprovalParticipant).filter_by(
+        team_id=team_id, approval_id=approval.id, user_id=current_user.id, kind=ApprovalParticipantKind.CC,
+    ).order_by(ApprovalParticipant.id).all()
+    if not deliveries:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="抄送审批不存在")
+    return {
+        **_serialize_generic_approval(approval, db),
+        "cc_deliveries": [
+            {"id": row.id, "node_id": row.node_id, "node_name": row.node_name, "created_time": row.created_time}
+            for row in deliveries
+        ],
+    }
 
-    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
-    if not approval:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="审批流程不存在",
-        )
-    _check_approval_detail_permissions(db, approval, current_user, team_id)
 
+def _approval_attachment_response(
+    db: Session,
+    *,
+    entity_type: str,
+    resolved_entity_id: int,
+    team_id: int,
+) -> Response:
+    """Load an approval-backed business attachment after authorization."""
     file_path: Optional[str] = None
     file_name: Optional[str] = None
     mime_type: Optional[str] = None
@@ -2588,16 +2591,75 @@ def download_generic_approval_file(
     )
 
 
+@router.get("/cc/{approval_id}/file", summary="预览或下载抄送审批附件")
+def download_cc_approval_file(
+    approval_id: int,
+    db: Session = Depends(get_db),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+) -> Response:
+    approval = approval_crud.get_by_id(db, approval_id, team_id)
+    if approval is None or not is_participant(
+        db, approval, int(current_user.id), ApprovalParticipantKind.CC
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="抄送审批不存在",
+        )
+    if approval.business_type not in {
+        BusinessType.CONTRACT,
+        BusinessType.INVOICE,
+        BusinessType.CONTRACT_CHANGE,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="该审批单据暂无可预览附件",
+        )
+    return _approval_attachment_response(
+        db,
+        entity_type=str(approval.business_type),
+        resolved_entity_id=int(approval.business_id),
+        team_id=team_id,
+    )
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/file",
+    summary="预览或下载审批附件（通用）",
+    description="在审批上下文中读取合同附件或发票文件，权限与审批详情保持一致。",
+)
+def download_generic_approval_file(
+    entity_type: str,
+    entity_id: str,
+    db: Session = Depends(get_db),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+) -> Response:
+    _validate_entity_type(entity_type)
+    resolved_entity_id = _resolve_generic_entity_id(
+        db, entity_type=entity_type, entity_ref=entity_id, team_id=team_id
+    )
+
+    approval = approval_crud.get_by_entity(db, entity_type, resolved_entity_id, team_id)
+    if not approval:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="审批流程不存在",
+        )
+    _check_approval_detail_permissions(db, approval, current_user, team_id)
+    return _approval_attachment_response(
+        db,
+        entity_type=entity_type,
+        resolved_entity_id=resolved_entity_id,
+        team_id=team_id,
+    )
+
+
 # ============================================================================
 # Task C3：通用审批列表端点 GET /v1/approvals
 # ============================================================================
 # 设计要点：
-# - E2 越权过滤（P0）：tab=pending/processed/submitted 分别按角色/记录/提交人过滤，
-#   team_id 由 get_current_user_team 注入，前端无法跨 team 抓数据。
-# - 角色获取：复用既有 role_crud.get_user_roles(db, user_id, team_id) → 取 code 集合，
-#   传给 approval_crud.list_approvals 做 pending tab 的 IN 过滤。
-# - 权限：Depends(get_current_user_team) + get_current_active_user 即可，无需额外
-#   require_permission——能看到的都是自己相关（待我审批/我已处理/我提交的）。
+# - 各 tab 按当前审批人、处理记录、提交人或抄送参与人过滤，并限制在当前团队。
 # - E9 N+1：approval_crud.list_approvals 内部分组批量预取实体摘要。
 # - 响应：{items, total, pending_count}（pending_count=pending tab total，任意 tab 附）。
 # ============================================================================
@@ -2608,16 +2670,17 @@ def download_generic_approval_file(
     response_model=ApprovalGenericListResponse,
     summary="获取审批列表（通用，Task C3）",
     description="""
-按 tab 维度查询当前用户相关审批列表，团队隔离 + 角色驱动过滤。
+按 tab 维度查询当前用户相关审批列表，团队隔离 + 提交时冻结的参与人过滤。
 
 **功能说明：**
-- tab=pending：当前节点审批角色属于我的角色集 + 状态 PENDING
+- tab=pending：当前节点冻结 APPROVER 参与人 + 状态 PENDING
 - tab=processed：我作为审批人留下过 APPROVE/REJECT 记录的审批
 - tab=submitted：我提交的所有审批（含已通过/驳回/撤回）
+- tab=cc：当前用户收到 CC 参与人记录的审批（只读）
 - 任意 tab 响应都附 `pending_count`（当前用户待我审批总数，供侧边栏徽章）
 
 **查询参数：**
-- tab: pending / processed / submitted
+- tab: pending / processed / submitted / cc
 - business_type: 可选 CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY 维度过滤
 - business_type_exclude: 可选排除业务类型，多个值用英文逗号分隔
 - page / page_size: 分页
@@ -2630,7 +2693,7 @@ def download_generic_approval_file(
 """,
 )
 def list_approvals(
-    tab: str = Query("pending", description="过滤维度：pending/processed/submitted"),
+    tab: str = Query("pending", description="过滤维度：pending/processed/submitted/cc"),
     business_type: Optional[str] = Query(None, description="业务类型过滤 CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY"),
     business_type_exclude: Optional[str] = Query(None, description="排除业务类型，多个值用英文逗号分隔"),
     approval_status: Optional[str] = Query(None, alias="status", description="审批状态过滤 PENDING/APPROVED/REJECTED/CANCELLED，多个值用英文逗号分隔"),
@@ -2651,10 +2714,10 @@ def list_approvals(
     db: Session = Depends(get_db),
 ):
     # 参数校验
-    if tab not in ("pending", "processed", "submitted"):
+    if tab not in ("pending", "processed", "submitted", "cc"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"非法 tab: {tab}，仅支持 pending / processed / submitted",
+            detail=f"非法 tab: {tab}，仅支持 pending / processed / submitted / cc",
         )
     parsed_filters, parsed_sorts = optional_request_list_query(
         filters_raw=filters,
@@ -2695,15 +2758,10 @@ def list_approvals(
                 detail=f"无效的审批状态: {invalid_value}，仅支持 PENDING / APPROVED / REJECTED / CANCELLED",
             )
 
-    # 当前用户在该 team 下的角色 code 集合（pending tab 过滤用）
-    user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
-    user_roles = [r.code for r in user_role_objs]
-
     items, total, pending_count = run_or_400(lambda: approval_crud.list_approvals(
         db,
         team_id=team_id,
         user_id=current_user.id,
-        user_roles=user_roles,
         tab=tab,
         business_types=business_types,
         business_types_exclude=business_types_exclude,

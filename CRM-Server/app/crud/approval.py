@@ -1,17 +1,21 @@
 from sqlalchemy.orm import Query, Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, exists as db_exists
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.sql.expression import Exists
 from typing import Optional, List, Tuple, Dict, Any
 from decimal import Decimal
 from datetime import date, time
 import logging
 
-from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus, ApprovalAction
+from app.models.approval import (
+    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus, ApprovalAction,
+    ApprovalParticipant, ApprovalParticipantKind,
+)
 from app.models.contract import Contract
 from app.models.contract_change import ContractChangeRequest
 from app.constants.business_types import BusinessType
 from app.schemas.approval import (
-    ApprovalFlowCreate, ApprovalFlowUpdate,
+    ApprovalFlowCreate, ApprovalFlowUpdate, ApprovalNodeCreate,
     ApprovalSubmitRequest, ApprovalActionRequest
 )
 from app.utils.time import business_now
@@ -111,6 +115,15 @@ def calculate_flow_precision_score(flow: ApprovalFlow, amount, license_type: Opt
     return score
 
 
+def _participant_exists(user_id: int, kind: str) -> Exists:
+    return db_exists().where(
+        ApprovalParticipant.approval_id == Approval.id,
+        ApprovalParticipant.team_id == Approval.team_id,
+        ApprovalParticipant.user_id == int(user_id),
+        ApprovalParticipant.kind == kind,
+    )
+
+
 class ApprovalFlowCRUD:
     def get_by_id(self, db: Session, flow_id: int, team_id: Optional[int] = None) -> Optional[ApprovalFlow]:
         query = db.query(ApprovalFlow).filter(ApprovalFlow.id == flow_id)
@@ -157,46 +170,99 @@ class ApprovalFlowCRUD:
         return db_flow
     
     def update(self, db: Session, db_obj: ApprovalFlow, obj_in: ApprovalFlowUpdate) -> ApprovalFlow:
-        from app.models.approval import ApprovalNode
-        
-        update_data = obj_in.model_dump(exclude_unset=True, exclude={'nodes'})
-        
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        nodes_data = obj_in.model_dump(exclude_unset=True).get('nodes')
+        payload = obj_in.model_dump(exclude_unset=True)
+        nodes_data = payload.pop('nodes', None)
+
         if nodes_data is not None:
-            existing_nodes = {node.id: node for node in db_obj.nodes}
-            
+            if not nodes_data:
+                raise ValueError('审批节点不能为空')
+
+            existing_nodes = db.query(ApprovalNode).filter(
+                ApprovalNode.flow_id == db_obj.id,
+                ApprovalNode.team_id == db_obj.team_id,
+                ApprovalNode.is_archived == 0,
+            ).all()
+            existing_by_id = {int(node.id): node for node in existing_nodes}
+            requested_ids = [node.get('id') for node in nodes_data if node.get('id') is not None]
+            if len(requested_ids) != len(set(requested_ids)):
+                raise ValueError('审批流程节点不能重复')
+            unknown_ids = set(requested_ids) - set(existing_by_id)
+            if unknown_ids:
+                raise ValueError('审批流程节点不存在或不属于当前流程')
+
+            final_nodes: list[tuple[int | None, dict[str, Any]]] = []
             for node_data in nodes_data:
                 node_id = node_data.get('id')
-                node_fields = {k: v for k, v in node_data.items() if k != 'id' and v is not None}
-                
-                if node_id and node_id in existing_nodes:
-                    for field, value in node_fields.items():
-                        setattr(existing_nodes[node_id], field, value)
+                if node_id is None:
+                    final_nodes.append((None, dict(node_data)))
+                    continue
+                current = existing_by_id[node_id]
+                merged = {
+                    'node_name': current.node_name,
+                    'node_code': current.node_code,
+                    'node_order': current.node_order,
+                    'description': current.description,
+                    'node_type': current.node_type or 'APPROVAL',
+                    'approver_roles': current.approver_roles,
+                    'approver_users': current.approver_users,
+                }
+                merged.update({key: value for key, value in node_data.items() if key != 'id'})
+                final_nodes.append((node_id, merged))
+
+            ordered_nodes = sorted(final_nodes, key=lambda item: item[1].get('node_order') or 0)
+            validated_nodes: list[tuple[int | None, ApprovalNodeCreate]] = []
+            for index, (node_id, node_data) in enumerate(ordered_nodes, start=1):
+                try:
+                    validated = ApprovalNodeCreate.model_validate(node_data)
+                except Exception as exc:
+                    raise ValueError(f'第 {index} 个节点配置无效: {exc}') from exc
+                if not (validated.approver_roles or validated.approver_users):
+                    raise ValueError(f'第 {index} 个节点未选择审批人员')
+                validated_nodes.append((node_id, validated))
+
+            if validated_nodes[0][1].node_type.value != 'APPROVAL':
+                raise ValueError('抄送节点需位于审批节点之后')
+            orders = [node.node_order for _, node in validated_nodes]
+            if orders != list(range(1, len(orders) + 1)):
+                raise ValueError('审批节点顺序必须从1开始连续编号')
+            codes = [node.node_code for _, node in validated_nodes]
+            if len(codes) != len(set(codes)):
+                raise ValueError('节点编码不能重复')
+
+            requested_id_set = set(requested_ids)
+            for node in existing_nodes:
+                if node.id not in requested_id_set:
+                    node.is_archived = 1  # type: ignore[assignment]
+            for node_id, node_model in validated_nodes:
+                values = node_model.model_dump(mode='json')
+                if node_id is None:
+                    db.add(ApprovalNode(flow_id=db_obj.id, team_id=db_obj.team_id, **values))
                 else:
-                    new_node = ApprovalNode(flow_id=db_obj.id, team_id=db_obj.team_id, **node_fields)
-                    db.add(new_node)
-            
-            node_ids_to_keep = {n.get('id') for n in nodes_data if n.get('id')}
-            for existing_node in db_obj.nodes:
-                if existing_node.id not in node_ids_to_keep:
-                    db.delete(existing_node)
-        
+                    node = existing_by_id[node_id]
+                    for field, value in values.items():
+                        setattr(node, field, value)
+
+        for field, value in payload.items():
+            setattr(db_obj, field, value)
+
         db.commit()
         db.refresh(db_obj)
         return db_obj
-    
-    def delete(self, db: Session, flow_id: int) -> bool:
-        flow = self.get_by_id(db, flow_id)
+
+    def delete(self, db: Session, flow_id: int, team_id: Optional[int] = None) -> bool:
+        flow = self.get_by_id(db, flow_id, team_id)
         if not flow:
             return False
-        
+        approval_query = db.query(Approval.id).filter(Approval.flow_id == flow.id)
+        if flow.team_id is not None:
+            approval_query = approval_query.filter(Approval.team_id == flow.team_id)
+        if approval_query.first() is not None:
+            raise ValueError('存在关联的审批实例，不能删除审批流程')
         db.delete(flow)
         db.commit()
         return True
     
+
     def match_flow(self, db: Session, contract: Contract, team_id: Optional[int] = None) -> Tuple[Optional[ApprovalFlow], Optional[str]]:
         """
         匹配审批流程（合同专用 thin wrapper，A5 解耦后保留以兼容现有调用方）
@@ -361,121 +427,32 @@ class ApprovalFlowCRUD:
 
         return selected_flow, None
 
-    def check_node_has_approvers(self, db: Session, node_id: int, team_id: int) -> bool:
-        """
-        检查审批节点是否有审批人
-
-        Args:
-            db: 数据库会话
-            node_id: 审批节点ID
-            team_id: 团队ID
-
-        Returns:
-            bool: 是否有审批人
-        """
-        from app.crud.role import role_crud
-
-        # 获取审批节点
-        node = db.query(ApprovalNode).filter(
-            ApprovalNode.id == node_id,
-            ApprovalNode.team_id == team_id
-        ).first()
-
-        if not node:
-            return False
-
-        # 获取审批角色
-        if not node.approve_role:
-            return False
-
-        # 获取角色的成员列表
-        role = role_crud.get_by_code(db, node.approve_role)
-        if not role:
-            return False
-
-        users = role_crud.get_role_users(db, role.id, team_id)
-        return len(users) > 0
-
     def check_flow_has_all_approvers(self, db: Session, flow_id: int, team_id: int) -> Dict[str, Any]:
+        """检查流程各审批节点是否有人可批（整角色成员 ∪ 仍在角色内的指定成员）。
+
+        node_index 为节点在全部节点（含抄送）中的 1-based 位置，与「第 N 个节点」提示一致。
         """
-        检查审批流程所有节点是否有审批人
+        from app.services.approval_routing import NODE_TYPE_APPROVAL, resolve_node_user_ids
 
-        Args:
-            db: 数据库会话
-            flow_id: 审批流程ID
-            team_id: 团队ID
-
-        Returns:
-            Dict: 包含各节点的审批人状态
-                {
-                    "all_have_approvers": bool,  # 是否所有节点都有审批人
-                    "nodes": [  # 各节点状态列表
-                        {
-                            "node_id": int,
-                            "node_name": str,
-                            "approve_role": str,
-                            "has_approvers": bool,
-                            "approver_count": int
-                        }
-                    ],
-                    "missing_nodes": [  # 无审批人的节点列表
-                        {
-                            "node_id": int,
-                            "node_name": str,
-                            "approve_role": str
-                        }
-                    ]
-                }
-        """
-        from app.crud.role import role_crud
-
-        # 获取审批流程的所有节点
-        nodes = db.query(ApprovalNode).filter(
-            ApprovalNode.flow_id == flow_id,
-            ApprovalNode.team_id == team_id
-        ).order_by(ApprovalNode.node_order).all()
-
-        if not nodes:
-            return {
-                "all_have_approvers": False,
-                "nodes": [],
-                "missing_nodes": []
-            }
-
-        result = {
-            "all_have_approvers": True,
-            "nodes": [],
-            "missing_nodes": []
-        }
-
-        for node in nodes:
-            approver_count = 0
-            has_approvers = False
-
-            if node.approve_role:
-                role = role_crud.get_by_code(db, node.approve_role)
-                if role:
-                    users = role_crud.get_role_users(db, role.id, team_id)
-                    approver_count = len(users)
-                    has_approvers = approver_count > 0
-
-            node_status = {
+        flow = self.get_by_id(db, flow_id, team_id)
+        nodes = list(flow.nodes) if flow else []
+        result: Dict[str, Any] = {"all_have_approvers": bool(nodes), "nodes": [], "missing_nodes": []}
+        for index, node in enumerate(nodes, start=1):
+            user_ids = resolve_node_user_ids(db, node, team_id)
+            is_approval = (node.node_type or NODE_TYPE_APPROVAL) == NODE_TYPE_APPROVAL
+            has_approvers = bool(user_ids) or not is_approval
+            status = {
                 "node_id": node.id,
+                "node_index": index,
                 "node_name": node.node_name,
-                "approve_role": node.approve_role or "",
+                "node_type": node.node_type,
                 "has_approvers": has_approvers,
-                "approver_count": approver_count
+                "approver_count": len(user_ids),
             }
-            result["nodes"].append(node_status)
-
+            result["nodes"].append(status)
             if not has_approvers:
                 result["all_have_approvers"] = False
-                result["missing_nodes"].append({
-                    "node_id": node.id,
-                    "node_name": node.node_name,
-                    "approve_role": node.approve_role or ""
-                })
-
+                result["missing_nodes"].append(status)
         return result
 
 
@@ -729,7 +706,7 @@ class ApprovalCRUD:
         Returns:
             Approval: 创建后的审批实例
         """
-        from app.models.approval import ApprovalNode, ApprovalRecord
+        from app.models.approval import ApprovalRecord
         from app.services.approval_adapter import get_adapter
 
         adapter = get_adapter(business_type)
@@ -737,6 +714,10 @@ class ApprovalCRUD:
             entity = adapter.get_entity(db, business_id, team_id)
         if entity is None:
             raise ValueError("业务单据不存在")
+        from app.services.approval_routing import build_snapshot, enter_next
+
+        # 提交时冻结审批人；任一审批节点无人可批则拒绝，单据不进入审批。
+        nodes_snapshot = build_snapshot(db, list(flow.nodes), team_id)
 
         if auto_commit:
             from app.services.approval_adapter import advance_approval_source, get_approval_customer_id
@@ -762,10 +743,7 @@ class ApprovalCRUD:
             user = user_crud.get_by_id(db, int(submitter_id))
             submitter_name = user.name if user else None
 
-        first_node = db.query(ApprovalNode).filter(
-            ApprovalNode.flow_id == flow.id,
-            ApprovalNode.node_order == 1
-        ).first()
+        first_node_id = nodes_snapshot[0]["node_id"]
 
         db_approval = Approval(
             business_type=business_type,
@@ -773,7 +751,8 @@ class ApprovalCRUD:
             contract_id=contract_id,
             flow_id=flow.id,
             team_id=team_id,
-            current_node_id=first_node.id if first_node else None,
+            current_node_id=first_node_id,
+            nodes_snapshot=nodes_snapshot,
             status=ApprovalStatus.PENDING,
             submitter_id=submitter_id,
             submitter_name=submitter_name,
@@ -798,10 +777,11 @@ class ApprovalCRUD:
                 advance_approval_source(db, business_type, entity)
         db.add(db_approval)
         db.flush()
+        enter_next(db, db_approval, start_index=0)
 
         db.add(ApprovalRecord(
             approval_id=db_approval.id,
-            node_id=first_node.id if first_node else None,
+            node_id=first_node_id,
             approver_id=submitter_id,
             approver_name=submitter_name,  # 同样使用补充后的 submitter_name
             action=ApprovalAction.SUBMIT,
@@ -820,9 +800,12 @@ class ApprovalCRUD:
 
 
     def approve(self, db: Session, approval: Approval, action_request: ApprovalActionRequest, approver_id: str, approver_name: str) -> Approval:
-        from app.models.approval import ApprovalNode
+        from app.services.approval_routing import clear_approvers, current_snapshot_entry, enter_next, is_participant
+        from app.services.outbound_notification_job_service import outbound_notification_job_service
         from app.services.approval_adapter import advance_approval_source, get_adapter, get_approval_customer_id
         from app.constants.approval_phase import ApprovalPhase
+
+        expected_node_id = approval.current_node_id
 
         adapter = get_adapter(approval.business_type)
         with db.no_autoflush:
@@ -832,26 +815,26 @@ class ApprovalCRUD:
         approval = db.query(Approval).filter(
             Approval.id == approval.id, Approval.team_id == approval.team_id,
         ).populate_existing().with_for_update().one()
-        # 乐观锁检查：防止并发审批冲突
-        if action_request.updated_time is not None:
-            if approval.updated_time != action_request.updated_time:
-                raise ValueError("审批已被其他用户处理")
-
+        if approval.current_node_id != expected_node_id:
+            raise ValueError('审批已被其他用户处理')
+        if action_request.updated_time is not None and approval.updated_time != action_request.updated_time:
+            raise ValueError('审批已被其他用户处理')
         if approval.status != ApprovalStatus.PENDING:
-            raise ValueError(f"当前审批状态为 {approval.status}，无法进行审批操作")
-
-        current_node = approval.current_node
-        if not current_node:
-            raise ValueError("当前审批节点不存在")
+            raise ValueError(f'当前审批状态为 {approval.status}，无法进行审批操作')
+        if not is_participant(db, approval, int(approver_id), ApprovalParticipantKind.APPROVER):
+            raise ValueError('您不是当前节点的审批人')
+        current_entry = current_snapshot_entry(approval)
+        if current_entry is None:
+            raise ValueError('当前审批节点不存在')
 
         record = ApprovalRecord(
             approval_id=approval.id,
-            node_id=current_node.id,
+            node_id=approval.current_node_id,
             approver_id=approver_id,
             approver_name=approver_name,
             action=action_request.action.value,
             comment=action_request.comment,
-            team_id=approval.team_id
+            team_id=approval.team_id,
         )
         db.add(record)
 
@@ -864,16 +847,15 @@ class ApprovalCRUD:
             if customer_id is not None and get_approval_customer_id(db, approval.business_type, entity) != customer_id:
                 raise ValueError("业务单据所属客户已变更，请刷新后重试")
 
+        cc_requests = []
         if action_request.action.value == ApprovalAction.APPROVE:
-            next_node = db.query(ApprovalNode).filter(
-                ApprovalNode.flow_id == approval.flow_id,
-                ApprovalNode.node_order == current_node.node_order + 1
-            ).first()
-
-            if next_node:
-                approval.current_node_id = next_node.id
-                # 多级审批中间节点通过：approval_phase 保持 PENDING_REVIEW
-            else:
+            # 跳过抄送节点（写入抄送人）直达下一审批节点；无后续审批节点即通过。
+            routed = enter_next(db, approval)
+            cc_requests = outbound_notification_job_service.enqueue_cc_entries(
+                db, approval=approval, team_id=int(approval.team_id),
+                cc_entries=routed.cc_entries, actor_id=approver_id,
+            )
+            if routed.finished:
                 # 最后节点通过：Approval.status = APPROVED
                 if entity is not None:
                     advance_approval_source(db, approval.business_type, entity)
@@ -885,6 +867,7 @@ class ApprovalCRUD:
                     adapter.on_approved(db, entity)
 
         elif action_request.action.value == ApprovalAction.REJECT:
+            clear_approvers(db, approval)
             # Approval.status = REJECTED
             if entity is not None:
                 advance_approval_source(db, approval.business_type, entity)
@@ -897,6 +880,8 @@ class ApprovalCRUD:
 
         db.commit()
         db.refresh(approval)
+        for request in cc_requests:
+            outbound_notification_job_service.kick(request)
         return approval
 
     def cancel(self, db: Session, approval: Approval, user_id: str) -> Approval:
@@ -921,6 +906,8 @@ class ApprovalCRUD:
             raise ValueError("只有提交人可以撤回审批")
 
         approval.status = ApprovalStatus.CANCELLED
+        from app.services.approval_routing import clear_approvers
+        clear_approvers(db, approval)
 
         if entity is not None:
             with db.no_autoflush:
@@ -940,9 +927,10 @@ class ApprovalCRUD:
         db.refresh(approval)
         return approval
     
-    def get_records(self, db: Session, approval_id: int) -> List[ApprovalRecord]:
+    def get_records(self, db: Session, approval_id: int, team_id: int) -> List[ApprovalRecord]:
         return db.query(ApprovalRecord).filter(
-            ApprovalRecord.approval_id == approval_id
+            ApprovalRecord.approval_id == approval_id,
+            ApprovalRecord.team_id == team_id,
         ).order_by(ApprovalRecord.created_time.asc()).all()
 
     def get_overdue_approvals(
@@ -975,6 +963,7 @@ class ApprovalCRUD:
             Tuple[List[Dict], int]: 超时审批列表和总数
         """
         from datetime import timedelta
+        from app.services.approval_routing import snapshot_entry_for_node
 
         # 计算超时阈值时间点
         now = business_now()
@@ -991,16 +980,21 @@ class ApprovalCRUD:
             Approval.created_time.label('submit_time'),
             Approval.submitter_name,
             Approval.current_node_id,
-            ApprovalNode.node_name.label('current_node_name'),
-            ApprovalNode.approve_role,
+            Approval.nodes_snapshot,
+            ApprovalNode.node_name.label('legacy_node_name'),
         ).outerjoin(
-            ApprovalNode, Approval.current_node_id == ApprovalNode.id
+            ApprovalNode,
+            and_(
+                Approval.nodes_snapshot.is_(None),
+                Approval.current_node_id == ApprovalNode.id,
+                or_(ApprovalNode.team_id == Approval.team_id, ApprovalNode.team_id.is_(None)),
+            ),
         ).filter(
             Approval.team_id == team_id,
             Approval.status == ApprovalStatus.PENDING,
             Approval.created_time <= threshold_time
         ).order_by(
-            Approval.created_time.asc()  # 超时时间最长的排在前面
+            Approval.created_time.asc()
         )
 
         total = query.count()
@@ -1011,21 +1005,25 @@ class ApprovalCRUD:
         for row in results:
             overdue_hours = int((now - row.submit_time).total_seconds() / 3600)
 
-            # 获取当前审批人姓名
-            current_approver_name = None
-            if row.approve_role:
-                approvers = self._get_approvers_by_role(db, row.approve_role, team_id)
-                if approvers:
-                    current_approver_name = ", ".join([a.name for a in approvers if a.name])
-
+            current_entry = next(
+                (item for item in (row.nodes_snapshot or []) if item.get('node_id') == row.current_node_id),
+                None,
+            )
+            current_node_name = (
+                (current_entry or {}).get('node_name')
+                if row.nodes_snapshot is not None
+                else row.legacy_node_name
+            )
+            approvers = self._current_approvers(db, row.approval_id, team_id)
+            current_approver_name = ', '.join(a.name for a in approvers if a.name) or None
             overdue_list.append({
                 'approval_id': row.approval_id,
                 'business_type': row.business_type,
                 'business_id': row.business_id,
                 'contract_id': row.contract_id,
-                'contract_name': None,  # 实体名由调用方按需经适配器取
+                'contract_name': None,
                 'contract_number': None,
-                'current_node_name': row.current_node_name,
+                'current_node_name': current_node_name,
                 'current_approver_name': current_approver_name,
                 'overdue_hours': overdue_hours,
                 'submitter_name': row.submitter_name,
@@ -1035,29 +1033,22 @@ class ApprovalCRUD:
 
         return overdue_list, total
 
-    def _get_approvers_by_role(self, db: Session, role_code: str, team_id: int) -> List[Any]:
-        """获取指定角色的审批人列表"""
-        from app.models.role import Role, UserRole
+    def _current_approvers(self, db: Session, approval_id: int, team_id: int) -> List[Any]:
+        """当前审批节点的冻结审批人。"""
         from app.models.user import User
 
-        role = db.query(Role).filter(Role.code == role_code).first()
-        if not role:
-            return []
-
-        # 查询拥有该角色的用户
-        users = db.query(User).join(
-            UserRole, User.id == UserRole.user_id
-        ).filter(
-            UserRole.role_id == role.id
+        return db.query(User).join(ApprovalParticipant, ApprovalParticipant.user_id == User.id).filter(
+            ApprovalParticipant.approval_id == approval_id,
+            ApprovalParticipant.team_id == team_id,
+            ApprovalParticipant.kind == ApprovalParticipantKind.APPROVER,
         ).all()
-
-        return users
 
     # ========================================================================
     # Task C3：通用审批列表（GET /v1/approvals）
     # ========================================================================
     # E2 越权过滤（P0）——按 tab 切换查询主体：
-    #   pending  : status=PENDING AND team_id AND current_node.approve_role IN user_roles
+    #   pending  : status=PENDING AND team_id AND 我是当前节点冻结审批人（participants APPROVER）
+    #   cc       : 我是已流转到的抄送节点的抄送人（participants CC）
     #   processed: EXISTS(records WHERE approver_id=user_id AND action!=SUBMIT) AND team_id
     #   submitted: submitter_id=user_id AND team_id
     # E9 N+1 规避：审批行先取主体，再按 business_type 分组批量预取
@@ -1074,32 +1065,28 @@ class ApprovalCRUD:
         *,
         team_id: int,
         user_id: int,
-        user_roles: List[str],
         tab: str,
         search: str | None,
         filters: list[FilterCondition],
         sorts: list[SortCondition],
     ) -> tuple[Query, bool]:
         """Return ordered approvals and whether legacy summary filtering is required."""
-        from app.models.approval import ApprovalNode, ApprovalRecord, ApprovalAction
-
         user_id_str = str(user_id)
         query = db.query(Approval).filter(Approval.team_id == team_id)
         if tab == "pending":
-            query = (
-                query.join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
-                .filter(Approval.status == ApprovalStatus.PENDING)
+            query = query.filter(
+                Approval.status == ApprovalStatus.PENDING,
+                _participant_exists(user_id, ApprovalParticipantKind.APPROVER),
             )
-            if user_roles:
-                query = query.filter(ApprovalNode.approve_role.in_(user_roles))
-            else:
-                query = query.filter(ApprovalNode.approve_role.is_(None))
+        elif tab == "cc":
+            query = query.filter(_participant_exists(user_id, ApprovalParticipantKind.CC))
         elif tab == "submitted":
             query = query.filter(Approval.submitter_id == user_id_str)
         elif tab == "processed":
             processed_sub = (
                 db.query(ApprovalRecord.approval_id)
                 .filter(
+                    ApprovalRecord.team_id == team_id,
                     ApprovalRecord.approver_id == user_id_str,
                     ApprovalRecord.action != ApprovalAction.SUBMIT,
                 )
@@ -1107,7 +1094,7 @@ class ApprovalCRUD:
             )
             query = query.filter(Approval.id.in_(processed_sub))
         else:
-            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
+            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted / cc")
 
         context = ListQueryContext(
             db=db,
@@ -1129,11 +1116,24 @@ class ApprovalCRUD:
         )
         return ordered.order_by(Approval.id.asc()), False
 
-    def build_list_items(self, projection_db: Session, rows: List[Approval], team_id: int) -> List[Dict[str, Any]]:
+    def build_list_items(
+        self, projection_db: Session, rows: List[Approval], team_id: int, *, cc_user_id: int | None = None,
+    ) -> List[Dict[str, Any]]:
         summaries = self._batch_entity_summaries(projection_db, rows, team_id)
+        latest_cc: dict[int, ApprovalParticipant] = {}
+        if rows and cc_user_id is not None:
+            deliveries = projection_db.query(ApprovalParticipant).filter(
+                ApprovalParticipant.team_id == team_id,
+                ApprovalParticipant.user_id == cc_user_id,
+                ApprovalParticipant.kind == ApprovalParticipantKind.CC,
+                ApprovalParticipant.approval_id.in_([ap.id for ap in rows]),
+            ).order_by(ApprovalParticipant.created_time.desc(), ApprovalParticipant.id.desc())
+            for delivery in deliveries:
+                latest_cc.setdefault(int(delivery.approval_id), delivery)
         now = business_now()
         items: List[Dict[str, Any]] = []
         for ap in rows:
+            cc_delivery = latest_cc.get(int(ap.id))
             sum_key = (ap.business_type, ap.business_id) if ap.business_id else None
             summary = summaries.get(sum_key) if sum_key else None
             overdue_hours: Optional[int] = None
@@ -1173,6 +1173,8 @@ class ApprovalCRUD:
                 "created_time": ap.created_time.isoformat() if ap.created_time else "",
                 "updated_time": ap.updated_time.isoformat() if ap.updated_time else "",
                 "overdue_hours": overdue_hours,
+                "cc_node_name": cc_delivery.node_name if cc_delivery else None,
+                "cc_time": cc_delivery.created_time.isoformat() if cc_delivery else None,
             })
         return items
 
@@ -1181,7 +1183,6 @@ class ApprovalCRUD:
         db: Session,
         team_id: int,
         user_id: int,
-        user_roles: List[str],
         tab: str = "pending",
         business_type: Optional[str] = None,
         business_types: Optional[List[str]] = None,
@@ -1206,8 +1207,7 @@ class ApprovalCRUD:
             db: 数据库会话
             team_id: 团队ID（团队隔离）
             user_id: 当前用户ID（int，用于 submitted/processed 过滤）
-            user_roles: 当前用户在 team_id 下的角色 code 列表（用于 pending 过滤）
-            tab: pending / processed / submitted
+            tab: pending / processed / submitted / cc
             business_type: 可选业务类型过滤（兼容旧调用）
             business_types: 可选业务类型包含过滤（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY）
             business_types_exclude: 可选业务类型排除过滤
@@ -1229,7 +1229,6 @@ class ApprovalCRUD:
                 pending_count 为当前用户待我审批总数（任意 tab 都附）。
         """
         from datetime import datetime
-        from app.models.approval import ApprovalNode, ApprovalRecord, ApprovalAction
 
         user_id_str = str(user_id)
         skip = max(0, (page - 1) * page_size)
@@ -1258,16 +1257,12 @@ class ApprovalCRUD:
                 query = query.filter(Approval.created_time <= datetime.combine(created_time_end, time.max))
 
         if tab == "pending":
-            # JOIN current_node 取 approve_role 过滤
-            query = (
-                query.join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
-                .filter(Approval.status == ApprovalStatus.PENDING)
+            query = query.filter(
+                Approval.status == ApprovalStatus.PENDING,
+                _participant_exists(user_id, ApprovalParticipantKind.APPROVER),
             )
-            if user_roles:
-                query = query.filter(ApprovalNode.approve_role.in_(user_roles))
-            else:
-                # 无任何角色 → 不返任何 pending 行（避免 IN () SQL 报错）
-                query = query.filter(ApprovalNode.approve_role.is_(None))
+        elif tab == "cc":
+            query = query.filter(_participant_exists(user_id, ApprovalParticipantKind.CC))
         elif tab == "submitted":
             query = query.filter(Approval.submitter_id == user_id_str)
         elif tab == "processed":
@@ -1277,6 +1272,7 @@ class ApprovalCRUD:
             processed_sub = (
                 db.query(ApprovalRecord.approval_id)
                 .filter(
+                    ApprovalRecord.team_id == team_id,
                     ApprovalRecord.approver_id == user_id_str,
                     ApprovalRecord.action != ApprovalAction.SUBMIT,
                 )
@@ -1284,7 +1280,7 @@ class ApprovalCRUD:
             )
             query = query.filter(Approval.id.in_(processed_sub))
         else:
-            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted")
+            raise ValueError(f"非法 tab: {tab}，仅支持 pending / processed / submitted / cc")
 
         query = apply_search(
             query,
@@ -1303,7 +1299,6 @@ class ApprovalCRUD:
                 db,
                 team_id=team_id,
                 user_id=user_id,
-                user_roles=user_roles,
                 tab=tab,
                 search=search,
                 filters=filters or [],
@@ -1311,8 +1306,8 @@ class ApprovalCRUD:
             )
             total = query.order_by(None).count()
             rows = query.offset(skip).limit(page_size).all()
-            items = self.build_list_items(db, rows, team_id)
-            pending_count = self._count_pending_for_user(db, team_id, user_roles)
+            items = self.build_list_items(db, rows, team_id, cc_user_id=user_id if tab == "cc" else None)
+            pending_count = self._count_pending_for_user(db, team_id, user_id)
             return items, total, pending_count
 
         needs_summary_filter = any([
@@ -1327,7 +1322,7 @@ class ApprovalCRUD:
             total = query.count()
             rows = ordered_query.offset(skip).limit(page_size).all()
 
-        items = self.build_list_items(db, rows, team_id)
+        items = self.build_list_items(db, rows, team_id, cc_user_id=user_id if tab == "cc" else None)
 
         def matches_summary_filters(item: Dict[str, Any]) -> bool:
             if application_number:
@@ -1355,7 +1350,7 @@ class ApprovalCRUD:
             items = items[skip:skip + page_size]
 
         # ---- pending_count：当前用户待我审批总数，任意 tab 都附 ----
-        pending_count = self._count_pending_for_user(db, team_id, user_roles)
+        pending_count = self._count_pending_for_user(db, team_id, user_id)
 
         return items, total, pending_count
 
@@ -1594,24 +1589,14 @@ class ApprovalCRUD:
         self,
         db: Session,
         team_id: int,
-        user_roles: List[str],
+        user_id: int,
     ) -> int:
         """当前用户「待我审批」总数（pending tab 的 total，任意 tab 响应都附给前端徽章）。"""
-        from app.models.approval import ApprovalNode
-
-        query = (
-            db.query(Approval)
-            .join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
-            .filter(
-                Approval.team_id == team_id,
-                Approval.status == ApprovalStatus.PENDING,
-            )
-        )
-        if user_roles:
-            query = query.filter(ApprovalNode.approve_role.in_(user_roles))
-        else:
-            query = query.filter(ApprovalNode.approve_role.is_(None))
-        return query.count()
+        return db.query(Approval).filter(
+            Approval.team_id == team_id,
+            Approval.status == ApprovalStatus.PENDING,
+            _participant_exists(user_id, ApprovalParticipantKind.APPROVER),
+        ).count()
 
 
 approval_flow_crud = ApprovalFlowCRUD()

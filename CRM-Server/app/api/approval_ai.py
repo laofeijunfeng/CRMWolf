@@ -7,18 +7,20 @@ import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
 from app.models.user import User
+from app.models.role import Role
+from app.models.user_role import UserRole
 from app.models.approval import ApprovalFlow, ApprovalNode
 from app.schemas.approval_ai import ApprovalAIParseRequest, ApprovalAICreateRequest
 from app.services.approval_ai_parser import approval_ai_parser_service
 from app.utils.sse_encoder import SSEJsonEncoder
 from app.crud.approval import approval_flow_crud
-from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +101,7 @@ async def create_approval_flow_from_ai(
     校验规则：
     1. flow_code 不能重复
     2. nodes 至少包含 1 个节点
-    3. approve_role 必须是预定义角色
+    3. 审批角色必须是预定义角色，首个节点必须是审批节点
     4. node_order 自动修正为连续
     """
     # 检查 team_id 是否有效
@@ -123,13 +125,56 @@ async def create_approval_flow_from_ai(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="审批节点不能为空"
         )
+    if request.nodes[0].node_type != "APPROVAL":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="抄送节点需位于审批节点之后")
 
-    # 验证角色编码
-    for node in request.nodes:
-        if node.approve_role not in ALLOWED_APPROVAL_ROLES:
+    requested_roles = {
+        role
+        for node in request.nodes
+        for role in (node.approver_roles or []) + [user.role for user in node.approver_users or []]
+    }
+    team_role_codes = {
+        code for (code,) in db.query(Role.code).join(UserRole, UserRole.role_id == Role.id).filter(
+            UserRole.team_id == team_id,
+            Role.code.in_(requested_roles),
+        ).distinct().all()
+    }
+    invalid_roles = requested_roles - team_role_codes
+    if invalid_roles:
+        invalid_role = sorted(invalid_roles)[0]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"审批角色「{invalid_role}」不属于当前团队",
+        )
+    requested_user_roles = {
+        (user.user_id, user.role)
+        for node in request.nodes
+        for user in (node.approver_users or [])
+    }
+    if requested_user_roles:
+        valid_user_roles = {
+            (user_id, code)
+            for user_id, code in db.query(UserRole.user_id, Role.code).join(
+                Role, Role.id == UserRole.role_id
+            ).filter(
+                UserRole.team_id == team_id,
+                tuple_(UserRole.user_id, Role.code).in_(requested_user_roles),
+            ).all()
+        }
+        invalid_user_roles = requested_user_roles - valid_user_roles
+        if invalid_user_roles:
+            user_id, role = sorted(invalid_user_roles)[0]
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"审批角色「{node.approve_role}」无效，请使用预定义角色：{', '.join(ALLOWED_APPROVAL_ROLES)}"
+                detail=f"指定成员 {user_id} 不属于角色「{role}」",
+            )
+
+    for index, node in enumerate(request.nodes, start=1):
+        roles = (node.approver_roles or []) + [user.role for user in node.approver_users or []]
+        if not roles:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"第 {index} 个节点未选择审批人员",
             )
 
     # 检查节点编码唯一性
@@ -162,8 +207,9 @@ async def create_approval_flow_from_ai(
                 node_code=node.node_code,
                 node_order=i + 1,  # 强制连续
                 description=node.description,
-                approve_role=node.approve_role,
-                is_required=node.is_required if hasattr(node, 'is_required') else 1
+                node_type=node.node_type.value,
+                approver_roles=node.approver_roles,
+                approver_users=[user.model_dump() for user in node.approver_users] if node.approver_users else None,
             )
             db.add(node_obj)
             created_nodes.append(node_obj)
@@ -194,7 +240,9 @@ async def create_approval_flow_from_ai(
                         "node_name": n.node_name,
                         "node_code": n.node_code,
                         "node_order": n.node_order,
-                        "approve_role": n.approve_role
+                        "node_type": n.node_type,
+                        "approver_roles": n.approver_roles or [],
+                        "approver_users": n.approver_users or [],
                     }
                     for n in created_nodes
                 ]

@@ -13,7 +13,7 @@ def test_approval_flow_create_requires_business_type():
         node_name="测试节点",
         node_code="TEST_NODE",
         node_order=1,
-        approve_role="SALES_DIRECTOR"
+        approver_roles=["SALES_DIRECTOR"],
     )
 
     with pytest.raises(ValidationError):
@@ -32,7 +32,7 @@ def test_approval_flow_create_custom_business_type():
         node_name="回款审批",
         node_code="PAYMENT_NODE",
         node_order=1,
-        approve_role="FINANCE"
+        approver_users=[{"role": "FINANCE", "user_id": 1}],
     )
 
     schema = ApprovalFlowCreate(
@@ -53,7 +53,7 @@ def test_approval_flow_create_license_business_type():
         node_name="License审批",
         node_code="LICENSE_NODE",
         node_order=1,
-        approve_role="SALES_DIRECTOR"
+        approver_roles=["SALES_DIRECTOR"],
     )
 
     schema = ApprovalFlowCreate(
@@ -74,7 +74,7 @@ def test_approval_flow_create_invalid_business_type_rejected():
         node_name="测试",
         node_code="TEST",
         node_order=1,
-        approve_role="SALES_DIRECTOR"
+        approver_roles=["SALES_DIRECTOR"],
     )
 
     with pytest.raises(ValidationError):

@@ -251,6 +251,39 @@ class FeishuNotificationService:
         )
         return await self.send_to_users(db, team_id, [user_id], "interactive", content)
 
+    async def notify_approval_cc(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        entity_type: str,
+        entity_name: str,
+        approval_id: int,
+        cc_node_name: str,
+        submitter_name: Optional[str] = None,
+        approval_type_name: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        detail_fields: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, int]:
+        approval_type_name = approval_type_name or self._entity_type_label(entity_type)
+        sep = self._title_separator(entity_type)
+        fields = detail_fields or self._fallback_approval_fields(
+            approval_type_name=approval_type_name,
+            entity_name=entity_name,
+            customer_name=customer_name,
+        )
+        if cc_node_name:
+            fields = {**fields, "抄送节点": cc_node_name}
+        content = self._approval_card(
+            entity_type=entity_type,
+            title=f"{submitter_name or '有人'}{sep}的{sep}{approval_type_name}抄送给你",
+            template="wathet",
+            fields=fields,
+            button_text="查看详情",
+            button_url=self._absolute_frontend_url(db, team_id, f"/approvals?tab=cc&approval_id={int(approval_id)}"),
+        )
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content)
+
     async def notify_approval_reminder(
         self,
         db: Session,

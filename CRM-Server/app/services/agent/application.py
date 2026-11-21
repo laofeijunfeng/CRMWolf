@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from uuid import UUID
 from datetime import timedelta
 from time import monotonic
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 
 from fastapi import HTTPException
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -116,6 +116,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+RequestStatusName: TypeAlias = Literal[
+    "IN_PROGRESS",
+    "COMPLETED",
+    "PARTIALLY_COMMITTED",
+    "NEEDS_RECONCILIATION",
+    "FAILED",
+]
 
 
 @dataclass(frozen=True)
@@ -885,7 +893,7 @@ class AgentApplicationService:
             AgentTurnExecutionStatus.COMPLETED, AgentTurnExecutionStatus.PARTIALLY_COMMITTED,
             AgentTurnExecutionStatus.NEEDS_RECONCILIATION,
         }:
-            return status
+            return cast("RequestStatusName", status)
         return "FAILED"
 
     @staticmethod

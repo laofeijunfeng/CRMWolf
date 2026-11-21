@@ -25,6 +25,7 @@ class OutboundNotificationEventType:
     APPROVAL_CANCELLED = "approval_cancelled"
     APPROVAL_ISSUED = "approval_issued"
     APPROVAL_REMINDER = "approval_reminder"
+    APPROVAL_CC = "approval_cc"
     ACCOUNT_CREATED = "account_created"
     ACCOUNT_STATUS_WON = "account_status_won"
     ACCOUNT_STATUS_LOST = "account_status_lost"
@@ -42,6 +43,7 @@ class OutboundNotificationEventType:
             APPROVAL_CANCELLED,
             APPROVAL_ISSUED,
             APPROVAL_REMINDER,
+            APPROVAL_CC,
         }
     )
     BUSINESS = frozenset(
@@ -115,7 +117,7 @@ class OutboundNotificationJob(Base):
     __table_args__ = (
         CheckConstraint(
             "event_type IN ('approval_pending', 'approval_approved', 'approval_rejected', "
-            "'approval_cancelled', 'approval_issued', 'approval_reminder', "
+            "'approval_cancelled', 'approval_issued', 'approval_reminder', 'approval_cc', "
             "'account_created', 'account_status_won', 'account_status_lost', "
             "'customer_returned', 'lead_claimed', 'lead_assigned', "
             "'opportunity_won', 'opportunity_lost')",

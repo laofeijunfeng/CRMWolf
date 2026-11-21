@@ -447,13 +447,13 @@ watch([hasAccess, teamId], (): void => {
                   <div class="flex items-center gap-2">
                     <Badge variant="outline">{{ node.node_order }}</Badge>
                     <span class="font-medium">{{ node.node_name }}</span>
-                    <Badge v-if="node.is_required" variant="destructive" class="text-xs">必须</Badge>
-                    <Badge v-else variant="secondary" class="text-xs">可选</Badge>
+                    <Badge :variant="node.node_type === 'CC' ? 'secondary' : 'default'" class="text-xs">{{ node.node_type === 'CC' ? '抄送' : '审批' }}</Badge>
                   </div>
                 </div>
                 <div class="text-sm text-muted-foreground space-y-1">
                   <div>编码：{{ node.node_code }}</div>
-                  <div>审批角色：{{ node.approve_role }}</div>
+                  <div>角色：{{ node.approver_roles.length > 0 ? node.approver_roles.join('、') : '无' }}</div>
+                  <div>指定成员：{{ node.approver_users.length > 0 ? node.approver_users.map(user => `${user.role} #${user.user_id}`).join('、') : '无' }}</div>
                   <div v-if="node.description">描述：{{ node.description }}</div>
                 </div>
               </div>

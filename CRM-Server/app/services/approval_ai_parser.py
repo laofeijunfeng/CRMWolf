@@ -45,9 +45,8 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 - node_name: 节点名称（如：销售总监审批）
 - node_code: 节点编码（英文大写+下划线）
 - node_order: 节点顺序（从1开始递增）
-- approve_role: 审批角色编码（必须是系统预定义角色）
+- approver_roles: 审批角色编码列表（必须是系统预定义角色）
 - description: 节点描述（可选）
-- is_required: 是否必须审批（默认1）
 
 ## 审批角色编码（系统预定义，必须使用以下编码）
 
@@ -59,7 +58,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 | SALES_MEMBER | 销售成员 | 一般审批，适合基础流程 |
 
 重要规则：
-1. approve_role 只能使用上述 4 个编码之一
+1. approver_roles 中的角色只能使用上述 4 个编码之一
 2. 如果用户描述的角色不在列表中，选择语义最接近的角色：
    - "总经理审批" → TEAM_ADMIN
    - "部门经理审批" → SALES_DIRECTOR
@@ -155,9 +154,8 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "节点名称",
         "node_code": "节点编码",
         "node_order": 顺序号,
-        "approve_role": "审批角色编码",
-        "description": "节点描述（可选）",
-        "is_required": 1
+        "approver_roles": ["审批角色编码"],
+        "description": "节点描述（可选）"
       }}
     ]
   }},
@@ -185,17 +183,15 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "销售总监审批",
         "node_code": "SALES_REVIEW",
         "node_order": 1,
-        "approve_role": "SALES_DIRECTOR",
-        "description": "销售总监审核合同内容",
-        "is_required": 1
+        "approver_roles": ["SALES_DIRECTOR"],
+        "description": "销售总监审核合同内容"
       }},
       {{
         "node_name": "财务审批",
         "node_code": "FINANCE_CHECK",
         "node_order": 2,
-        "approve_role": "FINANCE",
-        "description": "财务审核合同金额和条款",
-        "is_required": 1
+        "approver_roles": ["FINANCE"],
+        "description": "财务审核合同金额和条款"
       }}
     ]
   }},
@@ -221,25 +217,22 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "销售总监审批",
         "node_code": "SALES_REVIEW",
         "node_order": 1,
-        "approve_role": "SALES_DIRECTOR",
-        "description": "销售总监初步审核",
-        "is_required": 1
+        "approver_roles": ["SALES_DIRECTOR"],
+        "description": "销售总监初步审核"
       }},
       {{
         "node_name": "财务审批",
         "node_code": "FINANCE_CHECK",
         "node_order": 2,
-        "approve_role": "FINANCE",
-        "description": "财务审核大额合同",
-        "is_required": 1
+        "approver_roles": ["FINANCE"],
+        "description": "财务审核大额合同"
       }},
       {{
         "node_name": "总经理审批",
         "node_code": "FINAL_APPROVAL",
         "node_order": 3,
-        "approve_role": "TEAM_ADMIN",
-        "description": "团队所有者最终审批",
-        "is_required": 1
+        "approver_roles": ["TEAM_ADMIN"],
+        "description": "团队所有者最终审批"
       }}
     ]
   }},
@@ -265,25 +258,22 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "销售总监审批",
         "node_code": "SALES_REVIEW",
         "node_order": 1,
-        "approve_role": "SALES_DIRECTOR",
-        "description": "销售总监审核",
-        "is_required": 1
+        "approver_roles": ["SALES_DIRECTOR"],
+        "description": "销售总监审核"
       }},
       {{
         "node_name": "财务审批",
         "node_code": "FINANCE_CHECK",
         "node_order": 2,
-        "approve_role": "FINANCE",
-        "description": "财务审核企业版合同",
-        "is_required": 1
+        "approver_roles": ["FINANCE"],
+        "description": "财务审核企业版合同"
       }},
       {{
         "node_name": "总经理审批",
         "node_code": "FINAL_APPROVAL",
         "node_order": 3,
-        "approve_role": "TEAM_ADMIN",
-        "description": "团队所有者最终审批",
-        "is_required": 1
+        "approver_roles": ["TEAM_ADMIN"],
+        "description": "团队所有者最终审批"
       }}
     ]
   }},
@@ -309,9 +299,8 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "财务审批",
         "node_code": "FINANCE_CHECK",
         "node_order": 1,
-        "approve_role": "FINANCE",
-        "description": "财务审核回款入账",
-        "is_required": 1
+        "approver_roles": ["FINANCE"],
+        "description": "财务审核回款入账"
       }}
     ]
   }},
@@ -337,9 +326,8 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "销售总监审批",
         "node_code": "SALES_REVIEW",
         "node_order": 1,
-        "approve_role": "SALES_DIRECTOR",
-        "description": "销售总监审核大额发票",
-        "is_required": 1
+        "approver_roles": ["SALES_DIRECTOR"],
+        "description": "销售总监审核大额发票"
       }}
     ]
   }},
@@ -365,9 +353,8 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_name": "销售总监审批",
         "node_code": "SALES_REVIEW",
         "node_order": 1,
-        "approve_role": "SALES_DIRECTOR",
-        "description": "销售总监审核商机信息",
-        "is_required": 1
+        "approver_roles": ["SALES_DIRECTOR"],
+        "description": "销售总监审核商机信息"
       }}
     ]
   }},
@@ -392,18 +379,10 @@ class ApprovalAIParserService:
         return PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
 
     def _validate_roles(self, nodes: List[ApprovalAIParsedNode]) -> List[str]:
-        """验证审批角色是否在预定义列表
-
-        Args:
-            nodes: 节点列表
-
-        Returns:
-            无效角色列表（空列表表示全部有效）
-        """
-        invalid_roles = []
+        invalid_roles: List[str] = []
         for node in nodes:
-            if node.approve_role not in ALLOWED_APPROVAL_ROLES:
-                invalid_roles.append(node.approve_role)
+            roles = (node.approver_roles or []) + [user.role for user in node.approver_users or []]
+            invalid_roles.extend(role for role in roles if role not in ALLOWED_APPROVAL_ROLES)
         return invalid_roles
 
     def _auto_correct_nodes(self, nodes: List[ApprovalAIParsedNode]) -> List[ApprovalAIParsedNode]:
@@ -536,17 +515,10 @@ class ApprovalAIParserService:
                         parsed = json.loads(clean_content)
                         flow_data = parsed.get("flow", {})
 
-                        # 解析节点列表
-                        nodes = []
-                        for node_data in flow_data.get("nodes", []):
-                            nodes.append(ApprovalAIParsedNode(
-                                node_name=node_data.get("node_name"),
-                                node_code=node_data.get("node_code"),
-                                node_order=node_data.get("node_order"),
-                                approve_role=node_data.get("approve_role"),
-                                description=node_data.get("description"),
-                                is_required=node_data.get("is_required", 1)
-                            ))
+                        nodes = [
+                            ApprovalAIParsedNode.model_validate(node_data)
+                            for node_data in flow_data.get("nodes", [])
+                        ]
 
                         # 验证角色编码
                         invalid_roles = self._validate_roles(nodes)
@@ -671,20 +643,15 @@ class ApprovalAIParserService:
                 parsed = json.loads(clean_content)
                 flow_data = parsed.get("flow", {})
 
-                # 解析节点列表
-                nodes = []
-                for node_data in flow_data.get("nodes", []):
-                    nodes.append(ApprovalAIParsedNode(
-                        node_name=node_data.get("node_name"),
-                        node_code=node_data.get("node_code"),
-                        node_order=node_data.get("node_order"),
-                        approve_role=node_data.get("approve_role"),
-                        description=node_data.get("description"),
-                        is_required=node_data.get("is_required", 1)
-                    ))
+                nodes = [
+                    ApprovalAIParsedNode.model_validate(node_data)
+                    for node_data in flow_data.get("nodes", [])
+                ]
 
                 # 验证并修正
-                self._validate_roles(nodes)
+                invalid_roles = self._validate_roles(nodes)
+                if invalid_roles:
+                    raise ValueError(f"解析的角色编码无效：{', '.join(invalid_roles)}")
                 nodes = self._auto_correct_nodes(nodes)
 
                 flow = ApprovalAIParsedFlow(

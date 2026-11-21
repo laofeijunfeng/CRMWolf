@@ -15,8 +15,14 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker
 
 from app.models.contract import Contract, ContractStatus
-from app.models.approval import Approval, ApprovalRecord, ApprovalStatus, ApprovalAction, ApprovalFlow, ApprovalNode
+from app.models.approval import (
+    Approval, ApprovalRecord, ApprovalStatus, ApprovalAction, ApprovalFlow, ApprovalNode,
+    ApprovalParticipant, ApprovalParticipantKind,
+)
 from app.models.customer import Customer
+from app.models.role import Role
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.crud.contract import contract_crud
 from app.constants.approval_phase import ApprovalPhase
@@ -36,6 +42,9 @@ def db_session():
     Customer.__table__.to_metadata(metadata)
     # SQLite 仅对 INTEGER PRIMARY KEY 自动生成主键，生产模型仍使用 BigInteger。
     progress_table = CustomerLegacySourceProgress.__table__.to_metadata(metadata)
+    User.__table__.to_metadata(metadata)
+    Role.__table__.to_metadata(metadata)
+    UserRole.__table__.to_metadata(metadata)
     progress_table.c.id.type = BigInteger().with_variant(Integer(), "sqlite")
 
     # 合同表
@@ -100,9 +109,10 @@ def db_session():
         Column('node_code', String(50), nullable=False),
         Column('node_order', Integer, nullable=False),
         Column('description', Text, nullable=True),
-        Column('approve_role', String(50), nullable=True),
-        Column('notify_user_ids', Text, nullable=True),
-        Column('is_required', Integer, nullable=False, default=1),
+        Column('node_type', String(20), nullable=False, default='APPROVAL'),
+        Column('approver_roles', Text, nullable=True),
+        Column('approver_users', Text, nullable=True),
+        Column('is_archived', Integer, nullable=False, default=0),
         Column('created_time', DateTime, nullable=False),
     )
 
@@ -117,6 +127,7 @@ def db_session():
         Column('business_id', BigInteger, nullable=True),
         Column('flow_id', BigInteger, ForeignKey('crm_approval_flows.id'), nullable=True),
         Column('current_node_id', BigInteger, ForeignKey('crm_approval_nodes.id'), nullable=True),
+        Column('nodes_snapshot', Text, nullable=True),
         Column('status', String(20), nullable=False, default='PENDING'),
         Column('submitter_id', String(100), nullable=False),
         Column('submitter_name', String(100), nullable=True),
@@ -137,11 +148,30 @@ def db_session():
         Column('comment', Text, nullable=True),
         Column('created_time', DateTime, nullable=False, default=datetime.now),
     )
-
+    Table(
+        'crm_approval_participants', metadata,
+        Column('id', BigInteger, primary_key=True, autoincrement=True),
+        Column('team_id', BigInteger, nullable=False),
+        Column('approval_id', BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='CASCADE'), nullable=False),
+        Column('node_id', BigInteger, nullable=False),
+        Column('node_name', String(100), nullable=True),
+        Column('user_id', BigInteger, nullable=False),
+        Column('kind', String(20), nullable=False),
+        Column('created_time', DateTime, nullable=False, default=datetime.now),
+    )
     metadata.create_all(engine)
+
     Session = sessionmaker(bind=engine)
     session = Session()
-    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="user_001"))
+    session.add_all([
+        User(id=1, email="submitter@example.com", name="测试用户", status=UserStatus.ACTIVE),
+        User(id=2, email="approver@example.com", name="审批人", status=UserStatus.ACTIVE),
+    ])
+    role = Role(name="销售总监", code="SALES_DIRECTOR")
+    session.add(role)
+    session.flush()
+    session.add(UserRole(user_id=2, role_id=role.id, team_id=1))
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="1"))
     session.commit()
     yield session
     session.close()
@@ -165,9 +195,8 @@ def sample_contract(db_session):
         subscription_years=1,
         standard_unit_price=10000,
         status=ContractStatus.DRAFT,
-        approval_phase=ApprovalPhase.DRAFT,
-        owner_id="user_001",
-        creator_id="user_001"
+        owner_id="1",
+        creator_id="1"
     )
     db_session.add(contract)
     db_session.commit()
@@ -196,7 +225,7 @@ def sample_approval_flow(db_session):
         node_name="销售总监审批",
         node_code="SALES_DIRECTOR",
         node_order=1,
-        approve_role="SALES_DIRECTOR"
+        approver_roles=["SALES_DIRECTOR"], approver_users=[],
     )
     db_session.add(node)
     db_session.commit()
@@ -217,11 +246,19 @@ def sample_approval(db_session, sample_contract, sample_approval_flow):
         flow_id=sample_approval_flow.id,
         current_node_id=1,
         status=ApprovalStatus.PENDING,
-        submitter_id="user_001",
-        submitter_name="测试用户"
+        submitter_id="1",
+        submitter_name="测试用户",
+        nodes_snapshot=[{
+            "node_id": 1, "node_name": "销售总监审批", "node_code": "SALES_DIRECTOR",
+            "node_type": "APPROVAL", "user_ids": [2],
+        }],
     )
     db_session.add(approval)
     db_session.flush()  # 确保 approval.id 获取
+    db_session.add(ApprovalParticipant(
+        id=1, team_id=1, approval_id=approval.id, node_id=1, node_name="销售总监审批",
+        user_id=2, kind=ApprovalParticipantKind.APPROVER,
+    ))
 
     # 使用原生 SQL 插入审批记录（避免 SQLite RETURNING 问题）
     from sqlalchemy import text
@@ -234,7 +271,7 @@ def sample_approval(db_session, sample_contract, sample_approval_flow):
             "team_id": 1,
             "approval_id": approval.id,
             "node_id": 1,
-            "approver_id": "user_001",
+            "approver_id": "1",
             "approver_name": "测试用户",
             "action": ApprovalAction.SUBMIT,
             "comment": "提交审批",

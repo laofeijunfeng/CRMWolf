@@ -18,12 +18,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 
-# SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增。
-@compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
-    return "INTEGER"
-
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -34,7 +28,8 @@ from app.api.payments import router as payments_router
 from app.constants.business_types import BusinessType
 from app.constants.approval_phase import ApprovalPhase
 from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalStatus,
+    Approval, ApprovalFlow, ApprovalNode, ApprovalParticipant, ApprovalParticipantKind,
+    ApprovalRecord, ApprovalStatus,
 )
 from app.models.contract import Contract, ContractStatus
 from app.models.customer import Customer
@@ -44,10 +39,18 @@ from app.models.outbound_notification_job import OutboundNotificationJob
 from app.models.payment import (
     PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus,
 )
+from app.models.role import Role
 from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
 from app.services.approval_adapter import PaymentRecordAdapter
 
 from types import SimpleNamespace
+
+
+# SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增。
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+    return "INTEGER"
 
 
 # ---------- DB fixtures ----------------------------------------------------
@@ -62,6 +65,8 @@ def db_session():
     )
     tables = [
         User.__table__,
+        Role.__table__,
+        UserRole.__table__,
         Customer.__table__,
         CustomerLegacySourceProgress.__table__,
         Opportunity.__table__,
@@ -72,6 +77,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
         OutboundNotificationJob.__table__,
     ]
     # Customer and Contract historically share a legacy ``idx_team_id`` name.
@@ -244,8 +250,12 @@ def seed_payment_record(db_session, seed_contract_plan):
 
 
 @pytest.fixture
-def seed_payment_flow(db_session):
+def seed_payment_flow(db_session, current_user_rec):
     """一条 PAYMENT 类型审批流程 + 单节点。"""
+    role = Role(code="FINANCE", name="财务")
+    db_session.add(role)
+    db_session.flush()
+    db_session.add(UserRole(user_id=current_user_rec.id, role_id=role.id, team_id=1))
     flow = ApprovalFlow(
         team_id=1,
         flow_name="回款审批",
@@ -261,12 +271,52 @@ def seed_payment_flow(db_session):
         node_name="财务确认",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.commit()
     return flow, node
+
+
+@pytest.fixture
+def seed_payment_approval(db_session, seed_payment_record, seed_payment_flow, current_user_rec):
+    """Create a frozen approval directly to set up payment edit states."""
+    flow, node = seed_payment_flow
+
+    def seed(status, phase):
+        approval = Approval(
+            business_type=BusinessType.PAYMENT,
+            business_id=seed_payment_record.id,
+            flow_id=flow.id,
+            current_node_id=node.id,
+            nodes_snapshot=[{
+                "node_id": node.id,
+                "node_name": node.node_name,
+                "node_code": node.node_code,
+                "node_type": node.node_type,
+                "user_ids": [current_user_rec.id],
+            }],
+            team_id=node.team_id,
+            status=status,
+            submitter_id=seed_payment_record.creator_id,
+            submitter_name=seed_payment_record.creator_name,
+        )
+        db_session.add(approval)
+        db_session.flush()
+        if status == ApprovalStatus.PENDING:
+            db_session.add(ApprovalParticipant(
+                approval_id=approval.id,
+                node_id=node.id,
+                node_name=node.node_name,
+                team_id=approval.team_id,
+                user_id=current_user_rec.id,
+                kind=ApprovalParticipantKind.APPROVER,
+            ))
+        seed_payment_record.approval_id = approval.id
+        seed_payment_record.approval_phase = phase
+        db_session.commit()
+
+    return seed
 
 
 # ---------- Step 1: submit-approval 匹配到流 -------------------------------
@@ -341,25 +391,10 @@ def test_payment_adapter_approves_only_after_customer_fence(db_session, seed_pay
 
 
 def test_update_payment_record_creator_can_edit_after_withdraw(
-    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
+    db_session, client, seed_payment_record, seed_payment_approval, patched_perms,
 ):
     patched_perms(["payment:view:own"])
-    flow, node = seed_payment_flow
-    approval = Approval(
-        business_type=BusinessType.PAYMENT,
-        business_id=seed_payment_record.id,
-        flow_id=flow.id,
-        current_node_id=node.id,
-        team_id=1,
-        status=ApprovalStatus.CANCELLED,
-        submitter_id="1",
-        submitter_name="财务张",
-    )
-    db_session.add(approval)
-    db_session.flush()
-    seed_payment_record.approval_id = approval.id
-    seed_payment_record.approval_phase = ApprovalPhase.DRAFT
-    db_session.commit()
+    seed_payment_approval(ApprovalStatus.CANCELLED, ApprovalPhase.DRAFT)
 
     r = client.put(
         f"/v1/payments/payment-records/{seed_payment_record.id}",
@@ -387,25 +422,10 @@ def test_update_payment_record_creator_can_edit_after_withdraw(
 
 
 def test_update_payment_record_pending_review_forbidden(
-    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
+    client, seed_payment_record, seed_payment_approval, patched_perms,
 ):
     patched_perms(["payment:view:own"])
-    flow, node = seed_payment_flow
-    approval = Approval(
-        business_type=BusinessType.PAYMENT,
-        business_id=seed_payment_record.id,
-        flow_id=flow.id,
-        current_node_id=node.id,
-        team_id=1,
-        status=ApprovalStatus.PENDING,
-        submitter_id="1",
-        submitter_name="财务张",
-    )
-    db_session.add(approval)
-    db_session.flush()
-    seed_payment_record.approval_id = approval.id
-    seed_payment_record.approval_phase = ApprovalPhase.PENDING_REVIEW
-    db_session.commit()
+    seed_payment_approval(ApprovalStatus.PENDING, ApprovalPhase.PENDING_REVIEW)
 
     r = client.put(
         f"/v1/payments/payment-records/{seed_payment_record.id}",
@@ -417,25 +437,10 @@ def test_update_payment_record_pending_review_forbidden(
 
 
 def test_update_payment_record_pending_approval_forbidden_even_if_phase_draft(
-    db_session, client, seed_payment_record, seed_payment_flow, patched_perms,
+    client, seed_payment_record, seed_payment_approval, patched_perms,
 ):
     patched_perms(["payment:view:own"])
-    flow, node = seed_payment_flow
-    approval = Approval(
-        business_type=BusinessType.PAYMENT,
-        business_id=seed_payment_record.id,
-        flow_id=flow.id,
-        current_node_id=node.id,
-        team_id=1,
-        status=ApprovalStatus.PENDING,
-        submitter_id="1",
-        submitter_name="财务张",
-    )
-    db_session.add(approval)
-    db_session.flush()
-    seed_payment_record.approval_id = approval.id
-    seed_payment_record.approval_phase = ApprovalPhase.DRAFT
-    db_session.commit()
+    seed_payment_approval(ApprovalStatus.PENDING, ApprovalPhase.DRAFT)
 
     r = client.put(
         f"/v1/payments/payment-records/{seed_payment_record.id}",

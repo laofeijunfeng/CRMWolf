@@ -19,7 +19,10 @@ from sqlalchemy.types import BigInteger
 from app.api.approvals import router as approvals_router
 from app.api.invoices import invoice_router
 from app.core import deps
-from app.models.approval import Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalRecord, ApprovalStatus
+from app.models.approval import (
+    Approval, ApprovalAction, ApprovalFlow, ApprovalNode, ApprovalParticipant,
+    ApprovalParticipantKind, ApprovalRecord, ApprovalStatus,
+)
 from app.models.contract import Contract
 from app.models.customer import Customer, CustomerMember
 from app.models.invoice import (
@@ -32,9 +35,7 @@ from app.models.invoice import (
 )
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentPlanStatus
-from app.models.role import Role
 from app.models.user import User, UserStatus
-from app.models.user_role import UserRole
 from app.constants.business_types import BusinessType
 
 
@@ -52,8 +53,6 @@ def db_session():
     )
     tables = [
         User.__table__,
-        Role.__table__,
-        UserRole.__table__,
         Customer.__table__,
         CustomerMember.__table__,
         Opportunity.__table__,
@@ -66,6 +65,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
     ]
     with engine.begin() as connection:
         for table in tables:
@@ -206,11 +206,7 @@ def _seed_invoice(db_session, **overrides) -> InvoiceApplication:
     return application
 
 
-def _seed_finance_role(db_session, user_id: int = 1) -> ApprovalNode:
-    role = Role(code="FINANCE", name="财务", description="财务")
-    db_session.add(role)
-    db_session.flush()
-    db_session.add(UserRole(user_id=user_id, role_id=role.id, team_id=1))
+def _seed_finance_node(db_session) -> ApprovalNode:
     flow = ApprovalFlow(
         team_id=1,
         flow_name="发票审批",
@@ -226,21 +222,27 @@ def _seed_finance_role(db_session, user_id: int = 1) -> ApprovalNode:
         node_name="财务审批",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.flush()
     return node
 
 
-def _seed_approval(db_session, node: ApprovalNode, **overrides) -> Approval:
+def _seed_approval(db_session, node: ApprovalNode, *, approver_id: int = 1, **overrides) -> Approval:
     defaults = {
         "business_type": BusinessType.INVOICE,
         "business_id": 1,
         "flow_id": node.flow_id,
         "team_id": 1,
         "current_node_id": node.id,
+        "nodes_snapshot": [{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": node.node_type,
+            "user_ids": [approver_id],
+        }],
         "status": ApprovalStatus.PENDING,
         "submitter_id": "1",
         "submitter_name": "财务张",
@@ -251,6 +253,15 @@ def _seed_approval(db_session, node: ApprovalNode, **overrides) -> Approval:
     approval = Approval(**defaults)
     db_session.add(approval)
     db_session.flush()
+    if approval.status == ApprovalStatus.PENDING:
+        db_session.add(ApprovalParticipant(
+            approval_id=approval.id,
+            node_id=node.id,
+            node_name=node.node_name,
+            team_id=approval.team_id,
+            kind=ApprovalParticipantKind.APPROVER,
+            user_id=approver_id,
+        ))
     db_session.add(ApprovalRecord(
         approval_id=approval.id,
         node_id=node.id,
@@ -258,7 +269,7 @@ def _seed_approval(db_session, node: ApprovalNode, **overrides) -> Approval:
         approver_name=defaults["submitter_name"],
         action=ApprovalAction.SUBMIT,
         comment=None,
-        team_id=1,
+        team_id=approval.team_id,
     ))
     return approval
 
@@ -362,10 +373,10 @@ def test_invoice_export_maps_invoiced_tab_and_writes_formula_safe_title(
     assert rows[1][3] == 1234.5
 
 
-def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatch):
+def test_approval_export_keeps_pending_participant_scope(client, db_session, monkeypatch):
     _grant(monkeypatch, "approval:export")
     _seed_user(db_session)
-    node = _seed_finance_role(db_session)
+    node = _seed_finance_node(db_session)
     other_flow = ApprovalFlow(
         team_id=1,
         flow_name="销售审批",
@@ -381,8 +392,7 @@ def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatc
         node_name="销售审批",
         node_code="SALES",
         node_order=1,
-        approve_role="SALES",
-        is_required=1,
+        approver_roles=["SALES"],
     )
     db_session.add(sales_node)
     db_session.flush()
@@ -390,7 +400,8 @@ def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatc
     mine_invoice = _seed_invoice(db_session, application_number="INV-MINE-11", customer_id=11, contract_id=11, opportunity_id=11, payment_plan_id=11)
     db_session.flush()
     mine = _seed_approval(db_session, node, business_id=mine_invoice.id)
-    _seed_approval(db_session, sales_node, business_id=12)
+    _seed_user(db_session, user_id=2, name="销售李")
+    _seed_approval(db_session, sales_node, business_id=12, approver_id=2)
     db_session.commit()
 
     response = client.post("/v1/approvals/export", json={
@@ -413,7 +424,7 @@ def test_approval_export_keeps_pending_role_scope(client, db_session, monkeypatc
 def test_approval_export_keeps_processed_and_submitted_scope(client, db_session, monkeypatch):
     _grant(monkeypatch, "approval:export")
     _seed_user(db_session)
-    node = _seed_finance_role(db_session)
+    node = _seed_finance_node(db_session)
     _seed_graph(db_session, owner_id="1", graph_id=21)
     _seed_graph(db_session, owner_id="2", graph_id=22)
     submitted_invoice = _seed_invoice(
@@ -484,7 +495,7 @@ def test_approval_export_keeps_processed_and_submitted_scope(client, db_session,
 def test_invoice_and_approval_exports_write_all_matching_rows(client, db_session, monkeypatch):
     _grant(monkeypatch, "invoice:export", "invoice:view:all", "approval:export")
     _seed_graph(db_session)
-    node = _seed_finance_role(db_session)
+    node = _seed_finance_node(db_session)
     for index in range(76):
         _seed_invoice(
             db_session,
@@ -551,7 +562,7 @@ def test_invoice_list_projects_current_reissue_file_for_download(client, db_sess
 def test_approval_export_blanks_internal_id_application_number_fallback(client, db_session, monkeypatch):
     _grant(monkeypatch, "approval:export")
     _seed_user(db_session)
-    node = _seed_finance_role(db_session)
+    node = _seed_finance_node(db_session)
     approval = _seed_approval(db_session, node, business_id=99)
     db_session.commit()
 

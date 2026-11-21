@@ -30,7 +30,7 @@
         :export-enabled="canExportApprovals"
         export-title="审批列表"
         :export-handler="exportApprovalFields"
-        :fields="fields"
+        :fields="activeFields"
         :data="rows"
         :total="total"
         :page="page"
@@ -43,9 +43,9 @@
         height="calc(100vh - 108px)"
         height-strategy="fill"
         scroll-mode="contained"
-        empty-title="暂无待审批事项"
+        :empty-title="activeTab === 'cc' ? '暂无抄送事项' : '暂无待审批事项'"
         :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
-        empty-description="所有回款与发票申请都已处理完毕"
+        :empty-description="activeTab === 'cc' ? '暂无抄送给你的审批单据' : '所有回款与发票申请都已处理完毕'"
         mobile-mode="card"
         row-interactive
         detail-column-key="application_number"
@@ -76,9 +76,12 @@
           />
         </template>
 
-        <!-- 类型列 -->
         <template #cell-business_type="{ row }">
           <span class="text-muted-foreground">{{ businessTypeLabel(row.business_type) }}</span>
+        </template>
+
+        <template #cell-cc_time="{ row }">
+          <span class="font-mono text-muted-foreground text-sm">{{ row.cc_time ? formatDateRelative(row.cc_time) : '-' }}</span>
         </template>
 
         <!-- 实体列 -->
@@ -119,34 +122,32 @@
 
 
         <template #mobile-card="{ row }">
-          <div :class="cn('approval-mobile-card min-w-0', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
+          <div v-if="activeTab === 'cc'" class="approval-mobile-card min-w-0">
             <div class="flex justify-between items-center mb-3">
-              <CopyableText
-                :value="row.application_number"
-                label="审批单号"
-                class="text-base"
-                data-testid="copy-number-mobile"
-              />
+              <CopyableText :value="row.application_number" label="审批单号" class="text-base" data-testid="copy-number-mobile" />
               <ApprovalStatusBadge :status="row.status" size="small" />
             </div>
-
+            <div class="flex justify-between text-sm text-muted-foreground gap-3">
+              <span class="min-w-0 flex-1 truncate">{{ row.submitter_name || '-' }} 提交</span>
+              <span class="shrink-0">{{ row.cc_time ? formatDateRelative(row.cc_time) : '-' }}</span>
+            </div>
+            <div class="mt-2 text-sm text-muted-foreground">抄送节点：{{ row.cc_node_name || '-' }}</div>
+          </div>
+          <div v-else :class="cn('approval-mobile-card min-w-0', row.overdue_hours != null && row.overdue_hours >= 48 && 'is-overdue')">
+            <div class="flex justify-between items-center mb-3">
+              <CopyableText :value="row.application_number" label="审批单号" class="text-base" data-testid="copy-number-mobile" />
+              <ApprovalStatusBadge :status="row.status" size="small" />
+            </div>
             <div class="flex justify-between items-center mb-3 gap-3">
-              <span class="text-base font-medium min-w-0 flex-1 truncate">
-                {{ row.entity_name || '-' }}
-              </span>
+              <span class="text-base font-medium min-w-0 flex-1 truncate">{{ row.entity_name || '-' }}</span>
               <AmountText :value="row.entity_amount" size="lg" tone="warning" />
             </div>
-
             <div class="flex justify-between text-sm text-muted-foreground mb-3 gap-3">
               <span class="min-w-0 flex-1 truncate">{{ row.submitter_name }} 提交</span>
               <span class="shrink-0">{{ formatDateRelative(row.created_time) }}</span>
             </div>
-
             <div v-if="row.overdue_hours != null && row.overdue_hours >= 48">
-              <Badge class="gap-1 bg-warning text-warning-foreground border-transparent">
-                <Clock class="w-3 h-3" />
-                超时 {{ row.overdue_hours }} 小时
-              </Badge>
+              <Badge class="gap-1 bg-warning text-warning-foreground border-transparent"><Clock class="w-3 h-3" />超时 {{ row.overdue_hours }} 小时</Badge>
             </div>
           </div>
         </template>
@@ -284,7 +285,7 @@
         <div v-show="drillTarget === null" class="flex flex-1 flex-col min-h-0 min-w-0">
         <!-- Header -->
         <DetailSheetHeader class="p-6 pb-4 border-b border-border">
-          <DetailSheetTitle v-if="drillTarget === null" class="text-lg font-semibold">审批详情</DetailSheetTitle>
+          <DetailSheetTitle v-if="drillTarget === null" class="text-lg font-semibold">{{ activeTab === 'cc' && selectedApproval ? `${selectedApproval.application_number || '-'} · ${businessTypeLabel(selectedApproval.business_type)}审批` : '审批详情' }}</DetailSheetTitle>
           <p class="font-mono text-sm mt-1">
             <CopyableText
               v-if="selectedApproval?.application_number"
@@ -298,12 +299,15 @@
 
         <!-- Content -->
         <ScrollArea class="flex-1 min-h-0 min-w-0">
-          <div class="p-6 space-y-6 min-h-[400px]">
+          <div class="p-6 flex flex-col gap-6 min-h-[400px]">
+            <Alert v-if="activeTab === 'cc' && selectedApproval" variant="info" class="order-first border bg-info/10" data-testid="approval-cc-readonly-notice">
+              <AlertDescription>你是被抄送人，仅可查看</AlertDescription>
+            </Alert>
             <!-- 申请主体信息：优先展示审批关联业务内容 -->
             <Card v-if="selectedApproval" class="rounded-lg">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
-                  <h3 class="text-sm font-semibold text-foreground">{{ approvalSubjectTitle }}</h3>
+                  <h3 class="text-sm font-semibold text-foreground">{{ activeTab === 'cc' ? '单据信息' : approvalSubjectTitle }}</h3>
                   <Button
                     v-if="invoiceBillingType"
                     type="button"
@@ -437,14 +441,23 @@
               </CardContent>
             </Card>
 
-            <!-- 审批流程卡片（组件内部处理加载/错误/空态） -->
-            <Card v-if="selectedApproval && selectedApprovalEntityId !== null" class="rounded-lg">
+            <!-- 审批流程卡片；抄送详情只展示流程，不挂载任何审批操作控件。 -->
+            <Card v-if="selectedApproval && (activeTab === 'cc' || selectedApprovalEntityId !== null)" :class="cn('rounded-lg', activeTab === 'cc' && 'order-first')">
               <CardContent class="p-0">
                 <div class="p-4 border-b border-border">
                   <h3 class="text-sm font-semibold text-foreground">审批流程</h3>
                 </div>
                 <div class="p-4">
+                  <div v-if="activeTab === 'cc' && ccDetailLoading" class="py-6 text-center text-sm text-muted-foreground" role="status">正在加载审批详情…</div>
+                  <ApprovalProcessStepper
+                    v-else-if="activeTab === 'cc' && activeApprovalDetail"
+                    :records="ccDetail?.records ?? []"
+                    :cc-deliveries="ccDetail?.cc_deliveries ?? []"
+                    :is-pending="activeApprovalDetail.status === 'PENDING'"
+                    :current-node-name="activeApprovalDetail.current_node_name ?? ''"
+                  />
                   <ApprovalProcessGeneric
+                    v-else-if="activeTab !== 'cc' && selectedApprovalEntityId !== null"
                     :entity-type="selectedApproval.business_type"
                     :entity-id="selectedApprovalEntityId"
                     :can-approve="activeTab === 'pending'"
@@ -600,9 +613,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { BellRing, Clock, Copy } from 'lucide-vue-next'
 import { AmountText, CopyableText, DataTable, FileAttachment, FilePreviewDialog, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
@@ -613,11 +626,13 @@ import type { ListSortCondition } from '@/components/crmwolf/listSortTypes'
 import { Button } from '@/components/ui/button'
 import { DetailSheetContent, DetailSheet, DetailSheetHeader, DetailSheetTitle, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import { Card, CardContent } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import ApprovalStatusBadge from '@/components/crmwolf/ApprovalStatusBadge.vue'
+import ApprovalProcessStepper from '@/components/ApprovalProcessStepper.vue'
 import ApprovalProcessGeneric from '@/components/ApprovalProcessGeneric.vue'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import ContractFormDialog from '@/components/dialogs/ContractFormDialog.vue'
@@ -651,12 +666,12 @@ import approvalGenericApi from '@/api/approvalGeneric'
 import { type ListExportPayload } from '@/api/listExport'
 import contractApi from '@/api/contract'
 import invoiceApi, { type InvoiceApplicationResponse } from '@/api/invoice'
-import type { EntityType, ApprovalCustomerInfo, ApprovalDetail, ApprovalListItem, ApprovalListQuery, ApprovalTab } from '@/schemas/approvalGeneric'
+import { ApprovalTabSchema, type EntityType, type ApprovalCcDetail, type ApprovalCustomerInfo, type ApprovalDetail, type ApprovalListItem, type ApprovalListQuery, type ApprovalTab } from '@/schemas/approvalGeneric'
 import type { FileAttachmentItem } from '@/types/fileAttachment'
 import { getAcquisitionSourceDisplayName } from '@/schemas/acquisition-source'
 import type { ContractResponse } from '@/api/contract'
 
-type Tab = 'pending' | 'processed' | 'submitted'
+type Tab = 'pending' | 'processed' | 'submitted' | 'cc'
 type ApprovalSubjectLinkTarget = 'contract' | 'payment' | 'invoice' | 'opportunity' | 'customer'
 interface ApprovalSubjectField {
   key: string
@@ -675,9 +690,10 @@ const store = useApprovalStore()
 const permissionStore = usePermissionStore()
 const headerStore = useHeaderStore()
 const { pendingCount, currentApprovalDetail } = storeToRefs(store)
+const route = useRoute()
 const router = useRouter()
-const canExportApprovals = computed(() => permissionStore.hasPermission('approval:export'))
-const activeTab = ref<Tab>('pending')
+const activeTab = ref<Tab>(ApprovalTabSchema.safeParse(route.query['tab']).data ?? 'pending')
+const canExportApprovals = computed(() => permissionStore.hasPermission('approval:export') && activeTab.value !== 'cc')
 
 interface ApprovalListExportContext {
   tab: ApprovalTab
@@ -730,6 +746,9 @@ const listLoading = ref<boolean>(false)
 
 const sheetVisible = ref<boolean>(false)
 const selectedApproval = ref<ApprovalListItem | null>(null)
+const ccDetail = ref<ApprovalCcDetail | null>(null)
+let ccDetailRequestId = 0
+const ccDetailLoading = ref<boolean>(false)
 const markIssuedDialogVisible = ref<boolean>(false)
 const reissueCompleteDialogVisible = ref<boolean>(false)
 const licenseIssueDialogVisible = ref<boolean>(false)
@@ -773,6 +792,7 @@ const attachmentPreviewVisible = ref<boolean>(false)
 const attachmentPreviewPendingId = ref<number | null>(null)
 const attachmentPreviewRow = ref<ApprovalListItem | null>(null)
 const attachmentPreviewUrl = ref<string>('')
+const attachmentPreviewFromCc = ref<boolean>(false)
 
 // ==================== 计算属性 ====================
 const quickActionPending = computed<boolean>(() =>
@@ -783,11 +803,14 @@ const quickRejectDescription = computed<string>(() => {
   if (!row) return ''
   return `确定驳回“${getApprovalSubjectLabel(row)}”吗？当前状态：审批中。`
 })
-
 const activeApprovalDetail = computed<ApprovalDetail | null>(() => {
   const selected = selectedApproval.value
+  if (!selected) return null
+  if (activeTab.value === 'cc') {
+    return ccDetail.value?.id === selected.id ? ccDetail.value : null
+  }
   const detail = currentApprovalDetail.value
-  if (!selected || !detail) return null
+  if (!detail) return null
   return detail.business_type === selected.business_type && detail.business_id === selected.business_id
     ? detail
     : null
@@ -837,7 +860,7 @@ const showLicenseIssueFooter = computed<boolean>(() =>
 )
 
 const showBusinessActionFooter = computed<boolean>(() =>
-  showInvoiceUploadFooter.value || showReissueCompleteFooter.value || showLicenseIssueFooter.value
+  activeTab.value !== 'cc' && (showInvoiceUploadFooter.value || showReissueCompleteFooter.value || showLicenseIssueFooter.value)
 )
 
 const uploadFooterLabel = computed<string>(() =>
@@ -1161,19 +1184,16 @@ const approvalSubjectFields = computed<ApprovalSubjectField[]>(() => {
 
 // ==================== ContextTabs 配置 ====================
 const tabs = computed(() => {
-  const pendingTab: { key: string; label: string; badge?: number } = {
-    key: 'pending',
-    label: '待我审批'
-  }
-  if (pendingCount.value > 0) {
-    pendingTab.badge = pendingCount.value
-  }
+  const pendingTab: { key: string; label: string; badge?: number } = { key: 'pending', label: '待我审批' }
+  if (pendingCount.value > 0) pendingTab.badge = pendingCount.value
   return [
     pendingTab,
     { key: 'processed', label: '我已处理' },
-    { key: 'submitted', label: '我提交的' }
+    { key: 'submitted', label: '我提交的' },
+    { key: 'cc', label: '抄送我' }
   ]
 })
+
 const effectiveFilters = computed(() => activeTab.value === 'pending'
   ? withoutFilterFields(activeFilters.value, ['status'])
   : activeFilters.value
@@ -1192,35 +1212,26 @@ const approvalBusinessTypeOptions = [
 const approvalStatusOptions = getStatusOptions('approval')
 
 const fields: ListFieldDefinition[] = [
-  {
-    key: 'application_number',
-    label: '单号',
-    type: 'text',
-    column: { width: '180px', fixed: 'left' },
-    filter: true
-  },
-  {
-    key: 'business_type',
-    label: '类型',
-    type: 'enum',
-    options: approvalBusinessTypeOptions,
-    column: { width: '90px', align: 'center' },
-    filter: { label: '单据类型' }
-  },
+  { key: 'application_number', label: '单号', type: 'text', column: { width: '180px', fixed: 'left' }, filter: true },
+  { key: 'business_type', label: '类型', type: 'enum', options: approvalBusinessTypeOptions, column: { width: '90px', align: 'center' }, filter: { label: '单据类型' } },
   { key: 'entity_name', label: '实体', type: 'text', column: { width: '160px' }, filter: true },
   { key: 'entity_amount', label: '金额', type: 'number', column: { width: '130px', align: 'right' }, filter: true },
   { key: 'submitter_name', label: '提交人', type: 'text', column: { width: '110px' }, filter: true },
   { key: 'created_time', label: '提交时间', type: 'date', column: { width: '150px' }, filter: true },
-  {
-    key: 'status',
-    label: '状态',
-    type: 'enum',
-    options: approvalStatusOptions,
-    column: { width: '120px', align: 'center' },
-    filter: { label: '审批状态' }
-  },
-  { key: 'overdue_hours', label: '超时', type: 'number', column: { width: '130px', align: 'center' } },
+  { key: 'status', label: '状态', type: 'enum', options: approvalStatusOptions, column: { width: '120px', align: 'center' }, filter: { label: '审批状态' } },
+  { key: 'overdue_hours', label: '超时', type: 'number', column: { width: '130px', align: 'center' } }
 ]
+
+const ccFields: ListFieldDefinition[] = [
+  { key: 'application_number', label: '单号', type: 'text', column: { width: '180px', fixed: 'left' }, filter: true },
+  { key: 'business_type', label: '单据类型', type: 'enum', options: approvalBusinessTypeOptions, column: { width: '110px', align: 'center' }, filter: { label: '单据类型' } },
+  { key: 'submitter_name', label: '提交人', type: 'text', column: { width: '120px' }, filter: true },
+  { key: 'cc_node_name', label: '抄送节点', type: 'text', column: { width: '150px' } },
+  { key: 'status', label: '当前状态', type: 'enum', options: approvalStatusOptions, column: { width: '120px', align: 'center' }, filter: { label: '当前状态' } },
+  { key: 'cc_time', label: '抄送时间', type: 'date', column: { width: '150px' } }
+]
+
+const activeFields = computed<ListFieldDefinition[]>(() => activeTab.value === 'cc' ? ccFields : fields)
 
 onUnmounted(() => {
   headerStore.clear()
@@ -1231,13 +1242,11 @@ useTopBarRegistration({
   activeTab: () => activeTab.value
 })
 
-// 监听 headerStore.activeTab 变化
-watchEffect(() => {
-  if (headerStore.activeTab && headerStore.activeTab !== activeTab.value) {
-    activeTab.value = headerStore.activeTab as Tab
-    page.value = 1
-    fetchList()
-  }
+watch(() => headerStore.activeTab, (tab): void => {
+  const parsed = ApprovalTabSchema.safeParse(tab)
+  if (!parsed.success || parsed.data === activeTab.value) return
+  if (activeTab.value === 'cc') clearCcDeepLink(parsed.data)
+  activeTab.value = parsed.data
 })
 
 // ===== 方法 =====
@@ -1441,16 +1450,53 @@ watch([sheetVisible, (): number | undefined => selectedApproval.value?.id], (): 
   drillTrigger = null
 })
 
+const fetchCcDetail = async (approvalId: number, fromLink = false): Promise<void> => {
+  const requestId = ++ccDetailRequestId
+  ccDetail.value = null
+  ccDetailLoading.value = true
+  try {
+    const detail = await approvalGenericApi.getApprovalCcDetail(approvalId)
+    if (requestId !== ccDetailRequestId || activeTab.value !== 'cc') return
+    ccDetail.value = detail
+    if (fromLink) {
+      selectedApproval.value = detail
+      triggerRowIndex.value = rows.value.findIndex(row => row.id === approvalId)
+      focusedRowEl.value = triggerRowIndex.value >= 0 ? getDetailTrigger(triggerRowIndex.value) : null
+      sheetVisible.value = true
+    }
+  } catch (error) {
+    if (requestId !== ccDetailRequestId) return
+    handleApiError(error, '获取抄送审批详情')
+  } finally {
+    if (requestId === ccDetailRequestId) ccDetailLoading.value = false
+  }
+}
+
 const openDetail = (row: ApprovalListItem, index?: number): void => {
   const rowIndex = index ?? rows.value.findIndex(r => r.id === row.id)
   selectedApproval.value = row
   triggerRowIndex.value = rowIndex
   focusedRowEl.value = getDetailTrigger(rowIndex)
+  store.clearDetail()
+  if (activeTab.value === 'cc') void fetchCcDetail(row.id)
   sheetVisible.value = true
+}
+const clearCcDeepLink = (nextTab?: string): void => {
+  if (route.query['approval_id'] === undefined && nextTab === undefined) return
+  void router.replace({
+    query: {
+      ...route.query,
+      ...(nextTab === undefined ? {} : { tab: nextTab }),
+      approval_id: undefined,
+    },
+  })
 }
 
 watch(sheetVisible, (open): void => {
-  if (!open) void nextTick(onSheetClosed)
+  if (!open) {
+    resetCcDetail()
+    void nextTick(() => { if (!sheetVisible.value) onSheetClosed() })
+  }
 })
 
 const restoreListFocus = (event: Event): void => {
@@ -1463,20 +1509,20 @@ const onSheetClosed = (): void => {
   const target = focusedRowEl.value?.isConnected === true ? focusedRowEl.value : getDetailTrigger(triggerRowIndex.value)
   target?.focus({ preventScroll: true })
   selectedApproval.value = null
+  if (!ccDetailLoading.value) resetCcDetail()
+  attachmentPreviewFromCc.value = false
   store.clearDetail()
+  clearCcDeepLink()
   markIssuedDialogVisible.value = false
   reissueCompleteDialogVisible.value = false
   licenseIssueDialogVisible.value = false
-  // Keep the list index until the dialog finishes its close-focus lifecycle.
 }
 
 const onApprovalActionDone = async (): Promise<void> => {
-  // 审批完成（同意/驳回/撤回/提交）后刷新列表 + 关抽屉
+  if (activeTab.value === 'cc') return
   sheetVisible.value = false
   const refreshed = await fetchList()
-  if (!refreshed) {
-    toast.warning('审批操作已提交，但列表刷新失败，请稍后重试。')
-  }
+  if (!refreshed) toast.warning('审批操作已提交，但列表刷新失败，请稍后重试。')
 }
 
 const handleInvoiceFileUploaded = async (): Promise<void> => {
@@ -1655,31 +1701,33 @@ const handleRemind = async (row: ApprovalListItem): Promise<void> => {
 
 const handleSelectedAttachmentPreview = (file: FileAttachmentItem): void => {
   const row = selectedAttachmentRow.value
-  if (row === null || file.id !== row.business_id) return
-  void handlePreviewAttachment(row)
+  if (row !== null && file.id === row.business_id) void handlePreviewAttachment(row)
 }
 
 const handleSelectedAttachmentDownload = (file: FileAttachmentItem): void => {
   const row = selectedAttachmentRow.value
   if (row === null || file.id !== row.business_id) return
   attachmentPreviewRow.value = row
+  attachmentPreviewFromCc.value = activeTab.value === 'cc'
   void handleDownloadAttachment()
 }
 
 const handlePreviewAttachment = async (row: ApprovalListItem): Promise<void> => {
-  if (!hasAttachment(row)) return
-  const entityId = requireApprovalEntityRouteId(row)
-  if (entityId === null) return
-
+  if (!hasAttachment(row) || attachmentPreviewPendingId.value !== null) return
+  const fromCc = activeTab.value === 'cc'
+  const entityId = fromCc ? null : requireApprovalEntityRouteId(row)
+  if (!fromCc && entityId === null) return
   attachmentPreviewPendingId.value = row.id
   attachmentPreviewRow.value = row
+  attachmentPreviewFromCc.value = fromCc
   attachmentPreviewVisible.value = true
   revokeAttachmentPreviewUrl()
   try {
-    attachmentPreviewUrl.value = await approvalGenericApi.createApprovalAttachmentObjectUrl(
-      row.business_type,
-      entityId
-    )
+    const url = entityId === null
+      ? await approvalGenericApi.createApprovalCcAttachmentObjectUrl(row.id)
+      : await approvalGenericApi.createApprovalAttachmentObjectUrl(row.business_type, entityId)
+    if (attachmentPreviewVisible.value) attachmentPreviewUrl.value = url
+    else URL.revokeObjectURL(url)
   } catch (error) {
     attachmentPreviewVisible.value = false
     attachmentPreviewRow.value = null
@@ -1740,15 +1788,19 @@ const getRowActions = (row: ApprovalListItem): TableRowActionSet => {
 const handleDownloadAttachment = async (): Promise<void> => {
   const row = attachmentPreviewRow.value
   if (!row) return
-  const entityId = requireApprovalEntityRouteId(row)
-  if (entityId === null) return
 
   try {
-    await approvalGenericApi.downloadApprovalAttachment(
-      row.business_type,
-      entityId,
-      getAttachmentFileName(row)
-    )
+    if (attachmentPreviewFromCc.value) {
+      await approvalGenericApi.downloadApprovalCcAttachment(row.id, getAttachmentFileName(row))
+    } else {
+      const entityId = requireApprovalEntityRouteId(row)
+      if (entityId === null) return
+      await approvalGenericApi.downloadApprovalAttachment(
+        row.business_type,
+        entityId,
+        getAttachmentFileName(row)
+      )
+    }
   } catch (error) {
     handleApiError(error, '下载附件')
   }
@@ -1912,12 +1964,43 @@ const teardownKeyboard = (): void => {
   window.removeEventListener('keydown', onKeydown)
 }
 
-// ===== 生命周期 =====
+const resetCcDetail = (): void => {
+  ++ccDetailRequestId
+  ccDetail.value = null
+  ccDetailLoading.value = false
+}
+
+const openCcDeepLink = (): void => {
+  const raw = route.query['approval_id']
+  if (activeTab.value !== 'cc' || route.query['tab'] !== 'cc' || typeof raw !== 'string' || !/^\d+$/.test(raw)) return
+  const id = Number(raw)
+  if (Number.isSafeInteger(id) && id > 0) void fetchCcDetail(id, true)
+}
+
+watch(activeTab, (): void => {
+  resetCcDetail()
+  sheetVisible.value = false
+  page.value = 1
+  rows.value = []
+  void fetchList()
+})
+
+watch(() => [route.query['tab'], route.query['approval_id']] as const, ([tab, id], previous): void => {
+  const parsed = ApprovalTabSchema.safeParse(tab)
+  if (parsed.success) activeTab.value = parsed.data
+  if (previous[1] !== id || tab !== previous[0]) {
+    resetCcDetail()
+    void nextTick(openCcDeepLink)
+  }
+})
+
 onMounted((): void => {
   setupKeyboard()
-  fetchList()
+  void fetchList()
+  openCcDeepLink()
 })
 onBeforeUnmount((): void => {
+  resetCcDetail()
   teardownKeyboard()
   store.clearList()
   revokeAttachmentPreviewUrl()

@@ -14,7 +14,6 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.approval import approval_crud
 from app.crud.outbound_notification_job import outbound_notification_job_crud
-from app.crud.role import role_crud
 from app.models.approval import Approval, ApprovalStatus
 from app.models.outbound_notification_job import (
     OutboundNotificationEventType,
@@ -28,6 +27,7 @@ from app.services.approval_adapter import (
     get_approval_customer_name,
     get_approval_type_name,
 )
+from app.services.approval_routing import snapshot_entry_for_node
 from app.services.feishu_notification import feishu_notification_service
 from app.utils.time import business_now
 
@@ -213,9 +213,8 @@ class OutboundNotificationJobService:
         actor_id: str | None = None,
         recipient_user_ids: list[int] | None = None,
     ) -> OutboundNotificationJobRequest | None:
-        node = approval.current_node
         node_id = int(approval.current_node_id) if approval.current_node_id is not None else None
-        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, node, team_id)
+        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, approval, team_id)
         if node_id is None:
             return None
         return self.enqueue_in_transaction(
@@ -230,6 +229,38 @@ class OutboundNotificationJobService:
             node_id=node_id,
             actor_id=actor_id,
         )
+
+    def enqueue_cc_entries(
+        self,
+        db: Session,
+        *,
+        approval: Approval,
+        team_id: int,
+        cc_entries: list[dict[str, Any]],
+        actor_id: str | None = None,
+    ) -> list[OutboundNotificationJobRequest]:
+        """流转经过的抄送节点：每个节点一张卡片，打开只读详情。"""
+        requests: list[OutboundNotificationJobRequest] = []
+        for entry in cc_entries:
+            recipients = [int(uid) for uid in entry.get("user_ids") or []]
+            if not recipients:
+                continue
+            request = self.enqueue_in_transaction(
+                db,
+                team_id=team_id,
+                event_type=OutboundNotificationEventType.APPROVAL_CC,
+                idempotency_key=f"{team_id}:cc:{int(approval.id)}:{int(entry['node_id'])}",
+                recipient_user_ids=recipients,
+                business_type=str(approval.business_type),
+                business_id=int(approval.business_id),
+                approval_id=int(approval.id),
+                node_id=int(entry["node_id"]),
+                actor_id=actor_id,
+                payload_json={"cc_node_name": entry.get("node_name") or ""},
+            )
+            if request is not None:
+                requests.append(request)
+        return requests
 
     def enqueue_approved(
         self,
@@ -298,7 +329,7 @@ class OutboundNotificationJobService:
         recipients = (
             recipient_user_ids
             if recipient_user_ids is not None
-            else self._notification_user_ids(db, approval.current_node, team_id)
+            else self._notification_user_ids(db, approval, team_id)
         )
         return self.enqueue_in_transaction(
             db,
@@ -348,9 +379,8 @@ class OutboundNotificationJobService:
         actor_id: str | None = None,
         recipient_user_ids: list[int] | None = None,
     ) -> OutboundNotificationJobRequest | None:
-        node = approval.current_node
         node_id = int(approval.current_node_id) if approval.current_node_id is not None else None
-        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, node, team_id)
+        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, approval, team_id)
         if node_id is None:
             return None
         return self.enqueue_in_transaction(
@@ -375,7 +405,7 @@ class OutboundNotificationJobService:
         actor_id: str | None = None,
     ) -> OutboundNotificationJobRequest | None:
         node_id = int(approval.current_node_id) if approval.current_node_id is not None else None
-        recipients = self._notification_user_ids(db, approval.current_node, team_id)
+        recipients = self._notification_user_ids(db, approval, team_id)
         if node_id is None or not recipients:
             return None
         idempotency_key = self._pending_idempotency_key(team_id, int(approval.id), node_id)
@@ -644,6 +674,20 @@ class OutboundNotificationJobService:
                 detail_fields=card["detail_fields"],
                 button_path=_optional_str(payload.get("button_path")),
             )
+        elif event_type == OutboundNotificationEventType.APPROVAL_CC:
+            notification_result = await feishu_notification_service.notify_approval_cc(
+                db=db,
+                team_id=int(job_data["team_id"]),
+                user_ids=recipients,
+                entity_type=card["entity_type"],
+                entity_name=card["entity_name"],
+                approval_id=int(job_data["approval_id"]),
+                cc_node_name=_optional_str(payload.get("cc_node_name")) or "",
+                submitter_name=card.get("submitter_name"),
+                approval_type_name=card["approval_type_name"],
+                customer_name=card.get("customer_name"),
+                detail_fields=card["detail_fields"],
+            )
         elif event_type == OutboundNotificationEventType.APPROVAL_REMINDER:
             notification_result = await feishu_notification_service.notify_approval_reminder(
                 db=db,
@@ -802,14 +846,21 @@ class OutboundNotificationJobService:
         approval = None
         if job_data.get("approval_id") is not None:
             approval = approval_crud.get_by_id(db, int(job_data["approval_id"]), int(job_data["team_id"]))
-        current_node = getattr(approval, "current_node", None) if approval is not None else None
+        node_name = ""
+        if approval is not None:
+            if approval.nodes_snapshot is not None:
+                node_entry = snapshot_entry_for_node(approval, job_data.get("node_id"))
+                node_name = str(node_entry.get("node_name") or "") if node_entry else ""
+            else:
+                current_node = getattr(approval, "current_node", None)
+                node_name = current_node.node_name if current_node is not None else ""
         payload = _payload_dict(job_data.get("payload_json"))
         entity_name = adapter.get_name(entity) or _optional_str(payload.get("entity_name")) or f"{business_type}#{business_id}"
         return {
             "entity_type": business_type,
             "entity_name": entity_name,
             "flow_name": approval.flow.flow_name if approval is not None and approval.flow else "",
-            "node_name": current_node.node_name if current_node is not None else "",
+            "node_name": node_name,
             "business_id": business_id,
             "submitter_name": approval.submitter_name if approval is not None else None,
             "approval_type_name": get_approval_type_name(business_type, entity),
@@ -817,25 +868,15 @@ class OutboundNotificationJobService:
             "detail_fields": get_approval_card_fields(db, business_type, entity),
         }
 
-    def _notification_user_ids(self, db: Session, node: Any, team_id: int) -> list[int]:
-        if not node or not getattr(node, "approve_role", None):
+    def _notification_user_ids(self, db: Session, approval: Any, team_id: int) -> list[int]:
+        """当前节点的冻结审批人（提交/流转时写入 participants）。"""
+        if approval is None:
             return []
-        role = role_crud.get_by_code(db, node.approve_role)
-        if not role:
-            logger.warning("审批通知跳过：审批角色不存在（role=%s, team_id=%s）", node.approve_role, team_id)
-            return []
-        approvers = role_crud.get_role_users(db, role.id, team_id)
-        notify_user_ids = getattr(node, "notify_user_ids", None) or []
-        if notify_user_ids:
-            notify_id_set = {int(user_id) for user_id in notify_user_ids}
-            approvers = [user for user in approvers if int(user.id) in notify_id_set]
-        user_ids = [int(user.id) for user in approvers]
+        from app.services.approval_routing import current_approver_ids
+
+        user_ids = current_approver_ids(db, approval)
         if not user_ids:
-            logger.warning(
-                "审批通知跳过：审批角色无可通知成员（role=%s, team_id=%s）",
-                node.approve_role,
-                team_id,
-            )
+            logger.warning("审批通知跳过：当前节点无审批人（approval_id=%s, team_id=%s）", approval.id, team_id)
         return user_ids
 
     @staticmethod

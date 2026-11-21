@@ -83,7 +83,7 @@ router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
 
 
 def _queue_pending_approval_notification(db: Session, approval, *, actor_id=None) -> None:
-    if approval is None or approval.current_node is None:
+    if approval is None or approval.current_node_id is None:
         return
     try:
         request = outbound_notification_job_service.enqueue_pending_for_approval(

@@ -19,12 +19,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 
-# SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增。
-@compiles(BigInteger, "sqlite")
-def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
-    return "INTEGER"
-
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -37,16 +31,24 @@ from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.invoice import invoice_application_crud
 from app.models.approval import (
     Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
-    ApprovalStatus,
+    ApprovalParticipant, ApprovalStatus,
 )
 from app.models.invoice import (
     InvoiceApplication, InvoiceApplicationStatus, InvoiceType,
 )
+from app.models.role import Role
 from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
 from app.schemas.approval import ApprovalActionRequest
 
 from app.models.customer import Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
+
+# SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增。
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
+    return "INTEGER"
 
 
 # ---------- DB fixtures ----------------------------------------------------
@@ -63,11 +65,14 @@ def db_session():
         Customer.__table__,
         CustomerLegacySourceProgress.__table__,
         User.__table__,
+        Role.__table__,
+        UserRole.__table__,
         InvoiceApplication.__table__,
         ApprovalFlow.__table__,
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
@@ -169,7 +174,12 @@ def seed_invoice_pending_review(db_session):
 
 @pytest.fixture
 def seed_flow_invoice(db_session):
-    """一条 INVOICE 类型审批流程 + 单节点（approve_role=FINANCE）。"""
+    """一条 INVOICE 类型审批流程 + 单节点，由财务用户审批。"""
+    approver = User(id=2, email="finance@example.com", name="财务张", status=UserStatus.ACTIVE)
+    role = Role(code="FINANCE", name="财务")
+    db_session.add_all([approver, role])
+    db_session.flush()
+    db_session.add(UserRole(user_id=approver.id, role_id=role.id, team_id=1))
     flow = ApprovalFlow(
         team_id=1,
         flow_name="发票审批",
@@ -185,8 +195,7 @@ def seed_flow_invoice(db_session):
         node_name="财务审批",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.commit()

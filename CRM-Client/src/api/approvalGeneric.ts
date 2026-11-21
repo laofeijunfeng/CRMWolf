@@ -28,6 +28,8 @@
 import request from '@/utils/request'
 import { postListExport, type ListExportPayload } from '@/api/listExport'
 import {
+  ApprovalCcDetailSchema,
+  type ApprovalCcDetail,
   type EntityType,
   type ApprovalAction,
   type ApprovalDetail,
@@ -121,6 +123,31 @@ function getApprovalDetail(
   )
 }
 
+async function getApprovalCcDetail(approvalId: number): Promise<ApprovalCcDetail> {
+  return ApprovalCcDetailSchema.parse(await request.get(`/v1/approvals/cc/${approvalId}`))
+}
+
+const getApprovalCcAttachmentPath = (approvalId: number): string => `/v1/approvals/cc/${approvalId}/file`
+
+async function createApprovalCcAttachmentObjectUrl(approvalId: number): Promise<string> {
+  const response = await request.get<Blob>(getApprovalCcAttachmentPath(approvalId), { responseType: 'blob' })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  return window.URL.createObjectURL(blob)
+}
+
+async function downloadApprovalCcAttachment(approvalId: number, fileName?: string): Promise<void> {
+  const response = await request.get<Blob>(getApprovalCcAttachmentPath(approvalId), { responseType: 'blob' })
+  const blob = response instanceof Blob ? response : new Blob([response])
+  const url = window.URL.createObjectURL(blob)
+  const link = window.document.createElement('a')
+  link.href = url
+  link.download = fileName !== undefined && fileName.trim() !== '' ? fileName.trim() : `approval-cc-${approvalId}`
+  window.document.body.appendChild(link)
+  link.click()
+  window.document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
 /**
  * 批量审批（E6：逐条独立事务，部分成功汇总）。
  * @param updatedTimes 可选乐观锁字典：{ str(id): iso8601 }，未提供 id 的条目不带锁
@@ -150,7 +177,7 @@ function bulkApprove(
  *
  * 后端按 tab 严格按角色过滤，team_id 由依赖注入携带（前端不传、不缓存）：
  *   submitted → submitter_id == current_user
- *   pending   → current_node.approve_role IN (user_roles) AND status=PENDING
+ *   pending   → current approval participant for current user AND status=PENDING
  *   processed → records.approver_id == current_user
  * business_type 为可选维度过滤（INVOICE / PAYMENT / CONTRACT）。
  *
@@ -206,6 +233,9 @@ const approvalGenericApi = {
   cancelApproval,
   remindApproval,
   getApprovalDetail,
+  getApprovalCcDetail,
+  createApprovalCcAttachmentObjectUrl,
+  downloadApprovalCcAttachment,
   bulkApprove,
   listApprovals,
   exportApprovals,
@@ -217,6 +247,9 @@ export default approvalGenericApi
 export {
   submitApproval,
   approveEntity,
+  getApprovalCcDetail,
+  createApprovalCcAttachmentObjectUrl,
+  downloadApprovalCcAttachment,
   cancelApproval,
   remindApproval,
   getApprovalDetail,

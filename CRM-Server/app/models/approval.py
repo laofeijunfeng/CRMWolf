@@ -1,5 +1,7 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Numeric, ForeignKey, Index
-from sqlalchemy.dialects.mysql import JSON
+from sqlalchemy import (
+    JSON as GenericJSON,
+    Column, BigInteger, String, Integer, DateTime, Text, Numeric, ForeignKey, Index,
+)
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 from app.utils.time import business_now
@@ -46,7 +48,13 @@ class ApprovalFlow(Base):
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
 
-    nodes = relationship("ApprovalNode", back_populates="flow", order_by="ApprovalNode.node_order")
+    # 只含现役节点；被编辑删除的节点归档保留，在审单据仍可按提交时快照引用。
+    nodes = relationship(
+        "ApprovalNode",
+        primaryjoin="and_(ApprovalFlow.id == ApprovalNode.flow_id, ApprovalNode.is_archived == 0)",
+        order_by="ApprovalNode.node_order",
+        viewonly=True,
+    )
     approvals = relationship("Approval", back_populates="flow")
 
     __table_args__ = (
@@ -75,13 +83,14 @@ class ApprovalNode(Base):
     node_order = Column(Integer, nullable=False, comment="节点顺序")
     description = Column(Text, nullable=True, comment="节点描述")
 
-    approve_role = Column(String(50), nullable=True, comment="审批角色（TEAM_ADMIN, SALES_DIRECTOR等）")
-    notify_user_ids = Column(JSON().with_variant(Text(), "sqlite"), nullable=True, comment="通知对象用户ID列表")
-    is_required = Column(Integer, nullable=False, default=1, comment="是否必须审批：0:否, 1:是")
+    node_type = Column(String(20), nullable=False, default="APPROVAL", comment="节点类型：APPROVAL 审批 / CC 抄送")
+    approver_roles = Column(GenericJSON(), nullable=True, comment="整角色选择：角色编码列表")
+    approver_users = Column(GenericJSON(), nullable=True, comment="指定成员：[{role, user_id}]")
+    is_archived = Column(Integer, nullable=False, default=0, comment="是否已从流程移除（保留给在审单据引用）")
 
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
 
-    flow = relationship("ApprovalFlow", back_populates="nodes")
+    flow = relationship("ApprovalFlow")
     records = relationship("ApprovalRecord", back_populates="node")
 
     __table_args__ = (
@@ -103,6 +112,7 @@ class Approval(Base):
     flow_id = Column(BigInteger, ForeignKey('crm_approval_flows.id', ondelete='SET NULL'), nullable=True, comment="审批流程模板ID")
     
     current_node_id = Column(BigInteger, ForeignKey('crm_approval_nodes.id', ondelete='SET NULL'), nullable=True, comment="当前审批节点ID")
+    nodes_snapshot = Column(GenericJSON(), nullable=True, comment="提交时的节点配置快照")
     status = Column(String(20), nullable=False, default=ApprovalStatus.PENDING, comment="审批状态：PENDING, APPROVED, REJECTED, CANCELLED")
     
     submitter_id = Column(String(100), nullable=False, comment="提交人系统用户ID")
@@ -150,4 +160,34 @@ class ApprovalRecord(Base):
         Index('idx_record_approver', 'approver_id'),
         Index('idx_crm_contract_approval_records_team_id', 'team_id'),
         {'comment': '合同审批记录表'}
+    )
+
+
+class ApprovalParticipantKind:
+    APPROVER = "APPROVER"
+    CC = "CC"
+
+
+class ApprovalParticipant(Base):
+    """审批实例参与人：提交时冻结的各审批节点审批人；流转到抄送节点时写入的被抄送人。"""
+    __tablename__ = "crm_approval_participants"
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True, comment="主键")
+    team_id = Column(BigInteger, nullable=False, comment="团队ID")
+    approval_id = Column(
+        BigInteger,
+        ForeignKey('crm_contract_approvals.id', ondelete='CASCADE'),
+        nullable=False,
+        comment="审批实例ID",
+    )
+    node_id = Column(BigInteger, nullable=False, comment="节点ID")
+    node_name = Column(String(100), nullable=True, comment="节点名称")
+    user_id = Column(BigInteger, nullable=False, comment="用户ID")
+    kind = Column(String(20), nullable=False, comment="APPROVER / CC")
+    created_time = Column(DateTime, nullable=False, default=business_now, comment="写入时间（抄送时间）")
+
+    __table_args__ = (
+        Index('idx_participant_user', 'team_id', 'user_id', 'kind'),
+        Index('idx_participant_approval', 'approval_id', 'node_id'),
+        {'comment': '审批参与人表'}
     )

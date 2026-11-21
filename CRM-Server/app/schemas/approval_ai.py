@@ -3,7 +3,7 @@ AI 解析审批流程配置 Schema
 
 用于 AI 辅助创建审批流程功能的请求和响应结构
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from decimal import Decimal
 
@@ -11,14 +11,17 @@ from app.constants.business_types import BusinessType, is_valid_business_type
 from app.schemas.approval import ApprovalNodeCreate
 
 
-class ApprovalAIParsedNode(BaseModel):
-    """AI 解析的审批节点"""
-    node_name: str = Field(..., description="节点名称，如：部门经理审批")
-    node_code: str = Field(..., description="节点编码，如：DEPT_MANAGER")
-    node_order: int = Field(..., gt=0, description="审批顺序，从1开始")
-    approve_role: str = Field(..., description="审批角色编码，如：SALES_DIRECTOR")
-    description: Optional[str] = Field(None, description="节点描述")
-    is_required: int = Field(1, ge=0, le=1, description="是否必须审批，默认1")
+class ApprovalAIParsedNode(ApprovalNodeCreate):
+    """AI 解析的审批节点（沿用标准审批节点配置）。"""
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_role(cls, value: object) -> object:
+        if isinstance(value, dict) and "approver_roles" not in value:
+            legacy_role = value.get("approve_role")
+            if isinstance(legacy_role, str):
+                return {**value, "approver_roles": [legacy_role]}
+        return value
 
 
 class ApprovalAIParsedFlow(BaseModel):
@@ -84,7 +87,7 @@ class ApprovalAICreateRequest(BaseModel):
         BusinessType.CONTRACT,
         description="流程适用单据类型：CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY，默认 CONTRACT",
     )
-    nodes: List[ApprovalNodeCreate] = Field(..., min_length=1, description="审批节点列表")
+    nodes: List[ApprovalAIParsedNode] = Field(..., min_length=1, description="审批节点列表")
 
     @field_validator("business_type")
     @classmethod

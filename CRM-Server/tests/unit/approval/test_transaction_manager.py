@@ -31,7 +31,7 @@ class TestApprovalTransactionManager:
     @pytest.fixture
     def mock_db(self):
         """Mock 数据库会话"""
-        return Mock(spec=Session)
+        return MagicMock(spec=Session)
 
     @pytest.fixture
     def mock_flow(self):
@@ -189,16 +189,13 @@ class TestApprovalTransactionManager:
 
         验证点：
         - approval_phase = REJECTED → DRAFT → PENDING_REVIEW
-        - 旧 Approval 实例被删除
+        - 旧 Approval 实例保留（审批记录/抄送历史不丢失），不再删除
         - 新 Approval 实例被创建
         - 事务正确 commit
         """
         entity = Mock()
         entity.id = 30
         entity.approval_phase = ApprovalPhase.REJECTED.value
-
-        old_approval = Mock()
-        old_approval.id = 88
 
         new_approval = Mock(spec=Approval)
         new_approval.id = 89
@@ -217,11 +214,7 @@ class TestApprovalTransactionManager:
                 entity.on_submit_called = True
 
         with patch.object(transaction_manager_module, "get_adapter", return_value=FakeAdapter()), \
-            patch.object(
-                transaction_manager_module.approval_crud,
-                "get_by_entity",
-                return_value=old_approval,
-            ) as mock_get_old, \
+            patch.object(transaction_manager_module.approval_crud, "get_pending_by_entity", return_value=None), \
             patch.object(
                 transaction_manager_module.approval_flow_crud,
                 "match_flow_generic",
@@ -244,8 +237,7 @@ class TestApprovalTransactionManager:
 
         assert error is None
         assert approval is new_approval
-        mock_get_old.assert_called_once_with(mock_db, BusinessType.OPPORTUNITY, 30, 2)
-        mock_db.delete.assert_called_once_with(old_approval)
+        mock_db.delete.assert_not_called()
         mock_match_flow.assert_called_once_with(
             mock_db,
             BusinessType.OPPORTUNITY,

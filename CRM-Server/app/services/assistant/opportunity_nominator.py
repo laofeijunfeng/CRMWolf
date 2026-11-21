@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from app.models.assistant import AssistantTask
     from app.models.customer_activity import CustomerActivity
+    from app.services.assistant.contracts import TaskDraft
 
 
 class OpportunitySignal(BaseModel):

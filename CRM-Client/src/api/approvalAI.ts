@@ -6,46 +6,26 @@
 import request from '@/utils/request'
 
 /**
- * 预定义审批角色（匹配后端 constants/approval_roles.py）
- */
-export const ALLOWED_APPROVAL_ROLES = [
-  'TEAM_ADMIN',       // 团队所有者
-  'SALES_DIRECTOR',   // 销售总监
-  'FINANCE',          // 财务人员
-  'SALES_MEMBER'      // 销售成员
-] as const
-
-export const ROLE_DISPLAY_NAMES: Record<string, string> = {
-  TEAM_ADMIN: '团队所有者',
-  SALES_DIRECTOR: '销售总监',
-  FINANCE: '财务人员',
-  SALES_MEMBER: '销售成员'
-}
-
-/**
- * AI 解析的审批节点（匹配 ApprovalAIParsedNode）
- */
+/** Typed approval-flow node used by AI parse and create. */
 export interface ApprovalAIParsedNode {
   node_name: string
   node_code: string
-  node_order: number  // >= 1
-  approve_role: string  // 预定义角色编码
+  node_order: number
+  node_type: 'APPROVAL' | 'CC'
+  approver_roles: string[]
+  approver_users: { role: string; user_id: number }[]
   description?: string
-  is_required: number  // 0 或 1，默认 1
 }
 
-/**
- * AI 解析的审批流程（匹配 ApprovalAIParsedFlow）
- */
 export interface ApprovalAIParsedFlow {
   flow_name: string
   flow_code: string
   description?: string
-  min_amount?: number  // Decimal → number
+  min_amount?: number
   max_amount?: number
   license_type?: string
   business_type?: 'CONTRACT' | 'PAYMENT' | 'INVOICE' | 'INVOICE_REISSUE' | 'LICENSE' | 'OPPORTUNITY'
-  nodes: ApprovalAIParsedNode[]  // min_length=1
+  nodes: ApprovalAIParsedNode[]
 }
 
 /**
@@ -111,7 +91,9 @@ export interface ApprovalAICreateResult {
       node_name: string
       node_code: string
       node_order: number
-      approve_role: string
+      node_type: 'APPROVAL' | 'CC'
+      approver_roles: string[]
+      approver_users: { role: string; user_id: number }[]
     }[]
   }
 }

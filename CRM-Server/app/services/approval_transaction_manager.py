@@ -144,6 +144,8 @@ class ApprovalTransactionManager:
                     submitter_id=submitter_id,
                     submitter_name=submitter_name
                 )
+            except ValueError:
+                raise  # 业务校验（如「第 N 个节点没有审批人」）原样返回给用户
             except Exception as e:
                 logger.error(f"审批创建失败: {e}", exc_info=True)
                 db.rollback()
@@ -307,15 +309,6 @@ class ApprovalTransactionManager:
                 # 兼容旧模型（没有 approval_phase 字段）
                 logger.warning(f"业务单据缺少 approval_phase 字段（business_type={business_type}, entity_id={entity_id})")
 
-            # 3. 如果 approval_phase = REJECTED，删除旧 Approval 实例
-            if (
-                hasattr(entity, 'approval_phase')
-                and self._approval_phase_value(entity.approval_phase) == ApprovalPhase.REJECTED.value
-            ):
-                old_approval = approval_crud.get_by_entity(db, business_type, entity_id, team_id)
-                if old_approval:
-                    db.delete(old_approval)
-                    logger.info(f"删除旧审批实例（approval_id={old_approval.id})")
 
             # 4. 匹配审批流程
             match_kwargs = adapter.match_kwargs(entity)
@@ -357,9 +350,9 @@ class ApprovalTransactionManager:
             # 7. adapter.on_submit() 触发原有 status 联动
             adapter.on_submit(db, entity)
 
-            # 8. 通知意图写入同一事务；失败不阻断审批事实。
+            # 8. 通知意图写入同一事务；流程完成或没有当前审批节点时不发送待审批通知。
             notify_request = None
-            if send_notification:
+            if send_notification and approval.current_node_id is not None:
                 try:
                     notify_request = outbound_notification_job_service.enqueue_pending_for_approval(
                         db,
@@ -388,6 +381,10 @@ class ApprovalTransactionManager:
 
             return (approval, None)
 
+        except ValueError as e:
+            logger.warning("审批提交校验失败（business_type=%s, entity_id=%s）: %s", business_type, entity_id, e)
+            db.rollback()
+            return (None, str(e))
         except Exception as e:
             logger.error(f"submit_for_approval 异常: {e}", exc_info=True)
             db.rollback()

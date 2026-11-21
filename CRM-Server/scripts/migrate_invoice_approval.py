@@ -26,12 +26,13 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.approval import Approval, ApprovalRecord, ApprovalStatus, ApprovalAction, ApprovalFlow, ApprovalNode
+from app.models.user import User
 from app.constants.business_types import BusinessType
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.crud.invoice import invoice_application_crud
 from app.services.approval_adapter import get_adapter
+from app.services.approval_routing import current_approver_ids
 from app.services.notification import notification_service_factory
-from app.api.approvals import get_approvers_by_role
 import logging
 
 # 配置日志
@@ -77,17 +78,21 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
             existing_approval = db.query(Approval).filter(
                 Approval.business_type == BusinessType.INVOICE,
                 Approval.business_id == invoice.id,
+                Approval.team_id == invoice.team_id,
                 Approval.status == ApprovalStatus.PENDING  # 只处理 PENDING 状态
             ).first()
 
             adapter = get_adapter(BusinessType.INVOICE)
 
             if existing_approval:
-                # 已有 Approval，检查是否需要发送通知
                 if existing_approval.current_node:
                     notification_service = notification_service_factory(db, invoice.team_id)
-                    approvers = get_approvers_by_role(db, existing_approval.current_node.approve_role)
-                    flow = db.query(ApprovalFlow).filter(ApprovalFlow.id == existing_approval.flow_id).first()
+                    approver_ids = current_approver_ids(db, existing_approval)
+                    approvers = db.query(User).filter(User.id.in_(approver_ids)).all() if approver_ids else []
+                    flow = db.query(ApprovalFlow).filter(
+                        ApprovalFlow.id == existing_approval.flow_id,
+                        ApprovalFlow.team_id == invoice.team_id,
+                    ).first()
 
                     for approver in approvers:
                         try:
@@ -103,7 +108,6 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
                             logger.info(f"发票 {invoice.id} 通知已发送给审批人 {approver.name}")
                         except Exception as notify_error:
                             logger.warning(f"发票 {invoice.id} 通知发送失败: {str(notify_error)}")
-
                 logger.info(f"发票 {invoice.id} 已有 Approval 记录，通知已发送")
                 skip_count += 1
                 continue
@@ -157,14 +161,13 @@ def migrate_invoice_approvals(db: Session, team_id: int = None):
 
             db.commit()
 
-            # 发送飞书通知给审批人
             if approval.current_node:
                 notification_service = notification_service_factory(db, invoice.team_id)
-                approvers = get_approvers_by_role(db, approval.current_node.approve_role)
+                approver_ids = current_approver_ids(db, approval)
+                approvers = db.query(User).filter(User.id.in_(approver_ids)).all() if approver_ids else []
 
                 for approver in approvers:
                     try:
-                        # 使用 asyncio 运行异步通知方法
                         asyncio.run(notification_service.notify_approval_pending(
                             entity_type=BusinessType.INVOICE,
                             entity_name=adapter.get_name(invoice) or invoice.application_number,

@@ -16,6 +16,8 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermStatus,
 )
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
 
 
@@ -724,7 +726,7 @@ def _positive_ints(values: Iterable[object]) -> list[int]:
     seen: set[int] = set()
     for value in values:
         try:
-            number = int(value)
+            number = int(value)  # type: ignore[call-overload]
         except (TypeError, ValueError):
             continue
         if number <= 0 or number in seen:

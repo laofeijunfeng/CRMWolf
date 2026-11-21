@@ -13,16 +13,16 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 from app.core.database import SessionLocal
-from app.models.approval import Approval, ApprovalStatus, ApprovalNode
+from app.models.approval import Approval, ApprovalStatus
 from app.models.user import User
 from app.models.role import Role
-from app.models.user_role import UserRole
 from app.models.team import Team
 from app.crud.approval import approval_crud
 from app.crud.role import role_crud
 from app.crud.team import team_crud
 from app.crud.system_config import system_config_crud
 from app.services.approval_adapter import get_adapter
+from app.services.approval_routing import current_approver_ids, current_snapshot_entry, snapshot_entry_for_node
 from app.services.notification import NotificationService
 from app.utils.time import business_now
 
@@ -101,14 +101,14 @@ class ApprovalReminderScheduler:
                     entity_name = adapter.get_name(entity)
                     business_id = approval.business_id
 
-                    # 获取当前审批节点
-                    current_node = approval.current_node
-                    if not current_node:
+                    # 快照实例仅依赖 current_node_id 与冻结节点名称；旧实例回退历史节点关系。
+                    node_name = self._get_node_name(approval)
+                    if not node_name:
                         logger.warning(f"审批实例 {approval.id} 当前节点不存在")
                         continue
 
                     # 获取审批人信息
-                    approvers = self._get_node_approvers(db, current_node, approval.team_id)
+                    approvers = self._get_node_approvers(db, approval, int(approval.team_id))
                     if not approvers:
                         logger.warning(f"审批实例 {approval.id} 当前节点无审批人")
                         continue
@@ -121,7 +121,7 @@ class ApprovalReminderScheduler:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["light"]):
                             await self._send_light_reminder(
                                 db, approval, entity_type, entity_name, business_id,
-                                current_node, approvers, waiting_hours
+                                node_name, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["light"])
                             stats["light_reminders"] += 1
@@ -131,7 +131,7 @@ class ApprovalReminderScheduler:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["medium"]):
                             await self._send_medium_reminder(
                                 db, approval, entity_type, entity_name, business_id,
-                                current_node, approvers, waiting_hours
+                                node_name, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["medium"])
                             stats["medium_reminders"] += 1
@@ -141,7 +141,7 @@ class ApprovalReminderScheduler:
                         if not self._has_sent_reminder(reminder_key, REMINDER_THRESHOLDS["strong"]):
                             await self._send_strong_reminder(
                                 db, approval, entity_type, entity_name, business_id,
-                                current_node, approvers, waiting_hours
+                                node_name, approvers, waiting_hours
                             )
                             self._mark_reminder_sent(reminder_key, REMINDER_THRESHOLDS["strong"])
                             stats["strong_reminders"] += 1
@@ -172,29 +172,22 @@ class ApprovalReminderScheduler:
 
         return stats
 
-    def _get_node_approvers(self, db, node: ApprovalNode, team_id: int) -> List[User]:
-        """获取审批节点的审批人列表
+    def _get_node_name(self, approval: Approval) -> Optional[str]:
+        if approval.nodes_snapshot is not None:
+            entry = current_snapshot_entry(approval)
+            return str(entry.get("node_name") or "") if entry else None
+        current_node = getattr(approval, "current_node", None)
+        return current_node.node_name if current_node is not None else None
 
-        Args:
-            db: 数据库会话
-            node: 审批节点
-            team_id: 团队ID
-
-        Returns:
-            审批人用户列表
-        """
-        if not node.approve_role:
+    def _get_node_approvers(self, db, approval: Approval, team_id: int) -> List[User]:
+        """获取当前审批节点的冻结审批人列表。"""
+        if approval.team_id != team_id:
             return []
-
-        # 获取角色
-        role = role_crud.get_by_code(db, node.approve_role)
-        if not role:
-            logger.warning(f"角色 {node.approve_role} 不存在")
+        user_ids = current_approver_ids(db, approval)
+        if not user_ids:
             return []
-
-        # 获取拥有该角色的用户
-        users = role_crud.get_role_users(db, role.id, team_id)
-        return users
+        approvers: List[User] = db.query(User).filter(User.id.in_(user_ids)).all()
+        return approvers
 
     def _get_team_admins(self, db, team_id: int) -> List[User]:
         """获取团队管理员列表
@@ -272,7 +265,7 @@ class ApprovalReminderScheduler:
         entity_type: str,
         entity_name: str,
         business_id,
-        node: ApprovalNode,
+        node_name: str,
         approvers: List[User],
         waiting_hours: float
     ):
@@ -284,7 +277,7 @@ class ApprovalReminderScheduler:
             entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
-            node: 当前审批节点
+            node_name: 当前审批节点名称
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
         """
@@ -302,7 +295,7 @@ class ApprovalReminderScheduler:
                     entity_type=entity_type,
                     entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
-                    node_name=node.node_name,
+                    node_name=node_name,
                     business_id=business_id,
                     reminder_level="light"
                 )
@@ -322,7 +315,7 @@ class ApprovalReminderScheduler:
         entity_type: str,
         entity_name: str,
         business_id,
-        node: ApprovalNode,
+        node_name: str,
         approvers: List[User],
         waiting_hours: float
     ):
@@ -334,7 +327,7 @@ class ApprovalReminderScheduler:
             entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
-            node: 当前审批节点
+            node_name: 当前审批节点名称
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
         """
@@ -352,7 +345,7 @@ class ApprovalReminderScheduler:
                     entity_type=entity_type,
                     entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
-                    node_name=node.node_name,
+                    node_name=node_name,
                     business_id=business_id,
                     reminder_level="medium"
                 )
@@ -380,7 +373,7 @@ class ApprovalReminderScheduler:
                     submitter_open_id=submitter_open_id,
                     entity_type=entity_type,
                     entity_name=entity_name,
-                    node_name=node.node_name,
+                    node_name=node_name,
                     approver_name=approver_names_str,
                     waiting_hours=int(waiting_hours),
                     business_id=business_id,
@@ -404,7 +397,7 @@ class ApprovalReminderScheduler:
         entity_type: str,
         entity_name: str,
         business_id,
-        node: ApprovalNode,
+        node_name: str,
         approvers: List[User],
         waiting_hours: float
     ):
@@ -416,7 +409,7 @@ class ApprovalReminderScheduler:
             entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
             entity_name: 业务单据展示名
             business_id: 业务单据ID
-            node: 当前审批节点
+            node_name: 当前审批节点名称
             approvers: 审批人列表
             waiting_hours: 等待时间（小时）
         """
@@ -434,7 +427,7 @@ class ApprovalReminderScheduler:
                     entity_type=entity_type,
                     entity_name=entity_name,
                     waiting_hours=int(waiting_hours),
-                    node_name=node.node_name,
+                    node_name=node_name,
                     business_id=business_id,
                     reminder_level="strong"
                 )
@@ -460,7 +453,7 @@ class ApprovalReminderScheduler:
                     submitter_open_id=submitter_open_id,
                     entity_type=entity_type,
                     entity_name=entity_name,
-                    node_name=node.node_name,
+                    node_name=node_name,
                     approver_name=approver_names_str,
                     waiting_hours=int(waiting_hours),
                     business_id=business_id,
@@ -487,7 +480,7 @@ class ApprovalReminderScheduler:
                     submitter_open_id=admin_open_id,
                     entity_type=entity_type,
                     entity_name=entity_name,
-                    node_name=node.node_name,
+                    node_name=node_name,
                     approver_name=approver_names_str if approvers else "未知",
                     waiting_hours=int(waiting_hours),
                     business_id=business_id,

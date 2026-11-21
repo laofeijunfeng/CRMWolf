@@ -5,9 +5,11 @@
  * 基于 Stepper 组件的紧凑时间线。审批动作、时间、处理人、节点和意见直接展示，
  * 不依赖 hover 才能读取关键审批信息。
  */
+import { computed } from 'vue'
 import type { Component } from 'vue'
 import {
   Check,
+  Copy,
   Clock,
   MessageSquare,
   RotateCcw,
@@ -19,15 +21,17 @@ import {
   StepperItem,
   StepperIndicator,
   StepperTitle,
-  StepperSeparator
+  StepperSeparator,
+  StepperTrigger
 } from '@/components/ui/stepper'
 import { DataViewStatePanel } from '@/components/crmwolf'
-import type { ApprovalRecord } from '@/schemas/approvalGeneric'
+import type { ApprovalCcDelivery, ApprovalRecord } from '@/schemas/approvalGeneric'
 
 // ==================== Types ====================
 interface Props {
   /** 审批记录列表 */
   records: ApprovalRecord[]
+  ccDeliveries?: ApprovalCcDelivery[]
   /** 当前是否为待审批状态 */
   isPending?: boolean
   /** 当前待处理节点 */
@@ -41,9 +45,19 @@ interface ActionConfig {
   dotClass: string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
+  ccDeliveries: () => [],
   isPending: false,
   currentNodeName: ''
+})
+
+const timeline = computed(() => {
+  const events = [
+    ...props.records.map(record => ({ key: `record-${record.id}`, record, createdTime: record.created_time })),
+    ...props.ccDeliveries.map(delivery => ({ key: `cc-${delivery.id}`, delivery, createdTime: delivery.created_time }))
+  ]
+  if (props.ccDeliveries.length > 0) events.sort((a, b) => a.createdTime.localeCompare(b.createdTime))
+  return events
 })
 
 // ==================== Constants ====================
@@ -64,14 +78,14 @@ const ACTION_CONFIG: Record<string, ActionConfig> = {
   APPROVE: {
     icon: Check,
     title: (record: ApprovalRecord): string =>
-      record.node_name != null && record.node_name.trim() !== '' ? `${record.node_name}审批通过` : '审批通过',
+      record.node_name != null && record.node_name.trim() !== '' ? `${record.node_name} · 通过` : '审批通过',
     titleClass: 'approval-stepper__title--approve',
     dotClass: 'approval-stepper__dot--approve'
   },
   REJECT: {
     icon: X,
     title: (record: ApprovalRecord): string =>
-      record.node_name != null && record.node_name.trim() !== '' ? `${record.node_name}驳回` : '审批驳回',
+      record.node_name != null && record.node_name.trim() !== '' ? `${record.node_name} · 驳回` : '审批驳回',
     titleClass: 'approval-stepper__title--reject',
     dotClass: 'approval-stepper__dot--reject'
   },
@@ -106,36 +120,37 @@ const formatDateTime = (iso: string): string => {
 <template>
   <div class="approval-stepper">
     <DataViewStatePanel
-      :state="records.length === 0 ? 'empty' : 'ready'"
+      :state="timeline.length === 0 && !(isPending && currentNodeName) ? 'empty' : 'ready'"
       empty-title="暂无审批记录"
     >
     <!-- Stepper 流程 -->
     <Stepper
-      :model-value="isPending && currentNodeName ? records.length + 1 : records.length"
+      :model-value="isPending && currentNodeName ? timeline.length + 1 : timeline.length"
       class="approval-stepper__timeline"
       orientation="vertical"
     >
       <StepperItem
-        v-for="(record, index) in records"
-        :key="record.id"
+        v-for="(event, index) in timeline"
+        :key="event.key"
         :step="index + 1"
         class="approval-stepper__item"
       >
         <div class="approval-stepper__marker">
+          <StepperTrigger class="sr-only" aria-hidden="true" tabindex="-1" />
           <StepperIndicator
             :class="[
               'approval-stepper__indicator',
-              getActionConfig(record.action).dotClass
+              'record' in event ? getActionConfig(event.record.action).dotClass : 'approval-stepper__dot--submit'
             ]"
           >
             <component
-              :is="getActionConfig(record.action).icon"
+              :is="'record' in event ? getActionConfig(event.record.action).icon : Copy"
               class="approval-stepper__indicator-icon"
               aria-hidden="true"
             />
           </StepperIndicator>
           <StepperSeparator
-            v-if="index < records.length - 1 || (isPending && currentNodeName)"
+            v-if="index < timeline.length - 1 || (isPending && currentNodeName)"
             class="approval-stepper__separator"
           />
         </div>
@@ -145,30 +160,31 @@ const formatDateTime = (iso: string): string => {
             <StepperTitle
               :class="[
                 'approval-stepper__title',
-                getActionConfig(record.action).titleClass
+                'record' in event ? getActionConfig(event.record.action).titleClass : 'approval-stepper__title--submit'
               ]"
             >
-              {{ getRecordTitle(record) }}
+              {{ 'record' in event ? getRecordTitle(event.record) : (event.delivery.node_name ? `${event.delivery.node_name} · 已抄送你` : '已抄送你') }}
             </StepperTitle>
           </div>
-          <div class="approval-stepper__meta">{{ getRecordMeta(record) }}</div>
+          <div class="approval-stepper__meta">{{ 'record' in event ? getRecordMeta(event.record) : formatDateTime(event.createdTime) }}</div>
           <div
-            v-if="record.comment"
+            v-if="'record' in event && event.record.comment"
             class="approval-stepper__comment"
-            :class="{ 'approval-stepper__comment--reject': record.action === 'REJECT' }"
+            :class="{ 'approval-stepper__comment--reject': event.record.action === 'REJECT' }"
           >
             <MessageSquare class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span>{{ record.comment }}</span>
+            <span>{{ event.record.comment }}</span>
           </div>
         </div>
       </StepperItem>
 
       <StepperItem
         v-if="isPending && currentNodeName"
-        :step="records.length + 1"
+        :step="timeline.length + 1"
         class="approval-stepper__item"
       >
         <div class="approval-stepper__marker">
+          <StepperTrigger class="sr-only" aria-hidden="true" tabindex="-1" />
           <StepperIndicator class="approval-stepper__indicator approval-stepper__dot--pending">
             <Clock class="approval-stepper__indicator-icon" aria-hidden="true" />
           </StepperIndicator>
@@ -177,7 +193,7 @@ const formatDateTime = (iso: string): string => {
         <div class="approval-stepper__content">
           <div class="approval-stepper__row">
             <StepperTitle class="approval-stepper__title approval-stepper__title--pending">
-              等待{{ currentNodeName }}处理
+              {{ currentNodeName }} · 待处理
             </StepperTitle>
           </div>
           <div class="approval-stepper__meta">当前节点</div>

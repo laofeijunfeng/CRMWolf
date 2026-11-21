@@ -212,12 +212,16 @@
             <div class="nodes-header">
               <div>
                 <div class="section-title">审批节点配置</div>
-                <div class="section-subtitle">按顺序执行，可调整节点、角色和必审状态</div>
+                <div class="section-subtitle">首个节点必须是审批节点；每个节点至少选择一个角色或人员</div>
               </div>
-              <Button variant="outline" size="sm" class="compact-button" @click="handleAddNode">
-                <Plus class="w-4 h-4 mr-2" aria-hidden="true" />
-                添加节点
-              </Button>
+              <div class="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" @click="handleAddNode('APPROVAL')">
+                  <Plus class="size-4" /> 添加审批节点
+                </Button>
+                <Button variant="outline" size="sm" :disabled="!flowForm.nodes.length" @click="handleAddNode('CC')">
+                  <Plus class="size-4" /> 添加抄送节点
+                </Button>
+              </div>
             </div>
 
             <DataViewStatePanel
@@ -227,12 +231,13 @@
             >
               <div
                 v-for="(node, index) in flowForm.nodes"
-                :key="`${node.node_code}-${index}`"
+                :key="node.key"
                 class="node-item"
               >
                 <div class="node-order">{{ index + 1 }}</div>
 
                 <div class="node-fields">
+                  <Badge variant="secondary" class="mb-2">{{ node.node_type === 'CC' ? '抄送' : '审批' }}</Badge>
                   <div class="node-grid">
                     <div class="form-item">
                       <InputField
@@ -253,12 +258,11 @@
                     </div>
 
                     <div class="form-item">
-                      <SelectField
-                        :id="`node-role-${index}`"
-                        v-model="node.approve_role"
-                        label="审批角色"
-                        :options="approvalRoleOptions"
-                        placeholder="请选择角色"
+                      <Label :for="`ai-node-assignees-${node.key}`">{{ node.node_type === 'CC' ? '抄送对象' : '审批人员' }}</Label>
+                      <ApprovalNodeApproverPicker
+                        :id="`ai-node-assignees-${node.key}`"
+                        v-model="node.assignees"
+                        :disabled="isCreating"
                       />
                     </div>
                   </div>
@@ -275,14 +279,6 @@
                         }"
                       />
                     </div>
-
-                    <label class="required-toggle">
-                      <Checkbox
-                        :checked="node.is_required === 1"
-                        @update:checked="(checked: boolean | 'indeterminate') => updateNodeRequired(node, checked)"
-                      />
-                      <span>必须审批</span>
-                    </label>
                   </div>
                 </div>
 
@@ -320,8 +316,8 @@
                 </div>
               </div>
               <template #empty-action>
-                <Button variant="outline" size="sm" class="compact-button" @click="handleAddNode">
-                  添加节点
+                <Button variant="outline" size="sm" class="compact-button" @click="handleAddNode('APPROVAL')">
+                  添加审批节点
                 </Button>
               </template>
             </DataViewStatePanel>
@@ -368,15 +364,16 @@ import {
 } from 'lucide-vue-next'
 import { DataViewStatePanel, InputField, SelectField, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import ApprovalNodeApproverPicker from '@/components/ApprovalNodeApproverPicker.vue'
+import { Label } from '@/components/ui/label'
+import type { ApprovalNodeAssignees, ApprovalNodeType } from '@/api/approvalFlow'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useUserStore } from '@/stores/user'
 import {
   approvalAiApi,
-  ALLOWED_APPROVAL_ROLES,
-  ROLE_DISPLAY_NAMES,
   type ApprovalAIParsedNode,
   type ErrorAction
 } from '@/api/approvalAI'
@@ -395,10 +392,11 @@ const licenseTypeOptions = [
   { value: 'SUBSCRIPTION', label: '订阅' },
   { value: 'PERPETUAL', label: '买断' },
 ]
-const approvalRoleOptions = ALLOWED_APPROVAL_ROLES.map(role => ({
-  value: role,
-  label: ROLE_DISPLAY_NAMES[role] ?? role,
-}))
+interface AINodeForm extends Omit<ApprovalAIParsedNode, 'approver_roles' | 'approver_users'> {
+  key: number
+  assignees: ApprovalNodeAssignees
+}
+let nextNodeKey = 0
 
 const props = defineProps<{
   modelValue: boolean
@@ -440,7 +438,7 @@ const flowForm = ref<{
   max_amount: number | undefined
   license_type: string
   business_type: BusinessType
-  nodes: ApprovalAIParsedNode[]
+  nodes: AINodeForm[]
 }>({
   flow_name: '',
   flow_code: '',
@@ -468,14 +466,14 @@ const isFlowCodeValid = computed(() => /^[A-Z][A-Z0-9_]*$/.test(flowForm.value.f
 
 const isFormValid = computed(() => {
   if (!flowForm.value.flow_name || !isFlowCodeValid.value) return false
-  if (flowForm.value.nodes.length === 0) return false
+  if (flowForm.value.nodes[0]?.node_type !== 'APPROVAL') return false
 
   const codes = flowForm.value.nodes.map(n => n.node_code).filter(Boolean)
   if (codes.length !== flowForm.value.nodes.length || codes.length !== new Set(codes).size) return false
 
   return flowForm.value.nodes.every(node =>
     node.node_name.trim() !== '' &&
-    ALLOWED_APPROVAL_ROLES.includes(node.approve_role as typeof ALLOWED_APPROVAL_ROLES[number])
+    (node.assignees.roles.length > 0 || node.assignees.users.length > 0)
   )
 })
 
@@ -571,7 +569,11 @@ const handleParse = async (): Promise<void> => {
                 max_amount: maxAmount,
                 license_type: event.flow.license_type ?? '__NONE__',
                 business_type: event.flow.business_type ?? 'CONTRACT',
-                nodes: event.flow.nodes.map(n => ({ ...n }))
+                nodes: [...event.flow.nodes].sort((a, b) => a.node_order - b.node_order).map(({ approver_roles, approver_users, ...node }) => ({
+                  ...node,
+                  key: nextNodeKey++,
+                  assignees: { roles: approver_roles, users: approver_users },
+                }))
               }
               minAmountText.value = minAmount !== undefined ? String(minAmount) : ''
               maxAmountText.value = maxAmount !== undefined ? String(maxAmount) : ''
@@ -646,16 +648,15 @@ const handleCancel = (): void => {
   toast.info('已取消生成')
 }
 
-const handleAddNode = (): void => {
-  const lastOrder = flowForm.value.nodes.length
-
+const handleAddNode = (nodeType: ApprovalNodeType): void => {
   flowForm.value.nodes.push({
+    key: nextNodeKey++,
     node_name: '',
     node_code: '',
-    node_order: lastOrder + 1,
-    approve_role: 'SALES_DIRECTOR',
+    node_order: flowForm.value.nodes.length + 1,
+    node_type: nodeType,
+    assignees: { roles: [], users: [] },
     description: '',
-    is_required: 1
   })
 }
 
@@ -676,10 +677,6 @@ const handleMoveNode = (index: number, direction: number): void => {
   nodes[index] = targetNode
   nodes[newIndex] = temp
   normalizeNodeOrder()
-}
-
-const updateNodeRequired = (node: ApprovalAIParsedNode, checked: boolean | 'indeterminate'): void => {
-  node.is_required = checked === true ? 1 : 0
 }
 
 const normalizeNodeOrder = (): void => {
@@ -718,7 +715,15 @@ const handleCreate = async (): Promise<void> => {
     const requestData: import('@/api/approvalAI').ApprovalAICreateRequest = {
       flow_name: flowForm.value.flow_name,
       flow_code: flowForm.value.flow_code,
-      nodes: flowForm.value.nodes
+      nodes: flowForm.value.nodes.map((node, index) => ({
+        node_name: node.node_name.trim(),
+        node_code: node.node_code.trim(),
+        node_order: index + 1,
+        node_type: node.node_type,
+        approver_roles: node.assignees.roles,
+        approver_users: node.assignees.users,
+        description: node.description?.trim() ?? '',
+      }))
     }
     if (flowForm.value.description !== '') requestData.description = flowForm.value.description
     if (flowForm.value.min_amount !== undefined) requestData.min_amount = flowForm.value.min_amount

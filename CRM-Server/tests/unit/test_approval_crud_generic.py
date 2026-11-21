@@ -16,25 +16,28 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.types import BigInteger
 from sqlalchemy.orm import sessionmaker
 
+from app.core.database import Base
+from app.constants.business_types import BusinessType
+from app.models.approval import (
+    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalParticipant,
+    ApprovalParticipantKind, ApprovalStatus, ApprovalAction,
+)
+from app.models.role import Role
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
+from app.models.contract import Contract, ContractStatus
+from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
+from app.crud.approval import approval_crud, approval_flow_crud
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
+
 # SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增
 # （SQLite 仅对 INTEGER PRIMARY KEY 启用 rowid 自增；BIGINT不具备此行为）。
 # 仅作用于 sqlite 方言，不影响 MySQL 真实引擎。
 @compiles(BigInteger, "sqlite")
 def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
     return "INTEGER"
-
-
-from app.core.database import Base
-from app.constants.business_types import BusinessType
-from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
-    ApprovalStatus, ApprovalAction,
-)
-from app.models.contract import Contract, ContractStatus
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
-from app.crud.approval import approval_crud, approval_flow_crud
-from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 
 
 
@@ -44,6 +47,9 @@ def db_session():
     engine = create_engine("sqlite:///:memory:")
     # 显式列表：只建本测试用到的表；FK 指向的表（customers 等）不建，SQLite 不强制 FK
     tables = [
+        User.__table__,
+        Role.__table__,
+        UserRole.__table__,
         Customer.__table__,
         CustomerLegacySourceProgress.__table__,
         Contract.__table__,
@@ -52,6 +58,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
     ]
     customer_index = next(index for index in Customer.__table__.indexes if index.name == "idx_team_id")
     Customer.__table__.indexes.discard(customer_index)
@@ -61,7 +68,24 @@ def db_session():
         Customer.__table__.indexes.add(customer_index)
     Session = sessionmaker(bind=engine)
     session = Session()
-    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="u1"))
+    session.add_all([
+        User(id=1, email="submitter@example.com", name="提交人", status=UserStatus.ACTIVE),
+        User(id=2, email="sales@example.com", name="销售审批人", status=UserStatus.ACTIVE),
+        User(id=3, email="director@example.com", name="总监审批人", status=UserStatus.ACTIVE),
+    ])
+    session.flush()
+    sales = Role(name="销售总监", code="SALES_DIRECTOR")
+    director = Role(name="总监", code="DIRECTOR")
+    finance = Role(name="财务", code="FINANCE")
+    session.add_all([sales, director, finance])
+    session.flush()
+    session.add_all([
+        UserRole(user_id=2, role_id=sales.id, team_id=1),
+        UserRole(user_id=3, role_id=director.id, team_id=1),
+        UserRole(user_id=2, role_id=finance.id, team_id=1),
+    ])
+    session.flush()
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="1"))
     session.commit()
     yield session
     session.close()
@@ -90,8 +114,8 @@ def seed_flow_with_one_node(db_session):
         node_name="销售总监审批",
         node_code="SALES_DIRECTOR",
         node_order=1,
-        approve_role="SALES_DIRECTOR",
-        is_required=1,
+        approver_roles=["SALES_DIRECTOR"],
+        approver_users=[],
     )
     db_session.add(node)
     db_session.commit()
@@ -116,8 +140,8 @@ def seed_invoice_flow_with_one_node(db_session):
         node_name="财务审批",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
+        approver_users=[],
     )
     db_session.add(node)
     db_session.commit()
@@ -140,8 +164,8 @@ def seed_contract_draft(db_session):
         subscription_years=1,
         standard_unit_price=10000,
         status=ContractStatus.DRAFT,
-        owner_id="u1",
-        creator_id="u1",
+        owner_id="1",
+        creator_id="1",
     )
     db_session.add(contract)
     db_session.commit()
@@ -161,7 +185,7 @@ def seed_invoice_draft(db_session):
         invoice_amount=5000,
         invoice_type=InvoiceType.VAT_NORMAL,
         status=InvoiceApplicationStatus.DRAFT,
-        applicant_id="u1",
+        applicant_id="1",
         invoice_title_type="COMPANY",
         invoice_title_text="测试公司",
         invoice_taxpayer_id="91110000XXXXXXX",
@@ -185,12 +209,12 @@ def test_get_by_entity_returns_latest_approval_by_id_after_resubmit(
     flow, _ = seed_flow_with_one_node
 
     first = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
-    approval_crud.cancel(db_session, first, "u1")
+    approval_crud.cancel(db_session, first, "1")
 
     second = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
 
     same_time = datetime(2026, 7, 16, 16, 17, 44)
@@ -213,12 +237,18 @@ def test_create_approval_generic_writes_business_columns(
     ap = approval_crud.create_approval_generic(
         db_session, BusinessType.INVOICE, seed_invoice_draft.id,
         team_id=seed_invoice_draft.team_id, flow=flow,
-        submitter_id="u1", submitter_name="eddie",
+        submitter_id="1", submitter_name="提交人",
     )
     assert ap.business_type == BusinessType.INVOICE
     assert ap.business_id == seed_invoice_draft.id
     assert ap.contract_id is None  # INVOICE 不写 contract_id
     assert ap.status == ApprovalStatus.PENDING
+    assert ap.nodes_snapshot[0]["node_type"] == "APPROVAL"
+    assert ap.nodes_snapshot[0]["user_ids"] == [2]
+    participants = db_session.query(ApprovalParticipant).filter_by(approval_id=ap.id).all()
+    assert [(p.node_id, p.user_id, p.kind) for p in participants] == [
+        (ap.current_node_id, 2, ApprovalParticipantKind.APPROVER),
+    ]
     # on_submit 经适配器切状态
     db_session.refresh(seed_invoice_draft)
     assert seed_invoice_draft.status == InvoiceApplicationStatus.PENDING_REVIEW
@@ -229,7 +259,7 @@ def test_contract_create_legacy_still_works(
 ):
     flow, _ = seed_flow_with_one_node
     ap = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
     assert ap.business_type == BusinessType.CONTRACT
     assert ap.business_id == seed_contract_draft.id
@@ -314,16 +344,19 @@ def test_approve_final_node_writes_contract_signed_via_adapter(
     """末节点 APPROVE 经 ContractAdapter.on_approved → status=SIGNED（等价原 contract.status=SIGNED）。"""
     flow, _ = seed_flow_with_one_node
     ap = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
     # 构造 action_request
     from app.schemas.approval import ApprovalActionRequest
     from app.models.approval import ApprovalAction as AA
     req = ApprovalActionRequest(action=AA.APPROVE, comment="同意", updated_time=ap.updated_time)
-    approval_crud.approve(db_session, ap, req, approver_id="reviewer", approver_name="审核人")
+    approval_crud.approve(db_session, ap, req, approver_id="2", approver_name="销售审批人")
     db_session.refresh(seed_contract_draft)
     assert seed_contract_draft.status == ContractStatus.SIGNED
     db_session.refresh(ap)
+    assert db_session.query(ApprovalParticipant).filter_by(
+        approval_id=ap.id, kind=ApprovalParticipantKind.APPROVER,
+    ).count() == 0
     assert ap.status == ApprovalStatus.APPROVED
 
 
@@ -333,12 +366,12 @@ def test_approve_reject_writes_contract_draft_via_adapter(
     """REJECT 经 ContractAdapter.on_rejected → status=DRAFT（等价原 contract.status=DRAFT）。"""
     flow, _ = seed_flow_with_one_node
     ap = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
     from app.schemas.approval import ApprovalActionRequest
     from app.models.approval import ApprovalAction as AA
     req = ApprovalActionRequest(action=AA.REJECT, comment="驳回", updated_time=ap.updated_time)
-    approval_crud.approve(db_session, ap, req, approver_id="reviewer", approver_name="审核人")
+    approval_crud.approve(db_session, ap, req, approver_id="2", approver_name="销售审批人")
     db_session.refresh(seed_contract_draft)
     assert seed_contract_draft.status == ContractStatus.DRAFT
     db_session.refresh(ap)
@@ -351,13 +384,16 @@ def test_cancel_writes_contract_draft_via_adapter(
     """cancel 经 ContractAdapter.on_cancelled → status=DRAFT（等价原 contract.status=DRAFT）。"""
     flow, _ = seed_flow_with_one_node
     ap = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
-    approval_crud.cancel(db_session, ap, user_id="u1")
+    approval_crud.cancel(db_session, ap, user_id="1")
     db_session.refresh(seed_contract_draft)
     assert seed_contract_draft.status == ContractStatus.DRAFT
     db_session.refresh(ap)
     assert ap.status == ApprovalStatus.CANCELLED
+    assert db_session.query(ApprovalParticipant).filter_by(
+        approval_id=ap.id, kind=ApprovalParticipantKind.APPROVER,
+    ).count() == 0
 
 def test_approval_transitions_advance_customer_revision_only_on_source_change(
     db_session, seed_contract_draft, seed_flow_with_one_node
@@ -367,36 +403,113 @@ def test_approval_transitions_advance_customer_revision_only_on_source_change(
     flow, _ = seed_flow_with_one_node
     db_session.add(ApprovalNode(
         team_id=1, flow_id=flow.id, node_name="终审", node_code="FINAL",
-        node_order=2, approve_role="DIRECTOR", is_required=1,
+        node_order=2, approver_roles=["DIRECTOR"],
     ))
     db_session.commit()
-    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "u1", "eddie")
-    progress = db_session.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
-    assert progress.eligible_revision == 1
+    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "1", "提交人")
+    current = db_session.query(ApprovalParticipant).filter_by(
+        approval_id=approval.id, kind=ApprovalParticipantKind.APPROVER,
+    ).all()
+    assert [(p.node_id, p.user_id) for p in current] == [(approval.current_node_id, 2)]
 
     request = ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="同意", updated_time=approval.updated_time)
-    approval_crud.approve(db_session, approval, request, "reviewer", "审核人")
-    db_session.refresh(progress)
+    approval_crud.approve(db_session, approval, request, "2", "销售审批人")
     assert approval.status == ApprovalStatus.PENDING
-    assert seed_contract_draft.status == ContractStatus.PENDING_REVIEW
-    assert progress.eligible_revision == 1
+    current = db_session.query(ApprovalParticipant).filter_by(
+        approval_id=approval.id, kind=ApprovalParticipantKind.APPROVER,
+    ).all()
+    assert [(p.node_id, p.user_id) for p in current] == [(approval.current_node_id, 3)]
 
     request = ApprovalActionRequest(action=ApprovalAction.APPROVE, comment="终审同意", updated_time=approval.updated_time)
-    approval_crud.approve(db_session, approval, request, "director", "终审人")
-    db_session.refresh(progress)
+    approval_crud.approve(db_session, approval, request, "3", "总监审批人")
     assert seed_contract_draft.status == ContractStatus.SIGNED
-    assert progress.eligible_revision == 2
+    assert db_session.query(ApprovalParticipant).filter_by(
+        approval_id=approval.id, kind=ApprovalParticipantKind.APPROVER,
+    ).count() == 0
+    assert approval.status == ApprovalStatus.APPROVED
 
 
 def test_cancel_approval_advances_customer_revision(
     db_session, seed_contract_draft, seed_flow_with_one_node
 ):
     flow, _ = seed_flow_with_one_node
-    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "u1", "eddie")
-    approval_crud.cancel(db_session, approval, "u1")
+    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "1", "提交人")
+    approval_crud.cancel(db_session, approval, "1")
     progress = db_session.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
     assert seed_contract_draft.status == ContractStatus.DRAFT
     assert progress.eligible_revision == 2
+    assert db_session.query(ApprovalParticipant).filter_by(
+        approval_id=approval.id, kind=ApprovalParticipantKind.APPROVER,
+    ).count() == 0
+
+def test_flow_update_rejects_unknown_node_id(db_session, seed_flow_with_one_node):
+    from app.schemas.approval import ApprovalFlowUpdate
+
+    flow, node = seed_flow_with_one_node
+    with pytest.raises(ValueError, match="审批流程节点不存在"):
+        approval_flow_crud.update(
+            db_session,
+            flow,
+            ApprovalFlowUpdate(nodes=[{
+                "id": node.id + 1000,
+                "node_name": "伪造节点",
+                "node_code": "FORGED",
+                "node_order": 1,
+                "approver_roles": ["SALES_DIRECTOR"],
+            }]),
+        )
+
+
+def test_flow_update_rejects_cc_as_first_merged_node(db_session, seed_flow_with_one_node):
+    from app.schemas.approval import ApprovalFlowUpdate
+
+    flow, node = seed_flow_with_one_node
+    with pytest.raises(ValueError, match="抄送节点需位于审批节点之后"):
+        approval_flow_crud.update(
+            db_session,
+            flow,
+            ApprovalFlowUpdate(nodes=[{
+                "id": node.id,
+                "node_type": "CC",
+                "approver_roles": ["SALES_DIRECTOR"],
+            }]),
+        )
+
+
+def test_flow_delete_rejects_pending_approval(db_session, seed_flow_with_one_node, seed_contract_draft):
+    flow, _ = seed_flow_with_one_node
+    approval_crud.create_approval(db_session, seed_contract_draft, flow, "1", "提交人")
+
+    with pytest.raises(ValueError, match="存在关联的审批实例"):
+        approval_flow_crud.delete(db_session, flow.id, team_id=1)
+
+    assert db_session.get(ApprovalFlow, flow.id) is not None
+
+
+def test_create_with_approval_surfaces_empty_approver_message(
+    db_session, seed_contract_draft, seed_flow_with_one_node
+):
+    """商机/合同变更走 create_with_approval：节点无人可审时返回需求原文，而非“系统异常”。"""
+    from app.services.approval_transaction_manager import approval_transaction_manager
+
+    _, node = seed_flow_with_one_node
+    node.approver_roles = ["UNSTAFFED_ROLE"]
+    db_session.commit()
+
+    result = approval_transaction_manager.create_with_approval(
+        db_session,
+        business_type=BusinessType.CONTRACT,
+        entity_create_func=lambda: seed_contract_draft,
+        match_flow_kwargs={"amount": 100000, "license_type": "SUBSCRIPTION"},
+        submitter_id="1",
+        submitter_name="提交人",
+        team_id=1,
+        send_notification=False,
+    )
+
+    assert result == (None, None, "第 1 个节点没有审批人，请联系管理员")
+    assert db_session.query(Approval).count() == 0
+
 
 
 def test_approve_entity_deleted_skips_on_status_write(
@@ -405,7 +518,7 @@ def test_approve_entity_deleted_skips_on_status_write(
     """E4 守卫：单据已删（get_entity 返 None）时仅终结审批，不回写单据状态、不抛异常。"""
     flow, _ = seed_flow_with_one_node
     ap = approval_crud.create_approval(
-        db_session, seed_contract_draft, flow, "u1", "eddie"
+        db_session, seed_contract_draft, flow, "1", "提交人"
     )
     # 模拟单据已删：把 business_id 指向不存在的 ID，使 adapter.get_entity 返 None
     ap.business_id = 999999
@@ -413,7 +526,7 @@ def test_approve_entity_deleted_skips_on_status_write(
     from app.schemas.approval import ApprovalActionRequest
     from app.models.approval import ApprovalAction as AA
     req = ApprovalActionRequest(action=AA.APPROVE, comment="同意", updated_time=ap.updated_time)
-    approval_crud.approve(db_session, ap, req, approver_id="reviewer", approver_name="审核人")
+    approval_crud.approve(db_session, ap, req, approver_id="2", approver_name="销售审批人")
     db_session.refresh(ap)
     # 审批仍终结
     assert ap.status == ApprovalStatus.APPROVED

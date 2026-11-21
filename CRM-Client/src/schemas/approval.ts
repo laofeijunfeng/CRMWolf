@@ -4,6 +4,11 @@ import { ApprovalRecordSchema, MessageResponseSchema } from './approvalGeneric'
 
 const NullableString = z.string().nullable()
 
+const ApprovalUserSelectionSchema = z.object({
+  role: z.string().min(1),
+  user_id: z.number().int().positive(),
+})
+
 export const ApprovalNodeResponseSchema = z.object({
   id: z.number().int().positive(),
   flow_id: z.number().int().positive(),
@@ -11,9 +16,9 @@ export const ApprovalNodeResponseSchema = z.object({
   node_code: z.string(),
   node_order: z.number().int().positive(),
   description: NullableString,
-  approve_role: z.string(),
-  notify_user_ids: z.array(z.number().int()).nullable(),
-  is_required: z.number().int().min(0).max(1),
+  node_type: z.enum(['APPROVAL', 'CC']).default('APPROVAL'),
+  approver_roles: z.array(z.string()).default([]),
+  approver_users: z.array(ApprovalUserSelectionSchema).default([]),
   created_time: BusinessDateTimeStringSchema
 })
 

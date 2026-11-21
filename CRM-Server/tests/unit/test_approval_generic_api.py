@@ -40,6 +40,8 @@ from app.models.approval import (
     Approval,
     ApprovalFlow,
     ApprovalNode,
+    ApprovalParticipant,
+    ApprovalParticipantKind,
     ApprovalRecord,
     ApprovalStatus,
 )
@@ -104,8 +106,9 @@ def db_session():
         PaymentPlan.__table__,
         PaymentRecord.__table__,
         ApprovalFlow.__table__,
-        ApprovalNode.__table__,
         Approval.__table__,
+        ApprovalNode.__table__,
+        ApprovalParticipant.__table__,
         ApprovalRecord.__table__,
         OutboundNotificationJob.__table__,
     ]
@@ -185,7 +188,7 @@ def _current_user_stub():
 # ---------- 种子 fixtures --------------------------------------------------
 
 @pytest.fixture
-def seed_invoice_flow_with_finance_node(db_session):
+def seed_invoice_flow_with_finance_node(db_session, seed_finance_role_and_link):
     """INVOICE 类型审批流程 + 1 个 FINANCE 节点。"""
     flow = ApprovalFlow(
         team_id=1,
@@ -202,8 +205,7 @@ def seed_invoice_flow_with_finance_node(db_session):
         node_name="财务审批",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.commit()
@@ -333,8 +335,7 @@ def seed_payment_flow_with_director_node(db_session):
         node_name="销售总监审批",
         node_code="SALES_DIRECTOR",
         node_order=1,
-        approve_role="SALES_DIRECTOR",
-        is_required=1,
+        approver_roles=["SALES_DIRECTOR"],
     )
     db_session.add(node)
     db_session.commit()
@@ -495,23 +496,29 @@ def test_approve_invoice_writes_reviewer_via_endpoint(
     assert inv.review_comment == "同意开票"
 
 
-def test_approve_rejects_non_matching_role(
+def test_approve_rejects_non_participant(
     db_session, client, seed_invoice_draft, seed_invoice_flow_with_finance_node,
-    current_user_rec,
+    seed_finance_role_and_link, grant_invoice_approve_own,
 ):
-    """角色不匹配时 403。"""
-    # 不创建 FINANCE 角色 —— current_user 无任何角色
-    r = client.post(
-        f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit",
-        json={"comment": "请审批"},
-    )
-    assert r.status_code == 200, r.text
+    """拥有财务角色和自审权限，但未被选为审批人时仍返回 403。"""
+    other_finance = User(email="other-finance@example.com", name="另一财务")
+    db_session.add(other_finance)
+    db_session.flush()
+    db_session.add(UserRole(user_id=other_finance.id, role_id=seed_finance_role_and_link.id, team_id=1))
+    _, node = seed_invoice_flow_with_finance_node
+    node.approver_roles = []
+    node.approver_users = [{"role": "FINANCE", "user_id": other_finance.id}]
+    db_session.commit()
 
-    r = client.post(
+    response = client.post(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/submit", json={"comment": "请审批"})
+    assert response.status_code == 200, response.text
+    approval = db_session.get(Approval, response.json()["approval_id"])
+
+    response = client.post(
         f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/approve",
-        json={"action": "APPROVE", "comment": "同意", "updated_time": None},
+        json={"action": "APPROVE", "comment": "同意", "updated_time": approval.updated_time.isoformat()},
     )
-    assert r.status_code == 403, r.text
+    assert response.status_code == 403, response.text
 
 
 # ---------- cancel: 仅提交人可撤回 ----------------------------------------
@@ -602,14 +609,27 @@ def seed_invoice_reissue_approval(
     )
     db_session.add(reissue)
     db_session.flush()
-    db_session.add(Approval(
+    approval = Approval(
         team_id=1,
         business_type=BusinessType.INVOICE_REISSUE,
         business_id=reissue.id,
         flow_id=flow.id,
         current_node_id=node.id,
+        nodes_snapshot=[{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": node.node_type,
+            "user_ids": [1],
+        }],
         submitter_id=original.applicant_id,
         status=ApprovalStatus.PENDING,
+    )
+    db_session.add(approval)
+    db_session.flush()
+    db_session.add(ApprovalParticipant(
+        approval_id=approval.id, node_id=node.id, node_name=node.node_name,
+        user_id=1, kind=ApprovalParticipantKind.APPROVER, team_id=1,
     ))
     db_session.commit()
     return reissue
@@ -819,11 +839,23 @@ def test_remind_pending_approval_by_submitter_sends_notification(
         business_id=seed_invoice_draft.id,
         flow_id=flow.id,
         current_node_id=node.id,
+        nodes_snapshot=[{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": node.node_type,
+            "user_ids": [current_user_rec.id],
+        }],
         status=ApprovalStatus.PENDING,
         submitter_id=str(current_user_rec.id),
         submitter_name=current_user_rec.name,
     )
     db_session.add(approval)
+    db_session.flush()
+    db_session.add(ApprovalParticipant(
+        approval_id=approval.id, node_id=node.id, node_name=node.node_name,
+        user_id=current_user_rec.id, kind=ApprovalParticipantKind.APPROVER, team_id=1,
+    ))
     db_session.commit()
 
     r = client.post(f"/v1/approvals/INVOICE/{seed_invoice_draft.id}/remind")
@@ -916,18 +948,16 @@ def test_bulk_approve_optimistic_lock_conflict(
     )
     approval_crud.approve(
         db_session, ap, req_other,
-        approver_id="other_user", approver_name="他人",
+        approver_id="1", approver_name="他人",
     )
     db_session.refresh(ap)
     assert ap.status == ApprovalStatus.APPROVED
 
-    # SQLite 秒级精度下 onupdate 可能不产生新时间戳——手动 +1s 模拟真实 DB
-    # 的 updated_time 变化,保证 bulk-approve 传入的旧时间戳与当前值不匹配,
-    # 从而触发乐观锁冲突(approval_crud.approve 内的 updated_time 比对)。
-    if ap.updated_time == original_updated_time:
-        ap.updated_time = original_updated_time + timedelta(seconds=1)
-        db_session.commit()
-        db_session.refresh(ap)
+    # SQLite 秒级精度下 onupdate 可能不产生新时间戳；显式推进时间戳，
+    # 保证 bulk-approve 传入的旧值与当前值不匹配。
+    ap.updated_time = original_updated_time + timedelta(seconds=1)
+    db_session.commit()
+    db_session.refresh(ap)
     assert ap.updated_time != original_updated_time
 
     # 3. bulk-approve 仍用旧的 updated_time → 乐观锁冲突 → reason="已被他人处理"

@@ -40,11 +40,11 @@ from app.crud.payment import (
     query_pending_approval_me,
 )
 from app.crud.permission import permission_crud
-from app.crud.role import role_crud
 from app.crud.user import user_crud
 from app.models.approval import Approval, ApprovalNode, ApprovalRecord, ApprovalStatus
 from app.models.command_execution import CommandExecutionStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
+from app.models.user import User
 from app.schemas.command import CommandEffect, CommandResource
 from app.schemas.list_export import PaymentPlanListExportRequest, PaymentRecordListExportRequest
 from app.schemas.payment_composition import composition_payload
@@ -68,10 +68,7 @@ from app.schemas.payment_record_chart import (
     PaymentRecordChartBucketRecords,
     PaymentRecordChartResponse,
 )
-from app.services.payment_record_chart_stats import (
-    build_payment_record_chart,
-    list_chart_bucket_records,
-)
+from app.services.approval_routing import NODE_TYPE_APPROVAL, current_approver_ids
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.command_execution_service import (
     CommandAlreadyInProgress,
@@ -85,6 +82,10 @@ from app.services.customer_business_object_intelligence_service import (
     customer_business_object_intelligence_service,
 )
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.services.payment_record_chart_stats import (
+    build_payment_record_chart,
+    list_chart_bucket_records,
+)
 
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
@@ -497,26 +498,24 @@ def _build_payment_record_list_items(
         for user in projection_db.query(User).filter(User.id.in_(numeric_owner_ids)).all()
     } if numeric_owner_ids else {}
 
-    approval_ids = [record.approval_id for record in records if record.approval_id]
+    approval_ids = {record.approval_id for record in records if record.approval_id}
+
     approvals_by_id = {
         approval.id: approval
-        for approval in projection_db.query(Approval).filter(Approval.id.in_(approval_ids)).all()
+        for approval in projection_db.query(Approval).filter(
+            Approval.id.in_(approval_ids),
+            Approval.team_id == team_id,
+            Approval.business_type == BusinessType.PAYMENT,
+        ).all()
     } if include_approval and approval_ids else {}
     approval_records_by_approval: dict[int, list[ApprovalRecord]] = {}
-    flow_nodes_by_flow: dict[int, list[ApprovalNode]] = {}
     if include_approval and approval_ids:
         approval_records = projection_db.query(ApprovalRecord).filter(
-            ApprovalRecord.approval_id.in_(approval_ids)
-        ).order_by(ApprovalRecord.created_time).all()
+            ApprovalRecord.approval_id.in_(approval_ids),
+            ApprovalRecord.team_id == team_id,
+        ).order_by(ApprovalRecord.created_time, ApprovalRecord.id).all()
         for approval_record in approval_records:
             approval_records_by_approval.setdefault(approval_record.approval_id, []).append(approval_record)
-        flow_ids = [approval.flow_id for approval in approvals_by_id.values() if approval.flow_id]
-        if flow_ids:
-            flow_nodes = projection_db.query(ApprovalNode).filter(
-                ApprovalNode.flow_id.in_(flow_ids)
-            ).order_by(ApprovalNode.node_order).all()
-            for node in flow_nodes:
-                flow_nodes_by_flow.setdefault(node.flow_id, []).append(node)
 
     items = []
     for record in records:
@@ -569,48 +568,10 @@ def _build_payment_record_list_items(
         if include_approval and record.approval_id:
             approval = approvals_by_id.get(record.approval_id)
             if approval is not None:
-                approval_records = approval_records_by_approval.get(approval.id, [])
-                nodes_info = []
-                if approval.flow_id:
-                    for node in flow_nodes_by_flow.get(approval.flow_id, []):
-                        node_records = [row for row in approval_records if row.node_id == node.id]
-                        node_status = "PENDING"
-                        final_record = None
-                        if node_records:
-                            node_records_sorted = sorted(node_records, key=lambda row: row.created_time)
-                            final_record = node_records_sorted[-1]
-                            if final_record.action == "SUBMIT":
-                                node_status = "SUBMIT"
-                            elif final_record.action == "APPROVE":
-                                node_status = "APPROVE"
-                            elif final_record.action == "REJECT":
-                                node_status = "REJECT"
-                        approver_id = final_record.approver_id if final_record else None
-                        approver_name = final_record.approver_name if final_record else None
-                        if node_status == "APPROVE":
-                            approve_record = next(
-                                (row for row in node_records if row.action == "APPROVE"),
-                                None,
-                            )
-                            if approve_record:
-                                approver_id = approve_record.approver_id
-                                approver_name = approve_record.approver_name
-                        nodes_info.append({
-                            "id": node.id,
-                            "node_order": node.node_order,
-                            "node_name": node.node_name,
-                            "approve_role": node.approve_role,
-                            "status": node_status,
-                            "approver_id": approver_id,
-                            "approver_name": approver_name,
-                            "comment": final_record.comment if final_record else None,
-                        })
-                item_dict["approval"] = {
-                    "id": approval.id,
-                    "status": approval.status,
-                    "current_approver_name": _get_current_approver_names(projection_db, approval, team_id),
-                    "nodes": nodes_info,
-                }
+                item_dict["approval"] = _payment_approval_info(
+                    projection_db, approval, team_id,
+                    records=approval_records_by_approval.get(int(approval.id), []),
+                )
         items.append(item_dict)
     return items
 
@@ -817,50 +778,6 @@ def _persist_payment_command_failure(
     except Exception:
         db.rollback()
         logger.error("[Payment] 无法持久化回款操作失败结果", exc_info=True)
-
-
-def _get_current_approver_names(db: Session, approval: Approval, team_id: int) -> Optional[str]:
-    """
-    获取当前审批人姓名（从 approve_role 查询）
-
-    Args:
-        db: 数据库会话
-        approval: 审批实例
-        team_id: 团队ID
-
-    Returns:
-        审批人姓名（多个审批人用逗号分隔），如无审批人则返回 None
-
-    Note:
-        审批人姓名是从 approval.current_node.approve_role 查询角色成员得到的，
-        不是节点名称（node_name）。节点名称是审批节点名称（如"财务审批"）。
-    """
-    if not approval:
-        return None
-
-    # 检查审批状态是否为 PENDING
-    if approval.status != ApprovalStatus.PENDING:
-        return None
-
-    # 获取当前审批节点
-    if not approval.current_node:
-        return None
-
-    # 从 approve_role 查询审批人姓名
-    approve_role = approval.current_node.approve_role
-    if not approve_role:
-        return None
-
-    role = role_crud.get_by_code(db, approve_role)
-    if not role:
-        return None
-
-    users = role_crud.get_role_users(db, role.id, team_id)
-    if not users:
-        return None
-
-    # 返回审批人姓名（多个审批人用逗号分隔）
-    return ", ".join([user.name for user in users if user.name])
 
 
 def _validate_payment_commission_member(
@@ -1188,32 +1105,8 @@ def get_payment_plan_badge_counts(
         Approval.status == ApprovalStatus.PENDING
     ).count()
 
-    # Task 8.3: 6. 待我审批的数量（与审批中心一致）
-    # 查询当前审批节点角色属于当前用户角色集的审批记录
-
-    # 获取当前用户的角色集合
-    user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
-    user_roles = [r.code for r in user_role_objs]
-
-    # 查询待我审批的数量（JOIN ApprovalNode，过滤 approve_role IN user_roles）
-    if not user_roles:
-        # 无任何角色 → 0
-        pending_approval_me_count = 0
-    else:
-        pending_approval_me_query = (
-            db.query(Approval)
-            .join(ApprovalNode, Approval.current_node_id == ApprovalNode.id)
-            .join(PaymentRecord, Approval.business_id == PaymentRecord.id)
-            .join(PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id)
-            .filter(
-                Approval.business_type == BusinessType.PAYMENT,
-                Approval.team_id == team_id,
-                Approval.status == ApprovalStatus.PENDING,
-                PaymentPlan.team_id == team_id,
-                ApprovalNode.approve_role.in_(user_roles)
-            )
-        )
-        pending_approval_me_count = pending_approval_me_query.count()
+    # 查询冻结参与人中的待我审批数量，避免读取已移除的节点角色字段。
+    pending_approval_me_count = query_pending_approval_me(db, team_id, current_user.id)
 
     return {
         "pending": pending_count,
@@ -1336,85 +1229,17 @@ def get_payment_plan_detail(
         approval = db.query(Approval).filter(
             Approval.business_type == BusinessType.PAYMENT,
             Approval.business_id == latest_record.id,
-            Approval.team_id == team_id
+            Approval.team_id == team_id,
         ).order_by(Approval.created_time.desc()).first()
 
         if approval:
-            # 获取审批节点信息
-            approval_records = db.query(ApprovalRecord).filter(
-                ApprovalRecord.approval_id == approval.id
-            ).order_by(ApprovalRecord.created_time).all()
-
-            # 构建审批节点信息（按节点顺序）
-            if approval.flow_id:
-                flow_nodes = db.query(ApprovalNode).filter(
-                    ApprovalNode.flow_id == approval.flow_id
-                ).order_by(ApprovalNode.node_order).all()
-
-                # 构建节点列表，包含审批状态
-                nodes_info = []
-                for node in flow_nodes:
-                    # 查找该节点的所有审批记录（可能有 SUBMIT + APPROVE）
-                    node_records = [r for r in approval_records if r.node_id == node.id]
-
-                    # 节点状态逻辑：
-                    # - 如果有多条记录（SUBMIT + APPROVE/REJECT），取最后一条（审批结果）
-                    # - 如果只有一条 SUBMIT，显示 SUBMIT
-                    # - 如果没有记录，显示 PENDING
-                    node_status = "PENDING"
-                    final_record = None
-
-                    if node_records:
-                        # 按时间排序，取最后一条（审批结果）
-                        node_records_sorted = sorted(node_records, key=lambda r: r.created_time)
-                        final_record = node_records_sorted[-1]
-
-                        # 如果最后一条是 SUBMIT，说明还在审批中
-                        # 如果最后一条是 APPROVE/REJECT，说明审批已完成
-                        if final_record.action == "SUBMIT":
-                            # 只有 SUBMIT 记录，审批中
-                            node_status = "SUBMIT"
-                        elif final_record.action == "APPROVE":
-                            node_status = "APPROVE"
-                        elif final_record.action == "REJECT":
-                            node_status = "REJECT"
-
-                    # approver_id/approver_name：取最后一条记录的审批人（如果有 APPROVE/REJECT）
-                    # 如果只有 SUBMIT，approver_id 是提交人
-                    approver_id = final_record.approver_id if final_record else None
-                    approver_name = final_record.approver_name if final_record else None
-
-                    # 但对于审批通过的情况，应该显示审批人（APPROVE 记录），而不是提交人
-                    if node_status == "APPROVE":
-                        # 找 APPROVE 记录
-                        approve_record = next(
-                            (r for r in node_records if r.action == "APPROVE"),
-                            None
-                        )
-                        if approve_record:
-                            approver_id = approve_record.approver_id
-                            approver_name = approve_record.approver_name
-
-                    nodes_info.append({
-                        "id": node.id,
-                        "node_name": node.node_name,
-                        "node_order": node.node_order,
-                        "approve_role": node.approve_role,
-                        "status": node_status,
-                        "approver_id": approver_id,
-                        "approver_name": approver_name,
-                        "approved_time": final_record.created_time.isoformat() if final_record else None,
-                        "comment": final_record.comment if final_record else None
-                    })
-
-                latest_approval = {
-                    "id": approval.id,
-                    "status": approval.status,
-                    "submitter_id": approval.submitter_id,
-                    "submitter_name": approval.submitter_name,
-                    "created_time": approval.created_time.isoformat(),
-                    "nodes": nodes_info
-                }
+            latest_approval = _payment_approval_info(db, approval, team_id, include_times=True)
+            if latest_approval is not None:
+                latest_approval.update(
+                    submitter_id=approval.submitter_id,
+                    submitter_name=approval.submitter_name,
+                    created_time=approval.created_time.isoformat(),
+                )
 
     # 构建响应（添加 approval 信息）
     # Task 1.2: Compute invoice fields using model properties
@@ -1885,67 +1710,81 @@ def get_payment_records(
 
 
 def _payment_approval_info(
-    db: Session, approval: Approval | None, team_id: int
+    db: Session,
+    approval: Approval | None,
+    team_id: int,
+    *,
+    records: list[ApprovalRecord] | None = None,
+    include_times: bool = False,
 ) -> dict | None:
-    """构建回款详情需要的审批状态，避免前端自行推断最终状态。"""
-    if approval is None:
+    """Serialize frozen assignments separately from recorded actions."""
+    if approval is None or approval.team_id != team_id:
         return None
-
-    approval_records = (
-        db.query(ApprovalRecord)
-        .filter(
+    if records is None:
+        records = db.query(ApprovalRecord).filter(
             ApprovalRecord.approval_id == approval.id,
             ApprovalRecord.team_id == team_id,
-        )
-        .order_by(ApprovalRecord.created_time)
-        .all()
-    )
-    nodes_info = []
-    if approval.flow_id:
-        flow_nodes = (
-            db.query(ApprovalNode)
-            .filter(ApprovalNode.flow_id == approval.flow_id)
-            .order_by(ApprovalNode.node_order)
-            .all()
-        )
-        for node in flow_nodes:
-            node_records = [record for record in approval_records if record.node_id == node.id]
-            final_record = node_records[-1] if node_records else None
-            node_status = "PENDING"
-            if final_record is not None:
-                node_status = {
-                    "SUBMIT": "SUBMIT",
-                    "APPROVE": "APPROVE",
-                    "REJECT": "REJECT",
-                }.get(final_record.action, final_record.action)
-
-            approver_id = final_record.approver_id if final_record else None
-            approver_name = final_record.approver_name if final_record else None
-            if node_status == "APPROVE":
-                approve_record = next(
-                    (record for record in reversed(node_records) if record.action == "APPROVE"),
-                    None,
-                )
-                if approve_record is not None:
-                    approver_id = approve_record.approver_id
-                    approver_name = approve_record.approver_name
-
-            nodes_info.append({
-                "id": node.id,
-                "node_order": node.node_order,
-                "node_name": node.node_name,
-                "approve_role": node.approve_role,
-                "status": node_status,
-                "approver_id": approver_id,
-                "approver_name": approver_name,
-                "comment": final_record.comment if final_record else None,
-            })
-
+        ).order_by(ApprovalRecord.created_time, ApprovalRecord.id).all()
+    last_action = {row.node_id: row for row in records}
+    current_ids = current_approver_ids(db, approval) if approval.status == ApprovalStatus.PENDING else []
+    if approval.nodes_snapshot is not None:
+        entries = [
+            (
+                entry.get("node_id"),
+                order,
+                entry.get("node_name", ""),
+                entry.get("node_type", NODE_TYPE_APPROVAL),
+                [int(uid) for uid in entry.get("user_ids", [])],
+            )
+            for order, entry in enumerate(approval.nodes_snapshot, start=1)
+        ]
+    else:
+        entries = [
+            (node.id, node.node_order, node.node_name, node.node_type, [])
+            for node in db.query(ApprovalNode).filter(
+                ApprovalNode.flow_id == approval.flow_id,
+                ApprovalNode.team_id == team_id,
+                or_(ApprovalNode.is_archived == 0, ApprovalNode.id.in_(last_action)),
+            ).order_by(ApprovalNode.node_order, ApprovalNode.id).all()
+        ] if approval.flow_id else []
+    user_ids = set(current_ids)
+    for _, _, _, node_type, frozen_ids in entries:
+        if node_type == NODE_TYPE_APPROVAL:
+            user_ids.update(frozen_ids)
+    names_by_id: dict[int, str] = {
+        int(uid): name for uid, name in db.query(User.id, User.name).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+    def names(ids: list[int]) -> list[str]:
+        return [names_by_id[uid] for uid in ids if names_by_id.get(uid)]
+    nodes = []
+    current_node_name = None
+    for node_id, order, node_name, node_type, frozen_ids in entries:
+        if node_id == approval.current_node_id:
+            current_node_name = node_name
+        ids = frozen_ids if node_type == NODE_TYPE_APPROVAL else []
+        action = last_action.get(node_id)
+        node = {
+            "id": node_id,
+            "node_order": order,
+            "node_name": node_name,
+            "node_type": node_type,
+            "status": action.action if action else "PENDING",
+            "approver_ids": ids,
+            "approver_names": names(ids),
+            "approver_id": action.approver_id if action else None,
+            "approver_name": action.approver_name if action else None,
+            "comment": action.comment if action else None,
+        }
+        if include_times:
+            node["approved_time"] = action.created_time.isoformat() if action else None
+        nodes.append(node)
     return {
         "id": approval.id,
         "status": approval.status,
-        "current_approver_name": _get_current_approver_names(db, approval, team_id),
-        "nodes": nodes_info,
+        "current_node_name": current_node_name,
+        "current_approver_ids": current_ids,
+        "current_approver_name": ", ".join(names(current_ids)) or None,
+        "nodes": nodes,
     }
 
 
@@ -2478,9 +2317,7 @@ def list_payment_records(
             sorts=parsed_sorts,
         ))
 
-        user_role_objs = role_crud.get_user_roles(db, current_user.id, team_id)
-        user_roles = [r.code for r in user_role_objs]
-        pending_approval_me_count = query_pending_approval_me(db, team_id, user_roles)
+        pending_approval_me_count = query_pending_approval_me(db, team_id, current_user.id)
         items = _build_payment_record_list_items(db, records, team_id)
         total_pages = (total + page_size - 1) // page_size if total > 0 else 0
         return {

@@ -1,7 +1,7 @@
 """Task C3：通用审批列表端点 GET /v1/approvals 单元测试。
 
 覆盖：
-- tab=pending：仅返 current_node.approve_role IN 当前用户角色集 + status=PENDING 的审批（E2）
+- tab=pending：仅返当前用户是 ApprovalParticipant(APPROVER) + status=PENDING 的审批（E2）
 - tab=processed：仅返 当前用户作为审批人留下过 APPROVE/REJECT 记录的审批（排除 SUBMIT）
 - tab=submitted：仅返 submitter_id == 当前用户 的审批
 - 跨 team 不返（team_id 隔离）
@@ -37,8 +37,8 @@ from app.core import deps
 from app.api.approvals import router as approvals_router
 
 from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
-    ApprovalStatus, ApprovalAction,
+    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalParticipant,
+    ApprovalParticipantKind, ApprovalStatus, ApprovalAction,
 )
 from app.models.contract import Contract, ContractStatus
 from app.models.contract_change import ContractChangeRequest
@@ -72,6 +72,7 @@ def db_session():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     with engine.begin() as conn:
@@ -208,8 +209,7 @@ def seed_invoice_flow(db_session):
         node_name="财务审批",
         node_code="FINANCE",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.commit()
@@ -234,8 +234,7 @@ def seed_invoice_flow_team2(db_session):
         node_name="财务审批-T2",
         node_code="FINANCE_T2",
         node_order=1,
-        approve_role="FINANCE",
-        is_required=1,
+        approver_roles=["FINANCE"],
     )
     db_session.add(node)
     db_session.commit()
@@ -294,6 +293,7 @@ def _make_approval(
     submitter_name="申请人",
     status=ApprovalStatus.PENDING,
     created_time=None,
+    approver_id=1,
 ):
     ap = Approval(
         business_type=business_type,
@@ -302,6 +302,13 @@ def _make_approval(
         flow_id=node.flow_id,
         team_id=team_id,
         current_node_id=node.id,
+        nodes_snapshot=[{
+            "node_id": node.id,
+            "node_name": node.node_name,
+            "node_code": node.node_code,
+            "node_type": node.node_type,
+            "user_ids": [approver_id],
+        }],
         status=status,
         submitter_id=submitter_id,
         submitter_name=submitter_name,
@@ -311,6 +318,11 @@ def _make_approval(
         ap.updated_time = created_time
     db_session.add(ap)
     db_session.flush()
+    if status == ApprovalStatus.PENDING:
+        db_session.add(ApprovalParticipant(
+            approval_id=ap.id, node_id=node.id, node_name=node.node_name,
+            user_id=approver_id, kind=ApprovalParticipantKind.APPROVER, team_id=team_id,
+        ))
     db_session.add(ApprovalRecord(
         approval_id=ap.id,
         node_id=node.id,
@@ -338,12 +350,13 @@ def _add_approve_record(db_session, approval, node, approver_id, approver_name):
     db_session.commit()
 
 
-# ---------- tab=pending：E2 角色过滤 --------------------------------------
 
-def test_pending_tab_returns_only_role_matched(
-    client, db_session, seed_invoice_flow, seed_finance_role,
+# ---------- tab=pending：冻结审批参与人过滤 -------------------------------
+
+def test_pending_tab_returns_frozen_approver_without_current_role(
+    client, db_session, seed_invoice_flow,
 ):
-    """pending tab：仅返 current_node.approve_role IN 当前用户角色集 + PENDING 的审批。"""
+    """pending tab：仅返当前用户是冻结审批参与人 + PENDING 的审批。"""
     flow, node = seed_invoice_flow
     inv1 = _make_invoice(db_session, team_id=1)
     _make_approval(db_session, BusinessType.INVOICE, inv1.id, 1, node)
@@ -362,11 +375,11 @@ def test_pending_tab_returns_only_role_matched(
     assert body["pending_count"] == 1
 
 
-def test_pending_tab_excludes_when_no_role(client, db_session, seed_invoice_flow):
-    """无 FINANCE 角色 → pending tab 不返任何行，pending_count=0。"""
+def test_pending_tab_excludes_non_participant(client, db_session, seed_invoice_flow, seed_finance_role):
+    """当前用户有 FINANCE 角色但不是冻结审批人，不显示待审批记录。"""
     flow, node = seed_invoice_flow
     inv = _make_invoice(db_session, team_id=1)
-    _make_approval(db_session, BusinessType.INVOICE, inv.id, 1, node)
+    _make_approval(db_session, BusinessType.INVOICE, inv.id, 1, node, approver_id=2)
 
     r = client.get("/v1/approvals?tab=pending")
     assert r.status_code == 200, r.text
@@ -488,6 +501,44 @@ def test_cross_team_isolation(
     ids = [it["business_id"] for it in body["items"]]
     assert inv_t2.id not in ids
     assert body["total"] == 0
+
+
+def test_cc_tab_returns_only_frozen_cc_participants(
+    client, db_session, seed_invoice_flow, seed_invoice_flow_team2,
+):
+    """The CC tab excludes deliveries to the same user in another team."""
+    _, node = seed_invoice_flow
+    _, node_team2 = seed_invoice_flow_team2
+    inv_team1 = _make_invoice(db_session, team_id=1)
+    approval_team1 = _make_approval(db_session, BusinessType.INVOICE, inv_team1.id, 1, node)
+    db_session.add(ApprovalParticipant(
+        approval_id=approval_team1.id,
+        node_id=node.id,
+        node_name=node.node_name,
+        user_id=1,
+        kind=ApprovalParticipantKind.CC,
+        team_id=1,
+    ))
+    db_session.commit()
+
+    inv_team2 = _make_invoice(db_session, team_id=2)
+    approval_team2 = _make_approval(db_session, BusinessType.INVOICE, inv_team2.id, 2, node_team2)
+    db_session.add(ApprovalParticipant(
+        approval_id=approval_team2.id,
+        node_id=node_team2.id,
+        node_name=node_team2.node_name,
+        user_id=1,
+        kind=ApprovalParticipantKind.CC,
+        team_id=2,
+    ))
+    db_session.commit()
+
+    response = client.get("/v1/approvals?tab=cc")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["business_id"] == inv_team1.id
+
 
 
 # ---------- overdue_hours 计算 --------------------------------------------

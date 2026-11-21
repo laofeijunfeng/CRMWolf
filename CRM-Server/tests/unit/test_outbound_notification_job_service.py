@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.approval import ApprovalStatus
+from app.models.approval import Approval, ApprovalParticipant, ApprovalParticipantKind, ApprovalStatus
 from app.models.outbound_notification_job import (
     OutboundNotificationEventType,
     OutboundNotificationJob,
@@ -33,7 +33,10 @@ def _bigint_to_sqlite_int(element, compiler, **kw):
 @pytest.fixture
 def job_session_factory(monkeypatch):
     engine = create_engine("sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine, tables=[OutboundNotificationJob.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[Approval.__table__, OutboundNotificationJob.__table__, ApprovalParticipant.__table__],
+    )
     Session = sessionmaker(bind=engine)
     monkeypatch.setattr("app.services.outbound_notification_job_service.SessionLocal", Session)
     monkeypatch.setattr(
@@ -51,13 +54,20 @@ def job_session_factory(monkeypatch):
 def _approval(*, status=ApprovalStatus.PENDING, current_node_id=4, approval_id=10, business_id=9):
     return SimpleNamespace(
         id=approval_id,
+        team_id=1,
         status=status,
         current_node_id=current_node_id,
         current_node=SimpleNamespace(
             node_name="财务审批",
-            approve_role="FINANCE",
-            notify_user_ids=None,
+            approver_roles=["FINANCE"],
         ),
+        nodes_snapshot=[{
+            "node_id": current_node_id,
+            "node_name": "财务审批",
+            "node_code": "FINANCE",
+            "node_type": "APPROVAL",
+            "user_ids": [11],
+        }],
         flow=SimpleNamespace(flow_name="回款审批"),
         submitter_id="11",
         submitter_name="张三",
@@ -197,18 +207,19 @@ def test_reminder_jobs_use_unique_idempotency_keys(job_session_factory):
     session.close()
 
 
-def test_requeue_resets_failed_and_exhausted_jobs(job_session_factory, monkeypatch):
+def test_requeue_resets_failed_and_exhausted_jobs(job_session_factory):
     session = job_session_factory()
     service = OutboundNotificationJobService()
     approval = _approval()
-    monkeypatch.setattr(
-        "app.services.outbound_notification_job_service.role_crud.get_by_code",
-        lambda db, code: SimpleNamespace(id=8),
-    )
-    monkeypatch.setattr(
-        "app.services.outbound_notification_job_service.role_crud.get_role_users",
-        lambda db, role_id, team_id: [SimpleNamespace(id=11)],
-    )
+    session.add(ApprovalParticipant(
+        team_id=approval.team_id,
+        approval_id=approval.id,
+        node_id=approval.current_node_id,
+        node_name=approval.current_node.node_name,
+        user_id=11,
+        kind=ApprovalParticipantKind.APPROVER,
+    ))
+    session.flush()
     request = service.enqueue_pending_for_approval(session, approval=approval, team_id=1)
     job = session.query(OutboundNotificationJob).filter_by(public_id=request.job_public_id).one()
     job.status = OutboundNotificationJobStatus.EXHAUSTED

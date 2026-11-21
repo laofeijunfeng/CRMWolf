@@ -14,11 +14,13 @@
 - CONTRACT 审批回归：仍能正常催办，entity_type=CONTRACT
 """
 import pytest
-from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 from app.tasks.approval_reminder import ApprovalReminderScheduler
 from app.constants.business_types import BusinessType
+from app.models.approval import ApprovalParticipant
+from app.utils.time import business_now
 
 
 # ---------- helpers --------------------------------------------------------
@@ -40,18 +42,26 @@ def _make_approval(
     approval.contract_id = None  # 泛化后回款/发票为 None
     approval.team_id = team_id
     approval.submitter_id = submitter_id
-    approval.created_time = datetime.now() - timedelta(hours=waiting_hours)
+    approval.created_time = business_now() - timedelta(hours=waiting_hours)
     approval.status = "PENDING"
 
     node = MagicMock()
     node.id = 10
     node.node_name = "财务审批"
-    node.approve_role = "APPROVER"
+    node.approver_roles = ["APPROVER"]
     approval.current_node = node
+    approval.current_node_id = node.id
+    approval.nodes_snapshot = [{
+        "node_id": node.id,
+        "node_name": node.node_name,
+        "node_code": "APPROVER",
+        "node_type": "APPROVAL",
+        "user_ids": [11],
+    }]
     return approval
 
 
-def _make_user(*, open_id: str, name: str, uid: int = 1):
+def _make_user(*, open_id: str, name: str, uid: int = 11):
     u = MagicMock()
     u.id = uid
     u.feishu_open_id = open_id
@@ -59,20 +69,27 @@ def _make_user(*, open_id: str, name: str, uid: int = 1):
     return u
 
 
-def _make_db(approvals, submitter=None):
-    """构造 mock SessionLocal：query(Approval)→待审批列表，query(User)→提交人。"""
+def _make_db(approvals, submitter=None, approvers=()):
+    """Mock the pending approvals, their frozen participant IDs, and user lookups."""
     db = MagicMock()
 
     q_approval = MagicMock()
     q_approval.filter.return_value = q_approval
     q_approval.all.return_value = approvals
 
+    q_participant = MagicMock()
+    q_participant.filter.return_value = q_participant
+    q_participant.all.return_value = [(user.id,) for user in approvers]
+
     q_user = MagicMock()
     q_user.filter.return_value = q_user
     # _send_medium/strong 里可能多次 db.query(User) 调用，统一返回同一 submitter
     q_user.first.return_value = submitter
+    q_user.all.return_value = list(approvers)
 
     def _query(model, *args, **kwargs):
+        if model is ApprovalParticipant.user_id:
+            return q_participant
         if model.__name__ == "Approval":
             return q_approval
         if model.__name__ == "User":
@@ -128,7 +145,7 @@ async def test_payment_light_reminder_uses_entity_type(monkeypatch):
         business_id=7,
         waiting_hours=25,
     )
-    db = _make_db([approval], submitter=_make_user(open_id="ou_submitter", name="提交人"))
+    db = _make_db([approval], approvers=[_make_user(open_id="ou_app1", name="审批人A")])
 
     captured_reminder: dict = {}
     captured_alert: dict = {}
@@ -140,7 +157,6 @@ async def test_payment_light_reminder_uses_entity_type(monkeypatch):
     )
 
     sched = _make_scheduler()
-    sched._get_node_approvers = MagicMock(return_value=[_make_user(open_id="ou_app1", name="审批人A")])
 
     monkeypatch.setattr("app.tasks.approval_reminder.SessionLocal", lambda: db)
     stats = await sched.check_approval_timeout()
@@ -167,7 +183,8 @@ async def test_invoice_strong_reminder_carries_entity_type(monkeypatch):
         waiting_hours=73,
     )
     submitter = _make_user(open_id="ou_submitter", name="提交人", uid=2)
-    db = _make_db([approval], submitter=submitter)
+    approver = _make_user(open_id="ou_app1", name="审批人A")
+    db = _make_db([approval], submitter=submitter, approvers=[approver])
 
     # 多级提醒会多次调用 notify_approval_reminder（light/medium/strong），
     # 用 list 收集每次 kwargs
@@ -192,8 +209,6 @@ async def test_invoice_strong_reminder_carries_entity_type(monkeypatch):
     _patch_adapter(monkeypatch, entity=MagicMock(id=3), name="发票申请#3")
 
     sched = _make_scheduler()
-    approver = _make_user(open_id="ou_app1", name="审批人A", uid=11)
-    sched._get_node_approvers = MagicMock(return_value=[approver])
     admin = _make_user(open_id="ou_admin1", name="管理员Z", uid=21)
     sched._get_team_admins = MagicMock(return_value=[admin])
 
@@ -241,7 +256,6 @@ async def test_orphan_business_type_skips_reminder(monkeypatch):
     _patch_adapter(monkeypatch, raises=ValueError("不支持的业务单据类型: ORPHAN"))
 
     sched = _make_scheduler()
-    sched._get_node_approvers = MagicMock(return_value=[_make_user(open_id="ou", name="x")])
 
     monkeypatch.setattr("app.tasks.approval_reminder.SessionLocal", lambda: db)
     stats = await sched.check_approval_timeout()
@@ -279,7 +293,6 @@ async def test_entity_deleted_skips_reminder(monkeypatch):
     )
 
     sched = _make_scheduler()
-    sched._get_node_approvers = MagicMock(return_value=[_make_user(open_id="ou", name="x")])
 
     monkeypatch.setattr("app.tasks.approval_reminder.SessionLocal", lambda: db)
     stats = await sched.check_approval_timeout()
@@ -301,7 +314,7 @@ async def test_contract_reminder_still_works(monkeypatch):
         business_id=100,
         waiting_hours=25,
     )
-    db = _make_db([approval], submitter=_make_user(open_id="ou_sub", name="提交人"))
+    db = _make_db([approval], approvers=[_make_user(open_id="ou_app", name="审批人")])
 
     captured_reminder: dict = {}
     captured_alert: dict = {}
@@ -309,7 +322,6 @@ async def test_contract_reminder_still_works(monkeypatch):
     _patch_adapter(monkeypatch, entity=MagicMock(id=100), name="测试合同")
 
     sched = _make_scheduler()
-    sched._get_node_approvers = MagicMock(return_value=[_make_user(open_id="ou_app", name="审批人")])
 
     monkeypatch.setattr("app.tasks.approval_reminder.SessionLocal", lambda: db)
     stats = await sched.check_approval_timeout()

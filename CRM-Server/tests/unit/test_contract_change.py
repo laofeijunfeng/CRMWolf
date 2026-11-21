@@ -24,6 +24,7 @@ from app.models.approval import (  # noqa: E402
     ApprovalAction,
     ApprovalFlow,
     ApprovalNode,
+    ApprovalParticipant,
     ApprovalRecord,
     ApprovalStatus,
 )
@@ -33,6 +34,9 @@ from app.models.customer import Customer  # noqa: E402
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress  # noqa: E402
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus  # noqa: E402
 from app.models.payment import PaymentPlan, PaymentRecord  # noqa: E402
+from app.models.role import Role  # noqa: E402
+from app.models.user import User, UserStatus  # noqa: E402
+from app.models.user_role import UserRole  # noqa: E402
 from app.schemas.approval import ApprovalActionRequest  # noqa: E402
 from app.services import approval_transaction_manager as manager_module  # noqa: E402
 from app.services import contract_change as contract_change_module  # noqa: E402
@@ -59,6 +63,9 @@ def db_session(monkeypatch, tmp_path):
         connect_args={"check_same_thread": False},
     )
     tables = [
+        User.__table__,
+        Role.__table__,
+        UserRole.__table__,
         Customer.__table__,
         CustomerLegacySourceProgress.__table__,
         Contract.__table__,
@@ -66,6 +73,7 @@ def db_session(monkeypatch, tmp_path):
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
         ContractChangeRequest.__table__,
         PaymentPlan.__table__,
         PaymentRecord.__table__,
@@ -84,7 +92,12 @@ def db_session(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(contract_change_module, "file_storage_service", FileStorageService(base_dir=str(tmp_path)))
     session = sessionmaker(bind=engine)()
-    session.add(Customer(id=1, team_id=TEAM_ID, account_name="测试客户", city="北京", creator_id="u1"))
+    session.add(User(id=9, email="reviewer@example.com", name="审批人", status=UserStatus.ACTIVE))
+    role = Role(name="销售总监", code="SALES_DIRECTOR")
+    session.add(role)
+    session.flush()
+    session.add(UserRole(user_id=9, role_id=role.id, team_id=TEAM_ID))
+    session.add(Customer(id=1, team_id=TEAM_ID, account_name="测试客户", city="北京", creator_id="7"))
     session.commit()
     try:
         yield session
@@ -112,8 +125,8 @@ def _make_flow(db, *, team_id=TEAM_ID, min_amount=1, max_amount=1_000_000, flow_
             node_name=f"节点{order}",
             node_code=f"{flow_code}_N{order}",
             node_order=order,
-            approve_role="SALES_DIRECTOR",
-            is_required=1,
+            approver_roles=["SALES_DIRECTOR"],
+            approver_users=[],
         ))
     db.commit()
     return flow

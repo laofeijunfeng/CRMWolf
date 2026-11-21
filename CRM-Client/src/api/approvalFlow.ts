@@ -1,14 +1,26 @@
 import request from '@/utils/request'
 
+export type ApprovalNodeType = 'APPROVAL' | 'CC'
+
+export interface ApprovalUserSelection {
+  role: string
+  user_id: number
+}
+
+export interface ApprovalNodeAssignees {
+  roles: string[]
+  users: ApprovalUserSelection[]
+}
+
 export interface ApprovalNode {
   id?: number
   node_name: string
   node_code: string
   node_order: number
   description?: string
-  approve_role: string
-  notify_user_ids?: number[] | null
-  is_required: number
+  node_type: ApprovalNodeType
+  approver_roles: string[]
+  approver_users: ApprovalUserSelection[]
 }
 
 export interface ApprovalFlow {

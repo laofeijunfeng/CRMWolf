@@ -184,13 +184,12 @@ export const BulkApproveResponseSchema = z.object({
 
 export type BulkApproveResponse = z.infer<typeof BulkApproveResponseSchema>
 
-// ===== FinanceApprovalCenter 列表项（Task C3 / E2 角色过滤） =====
-// 后端列表端点按 tab+business_type 严格按角色过滤（E2）：
-//   submitted  → submitter_id == current_user AND team_id
-//   pending    → current_node.approve_role IN (user_roles) AND status=PENDING AND team_id
-//   processed  → records.approver_id == current_user AND team_id
-// 单号 / 实体摘要 / 金额由后端按 business_type 分组批量预取后内存 join（E9）。
-export const ApprovalTabSchema = z.enum(['pending', 'processed', 'submitted'])
+// 审批中心按当前用户在团队中的审批关系过滤。
+export const ApprovalCcMetadataSchema = z.object({
+  cc_node_name: z.string().nullable().optional(),
+  cc_time: z.string().nullable().optional(),
+})
+export const ApprovalTabSchema = z.enum(['pending', 'processed', 'submitted', 'cc'])
 export type ApprovalTab = z.infer<typeof ApprovalTabSchema>
 
 export const ApprovalListItemSchema = z.object({
@@ -224,8 +223,21 @@ export const ApprovalListItemSchema = z.object({
   created_time: z.string().min(1),
   updated_time: z.string().min(1),
   overdue_hours: z.number().nullable()
-})
+}).extend(ApprovalCcMetadataSchema.shape)
 export type ApprovalListItem = z.infer<typeof ApprovalListItemSchema>
+
+const ApprovalCcDeliverySchema = z.object({
+  id: z.number().int().positive(),
+  node_id: z.number().int().positive(),
+  node_name: z.string().nullable(),
+  created_time: z.string().min(1)
+})
+export type ApprovalCcDelivery = z.infer<typeof ApprovalCcDeliverySchema>
+export const ApprovalCcDetailSchema = ApprovalDetailSchema.extend({
+  ...ApprovalListItemSchema.shape,
+  cc_deliveries: z.array(ApprovalCcDeliverySchema)
+})
+export type ApprovalCcDetail = z.infer<typeof ApprovalCcDetailSchema>
 
 export const ApprovalListResponseSchema = z.object({
   items: z.array(ApprovalListItemSchema),

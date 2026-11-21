@@ -20,7 +20,6 @@ fixture 仿 A5/A6/B2：内存 SQLite + StaticPool（跨线程共享同一连接�
 ApprovalRecord），FK 指向的 customers 等表不建（SQLite 不强制 FK）。
 """
 import pytest
-from datetime import datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -29,24 +28,27 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 
+from app.core.database import Base
+from app.constants.business_types import BusinessType
+from app.models.approval import (
+    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalParticipant,
+    ApprovalStatus, ApprovalAction,
+)
+from app.models.role import Role
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
+from app.models.contract import Contract, ContractStatus
+from app.crud.approval import approval_crud, approval_flow_crud
+from app.models.customer import Customer
+from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+
+
 # SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增
 # （SQLite 仅对 INTEGER PRIMARY KEY 启用 rowid 自增；BIGINT 不具备此行为）。
 # 仅作用于 sqlite 方言，不影响 MySQL 真实引擎。
 @compiles(BigInteger, "sqlite")
 def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
     return "INTEGER"
-
-
-from app.core.database import Base
-from app.constants.business_types import BusinessType
-from app.models.approval import (
-    Approval, ApprovalRecord, ApprovalFlow, ApprovalNode,
-    ApprovalStatus, ApprovalAction,
-)
-from app.models.contract import Contract, ContractStatus
-from app.crud.approval import approval_crud, approval_flow_crud
-from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 
 
 
@@ -61,13 +63,10 @@ def db_session():
         connect_args={"check_same_thread": False},
     )
     tables = [
-        Customer.__table__,
-        CustomerLegacySourceProgress.__table__,
-        Contract.__table__,
-        ApprovalFlow.__table__,
-        ApprovalNode.__table__,
-        Approval.__table__,
-        ApprovalRecord.__table__,
+        User.__table__, Role.__table__, UserRole.__table__,
+        Customer.__table__, CustomerLegacySourceProgress.__table__,
+        Contract.__table__, ApprovalFlow.__table__, ApprovalNode.__table__,
+        Approval.__table__, ApprovalRecord.__table__, ApprovalParticipant.__table__,
     ]
     # Customer and Contract both define idx_team_id; this SQLite fixture
     # omits the customer's redundant index without changing model metadata.
@@ -79,7 +78,16 @@ def db_session():
         Customer.__table__.indexes.add(customer_index)
     Session = sessionmaker(bind=engine)
     session = Session()
-    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="u1"))
+    session.add_all([
+        User(id=1, email="submitter@example.com", name="提交人", status=UserStatus.ACTIVE),
+        User(id=2, email="sales@example.com", name="销售审批人", status=UserStatus.ACTIVE),
+    ])
+    session.flush()
+    role = Role(name="销售总监", code="SALES_DIRECTOR")
+    session.add(role)
+    session.flush()
+    session.add(UserRole(user_id=2, role_id=role.id, team_id=TEAM_ID))
+    session.add(Customer(id=1, team_id=1, account_name="测试客户", city="北京", creator_id="1"))
     session.commit()
     yield session
     session.close()
@@ -135,8 +143,8 @@ def _make_flow_with_node(db, *, flow_code, flow_name, min_amount=None,
         node_name=f"{flow_name}-节点1",
         node_code=node_code,
         node_order=1,
-        approve_role=approve_role,
-        is_required=1,
+        approver_roles=[approve_role],
+        approver_users=[],
     )
     db.add(node)
     db.commit()
@@ -162,8 +170,8 @@ def _make_contract(db, *, total_amount, license_type="SUBSCRIPTION",
         subscription_years=1,
         standard_unit_price=10000,
         status=status,
-        owner_id="u1",
-        creator_id="u1",
+        owner_id="1",
+        creator_id="1",
     )
     db.add(contract)
     db.commit()
@@ -409,7 +417,7 @@ def test_e2e_submit_approve_final_node_signed(db_session):
     )
     # 提交：create_approval → adapter.on_submit 切 PENDING_REVIEW
     ap = approval_crud.create_approval(
-        db_session, contract, flow, submitter_id="u1", submitter_name="eddie",
+        db_session, contract, flow, submitter_id="1", submitter_name="提交人",
     )
     assert ap.status == ApprovalStatus.PENDING
     assert ap.business_type == BusinessType.CONTRACT
@@ -424,7 +432,7 @@ def test_e2e_submit_approve_final_node_signed(db_session):
         action=ApprovalAction.APPROVE, comment="同意", updated_time=ap.updated_time,
     )
     approval_crud.approve(
-        db_session, ap, req, approver_id="reviewer", approver_name="审核人",
+        db_session, ap, req, approver_id="2", approver_name="销售审批人",
     )
     db_session.refresh(contract)
     db_session.refresh(ap)
@@ -443,7 +451,7 @@ def test_e2e_submit_reject_back_to_draft(db_session):
         contract_number="CON-E2E-REJ",
     )
     ap = approval_crud.create_approval(
-        db_session, contract, flow, submitter_id="u1", submitter_name="eddie",
+        db_session, contract, flow, submitter_id="1", submitter_name="提交人",
     )
     db_session.refresh(contract)
     assert contract.status == ContractStatus.PENDING_REVIEW
@@ -453,7 +461,7 @@ def test_e2e_submit_reject_back_to_draft(db_session):
         action=ApprovalAction.REJECT, comment="驳回", updated_time=ap.updated_time,
     )
     approval_crud.approve(
-        db_session, ap, req, approver_id="reviewer", approver_name="审核人",
+        db_session, ap, req, approver_id="2", approver_name="销售审批人",
     )
     db_session.refresh(contract)
     db_session.refresh(ap)
@@ -472,12 +480,12 @@ def test_e2e_submit_cancel_back_to_draft(db_session):
         contract_number="CON-E2E-CAN",
     )
     ap = approval_crud.create_approval(
-        db_session, contract, flow, submitter_id="u1", submitter_name="eddie",
+        db_session, contract, flow, submitter_id="1", submitter_name="提交人",
     )
     db_session.refresh(contract)
     assert contract.status == ContractStatus.PENDING_REVIEW
 
-    approval_crud.cancel(db_session, ap, user_id="u1")
+    approval_crud.cancel(db_session, ap, user_id="1")
     db_session.refresh(contract)
     db_session.refresh(ap)
     assert contract.status == ContractStatus.DRAFT

@@ -1,11 +1,128 @@
-"""Approval AI 接口层稳定性测试：SSEJsonEncoder + done 事件 + 三层错误处理。"""
+"""Approval AI endpoint scope and SSE stability tests."""
+
 import json
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.api import approval_ai as approval_ai_module
 from app.api.approval_ai import parse_approval_flow
+from app.core.database import Base
+from app.models.approval import ApprovalFlow, ApprovalNode
+from app.models.role import Role
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
 from app.schemas.approval_ai import ApprovalAIParseRequest
+
+
+@compiles(BigInteger, "sqlite")
+def _bigint_to_sqlite_int(element, compiler, **kw):
+    return "INTEGER"
+
+
+def _ai_create_request(*, role: str, user_id: int | None = None):
+    approver_users = [{"role": role, "user_id": user_id}] if user_id is not None else None
+    return approval_ai_module.ApprovalAICreateRequest(
+        flow_name="自定义角色流程",
+        flow_code=f"CUSTOM_{role}_{user_id or 'ALL'}",
+        nodes=[
+            {
+                "node_name": "自定义审批",
+                "node_code": "CUSTOM_APPROVAL",
+                "node_order": 1,
+                "approver_roles": None if user_id is not None else [role],
+                "approver_users": approver_users,
+            }
+        ],
+    )
+
+
+def _ai_role_db():
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(
+        engine,
+        tables=[User.__table__, Role.__table__, UserRole.__table__, ApprovalFlow.__table__, ApprovalNode.__table__],
+    )
+    return engine, sessionmaker(bind=engine)()
+
+
+@pytest.mark.asyncio
+async def test_ai_create_accepts_custom_role_linked_to_current_team():
+    engine, db = _ai_role_db()
+    try:
+        user = User(id=1, email="custom@example.com", name="自定义角色成员", status=UserStatus.ACTIVE)
+        role = Role(id=1, name="自定义审阅人", code="CUSTOM_REVIEWER")
+        db.add_all([user, role])
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id, team_id=101))
+        db.commit()
+
+        result = await approval_ai_module.create_approval_flow_from_ai(
+            _ai_create_request(role=role.code),
+            current_user=user,
+            team_id=101,
+            db=db,
+        )
+
+        assert result["success"] is True
+        assert result["data"]["nodes"][0]["approver_roles"] == [role.code]
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_create_rejects_role_not_linked_to_current_team():
+    engine, db = _ai_role_db()
+    try:
+        user = User(id=1, email="custom@example.com", name="其他团队成员", status=UserStatus.ACTIVE)
+        role = Role(id=1, name="其他团队审阅人", code="OTHER_TEAM_REVIEWER")
+        db.add_all([user, role])
+        db.flush()
+        db.add(UserRole(user_id=user.id, role_id=role.id, team_id=202))
+        db.commit()
+
+        with pytest.raises(HTTPException, match="不属于当前团队"):
+            await approval_ai_module.create_approval_flow_from_ai(
+                _ai_create_request(role=role.code),
+                current_user=user,
+                team_id=101,
+                db=db,
+            )
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_create_rejects_selected_member_without_current_team_role():
+    engine, db = _ai_role_db()
+    try:
+        team_member = User(id=1, email="team-role@example.com", name="团队角色成员", status=UserStatus.ACTIVE)
+        selected = User(id=2, email="selected@example.com", name="跨团队指定成员", status=UserStatus.ACTIVE)
+        role = Role(id=1, name="团队审阅人", code="TEAM_REVIEWER")
+        db.add_all([team_member, selected, role])
+        db.flush()
+        db.add_all([
+            UserRole(user_id=team_member.id, role_id=role.id, team_id=101),
+            UserRole(user_id=selected.id, role_id=role.id, team_id=202),
+        ])
+        db.commit()
+
+        with pytest.raises(HTTPException, match="不属于角色"):
+            await approval_ai_module.create_approval_flow_from_ai(
+                _ai_create_request(role=role.code, user_id=selected.id),
+                current_user=team_member,
+                team_id=101,
+                db=db,
+            )
+    finally:
+        db.close()
+        engine.dispose()
 
 
 def test_sse_json_encoder_used():

@@ -12,7 +12,7 @@ from app.crud.approval import approval_flow_crud, approval_crud
 from app.crud import crud_license_application as license_crud_module
 from app.crud.crud_license_application import license_application_crud
 from app.constants.business_types import BusinessType
-from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode
+from app.models.approval import Approval, ApprovalRecord, ApprovalFlow, ApprovalNode, ApprovalParticipant
 from app.models.customer import Customer
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.contract import Contract
@@ -21,6 +21,9 @@ from app.models.product import Product, ProductModule
 from app.models.license_application import LicenseApplicationStatus
 from app.models.license_application import LicenseApplication
 from app.models.approval import ApprovalStatus
+from app.models.role import Role
+from app.models.user import User, UserStatus
+from app.models.user_role import UserRole
 from app.schemas.license_application import LicenseApplicationApproveFull, LicenseApplicationInternalCreate
 from app.schemas.approval import ApprovalFlowCreate, ApprovalNodeCreate
 from app.services.approval_adapter import get_adapter
@@ -46,6 +49,10 @@ def db():
         ApprovalNode.__table__,
         Approval.__table__,
         ApprovalRecord.__table__,
+        ApprovalParticipant.__table__,
+        Role.__table__,
+        User.__table__,
+        UserRole.__table__,
     ]
     renamed_indexes = []
     for table in tables:
@@ -157,7 +164,20 @@ def test_user(db):
     })()
 
 
-def test_license_application_submit_creates_approval(db, test_team, test_user, test_customer, test_product):
+@pytest.fixture
+def team_owner_approver(db, test_team, test_user):
+    user = User(id=test_user.id, email="owner@example.com", name=test_user.name, status=UserStatus.ACTIVE)
+    role = Role(code="TEAM_OWNER", name="团队所有者")
+    db.add_all([user, role])
+    db.flush()
+    db.add(UserRole(user_id=user.id, role_id=role.id, team_id=test_team.id))
+    db.commit()
+    return role
+
+
+def test_license_application_submit_creates_approval(
+    db, test_team, test_user, test_customer, test_product, team_owner_approver,
+):
     """测试 License 提交时创建审批实例"""
     # 1. 创建审批流程配置（LICENSE 类型）
     flow = approval_flow_crud.create(
@@ -172,7 +192,7 @@ def test_license_application_submit_creates_approval(db, test_team, test_user, t
                     node_name="团队所有者审批",
                     node_code="TEAM_OWNER",
                     node_order=1,
-                    approve_role="TEAM_OWNER",
+                    approver_roles=["TEAM_OWNER"],
                 )
             ]
         ),
@@ -268,7 +288,9 @@ def test_license_application_without_flow_direct_approval(db, test_team, test_us
     assert application.status == LicenseApplicationStatus.DRAFT
 
 
-def test_license_approval_flow_visible_in_approval_center(db, test_team, test_user, test_customer, test_product):
+def test_license_approval_flow_visible_in_approval_center(
+    db, test_team, test_user, test_customer, test_product, team_owner_approver,
+):
     """测试 License 审批在审批中心可见"""
     # 1. 创建审批流程配置
     flow = approval_flow_crud.create(
@@ -283,7 +305,7 @@ def test_license_approval_flow_visible_in_approval_center(db, test_team, test_us
                     node_name="团队所有者审批",
                     node_code="TEAM_OWNER",
                     node_order=1,
-                    approve_role="TEAM_OWNER",
+                    approver_roles=["TEAM_OWNER"],
                 )
             ]
         ),
@@ -438,13 +460,13 @@ def test_issue_rolls_back_application_when_snapshot_progress_fails(db, test_cust
         status=LicenseApplicationStatus.APPROVED,
     )
     db.add(application)
-    db.commit()
     approval = Approval(
         team_id=1,
         business_type=BusinessType.LICENSE,
         business_id=application.id,
         status=ApprovalStatus.APPROVED,
         submitter_id="tester",
+        nodes_snapshot=[],
     )
     db.add(approval)
     db.commit()
@@ -473,10 +495,9 @@ def test_issue_locks_customer_before_changing_application(db, test_customer, mon
         authorized_users=10, applicant_id="tester", status=LicenseApplicationStatus.APPROVED,
     )
     db.add(application)
-    db.commit()
     db.add(Approval(
         team_id=1, business_type=BusinessType.LICENSE, business_id=application.id,
-        status=ApprovalStatus.APPROVED, submitter_id="tester",
+        status=ApprovalStatus.APPROVED, submitter_id="tester", nodes_snapshot=[],
     ))
     db.commit()
 

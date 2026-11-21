@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Query, Session
 from sqlalchemy import and_, case, func
-from typing import Optional, List, Tuple
+from typing import TYPE_CHECKING, Optional, List, Tuple
 from decimal import Decimal
 from datetime import date, datetime
 import logging
@@ -25,6 +25,9 @@ from app.core.list_query import (
     without_filter_field,
 )
 from app.core.list_query.catalogs import CONTRACTS_LIST_QUERY_CATALOG
+
+if TYPE_CHECKING:
+    from app.models.approval import Approval
 
 logger = logging.getLogger(__name__)
 

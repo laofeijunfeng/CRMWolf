@@ -18,18 +18,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Checkbox } from '@/components/ui/checkbox'
 import { DataViewStatePanel } from '@/components/crmwolf'
-import approvalFlowApi, {
-  type ApprovalFlow,
-  type ApprovalFlowDetail,
-  type ApprovalNode,
-} from '@/api/approvalFlow'
-import roleApi, { type RoleResponse, type RoleUserResponse } from '@/api/role'
+import ApprovalNodeApproverPicker from '@/components/ApprovalNodeApproverPicker.vue'
+import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail, type ApprovalNode, type ApprovalNodeAssignees, type ApprovalNodeType } from '@/api/approvalFlow'
 import { handleApiError } from '@/utils/errorHandler'
 
 interface Props {
@@ -44,13 +40,13 @@ interface Emits {
 }
 
 interface FlowNodeForm {
+  key: number
   id?: number
   nodeName: string
   nodeCode: string
-  approveRole: string
-  notifyUserIds: number[]
+  nodeType: ApprovalNodeType
+  assignees: ApprovalNodeAssignees
   description: string
-  required: boolean
 }
 
 interface FlowForm {
@@ -78,10 +74,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 const emit = defineEmits<Emits>()
 
-const roles = ref<RoleResponse[]>([])
-const rolesLoading = ref(false)
-const roleUsers = ref<Record<string, RoleUserResponse[]>>({})
-const roleUsersLoading = ref<Record<string, boolean>>({})
+let nextNodeKey = 0
 const loadingDetail = ref(false)
 const submitting = ref(false)
 
@@ -151,12 +144,12 @@ function hydrateForm(flow: ApprovalFlowDetail): void {
     .sort((a, b) => a.node_order - b.node_order)
     .map((node) => {
       const formNode: FlowNodeForm = {
+        key: nextNodeKey++,
         nodeName: node.node_name,
         nodeCode: node.node_code,
-        approveRole: node.approve_role,
-        notifyUserIds: node.notify_user_ids ?? [],
+        nodeType: node.node_type,
+        assignees: { roles: [...node.approver_roles], users: [...node.approver_users] },
         description: node.description ?? '',
-        required: node.is_required !== 0,
       }
 
       if (node.id !== undefined) {
@@ -165,82 +158,9 @@ function hydrateForm(flow: ApprovalFlowDetail): void {
 
       return formNode
     })
-  void preloadNodeRoleUsers()
   clearErrors()
 }
 
-async function fetchRoles(): Promise<void> {
-  if (roles.value.length > 0 || rolesLoading.value) return
-
-  rolesLoading.value = true
-  try {
-    roles.value = await roleApi.getRoles()
-    void preloadNodeRoleUsers()
-  } catch (error: unknown) {
-    handleApiError(error, '获取角色列表')
-  } finally {
-    rolesLoading.value = false
-  }
-}
-
-function getRoleByCode(roleCode: string): RoleResponse | undefined {
-  return roles.value.find((role) => role.code === roleCode)
-}
-
-async function fetchRoleUsersByCode(roleCode: string): Promise<void> {
-  if (
-    roleCode.trim() === ''
-    || roleUsers.value[roleCode] !== undefined
-    || roleUsersLoading.value[roleCode] === true
-  ) return
-
-  const role = getRoleByCode(roleCode)
-  if (role === undefined) return
-
-  roleUsersLoading.value = { ...roleUsersLoading.value, [roleCode]: true }
-  try {
-    const users = await roleApi.getRoleUsers(role.id)
-    roleUsers.value = { ...roleUsers.value, [roleCode]: users }
-  } catch (error: unknown) {
-    handleApiError(error, '获取角色成员')
-  } finally {
-    roleUsersLoading.value = { ...roleUsersLoading.value, [roleCode]: false }
-  }
-}
-
-async function preloadNodeRoleUsers(): Promise<void> {
-  const roleCodes = [...new Set(form.nodes.map((node) => node.approveRole).filter(Boolean))]
-  await Promise.all(roleCodes.map((roleCode) => fetchRoleUsersByCode(roleCode)))
-}
-
-function getNodeRoleUsers(node: FlowNodeForm): RoleUserResponse[] {
-  return roleUsers.value[node.approveRole] ?? []
-}
-
-function handleNodeRoleChange(node: FlowNodeForm, roleCode: string): void {
-  node.approveRole = roleCode
-  node.notifyUserIds = []
-  void fetchRoleUsersByCode(roleCode)
-}
-
-function handleNotifyUserChange(node: FlowNodeForm, userId: number, checked: boolean | 'indeterminate'): void {
-  if (checked === true) {
-    if (!node.notifyUserIds.includes(userId)) {
-      node.notifyUserIds = [...node.notifyUserIds, userId]
-    }
-    return
-  }
-
-  node.notifyUserIds = node.notifyUserIds.filter((id) => id !== userId)
-}
-
-function selectAllNotifyUsers(node: FlowNodeForm): void {
-  node.notifyUserIds = getNodeRoleUsers(node).map((user) => user.id)
-}
-
-function useDefaultNotifyUsers(node: FlowNodeForm): void {
-  node.notifyUserIds = []
-}
 
 async function fetchFlowDetail(): Promise<void> {
   if (!isEditMode.value || props.flowId === null) return
@@ -256,14 +176,14 @@ async function fetchFlowDetail(): Promise<void> {
   }
 }
 
-function addNode(): void {
+function addNode(nodeType: ApprovalNodeType): void {
   form.nodes.push({
+    key: nextNodeKey++,
     nodeName: '',
     nodeCode: '',
-    approveRole: '',
-    notifyUserIds: [],
+    nodeType,
+    assignees: { roles: [], users: [] },
     description: '',
-    required: true,
   })
   errors.nodes = ''
 }
@@ -312,14 +232,16 @@ function validateForm(): boolean {
 
   if (form.nodes.length === 0) {
     errors.nodes = '请至少添加一个审批节点'
+  } else if (form.nodes[0]?.nodeType !== 'APPROVAL') {
+    errors.nodes = '首个节点必须是审批节点'
   } else {
     const invalidIndex = form.nodes.findIndex((node) =>
       node.nodeName.trim() === ''
       || node.nodeCode.trim() === ''
-      || node.approveRole.trim() === ''
+      || (node.assignees.roles.length === 0 && node.assignees.users.length === 0)
     )
     if (invalidIndex !== -1) {
-      errors.nodes = `请完整填写第 ${invalidIndex + 1} 个节点`
+      errors.nodes = `请填写第 ${invalidIndex + 1} 个节点的名称、编码，并选择角色或人员`
     }
   }
 
@@ -341,9 +263,9 @@ function buildPayload(): ApprovalFlow {
         node_name: node.nodeName.trim(),
         node_code: node.nodeCode.trim(),
         node_order: index + 1,
-        approve_role: node.approveRole.trim(),
-        notify_user_ids: node.notifyUserIds,
-        is_required: node.required ? 1 : 0,
+        node_type: node.nodeType,
+        approver_roles: node.assignees.roles,
+        approver_users: node.assignees.users,
       }
 
       if (node.id !== undefined) {
@@ -413,7 +335,6 @@ watch(
     if (!open) return
 
     resetForm()
-    void fetchRoles()
     if (isEditMode.value) {
       void fetchFlowDetail()
     }
@@ -548,10 +469,6 @@ watch(
           <section class="form-section">
             <div class="section-header">
               <h3 class="section-title">审批节点</h3>
-              <Button type="button" size="sm" variant="outline" @click="addNode">
-                <Plus class="w-4 h-4 mr-2" />
-                添加节点
-              </Button>
             </div>
 
             <p v-if="errors.nodes" class="field-error">{{ errors.nodes }}</p>
@@ -563,11 +480,12 @@ watch(
             >
               <div
                 v-for="(node, index) in form.nodes"
-                :key="node.id ?? index"
+                :key="node.key"
                 class="node-item"
               >
                 <div class="node-header">
-                  <span class="node-order">第 {{ index + 1 }} 步</span>
+                  <span class="node-order">节点 {{ index + 1 }}</span>
+                  <Badge :variant="node.nodeType === 'CC' ? 'secondary' : 'outline'" class="mr-auto ml-2">{{ node.nodeType === 'CC' ? '抄送' : '审批' }}</Badge>
                   <div class="node-actions">
                     <Button
                       type="button"
@@ -624,83 +542,30 @@ watch(
                   </div>
                 </div>
 
-                <div class="form-grid">
-                  <div class="form-field">
-                    <Label>审批角色 <span class="required">*</span></Label>
-                    <Select
-                      :model-value="node.approveRole"
-                      :disabled="rolesLoading"
-                      @update:model-value="handleNodeRoleChange(node, String($event))"
-                    >
-                      <SelectTrigger>
-                        <SelectValue :placeholder="rolesLoading ? '角色加载中' : '选择审批角色'" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem
-                          v-for="role in roles"
-                          :key="role.code"
-                          :value="role.code"
-                        >
-                          {{ role.name }}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div class="switch-row switch-row--node">
-                    <Switch
-                      :id="`node-required-${index}`"
-                      :checked="node.required"
-                      @update:checked="node.required = $event"
-                    />
-                    <Label :for="`node-required-${index}`" class="cursor-pointer">必须审批</Label>
-                  </div>
-                </div>
-
-                <div v-if="node.approveRole" class="notify-panel">
-                  <div class="notify-panel__header">
-                    <Label>通知对象</Label>
-                    <div class="notify-actions">
-                      <Button type="button" size="sm" variant="ghost" @click="selectAllNotifyUsers(node)">
-                        全选
-                      </Button>
-                      <Button type="button" size="sm" variant="ghost" @click="useDefaultNotifyUsers(node)">
-                        默认全部
-                      </Button>
-                    </div>
-                  </div>
-                  <div v-if="roleUsersLoading[node.approveRole]" class="notify-empty">成员加载中...</div>
-                  <div v-else-if="getNodeRoleUsers(node).length === 0" class="notify-empty">该角色暂无成员</div>
-                  <div v-else class="notify-users">
-                    <label
-                      v-for="user in getNodeRoleUsers(node)"
-                      :key="user.id"
-                      class="notify-user"
-                    >
-                      <Checkbox
-                        :checked="node.notifyUserIds.includes(user.id)"
-                        @update:checked="handleNotifyUserChange(node, user.id, $event)"
-                      />
-                      <span class="notify-user__name">{{ user.name }}</span>
-                      <span class="notify-user__email">{{ user.email }}</span>
-                    </label>
-                  </div>
-                  <p class="notify-hint">
-                    {{ node.notifyUserIds.length === 0 ? '当前默认通知该角色全部成员' : `当前通知 ${node.notifyUserIds.length} 人` }}
-                  </p>
-                </div>
-
                 <div class="form-field">
-                  <Label :for="`node-description-${index}`">节点描述</Label>
-                  <Textarea
-                    :id="`node-description-${index}`"
-                    v-model="node.description"
-                    maxlength="200"
-                    placeholder="补充说明该节点的审批要求"
+                  <Label :for="`node-assignees-${node.key}`">{{ node.nodeType === 'CC' ? '抄送对象' : '审批人员' }} <span class="required">*</span></Label>
+                  <ApprovalNodeApproverPicker
+                    :id="`node-assignees-${node.key}`"
+                    v-model="node.assignees"
+                    :disabled="submitting"
                   />
+                  <p class="field-help">
+                    {{ node.nodeType === 'CC'
+                      ? '前面的审批通过，流程走到这里时发飞书消息，不需要处理，流程直接进入下一个节点。被抄送人可只读查看这一张单据。'
+                      : '审批人员：只有选中的人能看到、能审批、收到通知，其中一人审了即通过。' }}
+                  </p>
                 </div>
               </div>
             </DataViewStatePanel>
+
+            <div class="node-add-actions">
+              <Button type="button" size="sm" variant="outline" @click="addNode('APPROVAL')">
+                <Plus class="size-4" /> 添加审批节点
+              </Button>
+              <Button type="button" size="sm" variant="outline" :disabled="form.nodes.length === 0" @click="addNode('CC')">
+                <Plus class="size-4" /> 添加抄送节点
+              </Button>
+            </div>
           </section>
         </DataViewStatePanel>
       </div>
@@ -787,10 +652,6 @@ watch(
   min-height: var(--touch-target);
 }
 
-.switch-row--node {
-  align-self: end;
-  margin-bottom: $space-1;
-}
 
 .nodes-list {
   display: flex;
@@ -823,78 +684,19 @@ watch(
   gap: $space-1;
 }
 
-.notify-panel {
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: $space-2;
-  margin-bottom: $space-3;
-  padding: $space-3;
-}
-
-.notify-panel__header {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: $space-2;
-}
-
-.notify-actions {
-  display: flex;
-  gap: $space-1;
-}
-
-.notify-users {
-  display: grid;
-  gap: $space-1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-height: 156px;
-  overflow-y: auto;
-}
-
-.notify-user {
-  align-items: center;
-  border-radius: var(--radius-sm);
-  display: grid;
-  gap: $space-1;
-  grid-template-columns: auto minmax(72px, max-content) minmax(0, 1fr);
-  min-height: var(--touch-target);
-  padding: $space-1 $space-2;
-}
-
-.notify-user:hover {
-  background: var(--wash-hover);
-}
-
-.notify-user__name {
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-  font-weight: 500;
-}
-
-.notify-user__email,
-.notify-empty,
-.notify-hint {
+.field-help {
   color: hsl(var(--muted-foreground));
   font-size: var(--font-size-caption);
-  line-height: 20px;
-}
-
-.notify-user__email {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.notify-empty {
-  min-height: var(--touch-target);
-}
-
-.notify-hint {
   margin: 0;
 }
+
+.node-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-2;
+  margin-top: $space-3;
+}
+
 
 @media (max-width: $bp-sm) {
   .dialog-body {
@@ -902,15 +704,6 @@ watch(
   }
 
   .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .switch-row--node {
-    align-self: start;
-    margin-bottom: 0;
-  }
-
-  .notify-users {
     grid-template-columns: 1fr;
   }
 }

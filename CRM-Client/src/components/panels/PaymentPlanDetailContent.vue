@@ -180,7 +180,7 @@ const approvalStepperRecords = computed<ApprovalRecord[]>(() => {
       node_id: node.id,
       node_name: node.node_name,
       approver_id: node.approver_id ?? null,
-      approver_name: node.approver_name ?? node.approve_role,
+      approver_name: node.approver_name ?? null,
       approver_status: null,
       approver_status_display: null,
       action: isRejected ? 'REJECT' : 'APPROVE',

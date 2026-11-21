@@ -1450,40 +1450,34 @@ class PaymentRecordCRUD:
         return approval
 
 
-def query_pending_approval_me(db: Session, team_id: int, user_roles: List[str]) -> int:
-    """
-    Task 1.4: 查询待我审批的回款记录数量
-
-    Args:
-        db: 数据库会话
-        team_id: 团队ID
-        user_roles: 当前用户的角色代码列表
-
-    Returns:
-        待我审批的数量
-    """
-    from app.models.approval import Approval, ApprovalNode, ApprovalStatus
+def query_pending_approval_me(db: Session, team_id: int, user_id: int | str) -> int:
+    """查询当前用户可处理的待审批回款记录数量。"""
+    from app.models.approval import Approval, ApprovalStatus
     from app.constants.business_types import BusinessType
+    from app.services.approval_routing import current_approver_ids
 
-    if not user_roles:
+    try:
+        target_user_id = int(user_id)
+    except (TypeError, ValueError):
         return 0
 
-    # 查询当前审批节点角色属于当前用户角色集的审批记录
-    pending_approval_me_count = db.query(Approval).join(
-        ApprovalNode, Approval.current_node_id == ApprovalNode.id
-    ).join(
-        PaymentRecord, Approval.business_id == PaymentRecord.id
-    ).join(
-        PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id
-    ).filter(
-        Approval.business_type == BusinessType.PAYMENT,
-        Approval.team_id == team_id,
-        Approval.status == ApprovalStatus.PENDING,
-        PaymentPlan.team_id == team_id,
-        ApprovalNode.approve_role.in_(user_roles)
-    ).count()
-
-    return pending_approval_me_count
+    approvals = (
+        db.query(Approval)
+        .join(PaymentRecord, Approval.business_id == PaymentRecord.id)
+        .join(PaymentPlan, PaymentRecord.payment_plan_id == PaymentPlan.id)
+        .filter(
+            Approval.business_type == BusinessType.PAYMENT,
+            Approval.team_id == team_id,
+            Approval.status == ApprovalStatus.PENDING,
+            PaymentRecord.team_id == team_id,
+            PaymentPlan.team_id == team_id,
+        )
+        .all()
+    )
+    return sum(
+        target_user_id in current_approver_ids(db, approval)
+        for approval in approvals
+    )
 
 
 payment_plan_crud = PaymentPlanCRUD()

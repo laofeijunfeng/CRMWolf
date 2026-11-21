@@ -284,21 +284,25 @@ class PaymentRecordWithConfirmation(PaymentRecordResponse):
 # Task 1.4: PaymentRecord list response schemas
 
 class ApprovalNodeInfo(BaseModel):
-    """审批节点信息"""
+    """审批节点信息，使用提交时冻结的审批人列表。"""
     id: int
     node_order: int
     node_name: str
-    approve_role: str
+    node_type: str = "APPROVAL"
     status: str = "PENDING"
+    approver_ids: List[int] = Field(default_factory=list)
+    approver_names: List[str] = Field(default_factory=list)
     approver_id: Optional[str] = None
     approver_name: Optional[str] = None
     comment: Optional[str] = None
 
 
 class ApprovalInfo(BaseModel):
-    """审批信息"""
+    """审批信息。"""
     id: int
     status: str
+    current_node_name: Optional[str] = None
+    current_approver_ids: List[int] = Field(default_factory=list)
     current_approver_name: Optional[str] = None
     nodes: List[ApprovalNodeInfo] = Field(default_factory=list)
 
