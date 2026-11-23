@@ -995,17 +995,17 @@ def _add_communication_time_fact(facts: list[InteractionConfirmationFact], conte
     override = activity_edit_time(content_json, "communication_time")
     if override is not None:
         at, granularity = override
-        if at is None:
+        if at is not None:
+            _add_fact(
+                facts,
+                "communication_time",
+                "沟通时间",
+                _format_temporal_date(at, include_time=granularity == "DATETIME"),
+                group="write",
+                source=None,
+            )
             return
-        _add_fact(
-            facts,
-            "communication_time",
-            "沟通时间",
-            _format_temporal_date(at, include_time=granularity == "DATETIME"),
-            group="write",
-            source=None,
-        )
-        return
+        # A cleared override restores the original evidence, exactly as the write does.
 
     bundle = content_json.get("temporal_evidence")
     if not isinstance(bundle, dict) or bundle.get("version") != "temporal-evidence-v1":

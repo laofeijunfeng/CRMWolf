@@ -100,9 +100,11 @@ export const ActivityPreviewSchema = z.object({
 
 export const ProposalKindSchema = z.enum(['follow_up_task_create', 'opportunity_stage', 'opportunity_create'])
 export type ProposalKind = z.infer<typeof ProposalKindSchema>
+// Waits frozen before CRM-154 may still carry retired kinds. They stay loadable; the server refuses to execute them.
+export const StoredProposalKindSchema = z.enum([...ProposalKindSchema.options, 'customer_fact', 'follow_up_task'])
 
 export const ProposalCandidateSchema = z.object({
-  kind: ProposalKindSchema,
+  kind: StoredProposalKindSchema,
   key: z.string().min(1),
   payload: z.record(z.unknown()),
   action_id: z.string().nullable().optional(),
@@ -128,7 +130,7 @@ export const ProposalCandidateSchema = z.object({
 
 export const ConfirmationPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('activity_write'), preview: ActivityPreviewSchema }).strict(),
-  z.object({ kind: z.literal('proposal'), proposal_kind: ProposalKindSchema, candidate: ProposalCandidateSchema }).strict()
+  z.object({ kind: z.literal('proposal'), proposal_kind: StoredProposalKindSchema, candidate: ProposalCandidateSchema }).strict()
 ]).superRefine((payload, ctx) => {
   if (payload.kind === 'proposal' && payload.proposal_kind !== payload.candidate.kind) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['candidate', 'kind'], message: '提议类型不一致' })
@@ -193,7 +195,7 @@ const CustomerActivityReceiptSchema = z.object({
 export const AssistantTurnStatusSchema = z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED'])
 
 const AcceptedProposalReceiptSchema = z.object({
-  kind: z.enum(['follow_up_task_create', 'opportunity_stage', 'opportunity_create', 'customer_fact', 'follow_up_task']),
+  kind: StoredProposalKindSchema,
   public_id: z.string().min(1),
   proposal_key: z.string().min(1),
   customer_id: z.number().int().nullable().optional(),

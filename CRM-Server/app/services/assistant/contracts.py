@@ -24,6 +24,9 @@ Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
 ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunity_create"]
+# Waits and receipts frozen before CRM-154 may still carry retired kinds. They stay readable;
+# every new proposal remains restricted to ProposalKind.
+StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
 
 
 class ContextEvidence(BaseModel):
@@ -134,7 +137,7 @@ class ProposalCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    kind: ProposalKind
+    kind: StoredProposalKind
     key: str = Field(min_length=1)
     payload: dict[str, object]
     evidence_quote: str = Field(min_length=1)
@@ -163,7 +166,7 @@ class ProposalConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["proposal"]
-    proposal_kind: ProposalKind
+    proposal_kind: StoredProposalKind
     candidate: ProposalCandidate
 
     @model_validator(mode="after")
@@ -188,7 +191,7 @@ class CustomerActivityReceipt(BaseModel):
 class AcceptedProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    kind: ProposalKind | Literal["customer_fact", "follow_up_task"]
+    kind: StoredProposalKind
     public_id: str = Field(min_length=1)
     proposal_key: str = Field(min_length=1)
     customer_id: int | None = None

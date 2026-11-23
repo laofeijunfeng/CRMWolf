@@ -222,10 +222,11 @@ async def offer_next_proposal(
             proposal = _take_queued_candidate(db, task, queue, rejected)
             if rejected:
                 action_result = {"rejected": rejected}
-            if saved is not None:
-                action_name = "complete_after_proposals"
-            elif proposal is None and rejected:
+            if proposal is None and rejected:
+                # Nothing offerable is left: say so instead of reporting a normal completion.
                 action_name = proposal_outcome = "proposal_rejected"
+            elif saved is not None:
+                action_name = "complete_after_proposals"
     except (AssistantLLMError, TimeoutError, SQLAlchemyError) as exc:
         if started is not None and reporter is not None:
             reporter.stage_failed(stage("propose"))
@@ -586,6 +587,9 @@ async def settle_proposal(
             # before invoking CRM, which can commit its own transaction.
             assert_owned_execution_lease(db, task)
         try:
+            if proposal["kind"] not in _PRIORITY:
+                # A retired kind cannot run any more: settle it as the stale proposal it is.
+                raise AssistantCRMNoEffect("该提议类型已下线，未执行")
             outcome = await executor(db, task, proposal)
         except AssistantCRMNoEffect as exc:
             db.rollback()

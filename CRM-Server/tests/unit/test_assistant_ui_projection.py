@@ -1156,7 +1156,7 @@ def test_user_edited_communication_date_shows_date_without_midnight_time() -> No
     assert fact.value == "2026年11月20日（周五）"
 
 
-def test_cleared_communication_time_suppresses_temporal_evidence() -> None:
+def test_cleared_communication_time_restores_the_evidence_row_like_the_write() -> None:
     waiting = _confirmation(
         _preview(
             content_json={
@@ -1198,7 +1198,9 @@ def test_cleared_communication_time_suppresses_temporal_evidence() -> None:
         active_boundary=False,
     )
     interaction = envelope.blocks[0]
-    assert all(fact.key != "communication_time" for fact in interaction.facts)
+    fact = next(item for item in interaction.facts if item.key == "communication_time")
+    assert fact.value == "2026年11月13日（周五）"
+    assert fact.source == "原话：“上周”"
 
 
 def test_cleared_communication_time_without_evidence_has_no_fact() -> None:

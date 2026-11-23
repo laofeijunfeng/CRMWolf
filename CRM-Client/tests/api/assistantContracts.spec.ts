@@ -131,6 +131,14 @@ describe('current assistant confirmation commands', () => {
     const bound = { ...payload, candidate: { ...payload.candidate, target_public_id: 'opp_fictional', prior_version: 2 } }
     expect(AssistantTaskViewSchema.parse({ ...task, committed: [], waiting: confirmation('proposal:opportunity_stage', bound) }).waiting?.confirmation_payload).toEqual(bound)
   })
+
+  it('keeps loading a task that still waits on a retired proposal kind', () => {
+    for (const kind of ['customer_fact', 'follow_up_task']) {
+      const payload = { kind: 'proposal', proposal_kind: kind, candidate: { ...candidate, kind, target_public_id: 'fut_fictional' } }
+      const parsed = AssistantTaskViewSchema.parse({ ...task, committed: [activityReceipt], waiting: confirmation(`proposal:${kind}`, payload) })
+      expect(parsed.waiting?.confirmation_payload).toEqual(payload)
+    }
+  })
   it('requires a typed processing pointer pair and accepts an active internal turn', () => {
     const running = { ...task, committed: [activityReceipt], processing_turn_id: 'atn_internal', processing_turn_status: 'RUNNING' }
     expect(AssistantTaskViewSchema.parse(running).processing_turn_id).toBe('atn_internal')

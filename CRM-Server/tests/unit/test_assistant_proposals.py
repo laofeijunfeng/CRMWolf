@@ -228,6 +228,71 @@ async def test_rejected_nominations_audit_each_reason(crm_session, monkeypatch):
     ]}
 
 
+@pytest.mark.parametrize("accepted", [False, True])
+@pytest.mark.parametrize("kind", ["customer_fact", "follow_up_task"])
+async def test_stored_legacy_proposal_wait_still_loads_renders_and_settles(db_session, kind, accepted):
+    """A wait frozen before CRM-154 stays readable; retiring its kind must not brick the task."""
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant import proposals
+    from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    task = _task(db_session)
+    candidate = {
+        "kind": kind, "target_public_id": "fut_legacy", "payload": {"action": "complete"},
+        "evidence_quote": "明年采购", "activity_id": 1, "customer_id": 7, "source_revision": 1,
+    }
+    candidate["key"] = proposals._candidate_key(candidate)
+    task.waiting_type, task.waiting_field = "CONFIRMATION", f"proposal:{kind}"
+    task.waiting_json = {"action_id": "awa_legacy", "payload": {
+        "question_id": "q_legacy", "prompt": "确认这项旧提议？",
+        "confirmation_payload": {"kind": "proposal", "proposal_kind": kind, "candidate": candidate},
+    }}
+    db_session.commit()
+
+    view = task_view(task, db_session)
+    assert view.waiting is not None and view.waiting.field == f"proposal:{kind}"
+
+    message = ConversationMessage.model_validate({
+        "id": "legacy", "role": "assistant", "text": "确认这项旧提议？", "at": "2026-11-01T10:00:00",
+        "task": view, "boundary": None, "outcome": None,
+    })
+    finalize_assistant_ui([message], focused_task=view, pending_choice=None)
+    interaction = next(block for block in message.ui.blocks if block.type == "interaction")
+    assert interaction.interaction_type == "confirmation"
+
+    settled, reply, offered = await settle_proposal(
+        db_session, task, accepted=accepted, executor=RealCRMProposalExecutor() if accepted else None,
+    )
+    assert not offered and settled.status == AssistantTaskStatus.COMPLETED and settled.waiting_field is None
+    assert settled.committed_json[-1] == {"kind": f"refused:{kind}", "proposal_key": candidate["key"]}
+    if accepted:
+        assert reply == "该提议类型已下线，未执行"
+
+
+async def test_exhausted_queue_reports_unavailable_instead_of_done(db_session, monkeypatch, nominate):
+    from app.services.assistant import proposals
+
+    nominate[0].extend([
+        {"kind": "opportunity_stage", "target_public_id": "opp_a", "evidence_quote": "明年采购", "payload": {}},
+        {"kind": "opportunity_create", "evidence_quote": "明年采购", "payload": {"opportunity_name": "项目"}},
+    ])
+    monkeypatch.setattr(proposals, "validate_candidate", _bound_candidate)
+    offered, _, active = await offer_next_proposal(db_session, _task(db_session))
+    assert active and offered.waiting_field == "proposal:opportunity_stage"
+    db_session.commit()
+    # The queued create no longer revalidates once the user declines the first proposal.
+    monkeypatch.setattr(proposals, "validate_candidate", lambda db, task, candidate, **kwargs: None)
+
+    settled, message, offered_again = await settle_proposal(db_session, offered, accepted=False)
+
+    assert not offered_again and settled.status == AssistantTaskStatus.COMPLETED
+    assert message == "活动已记录。本次没能生成后续建议，可在客户页手动处理。"
+    assert proposals.load_authority(settled).proposal_outcome == "proposal_rejected"
+    assert db_session.query(AssistantAction).filter_by(action="proposal_rejected").count() == 1
+
+
 async def test_queue_prioritizes_advancement_and_does_not_nominate_again(db_session, monkeypatch, nominate):
     from app.services.assistant import proposals
 
