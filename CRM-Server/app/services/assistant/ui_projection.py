@@ -896,7 +896,10 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
         _add_fact(facts, "next_action", "下一步", "未提供行动项", group="write")
     from app.services.assistant.temporal_evidence import confirmation_time_labels
 
-    commitment_line, follow_override = confirmation_time_labels(preview.content_json)
+    try:
+        commitment_line, follow_override = confirmation_time_labels(preview.content_json)
+    except ValidationError:
+        commitment_line, follow_override = None, None
     _add_fact(facts, "customer_commitment", "客户承诺", commitment_line, group="write")
     if not _add_follow_time_fact(facts, preview):
         follow_time = follow_override or preview.next_follow_time_text or preview.next_follow_time
@@ -1010,7 +1013,10 @@ def _add_communication_time_fact(facts: list[InteractionConfirmationFact], conte
     from app.services.assistant.temporal_evidence import StoredMention
 
     for raw in raw_mentions:
-        mention = StoredMention.model_validate(raw)
+        try:
+            mention = StoredMention.model_validate(raw)
+        except ValidationError:
+            continue
         if not mention.communication_time or mention.state != "ACTIVE" or mention.resolved_at is None:
             continue
         _add_fact(
@@ -1030,7 +1036,12 @@ def _follow_time_source(preview: ActivityPreview, raw: str) -> str | None:
     if isinstance(bundle, dict) and isinstance(bundle.get("mentions"), list):
         from app.services.assistant.temporal_evidence import StoredMention
 
-        mentions = [StoredMention.model_validate(item) for item in bundle["mentions"]]
+        mentions: list[StoredMention] = []
+        for item in bundle["mentions"]:
+            try:
+                mentions.append(StoredMention.model_validate(item))
+            except ValidationError:
+                continue
         primary_id = bundle.get("primary_action_id")
         candidates = [
             item

@@ -963,6 +963,35 @@ def test_communication_time_is_read_only_fact_without_followup_prompt() -> None:
     assert interaction.interaction_type == "confirmation"
 
 
+def test_malformed_temporal_evidence_does_not_break_confirmation_projection() -> None:
+    waiting = _confirmation(
+        _preview(
+            content_json={
+                "temporal_evidence": {
+                    "version": "temporal-evidence-v1",
+                    "mentions": [{"legacy": "payload"}],
+                    "actions": [],
+                }
+            },
+            next_action=None,
+            next_follow_time="2026-11-11T09:00:00",
+            next_follow_time_text="下周三",
+            next_follow_time_granularity="DATE",
+        )
+    )
+    envelope = project_assistant_message(
+        _message("malformed_temporal_evidence", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    assert [block.type for block in envelope.blocks] == ["interaction"]
+    interaction = envelope.blocks[0]
+    assert interaction.interaction_type == "confirmation"
+    facts = {fact.key: fact for fact in interaction.facts}
+    assert "communication_time" not in facts
+    assert facts["next_follow_time"].value == "2026年11月11日（周三）09:00"
+    assert facts["next_follow_time"].source == "原话：“下周三”"
+
 def test_user_edited_communication_time_overrides_temporal_evidence() -> None:
     content_json = {
         "activity_edit_times": {
