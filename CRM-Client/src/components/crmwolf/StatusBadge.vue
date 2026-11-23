@@ -34,10 +34,13 @@ const props = defineProps<{
   status: string
   type?: StatusType
   size?: 'default' | 'small'
+  /** 覆盖展示文案；语气仍取自映射。用于文案由服务端下发的状态。 */
+  label?: string | undefined
 }>()
 
 const domain = computed<StatusDomain>(() => props.type ?? 'generic')
 const presentation = computed(() => getStatusPresentation(domain.value, props.status))
+const statusLabel = computed(() => props.label ?? presentation.value.label)
 const size = computed(() => props.size ?? 'default')
 const isUnknown = computed(() => presentation.value.traceValue !== undefined)
 const statusClasses = computed(() => [
@@ -60,10 +63,10 @@ const statusTitle = computed(() => {
     :data-status-value="status"
     :title="statusTitle"
     role="status"
-    :aria-label="presentation.label"
+    :aria-label="statusLabel"
   >
     <span class="status-badge-dot" aria-hidden="true"></span>
-    {{ presentation.label }}
+    {{ statusLabel }}
   </Badge>
 </template>
 

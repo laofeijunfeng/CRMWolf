@@ -48,6 +48,7 @@
 | `icon-button-label` | GATE-09 | 只有图标的 Button 缺少 `aria-label`；纯图标白名单见[按钮](../components/button.md#变体与内容)。 |
 | `page-form-primitive` | GATE-10 | views 直接导入 `ui/input`、`ui/label` 拼表单；改用 crmwolf `*Field`；Switch/Checkbox 标签与带内联按钮的输入登记在 `exceptions.json`。 |
 | `float-layer-drift` | GATE-11 | 导入 `ui/sheet`、`ui/drawer` 的文件必须在 `exceptions.json` 白名单内（原件包内部引用除外）；侧滑详情用 `ui/detail-sheet`。 |
+| `off-scale-alpha` | GATE-12 | `bg / border / text / ring-X/N` 的 N 不在 opacity 刻度内（步长 5）；这类类名不生成 CSS，属于静默失效。 |
 
 「同排同档」「loading 不改宽」暂无脚本，由代码评审检查。
 

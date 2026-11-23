@@ -201,9 +201,9 @@ describe('LicenseApplicationFormDialog product', () => {
     expect(wrapper.findComponent(ProductIntentPicker).props('locked')).toBe(false)
     expect(wrapper.findComponent(ProductIntentPicker).props('modelValue')).toBe('prd_apifox')
 
-    const echo = wrapper.findComponent(ProductIntentPicker).findAll('.segmented-choice__item')
-      .find((item) => item.text().includes('EchoAPI'))
-    await echo?.get('.segmented-choice__radio').trigger('click')
+    const echo = wrapper.findComponent(ProductIntentPicker).findAll('[role="radio"]')
+      .find((option) => option.text().includes('EchoAPI'))
+    await echo?.trigger('click')
     await submit(wrapper)
     expect(licenseApplicationApi.create).toHaveBeenCalledWith(expect.objectContaining({
       license_type: 'TRIAL',

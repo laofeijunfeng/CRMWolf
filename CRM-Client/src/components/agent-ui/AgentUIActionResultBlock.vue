@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { AlertCircle, CheckCircle2, CircleSlash2 } from 'lucide-vue-next'
 
+import AgentUIBanner from './AgentUIBanner.vue'
+import { Button } from '@/components/ui/button'
 import type { AgentUIBlock, EntityRef } from '@/schemas/agent-contracts'
 import { isAgentEntityOpenable } from '@/components/agent/agentEntityNavigation'
 
@@ -10,6 +12,9 @@ type ActionResultBlock = Extract<AgentUIBlock, { type: 'action_result' }>
 const props = defineProps<{ block: ActionResultBlock }>()
 const messageLines = computed(() => props.block.message.split('\n').map(line => line.trim()).filter(line => line !== ''))
 const multiline = computed(() => messageLines.value.length > 1)
+const openableEntity = computed<EntityRef | null>(() => (
+  props.block.entity_ref && isAgentEntityOpenable(props.block.entity_ref) ? props.block.entity_ref : null
+))
 
 const emit = defineEmits<{
   'open-entity': [entityRef: EntityRef]
@@ -19,41 +24,39 @@ const iconByStatus = {
   SUCCESS: CheckCircle2,
   FAILED: AlertCircle,
   CANCELLED: CircleSlash2
-}
+} satisfies Record<ActionResultBlock['status'], unknown>
 
-const classesByStatus = {
-  SUCCESS: 'border-success/25 text-success',
-  FAILED: 'border-destructive/25 text-destructive',
-  CANCELLED: 'border-border bg-muted text-muted-foreground'
-} satisfies Record<ActionResultBlock['status'], string>
+const toneByStatus = {
+  SUCCESS: 'success',
+  FAILED: 'danger',
+  CANCELLED: 'neutral'
+} as const satisfies Record<ActionResultBlock['status'], string>
 </script>
 
 <template>
-  <section class="grid grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-lg border p-3" :class="block.status === 'SUCCESS' ? 'border-success/30 bg-success/5' : classesByStatus[block.status]">
-    <span class="grid size-[22px] place-items-center rounded-md text-caption font-semibold" :class="block.status === 'SUCCESS' ? 'bg-success/12 text-success' : 'bg-muted text-muted-foreground'" aria-hidden="true">
-      <component :is="iconByStatus[block.status]" class="h-3.5 w-3.5" />
-    </span>
-    <div>
-      <strong class="text-body text-foreground">{{ block.title }}</strong>
-      <template v-if="multiline">
-        <p v-for="(line, index) in messageLines" :key="index" class="mb-0 mt-1 text-sm text-foreground">{{ line }}</p>
-      </template>
-      <p v-else class="mb-0 mt-1 text-caption text-muted-foreground">{{ block.message }}</p>
-      <button
-        v-if="block.entity_ref && isAgentEntityOpenable(block.entity_ref)"
-        type="button"
-        class="mt-1 block max-w-full truncate text-left text-xs text-brand underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        :aria-label="`打开${block.entity_ref.display_name}详情`"
-        @click="emit('open-entity', block.entity_ref)"
-      >
-        {{ block.entity_ref.display_name }}
-      </button>
-      <span
-        v-else-if="block.entity_ref"
-        class="mt-1 block max-w-full truncate text-xs text-muted-foreground"
-      >
-        {{ block.entity_ref.display_name }}
-      </span>
-    </div>
-  </section>
+  <AgentUIBanner
+    :tone="toneByStatus[block.status]"
+    :icon="iconByStatus[block.status]"
+    :title="block.title"
+    :role="block.status === 'FAILED' ? 'alert' : 'status'"
+  >
+    <template v-if="multiline">
+      <p v-for="(line, index) in messageLines" :key="index" class="m-0 text-body text-foreground">{{ line }}</p>
+    </template>
+    <p v-else class="m-0 text-caption text-muted-foreground">{{ block.message }}</p>
+    <Button
+      v-if="openableEntity"
+      type="button"
+      variant="link"
+      size="sm"
+      class="max-w-full justify-start"
+      :aria-label="`打开${openableEntity.display_name}详情`"
+      @click="emit('open-entity', openableEntity)"
+    >
+      {{ openableEntity.display_name }}
+    </Button>
+    <p v-else-if="block.entity_ref" class="m-0 max-w-full truncate text-caption text-muted-foreground">
+      {{ block.entity_ref.display_name }}
+    </p>
+  </AgentUIBanner>
 </template>

@@ -38,5 +38,6 @@
 - **行操作：**`getRowActions` 返回当前行动作集，同时驱动行尾操作区与右键 / 键盘菜单；`rowInteractive` + `row-click` 承担查看详情。
 - **筛选、排序、搜索、视图：**`filters`·`sorts`·`search` 受控，配合 `update:filters`、`filter-apply`、`update:sorts`、`sort-apply`、`update:search`、`search-apply` 等事件；字段配置走 `viewKey`、`columnConfigEnabled`。
 - **高度与滚动：**新页面用 `heightStrategy` 与 `scrollMode`，不写固定 `height`。
+- **只读嵌入：**受限内容区（如助手消息）用 `embedded`：只渲染表格，不出工具栏、状态摘要、分页与行菜单；窄视口保持表格并在容器内横向滚动，容器圆角同内容表面。
 - **插槽：**`cell-<key>`（`row`、`value`）、`mobile-card`、`mobile-actions`、`tableTools`、`replacement`。
 - **分页与选择：**`update:page`、`update:page-size`、`update:selectedRowKeys`；`retry` 由失败状态触发。

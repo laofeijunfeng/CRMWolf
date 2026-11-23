@@ -17,11 +17,11 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <nav class="flex items-center justify-between gap-3 text-xs text-muted-foreground" aria-label="查询结果分页">
-    <span>
+  <nav class="flex items-center justify-between gap-space-3 text-caption text-muted-foreground" aria-label="查询结果分页">
+    <span class="tabular-nums">
       第 {{ block.range_start }}–{{ block.range_end }} 条<span v-if="block.total !== null && block.total !== undefined">，共 {{ block.total }} 条</span>
     </span>
-    <div class="flex gap-1">
+    <div class="flex gap-space-2">
       <Button
         type="button"
         variant="outline"
@@ -30,7 +30,7 @@ const emit = defineEmits<{
         aria-label="上一页"
         @click="block.previous_action_id && emit('action', block.previous_action_id)"
       >
-        <ChevronLeft class="h-4 w-4" aria-hidden="true" />
+        <ChevronLeft aria-hidden="true" />
       </Button>
       <Button
         type="button"
@@ -40,7 +40,7 @@ const emit = defineEmits<{
         aria-label="下一页"
         @click="block.next_action_id && emit('action', block.next_action_id)"
       >
-        <ChevronRight class="h-4 w-4" aria-hidden="true" />
+        <ChevronRight aria-hidden="true" />
       </Button>
     </div>
   </nav>

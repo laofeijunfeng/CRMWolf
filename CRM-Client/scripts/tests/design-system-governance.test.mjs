@@ -289,3 +289,17 @@ test('GATE-09 requires accessible names on icon-only buttons', () => {
   assert.equal(found('<Button size="icon" :aria-label="label"><Trash2 /></Button>'), 0)
   assert.equal(found('<Button><Plus /> 新建</Button>'), 0)
 })
+
+test('GATE-12 rejects color opacity modifiers outside the opacity scale', () => {
+  const violations = inspectContent('CRM-Client/src/components/Example.vue', [
+    '<div class="rounded-md border border-danger/30 bg-danger/12" />',
+    '<div class="slide-in-from-left-1/2 bg-brand/10 text-brand/95 hover:bg-destructive/13" />',
+    '<div class="bg-black/80 border-border/70" />',
+  ], [])
+
+  assert.deepEqual(violations.map((violation) => [violation.category, violation.line]), [
+    ['off-scale-alpha', 1],
+    ['off-scale-alpha', 2],
+  ])
+  assert.equal(inspectContent('CRM-Client/src/components/__tests__/Example.test.ts', ['bg-danger/12'], []).length, 0)
+})

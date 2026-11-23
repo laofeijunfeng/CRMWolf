@@ -19,17 +19,20 @@ interface Props {
   emptyText?: string
   /** 加载状态 */
   loading?: boolean
-  /** 行是否可点击 */
-  rowInteractive?: boolean
+  /** 行是否可点击；传函数时按行判断（可打开与不可打开的行混排） */
+  rowInteractive?: boolean | ((item: T) => boolean)
   /** 需要高亮并可被外层恢复焦点的行 ID */
   highlightedItemId?: string | number | null | undefined
+  /** compact：受限内容区的紧凑态，行高按列表单行，不渲染标题栏 */
+  density?: 'default' | 'compact'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   emptyText: '暂无数据',
   loading: false,
   rowInteractive: false,
-  highlightedItemId: null
+  highlightedItemId: null,
+  density: 'default'
 })
 
 const emit = defineEmits<{
@@ -38,10 +41,14 @@ const emit = defineEmits<{
 
 const handleRowClick = (event: MouseEvent, item: T): void => {
   if (isNestedInteractiveElement(event.target, event.currentTarget)) return
-  if (props.rowInteractive) {
+  if (isRowInteractive(item)) {
     emit('row-click', item)
   }
 }
+
+const isRowInteractive = (item: T): boolean => (
+  typeof props.rowInteractive === 'function' ? props.rowInteractive(item) : props.rowInteractive
+)
 
 const isNestedInteractiveElement = (target: EventTarget | null, currentTarget: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement) || !(currentTarget instanceof HTMLElement)) return false
@@ -52,7 +59,7 @@ const isNestedInteractiveElement = (target: EventTarget | null, currentTarget: E
 
 const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   if (isNestedInteractiveElement(event.target, event.currentTarget)) return
-  if (props.rowInteractive && (event.key === 'Enter' || event.key === ' ')) {
+  if (isRowInteractive(item) && (event.key === 'Enter' || event.key === ' ')) {
     event.preventDefault()
     emit('row-click', item)
   }
@@ -60,9 +67,13 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
 </script>
 
 <template>
-  <Card class="list-card" :aria-busy="loading">
+  <Card
+    :class="`list-card${density === 'compact' ? ' list-card--compact' : ''}`"
+    :aria-busy="loading"
+    :aria-label="density === 'compact' ? title : undefined"
+  >
     <!-- Header -->
-    <div class="list-card-header">
+    <div v-if="density !== 'compact'" class="list-card-header">
       <h3 class="list-card-title">{{ title }}</h3>
       <div v-if="$slots['headerActions']" class="list-card-actions">
         <slot name="headerActions" />
@@ -93,13 +104,13 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
           :key="item.id"
           class="list-card-item"
           :class="{
-            'is-interactive': rowInteractive,
+            'is-interactive': isRowInteractive(item),
             'is-highlighted': highlightedItemId === item.id
           }"
           :data-list-card-row-id="item.id"
           :data-highlighted="highlightedItemId === item.id ? 'true' : undefined"
-          :role="rowInteractive ? 'button' : undefined"
-          :tabindex="rowInteractive ? 0 : undefined"
+          :role="isRowInteractive(item) ? 'button' : undefined"
+          :tabindex="isRowInteractive(item) ? 0 : undefined"
           @click="handleRowClick($event, item)"
           @keydown="handleRowKeydown($event, item)"
         >
@@ -313,6 +324,40 @@ const handleRowKeydown = (event: KeyboardEvent, item: T): void => {
   button {
     min-height: var(--touch-target);
     min-width: var(--touch-target);
+  }
+}
+
+// ==================== 紧凑态：受限内容区的列表单行 ====================
+.list-card--compact {
+  box-shadow: none;
+
+  .list-card-empty {
+    min-height: 36px;
+    justify-content: flex-start;
+    padding: $space-2 $space-3;
+  }
+
+  .list-card-empty-state {
+    color: hsl(var(--muted-foreground));
+    font-size: var(--font-size-caption);
+    font-weight: 400;
+    text-align: left;
+  }
+
+  .list-card-item {
+    gap: $space-2;
+    min-height: 36px; // 列表单行行高
+    padding: 0 $space-3;
+    color: hsl(var(--foreground));
+    font-size: var(--font-size-body);
+    font-weight: 500;
+    line-height: var(--line-height-body);
+  }
+}
+
+@media (max-width: 767px) {
+  .list-card--compact .list-card-item {
+    min-height: var(--touch-target);
   }
 }
 

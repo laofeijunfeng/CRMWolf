@@ -155,7 +155,8 @@ test('customer name card submits once and leaves the processing label', async ({
   await page.getByLabel('客户名称').fill('  星河  科技  ')
   await page.getByRole('button', { name: '提交', exact: true }).click()
   await expect(page.getByText('请补充沟通内容')).toBeVisible()
-  await expect(page.getByRole('button', { name: '提交处理中…' })).toHaveCount(0)
+  // 提交中由按钮的忙碌状态表达：文字与宽度不变。
+  await expect(page.locator('button[aria-busy="true"]')).toHaveCount(0)
   expect(calls.commands).toHaveLength(1)
   expect(calls.commands[0]).toMatchObject({
     expected_version: 2,
@@ -190,7 +191,7 @@ test('unknown network result stays locked without another command', async ({ pag
   await page.getByLabel('客户名称').fill('星河科技')
   await page.getByRole('button', { name: '提交', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('发送状态待确认')
-  await expect(page.getByRole('button', { name: '提交处理中…' })).toBeVisible()
+  await expect(page.locator('button[aria-busy="true"]')).toBeVisible()
   await page.waitForTimeout(300)
   expect(calls.commands).toHaveLength(1)
   await page.screenshot({ path: evidence('04-unknown-network.png'), fullPage: true })

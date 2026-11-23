@@ -156,7 +156,7 @@ test('activity confirmation keeps facts visible and folds the basis', async ({ p
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await assertNoOverflow(page)
-  await page.locator('.activity-card').screenshot({ path: path.join(evidence, 'crm66-confirm-1440.png') })
+  await page.locator('.agent-ui-interaction').screenshot({ path: path.join(evidence, 'crm66-confirm-1440.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   await assertNoOverflow(page)
   await page.screenshot({ path: path.join(evidence, 'crm66-confirm-390.png'), fullPage: true })

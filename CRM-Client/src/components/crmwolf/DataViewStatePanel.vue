@@ -8,6 +8,7 @@ import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
 
@@ -85,6 +86,9 @@ const emit = defineEmits<{
       aria-live="polite"
     >
       <EmptyHeader>
+        <EmptyMedia v-if="$slots['empty-media']">
+          <slot name="empty-media" />
+        </EmptyMedia>
         <EmptyTitle>{{ emptyTitle }}</EmptyTitle>
         <EmptyDescription v-if="emptyDescription">
           {{ emptyDescription }}

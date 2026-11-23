@@ -29,6 +29,7 @@ export type StatusDomain =
   | 'paymentConfirmation'
   | 'agentInteraction'
   | 'agentFact'
+  | 'agentDisposition'
 
 interface StatusConfig {
   readonly label: string
@@ -193,6 +194,16 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     '201-500人': { label: '201-500人', tone: 'warning' },
     '501-1000人': { label: '501-1000人', tone: 'success' },
     '1000人以上': { label: '1000人以上', tone: 'success' },
+  },
+  // 历史跟进任务处置：current / waiting 由前端定文案，其余文案由服务端 result_title 下发，这里只兜底。
+  agentDisposition: {
+    current: { label: '当前', tone: 'info' },
+    waiting: { label: '待处理', tone: 'neutral' },
+    complete: { label: '已完成', tone: 'success' },
+    hold: { label: '先放着', tone: 'neutral' },
+    skip: { label: '不管了', tone: 'neutral' },
+    failed: { label: '未能完成', tone: 'danger' },
+    unknown: { label: '结果待核对', tone: 'warning' },
   },
 }
 

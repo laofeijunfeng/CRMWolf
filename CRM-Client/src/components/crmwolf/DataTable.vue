@@ -186,6 +186,8 @@ interface Props {
   summaryShowsHiddenColumns?: boolean
   /** 筛选行清除范围。all 同时清筛选、排序和隐藏列 */
   summaryClearScope?: 'all' | 'filters' | 'filters-and-sorts'
+  /** 只读嵌入：只渲染表格，不出工具栏、状态摘要、分页与行菜单；窄视口保持表格并在容器内横向滚动。 */
+  embedded?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -213,6 +215,7 @@ const props = withDefaults(defineProps<Props>(), {
   filters: () => [],
   sorts: () => [],
   mobileMode: 'card',
+  embedded: false,
   mobileTitleKey: '',
   mobileSubtitleKey: '',
   mobileStatusKey: '',
@@ -304,7 +307,7 @@ const desktopActionsColumnWidth = computed(() =>
 const slots = useSlots()
 const tableCardStyle = computed<Record<string, string>>(() => {
   const style: Record<string, string> = {}
-  if (props.heightStrategy === 'page' || props.heightStrategy === 'auto' || slots['replacement']) {
+  if (props.embedded || props.heightStrategy === 'page' || props.heightStrategy === 'auto' || slots['replacement']) {
     // 图表替换表格时按内容增高。
   } else {
     // 固定高度优先于 fill：列表页显式传入的 height 是防止页面随行数增长的
@@ -322,8 +325,10 @@ const tableCardClass = computed(() => ({
   'data-table-card--auto': props.heightStrategy === 'auto',
   'data-table-card--no-scroll': effectiveScrollMode.value === 'none',
   'data-table-card--compact-pagination': props.compactPagination,
+  'data-table-card--embedded': props.embedded,
   'has-desktop-row-actions': hasDesktopRowActions.value
 }))
+const resolvedMobileMode = computed<'card' | 'table'>(() => (props.embedded ? 'table' : props.mobileMode))
 const listBodyHidden = computed(() =>
   props.contentHidden || props.viewDisplayMode === 'board' || props.viewDisplayMode === 'chart'
 )
@@ -721,6 +726,7 @@ async function openRowMenu(
 }
 
 function handleRowContextMenu(event: MouseEvent, row: T, index: number): void {
+  if (props.embedded) return
   if (isNativeContextMenuTarget(event.target)) return
   void openRowMenu(event, row, index)
 }
@@ -1038,7 +1044,7 @@ onBeforeUnmount(() => {
       ref="tableCardRef"
       :aria-busy="isRefreshing ? 'true' : undefined"
       class="data-table-card"
-      :class="[{ 'has-mobile-cards': mobileMode === 'card' }, tableCardClass]"
+      :class="[{ 'has-mobile-cards': resolvedMobileMode === 'card' }, tableCardClass]"
       :style="tableCardStyle"
     >
       <ContextMenu @update:open="handleRowMenuOpenChange">
@@ -1106,6 +1112,7 @@ onBeforeUnmount(() => {
       </div>
 
       <ListViewStateSummary
+        v-if="!embedded"
         :filters="filterSummaryItems"
         :sorts="sortSummaryItems"
         :hidden-column-count="hiddenColumnCount"
@@ -1156,7 +1163,7 @@ onBeforeUnmount(() => {
         v-else
         class="data-table-content"
         :class="[
-          { 'has-mobile-cards': mobileMode === 'card' },
+          { 'has-mobile-cards': resolvedMobileMode === 'card' },
           `data-table-content--${effectiveScrollMode}`
         ]"
         @scroll="handleScroll"
@@ -1188,7 +1195,7 @@ onBeforeUnmount(() => {
             重试
           </Button>
         </div>
-        <div v-if="mobileMode === 'card'" class="data-table-mobile-list">
+        <div v-if="resolvedMobileMode === 'card'" class="data-table-mobile-list">
           <div
             v-for="(row, index) in data"
             :key="getRowKey(row, index)"
@@ -1386,7 +1393,7 @@ onBeforeUnmount(() => {
 
       <!-- 分页区（固定在卡片底部） -->
       <div
-        v-if="!$slots['replacement']"
+        v-if="!$slots['replacement'] && !embedded"
         class="data-table-footer"
         :class="{ 'data-table-footer--compact': compactPagination }"
       >
@@ -1537,6 +1544,31 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
 .data-table-card--no-scroll {
   overflow: visible;
+}
+
+.data-table-card--embedded {
+  // 只读嵌入没有固定高度，也没有外层卡片兜住宽度：卡片自己裁圆角，表格只占容器宽。
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+
+  .data-table-content {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .data-table {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .data-table-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .data-table-row:last-child {
+    border-bottom: 0;
+  }
 }
 
 // ==================== 表格内容区（可滚动）====================

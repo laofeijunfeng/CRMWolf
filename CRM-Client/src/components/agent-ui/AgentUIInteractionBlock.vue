@@ -1,26 +1,36 @@
 <script setup lang="ts">
-import { CheckCircle2, Circle, Loader2 } from 'lucide-vue-next'
+import { AlertCircle, Check, ChevronRight, Circle, Info, LoaderCircle } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
+import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
+import InputField from '@/components/crmwolf/InputField.vue'
+import TextareaField from '@/components/crmwolf/TextareaField.vue'
+import SelectField from '@/components/crmwolf/SelectField.vue'
+import CheckboxField from '@/components/crmwolf/CheckboxField.vue'
+import MultiSelectField from '@/components/crmwolf/MultiSelectField.vue'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { AgentUIBlock, JsonObject, JsonValue } from '@/schemas/agent-contracts'
 
+import AgentUIBanner from './AgentUIBanner.vue'
 import type { InteractionNotice } from './interactionNotice'
 
 type InteractionBlock = Extract<AgentUIBlock, { type: 'interaction' }>
 type InteractionField = InteractionBlock['fields'][number]
+type InteractionOption = InteractionBlock['options'][number]
+type DispositionItem = InteractionBlock['disposition_items'][number]
+
+interface TileOption {
+  value: string
+  label: string
+  /** choice：未选前景色、选中品牌蓝，助手页选项瓦片的统一语气 */
+  tone: 'choice'
+  description?: string | null | undefined
+  group?: string | null | undefined
+  disabled?: boolean | undefined
+}
 
 const props = defineProps<{
   block: InteractionBlock
@@ -99,6 +109,7 @@ const canCancel = computed(() => (
   && props.block.business_action === 'provide_follow_up_content'
   && (props.block.interaction_type === 'text_input' || props.block.interaction_type === 'form')
 ))
+const readonly = computed(() => props.block.state === 'READ_ONLY')
 const isCompactTaskCompletion = computed(() => (
   props.block.presentation === 'COMPACT_TASK_COMPLETION'
 ))
@@ -133,6 +144,17 @@ const compactStateLabel = computed(() => {
 const stateStatus = computed(() => {
   if (props.notice?.kind === 'expired') return 'expired'
   if (props.notice?.kind === 'failed') return 'failed'
+  if (submitting.value) return 'processing'
+  return ({
+    ACTIVE: 'pending',
+    SUBMITTED: 'done',
+    EXPIRED: 'expired',
+    CANCELLED: 'cancelled',
+    READ_ONLY: 'history'
+  })[props.block.state]
+})
+
+const compactStatus = computed(() => {
   if (submitting.value) return 'processing'
   return ({
     ACTIVE: 'pending',
@@ -202,7 +224,6 @@ const submitManualDate = (): void => {
 }
 
 const kindEditorOpen = ref(false)
-const activityReferenceRef = ref<HTMLDetailsElement | null>(null)
 const activityHistoryHeadingRef = ref<HTMLElement | null>(null)
 const isActivityConfirmation = computed(() => props.block.business_action === 'confirm_activity_write')
 const activityFact = (key: string): InteractionBlock['facts'][number] | undefined => props.block.facts.find(fact => fact.key === key)
@@ -236,9 +257,10 @@ const showActivityHistory = computed(() => Boolean(
   || activityNotices.value.length > 0
 ))
 const showActivityBasis = computed(() => showActivityHistory.value || activityOpportunity.value || showActivityOrganizingBasis.value)
+// 「查看参考与依据」用 ui/collapsible；宿主点「查看对比依据」时展开并把焦点移到历史标题。
+const basisOpen = ref(false)
 const openActivityComparison = async (): Promise<void> => {
-  if (activityReferenceRef.value === null) return
-  activityReferenceRef.value.open = true
+  basisOpen.value = true
   await nextTick()
   activityHistoryHeadingRef.value?.focus({ preventScroll: true })
   activityHistoryHeadingRef.value?.scrollIntoView?.({ block: 'nearest' })
@@ -251,14 +273,11 @@ const activityWaitingLabel = computed(() => {
 const activityActionOptions = computed(() => {
   const cancel = props.block.options.find(option => option.value === 'cancel')
   const confirm = props.block.options.find(option => option.value === 'confirm')
-  return [cancel, confirm].filter((option): option is InteractionBlock['options'][number] => option !== undefined)
+  return [cancel, confirm].filter((option): option is InteractionOption => option !== undefined)
 })
-const activityKindPillClass = computed(() => {
-  const label = activityKindFact.value?.status_label ?? ''
-  if (label.includes('未识别')) return 'is-warning'
-  if (label === '已识别') return 'is-success'
-  return 'is-info'
-})
+const activityDisabledHint = computed(() => (
+  props.block.options.find((option) => option.disabled === true && option.description !== undefined && option.description !== null && option.description !== '')?.description ?? ''
+))
 
 const KIND_HINT_PREFIX = '原文提到：'
 const kindHintChannels = computed((): string[] => {
@@ -267,29 +286,62 @@ const kindHintChannels = computed((): string[] => {
   return hint.slice(KIND_HINT_PREFIX.length).split('、').map(part => part.trim()).filter(part => part !== '')
 })
 
-interface ChoiceEntry { option: InteractionBlock['options'][number]; index: number }
-interface ChoiceGroup { name: string | null; entries: ChoiceEntry[] }
 const choiceOptions = computed(() => (
   isActivityConfirmation.value ? activityActionOptions.value : props.block.options
 ))
-const choiceGroups = computed((): ChoiceGroup[] => {
-  const groups: ChoiceGroup[] = []
-  choiceOptions.value.forEach((option, index) => {
-    const name = typeof option.group === 'string' && option.group !== '' ? option.group : null
-    const current = groups[groups.length - 1]
-    if (current !== undefined && current.name === name) {
-      current.entries.push({ option, index })
-      return
-    }
-    groups.push({ name, entries: [{ option, index }] })
-  })
-  return groups
-})
 const showsChoiceOptions = computed(() => (
   isActive.value
   && (props.block.interaction_type === 'choice' || props.block.interaction_type === 'confirmation')
   && props.notice?.kind !== 'expired'
 ))
+const isGenericConfirmation = computed(() => (
+  isActivityConfirmation.value === false
+  && props.block.interaction_type === 'confirmation'
+  && showsChoiceOptions.value
+))
+const confirmationOptions = computed(() => ({
+  cancel: props.block.options.find(option => option.value === 'cancel'),
+  confirm: props.block.options.find(option => option.value === 'confirm')
+}))
+const confirmationDisabledHint = computed(() => (
+  props.block.options.find((option) => option.disabled === true && option.description !== undefined && option.description !== null && option.description !== '')?.description ?? ''
+))
+// 不再待处理的选择 / 确认折叠成一行摘要，不保留任何操作入口。
+const isCollapsedChoice = computed(() => (
+  isActivityConfirmation.value === false
+  && submittedChoiceValue.value !== null
+  && !isCompactTaskCompletion.value
+  && !isOpenFollowUpDisposition.value
+))
+// 确认卡里选了「取消」也算已处理，但不该配成功色的对勾。
+const isDeclinedConfirmation = computed(() => (
+  props.block.interaction_type === 'confirmation' && submittedChoiceValue.value === 'cancel'
+))
+// 提交中：被点的那一块在瓦片里写明「处理中…」；瓦片是等宽网格，文字变长不改宽。
+const tileOption = (option: InteractionOption): TileOption => ({
+  value: option.value,
+  tone: 'choice',
+  label: submitting.value && optionSelected(option.value) ? `${option.label}处理中…` : option.label,
+  description: option.description,
+  group: option.group,
+  disabled: option.disabled
+})
+const choiceTileOptions = computed<TileOption[]>(() => choiceOptions.value.map(tileOption))
+// 历史跟进任务的三选一只有单行标签；选项上的 description 是给别处用的说明，不在这里展开。
+const dispositionTileOptions = computed<TileOption[]>(() => props.block.options.map((option) => ({
+  value: option.value,
+  tone: 'choice',
+  label: submitting.value && optionSelected(option.value) ? `${option.label}处理中…` : option.label,
+  disabled: option.disabled
+})))
+// 活动类型的候选也走同一种瓦片语气。
+const kindTileOptions = (options: InteractionOption[] | undefined): TileOption[] => (options ?? []).map((option) => tileOption(option))
+const kindTileValue = (fact: InteractionBlock['facts'][number]): string => (
+  (fact.options ?? []).find(option => option.value === fact.value || option.label === fact.value)?.value ?? ''
+)
+const dispositionLabel = (item: DispositionItem): string | undefined => (
+  item.state === 'current' ? '当前' : item.state === 'waiting' ? '待处理' : item.result_title ?? undefined
+)
 
 const retryNoticeChoice = (): void => {
   const notice = props.notice
@@ -422,11 +474,12 @@ const selectionError = computed(() => {
   return null
 })
 
-const fieldErrorId = (field: InteractionField): string => `${props.block.id}-${field.key}-error`
-
 const focusFirstError = async (): Promise<void> => {
   await nextTick()
-  interactionRef.value?.querySelector<HTMLElement>('[data-agent-ui-error-focus="true"]')?.focus()
+  const root = interactionRef.value
+  root?.querySelector<HTMLElement>('[data-agent-ui-error-focus="true"]')?.focus()
+  // 选项瓦片是分段选择控件，校验失败时把焦点移到第一个选项按钮。
+  root?.querySelector<HTMLElement>('[data-agent-ui-choice] [role="radio"], [data-agent-ui-choice] [role="checkbox"]')?.focus()
 }
 
 const cancel = (): void => {
@@ -471,985 +524,675 @@ const submit = async (): Promise<void> => {
 </script>
 
 <template>
+  <!-- 待办任务：列表单行 -->
   <section
     v-if="isCompactTaskCompletion"
     ref="interactionRef"
-    class="agent-ui-interaction flex min-h-touch-target items-center gap-2 px-3 py-2 text-sm transition-colors"
-    :class="[
-      grouped ? '' : 'rounded-lg border border-border',
-      compactCompletionSucceeded
-        ? (grouped ? 'bg-card' : 'border-success/30 bg-card')
-        : (grouped ? 'bg-card' : 'border-border/70 bg-card')
-    ]"
+    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 px-space-3 text-foreground"
+    :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
     <button
       v-if="isActive"
       type="button"
-      class="-my-2 grid h-touch-target min-w-touch-target shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-brand focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-70"
+      class="-ml-space-2 grid size-control shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-wash-hover hover:text-brand disabled:cursor-default"
       aria-label="标记完成"
       :disabled="controlsDisabled"
       @click="completeCompactTask"
     >
-      <Loader2
+      <LoaderCircle
         v-if="submitting"
-        class="h-5 w-5 animate-spin text-brand motion-reduce:animate-none"
+        class="size-icon-sm animate-spin text-brand motion-reduce:animate-none"
         aria-hidden="true"
       />
-      <Circle v-else class="h-5 w-5" aria-hidden="true" />
+      <Circle v-else class="size-icon-sm" aria-hidden="true" />
     </button>
     <span
       v-else
-      class="-my-2 grid h-touch-target min-w-touch-target shrink-0 place-items-center rounded-full"
-      :class="compactCompletionSucceeded ? 'text-success' : 'text-muted-foreground'"
-      :aria-label="compactStateLabel"
+      class="grid h-space-4 w-space-4 shrink-0 place-items-center"
+      :class="compactCompletionSucceeded ? 'text-tone-success' : 'text-muted-foreground'"
       role="img"
+      :aria-label="compactStateLabel"
     >
-      <CheckCircle2 v-if="compactCompletionSucceeded" class="h-5 w-5" aria-hidden="true" />
-      <Circle v-else class="h-5 w-5" aria-hidden="true" />
+      <Check v-if="compactCompletionSucceeded" class="size-icon-sm" aria-hidden="true" />
+      <Circle v-else class="size-icon-sm" aria-hidden="true" />
     </span>
-    <p :id="`${block.id}-prompt`" class="m-0 min-w-0 flex-1 text-foreground">
+    <p :id="`${block.id}-prompt`" class="m-0 min-w-0 flex-1 text-body text-foreground">
       {{ block.prompt }}
     </p>
-    <span
-      class="shrink-0 text-xs"
-      :class="compactCompletionSucceeded
-        ? 'text-foreground'
-        : 'text-muted-foreground'"
-    >
-      {{ compactStateLabel }}
-    </span>
+    <StatusBadge
+      class="shrink-0"
+      :status="compactStatus"
+      type="agentInteraction"
+      size="small"
+      :label="compactStateLabel"
+    />
   </section>
 
+  <!-- 历史跟进任务 -->
   <section
     v-else-if="isOpenFollowUpDisposition"
     ref="interactionRef"
-    class="agent-ui-interaction grid gap-0 rounded-lg border border-border bg-card px-4 py-3.5 text-card-foreground"
+    class="agent-ui-interaction grid min-w-0 overflow-hidden rounded-lg border border-border bg-card text-foreground"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
-    <header class="flex items-start justify-between gap-3">
-      <h4 :id="`${block.id}-prompt`" class="m-0 text-sm font-semibold text-foreground">历史跟进任务</h4>
-      <span class="shrink-0 rounded-full border border-brand/30 bg-brand/10 px-2 text-xs font-semibold leading-5 text-foreground" :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`">{{ dispositionProgress }}</span>
+    <header class="flex items-start justify-between gap-space-3 px-space-4 pt-space-4">
+      <h4 :id="`${block.id}-prompt`" class="m-0 min-w-0 text-body font-semibold text-foreground [overflow-wrap:anywhere]">历史跟进任务</h4>
+      <Badge
+        variant="secondary"
+        class="shrink-0 font-semibold"
+        :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`"
+      >{{ dispositionProgress }}</Badge>
     </header>
-    <p v-if="block.hint" class="m-0 mt-2 text-body leading-5 text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
-    <ol class="m-0 mt-2.5 grid list-none gap-0 border-t border-border p-0">
+    <p v-if="block.hint" class="m-0 px-space-4 pt-space-2 text-body text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
+    <ol class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
       <li
         v-for="(item, index) in dispositionItems"
         :key="item.item_id"
-        class="grid gap-1.5 border-b border-border py-2.5 last:border-b-0"
+        class="grid gap-space-1 border-b border-border px-space-4 py-space-2 last:border-b-0"
       >
-        <div class="flex items-start justify-between gap-2.5">
-          <p class="m-0 min-w-0 text-sm text-foreground"><span class="mr-1.5 text-muted-foreground">{{ index + 1 }}</span>{{ item.title }}</p>
-          <span
-            class="shrink-0 rounded-full border px-2 text-xs leading-5"
-            :class="item.state === 'current'
-              ? 'border-brand/30 bg-brand/10 text-foreground'
-              : item.state === 'complete'
-                ? 'border-success/30 bg-success/12 text-foreground'
-                : item.state === 'unknown'
-                  ? 'border-warning/40 bg-warning/12 text-foreground'
-                  : item.state === 'failed'
-                    ? 'border-danger/30 bg-danger/12 text-foreground'
-                    : 'border-border bg-muted text-foreground'"
-          >{{ item.state === 'current' ? '当前' : item.state === 'waiting' ? '待处理' : item.result_title }}</span>
+        <div class="flex items-start justify-between gap-space-2">
+          <p class="m-0 min-w-0 text-body text-foreground"><span class="mr-space-1 text-muted-foreground">{{ index + 1 }}</span>{{ item.title }}</p>
+          <StatusBadge
+            class="shrink-0"
+            :status="item.state"
+            type="agentDisposition"
+            size="small"
+            :label="dispositionLabel(item)"
+          />
         </div>
-        <p v-if="item.owner_line" class="m-0 text-xs text-muted-foreground">{{ item.owner_line }}</p>
-        <div v-if="item.related && item.evidence_quote" class="grid gap-1">
-          <button
+        <p v-if="item.owner_line" class="m-0 text-caption text-muted-foreground">{{ item.owner_line }}</p>
+        <div v-if="item.related && item.evidence_quote" class="grid gap-space-1">
+          <Button
             type="button"
-            class="inline-flex min-h-touch-target w-fit items-center text-xs text-brand underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            variant="link"
+            size="sm"
+            class="justify-start px-0"
             :aria-expanded="evidenceOpenId === item.item_id"
             :aria-controls="`${block.id}-evidence-${item.item_id}`"
             data-agent-ui-related-toggle
             @click="toggleEvidence(item.item_id)"
           >
             查看关联信息
-          </button>
+          </Button>
           <p
             v-if="evidenceOpenId === item.item_id"
             :id="`${block.id}-evidence-${item.item_id}`"
-            class="m-0 rounded-md border border-border bg-background px-2.5 py-2 text-xs leading-5 text-foreground"
+            class="m-0 rounded-md bg-muted px-space-3 py-space-2 text-body text-foreground"
             data-agent-ui-related-line
           >
             本次跟进：“{{ item.evidence_quote }}”
           </p>
         </div>
-        <div v-if="item.state === 'current' && isActive" class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <button
-            v-for="option in block.options"
-            :key="option.value"
-            type="button"
-            :class="optionSelected(option.value) ? 'border-brand bg-accent text-accent-foreground' : 'border-input bg-background text-foreground disabled:bg-muted disabled:text-muted-foreground'"
-            class="min-h-touch-target h-auto whitespace-normal break-words rounded-md border px-2.5 py-1.5 text-center text-control-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
-            :disabled="controlsDisabled || option.disabled"
-            :aria-pressed="optionSelected(option.value)"
-            @click="handleOptionClick(option.value)"
-          >
-            {{ submitting && optionSelected(option.value) ? `${option.label}处理中…` : option.label }}
-          </button>
-        </div>
-        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-xs text-foreground">{{ item.result_message }}</p>
+        <SegmentedChoiceControl
+          v-if="item.state === 'current' && isActive"
+          class="mt-space-1 [--segmented-choice-columns:1] sm:[--segmented-choice-columns:3]"
+          :model-value="selectedValues[0] ?? ''"
+          :options="dispositionTileOptions"
+          :disabled="controlsDisabled"
+          :labelled-by="`${block.id}-prompt`"
+          :id-prefix="`${block.id}-disposition`"
+          wrap
+          @update:model-value="handleOptionClick"
+        />
+        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-caption text-muted-foreground">{{ item.result_message }}</p>
       </li>
     </ol>
   </section>
 
+  <!-- 已处理的选择 / 确认：折叠成一行 -->
+  <section
+    v-else-if="isCollapsedChoice"
+    ref="interactionRef"
+    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 overflow-hidden px-space-4 py-space-2 text-foreground"
+    :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
+    :aria-labelledby="`${block.id}-prompt`"
+  >
+    <component
+      :is="block.state === 'CANCELLED' || isDeclinedConfirmation ? Circle : Check"
+      class="size-icon-sm shrink-0"
+      :class="block.state === 'CANCELLED' || isDeclinedConfirmation ? 'text-muted-foreground' : 'text-tone-success'"
+      aria-hidden="true"
+    />
+    <p :id="`${block.id}-prompt`" class="m-0 min-w-0 truncate text-body font-medium text-muted-foreground">{{ block.prompt }}</p>
+    <p class="m-0 min-w-0 truncate text-body text-muted-foreground" data-agent-ui-submitted-choice>
+      已选择：<b class="font-medium text-foreground">{{ submittedChoiceOption?.label ?? submittedChoiceValue }}</b>
+    </p>
+    <StatusBadge class="ml-auto shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
+  </section>
+
+  <!-- 通用卡片：标题行 + 正文 + 底部操作区 -->
   <section
     v-else
     ref="interactionRef"
-    class="agent-ui-interaction grid rounded-lg p-3"
-    :class="isActivityConfirmation
-      ? (block.state === 'READ_ONLY' ? 'activity-card gap-0 overflow-hidden border border-dashed border-border bg-card p-0' : 'activity-card gap-0 overflow-hidden border border-border bg-card p-0')
-      : (block.state === 'READ_ONLY' ? 'gap-3 border border-dashed border-border bg-card text-card-foreground' : 'gap-3 border border-brand/20 bg-card text-card-foreground')"
+    class="agent-ui-interaction grid min-w-0 gap-0 overflow-hidden rounded-lg border border-border bg-card text-foreground"
+    :data-state="readonly ? 'readonly' : undefined"
     :aria-labelledby="`${block.id}-prompt`"
     :aria-busy="submitting"
   >
-    <template v-if="isActivityConfirmation">
-      <header class="activity-header">
-        <h2 :id="`${block.id}-prompt`" class="activity-title">{{ activityHistory ? '客户活动' : '确认写入客户活动' }}</h2>
-        <span class="activity-pill" :class="activityHistory ? 'is-muted' : 'is-info'">{{ activityWaitingLabel }}</span>
-      </header>
-      <div class="activity-main">
-        <section class="activity-section">
-          <p v-if="activityFact('customer')" class="activity-customer">
-            <b>{{ activityFact('customer')?.value }}</b>
-            <span aria-hidden="true">/</span>
-            <span>客户活动</span>
-          </p>
-          <p v-if="activityFact('summary')" class="activity-body">{{ activityFact('summary')?.value }}</p>
-          <dl
-            v-if="activityFact('next_action') || activityFact('customer_commitment') || activityFact('next_follow_time') || activityKindFact"
-            class="activity-meta"
-          >
-            <div v-if="activityFact('customer_commitment')" class="activity-meta-row">
-              <dt>客户承诺</dt>
-              <dd>{{ activityFact('customer_commitment')?.value }}</dd>
-            </div>
-            <div v-if="activityFact('next_action')" class="activity-meta-row">
-              <dt>下一步</dt>
-              <dd>{{ activityFact('next_action')?.value }}</dd>
-            </div>
-            <div v-if="activityFact('next_follow_time')" class="activity-meta-row">
-              <dt>跟进时间</dt>
-              <dd>
-                <div class="activity-time">
-                  <span class="activity-time-value">{{ activityFact('next_follow_time')?.value }}</span><span v-if="activityTimeFact?.status_label" class="activity-time-status">（{{ activityTimeFact.status_label }}）</span>
-                </div>
-              </dd>
-            </div>
-            <div v-if="activityKindFact" class="activity-meta-row">
-              <dt>活动类型</dt>
-              <dd>
-                <div class="activity-kind">
-                  <span class="activity-kind-name">{{ activityKindFact.value }}</span>
-                  <span v-if="activityKindFact.status_label && !activityHistory" class="activity-pill" :class="activityKindPillClass">{{ activityKindFact.status_label }}</span>
-                  <button v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认'" type="button" class="activity-link" @click="kindEditorOpen = !kindEditorOpen">{{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}</button>
-                </div>
-                <p v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'" class="activity-caption" data-agent-ui-kind-evidence>{{ activityKindFact.source }}</p>
-              </dd>
-            </div>
-          </dl>
-          <div v-if="activityKindFact && kindOptionsVisible(activityKindFact)" class="activity-kind-editor">
-            <div class="activity-kind-editor-head">
-              <span>选择活动类型</span>
-            </div>
-            <div class="activity-kind-options">
-              <button v-for="option in activityKindFact.options ?? []" :key="option.value" type="button" class="activity-kind-option" :class="option.label === activityKindFact.value ? 'is-selected' : ''" :disabled="controlsDisabled || option.disabled" @click="reviseActivityKind(option.value)">{{ option.label }}</button>
-            </div>
-          </div>
-        </section>
-        <section v-if="activityChangeSummary" class="activity-change">
-          <p class="activity-body">{{ activityChangeSummary.value }}</p>
-          <button type="button" class="activity-link" data-activity-comparison-link @click="openActivityComparison">查看对比依据</button>
-        </section>
-        <details v-if="showActivityBasis" ref="activityReferenceRef" class="activity-details activity-basis">
-          <summary>查看参考与依据</summary>
-          <div class="activity-reference-body">
-            <section v-if="showActivityHistory" class="activity-reference-section">
-              <h3 ref="activityHistoryHeadingRef" class="activity-reference-heading" tabindex="-1" data-activity-history-heading>历史对比</h3>
-              <div v-if="activityComparisonPrevious" class="activity-reference-quote" data-activity-comparison-previous>
-                <h4>此前</h4>
-                <p>{{ activityComparisonPrevious.value }}</p>
-                <p v-if="activityComparisonPrevious.source" class="activity-caption">{{ activityComparisonPrevious.source }}</p>
-              </div>
-              <div v-if="activityComparisonCurrent" class="activity-reference-quote" data-activity-comparison-current>
-                <h4>本次</h4>
-                <p>{{ activityComparisonCurrent.value }}</p>
-                <p v-if="activityComparisonCurrent.source" class="activity-caption">{{ activityComparisonCurrent.source }}</p>
-              </div>
-              <p v-if="activityContextStatus" class="activity-caption">{{ activityContextStatus.value }}</p>
-              <div v-if="activityLegacyContext || activityEvidenceLines.length > 0" class="activity-reference-quote">
-                <h4>历史参考背景</h4>
-                <p v-if="activityLegacyContext">{{ activityLegacyContext.source || activityLegacyContext.value }}</p>
-                <p v-for="line in activityEvidenceLines" :key="line">{{ line }}</p>
-              </div>
-              <ul v-if="activityNotices.length > 0" class="activity-reference-notices">
-                <li v-for="notice in activityNotices" :key="notice.key">{{ notice.value }}</li>
-              </ul>
-            </section>
-            <section v-if="activityOpportunity" class="activity-reference-section" data-activity-opportunity>
-              <h3 class="activity-reference-heading">参考商机</h3>
-              <p class="activity-body">{{ activityOpportunity.value }}</p>
-              <p class="activity-caption">本次仅记录客户活动，不修改商机阶段。</p>
-            </section>
-            <details v-if="showActivityOrganizingBasis" class="activity-details activity-score">
-              <summary>内容评分与整理依据</summary>
-              <div class="activity-score-body">
-                <div v-if="activityScoreFact || activityScoreReason" class="activity-reference-quote">
-                  <h4 v-if="activityScoreFact">内容评分：{{ activityScoreFact.value }}</h4>
-                  <p v-if="activityScoreReason">{{ activityScoreReason.value }}</p>
-                </div>
-                <div v-if="activityTimeFact?.source" class="activity-reference-quote">
-                  <h4>日期原话</h4>
-                  <p>{{ activityTimeFact.source }}</p>
-                </div>
-                <div v-if="activitySourceFolded" class="activity-reference-quote">
-                  <h4>类型来源</h4>
-                  <p>{{ activitySourceFolded }}</p>
-                </div>
-                <p v-if="activityIgnoredNoise" class="activity-caption" data-activity-ignored-noise>{{ activityIgnoredNoise.value }}</p>
-              </div>
-            </details>
-          </div>
-        </details>
-      </div>
-    </template>
-    <header v-if="!isActivityConfirmation" class="flex items-start justify-between gap-3">
-      <div class="flex min-w-0 items-start gap-2">
-        <span class="grid size-5 shrink-0 place-items-center rounded-sm bg-brand/10 text-caption font-semibold text-foreground" aria-hidden="true">?</span>
-        <p :id="`${block.id}-prompt`" class="m-0 text-body font-semibold leading-5 text-foreground">{{ block.prompt }}</p>
-      </div>
-      <StatusBadge class="shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
+    <header class="flex items-start justify-between gap-space-3 px-space-4 pt-space-4">
+      <h2
+        v-if="isActivityConfirmation"
+        :id="`${block.id}-prompt`"
+        class="m-0 min-w-0 text-body [overflow-wrap:anywhere]"
+        :class="readonly ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'"
+      >{{ activityHistory ? '客户活动' : '确认写入客户活动' }}</h2>
+      <p
+        v-else
+        :id="`${block.id}-prompt`"
+        class="m-0 min-w-0 text-body [overflow-wrap:anywhere]"
+        :class="readonly ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'"
+      >{{ block.prompt }}</p>
+      <StatusBadge
+        class="shrink-0"
+        :status="isActivityConfirmation ? (activityHistory ? 'history' : 'pending') : stateStatus"
+        type="agentInteraction"
+        size="small"
+        :label="isActivityConfirmation ? activityWaitingLabel : undefined"
+      />
     </header>
 
-    <div v-if="!isActivityConfirmation && block.facts.length > 0" class="grid gap-3" data-agent-ui-confirmation-facts>
-      <section v-for="group in ['write', 'activity_kind', 'context', 'score']" :key="group" class="grid gap-2">
-        <template v-if="block.facts.some(fact => (fact.group ?? 'write') === group)">
-          <div :class="group === 'write' ? 'grid grid-cols-1 gap-2 sm:grid-cols-2' : 'grid gap-2'">
-            <div
-              v-for="fact in block.facts.filter(item => (item.group ?? 'write') === group)"
-              :key="fact.key"
-              class="min-w-0 rounded-md border border-border bg-card px-2.5 py-2"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <dt class="text-caption text-muted-foreground">{{ fact.label }}</dt>
-                <StatusBadge v-if="fact.status_label" :status="fact.status_label" type="agentFact" size="small" />
+    <div v-if="isActivityConfirmation" class="grid min-w-0 gap-space-3 px-space-4 pb-space-4 pt-space-3">
+      <p
+        v-if="activityFact('customer')"
+        class="m-0 flex flex-wrap items-center gap-space-1 text-body"
+        data-activity-customer
+      >
+        <b class="font-medium text-foreground">{{ activityFact('customer')?.value }}</b>
+        <span class="text-muted-foreground" aria-hidden="true">/</span>
+        <span class="text-muted-foreground">客户活动</span>
+      </p>
+      <p v-if="activityFact('summary')" class="m-0 text-body text-foreground" data-activity-summary>{{ activityFact('summary')?.value }}</p>
+      <dl
+        v-if="activityFact('next_action') || activityFact('customer_commitment') || activityFact('next_follow_time') || activityKindFact"
+        class="m-0 grid gap-space-1 border-t border-border pt-space-3"
+        data-activity-meta
+      >
+        <div
+          v-if="activityFact('customer_commitment')"
+          class="grid grid-cols-[72px_minmax(0,1fr)] gap-x-space-3 max-[639px]:grid-cols-[minmax(0,1fr)]"
+          data-activity-prop="customer_commitment"
+        >
+          <dt class="text-caption leading-[var(--line-height-body)] text-muted-foreground">客户承诺</dt>
+          <dd class="m-0 min-w-0 text-body text-foreground [overflow-wrap:anywhere]">{{ activityFact('customer_commitment')?.value }}</dd>
+        </div>
+        <div
+          v-if="activityFact('next_action')"
+          class="grid grid-cols-[72px_minmax(0,1fr)] gap-x-space-3 max-[639px]:grid-cols-[minmax(0,1fr)]"
+          data-activity-prop="next_action"
+        >
+          <dt class="text-caption leading-[var(--line-height-body)] text-muted-foreground">下一步</dt>
+          <dd class="m-0 min-w-0 text-body text-foreground [overflow-wrap:anywhere]">{{ activityFact('next_action')?.value }}</dd>
+        </div>
+        <div
+          v-if="activityFact('next_follow_time')"
+          class="grid grid-cols-[72px_minmax(0,1fr)] gap-x-space-3 max-[639px]:grid-cols-[minmax(0,1fr)]"
+          data-activity-prop="next_follow_time"
+        >
+          <dt class="text-caption leading-[var(--line-height-body)] text-muted-foreground">跟进时间</dt>
+          <dd class="m-0 min-w-0 text-body text-foreground [overflow-wrap:anywhere]">
+            <span data-activity-time-value>{{ activityFact('next_follow_time')?.value }}</span><span v-if="activityTimeFact?.status_label" class="text-muted-foreground">（{{ activityTimeFact.status_label }}）</span>
+          </dd>
+        </div>
+        <div
+          v-if="activityKindFact"
+          class="grid grid-cols-[72px_minmax(0,1fr)] gap-x-space-3 max-[639px]:grid-cols-[minmax(0,1fr)]"
+          data-activity-prop="activity_kind"
+        >
+          <dt class="text-caption leading-[var(--line-height-body)] text-muted-foreground">活动类型</dt>
+          <dd class="m-0 min-w-0">
+            <div class="flex flex-wrap items-center gap-space-2">
+              <span class="text-body font-medium text-foreground">{{ activityKindFact.value }}</span>
+              <StatusBadge
+                v-if="activityKindFact.status_label && !activityHistory"
+                :status="activityKindFact.status_label"
+                type="agentFact"
+                size="small"
+              />
+              <Button
+                v-if="(activityKindFact.options?.length ?? 0) > 0 && activityKindFact.status_label !== '未识别 · 需要确认' && isActive"
+                type="button"
+                variant="link"
+                size="sm"
+                class="justify-start px-0"
+                @click="kindEditorOpen = !kindEditorOpen"
+              >
+                {{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}
+              </Button>
+            </div>
+            <p
+              v-if="activityKindFact.source && activityKindFact.status_label === '未识别 · 需要确认'"
+              class="m-0 text-caption text-muted-foreground"
+              data-agent-ui-kind-evidence
+            >{{ activityKindFact.source }}</p>
+          </dd>
+        </div>
+      </dl>
+      <div
+        v-if="activityKindFact && kindOptionsVisible(activityKindFact)"
+        class="grid gap-space-2 rounded-md border border-border bg-background p-space-3"
+      >
+        <span :id="`${block.id}-kind-editor`" class="text-caption font-medium text-foreground">选择活动类型</span>
+        <SegmentedChoiceControl
+          :model-value="activityKindFact.value"
+          :options="kindTileOptions(activityKindFact.options)"
+          :disabled="controlsDisabled"
+          :labelled-by="`${block.id}-kind-editor`"
+          :id-prefix="`${block.id}-kind`"
+          wrap
+          class="[--segmented-choice-columns:2] sm:[--segmented-choice-columns:3]"
+          @update:model-value="reviseActivityKind"
+        />
+      </div>
+      <section v-if="activityChangeSummary" class="grid gap-space-1" data-activity-change>
+        <p class="m-0 text-body text-foreground">{{ activityChangeSummary.value }}</p>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          class="justify-start px-0"
+          data-activity-comparison-link
+          @click="openActivityComparison"
+        >
+          查看对比依据
+        </Button>
+      </section>
+      <Collapsible
+        v-if="showActivityBasis"
+        v-model:open="basisOpen"
+        class="grid gap-0 border-t border-border pt-space-1"
+        data-activity-basis
+      >
+        <CollapsibleTrigger as-child>
+          <button
+            type="button"
+            class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-full items-center gap-space-2 text-left text-caption text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronRight
+              class="size-icon-sm shrink-0 transition-transform"
+              :class="basisOpen ? 'rotate-90' : ''"
+              aria-hidden="true"
+            />
+            查看参考与依据
+          </button>
+        </CollapsibleTrigger>
+        <!-- 内容常驻 DOM（「查看对比依据」展开后要立刻把焦点移进去），收起时用 display:none 移出视觉与读屏。 -->
+        <CollapsibleContent force-mount :class="basisOpen ? '' : 'hidden'">
+          <div class="grid gap-space-2 pb-space-2">
+            <section v-if="showActivityHistory" class="grid gap-space-2">
+              <h3
+                ref="activityHistoryHeadingRef"
+                class="m-0 text-caption font-semibold text-foreground"
+                tabindex="-1"
+                data-activity-history-heading
+              >历史对比</h3>
+              <div v-if="activityComparisonPrevious" class="grid gap-space-1 rounded-md bg-muted px-space-3 py-space-2" data-activity-comparison-previous>
+                <h4 class="m-0 text-caption font-medium text-foreground">此前</h4>
+                <p class="m-0 text-body text-foreground">{{ activityComparisonPrevious.value }}</p>
+                <p v-if="activityComparisonPrevious.source" class="m-0 text-caption text-muted-foreground">{{ activityComparisonPrevious.source }}</p>
               </div>
-              <dd class="m-0 mt-0.5 text-xs font-semibold text-foreground" :class="group === 'activity_kind' ? '' : 'truncate'" :title="fact.value">{{ fact.value }}</dd>
-              <p v-if="fact.source" class="m-0 mt-1 text-caption leading-5 text-muted-foreground">{{ fact.source }}</p>
-              <div v-if="(fact.options?.length ?? 0) > 0" class="mt-2 grid gap-2">
+              <div v-if="activityComparisonCurrent" class="grid gap-space-1 rounded-md bg-muted px-space-3 py-space-2" data-activity-comparison-current>
+                <h4 class="m-0 text-caption font-medium text-foreground">本次</h4>
+                <p class="m-0 text-body text-foreground">{{ activityComparisonCurrent.value }}</p>
+                <p v-if="activityComparisonCurrent.source" class="m-0 text-caption text-muted-foreground">{{ activityComparisonCurrent.source }}</p>
+              </div>
+              <p v-if="activityContextStatus" class="m-0 text-caption text-muted-foreground">{{ activityContextStatus.value }}</p>
+              <div v-if="activityLegacyContext || activityEvidenceLines.length > 0" class="grid gap-space-1">
+                <h4 class="m-0 text-caption font-medium text-foreground">历史参考背景</h4>
+                <p v-if="activityLegacyContext" class="m-0 text-body text-foreground">{{ activityLegacyContext.source || activityLegacyContext.value }}</p>
+                <p v-for="line in activityEvidenceLines" :key="line" class="m-0 text-body text-foreground">{{ line }}</p>
+              </div>
+              <ul v-if="activityNotices.length > 0" class="m-0 grid list-none gap-space-1 p-0">
+                <li v-for="notice in activityNotices" :key="notice.key" class="text-caption text-muted-foreground">{{ notice.value }}</li>
+              </ul>
+            </section>
+            <section v-if="activityOpportunity" class="grid gap-space-1" data-activity-opportunity>
+              <h3 class="m-0 text-caption font-semibold text-foreground">参考商机</h3>
+              <p class="m-0 text-body text-foreground">{{ activityOpportunity.value }}</p>
+              <p class="m-0 text-caption text-muted-foreground">本次仅记录客户活动，不修改商机阶段。</p>
+            </section>
+            <Collapsible
+              v-if="showActivityOrganizingBasis"
+              v-slot="{ open }"
+              class="grid gap-0 border-t border-border pt-space-1"
+              data-activity-score
+            >
+              <CollapsibleTrigger as-child>
                 <button
-                  v-if="fact.status_label !== '未识别 · 需要确认'"
                   type="button"
-                  class="min-h-touch-target w-fit text-xs text-brand underline-offset-2 hover:underline"
+                  class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-full items-center gap-space-2 text-left text-caption text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ChevronRight
+                    class="size-icon-sm shrink-0 transition-transform"
+                    :class="open ? 'rotate-90' : ''"
+                    aria-hidden="true"
+                  />
+                  内容评分与整理依据
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent force-mount :class="open ? '' : 'hidden'">
+                <div class="grid gap-space-2 pb-space-1">
+                  <div v-if="activityScoreFact || activityScoreReason" class="grid gap-space-1">
+                    <h4 v-if="activityScoreFact" class="m-0 text-caption font-medium text-foreground">内容评分：{{ activityScoreFact.value }}</h4>
+                    <p v-if="activityScoreReason" class="m-0 text-body text-foreground">{{ activityScoreReason.value }}</p>
+                  </div>
+                  <div v-if="activityTimeFact?.source" class="grid gap-space-1">
+                    <h4 class="m-0 text-caption font-medium text-foreground">日期原话</h4>
+                    <p class="m-0 text-body text-foreground">{{ activityTimeFact.source }}</p>
+                  </div>
+                  <div v-if="activitySourceFolded" class="grid gap-space-1">
+                    <h4 class="m-0 text-caption font-medium text-foreground">类型来源</h4>
+                    <p class="m-0 text-body text-foreground">{{ activitySourceFolded }}</p>
+                  </div>
+                  <p v-if="activityIgnoredNoise" class="m-0 text-caption text-muted-foreground" data-activity-ignored-noise>{{ activityIgnoredNoise.value }}</p>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+
+    <div v-else class="grid min-w-0 gap-space-3 px-space-4 pb-space-4 pt-space-3">
+      <div v-if="block.facts.length > 0" class="grid gap-space-3" data-agent-ui-confirmation-facts>
+        <section v-for="group in ['write', 'activity_kind', 'context', 'score']" :key="group" class="grid gap-space-2">
+          <template v-if="block.facts.some(fact => (fact.group ?? 'write') === group)">
+            <div :class="group === 'write' ? 'grid grid-cols-1 gap-x-space-3 gap-y-space-2 sm:grid-cols-2' : 'grid gap-x-space-3 gap-y-space-2'">
+              <div
+                v-for="fact in block.facts.filter(item => (item.group ?? 'write') === group)"
+                :key="fact.key"
+                class="grid min-w-0 content-start gap-space-1"
+                :data-agent-ui-fact="fact.key"
+              >
+                <dt class="m-0 flex flex-wrap items-center justify-between gap-space-1 text-caption text-muted-foreground">
+                  {{ fact.label }}
+                  <StatusBadge v-if="fact.status_label" :status="fact.status_label" type="agentFact" size="small" />
+                </dt>
+                <dd class="m-0 truncate text-body font-medium text-foreground" :title="fact.value">{{ fact.value }}</dd>
+                <p v-if="fact.source" class="m-0 text-caption text-muted-foreground">{{ fact.source }}</p>
+                <Button
+                  v-if="(fact.options?.length ?? 0) > 0 && fact.status_label !== '未识别 · 需要确认' && isActive"
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  class="justify-start px-0"
                   @click="kindEditorOpen = !kindEditorOpen"
                 >
                   {{ kindEditorOpen ? '收起类型选项' : '修改活动类型' }}
-                </button>
-                <div v-if="kindOptionsVisible(fact)" class="flex flex-wrap gap-2">
-                  <button
-                    v-for="option in fact.options ?? []"
-                    :key="option.value"
-                    type="button"
-                    class="min-h-touch-target rounded-md border px-3 text-xs"
-                    :class="option.value === fact.value || option.label === fact.value ? 'border-brand bg-accent text-accent-foreground' : 'border-border bg-background'"
-                    :disabled="controlsDisabled || option.disabled"
-                    @click="reviseActivityKind(option.value)"
-                  >
-                    {{ option.label }}
-                  </button>
+                </Button>
+                <div v-if="kindOptionsVisible(fact)" class="grid gap-space-2 rounded-md border border-border bg-background p-space-3">
+                  <span class="text-caption font-medium text-foreground">选择活动类型</span>
+                  <SegmentedChoiceControl
+                    :model-value="kindTileValue(fact)"
+                    :options="kindTileOptions(fact.options)"
+                    :disabled="controlsDisabled"
+                    wrap
+                    class="[--segmented-choice-columns:2] sm:[--segmented-choice-columns:3]"
+                    @update:model-value="reviseActivityKind"
+                  />
                 </div>
               </div>
             </div>
-          </div>
-        </template>
-      </section>
-    </div>
-
-    <div
-      v-if="notice?.kind === 'failed'"
-      class="rounded-md border border-danger/30 bg-danger/12 px-3 py-2"
-      data-agent-ui-card-notice="failed"
-    >
-      <p class="m-0 text-xs leading-5 text-foreground">选择没有提交成功，请重新选择</p>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        class="mt-2 min-h-touch-target border-destructive/30 bg-background text-foreground hover:bg-destructive/10"
-        :disabled="disabled === true || locked === true || submitting"
-        @click="retryNoticeChoice"
-      >
-        重新提交
-      </Button>
-    </div>
-    <p
-      v-else-if="notice?.kind === 'invalid'"
-      class="m-0 rounded-md border border-danger/30 bg-danger/12 px-3 py-2 text-xs leading-5 text-foreground"
-      data-agent-ui-card-notice="invalid"
-    >
-      请从卡片给出的活动类型中选择。
-    </p>
-    <p
-      v-else-if="notice?.kind === 'expired'"
-      class="m-0 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground"
-      data-agent-ui-card-notice="expired"
-    >
-      已在别处处理，已刷新
-    </p>
-
-    <div
-      v-if="submittedChoiceValue !== null"
-      class="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-      data-agent-ui-submitted-choice
-    >
-      <span class="font-medium">已选择：</span>{{ submittedChoiceOption?.label ?? submittedChoiceValue }}
-    </div>
-
-    <template v-else-if="showsChoiceOptions">
-      <div
-        class="gap-2"
-        :class="block.interaction_type === 'confirmation' ? (isActivityConfirmation ? 'activity-actions' : 'flex flex-wrap') : 'grid grid-cols-1 sm:grid-cols-2'"
-        role="group"
-        :aria-invalid="selectionError !== null"
-        :aria-describedby="selectionError === null ? undefined : `${block.id}-selection-error`"
-      >
-      <p
-        v-if="isActivityConfirmation && block.options.some(option => option.disabled && option.description)"
-        class="activity-actions-hint"
-      >
-        {{ block.options.find(option => option.disabled && option.description)?.description }}
-      </p>
-      <div
-        v-if="block.hint"
-        class="col-span-full rounded-md border border-border bg-muted px-3 py-2"
-        data-agent-ui-kind-hint
-      >
-        <p class="m-0 flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
-          <span>原文提到：</span>
-          <span
-            v-for="channel in kindHintChannels"
-            :key="channel"
-            class="rounded border border-border bg-background px-1.5 py-0.5 text-caption text-foreground"
-          >{{ channel }}</span>
-          <span v-if="kindHintChannels.length === 0">{{ block.hint }}</span>
-        </p>
-        <p class="m-0 mt-1 text-xs leading-5 text-foreground">
-          <b class="font-semibold">请按本次实际发生的沟通来选</b>；之后计划的会议不算本次活动。
-        </p>
+          </template>
+        </section>
       </div>
-      <template v-for="(group, groupIndex) in choiceGroups" :key="`${group.name ?? ''}#${groupIndex}`">
-        <p v-if="group.name" class="col-span-full m-0 mt-1 text-caption font-medium text-muted-foreground">{{ group.name }}</p>
-        <Button
-          v-for="entry in group.entries"
-          :key="entry.option.value"
-          type="button"
-          :variant="block.interaction_type === 'confirmation' && entry.option.value === 'confirm' ? 'default' : 'outline'"
-          class="min-h-touch-target h-auto justify-start gap-0.5 px-3 py-2 text-left"
-          :class="[
-            block.interaction_type === 'confirmation' ? '' : 'grid w-full bg-background',
-            block.business_action === 'resolve_temporal_choice' ? 'min-w-0 grid-cols-1 whitespace-normal [overflow-wrap:anywhere]' : '',
-            optionSelected(entry.option.value) ? 'border-brand bg-accent text-accent-foreground' : '',
-            isActivityConfirmation ? 'activity-action' : '', isActivityConfirmation && entry.option.disabled ? 'border-border bg-muted text-muted-foreground opacity-100' : ''
-          ]"
-          :aria-pressed="optionSelected(entry.option.value)"
-          :disabled="controlsDisabled || entry.option.disabled"
-          :data-agent-ui-error-focus="selectionError !== null && entry.index === 0 ? 'true' : undefined"
-          @click="handleOptionClick(entry.option.value)"
-        >
-          <span>{{ submitting && optionSelected(entry.option.value) ? `${entry.option.label}处理中…` : entry.option.label }}</span>
-          <small v-if="entry.option.description && block.interaction_type !== 'confirmation'" class="text-xs text-muted-foreground">
-            {{ entry.option.description }}
-          </small>
-        </Button>
-      </template>
-        <p
-          v-if="!isActivityConfirmation && block.interaction_type === 'confirmation' && block.options.some(option => option.disabled && option.description)"
-          class="m-0 basis-full text-xs text-muted-foreground"
-        >
-          {{ block.options.find(option => option.disabled && option.description)?.description }}
-        </p>
+
+      <!-- 卡片级提示只由宿主挂在活动类型选择卡上（见 SalesAssistantChat.cardNoticeKey），所以只出现在通用卡片里。 -->
+      <AgentUIBanner
+        v-if="notice?.kind === 'failed'"
+        tone="danger"
+        :icon="AlertCircle"
+        title="选择没有提交成功，请重新选择"
+        data-agent-ui-card-notice="failed"
+      >
+        <template #actions>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            :disabled="disabled === true || locked === true || submitting"
+            @click="retryNoticeChoice"
+          >
+            重新提交
+          </Button>
+        </template>
+      </AgentUIBanner>
+      <AgentUIBanner
+        v-else-if="notice?.kind === 'invalid'"
+        tone="danger"
+        :icon="AlertCircle"
+        title="请从卡片给出的活动类型中选择。"
+        data-agent-ui-card-notice="invalid"
+      />
+      <AgentUIBanner
+        v-else-if="notice?.kind === 'expired'"
+        tone="neutral"
+        :icon="Info"
+        role="status"
+        title="已在别处处理，已刷新"
+        data-agent-ui-card-notice="expired"
+      />
+
+      <div v-if="isGenericConfirmation && confirmationDisabledHint" class="text-caption text-muted-foreground">
+        {{ confirmationDisabledHint }}
+      </div>
+
+      <template v-if="showsChoiceOptions && block.interaction_type === 'choice'">
+        <div v-if="block.hint" class="grid gap-space-1" data-agent-ui-kind-hint>
+          <p class="m-0 flex flex-wrap items-center gap-space-2 text-caption text-muted-foreground">
+            <span>原文提到：</span>
+            <Badge v-for="channel in kindHintChannels" :key="channel" variant="secondary">{{ channel }}</Badge>
+            <span v-if="kindHintChannels.length === 0">{{ block.hint }}</span>
+          </p>
+          <p class="m-0 text-caption text-muted-foreground">
+            <b class="font-semibold text-foreground">请按本次实际发生的沟通来选</b>；之后计划的会议不算本次活动。
+          </p>
+        </div>
+        <div class="grid gap-space-2" data-agent-ui-choice>
+          <SegmentedChoiceControl
+            v-if="block.selection_mode === 'multiple'"
+            multiple
+            :model-value="selectedValues"
+            :options="choiceTileOptions"
+            :disabled="controlsDisabled"
+            :labelled-by="`${block.id}-prompt`"
+            :id-prefix="`${block.id}-option`"
+            :invalid="selectionError !== null"
+            :described-by="selectionError === null ? undefined : `${block.id}-selection-error`"
+            wrap
+            class="[--segmented-choice-columns:2]"
+            @update:model-value="selectedValues = $event"
+          />
+          <SegmentedChoiceControl
+            v-else
+            :model-value="selectedValues[0] ?? ''"
+            :options="choiceTileOptions"
+            :disabled="controlsDisabled"
+            :labelled-by="`${block.id}-prompt`"
+            :id-prefix="`${block.id}-option`"
+            :invalid="selectionError !== null"
+            :described-by="selectionError === null ? undefined : `${block.id}-selection-error`"
+            wrap
+            class="[--segmented-choice-columns:2]"
+            @update:model-value="handleOptionClick"
+          />
+        </div>
+        <InputField
+          v-if="block.business_action === 'resolve_temporal_choice'"
+          :id="`${block.id}-manual-date`"
+          :model-value="manualDate"
+          label="手动输入其他日期"
+          placeholder="例如：2026-10-30"
+          helper-text="选择候选或输入完整日期后继续。"
+          :disabled="controlsDisabled"
+          @update:model-value="manualDate = String($event)"
+          @keydown.enter.prevent="submitManualDate"
+        />
         <p
           v-if="selectionError !== null"
           :id="`${block.id}-selection-error`"
-          class="m-0 text-sm text-foreground"
+          class="m-0 text-body text-foreground"
           role="alert"
         >
           {{ selectionError }}
         </p>
-      </div>
-      <div v-if="block.business_action === 'resolve_temporal_choice'" class="grid gap-1.5">
-        <label class="text-body font-semibold text-foreground" :for="`${block.id}-manual-date`">手动输入其他日期</label>
-        <input
-          :id="`${block.id}-manual-date`"
-          v-model="manualDate"
-          type="text"
-          class="min-h-touch-target rounded-md border border-border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          placeholder="例如：2026-10-30"
-          :disabled="controlsDisabled"
-          @keydown.enter.prevent="submitManualDate"
-        />
-        <p class="m-0 text-caption text-muted-foreground">选择候选或输入完整日期后继续。</p>
-      </div>
-    </template>
-    <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
+      </template>
 
-    <div
-      v-else-if="submittedTextField !== null"
-      class="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
-      data-agent-ui-submitted-text
-    >
-      <span class="font-medium">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
-    </div>
+      <p
+        v-else-if="submittedTextField !== null"
+        class="m-0 text-body text-foreground [overflow-wrap:anywhere]"
+        data-agent-ui-submitted-text
+      >
+        <span class="font-medium text-muted-foreground">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
+      </p>
 
-    <div v-else-if="block.state === 'READ_ONLY' && (block.interaction_type === 'text_input' || block.interaction_type === 'form')" class="hidden"></div>
-    <form v-else class="grid gap-3" novalidate @submit.prevent="submit">
-      <div v-for="field in block.fields" :key="field.key" class="grid gap-1.5">
-        <Label :for="`${block.id}-${field.key}`" class="text-sm font-medium text-foreground">
-          {{ field.label }}<b v-if="field.required" aria-hidden="true"> *</b>
-        </Label>
-
-        <Textarea
-          v-if="field.field_type === 'textarea'"
-          :id="`${block.id}-${field.key}`"
-          :model-value="textValue(field)"
-          :placeholder="field.placeholder ?? undefined"
-          :minlength="field.min_length ?? undefined"
-          :maxlength="field.max_length ?? undefined"
-          :required="field.required"
-          :disabled="controlsDisabled"
-          :aria-invalid="visibleFieldError(field) !== null"
-          :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
-          :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-          rows="3"
-          @update:model-value="updateTextValue(field, $event)"
-        />
-
-        <Input
-          v-else-if="field.field_type === 'text' || field.field_type === 'date' || field.field_type === 'datetime'"
-          :id="`${block.id}-${field.key}`"
-          class="min-h-touch-target"
-          :type="field.field_type === 'datetime' ? 'datetime-local' : field.field_type"
-          :model-value="textValue(field)"
-          :placeholder="field.placeholder ?? undefined"
-          :minlength="field.min_length ?? undefined"
-          :maxlength="field.max_length ?? undefined"
-          :required="field.required"
-          :disabled="controlsDisabled"
-          :aria-invalid="visibleFieldError(field) !== null"
-          :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
-          :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-          @update:model-value="updateTextValue(field, $event)"
-        />
-
-        <Input
-          v-else-if="field.field_type === 'number'"
-          :id="`${block.id}-${field.key}`"
-          class="min-h-touch-target"
-          type="number"
-          :model-value="numberValue(field)"
-          :min="field.minimum ?? undefined"
-          :max="field.maximum ?? undefined"
-          :required="field.required"
-          :disabled="controlsDisabled"
-          :aria-invalid="visibleFieldError(field) !== null"
-          :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
-          :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-          @update:model-value="updateNumberValue(field, $event)"
-        />
-
-        <Select
-          v-else-if="field.field_type === 'select'"
-          :model-value="textValue(field)"
-          :disabled="controlsDisabled"
-          @update:model-value="updateSelectValue(field, $event)"
-        >
-          <SelectTrigger
+      <form v-else-if="!(readonly && (block.interaction_type === 'text_input' || block.interaction_type === 'form'))" class="grid gap-space-3" novalidate @submit.prevent="submit">        <template v-for="field in block.fields" :key="field.key">
+          <TextareaField
+            v-if="field.field_type === 'textarea'"
             :id="`${block.id}-${field.key}`"
-            class="min-h-touch-target"
-            :aria-required="field.required"
-            :aria-invalid="visibleFieldError(field) !== null"
-            :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
-            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-          >
-            <SelectValue :placeholder="field.placeholder ?? `请选择${field.label}`" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="option in field.options"
-              :key="option.value"
-              :value="option.value"
-              :disabled="option.disabled"
-            >
-              {{ option.label }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select
-          v-else-if="field.field_type === 'multi_select'"
-          :model-value="selectedFieldValues(field)"
-          :multiple="true"
-          :disabled="controlsDisabled"
-          @update:model-value="updateMultiSelectValue(field, $event)"
-        >
-          <SelectTrigger
-            :id="`${block.id}-${field.key}`"
-            class="min-h-touch-target"
-            :aria-required="field.required"
-            :aria-invalid="visibleFieldError(field) !== null"
-            :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
-            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-          >
-            <SelectValue :placeholder="field.placeholder ?? `请选择${field.label}`" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="option in field.options"
-              :key="option.value"
-              :value="option.value"
-              :disabled="option.disabled"
-            >
-              {{ option.label }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-
-        <div v-else class="flex min-h-11 items-center gap-2">
-          <Checkbox
-            :id="`${block.id}-${field.key}`"
-            :checked="booleanValue(field)"
+            :label="field.label"
+            :model-value="textValue(field)"
+            :placeholder="field.placeholder ?? ''"
             :required="field.required"
             :disabled="controlsDisabled"
-            :aria-invalid="visibleFieldError(field) !== null"
-            :aria-describedby="visibleFieldError(field) === null ? undefined : fieldErrorId(field)"
+            :error="visibleFieldError(field) ?? ''"
+            rows="3"
+            :minlength="field.min_length ?? undefined"
+            :maxlength="field.max_length ?? undefined"
             :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
-            @update:checked="updateBooleanValue(field, $event)"
+            @update:model-value="updateTextValue(field, $event)"
           />
-          <span class="text-sm text-muted-foreground">
-            {{ booleanValue(field) ? '是' : '否' }}
-          </span>
-        </div>
+          <InputField
+            v-else-if="field.field_type === 'text' || field.field_type === 'date' || field.field_type === 'datetime'"
+            :id="`${block.id}-${field.key}`"
+            :label="field.label"
+            :type="field.field_type === 'datetime' ? 'datetime-local' : field.field_type"
+            :model-value="textValue(field)"
+            :placeholder="field.placeholder ?? ''"
+            :required="field.required"
+            :disabled="controlsDisabled"
+            :error="visibleFieldError(field) ?? ''"
+            :minlength="field.min_length ?? undefined"
+            :maxlength="field.max_length ?? undefined"
+            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
+            @update:model-value="updateTextValue(field, $event)"
+          />
+          <InputField
+            v-else-if="field.field_type === 'number'"
+            :id="`${block.id}-${field.key}`"
+            :label="field.label"
+            type="number"
+            :model-value="numberValue(field) ?? ''"
+            :placeholder="field.placeholder ?? ''"
+            :required="field.required"
+            :disabled="controlsDisabled"
+            :error="visibleFieldError(field) ?? ''"
+            :min="field.minimum ?? undefined"
+            :max="field.maximum ?? undefined"
+            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
+            @update:model-value="updateNumberValue(field, $event)"
+          />
+          <SelectField
+            v-else-if="field.field_type === 'select'"
+            :id="`${block.id}-${field.key}`"
+            :label="field.label"
+            :options="field.options"
+            :model-value="textValue(field)"
+            :placeholder="field.placeholder ?? `请选择${field.label}`"
+            :required="field.required"
+            :disabled="controlsDisabled"
+            :error="visibleFieldError(field) ?? ''"
+            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
+            @update:model-value="updateSelectValue(field, $event)"
+          />
+          <MultiSelectField
+            v-else-if="field.field_type === 'multi_select'"
+            :id="`${block.id}-${field.key}`"
+            :label="field.label"
+            :options="field.options"
+            :model-value="selectedFieldValues(field)"
+            :placeholder="field.placeholder ?? `请选择${field.label}`"
+            :required="field.required"
+            :disabled="controlsDisabled"
+            :error="visibleFieldError(field) ?? ''"
+            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
+            @update:model-value="updateMultiSelectValue(field, $event)"
+          />
+          <CheckboxField
+            v-else
+            :id="`${block.id}-${field.key}`"
+            :label="field.label"
+            :model-value="booleanValue(field)"
+            :required="field.required"
+            :disabled="controlsDisabled"
+            :error="visibleFieldError(field) ?? ''"
+            :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
+            @update:model-value="updateBooleanValue(field, $event)"
+          />
+        </template>
+      </form>
+    </div>
 
-        <p
-          v-if="visibleFieldError(field) !== null"
-          :id="fieldErrorId(field)"
-          class="m-0 text-sm text-foreground"
-          role="alert"
+    <footer
+      v-if="(isActivityConfirmation && showsChoiceOptions) || isGenericConfirmation || canCancel || (!isActivityConfirmation && isActive && !submitsOnOptionClick)"
+      class="flex flex-wrap items-center justify-end gap-space-2 border-t border-border px-space-4 py-space-3"
+    >
+      <p v-if="isActivityConfirmation && activityDisabledHint" class="m-0 min-w-0 flex-1 basis-full text-caption text-muted-foreground">
+        {{ activityDisabledHint }}
+      </p>
+      <template v-if="isActivityConfirmation">
+        <Button
+          v-for="option in activityActionOptions"
+          :key="option.value"
+          type="button"
+          :variant="option.value === 'confirm' ? 'default' : 'outline'"
+          :loading="option.value === 'confirm' && submitting"
+          :disabled="controlsDisabled || option.disabled"
+          @click="handleOptionClick(option.value)"
         >
-          {{ visibleFieldError(field) }}
-        </p>
-      </div>
-    </form>
-
-    <Button
-      v-if="canCancel"
-      type="button"
-      variant="outline"
-      size="sm"
-      class="min-h-touch-target"
-      :disabled="controlsDisabled"
-      @click="cancel"
-    >
-      取消
-    </Button>
-
-    <Button
-      v-if="isActive && !submitsOnOptionClick"
-      type="button"
-      size="sm"
-      class="min-h-touch-target"
-      :disabled="controlsDisabled"
-      @click="submit"
-    >
-      {{ submitting ? `${block.submit_label}处理中…` : block.submit_label }}
-    </Button>
+          {{ option.label }}
+        </Button>
+      </template>
+      <template v-else-if="isGenericConfirmation">
+        <Button
+          type="button"
+          variant="outline"
+          :disabled="controlsDisabled || confirmationOptions.cancel?.disabled === true"
+          @click="handleOptionClick('cancel')"
+        >
+          {{ confirmationOptions.cancel?.label }}
+        </Button>
+        <Button
+          type="button"
+          :loading="submitting"
+          :disabled="controlsDisabled || confirmationOptions.confirm?.disabled === true"
+          @click="handleOptionClick('confirm')"
+        >
+          {{ confirmationOptions.confirm?.label }}
+        </Button>
+      </template>
+      <template v-else>
+        <Button
+          v-if="canCancel"
+          type="button"
+          variant="outline"
+          :disabled="controlsDisabled"
+          @click="cancel"
+        >
+          取消
+        </Button>
+        <Button
+          v-if="isActive && !submitsOnOptionClick"
+          type="button"
+          :loading="submitting"
+          :disabled="controlsDisabled"
+          @click="submit"
+        >
+          {{ block.submit_label }}
+        </Button>
+      </template>
+    </footer>
   </section>
 </template>
-
-<style scoped>
-.activity-card {
-  gap: 0;
-  min-width: 0;
-  color: hsl(var(--card-foreground));
-  overflow-wrap: anywhere;
-  font-size: var(--font-size-body);
-  line-height: 22px;
-  font-weight: 400;
-}
-
-.activity-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid hsl(var(--border));
-  padding: 12px 16px;
-}
-
-.activity-title {
-  margin: 0;
-  min-width: 0;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body-strong);
-  font-weight: 600;
-  line-height: 22px;
-}
-
-.activity-main {
-  display: grid;
-  gap: 16px;
-  min-width: 0;
-  padding: 16px 16px 8px;
-}
-
-.activity-section,
-.activity-change,
-.activity-score-body {
-  display: grid;
-  min-width: 0;
-  gap: 8px;
-}
-
-.activity-kind,
-.activity-kind-editor-head,
-.activity-customer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.activity-kind-editor-head {
-  justify-content: space-between;
-}
-
-.activity-kind-editor-head span:first-child {
-  margin: 0;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-control-sm);
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.activity-customer,
-.activity-kind-editor-head {
-  margin: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
-  font-weight: 400;
-  line-height: 20px;
-}
-
-.activity-customer b,
-.activity-kind-name,
-.activity-time-value {
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  line-height: 22px;
-}
-
-.activity-time-status {
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
-}
-
-.activity-body {
-  margin: 0;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-  font-weight: 400;
-  line-height: 22px;
-}
-
-.activity-meta {
-  display: grid;
-  gap: 8px;
-  margin: 4px 0 0;
-  border-top: 1px solid hsl(var(--border));
-  padding-top: 12px;
-}
-
-.activity-meta-row {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: start;
-}
-
-.activity-meta-row dt {
-  margin: 0;
-  padding-top: 1px;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
-  font-weight: 400;
-  line-height: 20px;
-}
-
-.activity-meta-row dd {
-  margin: 0;
-  min-width: 0;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-body);
-  font-weight: 400;
-  line-height: 22px;
-}
-
-.activity-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: hsl(var(--brand));
-  font-size: var(--font-size-control-sm);
-  font-weight: 500;
-  line-height: 20px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-
-.activity-caption,
-.activity-kind-editor > p,
-.activity-actions-hint {
-  margin: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-caption);
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.activity-kind .activity-caption {
-  margin-top: 4px;
-}
-
-.activity-pill {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0 8px;
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-  line-height: 20px;
-  max-width: 100%;
-}
-
-.activity-pill.is-info,
-.activity-card :deep(.is-info) {
-  border-color: hsl(var(--brand) / 0.2);
-  background: hsl(var(--brand) / 0.08);
-  color: hsl(var(--brand));
-}
-
-.activity-pill.is-success {
-  border-color: hsl(var(--status-success) / 0.3);
-  background: hsl(var(--status-success) / 0.08);
-  color: hsl(var(--foreground));
-}
-
-.activity-pill.is-warning {
-  border-color: hsl(var(--status-warning) / 0.4);
-  background: hsl(var(--status-warning) / 0.12);
-  color: hsl(var(--foreground));
-}
-
-.activity-pill.is-muted {
-  border-color: hsl(var(--border));
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-}
-
-.activity-section > .activity-kind-editor {
-  margin-top: 4px;
-}
-
-.activity-kind-editor {
-  margin-top: 8px;
-  border: 1px solid hsl(var(--brand) / 0.2);
-  border-radius: 12px;
-  background: hsl(var(--brand) / 0.08);
-  padding: 12px;
-}
-
-.activity-kind-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.activity-kind-option {
-  min-height: 44px;
-  max-width: 100%;
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  background: hsl(var(--background));
-  padding: 8px 12px;
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-control-sm);
-  font-weight: 500;
-  line-height: 20px;
-  cursor: pointer;
-}
-
-.activity-kind-option.is-selected {
-  border-color: hsl(var(--brand));
-  background: hsl(var(--brand));
-  color: hsl(var(--primary-foreground));
-}
-
-.activity-kind-option:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.activity-kind-editor > p {
-  margin-top: 8px;
-}
-
-.activity-reference-body,
-.activity-reference-section,
-.activity-reference-quote {
-  display: grid;
-  min-width: 0;
-  gap: 8px;
-}
-
-.activity-reference-body {
-  gap: 12px;
-}
-
-.activity-reference-heading,
-.activity-reference-quote h4,
-.activity-reference-quote p {
-  margin: 0;
-  font-size: var(--font-size-control-sm);
-  line-height: 20px;
-}
-
-.activity-reference-heading,
-.activity-reference-quote h4 {
-  color: hsl(var(--foreground));
-  font-weight: 600;
-}
-
-.activity-reference-quote p {
-  color: hsl(var(--muted-foreground));
-}
-
-.activity-reference-notices {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
-  line-height: 20px;
-  list-style: none;
-}
-
-.activity-details {
-  min-width: 0;
-  border-top: 1px solid hsl(var(--border));
-}
-
-.activity-details > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  min-height: 44px;
-  padding: 8px 0;
-  color: hsl(var(--muted-foreground));
-  font-size: var(--font-size-control-sm);
-  font-weight: 500;
-  line-height: 20px;
-  list-style: none;
-  cursor: pointer;
-}
-
-.activity-details > summary::before {
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  content: '';
-  transform: rotate(-45deg);
-}
-
-.activity-details[open] > summary::before {
-  transform: rotate(45deg);
-}
-
-.activity-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.activity-details > summary:focus-visible,
-.activity-reference-heading:focus,
-.activity-link:focus-visible,
-.activity-kind-option:focus-visible {
-  border-radius: 6px;
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-}
-
-.activity-score-body {
-  min-width: 0;
-  padding-bottom: 8px;
-}
-
-.activity-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  border-top: 1px solid hsl(var(--border));
-  padding: 12px 16px;
-}
-
-.activity-actions-hint {
-  margin-right: auto;
-  color: hsl(var(--foreground));
-}
-
-.activity-card :deep(.activity-action) {
-  height: auto;
-  min-height: 44px;
-  border-radius: 6px;
-  padding-right: 16px;
-  padding-left: 16px;
-  font-size: var(--font-size-control-sm);
-  font-weight: 500;
-  line-height: 20px;
-}
-
-@media (max-width: 640px) {
-  .activity-meta-row {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 2px;
-  }
-
-  .activity-meta-row dt {
-    padding-top: 0;
-  }
-
-  .activity-header {
-    align-items: flex-start;
-  }
-}
-
-.activity-card :deep(.activity-action:disabled) {
-  border-color: hsl(var(--border));
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
-  opacity: 1;
-}
-</style>

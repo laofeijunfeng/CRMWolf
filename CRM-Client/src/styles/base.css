@@ -140,11 +140,13 @@
   --bottom-nav-height: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --assistant-column: 720px;
 }
 
 @media (max-width: 767px) {
   :root {
     --page-padding: 16px;
+    --assistant-column: 100%;
   }
 }
 

@@ -1,10 +1,22 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { ChevronRight } from 'lucide-vue-next'
+
+import ListCard from '@/components/crmwolf/ListCard.vue'
+
 import type { AgentUIBlock, EntityRef } from '@/schemas/agent-contracts'
 import { isAgentEntityOpenable } from '@/components/agent/agentEntityNavigation'
 
 type EntityListBlock = Extract<AgentUIBlock, { type: 'entity_list' }>
 
-defineProps<{
+interface EntityListRow {
+  id: string
+  name: string
+  entityRef: EntityRef
+  openable: boolean
+}
+
+const props = defineProps<{
   block: EntityListBlock
 }>()
 
@@ -12,27 +24,32 @@ const emit = defineEmits<{
   'open-entity': [entityRef: EntityRef]
 }>()
 
+const rows = computed<EntityListRow[]>(() => props.block.items.map((item, index) => ({
+  id: `${item.entity_ref.ref_id}#${index}`,
+  name: item.entity_ref.display_name,
+  entityRef: item.entity_ref,
+  openable: isAgentEntityOpenable(item.entity_ref),
+})))
+
+const openRow = (row: EntityListRow): void => {
+  emit('open-entity', row.entityRef)
+}
 </script>
 
 <template>
-  <section class="overflow-hidden rounded-lg border border-border bg-white" :aria-label="block.entity_type === 'customer' ? '公司列表' : '实体列表'">
-    <template v-for="item in block.items" :key="item.entity_ref.ref_id">
-      <button
-        v-if="isAgentEntityOpenable(item.entity_ref)"
-        type="button"
-        class="flex min-h-11 w-full items-center border-t border-border bg-card px-3 py-2.5 text-left text-sm font-semibold text-foreground first:border-t-0 hover:bg-wash-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :aria-label="`打开${item.entity_ref.display_name}详情`"
-        @click="emit('open-entity', item.entity_ref)"
-      >
-        <span class="min-w-0 truncate">{{ item.entity_ref.display_name }}</span>
-      </button>
-      <div
-        v-else
-        class="flex min-h-11 w-full items-center border-t border-border bg-card px-3 py-2.5 text-sm font-semibold text-foreground first:border-t-0"
-      >
-        <span class="min-w-0 truncate">{{ item.entity_ref.display_name }}</span>
-      </div>
+  <ListCard
+    density="compact"
+    :title="block.entity_type === 'customer' ? '公司列表' : '实体列表'"
+    :items="rows"
+    empty-text="没有符合条件的记录。"
+    :row-interactive="(row: EntityListRow) => row.openable"
+    @row-click="openRow"
+  >
+    <template #itemMain="{ item }">
+      <span class="block truncate text-body text-foreground">{{ item.name }}</span>
     </template>
-    <p v-if="block.items.length === 0" class="m-0 text-xs text-muted-foreground">没有符合条件的记录。</p>
-  </section>
+    <template #itemMeta="{ item }">
+      <ChevronRight v-if="item.openable" class="size-icon-xs shrink-0 text-muted-foreground" aria-hidden="true" />
+    </template>
+  </ListCard>
 </template>

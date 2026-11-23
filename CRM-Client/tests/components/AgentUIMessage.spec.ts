@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import MultiSelect from '@/components/crmwolf/MultiSelect.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
@@ -391,9 +392,9 @@ describe('AgentUIMessage', () => {
 
     expect(wrapper.text()).toContain('共找到 1 家公司。')
     expect(wrapper.text()).toContain('上海示例客户')
-    expect(wrapper.findAll('button')).toHaveLength(1)
-    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
-    await wrapper.get('button').trigger('click')
+    expect(wrapper.findAll('[role="button"]')).toHaveLength(1)
+    expect(wrapper.get('[role="button"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[role="button"]').trigger('click')
     expect(wrapper.emitted('open-entity')).toEqual([[
       {
         ref_id: 'eref_customer_cus_1',
@@ -434,7 +435,7 @@ describe('AgentUIMessage', () => {
     const wrapper = mount(AgentUIMessage, { props: { message: contactMessage } })
 
     expect(wrapper.text()).toContain('王总')
-    expect(wrapper.findAll('button')).toHaveLength(0)
+    expect(wrapper.findAll('[role="button"], button')).toHaveLength(0)
     expect(wrapper.emitted('open-entity')).toBeUndefined()
   })
 
@@ -602,15 +603,15 @@ describe('AgentUIMessage', () => {
     const inputs = wrapper.findAllComponents(Input)
     expect(inputs).toHaveLength(2)
     expect(wrapper.findComponent(Textarea).exists()).toBe(true)
-    expect(wrapper.findAllComponents(Select)).toHaveLength(2)
+    expect(wrapper.findComponent(Select).exists()).toBe(true)
+    expect(wrapper.findComponent(MultiSelect).exists()).toBe(true)
     expect(wrapper.findComponent(Checkbox).exists()).toBe(true)
 
     inputs[0]?.vm.$emit('update:modelValue', '年度续约')
     inputs[1]?.vm.$emit('update:modelValue', '12000')
     wrapper.findComponent(Textarea).vm.$emit('update:modelValue', '客户已确认预算')
-    const selects = wrapper.findAllComponents(Select)
-    selects[0]?.vm.$emit('update:modelValue', 'active')
-    selects[1]?.vm.$emit('update:modelValue', ['important', 'renewal'])
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 'active')
+    wrapper.findComponent(MultiSelect).vm.$emit('update:modelValue', ['important', 'renewal'])
     wrapper.findComponent(Checkbox).vm.$emit('update:checked', true)
     await wrapper.vm.$nextTick()
 

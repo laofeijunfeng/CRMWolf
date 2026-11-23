@@ -140,6 +140,15 @@ const config: Config = {
 		opacity: {
 			disabled: 'var(--disabled-opacity)'
 		},
+		textColor: {
+			// 状态色的文字与图标：基色 --status-fg-mix + 前景，与 [data-tone] 同一条派生
+			tone: {
+				success: 'color-mix(in srgb, hsl(var(--status-success)) var(--status-fg-mix), hsl(var(--foreground)))',
+				warning: 'color-mix(in srgb, hsl(var(--status-warning)) var(--status-fg-mix), hsl(var(--foreground)))',
+				danger: 'color-mix(in srgb, hsl(var(--status-danger)) var(--status-fg-mix), hsl(var(--foreground)))',
+				info: 'color-mix(in srgb, hsl(var(--status-info)) var(--status-fg-mix), hsl(var(--foreground)))'
+			}
+		},
 		size: {
 			'control-sm': 'var(--control-h-sm)',
 			control: 'var(--control-h-md)',

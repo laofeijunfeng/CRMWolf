@@ -1,76 +1,56 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import DataTable from '@/components/crmwolf/DataTable.vue'
+import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
+
 import { formatAgentUIValue } from './agentUIFormatting'
 import type { AgentUIBlock } from '@/schemas/agent-contracts'
 
 type TableBlock = Extract<AgentUIBlock, { type: 'table' }>
 
-type TableCell = TableBlock['rows'][number]['cells'][number]
+type AgentUITableRow = Record<string, string>
 
 const props = defineProps<{ block: TableBlock }>()
 
-const cellsByRow = computed(() => new Map(
-  props.block.rows.map(row => [row.id, new Map(row.cells.map(cell => [cell.column_key, cell]))])
-))
-
-const cellFor = (rowId: string, columnKey: string): TableCell | undefined => {
-  return cellsByRow.value.get(rowId)?.get(columnKey)
-}
-
-const formattedCell = (rowId: string, columnKey: string): string => {
-  const cell = cellFor(rowId, columnKey)
-  return cell === undefined ? '-' : formatAgentUIValue(cell.value)
-}
+// 只读嵌入：列直接来自表格块。首列是识别列，按列表页的主列样式呈现；其余列不参与筛排与字段配置。
+const fields = computed<ListFieldDefinition[]>(() => props.block.columns.map((column, index) => (
+  index === 0
+    ? {
+        key: column.key,
+        label: column.label,
+        column: { align: column.align },
+        filter: false,
+        filterDisabledReason: '助手表格只读嵌入，不提供筛选',
+        sort: false,
+        sortDisabledReason: '助手表格只读嵌入，不提供排序',
+      }
+    : {
+        key: column.key,
+        label: column.label,
+        role: 'decoration' as const,
+        column: { align: column.align },
+      }
+)))
+const rows = computed<AgentUITableRow[]>(() => props.block.rows.map((row) => Object.fromEntries(
+  row.cells.map((cell) => [cell.column_key, formatAgentUIValue(cell.value)])
+)))
+const pageSize = computed(() => Math.max(props.block.rows.length, 1))
 </script>
 
 <template>
-  <div class="agent-ui-table-wrap max-w-full overflow-x-auto rounded-md border border-border bg-card">
-    <table class="agent-ui-table w-full min-w-[480px] border-collapse">
-      <caption v-if="block.caption" class="p-3 text-left font-semibold text-card-foreground">
-        {{ block.caption }}
-      </caption>
-      <thead>
-        <tr>
-          <th
-            v-for="column in block.columns"
-            :key="column.key"
-            scope="col"
-            :class="[
-              'h-11 border-b border-border bg-muted px-2 py-3 align-top text-xs font-medium text-muted-foreground whitespace-nowrap',
-              `agent-ui-table__cell--${column.align}`,
-            ]"
-          >
-            {{ column.label }}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in block.rows" :key="row.id">
-          <td
-            v-for="column in block.columns"
-            :key="column.key"
-            :class="[
-              'h-11 border-b border-border px-2 py-3 align-top text-foreground whitespace-nowrap',
-              `agent-ui-table__cell--${column.align}`,
-            ]"
-          >
-            {{ formattedCell(row.id, column.key) }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-if="block.rows.length === 0" class="m-0 p-4 text-center text-muted-foreground">
-      没有可展示的数据。
-    </p>
+  <div class="grid min-w-0 gap-space-2">
+    <p v-if="block.caption" class="m-0 text-body font-medium text-foreground">{{ block.caption }}</p>
+    <DataTable
+      v-if="rows.length > 0"
+      embedded
+      :fields="fields"
+      :data="rows"
+      :total="rows.length"
+      :page="1"
+      :page-size="pageSize"
+      height-strategy="auto"
+    />
+    <p v-else class="m-0 text-caption text-muted-foreground">没有可展示的数据。</p>
   </div>
 </template>
-
-<style scoped>
-.agent-ui-table tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-.agent-ui-table__cell--center { text-align: center; }
-.agent-ui-table__cell--right { text-align: right; }
-</style>

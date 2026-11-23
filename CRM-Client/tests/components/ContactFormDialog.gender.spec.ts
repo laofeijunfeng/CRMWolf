@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import ContactFormDialog from '@/components/dialogs/ContactFormDialog.vue'
 import type { ContactResponse } from '@/api/customer'
+import type * as RekaUi from 'reka-ui'
 
 const customerApi = vi.hoisted(() => ({
   createContact: vi.fn(),
@@ -32,15 +33,17 @@ vi.mock('@/components/ui/dialog', () => {
   }
 })
 
-vi.mock('@/components/ui/radio-group', async () => {
+vi.mock('reka-ui', async (importOriginal) => {
+  const reka = await importOriginal<typeof RekaUi>()
   const { defineComponent, h, inject, provide } = await import('vue')
   interface RadioContext {
     select: (value: string) => void
   }
   const radioGroupKey = Symbol('RadioGroup')
   return {
-    RadioGroup: defineComponent({
-      name: 'RadioGroup',
+    ...reka,
+    RadioGroupRoot: defineComponent({
+      name: 'RadioGroupRoot',
       props: { modelValue: String },
       emits: ['update:modelValue'],
       setup: (props, { emit, slots }) => {

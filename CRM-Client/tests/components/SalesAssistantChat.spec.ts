@@ -174,6 +174,10 @@ function rejectedCommand(status: number, message = 'rejected', detail: unknown =
   return Object.assign(new Error(message), { isAxiosError: true, response: { status, data } })
 }
 
+// 提交中由按钮的忙碌状态表达：文字与宽度不变，所以不再出现「提交处理中…」。
+const submitBusy = (wrapper: ReturnType<typeof mount>): boolean => wrapper.findAll('button')
+  .some((button) => button.text() === '提交' && button.attributes('aria-busy') === 'true')
+
 async function submitCardText(wrapper: ReturnType<typeof mount>, value: string): Promise<void> {
   const input = wrapper.find('input[type="text"]')
   expect(input.exists()).toBe(true)
@@ -212,7 +216,7 @@ describe('customer name text input', () => {
     const requestId = mocks.command.mock.calls[0]?.[0].input.client_request_id as string
     expect(requestId.length).toBeGreaterThanOrEqual(8)
     expect(wrapper.text()).toContain('请补充沟通内容')
-    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(submitBusy(wrapper)).toBe(false)
   })
 
   it('reads the text payload for a non-customer text input', async () => {
@@ -236,7 +240,7 @@ describe('customer name text input', () => {
     await submitCardText(wrapper, '   ')
     expect(mocks.command).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('请填写客户名称')
-    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(submitBusy(wrapper)).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text() === '提交' && button.attributes('disabled') === undefined)).toBe(true)
   })
 
@@ -250,7 +254,7 @@ describe('customer name text input', () => {
     await submitCardText(wrapper, '星河科技')
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('这次提交没有被接受，请按当前提示修改后再提交。')
-    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(submitBusy(wrapper)).toBe(false)
     await wrapper.get('[role="alert"]').get('button').trigger('click')
     await flushPromises()
     expect(mocks.command).toHaveBeenCalledTimes(1)
@@ -268,7 +272,7 @@ describe('customer name text input', () => {
     await flushPromises()
     await submitCardText(wrapper, '星河科技')
     expect(wrapper.get('[role="alert"]').text()).toContain('会话已更新，请查看当前提示；未接受的内容可重新发送。')
-    expect(wrapper.text()).not.toContain('提交处理中')
+    expect(submitBusy(wrapper)).toBe(false)
     expect(mocks.command).toHaveBeenCalledTimes(1)
 
     mocks.command.mockRejectedValueOnce(rejectedCommand(401, 'unauthorized'))
@@ -289,7 +293,7 @@ describe('customer name text input', () => {
     await submitCardText(wrapper, '星河科技')
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="alert"]').text()).toContain('发送状态待确认：Network Error')
-    expect(wrapper.text()).toContain('提交处理中')
+    expect(submitBusy(wrapper)).toBe(true)
     await flushPromises()
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('button').some((button) => button.text() === '重试同步')).toBe(true)

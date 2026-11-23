@@ -56,7 +56,7 @@ const isCompactTaskMessage = computed(() => (
 
 <template>
   <div
-    class="agent-ui-message grid min-w-0 gap-3"
+    class="agent-ui-message grid min-w-0 gap-space-2"
     :aria-label="message.metadata.accessibility_label ?? undefined"
   >
     <AgentUICompactTaskList

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
+
 import type { AgentUIBlock } from '@/schemas/agent-contracts'
 
 type TimelineBlock = Extract<AgentUIBlock, { type: 'timeline' }>
@@ -14,20 +16,19 @@ const formatTime = (value: string): string => {
 <template>
   <ol class="m-0 grid list-none gap-0 p-0">
     <li
-      v-for="(item, index) in block.items"
+      v-for="item in block.items"
       :key="item.id"
-      class="relative grid grid-cols-[14px_minmax(0,1fr)] gap-2 pb-4"
-      :class="index < block.items.length - 1 ? 'before:absolute before:bottom-0 before:left-[6px] before:top-3 before:w-px before:bg-border' : ''"
+      class="relative grid grid-cols-[var(--icon-sm)_minmax(0,1fr)] gap-space-2 pb-space-4 last:pb-0 before:absolute before:bottom-0 before:left-[calc(var(--icon-sm)/2)] before:top-0 before:w-px before:bg-border before:content-[''] first:before:top-space-2 last:before:bottom-[calc(100%_-_var(--icon-sm)/2)]"
     >
-      <span class="z-[1] mt-1 h-2.5 w-2.5 rounded-full border-2 border-brand bg-card" aria-hidden="true" />
-      <div class="grid min-w-0 gap-1">
-        <div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+      <span class="relative z-10 mt-space-1 size-icon-sm rounded-full border border-brand bg-card" aria-hidden="true" />
+      <div class="grid min-w-0 gap-space-1">
+        <div class="flex flex-wrap items-center gap-x-space-2 gap-y-space-1 text-caption text-muted-foreground">
           <time :datetime="item.occurred_at">{{ formatTime(item.occurred_at) }}</time>
           <span v-if="item.actor">{{ item.actor }}</span>
-          <span v-if="item.status" class="text-brand">{{ item.status }}</span>
+          <StatusBadge v-if="item.status" :status="item.status" type="agentFact" size="small" />
         </div>
-        <h3 class="m-0 text-sm font-semibold text-foreground">{{ item.title }}</h3>
-        <p v-if="item.description" class="m-0 text-muted-foreground">{{ item.description }}</p>
+        <h3 class="m-0 text-body font-medium text-foreground">{{ item.title }}</h3>
+        <p v-if="item.description" class="m-0 text-caption text-muted-foreground">{{ item.description }}</p>
       </div>
     </li>
   </ol>

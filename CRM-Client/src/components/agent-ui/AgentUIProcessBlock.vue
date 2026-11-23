@@ -6,34 +6,40 @@ import {
   ChevronRight,
   Circle,
   CircleDashed,
-  Loader2,
+  LoaderCircle,
   XCircle,
 } from 'lucide-vue-next'
 import { computed, type Component } from 'vue'
 
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import type { AgentUIBlock } from '@/schemas/agent-contracts'
 
-type ProcessBlock = Extract<AgentUIBlock, { type: 'process' }>
-type ProcessItem = ProcessBlock['items'][number]
+import { processStatusLabel, type ProcessBlock, type ProcessItem, type ProcessItemMeta } from './agentUIProcess'
 
-const props = defineProps<{ block: ProcessBlock }>()
+interface Props {
+  block: ProcessBlock
+  /** 默认展开；宿主用它展示正在进行的实时阶段。 */
+  defaultOpen?: boolean
+  /** 折叠头里的一句摘要；不传时沿用最新步骤的状态。 */
+  summary?: string | null | undefined
+  /** 折叠头右侧的状态徽标（处理中 / 已更新）。 */
+  status?: 'processing' | 'updated' | null | undefined
+  /** 每个步骤行右侧的元信息，键为步骤 key。 */
+  meta?: Readonly<Record<string, ProcessItemMeta>> | undefined
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  defaultOpen: false,
+  summary: null,
+  status: null,
+  meta: undefined,
+})
 
 const latestItem = computed(() => props.block.items[props.block.items.length - 1])
 
-const statusLabel = (status: ProcessItem['status']): string => ({
-  PENDING: '待执行',
-  RUNNING: '执行中',
-  COMPLETED: '已完成',
-  WAITING: '等待中',
-  FAILED: '失败',
-  CANCELLED: '已取消',
-  SKIPPED: '已跳过',
-})[status]
-
 const statusIcon = (status: ProcessItem['status']): Component => ({
   PENDING: CircleDashed,
-  RUNNING: Loader2,
+  RUNNING: LoaderCircle,
   COMPLETED: CheckCircle2,
   WAITING: Circle,
   FAILED: AlertCircle,
@@ -41,63 +47,74 @@ const statusIcon = (status: ProcessItem['status']): Component => ({
   SKIPPED: CircleDashed,
 })[status]
 
+// 步骤文字不着状态色；语义色只给图标，且用派生色保证图标对比度。
 const statusClass = (status: ProcessItem['status']): string => {
-  if (status === 'FAILED') return 'text-destructive'
+  if (status === 'FAILED') return 'text-tone-danger'
   if (status === 'CANCELLED' || status === 'PENDING' || status === 'SKIPPED') return 'text-muted-foreground'
   if (status === 'WAITING' || status === 'RUNNING') return 'text-brand'
-  return 'text-success'
+  return 'text-tone-success'
 }
+
+const itemMeta = (item: ProcessItem): ProcessItemMeta => props.meta?.[item.key] ?? { text: processStatusLabel(item.status) }
+const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.title} · 共 ${props.block.items.length} 步` : ''))
 </script>
 
 <template>
-  <Collapsible v-slot="{ open }" class="rounded-lg border border-border bg-card">
+  <Collapsible
+    v-slot="{ open }"
+    :default-open="defaultOpen === true"
+    class="min-w-0 overflow-hidden rounded-lg border border-border bg-card text-foreground"
+  >
     <CollapsibleTrigger as-child>
       <button
         type="button"
-        class="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-full items-center gap-space-2 px-space-3 text-left transition-colors hover:bg-wash-hover"
       >
         <component
           :is="open ? ChevronDown : ChevronRight"
-          class="h-4 w-4 shrink-0 text-muted-foreground"
+          class="size-icon-sm shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
         <component
-          v-if="latestItem"
+          v-if="!status && latestItem"
           :is="statusIcon(latestItem.status)"
-          class="h-4 w-4 shrink-0"
+          class="size-icon-sm shrink-0"
           :class="[statusClass(latestItem.status), latestItem.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
           aria-hidden="true"
         />
-        <span class="shrink-0 font-medium text-foreground">{{ block.title }}</span>
-        <span class="min-w-0 flex-1 truncate text-muted-foreground">
-          {{ latestItem?.title }}
+        <span class="shrink-0 text-body font-medium text-foreground">{{ block.title }}</span>
+        <span class="min-w-0 flex-1 truncate text-caption text-muted-foreground">
+          {{ summary ?? fallbackSummary }}
         </span>
-        <span v-if="latestItem" class="shrink-0 text-xs text-muted-foreground">
-          共 {{ block.items.length }} 步 · {{ statusLabel(latestItem.status) }}
-        </span>
+        <StatusBadge v-if="status" class="shrink-0" :status="status" type="agentInteraction" size="small" />
       </button>
     </CollapsibleTrigger>
 
     <CollapsibleContent>
-      <ol class="m-0 grid list-none gap-2 border-t border-border/70 px-3 py-3">
+      <ol class="m-0 grid list-none gap-0 border-t border-border px-space-3 py-space-1">
         <li
           v-for="item in block.items"
           :key="item.key"
-          class="grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-2 text-sm"
+          class="relative grid min-h-[var(--control-h-lg)] grid-cols-[var(--icon-sm)_minmax(0,1fr)_auto] items-center gap-space-2 before:absolute before:bottom-0 before:left-[calc(var(--icon-sm)/2)] before:top-0 before:w-px before:bg-border before:content-[''] first:before:top-1/2 last:before:bottom-1/2"
         >
-          <component
-            :is="statusIcon(item.status)"
-            class="mt-0.5 h-4 w-4"
-            :class="[statusClass(item.status), item.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
-            aria-hidden="true"
-          />
-          <div class="min-w-0">
-            <div class="font-medium text-foreground">{{ item.title }}</div>
-            <p v-if="item.description" class="mb-0 mt-0.5 text-xs text-muted-foreground">
+          <span class="relative z-10 grid size-icon-sm place-items-center bg-card">
+            <component
+              :is="statusIcon(item.status)"
+              class="size-icon-sm"
+              :class="[statusClass(item.status), item.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
+              aria-hidden="true"
+            />
+          </span>
+          <div class="grid min-w-0 gap-space-1">
+            <span class="text-body text-foreground">{{ item.title }}</span>
+            <p v-if="item.description" class="m-0 text-caption text-muted-foreground">
               {{ item.description }}
             </p>
           </div>
-          <span class="text-xs text-muted-foreground">{{ statusLabel(item.status) }}</span>
+          <span
+            class="shrink-0 text-caption tabular-nums"
+            :class="itemMeta(item).tone === 'danger' ? 'text-tone-danger' : itemMeta(item).tone === 'brand' ? 'text-brand' : 'text-muted-foreground'"
+          >{{ itemMeta(item).text }}</span>
         </li>
       </ol>
     </CollapsibleContent>

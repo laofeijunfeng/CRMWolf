@@ -148,6 +148,14 @@ const RULES = [
     test: (text, filePath) => resolveImports(filePath, text).some((target) => FLOAT_LAYER_PRIMITIVE.test(target)),
     message: 'ui/sheet、ui/drawer 只能由 governance/exceptions.json 白名单内的封装引用；侧滑详情用 ui/detail-sheet。',
   },
+  {
+    category: 'off-scale-alpha',
+    // 透明度修饰符不在 opacity 刻度（步长 5）内时类名不生成 CSS，属于静默失效；
+    // 前置的 (?<![\w-]) 排除 slide-in-from-left-1/2 这类位移分数。
+    appliesTo: (filePath) => !isTestFile(filePath) && /\.(?:vue|ts|tsx|js|jsx)$/.test(filePath),
+    pattern: /(?<![\w-])(?:bg|border|text|ring|from|to|via|fill|stroke|outline|decoration|divide|placeholder|caret|accent|shadow)-[a-z0-9-]+\/\d*[1-46-9](?!\w)/,
+    message: '颜色类的透明度修饰符必须落在 opacity 刻度内（0–100 步长 5），否则不生成 CSS；状态浅底走 data-tone。',
+  },
 ]
 
 function readJson(filePath) {

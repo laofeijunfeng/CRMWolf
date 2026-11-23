@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, shallowRef } from 'vue'
 import { isAxiosError } from 'axios'
-import { ArrowUp, X } from 'lucide-vue-next'
+import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
 import { assistantApi, submitInputStream, type AssistantTurn, type StageName } from '@/api/assistant'
 import type { SubmitAssistantInput } from '@/api/assistant'
-import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ZodError } from 'zod'
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import AgentUIBanner from '@/components/agent-ui/AgentUIBanner.vue'
+import AgentUIProcessBlock from '@/components/agent-ui/AgentUIProcessBlock.vue'
+import DataViewStatePanel from '@/components/crmwolf/DataViewStatePanel.vue'
+import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
+import type { ProcessBlock, ProcessItemMeta, ProcessItemStatus } from '@/components/agent-ui/agentUIProcess'
+import type { FeedbackError } from '@/types/feedback'
 import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
@@ -80,6 +85,16 @@ interface CommandDispatch {
 }
 
 const OUT_OF_RANGE_KIND = '请从卡片给出的活动类型中选择'
+const EMPTY_CONVERSATION_TITLE = '把一次客户沟通交给我整理'
+const EMPTY_CONVERSATION_HINT = '发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。'
+const INPUT_LOCKED_HINT = '请先处理上方的待办卡片，处理完成后可以继续输入。'
+const LIVE_STAGE_STATUS: Record<LiveStage['status'], ProcessItemStatus> = {
+  pending: 'PENDING',
+  running: 'RUNNING',
+  done: 'COMPLETED',
+  failed: 'FAILED',
+  awaiting: 'WAITING',
+}
 
 const conflictDetail = (error: unknown): string => {
   if (!isAxiosError(error)) return ''
@@ -116,7 +131,6 @@ const conversationLoadErrorMessage = (error: unknown): string => {
 }
 
 const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
-const isWaiting = computed(() => waiting.value !== null)
 const isTerminal = computed(() => task.value != null && task.value.status !== 'ACTIVE')
 
 
@@ -971,6 +985,54 @@ const gapNone = (entry: ChatEntry): Promise<void> => {
 
 const busy = computed(() => submitting.value || resultPending.value)
 
+const visibleEntries = computed(() => entries.value.filter((entry) => entry.projection?.visibility !== 'COVERED'))
+const isSeparator = (entry: ChatEntry): boolean => entry.role === 'assistant' && entry.outcome === 'task_completed'
+// 同一轮里连续的助手条目只在首条出头像；任务完成分隔线之后再出现的助手消息重新出头像。
+const showsAvatar = (index: number): boolean => {
+  const entry = visibleEntries.value[index]
+  if (entry === undefined || entry.role !== 'assistant' || isSeparator(entry)) return false
+  const previous = visibleEntries.value[index - 1]
+  return previous === undefined || previous.role !== 'assistant' || isSeparator(previous)
+}
+// 轮次之间 24（$space-6）；同一轮里连续的助手条目之间 16（$space-4）。
+const entrySpacing = (index: number): string => {
+  const entry = visibleEntries.value[index]
+  const previous = visibleEntries.value[index - 1]
+  if (index === 0 || entry === undefined || previous === undefined) return ''
+  return entry.role === 'assistant' && !isSeparator(entry) && previous.role === 'assistant' && !isSeparator(previous)
+    ? 'mt-space-4'
+    : 'mt-space-6'
+}
+// 等待待办卡片时输入框被禁用；用一行文字说明原因，不靠边框变色。
+const cardLocked = computed(() => conversation.value?.pending_choice != null)
+const historyErrorFeedback = computed<FeedbackError | null>(() => (
+  historyError.value === '' ? null : { title: historyError.value, description: '' }
+))
+// 聊天里的实时阶段走同一个执行过程块：阶段映射成步骤，耗时与评分作为右侧元信息。
+const liveProcess = computed<ProcessBlock | null>(() => {
+  const stages = processing.value.stages
+  if (stages.length === 0) return null
+  return {
+    id: 'live-process',
+    type: 'process',
+    title: '执行过程',
+    items: stages.map((stage) => ({ key: stage.name, title: STAGE_LABELS[stage.name], status: LIVE_STAGE_STATUS[stage.status] })),
+  }
+})
+const liveStageMeta = (stage: LiveStage): ProcessItemMeta => {
+  if (stage.status === 'done') {
+    return { text: [stage.ms === undefined ? '' : `${(stage.ms / 1000).toFixed(1)}s`, stage.score === undefined ? '' : `${stage.score} 分`].filter((part) => part !== '').join(' · ') }
+  }
+  if (stage.status === 'running') return { text: '进行中…' }
+  if (stage.status === 'failed') return { text: '失败', tone: 'danger' }
+  if (stage.status === 'awaiting') return { text: '待确认' }
+  return { text: '' }
+}
+const liveStageMetaByKey = computed<Record<string, ProcessItemMeta>>(() => Object.fromEntries(
+  processing.value.stages.map((stage) => [stage.name, liveStageMeta(stage)])
+))
+const liveProcessSummary = computed(() => `共 ${processing.value.stages.length} 步`)
+
 const ACTIVITY_BADGES: Record<string, string> = {
   PHONE_FOLLOW_UP: '电话跟进',
   WECHAT_FOLLOW_UP: '微信跟进',
@@ -1310,33 +1372,54 @@ void loadConversation()
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
-    <div class="flex h-full min-h-0 flex-col">
-    <div v-if="historyError" role="alert" class="mb-2 text-sm text-destructive">
-      {{ historyError }}
-      <Button variant="outline" size="sm" :disabled="submitting" @click="pendingConversation ? retryPending() : loadConversation()">重试同步</Button>
-    </div>
-    <div v-if="loadingConversation" role="status" class="mb-2 text-sm text-muted-foreground">正在恢复对话…</div>
-    <div ref="scrollId" class="flex-1 space-y-3 overflow-y-auto pr-1">
-      <Button v-if="olderCursor !== null" variant="ghost" size="sm" :disabled="submitting" @click="loadOlder">查看更早对话</Button>
-      <div v-if="entries.length === 0 && !loadingConversation && !historyError" class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-        发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。
-      </div>
-      <template v-for="entry in entries" :key="entry.id">
-        <template v-if="entry.projection?.visibility !== 'COVERED'">
-          <div v-if="entry.role === 'user'" class="flex justify-end">
-            <div class="max-w-[75%] rounded-lg bg-primary px-3.5 py-2 text-sm text-primary-foreground">
+  <div class="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-[var(--assistant-column)] flex-col">
+    <FeedbackAlert
+      v-if="historyErrorFeedback"
+      class="mb-space-2"
+      density="compact"
+      :error="historyErrorFeedback"
+      @retry="pendingConversation ? retryPending() : loadConversation()"
+    >
+      <template #actions>
+        <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="pendingConversation ? retryPending() : loadConversation()">重试同步</Button>
+      </template>
+    </FeedbackAlert>
+
+    <DataViewStatePanel v-if="loadingConversation" class="flex-1" state="loading" loading-type="list" :loading-rows="3" />
+
+    <div v-else ref="scrollId" class="min-h-0 flex-1 overflow-y-auto pr-space-1">
+      <div class="flex flex-col py-space-2">
+        <Button v-if="olderCursor !== null" variant="ghost" size="sm" class="self-start" :disabled="submitting" @click="loadOlder">查看更早对话</Button>
+        <DataViewStatePanel
+          v-if="visibleEntries.length === 0 && !historyError"
+          state="empty"
+          :empty-title="EMPTY_CONVERSATION_TITLE"
+          :empty-description="EMPTY_CONVERSATION_HINT"
+          class="py-space-4"
+        >
+          <template #empty-media>
+            <MessageSquare class="size-icon-lg text-muted-foreground" aria-hidden="true" />
+          </template>
+        </DataViewStatePanel>
+        <template v-for="(entry, index) in visibleEntries" :key="entry.id">
+          <div v-if="entry.role === 'user'" class="flex justify-end" :class="entrySpacing(index)">
+            <div class="max-w-[72%] whitespace-pre-wrap rounded-lg bg-secondary px-space-3 py-space-2 text-body text-secondary-foreground [overflow-wrap:anywhere] max-[767px]:max-w-[88%]">
               {{ entry.text }}
             </div>
           </div>
-          <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-3 py-2 text-sm text-muted-foreground">
+          <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-space-3" :class="entrySpacing(index)">
             <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
-            <span class="shrink-0 whitespace-nowrap">本次任务已完成</span>
+            <span class="shrink-0 whitespace-nowrap text-caption text-muted-foreground">本次任务已完成</span>
             <span aria-hidden="true" class="min-w-0 flex-1 border-t border-border"></span>
           </div>
-          <div v-else class="flex gap-2.5">
-            <div class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-brand/12 text-caption font-semibold text-brand">AI</div>
-            <div class="min-w-0 max-w-[88%] flex-1 space-y-2">
+          <div v-else class="flex items-start gap-space-2" :class="entrySpacing(index)">
+            <div
+              v-if="showsAvatar(index)"
+              class="grid h-space-6 w-space-6 shrink-0 place-items-center rounded-full bg-brand text-caption font-semibold leading-none text-brand-foreground select-none"
+              aria-hidden="true"
+            >AI</div>
+            <div v-else class="h-space-6 w-space-6 shrink-0" aria-hidden="true"></div>
+            <div class="grid min-w-0 flex-1 gap-space-2">
               <AgentUIMessage
                 v-if="entry.ui"
                 :message="entry.ui"
@@ -1346,42 +1429,41 @@ void loadConversation()
                 @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
                 @action="(actionId) => { void retryRootFailure(entry, actionId) }"
               />
-              <div v-else class="rounded-lg border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
+              <div v-else class="rounded-lg border border-border bg-card px-space-3 py-space-2 text-body text-foreground">这条结果暂时无法显示</div>
               <Button
                 v-if="showExplicitNone(entry)"
                 type="button"
-                variant="link"
+                variant="ghost"
                 size="sm"
-                class="h-auto min-h-11 px-0 text-xs font-normal text-muted-foreground underline-offset-2"
+                class="self-start"
                 :disabled="busy"
                 @click="() => { void gapNone(entry) }"
               >这条没有下一步</Button>
             </div>
           </div>
         </template>
-      </template>
-    </div>
-    <div v-if="showProcessCard" class="mt-2 rounded-lg border border-border bg-white px-3.5 py-3">
-      <p class="mb-2 text-sm text-foreground">原始内容已保存</p>
-      <p v-if="longOrganize" class="mb-2 text-sm text-foreground">正在整理，内容较长，预计需要约 1 分钟</p>
-      <div class="mb-2 flex items-center justify-between gap-2 text-body font-semibold">
-        <span>执行过程</span>
-        <StatusBadge v-if="processChipStatus" :status="processChipStatus" type="agentInteraction" size="small" />
-      </div>
-      <div v-for="stageItem in processing.stages" :key="stageItem.name" class="flex items-center gap-2 py-0.5 text-sm" :class="stageItem.status === 'done' ? 'text-success' : stageItem.status === 'running' ? 'font-medium text-brand' : stageItem.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'">
-        <span class="size-2 shrink-0 rounded-full border-2" :class="stageItem.status === 'done' ? 'border-success bg-success' : stageItem.status === 'running' ? 'border-brand bg-card' : stageItem.status === 'failed' ? 'border-destructive bg-destructive' : 'border-border'"></span>
-        <span>{{ STAGE_LABELS[stageItem.name] }}</span>
-        <span v-if="stageItem.status === 'done' && stageItem.ms !== undefined" class="text-xs text-muted-foreground">{{ (stageItem.ms / 1000).toFixed(1) }}s</span>
-        <span v-if="stageItem.status === 'done' && stageItem.score !== undefined" class="rounded-md border bg-muted/50 px-1.5 py-0.5 text-caption text-success">{{ stageItem.score }} 分</span>
-        <span v-if="stageItem.status === 'running'" class="text-xs font-normal text-muted-foreground">进行中…</span>
-        <span v-else-if="stageItem.status === 'failed'" class="text-xs font-normal text-destructive">失败</span>
-        <span v-else-if="stageItem.status === 'awaiting'" class="text-xs font-normal text-muted-foreground">待确认</span>
       </div>
     </div>
 
-    <div class="mt-3 rounded-lg border bg-background p-2.5 shadow-sm" :class="{ 'border-2 border-brand/60': isWaiting }">
-      <div v-if="processing.active || routing || recoveryNotice" class="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-brand">
-        <svg v-if="routing || processing.active || autoRecovering" class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
+    <section v-if="showProcessCard && liveProcess" class="mt-space-4 grid gap-space-2" aria-label="执行过程">
+      <AgentUIProcessBlock
+        :block="liveProcess"
+        default-open
+        :summary="liveProcessSummary"
+        :status="processChipStatus"
+        :meta="liveStageMetaByKey"
+      />
+      <AgentUIBanner tone="info" :icon="Info" title="原始内容已保存" role="status" />
+      <AgentUIBanner v-if="longOrganize" tone="info" :icon="Info" title="正在整理，内容较长，预计需要约 1 分钟" role="status" />
+    </section>
+
+    <div class="mt-space-4 rounded-lg border border-input bg-card p-space-3 transition-colors hover:border-ring-input focus-within:border-ring-input">
+      <p v-if="cardLocked" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground">
+        <Lock class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ INPUT_LOCKED_HINT }}</span>
+      </p>
+      <div v-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand">
+        <LoaderCircle v-if="routing || processing.active || autoRecovering" class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>
       <Textarea
@@ -1390,28 +1472,27 @@ void loadConversation()
         :rows="2"
         :disabled="loadingConversation || submitting || resultPending || conversation?.pending_choice != null"
         :placeholder="inputPlaceholder"
-        class="resize-none border-0 p-0 focus-visible:ring-0"
+        class="resize-none border-0 p-0"
         @keydown.enter.exact.prevent="submitText"
       />
-      <div class="mt-2 flex items-center justify-between">
-        <div class="flex items-center gap-2">
+      <div class="mt-space-2 flex flex-wrap items-center justify-between gap-space-2">
+        <div class="flex flex-wrap items-center gap-space-2">
           <Badge v-if="activityBadge" variant="secondary">{{ activityBadge }}</Badge>
-          <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
+          <span class="text-caption text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
-        <div class="flex items-center gap-2">
-          <Button v-if="showRefreshStatus" size="sm" variant="outline" :disabled="submitting" @click="showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
-          <p v-if="showReprocess" class="mb-0 text-xs text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
-          <Button v-if="showReprocess" size="sm" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
-          <Button v-if="showConversationRetry" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
-          <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" size="sm" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
-            <X class="size-3.5" />算了
+        <div class="flex flex-wrap items-center gap-space-2">
+          <Button v-if="showRefreshStatus" variant="outline" :disabled="submitting" @click="showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
+          <p v-if="showReprocess" class="m-0 text-caption text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
+          <Button v-if="showReprocess" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
+          <Button v-if="showConversationRetry" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
+          <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
+            <X aria-hidden="true" />算了
           </Button>
-          <Button aria-label="发送" size="icon-sm" :disabled="loadingConversation || busy || resultPending || conversation?.pending_choice != null" @click="submitText">
-            <ArrowUp class="size-4" />
+          <Button aria-label="发送" :disabled="loadingConversation || busy || resultPending || conversation?.pending_choice != null" @click="submitText">
+            <ArrowUp aria-hidden="true" />发送
           </Button>
         </div>
       </div>
-    </div>
     </div>
   </div>
 </template>

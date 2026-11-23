@@ -168,7 +168,7 @@ test('configuration failure has no retry button', async ({ page }, testInfo) => 
   })
   await page.goto('/assistant')
   await expect(page.getByText('模型配置暂不可用，本次没有写入客户活动，请联系管理员。')).toBeVisible()
-  await expect(page.getByText('不能盲目重试')).toBeVisible()
+  await expect(page.getByText('暂时不能重试')).toBeVisible()
   await expect(page.getByRole('button', { name: '重试', exact: true })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('root-configuration-no-retry.png'), fullPage: true })
 })

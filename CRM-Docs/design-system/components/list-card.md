@@ -31,13 +31,13 @@
 
 列表卡片使用[卡片](card.md)的基础层级：白色背景、圆角、轻量边框。标题栏与列表项之间以分隔线区分。
 
-标题栏包含标题文字和操作按钮（如"新建"），高度遵循[间距与布局](../foundations/spacing-layout.md)。列表项最小高度不低于 `--touch-target` 以满足触摸目标要求；宽视口单行 / 双行列表行高见[令牌数值](../foundations/token-values.md#间距与布局)的列表行高，悬停与选中用 `--wash-hover` / `--wash-selected`，内边距与标题栏保持一致节奏。
+标题栏包含标题文字和操作按钮（如"新建"），高度遵循[间距与布局](../foundations/spacing-layout.md)。列表项最小高度不低于 `--touch-target` 以满足触摸目标要求；宽视口单行 / 双行列表行高见[令牌数值](../foundations/token-values.md#间距与布局)的列表行高，悬停与选中用 `--wash-hover` / `--wash-selected`，内边距与标题栏保持一致节奏。受限内容区可使用紧凑态（`density="compact"`）：不渲染标题栏，标题只作为列表的可读名称；宽视口行高按列表单行，窄视口不低于 `--touch-target`。
 
 列表项之间以轻量分隔线组织，不使用斑马纹背景。悬停仅用于可点击项的视觉反馈，使用[颜色令牌](../foundations/color-tokens.md)的语义背景色。
 
 ## 交互与状态
 
-可点击的列表项必须可通过键盘到达并显示焦点。行内操作按钮（编辑、删除）遵循[无障碍](../foundations/accessibility.md)的触摸目标与焦点规则。
+`rowInteractive` 可传函数按行决定是否可点击；不可点击的行不呈现为按钮。可点击的列表项必须可通过键盘到达并显示焦点。行内操作按钮（编辑、删除）遵循[无障碍](../foundations/accessibility.md)的触摸目标与焦点规则。
 
 无数据、加载、失败状态必须呈现明确状态及后续动作（引导创建、重试）。状态过渡和减少动效遵循[动效与性能](../foundations/motion-performance.md)。
 

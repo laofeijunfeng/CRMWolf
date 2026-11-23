@@ -103,7 +103,7 @@ it('renders submitted text input as immutable text instead of an empty editor', 
   expect(wrapper.find('button').exists()).toBe(false)
 })
 
-it('highlights only the selected choice instead of the first option', async () => {
+it('submits the clicked confirmation choice even when the payload omits submit_on_select', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_opportunity_confirmation',
     type: 'interaction',
@@ -124,16 +124,12 @@ it('highlights only the selected choice instead of the first option', async () =
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
   const buttons = wrapper.findAll('button')
 
-  expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
-  expect(buttons[1]?.attributes('aria-pressed')).toBe('false')
-  expect(buttons[0]?.classes()).toContain('bg-primary')
-  expect(buttons[1]?.classes()).not.toContain('bg-primary')
-
-  await buttons[1]?.trigger('click')
-
-  expect(buttons[0]?.attributes('aria-pressed')).toBe('false')
-  expect(buttons[1]?.attributes('aria-pressed')).toBe('true')
-  expect(buttons[1]?.classes()).toContain('bg-accent')
+  // 取消在左、确认在右；没有默认选中，点哪个就提交哪个协议值。
+  expect(buttons.map(button => button.text())).toEqual(['否', '是'])
+  await buttons[0]?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([
+    ['act_opportunity_confirmation', { choice: 'cancel' }],
+  ])
 })
 
 it('submits a confirmation immediately when the signed contract opts in', async () => {
@@ -156,7 +152,7 @@ it('submits a confirmation immediately when the signed contract opts in', async 
   })
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
-  await wrapper.findAll('button')[1]?.trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === '否')?.trigger('click')
 
   expect(wrapper.emitted('submit')).toEqual([
     ['act_opportunity_confirmation_submit', { choice: 'cancel' }],
@@ -348,12 +344,13 @@ it('does not reopen a submitted confirmation when its parent releases a transien
     selection_mode: 'single', submit_action_id: 'act_confirmation_retry',
   })
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const confirmButton = wrapper.findAll('button').find(button => button.text() === '确认')
 
-  await wrapper.findAll('button')[0]?.trigger('click')
+  await confirmButton?.trigger('click')
   await wrapper.setProps({ locked: true })
   await wrapper.setProps({ locked: false })
   expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true)
-  await wrapper.findAll('button')[1]?.trigger('click')
+  await confirmButton?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([['act_confirmation_retry', { choice: 'confirm' }]])
 })
 
@@ -424,7 +421,7 @@ it('shows every open follow-up and submits only the current three-way choice', a
   ])
 })
 
-it('splits a customer month segment from a dated sales follow-up', () => {
+it('splits a customer month segment from a dated sales follow-up', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_activity',
     type: 'interaction',
@@ -452,21 +449,26 @@ it('splits a customer month segment from a dated sales follow-up', () => {
   })
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
-  const rows = Object.fromEntries(wrapper.findAll('.activity-meta-row').map(row => [
+  const rows = Object.fromEntries(wrapper.findAll('[data-activity-prop]').map(row => [
     row.get('dt').text(),
     row.get('dd').text()
   ]))
 
   expect(rows['下一步']).toBe('跟进付款进展')
   expect(rows['客户承诺']).toBe('下个月初付款（模糊时间，未确定具体日期）')
-  expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-05（周四）09:00')
+  expect(wrapper.get('[data-activity-time-value]').text()).toBe('2026-11-05（周四）09:00')
   expect(rows['跟进时间']).toBe('2026-11-05（周四）09:00（默认时刻）')
-  expect(wrapper.get('details.activity-score').text()).toContain('原话：“11 月 5 号”')
-  expect(wrapper.get('details.activity-score').element.closest('details.activity-basis')).not.toBeNull()
-  expect(wrapper.text()).not.toContain('2026-11-01')
+
+  expect(wrapper.get('[data-activity-score]').text()).toContain('原话：')
+  expect(wrapper.get('[data-activity-score]').element.closest('[data-activity-basis]')).not.toBeNull()
+  expect(wrapper.get('[data-activity-score] button').attributes('aria-expanded')).toBe('false')
+  await wrapper.get('[data-activity-basis] button').trigger('click')
+  await wrapper.get('[data-activity-score] button').trigger('click')
+  expect(wrapper.get('[data-activity-basis] button').attributes('aria-expanded')).toBe('true')
+  expect(wrapper.get('[data-activity-score] button').attributes('aria-expanded')).toBe('true')
 })
 
-it('shows a full month commitment separately from a sales date', () => {
+it('shows a full month commitment separately from a sales date', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_full_month',
     type: 'interaction',
@@ -494,21 +496,27 @@ it('shows a full month commitment separately from a sales date', () => {
   })
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
-  const rows = Object.fromEntries(wrapper.findAll('.activity-meta-row').map(row => [
+  const rows = Object.fromEntries(wrapper.findAll('[data-activity-prop]').map(row => [
     row.get('dt').text(),
     row.get('dd').text()
   ]))
 
   expect(rows['客户承诺']).toBe('预计11月份可以完成付款（整月，未确定具体日期）')
-  expect(wrapper.get('.activity-time-value').text()).toBe('2026-11-15（周日）15:00')
+  expect(wrapper.get('[data-activity-time-value]').text()).toBe('2026-11-15（周日）15:00')
   expect(rows['跟进时间']).toBe('2026-11-15（周日）15:00')
-  expect(wrapper.get('details.activity-score').text()).toContain('原话：“11月15号下午3点”')
-  expect(rows['下一步']).toBe('11月15号跟进付款方面的情况')
   expect(wrapper.text()).not.toContain('11月1日')
   expect(wrapper.text()).not.toContain('11月30')
+
+  expect(wrapper.get('[data-activity-score]').text()).toContain('原话：')
+  expect(wrapper.get('[data-activity-score]').element.closest('[data-activity-basis]')).not.toBeNull()
+  expect(wrapper.get('[data-activity-score] button').attributes('aria-expanded')).toBe('false')
+  await wrapper.get('[data-activity-basis] button').trigger('click')
+  await wrapper.get('[data-activity-score] button').trigger('click')
+  expect(wrapper.get('[data-activity-basis] button').attributes('aria-expanded')).toBe('true')
+  expect(wrapper.get('[data-activity-score] button').attributes('aria-expanded')).toBe('true')
 })
 
-it('keeps business fields primary and nests legacy background and organizing sources under one reference disclosure', () => {
+it('keeps business fields primary and nests legacy background and organizing sources under one reference disclosure', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_density',
     type: 'interaction',
@@ -541,23 +549,33 @@ it('keeps business fields primary and nests legacy background and organizing sou
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('.activity-customer').text()).toContain('上海期货信息技术有限公司')
-  expect(wrapper.get('.activity-body').text()).toBe('今天通过微信对齐了合同和发票。')
-  expect(wrapper.find('.activity-context').exists()).toBe(false)
-  expect(wrapper.find('.activity-change').exists()).toBe(false)
-  expect(wrapper.find('.activity-section .activity-pill.is-success').exists()).toBe(false)
-  const basis = wrapper.get('details.activity-basis')
-  const organizing = basis.get('details.activity-score')
-  expect(basis.attributes('open')).toBeUndefined()
-  expect(organizing.attributes('open')).toBeUndefined()
-  expect(wrapper.findAll('details').filter(details => details.element.parentElement?.closest('details') === null)).toHaveLength(1)
+  expect(wrapper.get('[data-activity-customer]').text()).toContain('上海期货信息技术有限公司')
+  expect(wrapper.get('[data-activity-summary]').text()).toBe('今天通过微信对齐了合同和发票。')
+  expect(wrapper.find('[data-activity-change]').exists()).toBe(false)
+  expect(wrapper.find('[data-activity-prop="activity_kind"] [data-tone="success"]').exists()).toBe(false)
+
+  // 折叠区收起时不渲染内容；「参考与依据」是唯一的顶层折叠区，整理依据嵌套在它里面。
+  const basis = wrapper.get('[data-activity-basis]')
+  const basisTrigger = basis.get('button')
+  expect(basisTrigger.attributes('aria-expanded')).toBe('false')
+  expect(wrapper.findAll('[data-activity-basis]')).toHaveLength(1)
+
+  await basisTrigger.trigger('click')
+
+  const organizing = basis.get('[data-activity-score]')
+  expect(organizing.get('button').attributes('aria-expanded')).toBe('false')
   expect(basis.text()).toContain('2026-09-23 微信沟通')
   expect(basis.text()).toContain('没有权限查看这部分内容')
+  expect(organizing.get('button').attributes('aria-expanded')).toBe('false')
+
+  await organizing.get('button').trigger('click')
+  expect(organizing.get('button').attributes('aria-expanded')).toBe('true')
+
   expect(organizing.text()).toContain('从今天微信联系中识别')
   expect(organizing.text()).toContain('76 / 100')
   expect(organizing.text()).toContain('主体和下一步都已整理')
-  expect(wrapper.get('.activity-kind').text()).not.toContain('从今天微信联系中识别')
-  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['取消', '确认写入'])
+  expect(wrapper.get('[data-activity-prop="activity_kind"]').text()).not.toContain('从今天微信联系中识别')
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['查看参考与依据', '内容评分与整理依据', '取消', '确认写入'])
 })
 
 it('opens the existing reference disclosure and focuses the frozen comparison without submitting an action', async () => {
@@ -592,30 +610,31 @@ it('opens the existing reference disclosure and focuses the frozen comparison wi
   })
   const wrapper = mount(AgentUIInteractionBlock, { props: { block }, attachTo: document.body })
   try {
-    const basis = wrapper.get<HTMLDetailsElement>('details.activity-basis')
-    const nested = basis.get<HTMLDetailsElement>('details.activity-score')
-    expect(basis.attributes('open')).toBeUndefined()
-    expect(wrapper.findAll('.activity-meta-row dt').map(node => node.text())).toEqual(['客户承诺', '下一步'])
-    expect(wrapper.get('.activity-change').text()).toContain('评审由周四改至周五')
+    const basis = wrapper.get('[data-activity-basis]')
+    const basisTrigger = basis.get('button')
+    expect(basisTrigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.findAll('[data-activity-prop] dt').map(node => node.text())).toEqual(['客户承诺', '下一步'])
+    expect(wrapper.get('[data-activity-change]').text()).toContain('评审由周四改至周五')
+
+    await wrapper.get('[data-activity-comparison-link]').trigger('click')
+
+    expect(basisTrigger.attributes('aria-expanded')).toBe('true')
     expect(basis.get('[data-activity-comparison-previous]').text()).toContain('原定周四评审')
     expect(basis.get('[data-activity-comparison-previous]').text()).toContain('2026-11-10 活动摘要')
     expect(basis.get('[data-activity-comparison-current]').text()).toContain('改到周五评审')
     expect(basis.get('[data-activity-comparison-current]').text()).toContain('本次客户原话')
     expect(basis.get('[data-activity-opportunity]').text()).toContain('电梯更新 · 方案评审')
     expect(basis.text()).toContain('仅比较可读取的历史')
-    expect(nested.text()).toContain('82 / 100')
-    await wrapper.get('[data-activity-comparison-link]').trigger('click')
-    expect(basis.element.open).toBe(true)
-    expect(nested.element.open).toBe(false)
+    expect(basis.get('[data-activity-score] button').attributes('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(basis.get('[data-activity-history-heading]').element)
-    expect(wrapper.findAll('.activity-meta-row dd').filter(node => node.text() === '客户确认周五评审')).toHaveLength(1)
+    expect(wrapper.findAll('[data-activity-prop] dd').filter(node => node.text() === '客户确认周五评审')).toHaveLength(1)
     expect(wrapper.emitted('submit')).toBeUndefined()
   } finally {
     wrapper.unmount()
   }
 })
 
-it('keeps ignored input noise only in nested organizing details and omits it when absent', () => {
+it('keeps ignored input noise only in nested organizing details and omits it when absent', async () => {
   const confirmation = (extra: Record<string, string>[]): ReturnType<typeof InteractionBlockSchema.parse> => InteractionBlockSchema.parse({
     id: 'b_interaction_noise',
     type: 'interaction',
@@ -642,10 +661,15 @@ it('keeps ignored input noise only in nested organizing details and omits it whe
   const shown = mount(AgentUIInteractionBlock, {
     props: { block: confirmation([{ key: 'ignored_noise', label: '已忽略', value: '已忽略 3 处发言时间', group: 'context' }]) }
   })
+  // 被忽略的原文片段只出现在嵌套的整理依据里。
+  await shown.get('[data-activity-basis] button').trigger('click')
+  await shown.get('[data-activity-basis] button').trigger('click')
+  await shown.get('[data-activity-score] button').trigger('click')
   expect(shown.findAll('[data-activity-ignored-noise]').map(node => node.text())).toEqual(['已忽略 3 处发言时间'])
-  expect(shown.get('[data-activity-ignored-noise]').element.closest('details.activity-score')).not.toBeNull()
+  expect(shown.get('[data-activity-ignored-noise]').element.closest('[data-activity-score]')).not.toBeNull()
 
   const absent = mount(AgentUIInteractionBlock, { props: { block: confirmation([]) } })
+  expect(absent.find('[data-activity-basis]').exists()).toBe(false)
   expect(absent.find('[data-activity-ignored-noise]').exists()).toBe(false)
 })
 
@@ -685,11 +709,11 @@ it('keeps an unrecognized activity type and its reason outside the fold', () => 
 
   expect(wrapper.text()).toContain('等待选择类型')
   expect(wrapper.get('[data-agent-ui-kind-evidence]').text()).toBe('原文没有写明渠道')
-  expect(wrapper.find('details.activity-basis').exists()).toBe(false)
-  expect(wrapper.get('button.activity-action.is-disabled, button[disabled].activity-action').text()).toContain('确认写入')
+  expect(wrapper.find('[data-activity-basis]').exists()).toBe(false)
+  expect(wrapper.findAll('button').filter(button => button.attributes('disabled') !== undefined).map(button => button.text())).toEqual(['确认写入'])
 })
 
-it('replays a historical activity confirmation without write actions', () => {
+it('replays a historical activity confirmation without write actions', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_interaction_history',
     type: 'interaction',
@@ -717,17 +741,21 @@ it('replays a historical activity confirmation without write actions', () => {
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('.activity-title').text()).toBe('客户活动')
-  expect(wrapper.findAll('span').filter(span => span.text() === '历史')).toHaveLength(1)
+  expect(wrapper.get('h2').text()).toBe('客户活动')
+  expect(wrapper.findAll('[role="status"]').filter(tag => tag.text() === '历史')).toHaveLength(1)
   expect(wrapper.text()).not.toContain('历史冻结')
   expect(wrapper.text()).toContain('当时冻结的活动正文。')
-  expect(wrapper.find('button').exists()).toBe(false)
+  // 只读卡只有两个折叠触发器，没有任何操作入口
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['查看参考与依据', '内容评分与整理依据'])
   expect(wrapper.text()).not.toContain('确认写入')
   expect(wrapper.text()).not.toContain('取消')
   expect(wrapper.text()).not.toContain('修改类型')
   expect(wrapper.text()).not.toContain('再次写入')
-  const basis = wrapper.get('details.activity-basis')
-  expect(basis.attributes('open')).toBeUndefined()
+
+  const basis = wrapper.get('[data-activity-basis]')
+  expect(basis.get('button').attributes('aria-expanded')).toBe('false')
+  await basis.get('button').trigger('click')
+  await basis.get('[data-activity-score] button').trigger('click')
   expect(basis.text()).toContain('当时的识别来源')
 })
 
@@ -760,18 +788,18 @@ it('groups the activity kinds and shows the wording that triggered the question'
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  const headings = wrapper.findAll('div[role="group"] > p').map(heading => heading.text())
+  const headings = wrapper.findAll('[role="radiogroup"] > p').map(heading => heading.text())
   expect(headings).toEqual(['会议', '跟进'])
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('原文提到：')
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('微信')
   expect(wrapper.get('[data-agent-ui-kind-hint]').text()).toContain('请按本次实际发生的沟通来选')
   expect(wrapper.text()).not.toContain('原文提到：微信、线上会议')
 
-  const options = wrapper.findAll('button')
+  const options = wrapper.findAll('[role="radio"]')
   expect(options.map(button => button.text())).toEqual([
     '线上会议远程会议', '线下会议当面开会', '微信跟进微信 / 企业微信', '其他跟进以上都不是'
   ])
-  expect(options.every(button => button.attributes('aria-pressed') === 'false')).toBe(true)
+  expect(options.every(button => button.attributes('aria-checked') === 'false')).toBe(true)
 
   await options[2]?.trigger('click')
   expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind', { choice: 'WECHAT_FOLLOW_UP' }])
@@ -832,7 +860,7 @@ it('offers a retry with the same choice when the card never reported an outcome'
 
   expect(wrapper.text()).toContain('提交失败')
   expect(wrapper.find('[data-agent-ui-card-notice="failed"] button').exists()).toBe(true)
-  expect(wrapper.get('button[aria-pressed="true"]').text()).toContain('微信跟进')
+  expect(wrapper.get('[role="radio"][aria-checked="true"]').text()).toContain('微信跟进')
 
   await wrapper.get('[data-agent-ui-card-notice="failed"] button').trigger('click')
   expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind_failed', { choice: 'WECHAT_FOLLOW_UP' }])
@@ -933,12 +961,14 @@ it('shows the chosen kind with its origin and only same-category revisions', asy
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('details.activity-score').text()).toContain('你选择：微信跟进')
-  expect(wrapper.get('.activity-kind').text()).not.toContain('你选择：微信跟进')
+  expect(wrapper.get('[data-activity-prop="activity_kind"]').text()).not.toContain('你选择：微信跟进')
+  await wrapper.get('[data-activity-basis] button').trigger('click')
+  await wrapper.get('[data-activity-score] button').trigger('click')
+  expect(wrapper.get('[data-activity-score]').text()).toContain('你选择：微信跟进')
 
-  await wrapper.get('button.activity-link').trigger('click')
-  expect(wrapper.get('button.activity-link').text()).toBe('收起类型选项')
-  const revisions = wrapper.findAll('button.activity-kind-option')
+  await wrapper.findAll('button').find(button => button.text() === '修改活动类型')?.trigger('click')
+  expect(wrapper.findAll('button').some(button => button.text() === '收起类型选项')).toBe(true)
+  const revisions = wrapper.findAll('[role="radio"]')
   expect(revisions.map(button => button.text())).toEqual(['电话跟进', '微信跟进'])
 
   await revisions[0]?.trigger('click')

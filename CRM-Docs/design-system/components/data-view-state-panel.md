@@ -21,6 +21,7 @@
 
 - `loading`：替换默认骨架。
 - `error-action`：替换默认「重新加载」按钮。
+- `empty-media`：空状态标题上方的图标位。
 - `empty-action`：空状态下的后续动作。
 - 默认插槽：ready 时的内容。
 

@@ -58,13 +58,19 @@ const runningTurn = (events: AssistantTurn['events'] = []): AssistantTurn => ({
   turn_id: 'turn-1', status: 'RUNNING', lease_version: 2, reprocess_allowed: false,
   events, task: runningTask(),
 })
-const stageRow = (wrapper: VueWrapper, label: string): HTMLElement | null | undefined =>
-  wrapper.findAll('span').find((span) => span.text() === label)?.element.parentElement
+// 步骤行 = 标题所在的 li：标题、说明与右侧元信息都在里面。
+const stageRow = (wrapper: VueWrapper, label: string): Element | null | undefined =>
+  wrapper.findAll('span').find((span) => span.text() === label)?.element.closest('li')
+// 步骤行本身不着状态色；完成、失败的语义色只落在该行的图标上。
+const stageIconTone = (wrapper: VueWrapper, label: string): string => (
+  stageRow(wrapper, label)?.querySelector('svg')?.getAttribute('class') ?? ''
+)
 const failedStage = (wrapper: VueWrapper): void => {
-  expect(stageRow(wrapper, '正在判断活动类型')?.className).toContain('text-success')
+  expect(stageIconTone(wrapper, '正在判断活动类型')).toContain('text-tone-success')
   expect(stageRow(wrapper, '正在整理活动内容')?.textContent).toContain('失败')
   expect(stageRow(wrapper, '正在整理活动内容')?.textContent).not.toContain('进行中')
-  expect(stageRow(wrapper, '正在评估记录质量')?.className ?? '').not.toContain('text-success')
+  expect(stageIconTone(wrapper, '正在整理活动内容')).toContain('text-tone-danger')
+  expect(stageIconTone(wrapper, '正在评估记录质量')).not.toContain('text-tone-success')
   expect(wrapper.text()).not.toContain('正在整理，内容较长')
 }
 let wrapper: VueWrapper | undefined

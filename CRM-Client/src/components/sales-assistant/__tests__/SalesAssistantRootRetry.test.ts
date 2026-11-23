@@ -91,7 +91,7 @@ describe('SalesAssistant root retry', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('模型配置不可用')
-    expect(wrapper.text()).toContain('不能盲目重试')
+    expect(wrapper.text()).toContain('暂时不能重试')
     expect(wrapper.findAll('button').some((button) => button.text() === '重试')).toBe(false)
     expect(retryConversationEntry).not.toHaveBeenCalled()
   })

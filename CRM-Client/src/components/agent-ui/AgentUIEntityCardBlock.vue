@@ -16,14 +16,14 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <article class="grid gap-3 rounded-lg border border-border bg-card p-4 text-card-foreground">
-    <h3 class="m-0 text-base font-semibold text-foreground">{{ block.title }}</h3>
-    <section v-for="section in block.sections" :key="section.key" class="grid gap-2">
-      <h4 v-if="section.title" class="m-0 text-xs font-medium text-muted-foreground">{{ section.title }}</h4>
-      <dl class="m-0 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-x-4 gap-y-2">
-        <div v-for="field in section.fields" :key="field.key" class="grid min-w-0 gap-0.5">
-          <dt class="m-0 text-xs font-medium text-muted-foreground">{{ field.label }}</dt>
-          <dd class="m-0 break-words text-foreground">{{ formatAgentUIValue(field.value) }}</dd>
+  <article class="grid min-w-0 gap-space-3 rounded-lg border border-border bg-card p-space-4 text-foreground">
+    <h3 class="m-0 text-body font-semibold text-foreground">{{ block.title }}</h3>
+    <section v-for="section in block.sections" :key="section.key" class="grid gap-space-2">
+      <h4 v-if="section.title" class="m-0 text-caption font-medium text-muted-foreground">{{ section.title }}</h4>
+      <dl class="m-0 grid grid-cols-1 gap-x-space-4 gap-y-space-2 sm:grid-cols-2">
+        <div v-for="field in section.fields" :key="field.key" class="grid min-w-0 gap-space-1">
+          <dt class="m-0 text-caption font-medium text-muted-foreground">{{ field.label }}</dt>
+          <dd class="m-0 break-words text-body text-foreground">{{ formatAgentUIValue(field.value) }}</dd>
         </div>
       </dl>
     </section>

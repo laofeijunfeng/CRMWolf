@@ -26,4 +26,11 @@ import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
     expect(badge.attributes('aria-label')).toBe(badge.text())
     expect(badge.attributes('title')).toBeUndefined()
   })
+
+  it('shows a server-provided label while keeping the tone from the status map', () => {
+    const badge = mount(StatusBadge, { props: { type: 'agentDisposition', status: 'complete', label: '已完成（服务端）' } })
+    expect(badge.text()).toBe('已完成（服务端）')
+    expect(badge.attributes('aria-label')).toBe('已完成（服务端）')
+    expect(badge.attributes('data-tone')).toBe('success')
+  })
 })

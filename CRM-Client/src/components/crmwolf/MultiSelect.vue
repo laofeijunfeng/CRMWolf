@@ -18,6 +18,10 @@ interface MultiSelectOption {
   label: string
 }
 
+defineOptions({
+  inheritAttrs: false,
+})
+
 const props = withDefaults(defineProps<{
   modelValue?: string[]
   options?: readonly MultiSelectOption[]
@@ -58,6 +62,7 @@ function toggleValue(value: string): void {
   <Popover>
     <PopoverTrigger as-child>
       <Button
+        v-bind="$attrs"
         type="button"
         variant="outline"
         role="combobox"

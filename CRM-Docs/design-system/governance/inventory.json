@@ -1254,6 +1254,36 @@
       "status": "exception",
       "lastVerified": "2026-11-20",
       "exceptionId": "PFP-006"
+    },
+    {
+      "id": "GOV-084",
+      "file": "CRM-Client/src/components/agent-ui/AgentUIInteractionBlock.vue",
+      "symbol": "bg-danger/12 bg-success/12 bg-warning/12（另见 AgentUINoticeBlock、AgentUIErrorBlock、AgentUIActionResultBlock、SalesAssistantChat）",
+      "category": "off-scale-alpha",
+      "current": "0 处命中",
+      "target": "提示块改为 data-tone 与 text-tone-* 派生色的反馈条（CRM-156）",
+      "exception": false,
+      "owner": "frontend-platform",
+      "batch": "CRM-156",
+      "risk": "透明度 12 的类名原本不生成 CSS；改后提示块开始出现浅底，属预期修复",
+      "verification": "npm run lint:design-system:all 对 agent-ui/** 与 sales-assistant/** 无 off-scale-alpha 命中",
+      "status": "fixed",
+      "lastVerified": "2026-11-24"
+    },
+    {
+      "id": "GOV-085",
+      "file": "CRM-Client/src/components/ui/alert/Alert.vue",
+      "symbol": "bg-danger/12 bg-success/12 bg-warning/12 bg-info/12",
+      "category": "off-scale-alpha",
+      "current": "0 处命中",
+      "target": "删除不生成 CSS 的失效类；彩色变体并入 data-tone 另立需求（CRM-156）",
+      "exception": false,
+      "owner": "frontend-platform",
+      "batch": "CRM-156",
+      "risk": "画面零变化：这些类名原本不生成 CSS",
+      "verification": "npm run lint:design-system:all 对 ui/alert/Alert.vue 无 off-scale-alpha 命中",
+      "status": "fixed",
+      "lastVerified": "2026-11-24"
     }
   ]
 }

@@ -25,7 +25,7 @@ const forwardSubmit = (actionId: string, values: JsonObject): void => {
 
 <template>
   <section
-    class="overflow-hidden rounded-lg border border-border bg-card divide-y divide-border"
+    class="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card"
     aria-label="待办任务"
   >
     <AgentUIInteractionBlock
@@ -34,7 +34,7 @@ const forwardSubmit = (actionId: string, values: JsonObject): void => {
       :block="block"
       :disabled="disabled === true"
       :locked="isLocked(block.submit_action_id)"
-      :grouped="true"
+      grouped
       @submit="forwardSubmit"
     />
   </section>

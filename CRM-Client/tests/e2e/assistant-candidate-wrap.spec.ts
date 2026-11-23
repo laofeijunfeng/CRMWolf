@@ -175,12 +175,12 @@ for (const width of [1440, 375]) {
     })
     await page.goto('/assistant')
     const card = page.locator('.agent-ui-interaction')
-    const options = card.getByRole('group').getByRole('button')
+    const options = card.getByRole('radiogroup').getByRole('radio')
     await expect(options).toHaveCount(3)
     async function assertContained() {
       const layout = await card.evaluate(el => {
         const bounds = el.getBoundingClientRect()
-        const buttons = [...el.querySelectorAll('button')]
+        const buttons = [...el.querySelectorAll('[role="radio"]')]
         return {
           overflow: el.scrollWidth - el.clientWidth,
           outside: buttons.some(button => {
@@ -191,13 +191,14 @@ for (const width of [1440, 375]) {
               return [...range.getClientRects()].some(rect => rect.left < box.left || rect.right > box.right + 1)
             })
           }),
-          columns: getComputedStyle(el.querySelector('[role="group"]') ?? el).gridTemplateColumns.split(' ').length,
+          columns: getComputedStyle(el.querySelector('[role="radiogroup"]') ?? el).gridTemplateColumns.split(' ').length,
           heights: buttons.map(button => button.getBoundingClientRect().height)
         }
       })
       expect(layout.overflow).toBeLessThanOrEqual(1)
       expect(layout.outside).toBe(false)
-      expect(layout.columns).toBe(width === 375 ? 1 : 2)
+      // 设计稿 08-mobile：窄视口选项仍是两列，长文案在瓦片内换行。
+      expect(layout.columns).toBe(2)
       expect(layout.heights[0]).toBeGreaterThan(44)
     }
     await page.screenshot({ path: testInfo.outputPath(`candidates-${width}.png`), fullPage: true })

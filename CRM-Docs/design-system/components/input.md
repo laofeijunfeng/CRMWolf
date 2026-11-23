@@ -25,12 +25,12 @@
 
 ## 实现契约
 
-页面表单只用 crmwolf `InputField`、`SelectField`、`TextareaField`、`DateField`、`SearchableSelectField`；`ui/form` 只在 Field 内部使用，页面不得直接导入，见[受限原件](registry.md#受限原件)。
+页面表单只用 crmwolf `InputField`、`SelectField`、`TextareaField`、`DateField`、`SearchableSelectField`、`CheckboxField`、`MultiSelectField`；`ui/form` 只在 Field 内部使用，页面不得直接导入，见[受限原件](registry.md#受限原件)。
 
 - **共同属性：**`modelValue`、`id`、`label`、`placeholder`、`helperText`、`error`、`required`、`disabled`、`class`；单行、多行、日期另有 `controlClass`，两种选择另有 `triggerClass`、`contentClass`。`controlClass` 等只用于布局，不得改高度、圆角或字号。
-- **值类型：**InputField / TextareaField 为字符串或数字，DateField 为 `Date | null`，两种选择均回传字符串。
+- **值类型：**InputField / TextareaField 为字符串或数字，DateField 为 `Date | null`，SelectField 回传字符串，CheckboxField 回传布尔，MultiSelectField 回传 `string[]`。
 - **事件：**全部发出 `update:modelValue`；SelectField 另有 `add`（配合 `addActionLabel`、`addActionDisabled`）与 `ariaLabel`；SearchableSelectField 另有 `searchValue` / `update:searchValue`、`update:open`、`loading`、`emptyText`、`loadingText`、`searchPlaceholder`。
 - **校验：**用 vee-validate 的 `Field` 或 `defineField` 绑定值，把错误文本传给 `error`；`aria-describedby` 依次指向错误与 `helperText`，出错时说明文字只对读屏保留；`required` 同时输出 `aria-required`。不得在页面手拼 Label + 控件 + 错误文本。
-- **标签行：**所有 `*Field` 的标签行固定 20px 高，文字与附加控件垂直居中，同一行相邻字段的输入框顶边必须对齐。标签右侧的开关、按钮或说明图标放进 `#label-action` 插槽，只用小号控件（`Switch size="sm"` 28×16、图标按钮 20×20），不得撑高标签行；自绘标签（如分段选择的标签）也必须保持同样高度。
+- **标签行：**所有 `*Field` 的标签行统一使用 `h-5`，文字与附加控件垂直居中，同一行相邻字段的输入框顶边必须对齐。标签右侧的开关、按钮或说明图标放进 `#label-action` 插槽，只用小号控件（`Switch size="sm"` 或采用 `size-5` 的图标按钮），不得撑高标签行；自绘标签（如分段选择的标签）也必须使用相同高度。
 - **静态规则说明：**不随输入变化的规则说明不常驻展示，用 `FieldHelpTip`（问号图标，悬停或键盘聚焦显示，必须给 `label` 作为可读名称）放在 `#label-action`。校验错误仍通过 `error` 在输入框下方直接展示，不得收进问号。
 - **选项：**`options` 为 `{ value, label, disabled? }`；SelectField 另支持 `disabledReason`，禁用项必须给出原因。

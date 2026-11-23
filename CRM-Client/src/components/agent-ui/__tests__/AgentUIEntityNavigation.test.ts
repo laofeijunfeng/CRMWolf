@@ -25,7 +25,7 @@ describe('AgentUIEntityListBlock', () => {
   it('emits navigation for supported entity resources', async () => {
     const wrapper = mount(AgentUIEntityListBlock, { props: { block: makeBlock('customer') } })
 
-    await wrapper.get('button').trigger('click')
+    await wrapper.get('[role="button"]').trigger('click')
 
     expect(wrapper.emitted('open-entity')).toHaveLength(1)
   })
@@ -33,7 +33,7 @@ describe('AgentUIEntityListBlock', () => {
   it('keeps unsupported resources readable without a misleading button', () => {
     const wrapper = mount(AgentUIEntityListBlock, { props: { block: makeBlock('payment') } })
 
-    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('[role="button"], button').exists()).toBe(false)
     expect(wrapper.text()).toContain('回款记录 1')
   })
 })

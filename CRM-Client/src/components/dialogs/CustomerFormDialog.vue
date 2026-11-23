@@ -1131,7 +1131,7 @@ function handleCancel(): void { closeGuard.requestClose() }
     --license-type-background: color-mix(in srgb, hsl(var(--status-success)) var(--status-bg-mix), transparent);
   }
 
-  .segmented-choice__radio:not(:disabled) + .segmented-choice__option {
+  .segmented-choice__option:not(:disabled) {
     color: var(--license-type-foreground);
   }
 

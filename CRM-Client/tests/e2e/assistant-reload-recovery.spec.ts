@@ -13,7 +13,7 @@ test('reload restores the in-flight task with its waiting card', async ({ page }
   const noteEcho = page.getByText(note, { exact: true })
   const waiting = page.getByText(/还差|属于哪种活动|确认后写入/)
   const stoppedNotice = page.getByText(stopped, { exact: true })
-  const restoring = page.getByRole('status').filter({ hasText: '正在恢复对话' })
+  const restoring = page.getByRole('status', { name: '加载中' })
 
   await page.goto('/assistant')
   const textarea = page.locator('textarea').first()

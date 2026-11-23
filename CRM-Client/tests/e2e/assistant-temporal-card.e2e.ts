@@ -200,12 +200,10 @@ for (const card of cases) {
     await expect(page.getByText('客户承诺', { exact: true })).toBeVisible()
     await expect(page.getByText('下个月初付款（模糊时间，未确定具体日期）', { exact: true })).toBeVisible()
     await expect(page.getByText('跟进时间', { exact: true })).toBeVisible()
-    const time = page.locator('.activity-time')
-    await expect(time.locator('.activity-time-value')).toHaveText(card.followTime.value)
-    const tag = time.locator('.activity-pill')
-    if (card.followTime.status_label) await expect(tag).toHaveText(card.followTime.status_label)
-    else await expect(tag).toHaveCount(0)
-    await expect(page.locator('.activity-time + .activity-caption')).toHaveText(card.followTime.source ?? '')
+    const time = page.locator('[data-activity-prop="next_follow_time"]')
+    await expect(time.locator('[data-activity-time-value]')).toHaveText(card.followTime.value)
+    // 识别状态跟在时间后面，是同一行的文字，不再是胶囊。
+    if (card.followTime.status_label) await expect(time).toContainText(card.followTime.status_label)
     await page.screenshot({ path: testInfo.outputPath(card.shot), fullPage: true })
   })
 }
