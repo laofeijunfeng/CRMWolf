@@ -84,7 +84,7 @@ def _resolved_time(at: datetime | None, granularity: str) -> EditTime | None:
     if at is None:
         return None
     if granularity == "DATE":
-        return at, "DATE"
+        return datetime.combine(at.date(), datetime.min.time()), "DATE"
     if granularity == "DATETIME":
         return at, "DATETIME"
     return None

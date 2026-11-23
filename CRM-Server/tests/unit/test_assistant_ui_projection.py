@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 from app.schemas.assistant import AssistantTaskView
 from app.schemas.assistant_conversation import ConversationBoundary, ConversationMessage
 from app.services.assistant.activity_channel import (
@@ -10,6 +12,7 @@ from app.services.assistant.activity_channel import (
     kind_choice_candidates,
 )
 from app.services.assistant.contracts import (
+    AcceptedProposalReceipt,
     ActivityPreview,
     ActivityWriteConfirmation,
     DraftField,
@@ -992,6 +995,97 @@ def test_malformed_temporal_evidence_does_not_break_confirmation_projection() ->
     assert facts["next_follow_time"].value == "2026年11月11日（周三）09:00"
     assert facts["next_follow_time"].source == "原话：“下周三”"
 
+def test_mixed_malformed_temporal_evidence_keeps_valid_confirmation_labels() -> None:
+    waiting = _confirmation(
+        _preview(
+            content_json={
+                "temporal_evidence": {
+                    "version": "temporal-evidence-v1",
+                    "primary_action_id": "act_sales",
+                    "mentions": [
+                        {"legacy": "mention"},
+                        {
+                            "mention_id": "tm_customer",
+                            "raw_text": "月底",
+                            "source_segment_id": "seg",
+                            "quote_start": 0,
+                            "quote_end": 2,
+                            "kind": "MONTH_SEGMENT",
+                            "role": "CUSTOMER_COMMITMENT",
+                            "action_id": "act_customer",
+                            "year": 2026,
+                            "month": 11,
+                            "day": None,
+                            "segment": "LATE",
+                            "granularity": "MONTH_SEGMENT",
+                            "anchor_at": "2026-11-01T09:00:00",
+                            "resolution_status": "RESOLVED",
+                            "resolved_at": None,
+                        },
+                        {
+                            "mention_id": "tm_sales",
+                            "raw_text": "11月15号",
+                            "source_segment_id": "seg",
+                            "quote_start": 3,
+                            "quote_end": 9,
+                            "kind": "MONTH_DAY",
+                            "role": "SALES_FOLLOW_UP",
+                            "action_id": "act_sales",
+                            "year": 2026,
+                            "month": 11,
+                            "day": 15,
+                            "granularity": "DATE",
+                            "anchor_at": "2026-11-01T09:00:00",
+                            "resolution_status": "RESOLVED",
+                            "resolved_at": "2026-11-15T00:00:00",
+                        },
+                    ],
+                    "actions": [
+                        {"legacy": "action"},
+                        {
+                            "action_id": "act_customer",
+                            "owner_role": "CUSTOMER",
+                            "action_text": "付款",
+                            "action_status": "COMMITTED",
+                            "source_segment_id": "seg",
+                            "evidence_quote": "月底",
+                            "quote_start": 0,
+                            "quote_end": 2,
+                            "temporal_mention_id": "tm_customer",
+                        },
+                        {
+                            "action_id": "act_sales",
+                            "owner_role": "SALES",
+                            "action_text": "跟进付款进展",
+                            "action_status": "PLANNED",
+                            "source_segment_id": "seg",
+                            "evidence_quote": "11月15号",
+                            "quote_start": 3,
+                            "quote_end": 9,
+                            "temporal_mention_id": "tm_sales",
+                        },
+                    ],
+                }
+            },
+            next_action="跟进付款进展",
+            next_follow_time=None,
+            next_follow_time_text=None,
+            next_follow_time_granularity="DATE",
+        )
+    )
+    envelope = project_assistant_message(
+        _message("mixed_malformed_temporal_evidence", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    assert [block.type for block in envelope.blocks] == ["interaction"]
+    interaction = envelope.blocks[0]
+    assert interaction.interaction_type == "confirmation"
+    values = {fact.key: fact.value for fact in interaction.facts}
+    assert values["customer_commitment"] == "月底付款（模糊时间，未确定具体日期）"
+    assert values["next_follow_time"] == "11月15号"
+
+
 def test_user_edited_communication_time_overrides_temporal_evidence() -> None:
     content_json = {
         "activity_edit_times": {
@@ -1749,3 +1843,42 @@ def test_activity_and_follow_up_receipts_link_to_owning_customer_only() -> None:
     assert [block.type for block in ordinary.ui.blocks] == ["text"]
     assert [block.type for block in failed.ui.blocks] == ["notice"]
     assert legacy.ui.blocks[0].entity_ref is None
+
+
+def test_every_accepted_proposal_receipt_kind_renders_a_structured_result() -> None:
+    annotation = AcceptedProposalReceipt.model_fields["kind"].annotation
+    kinds = {kind for part in get_args(annotation) for kind in get_args(part)}
+    assert {"customer_fact", "follow_up_task"} <= kinds
+    for kind in sorted(kinds):
+        message = _message(f"receipt_{kind}", "已处理", _task(), proposal_receipt={
+            "kind": kind,
+            "public_id": _OPPORTUNITY_ID if kind.startswith("opportunity_") else f"{kind}_one",
+            "proposal_key": f"{kind}_key",
+            "customer_public_id": _CUSTOMER_ID,
+        })
+
+        finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+
+        assert [block.type for block in message.ui.blocks] == ["action_result"], kind
+
+
+def test_legacy_proposal_receipts_keep_their_titles_detail_and_customer_link() -> None:
+    for kind, title, fallback in (
+        ("customer_fact", "客户事实已写入", "客户事实"),
+        ("follow_up_task", "跟进任务已更新", "跟进任务"),
+    ):
+        receipt = {
+            "kind": kind, "public_id": f"{kind}_one", "proposal_key": f"{kind}_key",
+            "customer_public_id": _CUSTOMER_ID,
+        }
+        detailed = _message(f"detailed_{kind}", "已处理", _task(), proposal_receipt={**receipt, "detail": "预算已确认"})
+        bare = _message(f"bare_{kind}", "已处理", _task(), proposal_receipt=receipt)
+
+        for message, expected in ((detailed, "预算已确认"), (bare, fallback)):
+            finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+
+            assert [block.type for block in message.ui.blocks] == ["action_result"]
+            result = message.ui.blocks[0]
+            assert result.status == "SUCCESS" and result.title == title
+            assert result.message == expected
+            assert result.entity_ref.resource == "customer" and result.entity_ref.public_id == _CUSTOMER_ID

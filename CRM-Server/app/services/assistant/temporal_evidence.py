@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeRole
@@ -1344,8 +1344,18 @@ def confirmation_time_labels(content_json: dict[str, object]) -> tuple[str | Non
     raw_actions = raw.get("actions")
     if not isinstance(raw_mentions, list) or not isinstance(raw_actions, list):
         return None, None
-    mentions = [_stored_mention(item) for item in raw_mentions]
-    actions = [_stored_action(item) for item in raw_actions]
+    mentions: list[StoredMention] = []
+    for item in raw_mentions:
+        try:
+            mentions.append(_stored_mention(item))
+        except ValidationError:
+            continue
+    actions: list[StoredAction] = []
+    for item in raw_actions:
+        try:
+            actions.append(_stored_action(item))
+        except ValidationError:
+            continue
     stored_commitments = content_json.get("customer_commitments")
     stored_texts: dict[str, str] = {}
     if isinstance(stored_commitments, list):

@@ -875,7 +875,7 @@ async def test_confirmation_clear_communication_time_restores_temporal_evidence(
                 "granularity": "DATE",
                 "anchor_at": "2026-11-20T10:00:00",
                 "resolution_status": "RESOLVED",
-                "resolved_at": "2026-11-13T00:00:00",
+                "resolved_at": "2026-11-13T14:30:00",
                 "communication_time": True,
             }
         ],

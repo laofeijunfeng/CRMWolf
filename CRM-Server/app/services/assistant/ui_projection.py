@@ -116,6 +116,9 @@ _PROPOSAL_LABELS = {
     "opportunity_stage": "推进商机",
     "opportunity_create": "创建商机",
     "follow_up_task_create": "创建跟进任务",
+    # Retired kinds stay renderable: stored receipts still carry them.
+    "customer_fact": "写入客户事实",
+    "follow_up_task": "更新跟进任务",
 }
 _FORM_FIELDS = {
     "create_opportunity_proposal": frozenset({
@@ -1288,6 +1291,8 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             "opportunity_stage": ("商机阶段已推进", "商机阶段"),
             "opportunity_create": ("商机已创建", "商机"),
             "follow_up_task_create": ("跟进任务已创建", "跟进任务"),
+            "customer_fact": ("客户事实已写入", "客户事实"),
+            "follow_up_task": ("跟进任务已更新", "跟进任务"),
         }[proposal.kind]
         if (
             proposal.kind == "opportunity_create"
