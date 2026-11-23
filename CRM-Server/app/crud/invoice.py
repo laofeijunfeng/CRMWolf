@@ -1,9 +1,19 @@
 from datetime import date, datetime, time
-from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, exists, not_, or_
 from sqlalchemy.orm import Query, Session
+
 from app.constants.business_types import BusinessType
+from app.core.list_query import (
+    FilterCondition,
+    ListQueryContext,
+    SortCondition,
+    apply_search,
+    build_optional_list_query,
+    uses_unified_list_query,
+    without_filter_field,
+)
+from app.core.list_query.catalogs import INVOICES_LIST_QUERY_CATALOG
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.invoice import (
@@ -27,32 +37,22 @@ from app.schemas.invoice import (
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
-from app.core.list_query import (
-    FilterCondition,
-    apply_search,
-    ListQueryContext,
-    SortCondition,
-    build_optional_list_query,
-    uses_unified_list_query,
-    without_filter_field,
-)
-from app.core.list_query.catalogs import INVOICES_LIST_QUERY_CATALOG
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
 class InvoiceTitleCRUD:
-    def get_by_id(self, db: Session, title_id: int, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+    def get_by_id(self, db: Session, title_id: int, team_id: int | None = None) -> InvoiceTitle | None:
         query = db.query(InvoiceTitle).filter(InvoiceTitle.id == title_id)
         if team_id is not None:
             query = query.filter(InvoiceTitle.team_id == team_id)
         return query.first()
 
-    def get_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[InvoiceTitle]:
+    def get_by_customer_id(self, db: Session, customer_id: int, team_id: int | None = None) -> list[InvoiceTitle]:
         query = db.query(InvoiceTitle).filter(
             InvoiceTitle.customer_id == customer_id
         )
@@ -60,7 +60,7 @@ class InvoiceTitleCRUD:
             query = query.filter(InvoiceTitle.team_id == team_id)
         return query.order_by(InvoiceTitle.is_default.desc(), InvoiceTitle.created_time.desc()).all()
 
-    def get_default_title(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+    def get_default_title(self, db: Session, customer_id: int, team_id: int | None = None) -> InvoiceTitle | None:
         query = db.query(InvoiceTitle).filter(
             and_(
                 InvoiceTitle.customer_id == customer_id,
@@ -71,7 +71,9 @@ class InvoiceTitleCRUD:
             query = query.filter(InvoiceTitle.team_id == team_id)
         return query.first()
 
-    def get_by_taxpayer_id(self, db: Session, customer_id: int, taxpayer_id: str, team_id: Optional[int] = None) -> Optional[InvoiceTitle]:
+    def get_by_taxpayer_id(
+        self, db: Session, customer_id: int, taxpayer_id: str, team_id: int | None = None
+    ) -> InvoiceTitle | None:
         query = db.query(InvoiceTitle).filter(
             and_(
                 InvoiceTitle.customer_id == customer_id,
@@ -103,7 +105,7 @@ class InvoiceTitleCRUD:
         db.refresh(db_obj)
         return db_obj
     
-    def set_default(self, db: Session, customer_id: int, title_id: int) -> Optional[InvoiceTitle]:
+    def set_default(self, db: Session, customer_id: int, title_id: int) -> InvoiceTitle | None:
         db.query(InvoiceTitle).filter(
             and_(
                 InvoiceTitle.customer_id == customer_id,
@@ -119,7 +121,7 @@ class InvoiceTitleCRUD:
             return title
         return None
     
-    def delete(self, db: Session, title_id: int, team_id: Optional[int] = None) -> bool:
+    def delete(self, db: Session, title_id: int, team_id: int | None = None) -> bool:
         title = self.get_by_id(db, title_id, team_id)
         if not title:
             return False
@@ -130,13 +132,15 @@ class InvoiceTitleCRUD:
 
 
 class InvoiceApplicationCRUD:
-    def get_by_id(self, db: Session, application_id: int, team_id: Optional[int] = None) -> Optional[InvoiceApplication]:
+    def get_by_id(self, db: Session, application_id: int, team_id: int | None = None) -> InvoiceApplication | None:
         query = db.query(InvoiceApplication).filter(InvoiceApplication.id == application_id)
         if team_id is not None:
             query = query.filter(InvoiceApplication.team_id == team_id)
         return query.first()
 
-    def get_by_application_number(self, db: Session, application_number: str, team_id: Optional[int] = None) -> Optional[InvoiceApplication]:
+    def get_by_application_number(
+        self, db: Session, application_number: str, team_id: int | None = None
+    ) -> InvoiceApplication | None:
         query = db.query(InvoiceApplication).filter(
             InvoiceApplication.application_number == application_number
         )
@@ -144,7 +148,9 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.team_id == team_id)
         return query.first()
 
-    def get_by_payment_plan(self, db: Session, payment_plan_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+    def get_by_payment_plan(
+        self, db: Session, payment_plan_id: int, team_id: int | None = None
+    ) -> list[InvoiceApplication]:
         query = db.query(InvoiceApplication).filter(
             InvoiceApplication.payment_plan_id == payment_plan_id
         )
@@ -152,7 +158,7 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.team_id == team_id)
         return query.order_by(InvoiceApplication.created_time.desc()).all()
 
-    def get_by_contract(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+    def get_by_contract(self, db: Session, contract_id: int, team_id: int | None = None) -> list[InvoiceApplication]:
         query = db.query(InvoiceApplication).filter(
             InvoiceApplication.contract_id == contract_id
         )
@@ -160,7 +166,7 @@ class InvoiceApplicationCRUD:
             query = query.filter(InvoiceApplication.team_id == team_id)
         return query.order_by(InvoiceApplication.created_time.desc()).all()
 
-    def get_by_customer(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[InvoiceApplication]:
+    def get_by_customer(self, db: Session, customer_id: int, team_id: int | None = None) -> list[InvoiceApplication]:
         query = db.query(InvoiceApplication).filter(
             InvoiceApplication.customer_id == customer_id
         )
@@ -234,26 +240,26 @@ class InvoiceApplicationCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        customer_id: Optional[int] = None,
-        contract_id: Optional[int] = None,
-        payment_plan_id: Optional[int] = None,
-        status: Optional[str] = None,
-        status_exclude: Optional[str] = None,
-        invoice_type: Optional[str] = None,
-        invoice_type_exclude: Optional[str] = None,
-        invoice_effective_status: Optional[str] = None,
-        applicant_id: Optional[str] = None,
-        current_user_id: Optional[str] = None,
-        visible_customer_ids: Optional[set[int]] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        created_time_start: Optional[date] = None,
-        created_time_end: Optional[date] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
+        customer_id: int | None = None,
+        contract_id: int | None = None,
+        payment_plan_id: int | None = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        invoice_type: str | None = None,
+        invoice_type_exclude: str | None = None,
+        invoice_effective_status: str | None = None,
+        applicant_id: str | None = None,
+        current_user_id: str | None = None,
+        visible_customer_ids: set[int] | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        created_time_start: date | None = None,
+        created_time_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[InvoiceApplication], int]:
+    ) -> tuple[list[InvoiceApplication], int]:
         if uses_unified_list_query(filters=filters, sorts=sorts):
             query = self.build_list_query(
                 db,
@@ -334,7 +340,9 @@ class InvoiceApplicationCRUD:
                     not_(pending_reissue_exists),
                 ))
             if "ACTIVE" in invoice_effective_status_values:
-                status_predicates.append(and_(not_(red_offset_exists), not_(completed_reissue_exists), not_(pending_reissue_exists)))
+                status_predicates.append(and_(
+                    not_(red_offset_exists), not_(completed_reissue_exists), not_(pending_reissue_exists)
+                ))
             if status_predicates:
                 query = query.filter(or_(*status_predicates))
         
@@ -439,12 +447,12 @@ class InvoiceApplicationCRUD:
                 id=contract.id, team_id=team_id,
             ).populate_existing().with_for_update().one_or_none()
             if contract is None or int(contract.customer_id) != customer_id:
-                raise ValueError("关联合同所属客户已变更，请重试")
+                raise ValueError("关联合同所属客户已变更\uff0c请重试")
             payment_plan = db.query(PaymentPlan).filter_by(
                 id=obj_in.payment_plan_id, team_id=team_id,
             ).populate_existing().with_for_update().one_or_none()
             if payment_plan is None or int(payment_plan.contract_id) != int(contract.id):
-                raise ValueError("回款计划所属合同已变更，请重试")
+                raise ValueError("回款计划所属合同已变更\uff0c请重试")
             invoice_title = db.query(InvoiceTitle).filter_by(
                 id=obj_in.invoice_title_id, team_id=team_id,
             ).populate_existing().with_for_update().one_or_none()
@@ -490,7 +498,7 @@ class InvoiceApplicationCRUD:
             source_id=db_obj.id,
             event_time=db_obj.created_time,
             actor_id=applicant_id,
-            summary=f"申请开票：{db_obj.invoice_amount}",
+            summary=f"申请开票\uff1a{db_obj.invoice_amount}",
         )
         db.commit()
         db.refresh(db_obj)
@@ -532,23 +540,23 @@ class InvoiceApplicationCRUD:
         self,
         db: Session,
         application_id: int,
-        team_id: Optional[int] = None,
-        invoice_file_path: Optional[str] = None,
-        invoice_number: Optional[str] = None,
-    ) -> Optional[InvoiceApplication]:
+        team_id: int | None = None,
+        invoice_file_path: str | None = None,
+        invoice_number: str | None = None,
+    ) -> InvoiceApplication | None:
         """将已通过通用审批引擎审批的发票申请标记为已开票。
 
-        B2 改判定源：原 `application.status == APPROVED` 直接判定改为查
+        B2 改判定源\uff1a原 `application.status == APPROVED` 直接判定改为查
         `approval_crud.get_by_entity(INVOICE, application_id, team_id).status == APPROVED`。
-        原因：发票审批已迁通用引擎（A6 submit_generic_approval / approve_generic_approval），
-        状态机由适配器 on_approved 回写——本方法不再读 InvoiceApplication.status，
-        改为以 Approval.status 为权威源，避免单据表与审批表不一致时误开票。
+        原因\uff1a发票审批已迁通用引擎\uff08A6 submit_generic_approval / approve_generic_approval\uff09\uff0c
+        状态机由适配器 on_approved 回写——本方法不再读 InvoiceApplication.status\uff0c
+        改为以 Approval.status 为权威源\uff0c避免单据表与审批表不一致时误开票。
 
         Args:
             db: 数据库会话
             application_id: 发票申请 ID
-            team_id: 团队 ID（团队隔离；从端点注入，避免误跨团队开票）
-            invoice_file_path: 发票文件相对路径（审批通过后的开票业务附件）
+            team_id: 团队 ID\uff08团队隔离\uff1b从端点注入\uff0c避免误跨团队开票\uff09
+            invoice_file_path: 发票文件相对路径\uff08审批通过后的开票业务附件\uff09
             invoice_number: 发票号码
         """
         from app.constants.business_types import BusinessType
@@ -565,10 +573,10 @@ class InvoiceApplicationCRUD:
             db, BusinessType.INVOICE, application_id, team_id,
         )
         if not approval or approval.status != ApprovalStatus.APPROVED:
-            raise ValueError("发票未通过审批，不可开票")
+            raise ValueError("发票未通过审批\uff0c不可开票")
 
         if application.status != InvoiceApplicationStatus.APPROVED:
-            raise ValueError(f"发票申请状态为 {application.status}，不可开票")
+            raise ValueError(f"发票申请状态为 {application.status}\uff0c不可开票")
         if invoice_file_path is not None:
             application.invoice_file_path = invoice_file_path
         if invoice_number is not None:
@@ -587,7 +595,7 @@ class InvoiceApplicationCRUD:
             source_type=DealJourneySourceType.INVOICE_APPLICATION,
             source_id=application.id,
             event_time=application.issued_time,
-            summary=f"完成开票：{application.invoice_amount}",
+            summary=f"完成开票\uff1a{application.invoice_amount}",
             metadata={"invoice_number": application.invoice_number},
         )
         db.commit()
@@ -622,7 +630,7 @@ class InvoiceApplicationCRUD:
     def _generate_application_number(self, db: Session) -> str:
         return BusinessNumberGenerator.generate('INV', db)
     
-    def get_payment_plan_invoice_summary(self, db: Session, payment_plan_id: int, team_id: Optional[int] = None) -> dict:
+    def get_payment_plan_invoice_summary(self, db: Session, payment_plan_id: int, team_id: int | None = None) -> dict:
         applications = self.get_by_payment_plan(db, payment_plan_id, team_id)
         
         payment_plan = db.query(PaymentPlan).filter(PaymentPlan.id == payment_plan_id).first()
@@ -648,7 +656,7 @@ class InvoiceReissueApplicationCRUD:
         InvoiceReissueApplicationStatus.APPROVED,
     )
 
-    def get_by_id(self, db: Session, reissue_id: int, team_id: Optional[int] = None) -> Optional[InvoiceReissueApplication]:
+    def get_by_id(self, db: Session, reissue_id: int, team_id: int | None = None) -> InvoiceReissueApplication | None:
         query = db.query(InvoiceReissueApplication).filter(InvoiceReissueApplication.id == reissue_id)
         if team_id is not None:
             query = query.filter(InvoiceReissueApplication.team_id == team_id)
@@ -658,8 +666,8 @@ class InvoiceReissueApplicationCRUD:
         self,
         db: Session,
         original_invoice_application_id: int,
-        team_id: Optional[int] = None,
-    ) -> List[InvoiceReissueApplication]:
+        team_id: int | None = None,
+    ) -> list[InvoiceReissueApplication]:
         query = db.query(InvoiceReissueApplication).filter(
             InvoiceReissueApplication.original_invoice_application_id == original_invoice_application_id
         )
@@ -671,8 +679,8 @@ class InvoiceReissueApplicationCRUD:
         self,
         db: Session,
         original_invoice_application_id: int,
-        team_id: Optional[int] = None,
-    ) -> Optional[InvoiceReissueApplication]:
+        team_id: int | None = None,
+    ) -> InvoiceReissueApplication | None:
         query = db.query(InvoiceReissueApplication).filter(
             InvoiceReissueApplication.original_invoice_application_id == original_invoice_application_id,
             InvoiceReissueApplication.status.in_(self.ACTIVE_STATUSES),
@@ -698,7 +706,7 @@ class InvoiceReissueApplicationCRUD:
             red_offset.source_type == InvoiceRedOffsetSourceType.MANUAL or red_offset.reissue_application_id is None
             for red_offset in red_offsets
         ):
-            raise ValueError("该发票已冲红，不可申请重开")
+            raise ValueError("该发票已冲红\uff0c不可申请重开")
         if self.get_active_by_original_invoice(db, original_invoice.id, team_id):
             raise ValueError("该发票已有未完成的重开申请")
 
@@ -761,10 +769,10 @@ class InvoiceReissueApplicationCRUD:
         team_id: int,
         *,
         red_invoice_file_path: str,
-        red_invoice_number: Optional[str],
+        red_invoice_number: str | None,
         new_invoice_file_path: str,
-        new_invoice_number: Optional[str],
-    ) -> Optional[InvoiceReissueApplication]:
+        new_invoice_number: str | None,
+    ) -> InvoiceReissueApplication | None:
         from app.constants.business_types import BusinessType
         from app.crud.approval import approval_crud
         from app.models.approval import ApprovalStatus
@@ -775,10 +783,10 @@ class InvoiceReissueApplicationCRUD:
 
         approval = approval_crud.get_by_entity(db, BusinessType.INVOICE_REISSUE, reissue_id, team_id)
         if not approval or approval.status != ApprovalStatus.APPROVED:
-            raise ValueError("重开申请未通过审批，不可完成重开")
+            raise ValueError("重开申请未通过审批\uff0c不可完成重开")
 
         if reissue.status != InvoiceReissueApplicationStatus.APPROVED:
-            raise ValueError(f"重开申请状态为 {reissue.status}，不可完成重开")
+            raise ValueError(f"重开申请状态为 {reissue.status}\uff0c不可完成重开")
 
         now = business_now()
         reissue.red_invoice_file_path = red_invoice_file_path
@@ -806,7 +814,7 @@ class InvoiceReissueApplicationCRUD:
 
 
 class InvoiceRedOffsetCRUD:
-    def get_by_id(self, db: Session, red_offset_id: int, team_id: Optional[int] = None) -> Optional[InvoiceRedOffset]:
+    def get_by_id(self, db: Session, red_offset_id: int, team_id: int | None = None) -> InvoiceRedOffset | None:
         query = db.query(InvoiceRedOffset).filter(InvoiceRedOffset.id == red_offset_id)
         if team_id is not None:
             query = query.filter(InvoiceRedOffset.team_id == team_id)
@@ -816,8 +824,8 @@ class InvoiceRedOffsetCRUD:
         self,
         db: Session,
         invoice_application_id: int,
-        team_id: Optional[int] = None,
-    ) -> List[InvoiceRedOffset]:
+        team_id: int | None = None,
+    ) -> list[InvoiceRedOffset]:
         query = db.query(InvoiceRedOffset).filter(
             InvoiceRedOffset.invoice_application_id == invoice_application_id
         )
@@ -829,8 +837,8 @@ class InvoiceRedOffsetCRUD:
         self,
         db: Session,
         reissue_application_id: int,
-        team_id: Optional[int] = None,
-    ) -> Optional[InvoiceRedOffset]:
+        team_id: int | None = None,
+    ) -> InvoiceRedOffset | None:
         query = db.query(InvoiceRedOffset).filter(
             InvoiceRedOffset.reissue_application_id == reissue_application_id
         )
@@ -844,7 +852,7 @@ class InvoiceRedOffsetCRUD:
         reissue: InvoiceReissueApplication,
         *,
         red_invoice_file_path: str,
-        red_invoice_number: Optional[str],
+        red_invoice_number: str | None,
         red_offset_time: datetime,
     ) -> InvoiceRedOffset:
         existing = self.get_by_reissue(db, reissue.id, reissue.team_id)
@@ -884,7 +892,7 @@ class InvoiceRedOffsetCRUD:
         if self.get_by_invoice(db, invoice_application.id, team_id):
             raise ValueError("该发票已冲红")
         if invoice_reissue_application_crud.get_active_by_original_invoice(db, invoice_application.id, team_id):
-            raise ValueError("该发票已有未完成的重开申请，不能单独冲红")
+            raise ValueError("该发票已有未完成的重开申请\uff0c不能单独冲红")
 
         completed_reissue = db.query(InvoiceReissueApplication).filter(
             InvoiceReissueApplication.team_id == team_id,
@@ -894,7 +902,7 @@ class InvoiceRedOffsetCRUD:
             InvoiceReissueApplication.new_invoice_file_path != "",
         ).first()
         if completed_reissue:
-            raise ValueError("该发票已重开，不能单独冲红")
+            raise ValueError("该发票已重开\uff0c不能单独冲红")
 
     def create_manual(
         self,
@@ -902,8 +910,8 @@ class InvoiceRedOffsetCRUD:
         invoice_application: InvoiceApplication,
         *,
         red_invoice_file_path: str,
-        red_invoice_number: Optional[str],
-        reason: Optional[str],
+        red_invoice_number: str | None,
+        reason: str | None,
         created_by: str,
         team_id: int,
     ) -> InvoiceRedOffset:

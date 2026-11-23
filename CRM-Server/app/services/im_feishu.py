@@ -171,7 +171,10 @@ class FeishuBotService:
         chat_id = message.get("chat_id") or open_id
         thread_id = message.get("thread_id") or message.get("root_id") or ""
         session_scope = hashlib.sha256(
-            f"{integration_config.team_id}:{integration_config.provider}:{chat_id}:{thread_id}:{account.user_id}".encode()
+            (
+                f"{integration_config.team_id}:{integration_config.provider}:"
+                f"{chat_id}:{thread_id}:{account.user_id}"
+            ).encode()
         ).hexdigest()[:32]
         channel_session = agent_channel_session_crud.get_or_create(
             db,

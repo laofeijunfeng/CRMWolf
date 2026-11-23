@@ -12,14 +12,13 @@ from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.permission import permission_crud
 from app.models.contract import Contract
 from app.models.customer import Customer
+from app.models.customer_activity import CustomerActivity
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus
 from app.models.lead import Lead, LeadStatus
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.payment import PaymentConfirmationStatus, PaymentRecord
-from app.models.customer_activity import CustomerActivity
 from app.models.user import User
 from app.utils.time import business_now
-
 
 router = APIRouter(prefix="/v1/sales-dashboard", tags=["销售看板"])
 
@@ -77,7 +76,7 @@ class SalesDashboardFollowUpTrendResponse(BaseModel):
     data: list[SalesDashboardFollowUpTrendPoint]
 
 
-def _scalar_number(value) -> float:
+def _scalar_number(value: Decimal | int | float | None) -> float:
     if value is None:
         return 0
     if isinstance(value, Decimal):
@@ -113,10 +112,7 @@ def _resolve_scope(db: Session, user_id: int, team_id: int) -> DashboardScope:
 def _month_range() -> tuple[datetime, datetime, str]:
     now = business_now()
     start = datetime(now.year, now.month, 1)
-    if now.month == 12:
-        end = datetime(now.year + 1, 1, 1)
-    else:
-        end = datetime(now.year, now.month + 1, 1)
+    end = datetime(now.year + 1, 1, 1) if now.month == 12 else datetime(now.year, now.month + 1, 1)
     return start, end, f"{now.year}年{now.month}月"
 
 
@@ -158,7 +154,7 @@ def _apply_owner_filter(query, column, owner_ids: list[str]):
 def get_sales_dashboard_funnel(
     start_date: date | None = Query(None, description="统计开始日期"),
     end_date: date | None = Query(None, description="统计结束日期"),
-    owner_id: str | None = Query(None, description="销售成员ID，多个用英文逗号分隔"),
+    owner_id: str | None = Query(None, description="销售成员ID\uff0c多个用英文逗号分隔"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -213,7 +209,9 @@ def get_sales_dashboard_funnel(
 
     lead_query = _apply_created_time_filter(lead_query, Lead.created_time, filter_start, filter_end)
     customer_query = _apply_created_time_filter(customer_query, Customer.created_time, filter_start, filter_end)
-    opportunity_query = _apply_created_time_filter(opportunity_query, Opportunity.created_time, filter_start, filter_end)
+    opportunity_query = _apply_created_time_filter(
+        opportunity_query, Opportunity.created_time, filter_start, filter_end
+    )
     contract_query = _apply_created_time_filter(contract_query, Contract.created_time, filter_start, filter_end)
     payment_query = _apply_created_time_filter(payment_query, PaymentRecord.created_time, filter_start, filter_end)
     invoice_query = _apply_created_time_filter(invoice_query, InvoiceApplication.created_time, filter_start, filter_end)
@@ -336,7 +334,7 @@ def get_sales_dashboard_funnel(
 def get_sales_dashboard_follow_up_trend(
     start_date: date | None = Query(None, description="统计开始日期"),
     end_date: date | None = Query(None, description="统计结束日期"),
-    owner_id: str | None = Query(None, description="销售成员ID，多个用英文逗号分隔"),
+    owner_id: str | None = Query(None, description="销售成员ID\uff0c多个用英文逗号分隔"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)

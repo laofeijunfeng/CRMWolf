@@ -1,9 +1,8 @@
 """Customer intelligence LangGraph subgraph.
 
-This graph is the runtime boundary for customer intelligence updates. It keeps
-business writes deterministic while allowing LLM-backed nodes to propose
-structured customer facts. Checkpointed state, Store memory, fact persistence,
-and user-readable trace projection all stay behind this typed contract.
+The graph loads customer context and memory to answer questions or record
+committed business events in memory. It checkpoints execution and streams a
+user-readable trace.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from __future__ import annotations
 import operator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeAlias, TypedDict, cast
 
 from langgraph.graph import END, START, StateGraph
@@ -21,19 +19,6 @@ from app.services.agent.checkpointer import agent_checkpoint_saver
 from app.services.agent.types import coerce_json_dict
 from app.services.customer_context_answer_service import (
     customer_context_answer_service,
-)
-from app.services.customer_fact_extraction_service import (
-    CustomerFactExtractionResult,
-    CustomerFactExtractionService,
-    customer_fact_extraction_service,
-)
-from app.services.customer_fact_service import (
-    CustomerFactCandidateInput,
-    CustomerFactInput,
-    CustomerFactService,
-    CustomerFactSourceInput,
-    CustomerFactType,
-    customer_fact_service,
 )
 from app.services.customer_intelligence_context_service import (
     CustomerIntelligenceContextService,
@@ -45,7 +30,6 @@ from app.services.customer_intelligence_event_service import (
 )
 from app.services.customer_intelligence_trace_service import visible_trace_events
 from app.services.customer_memory_store_service import (
-    CUSTOMER_MEMORY_FACTS,
     CUSTOMER_MEMORY_RETRIEVAL,
     CUSTOMER_MEMORY_SUMMARIES,
     CustomerMemoryStoreService,
@@ -71,7 +55,6 @@ CustomerIntelligenceRoute = Literal[
     "write_memory",
     "skip",
 ]
-FactAction: TypeAlias = Literal["upsert", "ignore"]
 
 
 _CUSTOMER_INTELLIGENCE_EVENT_RESET = "customer_intelligence_graph_invocation_started"
@@ -107,11 +90,8 @@ class CustomerIntelligenceGraphState(TypedDict, total=False):
     query_text: str
     customer_context: JSONDict
     customer_memory: JSONDict
-    extracted_customer_facts: list[JSONDict]
-    persisted_customer_fact_refs: list[JSONDict]
     customer_context_answer: JSONDict
     assistant_content: str
-    retrieval_state: JSONDict
     refresh_plan: JSONDict
     route: CustomerIntelligenceRoute
     visible_trace: Annotated[list[JSONDict], operator.add]
@@ -202,16 +182,12 @@ class CustomerIntelligenceGraphService:
         *,
         context_service: CustomerIntelligenceContextService | None = None,
         memory_store_service: CustomerMemoryStoreService | None = None,
-        fact_extraction_service: CustomerFactExtractionService | None = None,
-        fact_service: CustomerFactService | None = None,
         answer_service: CustomerContextAnswerGenerationService | None = None,
         checkpointer: object | None,
         session_factory: Callable[[], Session] = SessionLocal,
     ) -> None:
         self.context_service = context_service or customer_intelligence_context_service
         self.memory_store_service = memory_store_service or customer_memory_store_service
-        self.fact_extraction_service = fact_extraction_service or customer_fact_extraction_service
-        self.fact_service = fact_service or customer_fact_service
         self.answer_service = answer_service or cast(
             "CustomerContextAnswerGenerationService",
             customer_context_answer_service,
@@ -450,7 +426,6 @@ class CustomerIntelligenceGraphService:
         retrieval = coerce_json_dict(customer_context.get("retrieval"))
         return {
             "customer_context": customer_context,
-            "retrieval_state": retrieval,
             "visible_trace": [_trace_step("读取客户上下文", _context_loaded_label(customer_context))],
             "events": [
                 {
@@ -613,208 +588,6 @@ class CustomerIntelligenceGraphService:
             ],
         }
 
-    async def _extract_facts(
-        self,
-        state: CustomerIntelligenceGraphState,
-        runtime: Runtime[CustomerIntelligenceRuntimeContext],
-    ) -> CustomerIntelligenceGraphState:
-        context = runtime.context
-        event = coerce_json_dict(state.get("event"))
-        customer_context = coerce_json_dict(state.get("customer_context"))
-        customer_memory = coerce_json_dict(state.get("customer_memory"))
-        team_id = _positive_int(event.get("team_id")) or context.team_id
-        if team_id <= 0 or not customer_context:
-            return {
-                "extracted_customer_facts": [],
-                "events": [{"event": "customer_intelligence_fact_extraction_skipped", "reason": "context_unavailable"}],
-            }
-
-        try:
-            with self._db_scope() as db:
-                result = await self.fact_extraction_service.extract(
-                    db,
-                    team_id=team_id,
-                    event=event,
-                    customer_context=customer_context,
-                    customer_memory=customer_memory,
-                )
-        except Exception as exc:
-            return {
-                "extracted_customer_facts": [],
-                "errors": [
-                    {
-                        "event": "customer_intelligence_fact_extraction_failed",
-                        "message": exc.__class__.__name__,
-                    }
-                ],
-            }
-
-        facts = _extractable_facts(result)
-        return {
-            "extracted_customer_facts": facts,
-            "events": [
-                {
-                    "event": "customer_intelligence_facts_extracted",
-                    "fact_count": len(facts),
-                    "summary": result.summary,
-                }
-            ],
-        }
-
-    def _assess_facts(
-        self,
-        state: CustomerIntelligenceGraphState,
-        runtime: Runtime[CustomerIntelligenceRuntimeContext],  # noqa: ARG002
-    ) -> CustomerIntelligenceGraphState:
-        facts = [
-            self._assessed_fact_candidate(fact, state=state)
-            for fact in _json_object_list(state.get("extracted_customer_facts"))
-        ]
-        auto_persist_count = sum(fact.get("action") == "upsert" for fact in facts)
-        ignored_count = len(facts) - auto_persist_count
-        return {
-            "extracted_customer_facts": facts,
-            "events": [
-                {
-                    "event": "customer_intelligence_facts_assessed",
-                    "auto_persist_count": auto_persist_count,
-                    "ignored_count": ignored_count,
-                }
-            ],
-        }
-
-    def _assessed_fact_candidate(self, fact: JSONDict, *, state: CustomerIntelligenceGraphState) -> JSONDict:
-        fact_type = str(fact.get("fact_type") or "").strip()
-        content = str(fact.get("content") or "").strip()
-        if fact_type not in _customer_fact_types() or not content:
-            return {**fact, "action": "ignore", "assessment_reason": "invalid_fact_candidate"}
-        assessment = self.fact_service.assess_candidate_against_context(
-            candidate=CustomerFactCandidateInput(
-                fact_type=cast("CustomerFactType", fact_type),
-                subject=_optional_text(fact.get("subject")),
-                content=content,
-                confidence=_float_value(fact.get("confidence")),
-                action=cast("FactAction", str(fact.get("action") or "upsert"))
-                if str(fact.get("action") or "upsert") in {"upsert", "ignore"}
-                else "ignore",
-                reason=_optional_text(fact.get("reason")),
-                evidence_quote=_optional_text(fact.get("evidence_quote")),
-            ),
-            existing_facts=_existing_customer_facts(state),
-        )
-        updates: JSONDict = {
-            "action": assessment.action,
-            "assessment_reason": assessment.reason,
-        }
-        if assessment.existing_fact_id is not None:
-            updates["existing_fact_id"] = assessment.existing_fact_id
-        if assessment.existing_version is not None:
-            updates["existing_version"] = assessment.existing_version
-        if assessment.existing_content:
-            updates["existing_content"] = assessment.existing_content
-        if assessment.existing_confidence is not None:
-            updates["existing_confidence"] = assessment.existing_confidence
-        if assessment.conflict_reason:
-            updates["conflict_reason"] = assessment.conflict_reason
-        return {**fact, **updates}
-
-    def _persist_facts(
-        self,
-        state: CustomerIntelligenceGraphState,
-        runtime: Runtime[CustomerIntelligenceRuntimeContext],
-    ) -> CustomerIntelligenceGraphState:
-        context = runtime.context
-        event = coerce_json_dict(state.get("event"))
-        facts = _json_object_list(state.get("extracted_customer_facts"))
-        customer_id = _positive_int(event.get("customer_id"))
-        team_id = _positive_int(event.get("team_id")) or context.team_id
-        tenant_id = _positive_int(event.get("tenant_id")) or team_id
-        if customer_id is None or team_id <= 0 or tenant_id <= 0:
-            return {
-                "persisted_customer_fact_refs": [],
-                "events": [{"event": "customer_intelligence_fact_persist_skipped", "reason": "invalid_customer_event"}],
-            }
-
-        source = coerce_json_dict(event.get("source"))
-        persisted_refs: list[JSONDict] = []
-        ignored_count = 0
-        try:
-            with self._db_scope() as db:
-                for fact in facts:
-                    action = str(fact.get("action") or "upsert")
-                    if action == "ignore":
-                        ignored_count += 1
-                    if action != "upsert":
-                        continue
-                    content = str(fact.get("content") or "").strip()
-                    fact_type = str(fact.get("fact_type") or "").strip()
-                    if not content or fact_type not in _customer_fact_types():
-                        continue
-                    persisted = self.fact_service.upsert_fact(
-                        db,
-                        CustomerFactInput(
-                            tenant_id=tenant_id,
-                            team_id=team_id,
-                            customer_id=customer_id,
-                            fact_type=cast("CustomerFactType", fact_type),
-                            subject=_optional_text(fact.get("subject")),
-                            content=content,
-                            confidence=_float_value(fact.get("confidence")),
-                            occurred_at=_occurred_at(event),
-                            source=CustomerFactSourceInput(
-                                source_type=str(
-                                    source.get("source_type")
-                                    or event.get("trigger_type")
-                                    or "customer_intelligence_event"
-                                ),
-                                source_object_id=str(source.get("source_object_id") or event.get("event_key") or ""),
-                                business_object_type=_optional_text(source.get("business_object_type")),
-                                business_object_id=_optional_text(source.get("business_object_id")),
-                                evidence_id=_primary_evidence_id(state),
-                                quote=_optional_text(fact.get("evidence_quote")),
-                            ),
-                        ),
-                    )
-                    persisted_refs.append(
-                        {
-                            "fact_id": int(persisted.id),
-                            "version": int(getattr(persisted, "version", 1) or 1),
-                            "fact_type": fact_type,
-                            "subject": _optional_text(fact.get("subject")),
-                            "confidence": _float_value(fact.get("confidence")),
-                        }
-                    )
-        except Exception as exc:
-            return {
-                "persisted_customer_fact_refs": [],
-                "errors": [
-                    {
-                        "event": "customer_intelligence_fact_persist_failed",
-                        "message": exc.__class__.__name__,
-                    }
-                ],
-            }
-
-        return {
-            "persisted_customer_fact_refs": persisted_refs,
-            **(
-                {"visible_trace": [_trace_step("沉淀客户事实", f"已沉淀 {len(persisted_refs)} 条客户事实")]}
-                if persisted_refs
-                else {}
-            ),
-            "events": [
-                {
-                    "event": "customer_intelligence_facts_persisted",
-                    "persisted_count": len(persisted_refs),
-                    "ignored_count": ignored_count,
-                }
-            ],
-        }
-
-    def _route_after_persist_facts(self, _state: CustomerIntelligenceGraphState) -> str:
-        return "write_memory"
-
-
     def _write_memory(
         self,
         state: CustomerIntelligenceGraphState,
@@ -866,9 +639,7 @@ class CustomerIntelligenceGraphService:
                 {
                     "event": "customer_intelligence_memory_written",
                     "customer_id": customer_id,
-                    "sections": _written_memory_sections(
-                        retrieval_index=bool(retrieval_index), fact_index=False
-                    ),
+                    "sections": _written_memory_sections(retrieval_index=bool(retrieval_index)),
                 }
             ],
         }
@@ -906,11 +677,8 @@ def _checkpoint_state_from_input(input_state: CustomerIntelligenceGraphInput) ->
         "query_text": str(input_state.get("query_text") or event_payload.get("summary") or ""),
         "customer_context": {},
         "customer_memory": {},
-        "extracted_customer_facts": [],
-        "persisted_customer_fact_refs": [],
         "customer_context_answer": {},
         "assistant_content": "",
-        "retrieval_state": {},
         "refresh_plan": {},
         "route": "skip",
         "visible_trace": [],
@@ -1062,16 +830,6 @@ def _context_loaded_label(customer_context: JSONDict) -> str:
     return "已读取客户上下文"
 
 
-
-
-
-
-def _existing_customer_facts(state: CustomerIntelligenceGraphState) -> list[JSONDict]:
-    customer_context = coerce_json_dict(state.get("customer_context"))
-    strong_context = coerce_json_dict(customer_context.get("strong_context"))
-    return _json_object_list(strong_context.get("customer_facts"))
-
-
 def _memory_loaded_label(customer_memory: JSONDict) -> str:
     summaries = customer_memory.get("summaries")
     preferences = customer_memory.get("preferences")
@@ -1186,62 +944,10 @@ def _retrieval_index_from_context(customer_context: JSONDict) -> JSONDict:
     }
 
 
-def _fact_index_from_context(customer_context: JSONDict) -> JSONDict:
-    strong_context = coerce_json_dict(customer_context.get("strong_context"))
-    customer_facts = strong_context.get("customer_facts")
-    if not isinstance(customer_facts, list):
-        return {}
-    refs: list[JSONDict] = []
-    for item in customer_facts[:20]:
-        fact = coerce_json_dict(item)
-        fact_id = fact.get("id")
-        if not isinstance(fact_id, int):
-            continue
-        refs.append(
-            {
-                "fact_id": fact_id,
-                "fact_type": str(fact.get("fact_type") or ""),
-                "subject": str(fact.get("subject") or ""),
-                "confidence": fact.get("confidence") if isinstance(fact.get("confidence"), int | float) else None,
-            }
-        )
-    if not refs:
-        return {}
-    return {
-        "fact_refs": refs,
-        "source": "mysql",
-        "policy": "只保存事实引用，不复制完整业务事实",  # noqa: RUF001
-    }
-
-
-def _fact_index_from_state(state: CustomerIntelligenceGraphState, customer_context: JSONDict) -> JSONDict:
-    context_index = _fact_index_from_context(customer_context)
-    persisted_refs = _json_object_list(state.get("persisted_customer_fact_refs"))
-    if not persisted_refs:
-        return context_index
-
-    refs_by_id: dict[int, JSONDict] = {}
-    for ref in _json_object_list(context_index.get("fact_refs")):
-        fact_id = ref.get("fact_id")
-        if isinstance(fact_id, int):
-            refs_by_id[fact_id] = ref
-    for ref in persisted_refs:
-        fact_id = ref.get("fact_id")
-        if isinstance(fact_id, int):
-            refs_by_id[fact_id] = ref
-    return {
-        "fact_refs": list(refs_by_id.values())[:20],
-        "source": "mysql",
-        "policy": "只保存事实引用，不复制完整业务事实",  # noqa: RUF001
-    }
-
-
-def _written_memory_sections(*, retrieval_index: bool, fact_index: bool) -> list[str]:
-    sections = [CUSTOMER_MEMORY_SUMMARIES]
+def _written_memory_sections(*, retrieval_index: bool) -> list[JSONValue]:
+    sections: list[JSONValue] = [CUSTOMER_MEMORY_SUMMARIES]
     if retrieval_index:
         sections.append(CUSTOMER_MEMORY_RETRIEVAL)
-    if fact_index:
-        sections.append(CUSTOMER_MEMORY_FACTS)
     return sections
 
 
@@ -1255,16 +961,6 @@ def _json_list_len(value: object) -> int:
     return len(value) if isinstance(value, list) else 0
 
 
-def _extractable_facts(result: CustomerFactExtractionResult) -> list[JSONDict]:
-    facts: list[JSONDict] = []
-    for fact in result.facts:
-        payload = fact.model_dump(mode="json", exclude_none=True)
-        if payload.get("action") == "ignore":
-            continue
-        facts.append(payload)
-    return facts
-
-
 def _json_object_list(value: object) -> list[JSONDict]:
     if not isinstance(value, list):
         return []
@@ -1273,28 +969,6 @@ def _json_object_list(value: object) -> list[JSONDict]:
         if isinstance(item, dict):
             items.append(coerce_json_dict(item))
     return items
-
-
-def _customer_fact_types() -> set[str]:
-    return {
-        "alias",
-        "need",
-        "budget",
-        "risk",
-        "stage",
-        "stakeholder_attitude",
-        "competitor",
-        "next_step",
-        "preference",
-        "summary",
-    }
-
-
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    cleaned = str(value).strip()
-    return cleaned or None
 
 
 def _float_value(value: object) -> float:
@@ -1306,45 +980,6 @@ def _float_value(value: object) -> float:
         except ValueError:
             return 0.0
     return 0.0
-
-
-def _occurred_at(event: JSONDict) -> datetime | None:
-    occurred_at = event.get("occurred_at")
-    if not isinstance(occurred_at, str) or not occurred_at.strip():
-        return None
-    try:
-        return datetime.fromisoformat(occurred_at)
-    except ValueError:
-        return None
-
-
-def _primary_evidence_id(state: CustomerIntelligenceGraphState) -> str | None:
-    retrieval_state = coerce_json_dict(state.get("retrieval_state"))
-    if retrieval_state.get("status") != "ok":
-        return None
-    customer_context = coerce_json_dict(state.get("customer_context"))
-    evidence_items = customer_context.get("semantic_evidence")
-    if not isinstance(evidence_items, list) or not evidence_items:
-        return None
-    evidence = coerce_json_dict(evidence_items[0])
-    evidence_id = evidence.get("evidence_id") or evidence.get("document_key") or evidence.get("id")
-    return str(evidence_id) if evidence_id else None
-
-
-def _fact_type_label(fact_type: str) -> str:
-    labels = {
-        "alias": "常用称呼",
-        "need": "客户需求",
-        "budget": "预算",
-        "risk": "风险",
-        "stage": "阶段状态",
-        "stakeholder_attitude": "关键人态度",
-        "competitor": "竞品",
-        "next_step": "下一步",
-        "preference": "偏好",
-        "summary": "摘要",
-    }
-    return labels.get(fact_type, "客户事实")
 
 
 customer_intelligence_graph_service = CustomerIntelligenceGraphService(checkpointer=agent_checkpoint_saver)

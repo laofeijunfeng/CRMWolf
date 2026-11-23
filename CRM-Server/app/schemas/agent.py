@@ -1,9 +1,7 @@
 """CRM AI Agent schemas."""
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import List, Literal, Optional, TypeAlias
+from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_serializer, model_validator
 
@@ -61,10 +59,10 @@ class AgentSSEAgentUIDeltaEvent(BaseModel):
 
     event: Literal["agent_ui"]
     phase: Literal["delta"]
-    message_id: Optional[int] = Field(default=None, gt=0)
+    message_id: int | None = Field(default=None, gt=0)
     turn_id: str = Field(min_length=1, max_length=128)
     sequence: int = Field(ge=1)
-    operations: List[AgentUIStreamOperation] = Field(min_length=1, max_length=100)
+    operations: list[AgentUIStreamOperation] = Field(min_length=1, max_length=100)
 
 
 class AgentSSEAgentUIFinalEvent(BaseModel):
@@ -84,7 +82,7 @@ class AgentSSEAgentUIFinalEvent(BaseModel):
         return message.model_dump(mode="json")
 
     @model_validator(mode="after")
-    def validate_authoritative_message(self) -> "AgentSSEAgentUIFinalEvent":
+    def validate_authoritative_message(self) -> Self:
         if self.message.state != "final":
             raise ValueError("final stream message must have final state")
         if self.message.message_id != self.message_id or self.message.turn_id != self.turn_id:
@@ -101,8 +99,8 @@ class AgentSSETransportErrorEvent(BaseModel):
     code: AgentSSEErrorCode
     message: str = Field(min_length=1, max_length=10000)
     retryable: bool
-    session_id: Optional[int] = Field(default=None, gt=0)
-    status_code: Optional[int] = Field(default=None, ge=400, le=599)
+    session_id: int | None = Field(default=None, gt=0)
+    status_code: int | None = Field(default=None, ge=400, le=599)
 
 
 AgentSSEEvent: TypeAlias = (
@@ -130,20 +128,20 @@ class AgentSessionCreate(BaseModel):
     session_key: str = Field(..., min_length=1, max_length=64, description="Agent会话唯一标识")
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
-    title: Optional[str] = Field(None, max_length=200, description="会话标题")
-    context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
+    title: str | None = Field(None, max_length=200, description="会话标题")
+    context_json: JsonDict | None = Field(None, description="会话上下文快照")
 
 
 class AgentCreateSessionRequest(BaseModel):
-    title: Optional[str] = Field(None, max_length=200, description="会话标题")
-    context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
+    title: str | None = Field(None, max_length=200, description="会话标题")
+    context_json: JsonDict | None = Field(None, description="会话上下文快照")
 
 
 class AgentSessionUpdate(BaseModel):
-    title: Optional[str] = Field(None, max_length=200, description="会话标题")
-    status: Optional[str] = Field(None, max_length=20, description="会话状态")
-    summary: Optional[str] = Field(None, description="会话摘要")
-    context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
+    title: str | None = Field(None, max_length=200, description="会话标题")
+    status: str | None = Field(None, max_length=20, description="会话状态")
+    summary: str | None = Field(None, description="会话摘要")
+    context_json: JsonDict | None = Field(None, description="会话上下文快照")
 
 
 class AgentSessionResponse(BaseModel):
@@ -151,10 +149,10 @@ class AgentSessionResponse(BaseModel):
     session_key: str = Field(..., description="Agent会话唯一标识")
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
-    title: Optional[str] = Field(None, description="会话标题")
+    title: str | None = Field(None, description="会话标题")
     status: str = Field(..., description="会话状态")
-    summary: Optional[str] = Field(None, description="会话摘要")
-    context_json: Optional[JsonDict] = Field(None, description="会话上下文快照")
+    summary: str | None = Field(None, description="会话摘要")
+    context_json: JsonDict | None = Field(None, description="会话上下文快照")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 
@@ -167,9 +165,9 @@ class AgentMessageCreate(BaseModel):
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
     role: str = Field(..., max_length=20, description="消息角色")
-    event_type: Optional[str] = Field(None, max_length=50, description="SSE或业务事件类型")
-    content: Optional[str] = Field(None, description="消息正文")
-    payload_json: Optional[JsonDict] = Field(None, description="结构化消息载荷")
+    event_type: str | None = Field(None, max_length=50, description="SSE或业务事件类型")
+    content: str | None = Field(None, description="消息正文")
+    payload_json: JsonDict | None = Field(None, description="结构化消息载荷")
 
 
 class AgentLinkedFollowUpTaskConfirmationResponse(BaseModel):
@@ -193,9 +191,9 @@ class AgentMessageResponse(BaseModel):
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
     role: str = Field(..., description="消息角色")
-    event_type: Optional[str] = Field(None, description="SSE或业务事件类型")
-    content: Optional[str] = Field(None, description="消息正文")
-    payload_json: Optional[JsonDict] = Field(None, description="结构化消息载荷")
+    event_type: str | None = Field(None, description="SSE或业务事件类型")
+    content: str | None = Field(None, description="消息正文")
+    payload_json: JsonDict | None = Field(None, description="结构化消息载荷")
     linked_follow_up_task_confirmations: list[AgentLinkedFollowUpTaskConfirmationResponse] = Field(
         default_factory=list,
         description="精确关联到该消息的跟进待办确认卡片",
@@ -212,15 +210,15 @@ class AgentToolCallCreate(BaseModel):
     user_id: int = Field(..., description="系统用户ID")
     session_id: int = Field(..., description="Agent会话ID")
     tool_name: str = Field(..., min_length=1, max_length=100, description="Tool名称")
-    request_json: Optional[JsonDict] = Field(None, description="Tool请求参数快照")
+    request_json: JsonDict | None = Field(None, description="Tool请求参数快照")
 
 
 class AgentToolCallUpdate(BaseModel):
-    status: Optional[str] = Field(None, max_length=20, description="调用状态")
-    response_json: Optional[JsonDict] = Field(None, description="Tool响应结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
-    started_time: Optional[datetime] = Field(None, description="开始时间")
-    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    status: str | None = Field(None, max_length=20, description="调用状态")
+    response_json: JsonDict | None = Field(None, description="Tool响应结果快照")
+    error_message: str | None = Field(None, description="错误信息")
+    started_time: datetime | None = Field(None, description="开始时间")
+    finished_time: datetime | None = Field(None, description="结束时间")
 
 
 class AgentToolCallResponse(BaseModel):
@@ -231,11 +229,11 @@ class AgentToolCallResponse(BaseModel):
     session_id: int = Field(..., description="Agent会话ID")
     tool_name: str = Field(..., description="Tool名称")
     status: str = Field(..., description="调用状态")
-    request_json: Optional[JsonDict] = Field(None, description="Tool请求参数快照")
-    response_json: Optional[JsonDict] = Field(None, description="Tool响应结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
-    started_time: Optional[datetime] = Field(None, description="开始时间")
-    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    request_json: JsonDict | None = Field(None, description="Tool请求参数快照")
+    response_json: JsonDict | None = Field(None, description="Tool响应结果快照")
+    error_message: str | None = Field(None, description="错误信息")
+    started_time: datetime | None = Field(None, description="开始时间")
+    finished_time: datetime | None = Field(None, description="结束时间")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 
@@ -246,27 +244,27 @@ class AgentToolCallResponse(BaseModel):
 class AgentIdempotencyKeyCreate(BaseModel):
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
-    session_id: Optional[int] = Field(None, description="Agent会话ID")
+    session_id: int | None = Field(None, description="Agent会话ID")
     action_key: str = Field(..., min_length=1, max_length=160, description="幂等动作键")
-    request_hash: Optional[str] = Field(None, max_length=64, description="请求内容Hash")
+    request_hash: str | None = Field(None, max_length=64, description="请求内容Hash")
 
 
 class AgentIdempotencyKeyUpdate(BaseModel):
-    status: Optional[str] = Field(None, max_length=20, description="幂等状态")
-    result_json: Optional[JsonDict] = Field(None, description="执行结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
+    status: str | None = Field(None, max_length=20, description="幂等状态")
+    result_json: JsonDict | None = Field(None, description="执行结果快照")
+    error_message: str | None = Field(None, description="错误信息")
 
 
 class AgentIdempotencyKeyResponse(BaseModel):
     id: int = Field(..., description="主键")
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="系统用户ID")
-    session_id: Optional[int] = Field(None, description="Agent会话ID")
+    session_id: int | None = Field(None, description="Agent会话ID")
     action_key: str = Field(..., description="幂等动作键")
     status: str = Field(..., description="幂等状态")
-    request_hash: Optional[str] = Field(None, description="请求内容Hash")
-    result_json: Optional[JsonDict] = Field(None, description="执行结果快照")
-    error_message: Optional[str] = Field(None, description="错误信息")
+    request_hash: str | None = Field(None, description="请求内容Hash")
+    result_json: JsonDict | None = Field(None, description="执行结果快照")
+    error_message: str | None = Field(None, description="错误信息")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 
@@ -277,56 +275,56 @@ class AgentIdempotencyKeyResponse(BaseModel):
 class AgentWorkflowActionCreate(BaseModel):
     workflow_id: str = Field(..., min_length=1, max_length=64, description="Agent工作流ID")
     action_id: str = Field(..., min_length=1, max_length=64, description="Agent动作ID")
-    parent_action_id: Optional[str] = Field(None, max_length=64, description="父动作ID")
+    parent_action_id: str | None = Field(None, max_length=64, description="父动作ID")
     team_id: int = Field(..., description="团队ID")
-    user_id: Optional[int] = Field(None, description="系统用户ID")
-    session_id: Optional[int] = Field(None, description="Agent会话ID")
-    source_message_id: Optional[int] = Field(None, description="来源消息ID")
+    user_id: int | None = Field(None, description="系统用户ID")
+    session_id: int | None = Field(None, description="Agent会话ID")
+    source_message_id: int | None = Field(None, description="来源消息ID")
     source_type: str = Field(..., min_length=1, max_length=80, description="动作来源")
     action_type: str = Field(..., min_length=1, max_length=100, description="动作类型")
-    status: Optional[str] = Field(None, max_length=20, description="动作状态")
+    status: str | None = Field(None, max_length=20, description="动作状态")
     scope: str = Field(..., min_length=1, max_length=50, description="动作范围")
     source: str = Field(..., min_length=1, max_length=80, description="业务来源策略")
     execution_policy: str = Field(..., min_length=1, max_length=80, description="执行策略")
     on_reject: str = Field(..., min_length=1, max_length=80, description="拒绝策略")
     blocking: bool = Field(..., description="是否阻塞工作流")
-    target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    dependency_json: Optional[JsonDict] = Field(None, description="动作依赖")
-    payload_json: Optional[JsonDict] = Field(None, description="动作输入载荷")
-    result_json: Optional[JsonDict] = Field(None, description="动作结果")
-    decision_json: Optional[JsonDict] = Field(None, description="用户或路由决策")
-    idempotency_key: Optional[str] = Field(None, max_length=160, description="业务幂等键")
-    status_reason: Optional[str] = Field(None, description="状态原因")
-    error_message: Optional[str] = Field(None, description="错误信息")
+    target_type: str | None = Field(None, max_length=50, description="目标业务对象类型")
+    target_id: int | None = Field(None, description="目标业务对象ID")
+    dependency_json: JsonDict | None = Field(None, description="动作依赖")
+    payload_json: JsonDict | None = Field(None, description="动作输入载荷")
+    result_json: JsonDict | None = Field(None, description="动作结果")
+    decision_json: JsonDict | None = Field(None, description="用户或路由决策")
+    idempotency_key: str | None = Field(None, max_length=160, description="业务幂等键")
+    status_reason: str | None = Field(None, description="状态原因")
+    error_message: str | None = Field(None, description="错误信息")
 
 
 class AgentWorkflowActionUpdate(BaseModel):
-    parent_action_id: Optional[str] = Field(None, max_length=64, description="父动作ID")
-    source_message_id: Optional[int] = Field(None, description="来源消息ID")
-    status: Optional[str] = Field(None, max_length=20, description="动作状态")
-    target_type: Optional[str] = Field(None, max_length=50, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    dependency_json: Optional[JsonDict] = Field(None, description="动作依赖")
-    payload_json: Optional[JsonDict] = Field(None, description="动作输入载荷")
-    result_json: Optional[JsonDict] = Field(None, description="动作结果")
-    decision_json: Optional[JsonDict] = Field(None, description="用户或路由决策")
-    idempotency_key: Optional[str] = Field(None, max_length=160, description="业务幂等键")
-    status_reason: Optional[str] = Field(None, description="状态原因")
-    error_message: Optional[str] = Field(None, description="错误信息")
-    started_time: Optional[datetime] = Field(None, description="开始时间")
-    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    parent_action_id: str | None = Field(None, max_length=64, description="父动作ID")
+    source_message_id: int | None = Field(None, description="来源消息ID")
+    status: str | None = Field(None, max_length=20, description="动作状态")
+    target_type: str | None = Field(None, max_length=50, description="目标业务对象类型")
+    target_id: int | None = Field(None, description="目标业务对象ID")
+    dependency_json: JsonDict | None = Field(None, description="动作依赖")
+    payload_json: JsonDict | None = Field(None, description="动作输入载荷")
+    result_json: JsonDict | None = Field(None, description="动作结果")
+    decision_json: JsonDict | None = Field(None, description="用户或路由决策")
+    idempotency_key: str | None = Field(None, max_length=160, description="业务幂等键")
+    status_reason: str | None = Field(None, description="状态原因")
+    error_message: str | None = Field(None, description="错误信息")
+    started_time: datetime | None = Field(None, description="开始时间")
+    finished_time: datetime | None = Field(None, description="结束时间")
 
 
 class AgentWorkflowActionResponse(BaseModel):
     id: int = Field(..., description="主键")
     workflow_id: str = Field(..., description="Agent工作流ID")
     action_id: str = Field(..., description="Agent动作ID")
-    parent_action_id: Optional[str] = Field(None, description="父动作ID")
+    parent_action_id: str | None = Field(None, description="父动作ID")
     team_id: int = Field(..., description="团队ID")
-    user_id: Optional[int] = Field(None, description="系统用户ID")
-    session_id: Optional[int] = Field(None, description="Agent会话ID")
-    source_message_id: Optional[int] = Field(None, description="来源消息ID")
+    user_id: int | None = Field(None, description="系统用户ID")
+    session_id: int | None = Field(None, description="Agent会话ID")
+    source_message_id: int | None = Field(None, description="来源消息ID")
     source_type: str = Field(..., description="动作来源")
     action_type: str = Field(..., description="动作类型")
     status: str = Field(..., description="动作状态")
@@ -335,18 +333,18 @@ class AgentWorkflowActionResponse(BaseModel):
     execution_policy: str = Field(..., description="执行策略")
     on_reject: str = Field(..., description="拒绝策略")
     blocking: bool = Field(..., description="是否阻塞工作流")
-    target_type: Optional[str] = Field(None, description="目标业务对象类型")
-    target_id: Optional[int] = Field(None, description="目标业务对象ID")
-    dependency_json: Optional[JsonDict] = Field(None, description="动作依赖")
-    payload_json: Optional[JsonDict] = Field(None, description="动作输入载荷")
-    result_json: Optional[JsonDict] = Field(None, description="动作结果")
-    decision_json: Optional[JsonDict] = Field(None, description="用户或路由决策")
-    idempotency_key: Optional[str] = Field(None, description="业务幂等键")
-    status_reason: Optional[str] = Field(None, description="状态原因")
-    error_message: Optional[str] = Field(None, description="错误信息")
+    target_type: str | None = Field(None, description="目标业务对象类型")
+    target_id: int | None = Field(None, description="目标业务对象ID")
+    dependency_json: JsonDict | None = Field(None, description="动作依赖")
+    payload_json: JsonDict | None = Field(None, description="动作输入载荷")
+    result_json: JsonDict | None = Field(None, description="动作结果")
+    decision_json: JsonDict | None = Field(None, description="用户或路由决策")
+    idempotency_key: str | None = Field(None, description="业务幂等键")
+    status_reason: str | None = Field(None, description="状态原因")
+    error_message: str | None = Field(None, description="错误信息")
     capability: JsonDict = Field(default_factory=dict, description="动作能力契约快照")
-    started_time: Optional[datetime] = Field(None, description="开始时间")
-    finished_time: Optional[datetime] = Field(None, description="结束时间")
+    started_time: datetime | None = Field(None, description="开始时间")
+    finished_time: datetime | None = Field(None, description="结束时间")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 
@@ -355,7 +353,7 @@ class AgentWorkflowActionResponse(BaseModel):
 
 
 class AgentSessionDetailResponse(AgentSessionResponse):
-    messages: List[AgentMessageResponse] = Field(default_factory=list, description="会话消息")
+    messages: list[AgentMessageResponse] = Field(default_factory=list, description="会话消息")
 
 
 class AgentWorkflowActionSummaryResponse(BaseModel):
@@ -376,23 +374,23 @@ class AgentWorkflowGraphNodeResponse(BaseModel):
     action_id: str = Field(..., description="Agent动作ID")
     action_type: str = Field(..., description="动作类型")
     status: str = Field(..., description="动作状态")
-    status_reason: Optional[str] = Field(None, description="动作状态原因")
-    error_message: Optional[str] = Field(None, description="动作错误信息")
+    status_reason: str | None = Field(None, description="动作状态原因")
+    error_message: str | None = Field(None, description="动作错误信息")
     scope: str = Field(..., description="动作范围")
     blocking: bool = Field(..., description="是否阻塞工作流")
-    parent_action_id: Optional[str] = Field(None, description="父动作ID")
-    depends_on: List[str] = Field(default_factory=list, description="上游依赖动作ID")
-    parallel_group: Optional[str] = Field(None, description="并行分组")
+    parent_action_id: str | None = Field(None, description="父动作ID")
+    depends_on: list[str] = Field(default_factory=list, description="上游依赖动作ID")
+    parallel_group: str | None = Field(None, description="并行分组")
 
 
 class AgentWorkflowDetailResponse(BaseModel):
     workflow_id: str = Field(..., description="Agent工作流ID")
     workflow_status: str = Field(..., description="工作流聚合状态")
-    status_reason: Optional[str] = Field(None, description="工作流状态原因")
+    status_reason: str | None = Field(None, description="工作流状态原因")
     action_summary: AgentWorkflowActionSummaryResponse = Field(..., description="动作状态聚合")
-    nodes: List[AgentWorkflowGraphNodeResponse] = Field(default_factory=list, description="动作图节点")
-    edges: List[AgentWorkflowGraphEdgeResponse] = Field(default_factory=list, description="动作图依赖边")
-    actions: List[AgentWorkflowActionResponse] = Field(default_factory=list, description="动作明细")
+    nodes: list[AgentWorkflowGraphNodeResponse] = Field(default_factory=list, description="动作图节点")
+    edges: list[AgentWorkflowGraphEdgeResponse] = Field(default_factory=list, description="动作图依赖边")
+    actions: list[AgentWorkflowActionResponse] = Field(default_factory=list, description="动作明细")
 
 
 class AgentAsyncOperationEventResponse(BaseModel):
@@ -400,8 +398,8 @@ class AgentAsyncOperationEventResponse(BaseModel):
     event_type: str = Field(..., description="生命周期事件类型")
     status: str = Field(..., description="事件后的操作状态")
     event_key: str = Field(..., description="操作内事件幂等键")
-    step: Optional[str] = Field(None, description="当前业务步骤")
-    message: Optional[str] = Field(None, description="用户可见进度说明")
+    step: str | None = Field(None, description="当前业务步骤")
+    message: str | None = Field(None, description="用户可见进度说明")
     payload: JsonDict = Field(default_factory=dict, description="结构化进度载荷")
     occurred_at: datetime = Field(..., description="事件发生时间")
 
@@ -414,26 +412,26 @@ class AgentAsyncOperationResponse(BaseModel):
     request_id: str = Field(..., description="后台请求ID")
     team_id: int = Field(..., description="团队ID")
     user_id: int = Field(..., description="用户ID")
-    session_id: Optional[int] = Field(None, description="来源 Agent 会话ID")
-    source_user_message_id: Optional[int] = Field(None, description="来源用户消息ID")
-    source_assistant_message_id: Optional[int] = Field(None, description="来源助手消息ID")
+    session_id: int | None = Field(None, description="来源 Agent 会话ID")
+    source_user_message_id: int | None = Field(None, description="来源用户消息ID")
+    source_assistant_message_id: int | None = Field(None, description="来源助手消息ID")
     operation_type: str = Field(..., description="异步操作类型")
     resource_type: str = Field(..., description="业务资源类型")
-    resource_id: Optional[int] = Field(None, description="内部业务资源ID")
-    resource_public_id: Optional[str] = Field(None, description="业务资源对外ID")
+    resource_id: int | None = Field(None, description="内部业务资源ID")
+    resource_public_id: str | None = Field(None, description="业务资源对外ID")
     status: str = Field(..., description="异步操作状态")
-    summary: Optional[str] = Field(None, description="用户可见摘要")
-    current_step: Optional[str] = Field(None, description="当前步骤")
-    graph_thread_id: Optional[str] = Field(None, description="LangGraph thread ID")
+    summary: str | None = Field(None, description="用户可见摘要")
+    current_step: str | None = Field(None, description="当前步骤")
+    graph_thread_id: str | None = Field(None, description="LangGraph thread ID")
     result: JsonDict = Field(default_factory=dict, description="可回放结果摘要")
-    error_message: Optional[str] = Field(None, description="错误信息")
-    started_time: Optional[datetime] = Field(None, description="开始时间")
-    finished_time: Optional[datetime] = Field(None, description="结束时间")
-    next_retry_at: Optional[datetime] = Field(None, description="下次重试时间")
+    error_message: str | None = Field(None, description="错误信息")
+    started_time: datetime | None = Field(None, description="开始时间")
+    finished_time: datetime | None = Field(None, description="结束时间")
+    next_retry_at: datetime | None = Field(None, description="下次重试时间")
     attempt_count: int = Field(0, description="已开始执行次数")
     created_time: datetime = Field(..., description="创建时间")
     updated_time: datetime = Field(..., description="更新时间")
-    events: List[AgentAsyncOperationEventResponse] = Field(default_factory=list, description="可回放进度事件")
+    events: list[AgentAsyncOperationEventResponse] = Field(default_factory=list, description="可回放进度事件")
 
     class Config:
         from_attributes = True

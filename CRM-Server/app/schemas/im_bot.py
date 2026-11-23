@@ -1,14 +1,13 @@
 """IM webhook schemas."""
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
-
-JsonDict = Dict[str, Any]
+JsonDict = dict[str, Any]
 
 
 class IMWebhookResponse(BaseModel):
     code: int = 0
     message: str = "ok"
-    challenge: Optional[str] = None
-    data: Optional[JsonDict] = None
+    challenge: str | None = None
+    data: JsonDict | None = None

@@ -25,10 +25,10 @@ from app.services.agent.query import (
     DefaultCustomerContextReader,
 )
 from app.services.agent.query.executor import FollowUpTaskDetailAPIAdapter
-from app.services.agent.tools.api_client import InternalCRMAPIClient
 from app.services.agent.query.semantic_intent import LLMQuerySemanticIntentResolver
 from app.services.agent.semantic import agent_semantic_parser
 from app.services.agent.semantic_plan import AgentSemanticPlan, semantic_plan_from_result
+from app.services.agent.tools.api_client import InternalCRMAPIClient
 from app.services.agent.workflow.execution import CRMWorkflowEffectExecutor
 from app.services.agent.workflow.graph import build_workflow_subgraph
 from app.services.agent.workflow.planning import CRMWorkflowPlanner

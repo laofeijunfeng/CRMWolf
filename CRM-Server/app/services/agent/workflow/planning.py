@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
@@ -78,6 +78,9 @@ from app.services.customer_activity_contracts import (
     CustomerActivitySuggestionJobStatus,
 )
 from app.services.customer_activity_kinds import infer_activity_kind
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class WorkflowPlanningError(ValueError):
@@ -659,7 +662,7 @@ class CRMWorkflowPlanner:
         ):
             raise WorkflowPlanningError(
                 "WORKFLOW_LEAD_ALREADY_EXISTS",
-                f"线索「{lead_name}」已存在，请直接补充跟进，不要重复创建。",
+                f"线索「{lead_name}」已存在\uff0c请直接补充跟进\uff0c不要重复创建。",
             )
         lead_facts = [
             ("lead_name", "线索名称", lead_name),
@@ -842,7 +845,7 @@ class CRMWorkflowPlanner:
         ):
             raise WorkflowPlanningError(
                 "WORKFLOW_CUSTOMER_ALREADY_EXISTS",
-                f"客户「{account_name}」已存在，请直接记录跟进，不要重复创建。",
+                f"客户「{account_name}」已存在\uff0c请直接记录跟进\uff0c不要重复创建。",
             )
         if not isinstance(follow_up_content, str) or not follow_up_content.strip():
             return self._confirmation_plan(
@@ -2157,7 +2160,8 @@ class CRMWorkflowPlanner:
         if isinstance(module_ids, str):
             module_ids = [item.strip() for item in module_ids.split(",") if item.strip()]
         if module_ids is not None:
-            if not isinstance(module_ids, list) or any(not isinstance(item, str) or not item.strip() for item in module_ids):
+            if not isinstance(module_ids, list) or any(not isinstance(item, str)
+                or not item.strip() for item in module_ids):
                 raise WorkflowPlanningError(
                     "WORKFLOW_OPPORTUNITY_FIELDS_INVALID",
                     "产品模块无效。",
@@ -2650,7 +2654,7 @@ class CRMWorkflowPlanner:
     def _product_missing_prompt(
         missing_fields: list[str],
         *,
-        formatter,
+        formatter: Callable[[list[str]], str],
         db: object,
         team_id: int,
     ) -> str:

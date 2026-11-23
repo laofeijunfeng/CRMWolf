@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.assistant.contracts import TaskDraft
 from app.services.assistant.coordinator import NextActionDecision
+from app.services.assistant.failure_contract import attempt_budget_remaining
 from app.services.assistant.model_transport import (
     AssistantLLMError,
     AssistantModelTransport,
@@ -102,6 +103,8 @@ class AgentLLMChooser:
                 user_prompt=self._snapshot_prompt(task),
                 response_model=ActionNomination,
                 error_prefix="动作选择",
+                timeout_seconds=attempt_budget_remaining(),
+                stage="choose",
             )
             if result is None:
                 raise AssistantLLMError("动作选择：结构化输出不可用")

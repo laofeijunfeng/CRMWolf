@@ -1,14 +1,14 @@
-from __future__ import annotations
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field
+
 from app.schemas.permission import PermissionResponse
 
 
 class RoleBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="角色名称")
     code: str = Field(..., min_length=1, max_length=50, description="角色代码")
-    description: Optional[str] = Field(None, description="角色描述")
+    description: str | None = Field(None, description="角色描述")
 
 
 class RoleCreate(RoleBase):
@@ -16,8 +16,8 @@ class RoleCreate(RoleBase):
 
 
 class RoleUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=50, description="角色名称")
-    description: Optional[str] = Field(None, description="角色描述")
+    name: str | None = Field(None, min_length=1, max_length=50, description="角色名称")
+    description: str | None = Field(None, description="角色描述")
 
 
 class RoleResponse(RoleBase):
@@ -30,7 +30,7 @@ class RoleResponse(RoleBase):
 
 
 class RoleWithPermissions(RoleResponse):
-    permissions: List[PermissionResponse] = []
+    permissions: list[PermissionResponse] = []
 
 
 class UserRoleCreate(BaseModel):
@@ -53,7 +53,7 @@ class RoleUserResponse(BaseModel):
     id: int
     name: str
     email: str
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
     status: str
 
     class Config:
@@ -62,4 +62,4 @@ class RoleUserResponse(BaseModel):
 
 class RolePermissionsUpdate(BaseModel):
     """批量更新角色权限的请求"""
-    permission_ids: List[int] = Field(..., description="权限ID列表")
+    permission_ids: list[int] = Field(..., description="权限ID列表")

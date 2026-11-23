@@ -1,11 +1,12 @@
 import json
 import random
 import string
+
 from sqlalchemy.orm import Session
-from typing import Optional, List
+
 from app.models.team import Team, UserTeam
-from app.schemas.team import TeamCreate, TeamUpdate
 from app.models.user import User
+from app.schemas.team import TeamCreate, TeamUpdate
 
 
 class TeamCRUD:
@@ -14,16 +15,16 @@ class TeamCRUD:
         chars = string.ascii_uppercase + string.digits
         return ''.join(random.choices(chars, k=length))
 
-    def get_by_id(self, db: Session, team_id: int) -> Optional[Team]:
+    def get_by_id(self, db: Session, team_id: int) -> Team | None:
         return db.query(Team).filter(Team.id == team_id).first()
 
-    def get_by_code(self, db: Session, code: str) -> Optional[Team]:
+    def get_by_code(self, db: Session, code: str) -> Team | None:
         return db.query(Team).filter(Team.code == code).first()
 
-    def get_multi(self, db: Session, skip: int = 0, limit: int = 100) -> List[Team]:
+    def get_multi(self, db: Session, skip: int = 0, limit: int = 100) -> list[Team]:
         return db.query(Team).offset(skip).limit(limit).all()
 
-    def get_all_teams(self, db: Session) -> List[Team]:
+    def get_all_teams(self, db: Session) -> list[Team]:
         """获取所有团队列表"""
         return db.query(Team).all()
 
@@ -51,7 +52,7 @@ class TeamCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def delete(self, db: Session, team_id: int) -> Optional[Team]:
+    def delete(self, db: Session, team_id: int) -> Team | None:
         obj = db.query(Team).filter(Team.id == team_id).first()
         if obj:
             db.delete(obj)
@@ -68,16 +69,16 @@ class TeamCRUD:
             return team.code
         return ""
 
-    def get_members(self, db: Session, team_id: int) -> List[User]:
+    def get_members(self, db: Session, team_id: int) -> list[User]:
         """获取团队成员列表"""
         return db.query(User).join(
             UserTeam, User.id == UserTeam.user_id
         ).filter(UserTeam.team_id == team_id).all()
 
-    def get_member_info(self, db: Session, team_id: int) -> List[dict]:
+    def get_member_info(self, db: Session, team_id: int) -> list[dict]:
         """获取团队成员详细信息（包含角色）"""
         from sqlalchemy import text
-        # MySQL 兼容语法（不支持 PostgreSQL 的 FILTER 和 ::json）
+        # MySQL 兼容语法(不支持 PostgreSQL 的 FILTER 和 ::json)
         result = db.execute(text("""
             SELECT u.id, u.name, u.email, u.avatar_url, ut.current_team, ut.joined_at,
                    IFNULL(
@@ -113,7 +114,9 @@ class TeamCRUD:
             members.append(m)
         return members
 
-    def add_member(self, db: Session, team_id: int, user_id: int, set_current: bool = True, commit: bool = True) -> UserTeam:
+    def add_member(
+        self, db: Session, team_id: int, user_id: int, set_current: bool = True, commit: bool = True
+    ) -> UserTeam:
         """添加成员到团队"""
         # 检查用户是否已加入该团队
         existing = db.query(UserTeam).filter(
@@ -123,7 +126,7 @@ class TeamCRUD:
         if existing:
             return existing
 
-        # 如果设置为当前团队且用户没有其他团队，则设为当前
+        # 如果设置为当前团队且用户没有其他团队,则设为当前
         if set_current:
             user_teams_count = db.query(UserTeam).filter(
                 UserTeam.user_id == user_id
@@ -183,13 +186,13 @@ class TeamCRUD:
         db.commit()
         return True
 
-    def get_user_teams(self, db: Session, user_id: int) -> List[Team]:
+    def get_user_teams(self, db: Session, user_id: int) -> list[Team]:
         """获取用户所属的所有团队"""
         return db.query(Team).join(
             UserTeam, Team.id == UserTeam.team_id
         ).filter(UserTeam.user_id == user_id).all()
 
-    def get_user_current_team(self, db: Session, user_id: int) -> Optional[int]:
+    def get_user_current_team(self, db: Session, user_id: int) -> int | None:
         """获取用户当前活跃团队ID"""
         user_team = db.query(UserTeam).filter(
             UserTeam.user_id == user_id,
@@ -211,19 +214,19 @@ class TeamCRUD:
 
 
 class UserTeamCRUD:
-    def get_by_user_and_team(self, db: Session, user_id: int, team_id: int) -> Optional[UserTeam]:
+    def get_by_user_and_team(self, db: Session, user_id: int, team_id: int) -> UserTeam | None:
         return db.query(UserTeam).filter(
             UserTeam.user_id == user_id,
             UserTeam.team_id == team_id
         ).first()
 
-    def get_user_current_team(self, db: Session, user_id: int) -> Optional[UserTeam]:
+    def get_user_current_team(self, db: Session, user_id: int) -> UserTeam | None:
         return db.query(UserTeam).filter(
             UserTeam.user_id == user_id,
             UserTeam.current_team == True
         ).first()
 
-    def get_user_teams(self, db: Session, user_id: int) -> List[UserTeam]:
+    def get_user_teams(self, db: Session, user_id: int) -> list[UserTeam]:
         return db.query(UserTeam).filter(UserTeam.user_id == user_id).all()
 
 

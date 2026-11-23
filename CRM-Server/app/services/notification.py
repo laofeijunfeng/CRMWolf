@@ -1,12 +1,12 @@
 """
 通知服务统一入口
 
-根据系统配置选择通知方式（Webhook 或 API），统一调用 feishu_service 的对应方法。
+根据系统配置选择通知方式\uff08Webhook 或 API\uff09\uff0c统一调用 feishu_service 的对应方法。
 通知失败时记录日志但不阻塞审批流程。
 """
 import logging
 import warnings
-from typing import Optional
+
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
@@ -17,7 +17,7 @@ from app.services.feishu import feishu_service
 logger = logging.getLogger(__name__)
 
 
-# 单据类型展示名（Webhook 标题里 fallback 用，避免硬编码"合同"）
+# 单据类型展示名(Webhook 标题里 fallback 用,避免硬编码"合同")
 _ENTITY_TYPE_LABEL = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
@@ -29,28 +29,28 @@ _ENTITY_TYPE_LABEL = {
 
 
 def _resolve_entity_fields(
-    entity_type: Optional[str],
-    entity_name: Optional[str],
-    business_id: Optional[int],
-    contract_name: Optional[str],
-    contract_id: Optional[int],
-) -> tuple[str, Optional[str], Optional[int]]:
-    """把旧合同别名（contract_name / contract_id）映射到泛化签名。
+    entity_type: str | None,
+    entity_name: str | None,
+    business_id: int | None,
+    contract_name: str | None,
+    contract_id: int | None,
+) -> tuple[str, str | None, int | None]:
+    """把旧合同别名\uff08contract_name / contract_id\uff09映射到泛化签名。
 
-    new 签名优先；旧调用方仍传 contract_name / contract_id 时回退，并触发
-    DeprecationWarning。entity_type 缺省视为 CONTRACT（旧合同端点沿用语义）。
+    new 签名优先\uff1b旧调用方仍传 contract_name / contract_id 时回退\uff0c并触发
+    DeprecationWarning。entity_type 缺省视为 CONTRACT\uff08旧合同端点沿用语义\uff09。
     """
     if entity_name is None and contract_name is not None:
         entity_name = contract_name
         warnings.warn(
-            "notify_approval_*: contract_name 已弃用，请改用 entity_name",
+            "notify_approval_*: contract_name 已弃用\uff0c请改用 entity_name",
             DeprecationWarning,
             stacklevel=3,
         )
     if business_id is None and contract_id is not None:
         business_id = contract_id
         warnings.warn(
-            "notify_approval_*: contract_id 已弃用，请改用 business_id",
+            "notify_approval_*: contract_id 已弃用\uff0c请改用 business_id",
             DeprecationWarning,
             stacklevel=3,
         )
@@ -62,7 +62,7 @@ def _resolve_entity_fields(
 class NotificationService:
     """通知服务统一入口"""
 
-    def __init__(self, db: Session, team_id: int):
+    def __init__(self, db: Session, team_id: int) -> None:
         """初始化通知服务
 
         Args:
@@ -71,9 +71,9 @@ class NotificationService:
         """
         self.db = db
         self.team_id = team_id
-        self._config: Optional[NotificationConfigResponse] = None
+        self._config: NotificationConfigResponse | None = None
 
-    def get_config(self) -> Optional[NotificationConfigResponse]:
+    def get_config(self) -> NotificationConfigResponse | None:
         """获取通知配置
 
         Returns:
@@ -85,42 +85,42 @@ class NotificationService:
                     self.db, self.team_id
                 )
             except Exception as e:
-                logger.error(f"获取通知配置失败: team_id={self.team_id}, error={str(e)}")
+                logger.error(f"获取通知配置失败: team_id={self.team_id}, error={e!s}")
                 return None
         return self._config
 
     async def notify_approval_pending(
         self,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         flow_name: str = "",
         node_name: str = "",
         approver_open_id: str = "",
         approver_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批待处理通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代旧的
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代旧的
         contract_name / contract_id。旧合同调用方传 contract_name / contract_id
-        仍可工作（内部回退映射，并触发 DeprecationWarning）。
+        仍可工作\uff08内部回退映射\uff0c并触发 DeprecationWarning\uff09。
 
         Args:
-            entity_type: 业务单据类型（CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY），缺省 CONTRACT
-            entity_name: 业务单据展示名（如 "合同A" / "回款登记#9"）
+            entity_type: 业务单据类型\uff08CONTRACT / PAYMENT / INVOICE / LICENSE / OPPORTUNITY\uff09\uff0c缺省 CONTRACT
+            entity_name: 业务单据展示名\uff08如 "合同A" / "回款登记#9"\uff09
             flow_name: 审批流程名称
             node_name: 当前审批节点名称
-            approver_open_id: 审批人 Open ID（API 方式使用）
-            approver_name: 审批人姓名（Webhook 方式使用）
+            approver_open_id: 审批人 Open ID\uff08API 方式使用\uff09
+            approver_name: 审批人姓名\uff08Webhook 方式使用\uff09
             business_id: 业务单据ID
-            contract_name: (已弃用) 旧合同别名，映射到 entity_name
-            contract_id: (已弃用) 旧合同别名，映射到 business_id
+            contract_name: (已弃用) 旧合同别名\uff0c映射到 entity_name
+            contract_id: (已弃用) 旧合同别名\uff0c映射到 business_id
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -128,7 +128,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批待处理通知: "
+                f"通知配置未设置\uff0c跳过发送审批待处理通知: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -138,13 +138,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -170,35 +170,35 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批待处理通知失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 
     async def notify_approval_approved(
         self,
         submitter_open_id: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
-        business_id: Optional[int] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批通过通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
-            submitter_open_id: 提交人 Open ID（API 方式使用）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            submitter_open_id: 提交人 Open ID\uff08API 方式使用\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -206,7 +206,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批通过通知: "
+                f"通知配置未设置\uff0c跳过发送审批通过通知: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -216,13 +216,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -243,29 +243,29 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批通过通知失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 
     async def notify_approval_rejected(
         self,
         submitter_open_id: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         reject_reason: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批拒绝通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
-            submitter_open_id: 提交人 Open ID（API 方式使用）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            submitter_open_id: 提交人 Open ID\uff08API 方式使用\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             reject_reason: 拒绝原因
             business_id: 业务单据ID
@@ -273,7 +273,7 @@ class NotificationService:
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -281,7 +281,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批拒绝通知: "
+                f"通知配置未设置\uff0c跳过发送审批拒绝通知: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -291,13 +291,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -320,27 +320,27 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批拒绝通知失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 
     async def notify_approval_cancelled(
         self,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         submitter_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批撤回通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             submitter_name: 撤回人姓名
             business_id: 业务单据ID
@@ -348,7 +348,7 @@ class NotificationService:
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -356,7 +356,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批撤回通知: "
+                f"通知配置未设置\uff0c跳过发送审批撤回通知: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -366,13 +366,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -384,7 +384,7 @@ class NotificationService:
                     business_id=business_id,
                 )
             else:
-                # API 方式暂未实现撤回通知（feishu_service 中无对应方法）
+                # API 方式暂未实现撤回通知(feishu_service 中无对应方法)
                 logger.warning(
                     f"API 方式暂不支持审批撤回通知: team_id={self.team_id}"
                 )
@@ -392,7 +392,7 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批撤回通知失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 
@@ -400,35 +400,35 @@ class NotificationService:
         self,
         approver_open_id: str,
         approver_name: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         waiting_hours: int = 0,
         node_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         reminder_level: str = "light",
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批催办通知给审批人
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
-            approver_open_id: 审批人 Open ID（API 方式使用）
-            approver_name: 审批人姓名（Webhook 方式使用）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            approver_open_id: 审批人 Open ID\uff08API 方式使用\uff09
+            approver_name: 审批人姓名\uff08Webhook 方式使用\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
             node_name: 当前审批节点名称
             business_id: 业务单据ID
-            reminder_level: 提醒级别（light/medium/strong）
+            reminder_level: 提醒级别\uff08light/medium/strong\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -436,7 +436,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批催办通知: "
+                f"通知配置未设置\uff0c跳过发送审批催办通知: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -446,13 +446,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -479,45 +479,45 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批催办通知失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 
     async def notify_approval_timeout_alert(
         self,
         submitter_open_id: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         node_name: str = "",
         approver_name: str = "",
         waiting_hours: int = 0,
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         reminder_level: str = "medium",
         is_admin: bool = False,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """发送审批超时告警给提交人或管理员
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
-            submitter_open_id: 提交人/管理员 Open ID（API 方式使用）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            submitter_open_id: 提交人/管理员 Open ID\uff08API 方式使用\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             node_name: 当前审批节点名称
             approver_name: 当前审批人姓名
             waiting_hours: 已等待小时数
             business_id: 业务单据ID
-            reminder_level: 提醒级别（medium/strong）
+            reminder_level: 提醒级别\uff08medium/strong\uff09
             is_admin: 是否通知管理员
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity_fields(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -525,7 +525,7 @@ class NotificationService:
         config = self.get_config()
         if not config:
             logger.warning(
-                f"通知配置未设置，跳过发送审批超时告警: "
+                f"通知配置未设置\uff0c跳过发送审批超时告警: "
                 f"team_id={self.team_id}, entity_type={entity_type}, entity_name={entity_name}"
             )
             return False
@@ -535,13 +535,13 @@ class NotificationService:
                 # Webhook 方式
                 if not config.feishu_webhook_url:
                     logger.warning(
-                        f"Webhook URL 未配置，跳过发送: team_id={self.team_id}"
+                        f"Webhook URL 未配置\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
                 if not config.feishu_webhook_enabled:
                     logger.warning(
-                        f"Webhook 通知已禁用，跳过发送: team_id={self.team_id}"
+                        f"Webhook 通知已禁用\uff0c跳过发送: team_id={self.team_id}"
                     )
                     return False
 
@@ -571,7 +571,7 @@ class NotificationService:
         except Exception as e:
             logger.error(
                 f"发送审批超时告警失败: entity_type={entity_type}, "
-                f"entity_name={entity_name}, error={str(e)}"
+                f"entity_name={entity_name}, error={e!s}"
             )
             return False
 

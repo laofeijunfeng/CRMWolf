@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 _SUPERSEDED_SKIP_REASON = "SUPERSEDED_ACTIVITY_REVISION"
-_IN_PROGRESS_SUMMARY = "跟进已记录，任务对账处理中"
-_COMPLETED_SUMMARY = "跟进已记录，任务对账完成"
+_IN_PROGRESS_SUMMARY = "跟进已记录\uff0c任务对账处理中"
+_COMPLETED_SUMMARY = "跟进已记录\uff0c任务对账完成"
 
 
 class CustomerActivityPostCommitOperationProjector:
@@ -180,14 +180,14 @@ class CustomerActivityPostCommitOperationProjector:
                 operation,
                 error_message=str(job.error_message or "customer activity post-commit failed"),
                 retry_at=job.next_attempt_at,
-                summary="跟进已记录，任务对账将自动重试",
+                summary="跟进已记录\uff0c任务对账将自动重试",
             )
         if job_status == CustomerActivityPostCommitJobStatus.EXHAUSTED:
             return self.operation_service.fail(
                 db,
                 operation,
                 error_message=str(job.error_message or "customer activity post-commit retries exhausted"),
-                summary="跟进已记录，任务对账失败",
+                summary="跟进已记录\uff0c任务对账失败",
             )
         return operation
 

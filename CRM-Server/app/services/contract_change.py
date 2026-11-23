@@ -1,7 +1,6 @@
 """Contract change requests: submit through the contract approval flow, apply on final approval."""
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,7 +15,7 @@ from app.services.contract import ContractPricingService
 from app.services.file_storage import FileStorageError, file_storage_service
 
 CONTRACT_AMOUNT_KEY = "contract_amount"
-PENDING_CHANGE_MESSAGE = "已有一条变更在审批中，审批结束前不能再次发起"
+PENDING_CHANGE_MESSAGE = "已有一条变更在审批中\uff0c审批结束前不能再次发起"
 _CENT = Decimal("0.01")
 
 
@@ -32,7 +31,7 @@ class ContractNotFoundError(LookupError):
 class ContractChangeAttachment:
     filename: str
     content: bytes
-    content_type: Optional[str]
+    content_type: str | None
 
 
 @dataclass(frozen=True)
@@ -45,7 +44,7 @@ class ContractFinancialSnapshot:
     def floor_amount(self) -> Decimal:
         return max(self.paid_amount, self.invoiced_amount, self.planned_amount)
 
-    def violation(self, amount: Decimal) -> Optional[str]:
+    def violation(self, amount: Decimal) -> str | None:
         """Name the highest financial fact the amount would fall below."""
         floors = (
             (self.planned_amount, "回款计划金额合计"),
@@ -72,7 +71,7 @@ def amount_change_values(change: ContractChangeRequest) -> tuple[Decimal, Decima
 
 
 class ContractChangeService:
-    def get_pending(self, db: Session, team_id: int, contract_id: int) -> Optional[ContractChangeRequest]:
+    def get_pending(self, db: Session, team_id: int, contract_id: int) -> ContractChangeRequest | None:
         return contract_change_crud.get_pending(db, team_id, contract_id)
 
     def list_history(self, db: Session, team_id: int, contract_id: int) -> list[ContractChangeRequest]:
@@ -98,7 +97,7 @@ class ContractChangeService:
         actor_name: str,
         new_amount: Decimal,
         reason: str,
-        attachment: Optional[ContractChangeAttachment] = None,
+        attachment: ContractChangeAttachment | None = None,
     ) -> ContractChangeRequest:
         contract = contract_change_crud.get_active_contract(db, contract_id, team_id)
         if contract is None:
@@ -108,7 +107,7 @@ class ContractChangeService:
             raise ContractChangeError("请填写变更原因")
         new_amount = _money(new_amount)
 
-        attachment_path: Optional[str] = None
+        attachment_path: str | None = None
         if attachment is not None:
             try:
                 attachment_path = file_storage_service.save_contract_change_file(
@@ -187,7 +186,7 @@ class ContractChangeService:
         """Apply the final approval to the contract; caller owns the transaction."""
         contract = contract_change_crud.lock_active_contract(db, change.contract_id, change.team_id)
         if contract is None:
-            raise ValueError("合同不存在，无法应用合同变更")
+            raise ValueError("合同不存在\uff0c无法应用合同变更")
         _old_amount, new_amount = amount_change_values(change)
         violation = self.get_financial_snapshot(db, change.team_id, change.contract_id).violation(new_amount)
         if violation:
@@ -205,7 +204,7 @@ class ContractChangeService:
         change.pending_guard = None
 
     @staticmethod
-    def _ineligibility(contract: Contract, actor_id: str) -> Optional[str]:
+    def _ineligibility(contract: Contract, actor_id: str) -> str | None:
         if str(contract.creator_id) != str(actor_id):
             return "只有合同创建人可以申请变更合同"
         if contract.approval_phase != ApprovalPhase.APPROVED.value:

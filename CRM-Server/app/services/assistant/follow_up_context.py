@@ -12,15 +12,15 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import ValidationError
 
 from app.services.assistant.action_evidence import SourceSegment, parse_deadline
 from app.services.assistant.contracts import ComparisonCurrentSource, ComparisonHistoricalSource, FollowUpComparison
-
+from app.services.assistant.events import stage
 from app.services.assistant.llm import AssistantLLM, AssistantLLMError
-from app.services.assistant.llm_contracts import ChangeJudgment
 from app.services.assistant.temporal_evidence import PROTOCOL_VERSION, StoredAction, StoredMention
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
     from app.models.customer import Customer
     from app.models.opportunity import Opportunity
+    from app.services.assistant.events import ProgressReporter
+    from app.services.assistant.llm_contracts import ChangeJudgment
 
 SectionStatus = Literal["ready", "empty", "denied", "failed"]
 ChoiceKind = Literal["bound", "ask", "none", "unavailable", "stale"]
@@ -256,7 +258,8 @@ def verify_comparison(
         (pack.activities_status, pack.activities), (pack.tasks_status, pack.tasks),
         (pack.commitments_status, pack.commitments),
     )
-    history = next((item for status, items in sections if status == "ready" for item in items if item.ref == previous.ref), None)
+    history = next((item for status, items in sections if status == "ready"
+        for item in items if item.ref == previous.ref), None)
     if history is None or not _quote_matches(history.summary, previous.quote_start, previous.quote_end, previous.quote):
         return None
     # Historical summaries are a separate authority, never another copy of current speech.
@@ -285,7 +288,8 @@ def verify_comparison(
     linked = [item for item in mentions if item.action_id == action.action_id and item.state == "ACTIVE"]
     if any(item.role != "CUSTOMER_COMMITMENT" for item in linked):
         return None
-    if action.temporal_mention_id is not None and not any(item.mention_id == action.temporal_mention_id for item in linked):
+    if action.temporal_mention_id is not None and not any(item.mention_id == action.temporal_mention_id
+        for item in linked):
         return None
     # The same literal matter must be present in both sources and the already accepted action.
     subject = candidate.subject.strip()
@@ -325,11 +329,13 @@ def verify_comparison(
         if not (action.quote_start <= mention.quote_start < mention.quote_end <= action.quote_end):
             return None
         try:
-            old_at, old_granularity = parse_deadline(candidate.previous_date, anchor=datetime.fromisoformat(history.occurred_at))
+            old_at, old_granularity = parse_deadline(candidate.previous_date,
+                anchor=datetime.fromisoformat(history.occurred_at))
             new_at, new_granularity = parse_deadline(candidate.current_date, anchor=record.recorded_at)
         except (ValueError, TypeError):
             return None
-        if old_at is None or new_at is None or old_granularity not in {"DATE", "DATETIME"} or new_granularity not in {"DATE", "DATETIME"}:
+        if old_at is None or new_at is None or old_granularity not in {"DATE",
+            "DATETIME"} or new_granularity not in {"DATE", "DATETIME"}:
             return None
         if old_granularity != new_granularity or new_at != mention.resolved_at or new_at <= old_at:
             return None
@@ -352,7 +358,8 @@ def verify_comparison(
     return FollowUpComparison(
         kind=judged.classification, subject=subject, action_id=action.action_id, summary=summary,
         current=ComparisonCurrentSource(**current.model_dump()),
-        previous=ComparisonHistoricalSource(**previous.model_dump(), source_type=history.source_type, occurred_at=history.occurred_at),
+        previous=ComparisonHistoricalSource(**previous.model_dump(), source_type=history.source_type,
+            occurred_at=history.occurred_at),
         previous_date=previous_date, current_date=current_date,
     )
 
@@ -671,6 +678,7 @@ class RealFollowUpContext:
         choice: OpportunityChoice,
         source_records: list[SourceSegment | dict[str, object]],
         content_json: dict[str, object],
+        reporter: ProgressReporter | None = None,
     ) -> ChangeCard:
         comparison = None
         status = "未形成可验证的历史对比，仍可确认本次活动。"
@@ -679,6 +687,9 @@ class RealFollowUpContext:
         except (ValidationError, TypeError):
             records = []
         if choice.kind not in {"unavailable", "stale"} and records and pack.known_refs():
+            if reporter is not None:
+                reporter.stage_start(stage("judge"))
+            started = monotonic()
             try:
                 judged = await self.llm.judge_change(
                     db, team_id=team_id,
@@ -697,6 +708,11 @@ class RealFollowUpContext:
                     status = "未发现可单独展示的历史差异。"
             except (AssistantLLMError, ValidationError, TypeError, ValueError):
                 status = "历史对比暂时不可用，仍可确认本次活动。"
+                if reporter is not None:
+                    reporter.stage_failed(stage("judge"))
+            else:
+                if reporter is not None:
+                    reporter.stage_done(stage("judge"), ms=int((monotonic() - started) * 1000))
         elif not pack.known_refs():
             status = "暂无可用于比较的授权历史，本次活动仍可确认。"
         return render_change_card(pack, choice, comparison=comparison, status=status)

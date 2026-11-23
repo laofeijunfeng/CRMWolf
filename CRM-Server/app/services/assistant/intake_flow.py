@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, NoReturn
 
 from pydantic import ValidationError
 
-from app.models.assistant import AssistantTask, AssistantWaitingType
 from app.services.assistant.action_evidence import (
     append_source,
     is_action_deadline_correction,
@@ -46,6 +45,7 @@ _S_GATE = mk_stage("quality_gate")
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from app.models.assistant import AssistantTask
     from app.services.assistant.intake import KindStructurer
     from app.services.assistant.quality_gate import QualityGate as QualityGateProtocol
 
@@ -55,7 +55,7 @@ _KIND_PROMPT = "这次沟通属于哪种活动？"
 
 def kind_waiting(task: AssistantTask, *, source_text: str | None = None) -> TaskWaiting:
     return TaskWaiting(
-        type=AssistantWaitingType.ACTIVITY_KIND,
+        type="ACTIVITY_KIND",
         field="activity_kind",
         question_id=f"q_kind_{task.public_id}_{task.version}",
         prompt=_KIND_PROMPT,
@@ -651,7 +651,7 @@ async def intake_step(
         question = gate_outcome.question or "请补充这次沟通的关键信息。"
 
     gap = TaskWaiting(
-        type=AssistantWaitingType.FIELD,
+        type="FIELD",
         field=gap_field,
         question_id=f"q_gap_{task.public_id}_{task.version}",
         prompt=question,

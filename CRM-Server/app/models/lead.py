@@ -1,9 +1,11 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Text, Enum, Index, ForeignKey
-from sqlalchemy.orm import relationship
-from app.core.database import Base
-from app.utils.time import business_now
-from app.utils.public_id import generate_public_id
 import enum
+
+from sqlalchemy import BigInteger, Column, DateTime, Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import relationship
+
+from app.core.database import Base
+from app.utils.public_id import generate_public_id
+from app.utils.time import business_now
 
 
 class LeadSource(str, enum.Enum):
@@ -43,10 +45,17 @@ class Lead(Base):
     __tablename__ = "crm_leads"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
-    public_id = Column(String(64), nullable=False, unique=True, index=True, default=lambda: generate_public_id("lead"), comment="对外线索ID")
+    public_id = Column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: generate_public_id("lead"),
+        comment="对外线索ID",
+    )
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     lead_name = Column(String(255), nullable=False, comment="线索名称")
-    source = Column(String(50), nullable=False, comment="线索来源名称（跟读配置表，双写兼容）")
+    source = Column(String(50), nullable=False, comment="线索来源名称\uff08跟读配置表\uff0c双写兼容\uff09")
     source_id = Column(BigInteger, nullable=True, comment="获客来源ID")
     city = Column(String(100), nullable=False, comment="所在城市")
     contact_name = Column(String(100), nullable=False, comment="联系人姓名")
@@ -60,8 +69,10 @@ class Lead(Base):
 
     creator_id = Column(String(100), nullable=False, comment="创建人系统用户ID")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
-    version = Column(Integer, nullable=False, default=1, comment="版本号（乐观锁）")
+    last_modified_time = Column(
+        DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间"
+    )
+    version = Column(Integer, nullable=False, default=1, comment="版本号\uff08乐观锁\uff09")
 
     acquisition_source = relationship(
         "AcquisitionSource",
@@ -91,7 +102,9 @@ class LeadProduct(Base):
     __tablename__ = "crm_lead_products"
 
     lead_id = Column(BigInteger, ForeignKey("crm_leads.id", ondelete="CASCADE"), primary_key=True, comment="线索ID")
-    product_id = Column(BigInteger, ForeignKey("crm_products.id", ondelete="RESTRICT"), primary_key=True, comment="产品ID")
+    product_id = Column(
+        BigInteger, ForeignKey("crm_products.id", ondelete="RESTRICT"), primary_key=True, comment="产品ID"
+    )
     team_id = Column(BigInteger, nullable=False, comment="团队ID")
 
     lead = relationship("Lead", back_populates="product_links")

@@ -208,18 +208,26 @@ async def test_conflicting_model_shape_downgrades_instead_of_creating_multiple_c
 
 
 async def test_model_failure_keeps_the_authorized_history_available_without_comparison():
+    from app.services.assistant.events import SSEProgressReporter
+
     inputs = _comparison_input()
 
     class FailingModel:
         async def judge_change(self, db, **kwargs):
             raise AssistantLLMError("unavailable")
 
+    reporter = SSEProgressReporter()
+
     card = await RealFollowUpContext(FailingModel()).judge(
         None, team_id=1, pack=inputs["pack"],
         choice=OpportunityChoice("none"), source_records=inputs["source_records"], content_json=inputs["content_json"],
+        reporter=reporter,
     )
     assert card.comparison is None
     assert card.context_evidence[0]["summary"] == inputs["pack"].activities[0].summary
+    assert [(payload["stage"], payload["phase"]) for _, payload in reporter.drain()] == [
+        ("judge", "start"), ("judge", "failed"),
+    ]
 
 
 async def test_unavailable_history_is_not_given_to_the_model_or_exposed():

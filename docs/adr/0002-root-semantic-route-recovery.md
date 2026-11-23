@@ -2,8 +2,7 @@
 
 - **日期：**2026-09-03
 - **状态：**Accepted
-- **范围：**Agent Root Orchestrator 的普通文本路由，以及客户活动、客户、商机和跟进任务能力的入口保护
-- **关联文档：**`CRM-Docs/design-agent/foundations/architecture-boundary.md`
+- **范围：**仅适用于旧 Agent Root Orchestrator 的普通文本路由及其能力入口保护。[ADR 0003](0003-legacy-agent-entry-retirement.md) 已停用该入口的新输入；本 ADR 不适用于 `/assistant`。
 
 ## 背景
 

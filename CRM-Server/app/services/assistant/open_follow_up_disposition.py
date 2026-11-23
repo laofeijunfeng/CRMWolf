@@ -7,29 +7,46 @@ holds the frozen batch; the card is only a projection.
 
 from __future__ import annotations
 
+import logging
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import date, timedelta
 from hashlib import sha256
 from json import dumps
+from time import monotonic
 from typing import TYPE_CHECKING
 
-from sqlalchemy import or_, true
+from sqlalchemy import Table, or_, true
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.assistant import AssistantTask, AssistantWaitingType
+from app.models.assistant_open_follow_up_suppression import AssistantOpenFollowUpSuppression
+from app.models.assistant_turn import AssistantTurn
+from app.models.customer_activity import CustomerActivity
 from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
 from app.services.assistant.activity_channel import FOLLOW_UP_KINDS
 from app.services.assistant.contracts import TaskWaiting
 from app.services.assistant.crm_proposal_commands import source_activity
-from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority
+from app.services.assistant.events import stage
+from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority, load_waiting
 from app.utils.public_id import generate_public_id
+from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from datetime import datetime
 
     from sqlalchemy.orm import Session
+    from sqlalchemy.sql.dml import Insert
+
+    from app.services.assistant.events import ProgressReporter
+
+logger = logging.getLogger(__name__)
 
 
 MAX_CANDIDATES = 100
+DEFAULT_VISIBLE_CANDIDATES = 10
 GENERIC_FRAGMENTS = frozenset({
     "跟进客户",
     "联系客户",
@@ -40,6 +57,8 @@ GENERIC_FRAGMENTS = frozenset({
 })
 _STALE = ("关联已失效", "跟进内容已变化，任务未改动", "RELATION_STALE")
 _HANDLED = ("已被处理", "任务已不是未完成状态", "ALREADY_HANDLED")
+_UNKNOWN = ("结果待核对", "请在客户追踪页核对是否已完成", "UNKNOWN_COMMIT_RESULT")
+
 
 @dataclass(frozen=True)
 class DispositionOutcome:
@@ -58,18 +77,13 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
     if not isinstance(items, list):
         return None
     activity_id = _accepted_activity_id(task, batch)
-    current = next((item for item in items if isinstance(item, dict) and item.get("disposition") is None), None)
+    settling = isinstance(batch.get("settlement"), dict) and batch.get("status") == "ACTIVE"
     projected: list[dict[str, object]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         disposition = item.get("disposition")
-        if disposition is None and item is current:
-            state = "current"
-        elif disposition is None:
-            state = "waiting"
-        else:
-            state = str(disposition)
+        state = "waiting" if disposition in (None, "attempting") else str(disposition)
         projected.append({
             "item_id": item.get("item_id"),
             "task_public_id": item.get("task_public_id")
@@ -82,12 +96,8 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
             "state": state,
             "result_title": item.get("result_title"),
             "result_message": item.get("result_message"),
+            "failure_code": item.get("failure_code"),
         })
-    current_index = None
-    if isinstance(current, dict):
-        current_index = next(
-            index for index, item in enumerate(projected, start=1) if item["item_id"] == current.get("item_id")
-        )
     return {
         "batch_id": _public_batch_id(task, batch, activity_id),
         "activity_public_id": activity_id,
@@ -95,9 +105,37 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
         "customer_name": batch.get("customer_name") or "",
         "activity_kind_label": batch.get("activity_kind_label") or "",
         "total": len(projected),
-        "current_index": current_index,
+        "current_index": None,
+        "visible_count": min(DEFAULT_VISIBLE_CANDIDATES, len(projected)),
+        "settling": settling,
+        "suppression_status": batch.get("suppression_status"),
         "items": projected,
     }
+
+
+def disposition_choice_ids(task: AssistantTask) -> tuple[str, ...]:
+    """Derive issued bulk choices from authority, including old scalar waits."""
+    batch = _batch(task)
+    if batch is None or batch.get("status") != "ACTIVE" or batch.get("settlement") is not None:
+        return ()
+    return tuple(str(item["item_id"]) for item in _pending_items(batch))
+
+
+def _pending_items(batch: dict[str, object]) -> list[dict[str, object]]:
+    items = batch.get("items", [])
+    if not isinstance(items, list):
+        raise TypeError("invalid open follow-up batch items")
+    return [
+        item for item in items
+        if isinstance(item, dict) and item.get("disposition") is None
+    ]
+
+
+def _settlement_items(batch: dict[str, object]) -> list[dict[str, object]]:
+    items = batch["items"]
+    if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+        raise TypeError("invalid open follow-up settlement items")
+    return items
 
 
 def _accepted_activity_id(task: AssistantTask, batch: dict[str, object]) -> str | None:
@@ -179,18 +217,28 @@ def relate_title(title: str, source: str) -> tuple[str, str, str] | None:
     return None
 
 
-async def advance_open_follow_up(db: Session, task: AssistantTask) -> DispositionOutcome | None:
+async def advance_open_follow_up(
+    db: Session, task: AssistantTask, *, reporter: ProgressReporter | None = None
+) -> DispositionOutcome | None:
     """Offer the frozen batch, or return None so the existing proposal chain continues."""
 
     batch = _batch(task)
     if batch is not None and batch.get("status") in {"DONE", "OVERFLOW", "QUERY_FAILED"}:
         return None
     if batch is not None and batch.get("status") == "ACTIVE":
-        return _restore(db, task, batch)
+        if batch.get("settlement") is not None:
+            return DispositionOutcome(task, "历史跟进任务结果待核对", False)
+        return refresh_open_follow_up_waiting(db, task)
     activity = source_activity(db, task)
     if activity is None or activity.activity_kind not in FOLLOW_UP_KINDS:
         return None
     try:
+        customer_id = activity.customer_id
+        if isinstance(customer_id, int) and _is_suppressed(db, task, customer_id):
+            return None
+        if reporter is not None:
+            reporter.stage_start(stage("judge"))
+        started = monotonic()
         built = _build_batch(db, task, activity)
     except (PermissionError, SQLAlchemyError):
         return _record_terminal(
@@ -207,6 +255,8 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
             "历史任务暂时查不到，任务未改动",
             start_followup=False,
         )
+    if reporter is not None:
+        reporter.stage_done(stage("judge"), ms=int((monotonic() - started) * 1000))
     if built is None:
         return _record_terminal(
             db,
@@ -233,60 +283,208 @@ async def advance_open_follow_up(db: Session, task: AssistantTask) -> Dispositio
     return DispositionOutcome(result, waiting.prompt, False)
 
 
-async def settle_open_follow_up(db: Session, task: AssistantTask, choice: str) -> DispositionOutcome:
-    batch = _batch(task)
-    if batch is None or batch.get("status") != "ACTIVE":
+async def settle_open_follow_up(
+    db: Session, task: AssistantTask, *, choices: list[str], suppress_week: bool = False,
+) -> DispositionOutcome:
+    """Settle the accepted selection, committing each CRM effect with its row receipt."""
+
+    raw = _batch(task)
+    if (
+        raw is None or raw.get("status") != "ACTIVE"
+        or task.waiting_type != AssistantWaitingType.FOLLOW_UP_DISPOSITION
+    ):
         raise ValueError("没有可处理的历史跟进任务")
-    items = [item for item in batch.get("items", []) if isinstance(item, dict)]
-    current = next((item for item in items if item.get("disposition") is None), None)
-    if current is None:
-        raise ValueError("历史跟进任务已经处理完")
-    item_id, action = _split_choice(choice)
-    if item_id != current.get("item_id") or action not in {"complete", "hold", "skip"}:
-        raise ValueError("请选择当前这一条历史任务的处理")
-    failure = _revalidate(db, task, batch, current)
-    if failure is not None:
-        _observe(current, "failed", *failure)
-    elif action == "complete":
-        _apply_complete(db, task, batch, current)
-    elif action == "hold":
-        _observe(current, "hold", "先放着", "日期不变")
-    else:
-        _observe(current, "skip", "不管了", "下次可能还会提示")
-    batch["items"] = items
-    receipts = _receipt_for(current)
-    pending = next((item for item in items if item.get("disposition") is None), None)
-    if pending is not None:
-        waiting = _waiting_for(task, batch)
-        result = _save_batch(
-            db,
-            task,
-            batch,
-            waiting=waiting,
-            action_name=f"settle_open_follow_up_{action}",
-            action_input={"choice": choice, "item_id": item_id},
-            append_committed=receipts,
-        )
-        return DispositionOutcome(result, str(current.get("result_message") or current.get("result_title")), False)
+    if (
+        not isinstance(choices, list) or len(choices) > MAX_CANDIDATES
+        or any(not isinstance(choice, str) or not 1 <= len(choice) <= 64 for choice in choices)
+        or len(set(choices)) != len(choices) or not isinstance(suppress_week, bool)
+    ):
+        raise ValueError("请选择这张卡上的历史任务")
+
+    batch = deepcopy(raw)
+    selected = set(choices)
+    turn_id = task.active_turn_id
+    submission = {"choices": sorted(selected), "suppress_week": suppress_week, "turn_id": turn_id}
+    frozen = batch.get("settlement")
+    waiting = load_waiting(task)
+    if frozen is None:
+        issued = disposition_choice_ids(task)
+        if not issued or not selected.issubset(issued):
+            raise ValueError("请选择这张卡上的历史任务")
+        _fence(db, task, turn_id)
+        if "customer_id" not in batch:
+            # A legacy card did not store the customer separately from the accepted activity.
+            batch["customer_id"] = _legacy_customer_id(db, task, batch)
+        turn = db.get(AssistantTurn, task.active_turn_id) if task.active_turn_id is not None else None
+        submitted_at = turn.created_time if turn is not None else business_now()
+        batch["settlement"] = {**submission, "week_start": _week_start(submitted_at).isoformat()}
+        _save_batch(db, task, batch, waiting=waiting, action_name="settle_open_follow_up_begin", action_input={
+            "choices": submission["choices"], "suppress_week": suppress_week,
+        })
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            persisted = _reload_settlement(db, task, batch["settlement"], turn_id, allow_unbound=True)
+            if persisted.get("settlement") is None:
+                raise
+            batch = persisted
+    elif not isinstance(frozen, dict) or any(frozen.get(key) != value for key, value in submission.items()):
+        raise ValueError("历史任务已提交，不能更改处理结果")
+
+    items = _settlement_items(batch)
+    for item in items:
+        disposition = item.get("disposition")
+        if disposition not in (None, "attempting"):
+            continue
+        _fence(db, task, turn_id)
+        complete = item["item_id"] in selected
+        if disposition == "attempting":
+            # A prior worker reserved a write but left no authoritative receipt.
+            _observe(item, "unknown", *_UNKNOWN)
+        elif not complete:
+            _settle_item(db, task, batch, item, complete=False, turn_id=turn_id)
+        else:
+            item["disposition"] = "attempting"
+            key = str(item["idempotency_key"])
+            try:
+                _save_batch(db, task, batch, waiting=waiting, action_name="settle_open_follow_up_claim", action_input={
+                    "item_id": item["item_id"], "idempotency_key": key,
+                }, event_key=key)
+                db.commit()
+            except SQLAlchemyError:
+                persisted = _reload_settlement(db, task, batch["settlement"], turn_id)
+                durable_item = _settlement_item(persisted, item)
+                if durable_item.get("disposition") is None:
+                    # The claim was not committed. The executor has not run.
+                    _observe(item, "failed", "未能完成", "任务未改动", code="SERVICE_REJECTED")
+                elif durable_item["disposition"] == "attempting":
+                    _observe(item, "unknown", *_UNKNOWN)
+                else:
+                    item.update(durable_item)
+                    continue
+            else:
+                _fence(db, task, turn_id)
+                _settle_item(db, task, batch, item, complete=True, turn_id=turn_id)
+
+        try:
+            _save_batch(
+                db, task, batch, waiting=waiting, action_name="settle_open_follow_up_item",
+                action_input={"item_id": item["item_id"], "selected": complete},
+                action_result={"state": item["disposition"], "failure_code": item.get("failure_code")},
+                append_committed=_receipt_for(item),
+            )
+            db.commit()
+        except SQLAlchemyError:
+            persisted = _reload_settlement(db, task, batch["settlement"], turn_id)
+            durable_item = _settlement_item(persisted, item)
+            if durable_item.get("disposition") not in (None, "attempting"):
+                item.update(durable_item)
+                receipt = _receipt_for(item)
+                if receipt is None or receipt[0] in (task.committed_json or []):
+                    continue
+            if item.get("disposition") == "complete":
+                _observe(item, "unknown", *_UNKNOWN)
+            _save_batch(
+                db, task, batch, waiting=waiting, action_name="settle_open_follow_up_item",
+                action_input={"item_id": item["item_id"], "selected": complete},
+                action_result={"state": item["disposition"], "failure_code": item.get("failure_code")},
+            )
+            db.commit()
+
+    # This update, suppression, and publication share the enclosing turn's final transaction.
+    _fence(db, task, turn_id)
+    if suppress_week:
+        _apply_suppression(db, task, batch)
     batch["status"] = "DONE"
-    message = _summary(items)
-    result = _save_batch(
-        db,
-        task,
-        batch,
-        waiting=None,
-        action_name=f"settle_open_follow_up_{action}",
-        action_input={"choice": choice, "item_id": item_id},
-        append_committed=receipts,
-    )
+    message = _summary(items, batch.get("suppression_status"))
+    result = _save_batch(db, task, batch, waiting=None, action_name="settle_open_follow_up_batch")
     return DispositionOutcome(result, message, True)
 
 
-def _apply_complete(db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object]) -> None:
-    failure = _revalidate(db, task, batch, item)
+def _settle_item(
+    db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object], *,
+    complete: bool, turn_id: int | None,
+) -> None:
+    try:
+        failure = _revalidate(db, task, batch, item, lock=complete)
+    except (SQLAlchemyError, PermissionError) as exc:
+        db.rollback()
+        _fence(db, task, turn_id)
+        failure = (
+            ("无权限", "任务未改动", "NO_PERMISSION")
+            if isinstance(exc, PermissionError)
+            else ("未能核对", "请到客户追踪页处理", "REVALIDATION_FAILED")
+        )
     if failure is not None:
         _observe(item, "failed", *failure)
         return
+    if not complete:
+        _observe(item, "hold", "保持", "日期不变")
+        return
+    from app.services.assistant.turns import AssistantStateConflict
+
+    try:
+        _apply_complete(db, task, batch, item)
+    except AssistantStateConflict:
+        raise
+    except Exception:
+        logger.exception("follow-up disposition completion could not be verified")
+        _observe(item, "unknown", *_UNKNOWN)
+    if item["disposition"] != "complete":
+        db.rollback()
+        _fence(db, task, turn_id)
+
+
+def _fence(db: Session, task: AssistantTask, turn_id: int | None) -> None:
+    from app.services.assistant.turns import AssistantStateConflict, assert_owned_execution_lease
+
+    if task.active_turn_id != turn_id:
+        raise AssistantStateConflict("任务轮次归属已变化")
+    assert_owned_execution_lease(db, task)
+
+
+def _reload_settlement(
+    db: Session, task: AssistantTask, settlement: object, turn_id: int | None, *, allow_unbound: bool = False,
+) -> dict[str, object]:
+    from app.services.assistant.turns import AssistantStateConflict
+
+    db.rollback()
+    db.refresh(task)
+    _fence(db, task, turn_id)
+    persisted = _batch(task)
+    if persisted is None or persisted.get("status") != "ACTIVE":
+        raise AssistantStateConflict("历史任务处理轮次已变化")
+    binding = persisted.get("settlement")
+    if binding != settlement and not (allow_unbound and binding is None):
+        raise AssistantStateConflict("历史任务处理轮次已变化")
+    return deepcopy(persisted)
+
+
+def _settlement_item(batch: dict[str, object], item: dict[str, object]) -> dict[str, object]:
+    return next(row for row in _settlement_items(batch) if row["item_id"] == item["item_id"])
+
+
+def _legacy_customer_id(db: Session, task: AssistantTask, batch: dict[str, object]) -> int | None:
+    accepted_id = _accepted_activity_id(task, batch)
+    if accepted_id is None:
+        return None
+    for receipt in reversed(task.committed_json or []):
+        if receipt.get("kind") == "customer_activity" and receipt.get("public_id") == accepted_id:
+            receipt_customer_id = receipt.get("customer_id")
+            if receipt_customer_id is not None:
+                return receipt_customer_id if isinstance(receipt_customer_id, int) else None
+            break
+    activity = source_activity(db, task)
+    if (
+        activity is not None and activity.activity_revision == batch.get("activity_revision")
+        and _source_hash(_activity_source(activity)) == batch.get("source_sha256")
+    ):
+        customer_id = activity.customer_id
+        return customer_id if isinstance(customer_id, int) else None
+    return None
+
+
+def _apply_complete(db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object]) -> None:
     from app.services.follow_up_task_reconciliation_evaluation_service import (
         FollowUpTaskReconciliationDecision,
         FollowUpTaskReconciliationTaskDecision,
@@ -330,53 +528,56 @@ def _apply_complete(db: Session, task: AssistantTask, batch: dict[str, object], 
         expected_owner_id=str(item.get("owner_id") or ""),
         commit=False,
     )
-    row = _task_row(db, task, target)
+    db.flush()
+    row = _task_row(db, task, target, lock=True)
     if (
         result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED
         and row is not None
         and row.status == FollowUpTaskStatus.COMPLETED
     ):
-        _observe(item, "complete", "已完成", None)
+        _observe(item, "complete", "完成", None)
         return
-    if result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED or row is None:
-        _observe(item, "unknown", "结果待核对", "请稍后在任务列表确认是否已完成", code="UNKNOWN_RESULT")
+    if result.status == FollowUpTaskTransitionExecutionStatus.EXECUTED:
+        _observe(item, "unknown", *_UNKNOWN)
         return
-    if result.skip_reason == "TASK_NOT_OPEN":
-        _observe(item, "failed", "已被处理", "任务已不是未完成状态", code="ALREADY_HANDLED")
+    if result.skip_reason in {"TASK_NOT_OPEN", "TASK_OWNER_MISMATCH", "TASK_NOT_FOUND"}:
+        _observe(item, "failed", *_HANDLED)
         return
-    _observe(item, "failed", "未能完成", "请到任务列表处理", code="SERVICE_REJECTED")
+    _observe(item, "failed", "未能完成", "请到客户追踪页处理", code="SERVICE_REJECTED")
 
 
 def _revalidate(
-    db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object],
+    db: Session, task: AssistantTask, batch: dict[str, object], item: dict[str, object], *, lock: bool,
 ) -> tuple[str, str, str] | None:
-    activity = source_activity(db, task)
+    query = db.query(CustomerActivity).filter(
+        CustomerActivity.id == _accepted_activity_id(task, batch), CustomerActivity.team_id == task.team_id,
+    ).populate_existing()
+    activity = (query.with_for_update() if lock else query).one_or_none()
     if (
-        activity is None
-        or activity.id != batch.get("activity_id")
+        activity is None or activity.activity_kind not in FOLLOW_UP_KINDS
         or activity.activity_revision != batch.get("activity_revision")
         or _source_hash(activity.source_content or "") != batch.get("source_sha256")
+        or (batch.get("customer_id") is not None and batch["customer_id"] != activity.customer_id)
     ):
         return _STALE
-    fresh = relate_title(str(item.get("title") or ""), activity.source_content or "")
-    related_now = fresh is not None
-    if related_now != bool(item.get("related")):
-        return _STALE
-    if related_now and fresh is not None and fresh[1] != item.get("evidence_quote"):
-        return _STALE
-    row = _task_row(db, task, str(item.get("task_public_id") or ""))
-    if row is None or row.customer_id != activity.customer_id:
+    row = _task_row(db, task, str(item.get("task_public_id") or ""), lock=lock)
+    if row is None or row.customer_id != activity.customer_id or row.source_activity_id == activity.id:
         return _HANDLED
     if not _can_operate(db, task, row):
         return ("无权限", "任务未改动", "NO_PERMISSION")
-    if row.status != FollowUpTaskStatus.OPEN or _stamp(row.updated_time) != item.get("updated_time"):
+    if row.status != FollowUpTaskStatus.OPEN or row.owner_id != item.get("owner_id"):
         return _HANDLED
-    if row.owner_id != item.get("owner_id"):
+    title = row.title
+    fresh = relate_title(title if isinstance(title, str) else "", activity.source_content or "")
+    if bool(fresh) != bool(item.get("related")) or (fresh and fresh[1] != item.get("evidence_quote")):
+        return _STALE
+    legacy = "customer_id" not in batch or not batch.get("precise_timestamp")
+    if row.title != item.get("title") or _stamp(row.updated_time, legacy=legacy) != item.get("updated_time"):
         return _HANDLED
     return None
 
 
-def _build_batch(db: Session, task: AssistantTask, activity: object) -> dict[str, object] | None:
+def _build_batch(db: Session, task: AssistantTask, activity: CustomerActivity) -> dict[str, object] | None:
     codes = _permission_codes(db, task)
     privileged = bool(codes.intersection({"follow_up_task:operate:all", "follow_up_task:edit:all"}))
     operable_filter = true() if privileged else FollowUpTask.owner_id == str(task.user_id)
@@ -393,13 +594,13 @@ def _build_batch(db: Session, task: AssistantTask, activity: object) -> dict[str
         .limit(MAX_CANDIDATES + 1)
         .all()
     )
-    operable = [row for row in rows if _can_operate(db, task, row, codes)]
-    if len(rows) > MAX_CANDIDATES or len(operable) > MAX_CANDIDATES:
+    if len(rows) > MAX_CANDIDATES:
         return None
-    source = activity.source_content or ""
+    source = _activity_source(activity)
+    ranked = [(row, relate_title(row.title or "", source)) for row in rows]
+    ranked.sort(key=lambda pair: pair[1] is None)
     items: list[dict[str, object]] = []
-    for index, row in enumerate(operable, start=1):
-        related = relate_title(row.title or "", source)
+    for index, (row, related) in enumerate(ranked, start=1):
         items.append({
             "item_id": f"i{index}",
             "task_public_id": row.public_id,
@@ -416,19 +617,27 @@ def _build_batch(db: Session, task: AssistantTask, activity: object) -> dict[str
             "result_message": None,
             "idempotency_key": f"follow_up_disposition:{task.public_id}:i{index}:complete",
         })
+    customer_id = activity.customer_id
+    kind = activity.activity_kind
     return {
         "status": "ACTIVE",
         "disposition_batch_id": generate_public_id("afb"),
         "activity_id": activity.id,
+        "customer_id": activity.customer_id,
+        "precise_timestamp": True,
         "activity_revision": activity.activity_revision,
         "source_sha256": _source_hash(source),
-        "customer_name": _customer_name(db, task, activity.customer_id),
-        "activity_kind_label": _kind_label(activity.activity_kind),
+        "customer_name": _customer_name(db, task, customer_id if isinstance(customer_id, int) else None),
+        "activity_kind_label": _kind_label(kind if isinstance(kind, str) else ""),
         "items": items,
     }
 
 
-def _restore(db: Session, task: AssistantTask, batch: dict[str, object]) -> DispositionOutcome:
+def refresh_open_follow_up_waiting(db: Session, task: AssistantTask) -> DispositionOutcome:
+    """Reissue a legacy wait without applying its obsolete scalar choice."""
+    batch = _batch(task)
+    if batch is None or not disposition_choice_ids(task):
+        raise ValueError("没有可处理的历史跟进任务")
     waiting = _waiting_for(task, batch)
     result = _save_batch(db, task, batch, waiting=waiting, action_name="restore_open_follow_up_batch")
     return DispositionOutcome(result, waiting.prompt, False)
@@ -455,6 +664,8 @@ def _save_batch(
     action_name: str,
     action_input: dict[str, object] | None = None,
     append_committed: list[dict[str, object]] | None = None,
+    action_result: dict[str, object] | None = None,
+    event_key: str | None = None,
 ) -> AssistantTask:
     authority = load_authority(task).model_copy(update={"open_follow_up_batch": batch})
     result = apply_task_update(
@@ -468,26 +679,23 @@ def _save_batch(
             action_actor="SYSTEM" if action_name.startswith(("offer", "restore", "skip", "close")) else "USER",
             action_name=action_name,
             action_input=action_input or {"status": batch.get("status"), "count": len(batch.get("items") or [])},
-            action_result={"status": batch.get("status")},
+            action_result=action_result or {"status": batch.get("status")},
+            event_key=event_key,
         ),
     )
     return result.task
 
 
 def _waiting_for(task: AssistantTask, batch: dict[str, object]) -> TaskWaiting:
-    items = [item for item in batch.get("items", []) if isinstance(item, dict)]
-    current = next(item for item in items if item.get("disposition") is None)
-    item_id = str(current["item_id"])
+    items = _pending_items(batch)
     prompt = "历史跟进任务"
     return TaskWaiting(
         type=AssistantWaitingType.FOLLOW_UP_DISPOSITION,
         field="follow_up_disposition",
-        question_id=f"q_fut_{task.public_id}_{item_id}",
+        question_id=f"q_fut_{task.public_id}_batch",
         prompt=prompt,
         candidates=[
-            {"id": f"{item_id}:complete", "label": "已完成"},
-            {"id": f"{item_id}:hold", "label": "先放着"},
-            {"id": f"{item_id}:skip", "label": "不管了"},
+            {"id": str(item["item_id"]), "label": str(item["title"])} for item in items
         ],
     )
 
@@ -512,14 +720,13 @@ def _can_operate(db: Session, task: AssistantTask, row: FollowUpTask, codes: set
     return bool(granted.intersection({"follow_up_task:operate:all", "follow_up_task:edit:all"}))
 
 
-def _task_row(db: Session, task: AssistantTask, public_id: str) -> FollowUpTask | None:
+def _task_row(db: Session, task: AssistantTask, public_id: str, *, lock: bool = False) -> FollowUpTask | None:
     if not public_id:
         return None
-    return (
-        db.query(FollowUpTask)
-        .filter(FollowUpTask.team_id == task.team_id, FollowUpTask.public_id == public_id)
-        .one_or_none()
-    )
+    query = db.query(FollowUpTask).filter(
+        FollowUpTask.team_id == task.team_id, FollowUpTask.public_id == public_id,
+    ).populate_existing()
+    return (query.with_for_update() if lock else query).one_or_none()
 
 
 def _customer_name(db: Session, task: AssistantTask, customer_id: int | None) -> str:
@@ -584,14 +791,24 @@ def _observe(
         item["related"] = False
 
 
-def _summary(items: list[dict[str, object]]) -> str:
+def _summary(items: list[dict[str, object]], suppression_status: object) -> str:
     counts = (
-        ("已完成", sum(item.get("disposition") == "complete" for item in items)),
-        ("先放着", sum(item.get("disposition") == "hold" for item in items)),
-        ("不管了", sum(item.get("disposition") == "skip" for item in items)),
-        ("未能处理", sum(item.get("disposition") in {"failed", "unknown"} for item in items)),
+        ("完成", sum(item.get("disposition") == "complete" for item in items)),
+        ("保持", sum(item.get("disposition") == "hold" for item in items)),
+        ("跳过", sum(item.get("disposition") == "skip" for item in items)),
+        ("已被处理", sum(item.get("failure_code") == "ALREADY_HANDLED" for item in items)),
+        ("未能处理", sum(
+            item.get("disposition") == "failed" and item.get("failure_code") != "ALREADY_HANDLED"
+            for item in items
+        )),
+        ("结果待核对", sum(item.get("disposition") == "unknown" for item in items)),
     )
-    return "已处理完：" + "，".join(f"{count} 条{label}" for label, count in counts if count)
+    summary = "历史跟进任务：" + "，".join(f"{count} 条{label}" for label, count in counts if count)
+    if suppression_status == "applied":
+        return summary + "。本周不再提示此客户的历史任务。"
+    if suppression_status == "stale":
+        return summary + "。客户关联已失效，未设置本周免提示。"
+    return summary
 
 
 def _receipt_for(item: dict[str, object]) -> list[dict[str, object]] | None:
@@ -604,11 +821,55 @@ def _receipt_for(item: dict[str, object]) -> list[dict[str, object]] | None:
     }]
 
 
-def _split_choice(choice: str) -> tuple[str, str]:
-    item_id, separator, action = choice.partition(":")
-    if not separator:
-        return "", ""
-    return item_id, action
+def _week_start(value: datetime) -> date:
+    return value.date() - timedelta(days=value.weekday())
+
+
+def _is_suppressed(db: Session, task: AssistantTask, customer_id: int) -> bool:
+    return db.query(AssistantOpenFollowUpSuppression.id).filter_by(
+        team_id=task.team_id, customer_id=customer_id, week_start=_week_start(business_now()),
+    ).first() is not None
+
+
+def _apply_suppression(db: Session, task: AssistantTask, batch: dict[str, object]) -> None:
+    activity = source_activity(db, task)
+    customer_id = batch.get("customer_id")
+    if (
+        customer_id is None or _accepted_activity_id(task, batch) is None
+        or activity is None or activity.customer_id != customer_id
+    ):
+        batch["suppression_status"] = "stale"
+        return
+    settlement = batch["settlement"]
+    if not isinstance(settlement, dict):
+        raise TypeError("invalid open follow-up settlement")
+    week_start = settlement["week_start"]
+    if not isinstance(week_start, str):
+        raise TypeError("invalid open follow-up settlement week")
+    values = {
+        "team_id": task.team_id,
+        "customer_id": customer_id,
+        "week_start": date.fromisoformat(week_start),
+    }
+    table = AssistantOpenFollowUpSuppression.__table__
+    if not isinstance(table, Table):
+        raise TypeError("open follow-up suppression requires a mapped table")
+    statement: Insert
+    if db.get_bind().dialect.name == "sqlite":
+        statement = sqlite_insert(table).values(**values).on_conflict_do_nothing(
+            index_elements=["team_id", "customer_id", "week_start"],
+        )
+    else:
+        statement = mysql_insert(table).values(**values).on_duplicate_key_update(week_start=table.c.week_start)
+    db.execute(statement)
+    batch["suppression_status"] = "applied"
+
+
+def _activity_source(activity: CustomerActivity) -> str:
+    source = activity.source_content or ""
+    if not isinstance(source, str):
+        raise TypeError("invalid activity source content")
+    return source
 
 
 def _source_hash(source: str) -> str:
@@ -638,7 +899,7 @@ def _quote(source: str, phrase: str) -> str:
     return phrase
 
 
-def _stamp(value: datetime | None) -> str:
+def _stamp(value: datetime | None, *, legacy: bool = False) -> str:
     if value is None:
         return ""
-    return value.replace(microsecond=0).isoformat()
+    return value.isoformat(timespec="seconds" if legacy else "microseconds")

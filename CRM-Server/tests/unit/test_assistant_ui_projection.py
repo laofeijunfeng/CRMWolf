@@ -1345,3 +1345,220 @@ def test_coverage_is_stable_on_reprojection_and_incoming_order():
         finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
         assert [message.model_dump(mode="json") for message in messages] == first
         assert source.projection.covered_by == "final"
+
+
+def test_forms_preserve_server_fields_and_only_live_form_can_submit_or_cancel() -> None:
+    product = {
+        "key": "product_public_id", "label": "产品", "field_type": "select",
+        "default_value": "product_one", "options": [{"value": "product_one", "label": "产品一"}],
+    }
+    module = {
+        "key": "product_module_public_ids", "label": "模块", "field_type": "multi_select",
+        "depends_on_key": "product_public_id", "error_message": "请选择模块",
+        "options": [{"value": "module_one", "label": "模块一", "depends_on_value": "product_one"}],
+    }
+    summary = {
+        "key": "summary", "label": "摘要", "field_type": "textarea", "min_length": 1, "max_length": 300,
+        "default_value": "沟通摘要", "source_label": "来自原文",
+    }
+    proposal = TaskWaiting(
+        type="PROPOSAL_FORM", field="proposal:opportunity_create", question_id="q_form", prompt="为当前客户新建商机",
+        action_id="act_form", expected_version=1, form_revision=2, form_fields=[product, module],
+    )
+    edit = TaskWaiting(
+        type="CONFIRMATION_EDIT", field="activity_write", question_id="q_edit", prompt="修改活动内容",
+        action_id="act_edit", expected_version=2, form_revision=1, form_fields=[summary],
+    )
+    focused = _task(waiting=proposal)
+    messages = [_message("edit", edit.prompt, _task(waiting=edit)), _message("form", proposal.prompt, focused)]
+    finalize_assistant_ui(messages, focused_task=focused, pending_choice=None)
+    old, live = (message.ui.blocks[0] for message in messages)
+    assert old.interaction_type == live.interaction_type == "form"
+    assert old.business_action == "edit_confirmation" and live.business_action == "create_opportunity_proposal"
+    assert old.state == "READ_ONLY" and old.submit_action_id is None and not old.allow_cancel
+    assert live.state == "ACTIVE" and live.submit_action_id == "act_form" and live.allow_cancel
+    assert old.fields[0].source_label == "来自原文"
+    assert live.fields[1].options[0].depends_on_value == live.fields[0].default_value
+    assert live.fields[1].depends_on_key == live.fields[0].key
+    assert live.fields[1].error_message == "请选择模块"
+
+
+def test_malformed_edit_form_does_not_expose_generic_input() -> None:
+    waiting = TaskWaiting(
+        type="CONFIRMATION_EDIT", field="activity_write", question_id="q_edit", prompt="修改活动内容",
+        action_id="act_edit", expected_version=1, form_revision=1,
+        form_fields=[{"key": "summary", "label": "摘要", "field_type": "textarea"}],
+    )
+    focused = _task(waiting=waiting)
+    message = _message("invalid", waiting.prompt, focused)
+    finalize_assistant_ui([message], focused_task=focused, pending_choice=None)
+    assert [block.type for block in message.ui.blocks] == ["error"]
+    assert not message.ui.blocks[0].retryable
+
+
+def test_activity_edit_and_reject_reasons_are_active_only_without_adding_primary_options() -> None:
+    wait = _confirmation(_preview(channel_status="required", channel_options=list(FOLLOW_UP_KINDS)))
+    task = _task(waiting=wait)
+    messages = [_message("old", wait.prompt, task), _message("live", wait.prompt, task)]
+    finalize_assistant_ui(messages, focused_task=task, pending_choice=None)
+    old, live = (message.ui.blocks[0] for message in messages)
+    assert old.state == "READ_ONLY" and old.submit_action_id is None and old.secondary_action is None
+    assert not old.cancel_reasons and not next(fact for fact in old.facts if fact.key == "activity_kind").options
+    assert [option.value for option in live.options] == ["confirm", "cancel"] and live.options[0].disabled
+    assert live.secondary_action.value == "request_edit"
+    assert [reason.value for reason in live.cancel_reasons] == [
+        "wrong_customer", "wrong_content", "should_not_record", "other",
+    ]
+
+
+def _proposal_wait(kind: str, payload: dict[str, object]) -> TaskWaiting:
+    return TaskWaiting(
+        type="CONFIRMATION", field=f"proposal:{kind}", question_id=f"q_{kind}", prompt="是否确认建议？",
+        action_id=f"act_{kind}", expected_version=1,
+        confirmation_payload=ProposalConfirmation(
+            kind="proposal", proposal_kind=kind,
+            candidate=ProposalCandidate(
+                kind=kind, key="proposal_one", payload=payload, evidence_quote="客户同意下阶段方案",
+                activity_id=1, customer_id=2, source_revision=1,
+                target_public_id="opp_bound" if kind == "opportunity_stage" else None,
+            ),
+        ),
+    )
+
+
+def test_proposal_confirmations_show_only_frozen_stage_and_follow_up_facts() -> None:
+    stage = _proposal_wait("opportunity_stage", {
+        "opportunity_name": "续费项目", "current_stage_name": "初步接洽", "stage_name": "方案评审",
+    })
+    follow_up = _proposal_wait("follow_up_task_create", {
+        "action": "回访客户", "owner": "我", "due_date": "2026-11-30T09:00:00",
+    })
+    for waiting, expected in (
+        (stage, {"opportunity_name": "续费项目", "stage_transition": "初步接洽 → 方案评审"}),
+        (follow_up, {"action": "回访客户", "owner": "我", "due_date": "2026-11-30T09:00:00"}),
+    ):
+        message = _message("proposal", waiting.prompt, _task(waiting=waiting))
+        envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+        block = envelope.blocks[0]
+        facts = {fact.key: fact.value for fact in block.facts}
+        assert all(facts[key] == value for key, value in expected.items())
+        assert all(not fact.options for fact in block.facts)
+        assert block.secondary_action is None and not block.cancel_reasons
+
+
+def test_disposition_bulk_keeps_frozen_order_and_folds_without_losing_choices() -> None:
+    task = _round_task()
+    payload = task.follow_up_disposition
+    payload.update(total=51, visible_count=10, settling=False, customer_name="客户甲")
+    ids = [f"i{index}" for index in range(51, 0, -1)]
+    payload["items"] = [
+        {"item_id": item_id, "task_public_id": f"fut_{item_id}", "state": "waiting", "title": f"跟进 {item_id}"}
+        for item_id in ids
+    ]
+    message = _message("batch", "历史跟进任务", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=task, pending_choice=None)
+    block = message.ui.blocks[0]
+    assert block.state == "ACTIVE" and block.submit_action_id == "action_round"
+    assert block.selection_mode == "multiple" and (block.min_selections, block.max_selections) == (0, 51)
+    assert [option.value for option in block.options] == [row.item_id for row in block.disposition_items] == ids
+    assert block.disposition_link and not block.submit_on_select
+    assert block.secondary_action.value == "suppress_week"
+
+
+def test_settling_disposition_never_exposes_actions_even_if_a_wait_is_present() -> None:
+    task = _round_task(state="waiting")
+    task.follow_up_disposition.update(settling=True, total=1)
+    message = _message("settling", "历史跟进任务结果待核对", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=task, pending_choice=None)
+    block = message.ui.blocks[0]
+    assert block.state == "READ_ONLY" and block.submit_action_id is None and block.secondary_action is None
+    assert block.disposition_items[0].state == "waiting"
+
+
+def test_settled_disposition_retains_each_result_and_suppression_status() -> None:
+    task = _round_task(done=True, state="complete")
+    task.follow_up_disposition.update(total=3, suppression_status="applied")
+    task.follow_up_disposition["items"].extend([
+        {"item_id": "i2", "title": "核对附件", "state": "failed", "result_title": "已被处理",
+         "result_message": "任务已不是未完成状态", "evidence_reason": "客户提到同一附件", "failure_code": "ALREADY_HANDLED"},
+        {"item_id": "i3", "title": "核对报价", "state": "unknown", "result_title": "结果待核对"},
+    ])
+    message = _message("done", "历史跟进任务", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=None, pending_choice=None)
+    block = message.ui.blocks[0]
+    assert block.state == "READ_ONLY" and block.secondary_action is None and block.disposition_link
+    assert [row.state for row in block.disposition_items] == ["complete", "failed", "unknown"]
+    assert block.disposition_items[1].result_message == "任务已不是未完成状态"
+    assert block.disposition_items[1].evidence_reason == "客户提到同一附件"
+    assert "1 条已被处理" in block.hint and "未能处理" not in block.hint
+    assert "本周不再提示" in block.hint
+
+
+def test_overflow_is_a_warning_and_missing_batch_does_not_invent_a_card() -> None:
+    task = _task(follow_up_disposition={"status": "OVERFLOW", "items": []})
+    message = _message("overflow", "未完成任务超过 100 条，请到任务列表处理", task, outcome="follow_up_disposition")
+    envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
+    assert [block.type for block in envelope.blocks] == ["notice"] and envelope.blocks[0].tone == "warning"
+    no_batch = _message("absent", "没有新任务", _task())
+    assert [block.type for block in project_assistant_message(no_batch, active_waiting=False, active_boundary=False).blocks] == ["text"]
+
+
+_CUSTOMER_ID = "cus_" + "a" * 32
+_OPPORTUNITY_ID = "opp_" + "b" * 32
+
+
+def test_new_proposal_receipt_stays_before_next_interaction_without_duplicate_prose() -> None:
+    task = _task(waiting=_proposal_wait("follow_up_task_create", {}))
+    message = _message("stage", "商机阶段已推进。是否确认建议？", task, proposal_receipt={
+        "kind": "opportunity_stage", "public_id": _OPPORTUNITY_ID, "proposal_key": "stage_key",
+        "customer_public_id": _CUSTOMER_ID, "detail": "续费项目：初步接洽 → 方案评审",
+    })
+    finalize_assistant_ui([message], focused_task=task, pending_choice=None)
+    assert [block.type for block in message.ui.blocks] == ["action_result", "interaction"]
+    result, interaction = message.ui.blocks
+    assert result.status == "SUCCESS" and result.message == "续费项目：初步接洽 → 方案评审"
+    assert result.entity_ref.resource == "opportunity" and result.entity_ref.public_id == _OPPORTUNITY_ID
+    assert result.entity_ref.attributes == {"customer_public_id": _CUSTOMER_ID}
+    assert interaction.state == "ACTIVE" and interaction.prompt == task.waiting.prompt
+
+
+def test_terminal_create_receipt_requires_tied_approval_and_survives_reprojection() -> None:
+    receipt = {"kind": "opportunity_create", "public_id": _OPPORTUNITY_ID, "proposal_key": "create_key",
+               "customer_public_id": _CUSTOMER_ID, "approval_phase": "pending_review"}
+    task = _task(status="COMPLETED")
+    untied = _message("untied", "本次任务已完成", task, outcome="task_completed", proposal_receipt=receipt)
+    result = project_assistant_message(untied, active_waiting=False, active_boundary=False).blocks[0]
+    assert "待审批" not in result.title and "待审批" not in result.message
+
+    accepted = _message("accepted", "本次任务已完成", task, outcome="task_completed",
+                        proposal_receipt={**receipt, "approval_id": 23})
+    messages = [accepted]
+    for _ in range(2):
+        finalize_assistant_ui(messages, focused_task=None, pending_choice=None)
+        assert [message.id for message in messages] == ["accepted", "completion:ast_one"]
+        result = accepted.ui.blocks[0]
+        assert "待审批" in result.title or "待审批" in result.message
+        assert result.entity_ref.public_id == _OPPORTUNITY_ID
+        assert messages[1].ui is None and messages[1].proposal_receipt is None
+
+
+def test_activity_and_follow_up_receipts_link_to_owning_customer_only() -> None:
+    activity_receipt = {"kind": "customer_activity", "public_id": "activity_one", "customer_id": 11,
+                        "customer_public_id": _CUSTOMER_ID}
+    follow_up_receipt = {"kind": "follow_up_task_create", "public_id": "fut_one", "proposal_key": "follow_up_key",
+                         "customer_id": 11, "customer_public_id": _CUSTOMER_ID}
+    task = _task(committed=[activity_receipt, follow_up_receipt])
+    written = _message("written", "已记录", task, outcome="activity_written")
+    created = _message("created", "已创建", task, proposal_receipt=follow_up_receipt)
+    ordinary = _message("ordinary", "接下来再记一条", task)
+    failed = _message("failed", "结果待核对", task, outcome="failure", error_code="UNKNOWN_COMMIT_RESULT",
+                      proposal_receipt=follow_up_receipt)
+    legacy = _message("legacy", "已创建", task, proposal_receipt={**follow_up_receipt, "customer_public_id": None})
+    finalize_assistant_ui([written, created, ordinary, failed, legacy], focused_task=None, pending_choice=None)
+    for message in (written, created):
+        assert [block.type for block in message.ui.blocks] == ["action_result"]
+        entity = message.ui.blocks[0].entity_ref
+        assert entity.resource == "customer" and entity.public_id == _CUSTOMER_ID
+    assert [block.type for block in ordinary.ui.blocks] == ["text"]
+    assert [block.type for block in failed.ui.blocks] == ["notice"]
+    assert legacy.ui.blocks[0].entity_ref is None

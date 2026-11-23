@@ -9,8 +9,7 @@ execution happen upstream.
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.crud.customer import contact_crud
 from app.crud.customer_activity import customer_activity_crud
@@ -29,6 +28,9 @@ from app.services.customer_intelligence_event_service import (
 from app.utils.public_id import is_opportunity_public_id
 
 from .types import JSONDict, coerce_json_dict
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 class CustomerIntelligenceTriggerPolicy:
@@ -118,7 +120,8 @@ class DealJourneyEventSelector:
     event_type: str | None = None
 
 
-def _deal_journey_event_selector(db: Session, *, team_id: int, tool_result: JSONDict) -> DealJourneyEventSelector | None:
+def _deal_journey_event_selector(db: Session, *, team_id: int,
+    tool_result: JSONDict) -> DealJourneyEventSelector | None:
     tool_name = tool_result.get("tool_name")
     data = coerce_json_dict(tool_result.get("data"))
     if tool_name == "create_opportunity":

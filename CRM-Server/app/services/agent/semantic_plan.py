@@ -12,6 +12,7 @@ SpeechAct: TypeAlias = Literal[
     "REQUEST_ACTION",
     "CONFIRM_ACTION",
     "PROVIDE_SUPPLEMENT",
+    "CORRECT",
     "CANCEL",
     "UNKNOWN",
 ]

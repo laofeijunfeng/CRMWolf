@@ -5,8 +5,7 @@
 """
 
 from enum import Enum
-from typing import Dict, Any, List
-
+from typing import Any
 
 # ==================== 风险分级 ====================
 
@@ -25,7 +24,7 @@ class RiskLevel(Enum):
     CRITICAL = "critical"
 
 
-RISK_CONFIG: Dict[RiskLevel, Dict[str, Any]] = {
+RISK_CONFIG: dict[RiskLevel, dict[str, Any]] = {
     RiskLevel.LOW: {
         "auto_threshold": 0.85,
         "force_confirm": False,
@@ -95,7 +94,7 @@ class IntentType(Enum):
     UNKNOWN = "unknown"
 
 
-INTENT_DESCRIPTIONS: Dict[IntentType, str] = {
+INTENT_DESCRIPTIONS: dict[IntentType, str] = {
     IntentType.CREATE_FOLLOW_UP: "创建跟进记录",
     IntentType.CREATE_OPPORTUNITY: "创建商机",
     IntentType.UPDATE_OPPORTUNITY: "更新商机信息",
@@ -111,7 +110,7 @@ INTENT_DESCRIPTIONS: Dict[IntentType, str] = {
 
 # ==================== Action 风险映射 ====================
 
-ACTION_RISK_MAPPING: Dict[str, RiskLevel] = {
+ACTION_RISK_MAPPING: dict[str, RiskLevel] = {
     "create_follow_up": RiskLevel.LOW,
     "set_reminder": RiskLevel.LOW,
     "init_opportunity": RiskLevel.MEDIUM,
@@ -134,7 +133,7 @@ def get_action_risk(action_type: str) -> RiskLevel:
 
 # ==================== 业务规则 ====================
 
-BUSINESS_RULES: List[Dict[str, Any]] = [
+BUSINESS_RULES: list[dict[str, Any]] = [
     {
         "trigger": "keyword",
         "keyword": "签合同",
@@ -182,7 +181,7 @@ class AIErrorCode(Enum):
     LOCKED = "AI_LOCKED"                         # action_id 被锁定
 
 
-ERROR_CODE_MESSAGES: Dict[AIErrorCode, str] = {
+ERROR_CODE_MESSAGES: dict[AIErrorCode, str] = {
     AIErrorCode.MISSING_FIELD: "缺少必填字段",
     AIErrorCode.ENTITY_NOT_FOUND: "实体不存在",
     AIErrorCode.PERMISSION_DENIED: "无权限执行此操作",
@@ -197,14 +196,14 @@ ERROR_CODE_MESSAGES: Dict[AIErrorCode, str] = {
 # ==================== 导出 ====================
 
 __all__ = [
-    "RiskLevel",
-    "RISK_CONFIG",
-    "requires_confirmation",
-    "IntentType",
-    "INTENT_DESCRIPTIONS",
     "ACTION_RISK_MAPPING",
-    "get_action_risk",
     "BUSINESS_RULES",
-    "AIErrorCode",
     "ERROR_CODE_MESSAGES",
+    "INTENT_DESCRIPTIONS",
+    "RISK_CONFIG",
+    "AIErrorCode",
+    "IntentType",
+    "RiskLevel",
+    "get_action_risk",
+    "requires_confirmation",
 ]

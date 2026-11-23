@@ -4,9 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, ClassVar
 
 from app.crud.ai_config import ai_config_crud
 from app.services.agent import business_rules
@@ -19,6 +17,9 @@ from app.services.agent.prompts import CRM_AGENT_SUGGESTION_SYSTEM_PROMPT
 from app.services.agent.schemas import AgentBusinessSuggestion, AgentSemanticParseResult, AgentSuggestionResult
 from app.utils.public_id import is_opportunity_public_id
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
 
 class AgentSuggestionGeneratorError(Exception):
     """Raised when suggestion generation cannot call or validate AI output."""
@@ -29,11 +30,11 @@ class AgentSuggestionEnvelope:
     result: AgentSuggestionResult
     suggestion_source: str
     model: str
-    structured_output_strategy: Optional[str] = None
+    structured_output_strategy: str | None = None
 
 
 class AgentSuggestionGenerator:
-    SUPPORTED_ACTIONS = {
+    SUPPORTED_ACTIONS: ClassVar[set[str]] = {
         "CREATE_OPPORTUNITY",
         "MOVE_OPPORTUNITY_STAGE",
         "CREATE_CONTACT",
@@ -59,15 +60,15 @@ class AgentSuggestionGenerator:
         user_message: str,
         semantic_result: AgentSemanticParseResult,
         customer_context: dict[str, object],
-        current_date: Optional[date] = None,
+        current_date: date | None = None,
     ) -> AgentSuggestionEnvelope:
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            raise AgentSuggestionGeneratorError("AI 配置未设置，无法生成业务建议。")
+            raise AgentSuggestionGeneratorError("AI 配置未设置\uff0c无法生成业务建议。")
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            raise AgentSuggestionGeneratorError("AI API Key 未设置，无法生成业务建议。")
+            raise AgentSuggestionGeneratorError("AI API Key 未设置\uff0c无法生成业务建议。")
 
         semantic_json = semantic_result.model_dump_json(exclude_none=True)
         context_json = json.dumps(customer_context, ensure_ascii=False, default=str)
@@ -105,8 +106,8 @@ class AgentSuggestionGenerator:
         semantic_json: str,
         customer_context_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentSuggestionResult]:
+        current_date: date | None = None,
+    ) -> AgentSuggestionResult | None:
         prompt_date = current_date or date.today()
         system_prompt = f"{CRM_AGENT_SUGGESTION_SYSTEM_PROMPT}\n\n【当前日期】\n{prompt_date.isoformat()}"
         user_prompt = (
@@ -218,7 +219,7 @@ class AgentSuggestionGenerator:
         cls,
         suggestion: AgentBusinessSuggestion,
         active_stage_context: list[dict[str, object]],
-    ) -> Optional[AgentBusinessSuggestion]:
+    ) -> AgentBusinessSuggestion | None:
         target_stage_id = (suggestion.execution_payload or {}).get("stage_template_id")
         if not target_stage_id:
             return None
@@ -301,7 +302,7 @@ class AgentSuggestionGenerator:
     def _stage_move_target(
         stage_context: dict[str, object],
         target_stage_id: int,
-    ) -> Optional[dict[str, object]]:
+    ) -> dict[str, object] | None:
         stages = [stage for stage in stage_context.get("procurement_stages") or [] if isinstance(stage, dict)]
         requested_stage = next(
             (
@@ -314,7 +315,8 @@ class AgentSuggestionGenerator:
         if not requested_stage or requested_stage.get("is_current"):
             return None
         current_stage = next((stage for stage in stages if stage.get("is_current")), None)
-        if current_stage and requested_stage.get("sort_order") is not None and current_stage.get("sort_order") is not None:
+        if current_stage and requested_stage.get("sort_order") is not None and current_stage.get(
+            "sort_order") is not None:
             try:
                 if int(requested_stage["sort_order"]) < int(current_stage["sort_order"]):
                     return None
@@ -356,20 +358,22 @@ class AgentSuggestionGenerator:
                 "stage_template_id": int(stage["id"]),
                 "stage_name": stage.get("stage_name"),
             }
-            for stage in sorted(candidates, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0))
+            for stage in sorted(candidates, key=lambda stage: int(
+                AgentSuggestionGenerator._stage_sort_order(stage) or 0))
         ]
 
     @staticmethod
     def _next_stage_after_current(
         stages: list[dict[str, object]],
         current_stage: object,
-    ) -> Optional[dict[str, object]]:
+    ) -> dict[str, object] | None:
         if not isinstance(current_stage, dict):
             default_stage = next((stage for stage in stages if stage.get("is_default_start")), None)
             if default_stage:
                 return default_stage
             sortable = [stage for stage in stages if AgentSuggestionGenerator._stage_sort_order(stage) is not None]
-            return min(sortable, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0)) if sortable else None
+            return min(sortable, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(
+                stage) or 0)) if sortable else None
         current_order = AgentSuggestionGenerator._stage_sort_order(current_stage)
         if current_order is None:
             return None
@@ -380,10 +384,11 @@ class AgentSuggestionGenerator:
             and AgentSuggestionGenerator._stage_sort_order(stage) is not None
             and int(AgentSuggestionGenerator._stage_sort_order(stage) or 0) > current_order
         ]
-        return min(forward_stages, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(stage) or 0)) if forward_stages else None
+        return min(forward_stages, key=lambda stage: int(AgentSuggestionGenerator._stage_sort_order(
+            stage) or 0)) if forward_stages else None
 
     @staticmethod
-    def _stage_sort_order(stage: dict[str, object]) -> Optional[int]:
+    def _stage_sort_order(stage: dict[str, object]) -> int | None:
         if stage.get("sort_order") is None:
             return None
         try:
@@ -396,7 +401,7 @@ class AgentSuggestionGenerator:
         suggestion: AgentBusinessSuggestion,
         contract_ids: set[int],
         contracts: list[dict[str, object]],
-    ) -> Optional[AgentBusinessSuggestion]:
+    ) -> AgentBusinessSuggestion | None:
         related_id = suggestion.related_object_id
         if related_id is not None and int(related_id) in contract_ids:
             return suggestion.model_copy(update={"related_object_type": "contract"})
@@ -414,7 +419,7 @@ class AgentSuggestionGenerator:
         suggestion: AgentBusinessSuggestion,
         payment_plan_ids: set[int],
         open_payment_plans: list[dict[str, object]],
-    ) -> Optional[AgentBusinessSuggestion]:
+    ) -> AgentBusinessSuggestion | None:
         related_id = suggestion.related_object_id
         if related_id is not None and int(related_id) in payment_plan_ids:
             return suggestion.model_copy(update={"related_object_type": "payment_plan"})
@@ -435,7 +440,7 @@ class AgentSuggestionGenerator:
         approved_opportunities: list[dict[str, object]],
         approved_contracts: list[dict[str, object]],
         deployment_infos: list[dict[str, object]],
-    ) -> Optional[AgentBusinessSuggestion]:
+    ) -> AgentBusinessSuggestion | None:
         if not deployment_infos:
             return None
         related_type = suggestion.related_object_type
@@ -443,7 +448,8 @@ class AgentSuggestionGenerator:
         if related_type == "opportunity":
             if related_id is not None and str(related_id) in approved_opportunity_ids:
                 return suggestion
-            if related_id is None and len(approved_opportunities) == 1 and approved_opportunities[0].get("id") is not None:
+            if related_id is None and len(approved_opportunities) == 1 and approved_opportunities[
+                0].get("id") is not None:
                 return suggestion.model_copy(update={"related_object_id": approved_opportunities[0]["id"]})
             return None
         if related_type == "contract":
@@ -478,13 +484,13 @@ class AgentSuggestionGenerator:
             return base_suggestions + [AgentBusinessSuggestion(
                 action="CREATE_OPPORTUNITY",
                 title="先补充商机",
-                reason="用户输入体现已回款，但该客户上下文中没有商机和合同；按 CRM 业务链路应先补齐商机，再处理合同和回款。",
+                reason="用户输入体现已回款\uff0c但该客户上下文中没有商机和合同\uff1b按 CRM 业务链路应先补齐商机\uff0c再处理合同和回款。",
                 priority="high",
                 requires_confirmation=True,
                 missing_fields=["预计成交金额", "采购用户数", "授权模式", "采购类型", "预计成交日期"],
                 related_object_type=None,
                 related_object_id=None,
-                risk_notes=["当前 Agent 暂不支持创建合同，回款计划和回款登记都需要已有合同链路。"],
+                risk_notes=["当前 Agent 暂不支持创建合同\uff0c回款计划和回款登记都需要已有合同链路。"],
                 confidence=0.86,
             )]
         if not contracts:
@@ -495,13 +501,13 @@ class AgentSuggestionGenerator:
             ] + [AgentBusinessSuggestion(
                 action="NO_ACTION",
                 title="合同环节缺失",
-                reason="用户输入体现已回款，但该客户已有商机却没有可用于回款的合同；创建合同需要附件，当前 Agent 不执行合同创建。",
+                reason="用户输入体现已回款\uff0c但该客户已有商机却没有可用于回款的合同\uff1b创建合同需要附件\uff0c当前 Agent 不执行合同创建。",
                 priority="high",
                 requires_confirmation=False,
                 missing_fields=[],
                 related_object_type=None,
                 related_object_id=None,
-                risk_notes=["请先在合同模块完成人工合同创建后，再由 Agent 继续创建回款计划或登记回款。"],
+                risk_notes=["请先在合同模块完成人工合同创建后\uff0c再由 Agent 继续创建回款计划或登记回款。"],
                 confidence=0.9,
             )]
         return suggestions

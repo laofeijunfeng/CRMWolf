@@ -1,7 +1,7 @@
 """
 跟进信息解析服务
 
-可复用的跟进信息解析逻辑，用于：
+可复用的跟进信息解析逻辑\uff0c用于\uff1a
 1. 线索解析时的额外信息识别
 2. MagicWand 魔法棒操作
 3. 日历待办跟进
@@ -9,18 +9,19 @@
 """
 import json
 import re
+from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta
-from typing import AsyncGenerator, Dict, Any, Optional, List
-from sqlalchemy.orm import Session
+from typing import Any
+
 import httpx
+from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 from app.schemas.lead_parse import LeadFollowUpParseInfo
 from app.services.agent.temporal import agent_temporal_resolver
 from app.utils.time import business_now
 
-
-# 系统提示词：用于从文本中提取跟进信息
+# 系统提示词:用于从文本中提取跟进信息
 PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的跟进信息解析助手。
 
 【当前日期】
@@ -32,10 +33,10 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的跟进信息
 
 **content**: 跟进内容
 - 提取除"下一步计划"之外的描述内容
-- 包括：业务需求、沟通内容、客户情况、产品意向等
-- 如果描述只有下一步计划，content 可为 null
+- 包括\uff1a业务需求、沟通内容、客户情况、产品意向等
+- 如果描述只有下一步计划\uff0ccontent 可为 null
 
-**method**: 跟进方式（推断）
+**method**: 跟进方式\uff08推断\uff09
 - 包含"打电话"、"电话沟通"、"通了电话"、"下午和客户沟通" → "电话"
 - 包含"微信"、"微信聊" → "微信"
 - 包含"拜访"、"上门"、"见面" → "拜访"
@@ -44,65 +45,65 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的跟进信息
 
 **next_action**: 下一步动作/计划
 - 识别"下一步"、"接下来"、"计划"、"准备"、"等"后面的内容
-- 例如："下一步推进POC部署试用" → "推进POC部署试用"
-- 例如："下周要去拜访" → "去拜访"
-- 例如："等下周三看看，如果采购还没有联系，再和客户对齐" → "如果采购还没有联系，再和客户对齐"
-- 如果没有明确表述，返回 null
+- 例如\uff1a"下一步推进POC部署试用" → "推进POC部署试用"
+- 例如\uff1a"下周要去拜访" → "去拜访"
+- 例如\uff1a"等下周三看看\uff0c如果采购还没有联系\uff0c再和客户对齐" → "如果采购还没有联系\uff0c再和客户对齐"
+- 如果没有明确表述\uff0c返回 null
 
 **next_follow_time**: 下次跟进时间
-- 识别时间表达，**输出 YYYY-MM-DD 格式的具体日期**
-- 相对时间需要基于当前日期 {current_date} 转换为具体日期：
+- 识别时间表达\uff0c**输出 YYYY-MM-DD 格式的具体日期**
+- 相对时间需要基于当前日期 {current_date} 转换为具体日期\uff1a
   - "下周一" → 计算下周一的具体日期
   - "下周三" → 计算下周三的具体日期
   - "三天后"/"3天后" → 当前日期+3天
   - "一周后"/"下周" → 当前日期+7天
-- 具体日期保持原样（注意年份必须正确）：
+- 具体日期保持原样\uff08注意年份必须正确\uff09\uff1a
   - "5月25日" → 根据当前年份推断
-- 如果无法识别，返回 null
+- 如果无法识别\uff0c返回 null
 
 ## 输出格式
 
-你必须输出严格的 JSON 格式：
+你必须输出严格的 JSON 格式\uff1a
 ```json
 {
-  "content": "跟进内容（除下一步计划外的信息）",
+  "content": "跟进内容\uff08除下一步计划外的信息\uff09",
   "method": "电话/微信/拜访/邮件",
   "next_action": "下一步动作",
   "next_follow_time": "下次跟进时间表达"
 }
 ```
 
-如果某个字段无法识别，返回 null。
+如果某个字段无法识别\uff0c返回 null。
 
 ## 示例
 
-输入："下午和客户沟通了下，客户反馈已经经过领导审批，后续会有采购来联系；先提供了报价方案；等下周三看看，如果采购还没有联系，再和客户对齐下采购联系的时间"
+输入\uff1a"下午和客户沟通了下\uff0c客户反馈已经经过领导审批\uff0c后续会有采购来联系\uff1b先提供了报价方案\uff1b等下周三看看\uff0c如果采购还没有联系\uff0c再和客户对齐下采购联系的时间"
 
-输出：
+输出\uff1a
 ```json
 {
-  "content": "客户反馈已经经过领导审批，后续会有采购来联系；先提供了报价方案",
+  "content": "客户反馈已经经过领导审批\uff0c后续会有采购来联系\uff1b先提供了报价方案",
   "method": "电话",
-  "next_action": "如果采购还没有联系，再和客户对齐下采购联系的时间",
+  "next_action": "如果采购还没有联系\uff0c再和客户对齐下采购联系的时间",
   "next_follow_time": "{next_week_example}"
 }
 ```
 
-输入："想做电商系统，预算50万左右，下一步推进POC部署试用，下周三再联系"
+输入\uff1a"想做电商系统\uff0c预算50万左右\uff0c下一步推进POC部署试用\uff0c下周三再联系"
 
-输出：
+输出\uff1a
 ```json
 {
-  "content": "想做电商系统，预算50万左右",
+  "content": "想做电商系统\uff0c预算50万左右",
   "method": "电话",
   "next_action": "推进POC部署试用",
   "next_follow_time": "{next_week_example}"
 }
 ```
 
-输入："微信上聊了下，客户对产品很感兴趣，下周要去拜访"
+输入\uff1a"微信上聊了下\uff0c客户对产品很感兴趣\uff0c下周要去拜访"
 
-输出：
+输出\uff1a
 ```json
 {
   "content": "客户对产品很感兴趣",
@@ -112,12 +113,12 @@ PARSE_FOLLOW_UP_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的跟进信息
 }
 ```
 
-输入："需要CRM系统，大概20人团队"
+输入\uff1a"需要CRM系统\uff0c大概20人团队"
 
-输出：
+输出\uff1a
 ```json
 {
-  "content": "需要CRM系统，大概20人团队",
+  "content": "需要CRM系统\uff0c大概20人团队",
   "method": "电话",
   "next_action": null,
   "next_follow_time": null
@@ -129,24 +130,24 @@ class FollowUpParserService:
     """跟进信息解析服务"""
 
     # 从名称中提取 ID 的正则表达式
-    ID_PATTERN = re.compile(r'[（(]\s*ID[：:]\s*(\d+)\s*[）)]')
+    ID_PATTERN = re.compile('[\uff08(]\\s*ID[\uff1a:]\\s*(\\d+)\\s*[\uff09)]')
 
     def parse_relative_time(
         self,
-        time_text: Optional[str],
-        base_date: datetime = None
-    ) -> Optional[datetime]:
+        time_text: str | None,
+        base_date: datetime | None = None
+    ) -> datetime | None:
         """
         解析相对时间表达
 
-        支持：
-        - 具体日期：2024-05-25, 5月25日
-        - 相对天数：后天、三天后、3天后、一周后、下周三
+        支持\uff1a
+        - 具体日期\uff1a2024-05-25, 5月25日
+        - 相对天数\uff1a后天、三天后、3天后、一周后、下周三
         - 今天/明天
 
         Args:
             time_text: 时间文本
-            base_date: 基准日期（默认今天）
+            base_date: 基准日期\uff08默认今天\uff09
 
         Returns:
             datetime 对象或 None
@@ -159,7 +160,7 @@ class FollowUpParserService:
         )
         return datetime.fromisoformat(resolved) if resolved else None
 
-    def _parse_standard_date(self, date_text: str) -> Optional[datetime]:
+    def _parse_standard_date(self, date_text: str) -> datetime | None:
         """尝试解析标准日期格式"""
         # YYYY-MM-DD
         try:
@@ -180,12 +181,12 @@ class FollowUpParserService:
 
         return None
 
-    def extract_id_from_name(self, name_text: Optional[str]) -> Optional[int]:
+    def extract_id_from_name(self, name_text: str | None) -> int | None:
         """
         从名称中提取 ID
 
-        支持格式：
-        - 名称（ID：xxx）
+        支持格式\uff1a
+        - 名称\uff08ID\uff1axxx\uff09
         - 名称(ID:xxx)
 
         Args:
@@ -222,9 +223,9 @@ class FollowUpParserService:
         db: Session,
         user_message: str,
         team_id: int = 1
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
-        流式解析跟进信息，生成 SSE 事件
+        流式解析跟进信息\uff0c生成 SSE 事件
 
         Args:
             db: 数据库 session
@@ -267,85 +268,84 @@ class FollowUpParserService:
         full_content = ""
 
         try:
-            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
-                async with client.stream(
-                    "POST",
-                    f"{config.api_host}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "Accept-Encoding": "identity"
-                    },
-                    json=request_body
-                ) as response:
-                    response.raise_for_status()
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client, client.stream(
+                "POST",
+                f"{config.api_host}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "identity"
+                },
+                json=request_body
+            ) as response:
+                response.raise_for_status()
 
-                    buffer = ""
-                    async for text_chunk in response.aiter_text():
-                        buffer += text_chunk
-                        lines = buffer.split('\n')
-                        buffer = lines[-1] if lines else ""
+                buffer = ""
+                async for text_chunk in response.aiter_text():
+                    buffer += text_chunk
+                    lines = buffer.split('\n')
+                    buffer = lines[-1] if lines else ""
 
-                        for line in lines[:-1]:
-                            if not line:
+                    for line in lines[:-1]:
+                        if not line:
+                            continue
+
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+
+                            if data_str == "[DONE]":
+                                break
+
+                            try:
+                                chunk = json.loads(data_str)
+                                choices = chunk.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content_piece = delta.get("content", "")
+                                    if content_piece:
+                                        full_content += content_piece
+                                        yield {"event": "content", "content": content_piece}
+                            except json.JSONDecodeError:
                                 continue
 
-                            if line.startswith("data: "):
-                                data_str = line[6:]
+                # 解析完整响应
+                clean_content = self._clean_json_response(full_content)
 
-                                if data_str == "[DONE]":
-                                    break
+                try:
+                    parsed = json.loads(clean_content)
+                    next_follow_time_raw = parsed.get("next_follow_time")
 
-                                try:
-                                    chunk = json.loads(data_str)
-                                    choices = chunk.get("choices", [])
-                                    if choices:
-                                        delta = choices[0].get("delta", {})
-                                        content_piece = delta.get("content", "")
-                                        if content_piece:
-                                            full_content += content_piece
-                                            yield {"event": "content", "content": content_piece}
-                                except json.JSONDecodeError:
-                                    continue
-
-                    # 解析完整响应
-                    clean_content = self._clean_json_response(full_content)
-
-                    try:
-                        parsed = json.loads(clean_content)
-                        next_follow_time_raw = parsed.get("next_follow_time")
-
-                        # 尝试将相对时间转换为具体日期
-                        next_follow_time_dt = None
-                        if next_follow_time_raw:
-                            next_follow_time_dt = self.parse_relative_time(
-                                next_follow_time_raw,
-                                base_date=business_now()
-                            )
-
-                        # 如果能转换成功，使用具体日期；否则保留原始表述
-                        next_follow_time_final = next_follow_time_raw
-                        if next_follow_time_dt:
-                            next_follow_time_final = next_follow_time_dt.strftime("%Y-%m-%d")
-
-                        follow_up_info = LeadFollowUpParseInfo(
-                            content=parsed.get("content"),
-                            method=parsed.get("method"),
-                            next_action=parsed.get("next_action"),
-                            next_follow_time=next_follow_time_final
+                    # 尝试将相对时间转换为具体日期
+                    next_follow_time_dt = None
+                    if next_follow_time_raw:
+                        next_follow_time_dt = self.parse_relative_time(
+                            next_follow_time_raw,
+                            base_date=business_now()
                         )
 
-                        yield {
-                            "event": "parsed",
-                            "follow_up_info": follow_up_info.model_dump()
-                        }
-                    except json.JSONDecodeError:
-                        yield {"event": "error", "message": f"AI 返回格式异常"}
+                    # 如果能转换成功,使用具体日期;否则保留原始表述
+                    next_follow_time_final = next_follow_time_raw
+                    if next_follow_time_dt:
+                        next_follow_time_final = next_follow_time_dt.strftime("%Y-%m-%d")
+
+                    follow_up_info = LeadFollowUpParseInfo(
+                        content=parsed.get("content"),
+                        method=parsed.get("method"),
+                        next_action=parsed.get("next_action"),
+                        next_follow_time=next_follow_time_final
+                    )
+
+                    yield {
+                        "event": "parsed",
+                        "follow_up_info": follow_up_info.model_dump()
+                    }
+                except json.JSONDecodeError:
+                    yield {"event": "error", "message": "AI 返回格式异常"}
 
         except httpx.HTTPStatusError as e:
-            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
+            yield {"event": "error", "message": f"AI 服务请求失败\uff1a{e.response.status_code}"}
         except Exception as e:
-            yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
+            yield {"event": "error", "message": f"AI 服务异常\uff1a{e!s}"}
 
     async def parse_follow_up_info(
         self,
@@ -354,7 +354,7 @@ class FollowUpParserService:
         team_id: int = 1
     ) -> LeadFollowUpParseInfo:
         """
-        解析跟进信息（收集完整响应）
+        解析跟进信息\uff08收集完整响应\uff09
 
         Args:
             db: 数据库 session
@@ -376,7 +376,7 @@ class FollowUpParserService:
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
 
-        # 构建请求（非流式）
+        # 构建请求(非流式)
         request_body = {
             "model": config.model_name,
             "messages": [

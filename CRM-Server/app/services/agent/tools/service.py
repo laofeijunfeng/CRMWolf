@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Awaitable, Callable, List, Optional, Union
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from sqlalchemy import or_
 
@@ -76,13 +76,19 @@ from app.services.work_summary_service import work_summary_service as default_wo
 from app.utils.public_id import is_opportunity_public_id
 from app.utils.time import business_now
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from app.models.agent import AgentToolCall
+
 logger = logging.getLogger(__name__)
 
 
 def _with_acquisition_source_write_fields(
     payload: JsonDict,
-    db=None,
-    team_id=None,
+    db: Session | None = None,
+    team_id: int | None = None,
 ) -> JsonDict:
     return resolve_write_fields_for_ai(payload, db, team_id)
 
@@ -97,16 +103,16 @@ class CRMAgentToolService:
 
     def __init__(
         self,
-        api_client: Optional[InternalCRMAPIClient] = None,
-        intelligence_context_service: Optional[CustomerIntelligenceContextService] = None,
-        knowledge_candidate_service: Optional[CustomerKnowledgeCandidateService] = None,
-        alias_service: Optional[CustomerAliasService] = None,
-        identity_resolution_service: Optional[CustomerIdentityResolutionService] = None,
-        follow_up_query_service: Optional[FollowUpTaskQueryService] = None,
-        follow_up_confirmation_channel_service: Optional[FollowUpTaskConfirmationChannelService] = None,
-        follow_up_transition_execution_service: Optional[FollowUpTaskTransitionExecutionService] = None,
-        work_summary_service: Optional[WorkSummaryService] = None,
-        work_summary_graph_service: Optional[WorkSummaryGraphService] = None,
+        api_client: InternalCRMAPIClient | None = None,
+        intelligence_context_service: CustomerIntelligenceContextService | None = None,
+        knowledge_candidate_service: CustomerKnowledgeCandidateService | None = None,
+        alias_service: CustomerAliasService | None = None,
+        identity_resolution_service: CustomerIdentityResolutionService | None = None,
+        follow_up_query_service: FollowUpTaskQueryService | None = None,
+        follow_up_confirmation_channel_service: FollowUpTaskConfirmationChannelService | None = None,
+        follow_up_transition_execution_service: FollowUpTaskTransitionExecutionService | None = None,
+        work_summary_service: WorkSummaryService | None = None,
+        work_summary_graph_service: WorkSummaryGraphService | None = None,
     ) -> None:
         self.api_client = api_client or InternalCRMAPIClient()
         self.intelligence_context_service = intelligence_context_service or customer_intelligence_context_service
@@ -126,7 +132,7 @@ class CRMAgentToolService:
     async def search_customers(self, context: AgentToolContext, keyword: str, limit: int = 10) -> AgentToolResult:
         clean_keyword = keyword.strip()
         expanded_terms = self.alias_service.expand_query_terms(clean_keyword)
-        payload = {
+        payload: JsonDict = {
             "keyword": clean_keyword,
             "limit": limit,
             "scope": "accessible",
@@ -134,7 +140,7 @@ class CRMAgentToolService:
             "query_terms": expanded_terms,
         }
 
-        async def call_api():
+        async def call_api() -> JsonDict:
             lexical = await self.api_client.request(
                 "GET",
                 "/v1/customers/",
@@ -253,9 +259,9 @@ class CRMAgentToolService:
     async def search_creation_duplicates(
         self,
         context: AgentToolContext,
-        customer_keywords: List[str],
-        lead_keywords: List[str],
-        phone: Optional[str] = None,
+        customer_keywords: list[str],
+        lead_keywords: list[str],
+        phone: str | None = None,
         limit: int = 10,
     ) -> AgentToolResult:
         payload = {
@@ -265,7 +271,7 @@ class CRMAgentToolService:
             "limit": limit,
         }
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             return self._search_creation_duplicates_in_db(
                 context,
                 customer_keywords=payload["customer_keywords"],
@@ -279,9 +285,9 @@ class CRMAgentToolService:
     def _search_creation_duplicates_in_db(
         self,
         context: AgentToolContext,
-        customer_keywords: List[str],
-        lead_keywords: List[str],
-        phone: Optional[str],
+        customer_keywords: list[str],
+        lead_keywords: list[str],
+        phone: str | None,
         limit: int,
     ) -> JsonDict:
         permission_codes = {
@@ -337,11 +343,11 @@ class CRMAgentToolService:
     def _query_duplicate_customers(
         self,
         context: AgentToolContext,
-        keywords: List[str],
-        phone: Optional[str],
+        keywords: list[str],
+        phone: str | None,
         limit: int,
-    ) -> List[Customer]:
-        conditions = []
+    ) -> list[Customer]:
+        conditions: list[ColumnElement[bool]] = []
         for keyword in keywords:
             conditions.append(Customer.account_name.like(f"%{keyword}%"))
             conditions.append(Customer.account_name_norm.like(f"%{keyword}%"))
@@ -368,11 +374,11 @@ class CRMAgentToolService:
     def _query_duplicate_leads(
         self,
         context: AgentToolContext,
-        keywords: List[str],
-        phone: Optional[str],
+        keywords: list[str],
+        phone: str | None,
         limit: int,
-    ) -> List[Lead]:
-        conditions = []
+    ) -> list[Lead]:
+        conditions: list[ColumnElement[bool]] = []
         for keyword in keywords:
             conditions.append(Lead.lead_name.like(f"%{keyword}%"))
             conditions.append(Lead.contact_name.like(f"%{keyword}%"))
@@ -416,7 +422,7 @@ class CRMAgentToolService:
         )
 
     @staticmethod
-    def _clean_keywords(keywords: List[str]) -> List[str]:
+    def _clean_keywords(keywords: list[str]) -> list[str]:
         cleaned = []
         for keyword in keywords:
             if not isinstance(keyword, str):
@@ -429,12 +435,12 @@ class CRMAgentToolService:
     async def get_customer_context(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
-        query_text: Optional[str] = None,
+        customer_id: str | int,
+        query_text: str | None = None,
     ) -> AgentToolResult:
-        payload = {"customer_id": customer_id, "query_text": query_text}
+        payload: JsonDict = {"customer_id": customer_id, "query_text": query_text}
 
-        async def call_api():
+        async def call_api() -> JsonDict:
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
             detail = await self.api_client.request(
                 "GET",
@@ -459,15 +465,15 @@ class CRMAgentToolService:
         context: AgentToolContext,
         *,
         status: str = "open",
-        due_window: Optional[str] = None,
-        customer_id: Optional[Union[str, int]] = None,
+        due_window: str | None = None,
+        customer_id: str | int | None = None,
         owner_scope: str = "mine",
-        query_text: Optional[str] = None,
-        retrieval_mode: Optional[str] = None,
+        query_text: str | None = None,
+        retrieval_mode: str | None = None,
         limit: int = 50,
     ) -> AgentToolResult:
         normalized_retrieval_mode = normalize_follow_up_task_retrieval_mode(retrieval_mode, query_text)
-        payload = {
+        payload: JsonDict = {
             "status": status,
             "due_window": due_window,
             "customer_id": customer_id,
@@ -477,7 +483,7 @@ class CRMAgentToolService:
             "limit": limit,
         }
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             customer_public_id = (
                 self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
             )
@@ -502,9 +508,9 @@ class CRMAgentToolService:
         *,
         task_id: str,
     ) -> AgentToolResult:
-        payload = {"task_id": task_id}
+        payload: JsonDict = {"task_id": task_id}
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             return self.follow_up_query_service.get_task_detail(
                 context.db,
                 team_id=context.team_id,
@@ -519,16 +525,16 @@ class CRMAgentToolService:
         context: AgentToolContext,
         *,
         window: str = "this_week",
-        customer_id: Optional[Union[str, int]] = None,
+        customer_id: str | int | None = None,
         include_tasks: bool = True,
         include_activities: bool = True,
         include_business_events: bool = True,
-        start_at: Optional[str] = None,
-        end_at: Optional[str] = None,
-        cursor: Optional[str] = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+        cursor: str | None = None,
         limit: int = 50,
     ) -> AgentToolResult:
-        payload = {
+        payload: JsonDict = {
             "window": window,
             "customer_id": customer_id,
             "include_tasks": include_tasks,
@@ -540,7 +546,7 @@ class CRMAgentToolService:
             "limit": limit,
         }
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             customer_public_id = (
                 self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
             )
@@ -566,15 +572,15 @@ class CRMAgentToolService:
         context: AgentToolContext,
         *,
         window: str = "this_week",
-        customer_id: Optional[Union[str, int]] = None,
+        customer_id: str | int | None = None,
         include_tasks: bool = True,
         include_activities: bool = True,
         include_business_events: bool = True,
-        start_at: Optional[str] = None,
-        end_at: Optional[str] = None,
-        question: Optional[str] = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+        question: str | None = None,
     ) -> AgentToolResult:
-        payload = {
+        payload: JsonDict = {
             "window": window,
             "customer_id": customer_id,
             "include_tasks": include_tasks,
@@ -585,7 +591,7 @@ class CRMAgentToolService:
             "question": question,
         }
 
-        async def run_graph():
+        async def run_graph() -> JsonDict:
             customer_public_id = (
                 self._resolve_customer_public_id(context, customer_id) if customer_id is not None else None
             )
@@ -623,9 +629,9 @@ class CRMAgentToolService:
         *,
         limit: int = 20,
     ) -> AgentToolResult:
-        payload = {"limit": limit}
+        payload: JsonDict = {"limit": limit}
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             return self.follow_up_confirmation_channel_service.list_pending_cases(
                 context.db,
                 team_id=context.team_id,
@@ -641,9 +647,9 @@ class CRMAgentToolService:
         *,
         case_id: str,
         reply_text: str,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"case_id": case_id, "reply_text": reply_text}
+        payload: JsonDict = {"case_id": case_id, "reply_text": reply_text}
         action_key = self._action_key(
             "resolve_follow_up_task_confirmation_case",
             context,
@@ -651,7 +657,7 @@ class CRMAgentToolService:
             idempotency_suffix,
         )
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             return self.follow_up_confirmation_channel_service.resolve_reply(
                 context.db,
                 team_id=context.team_id,
@@ -674,11 +680,11 @@ class CRMAgentToolService:
         *,
         task_id: str,
         action: str,
-        proposed_due_at: Optional[str] = None,
-        reason: Optional[str] = None,
-        idempotency_suffix: Optional[str] = None,
+        proposed_due_at: str | None = None,
+        reason: str | None = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {
+        payload: JsonDict = {
             "task_id": task_id,
             "action": action,
             "proposed_due_at": proposed_due_at,
@@ -686,7 +692,7 @@ class CRMAgentToolService:
         }
         action_key = self._action_key("transition_follow_up_task", context, payload, idempotency_suffix)
 
-        async def call_db():
+        async def call_db() -> JsonDict:
             return self._execute_follow_up_task_transition(
                 context,
                 task_id=task_id,
@@ -703,8 +709,8 @@ class CRMAgentToolService:
         *,
         task_id: str,
         action: str,
-        proposed_due_at: Optional[str],
-        reason: Optional[str],
+        proposed_due_at: str | None,
+        reason: str | None,
     ) -> JsonDict:
         action_type = _follow_up_transition_action_type(action)
         decision = FollowUpTaskReconciliationDecision(
@@ -757,7 +763,7 @@ class CRMAgentToolService:
         }
 
     @staticmethod
-    def _customer_internal_id(context: AgentToolContext, customer_public_id: Union[str, int]) -> int:
+    def _customer_internal_id(context: AgentToolContext, customer_public_id: str | int) -> int:
         if isinstance(customer_public_id, int) or (
             isinstance(customer_public_id, str) and customer_public_id.isdecimal()
         ):
@@ -779,7 +785,7 @@ class CRMAgentToolService:
         return int(customer.id)
 
     @staticmethod
-    def _resolve_customer_public_id(context: AgentToolContext, customer_id: Union[str, int]) -> str:
+    def _resolve_customer_public_id(context: AgentToolContext, customer_id: str | int) -> str:
         if isinstance(customer_id, int) or (isinstance(customer_id, str) and customer_id.isdecimal()):
             customer = (
                 context.db.query(Customer)
@@ -792,7 +798,7 @@ class CRMAgentToolService:
         return str(customer_id)
 
     @staticmethod
-    def _resolve_lead_public_id(context: AgentToolContext, lead_id: Union[str, int]) -> str:
+    def _resolve_lead_public_id(context: AgentToolContext, lead_id: str | int) -> str:
         if isinstance(lead_id, int) or (isinstance(lead_id, str) and lead_id.isdecimal()):
             lead = context.db.query(Lead).filter(Lead.team_id == context.team_id, Lead.id == int(lead_id)).first()
             if lead is None:
@@ -805,7 +811,7 @@ class CRMAgentToolService:
         context: AgentToolContext,
         *,
         customer_id: int,
-        query_text: Optional[str],
+        query_text: str | None,
     ) -> JsonDict:
         try:
             intelligence_context = self.intelligence_context_service.build_context(
@@ -832,22 +838,22 @@ class CRMAgentToolService:
     async def create_customer_activity(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
+        customer_id: str | int,
         activity_kind: str,
         source_content: str,
-        customer_name: Optional[str] = None,
-        title: Optional[str] = None,
-        content_json: Optional[JsonDict] = None,
-        summary: Optional[str] = None,
-        next_action: Optional[str] = None,
-        next_action_source: Optional[str] = None,
-        next_follow_time: Optional[str] = None,
-        next_follow_time_source: Optional[str] = None,
-        effectiveness_score: Optional[int] = None,
-        effectiveness_is_valid: Optional[bool] = None,
-        effectiveness_reason: Optional[str] = None,
-        effectiveness_detail_json: Optional[JsonDict] = None,
-        idempotency_suffix: Optional[str] = None,
+        customer_name: str | None = None,
+        title: str | None = None,
+        content_json: JsonDict | None = None,
+        summary: str | None = None,
+        next_action: str | None = None,
+        next_action_source: str | None = None,
+        next_follow_time: str | None = None,
+        next_follow_time_source: str | None = None,
+        effectiveness_score: int | None = None,
+        effectiveness_is_valid: bool | None = None,
+        effectiveness_reason: str | None = None,
+        effectiveness_detail_json: JsonDict | None = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
         if effectiveness_score is None or effectiveness_is_valid is None or not effectiveness_reason:
             return AgentToolResult(
@@ -857,7 +863,7 @@ class CRMAgentToolService:
                 status_code=400,
             )
 
-        payload = {
+        payload: JsonDict = {
             "customer_id": customer_id,
             "customer_name": customer_name,
             "activity_kind": activity_kind,
@@ -984,12 +990,12 @@ class CRMAgentToolService:
         self,
         context: AgentToolContext,
         lead: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"lead": lead}
+        payload: JsonDict = {"lead": lead}
         action_key = self._action_key("create_lead", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             return await self.api_client.request(
                 "POST",
                 "/v1/leads/",
@@ -1004,12 +1010,12 @@ class CRMAgentToolService:
         self,
         context: AgentToolContext,
         customer: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"customer": customer}
+        payload: JsonDict = {"customer": customer}
         action_key = self._action_key("create_customer", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             return await self.api_client.request(
                 "POST",
                 "/v1/customers/",
@@ -1023,14 +1029,14 @@ class CRMAgentToolService:
     async def create_lead_follow_up(
         self,
         context: AgentToolContext,
-        lead_id: Union[str, int],
+        lead_id: str | int,
         content: str,
         method: str = "其他",
-        next_action: Optional[str] = None,
-        next_follow_time: Optional[str] = None,
-        idempotency_suffix: Optional[str] = None,
+        next_action: str | None = None,
+        next_follow_time: str | None = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {
+        payload: JsonDict = {
             "lead_id": lead_id,
             "content": content,
             "method": method,
@@ -1039,7 +1045,7 @@ class CRMAgentToolService:
         }
         action_key = self._action_key("create_lead_follow_up", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             lead_public_id = self._resolve_lead_public_id(context, lead_id)
             return await self.api_client.request(
                 "POST",
@@ -1059,14 +1065,14 @@ class CRMAgentToolService:
     async def create_contact(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
+        customer_id: str | int,
         contact: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"customer_id": customer_id, "contact": contact}
+        payload: JsonDict = {"customer_id": customer_id, "contact": contact}
         action_key = self._action_key("create_contact", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "POST",
@@ -1081,19 +1087,19 @@ class CRMAgentToolService:
     async def create_invoice_title(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
+        customer_id: str | int,
         invoice_title: JsonDict,
         set_default: bool = False,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {
+        payload: JsonDict = {
             "customer_id": customer_id,
             "invoice_title": invoice_title,
             "set_default": set_default,
         }
         action_key = self._action_key("create_invoice_title", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> JsonDict:
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
             created = await self.api_client.request(
                 "POST",
@@ -1119,12 +1125,12 @@ class CRMAgentToolService:
         self,
         context: AgentToolContext,
         deployment_info: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"deployment_info": deployment_info}
+        payload: JsonDict = {"deployment_info": deployment_info}
         action_key = self._action_key("create_deployment_info", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             api_payload = dict(deployment_info)
             if api_payload.get("customer_id") is not None:
                 api_payload["customer_id"] = self._resolve_customer_public_id(context, api_payload["customer_id"])
@@ -1141,14 +1147,14 @@ class CRMAgentToolService:
     async def create_customer_member(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
+        customer_id: str | int,
         member: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"customer_id": customer_id, "member": member}
+        payload: JsonDict = {"customer_id": customer_id, "member": member}
         action_key = self._action_key("create_customer_member", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             customer_public_id = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
                 "POST",
@@ -1164,13 +1170,13 @@ class CRMAgentToolService:
         self,
         context: AgentToolContext,
         opportunity: JsonDict,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
         opportunity = {key: value for key, value in opportunity.items() if key != "opportunity_name"}
-        payload = {"opportunity": opportunity}
+        payload: JsonDict = {"opportunity": opportunity}
         action_key = self._action_key("create_opportunity", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             api_payload = dict(opportunity)
             if api_payload.get("customer_id") is not None:
                 api_payload["customer_id"] = self._resolve_customer_public_id(context, api_payload["customer_id"])
@@ -1187,8 +1193,8 @@ class CRMAgentToolService:
     async def list_customer_opportunities(
         self,
         context: AgentToolContext,
-        customer_id: Union[str, int],
-        status: Optional[str] = None,
+        customer_id: str | int,
+        status: str | None = None,
         limit: int = 20,
     ) -> AgentToolResult:
         params: JsonDict = {"customer_id": customer_id, "limit": limit}
@@ -1196,7 +1202,7 @@ class CRMAgentToolService:
             params["status"] = status
         payload = dict(params)
 
-        async def call_api():
+        async def call_api() -> object:
             api_params = dict(params)
             api_params["customer_id"] = self._resolve_customer_public_id(context, customer_id)
             return await self.api_client.request(
@@ -1209,11 +1215,11 @@ class CRMAgentToolService:
         return await self._run_read_tool(context, "list_customer_opportunities", payload, call_api)
 
     async def get_opportunity_detail(
-        self, context: AgentToolContext, opportunity_id: Union[str, int]
+        self, context: AgentToolContext, opportunity_id: str | int
     ) -> AgentToolResult:
-        payload = {"opportunity_id": opportunity_id}
+        payload: JsonDict = {"opportunity_id": opportunity_id}
 
-        async def call_api():
+        async def call_api() -> object:
             opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "GET",
@@ -1226,11 +1232,11 @@ class CRMAgentToolService:
     async def get_opportunity_procurement_stages(
         self,
         context: AgentToolContext,
-        opportunity_id: Union[str, int],
+        opportunity_id: str | int,
     ) -> AgentToolResult:
-        payload = {"opportunity_id": opportunity_id}
+        payload: JsonDict = {"opportunity_id": opportunity_id}
 
-        async def call_api():
+        async def call_api() -> object:
             opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "GET",
@@ -1243,14 +1249,14 @@ class CRMAgentToolService:
     async def move_opportunity_stage(
         self,
         context: AgentToolContext,
-        opportunity_id: Union[str, int],
+        opportunity_id: str | int,
         stage_template_id: int,
-        idempotency_suffix: Optional[str] = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        payload = {"opportunity_id": opportunity_id, "stage_template_id": stage_template_id}
+        payload: JsonDict = {"opportunity_id": opportunity_id, "stage_template_id": stage_template_id}
         action_key = self._action_key("move_opportunity_stage", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             opportunity_public_id = self._resolve_opportunity_public_id(context, opportunity_id)
             return await self.api_client.request(
                 "POST",
@@ -1269,8 +1275,8 @@ class CRMAgentToolService:
         stage_name: str,
         planned_amount: float,
         due_date: str,
-        notes: Optional[str] = None,
-        idempotency_suffix: Optional[str] = None,
+        notes: str | None = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
         plan = {
             "stage_name": stage_name,
@@ -1281,7 +1287,7 @@ class CRMAgentToolService:
         payload = {"contract_id": contract_id, "plans": [plan]}
         action_key = self._action_key("create_payment_plan", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> JsonDict:
             created = await self.api_client.request(
                 "POST",
                 f"/v1/payments/contracts/{contract_id}/payment-plans",
@@ -1300,12 +1306,12 @@ class CRMAgentToolService:
         actual_amount: float,
         payment_date: str,
         commission_member_id: str,
-        actual_payer_name: Optional[str] = None,
-        proof_attachment: Optional[str] = None,
-        notes: Optional[str] = None,
-        idempotency_suffix: Optional[str] = None,
+        actual_payer_name: str | None = None,
+        proof_attachment: str | None = None,
+        notes: str | None = None,
+        idempotency_suffix: str | None = None,
     ) -> AgentToolResult:
-        record = {
+        record: JsonDict = {
             "actual_amount": actual_amount,
             "actual_payer_name": actual_payer_name,
             "payment_date": payment_date,
@@ -1313,10 +1319,10 @@ class CRMAgentToolService:
             "commission_member_id": commission_member_id,
             "notes": notes,
         }
-        payload = {"payment_plan_id": payment_plan_id, **record}
+        payload: JsonDict = {"payment_plan_id": payment_plan_id, **record}
         action_key = self._action_key("create_payment_record", context, payload, idempotency_suffix)
 
-        async def call_api():
+        async def call_api() -> object:
             return await self.api_client.request(
                 "POST",
                 f"/v1/payments/payment-plans/{payment_plan_id}/records",
@@ -1391,11 +1397,11 @@ class CRMAgentToolService:
         return stage_context
 
     @staticmethod
-    def _resolve_opportunity_public_id(context: AgentToolContext, opportunity_id: Union[str, int]) -> str:
+    def _resolve_opportunity_public_id(context: AgentToolContext, opportunity_id: str | int) -> str:
         if is_opportunity_public_id(opportunity_id):
             return str(opportunity_id)
 
-        numeric_id: Optional[int] = None
+        numeric_id: int | None = None
         if isinstance(opportunity_id, int):
             numeric_id = opportunity_id
         elif isinstance(opportunity_id, str) and opportunity_id.isdecimal():
@@ -1428,7 +1434,7 @@ class CRMAgentToolService:
         context: AgentToolContext,
         tool_name: str,
         request_json: JsonDict,
-        call_api: Callable[[], object],
+        call_api: Callable[[], Awaitable[object]],
     ) -> AgentToolResult:
         tool_call = self._create_tool_call(context, tool_name, request_json)
         try:
@@ -1568,7 +1574,7 @@ class CRMAgentToolService:
             )
         return result
 
-    def _create_tool_call(self, context: AgentToolContext, tool_name: str, request_json: JsonDict):
+    def _create_tool_call(self, context: AgentToolContext, tool_name: str, request_json: JsonDict) -> AgentToolCall:
         return agent_tool_call_crud.create(
             context.db,
             AgentToolCallCreate(
@@ -1584,10 +1590,10 @@ class CRMAgentToolService:
     @staticmethod
     def _mark_tool_failed(
         context: AgentToolContext,
-        tool_call,
+        tool_call: AgentToolCall,
         tool_name: str,
         message: str,
-        status_code: Optional[int],
+        status_code: int | None,
         response_json: object,
     ) -> AgentToolResult:
         agent_tool_call_crud.update(
@@ -1609,7 +1615,7 @@ class CRMAgentToolService:
         )
 
     @staticmethod
-    def _action_key(tool_name: str, context: AgentToolContext, payload: JsonDict, suffix: Optional[str]) -> str:
+    def _action_key(tool_name: str, context: AgentToolContext, payload: JsonDict, suffix: str | None) -> str:
         stable_suffix = suffix or CRMAgentToolService._hash_json(payload)[:24]
         return f"{tool_name}:{context.session_id}:{stable_suffix}"
 

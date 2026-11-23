@@ -2,10 +2,11 @@
 
 定义 License 申请相关的 Pydantic 模型。
 """
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
-from typing import Optional, Self
 from datetime import date, datetime
 from enum import Enum
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LicenseApplicationStatus(str, Enum):
@@ -17,7 +18,7 @@ class LicenseApplicationStatus(str, Enum):
     ISSUED = "ISSUED"
 
     @property
-    def description(self):
+    def description(self) -> str:
         descriptions = {
             "DRAFT": "草稿",
             "PENDING_REVIEW": "待审批",
@@ -34,7 +35,7 @@ class LicenseType(str, Enum):
     OFFICIAL = "OFFICIAL"
 
     @property
-    def description(self):
+    def description(self) -> str:
         descriptions = {
             "TRIAL": "试用版",
             "OFFICIAL": "正式版"
@@ -43,18 +44,18 @@ class LicenseType(str, Enum):
 
 
 TRIAL_PERMANENT_ERROR = "试用 License 不能设为永久"
-TRIAL_EXPIRY_REQUIRED_ERROR = "试用 License 必须填到期日期，且要晚于今天。"
+TRIAL_EXPIRY_REQUIRED_ERROR = "试用 License 必须填到期日期\uff0c且要晚于今天。"
 OFFICIAL_EXPIRY_FUTURE_ERROR = "到期时间必须晚于今天"
 
 
 def resolve_license_term(
     license_type: str,
     is_permanent: bool,
-    expiry_date: Optional[date],
-) -> Optional[date]:
+    expiry_date: date | None,
+) -> date | None:
     """校验 License 期限并返回应存储的到期时间。
 
-    不变量：永久 ⇒ OFFICIAL 且到期时间为空（传入的日期会被丢弃）；
+    不变量\uff1a永久 ⇒ OFFICIAL 且到期时间为空\uff08传入的日期会被丢弃\uff09\uff1b
     非永久 ⇒ 到期时间必填且晚于今天。
     """
     if is_permanent:
@@ -71,16 +72,16 @@ def resolve_license_term(
 class LicenseApplicationBase(BaseModel):
     """License 申请基础模型"""
     customer_id: str = Field(..., description="关联客户对外ID")
-    deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
+    deployment_info_id: int | None = Field(None, description="关联部署信息ID")
     license_type: LicenseType = Field(..., description="License 类型")
     authorized_users: int = Field(..., gt=0, description="本次申请使用人数")
-    is_permanent: bool = Field(False, description="是否永久（仅正式 License）")
-    expiry_date: Optional[date] = Field(None, description="到期时间（永久时为空）")
-    remark: Optional[str] = Field(None, description="备注（申请时填写）")
+    is_permanent: bool = Field(False, description="是否永久\uff08仅正式 License\uff09")
+    expiry_date: date | None = Field(None, description="到期时间\uff08永久时为空\uff09")
+    remark: str | None = Field(None, description="备注\uff08申请时填写\uff09")
 
     @model_validator(mode='after')
     def validate_license_term(self) -> Self:
-        """永久仅限正式版且无到期时间；非永久必须填写晚于今天的到期时间"""
+        """永久仅限正式版且无到期时间\uff1b非永久必须填写晚于今天的到期时间"""
         self.expiry_date = resolve_license_term(
             self.license_type.value, self.is_permanent, self.expiry_date
         )
@@ -97,11 +98,11 @@ class LicenseApplicationBase(BaseModel):
 
 class LicenseApplicationCreate(LicenseApplicationBase):
     """创建 License 申请请求模型"""
-    contract_id: Optional[int] = Field(None, description="关联合同ID（正式版必填）")
-    product_public_id: Optional[str] = Field(None, description="申请产品对外ID（正式版跟随合同对应商机的产品）")
+    contract_id: int | None = Field(None, description="关联合同ID\uff08正式版必填\uff09")
+    product_public_id: str | None = Field(None, description="申请产品对外ID\uff08正式版跟随合同对应商机的产品\uff09")
 
     @model_validator(mode='after')
-    def validate_contract_for_official(self):
+    def validate_contract_for_official(self) -> Self:
         """验证正式版必须关联合同"""
         if self.license_type == LicenseType.OFFICIAL and not self.contract_id:
             raise ValueError('正式版 License 必须关联合同')
@@ -113,16 +114,16 @@ class LicenseApplicationInternalCreate(LicenseApplicationCreate):
 
 class LicenseApplicationUpdate(BaseModel):
     """更新 License 申请请求模型"""
-    deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
-    contract_id: Optional[int] = Field(None, description="关联合同ID")
-    authorized_users: Optional[int] = Field(None, gt=0, description="本次申请使用人数")
-    is_permanent: Optional[bool] = Field(None, description="是否永久（仅正式 License）")
-    expiry_date: Optional[date] = Field(None, description="到期时间")
-    remark: Optional[str] = Field(None, description="备注")
+    deployment_info_id: int | None = Field(None, description="关联部署信息ID")
+    contract_id: int | None = Field(None, description="关联合同ID")
+    authorized_users: int | None = Field(None, gt=0, description="本次申请使用人数")
+    is_permanent: bool | None = Field(None, description="是否永久\uff08仅正式 License\uff09")
+    expiry_date: date | None = Field(None, description="到期时间")
+    remark: str | None = Field(None, description="备注")
 
     @field_validator('expiry_date')
     @classmethod
-    def validate_expiry_date(cls, v: Optional[date]) -> Optional[date]:
+    def validate_expiry_date(cls, v: date | None) -> date | None:
         """验证到期时间必须晚于今天"""
         if v is not None and v <= date.today():
             raise ValueError(OFFICIAL_EXPIRY_FUTURE_ERROR)
@@ -131,13 +132,13 @@ class LicenseApplicationUpdate(BaseModel):
 
 class LicenseApplicationApprove(BaseModel):
     """审批 License 申请请求模型 - 简化版本"""
-    license_code: str = Field(..., min_length=1, description="授权码（审批人回填）")
+    license_code: str = Field(..., min_length=1, description="授权码\uff08审批人回填\uff09")
 
 
 class LicenseApplicationApproveFull(BaseModel):
     """审批 License 申请请求模型 - 完整版本"""
     license_info: str = Field(..., min_length=1, description="完整的 License 信息文本")
-    comment: Optional[str] = Field(None, description="审批意见")
+    comment: str | None = Field(None, description="审批意见")
 
 
 class LicenseApplicationResponse(BaseModel):
@@ -146,38 +147,38 @@ class LicenseApplicationResponse(BaseModel):
     team_id: int = Field(..., description="团队ID")
     application_number: str = Field(..., description="申请单号")
     customer_id: str = Field(..., description="关联客户对外ID")
-    deployment_info_id: Optional[int] = Field(None, description="关联部署信息ID")
-    contract_id: Optional[int] = Field(None, description="关联合同ID")
-    product_public_id: Optional[str] = Field(None, description="申请产品对外ID（产品删除后为空）")
-    product_name: Optional[str] = Field(None, description="申请产品名称快照")
-    expiry_date: Optional[date] = Field(None, description="到期时间（永久时为空）")
+    deployment_info_id: int | None = Field(None, description="关联部署信息ID")
+    contract_id: int | None = Field(None, description="关联合同ID")
+    product_public_id: str | None = Field(None, description="申请产品对外ID\uff08产品删除后为空\uff09")
+    product_name: str | None = Field(None, description="申请产品名称快照")
+    expiry_date: date | None = Field(None, description="到期时间\uff08永久时为空\uff09")
     is_permanent: bool = Field(False, description="是否永久")
     license_type: str = Field(..., description="License 类型")
     authorized_users: int = Field(..., description="本次申请使用人数")
     # 补充需求字段
-    enterprise_id: Optional[str] = Field(None, description="企业编号")
-    supported_modules: Optional[str] = Field(None, description="支持模块")
-    server_license_code: Optional[str] = Field(None, description="服务端 License")
-    client_license_code: Optional[str] = Field(None, description="客户端 License")
-    remark: Optional[str] = Field(None, description="备注")
+    enterprise_id: str | None = Field(None, description="企业编号")
+    supported_modules: str | None = Field(None, description="支持模块")
+    server_license_code: str | None = Field(None, description="服务端 License")
+    client_license_code: str | None = Field(None, description="客户端 License")
+    remark: str | None = Field(None, description="备注")
     # 原有字段
-    license_code: Optional[str] = Field(None, description="授权码（旧字段）")
+    license_code: str | None = Field(None, description="授权码\uff08旧字段\uff09")
     status: str = Field(..., description="申请状态")
-    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
+    approval_phase: str | None = Field(None, description="审批流程状态\uff1adraft/pending_review/approved/rejected")
     applicant_id: str = Field(..., description="申请人系统用户ID")
-    approver_id: Optional[str] = Field(None, description="审批人系统用户ID")
-    approved_time: Optional[datetime] = Field(None, description="审批时间")
+    approver_id: str | None = Field(None, description="审批人系统用户ID")
+    approved_time: datetime | None = Field(None, description="审批时间")
     # 审批关联字段
-    approval_id: Optional[int] = Field(None, description="审批实例ID")
+    approval_id: int | None = Field(None, description="审批实例ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
 
-    # 关联信息（用于前端展示）
-    customer_name: Optional[str] = Field(None, description="客户名称")
-    deployment_name: Optional[str] = Field(None, description="部署名称")
-    contract_name: Optional[str] = Field(None, description="合同名称")
-    applicant_name: Optional[str] = Field(None, description="申请人姓名")
-    approver_name: Optional[str] = Field(None, description="审批人姓名")
+    # 关联信息(用于前端展示)
+    customer_name: str | None = Field(None, description="客户名称")
+    deployment_name: str | None = Field(None, description="部署名称")
+    contract_name: str | None = Field(None, description="合同名称")
+    applicant_name: str | None = Field(None, description="申请人姓名")
+    approver_name: str | None = Field(None, description="审批人姓名")
 
     model_config = ConfigDict(from_attributes=True)
 

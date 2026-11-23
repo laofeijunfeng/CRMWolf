@@ -3,22 +3,26 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
-from app.models.customer import Customer
+from app.crud.permission import permission_crud
 from app.models.contract import Contract
+from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.opportunity import Opportunity
 from app.models.role import Role
 from app.models.team import UserTeam
 from app.models.user import User
 from app.models.user_role import UserRole
-from app.crud.permission import permission_crud
-from app.schemas.customer import OwnerOption, OwnerListResponse
-
+from app.schemas.customer import OwnerListResponse, OwnerOption
 
 router = APIRouter(prefix="/v1/filter-options", tags=["筛选选项"])
 
 
-@router.get("/owners", response_model=OwnerListResponse, summary="获取可筛选的负责人列表", description="获取当前登录用户有权限查看的负责人列表")
+@router.get(
+    "/owners",
+    response_model=OwnerListResponse,
+    summary="获取可筛选的负责人列表",
+    description="获取当前登录用户有权限查看的负责人列表",
+)
 def get_filter_owners(
     resource: str = Query("customer", description="资源类型：customer、lead、opportunity、contract 或 sales_dashboard"),
     team_id: int = Depends(get_current_user_team),

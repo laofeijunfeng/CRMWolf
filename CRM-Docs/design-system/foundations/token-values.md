@@ -92,7 +92,7 @@
 | `--page-padding` | `24px`（<768px 为 `16px`） | 页面内边距，含列表页顶部。 |
 | `--assistant-column` | `720px`（<768px 为 `100%`） | 助手页阅读列；对话内容与输入区同轴。 |
 | `--sidebar-width` | `220px` | 桌面侧栏宽度。 |
-| `--topbar-height` / `--bottom-nav-height` / `--context-tabs-height` | `56px` / `56px` / `36px` | 顶栏 / 移动端底部导航 / 上下文标签栏。 |
+| `--topbar-height` / `--context-tabs-height` | `56px` / `36px` | 顶栏 / 上下文标签栏。 |
 | 卡片内边距 / 卡片间距 / 模块间距 | `$space-4` / `$space-4` / `$space-6`（移动端 `$space-3` / `$space-4` / `$space-4`） | 容器节奏。 |
 | 表格行 / 表头最小高度；表格单元格内边距 | `44px`；纵 `12px` / 横 `8px`（移动端 `8px 4px`） | 数据表格。 |
 | 列表 / 菜单行高 | `36px`（单行）/ `52px`（双行） | 菜单项、紧凑列表行；双行含主次两行文字。 |

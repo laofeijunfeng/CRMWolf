@@ -1,42 +1,47 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from typing import List
 import json
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, get_user_teams
-from app.crud.team import team_crud, user_team_crud
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.role import role_crud
+from app.crud.team import team_crud
 from app.crud.user import user_crud
-from app.services.permission_service import permission_service
-from app.services.acquisition_source_service import seed_default_sources
 from app.models.user import User
 from app.schemas.team import (
-    TeamCreate,
-    TeamUpdate,
-    TeamResponse,
-    TeamJoinRequest,
-    TeamSwitchRequest,
-    TeamInviteRequest,
     AddMemberRequest,
     AssignRolesRequest,
-    TeamMemberResponse,
-    RoleSimpleResponse,
-    UserTeamsListResponse,
     ResetPasswordRequest,
-    UpdateMemberNameRequest
+    RoleSimpleResponse,
+    TeamCreate,
+    TeamInviteRequest,
+    TeamJoinRequest,
+    TeamMemberResponse,
+    TeamResponse,
+    TeamSwitchRequest,
+    TeamUpdate,
+    UpdateMemberNameRequest,
+    UserTeamsListResponse,
 )
+from app.services.acquisition_source_service import seed_default_sources
+from app.services.permission_service import permission_service
 
 router = APIRouter(prefix="/v1/teams", tags=["团队"])
 
 
 def is_team_admin(db: Session, team_id: int, user_id: int) -> bool:
-    """判断用户是否为团队管理员（拥有 TEAM_ADMIN 角色）"""
+    """判断用户是否为团队管理员\uff08拥有 TEAM_ADMIN 角色\uff09"""
     user_roles = role_crud.get_user_roles(db, user_id, team_id)
     return any(r.code == "TEAM_ADMIN" for r in user_roles)
 
 
-@router.post("/", response_model=TeamResponse, summary="创建团队", description="创建新团队，创建者自动成为团队管理员")
+@router.post(
+    "/",
+    response_model=TeamResponse,
+    summary="创建团队",
+    description="创建新团队\uff0c创建者自动成为团队管理员",
+)
 def create_team(
     request: TeamCreate,
     current_user: User = Depends(get_current_active_user),
@@ -72,7 +77,7 @@ def join_team(
     if not team:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="邀请码无效，团队不存在"
+            detail="邀请码无效\uff0c团队不存在"
         )
 
     # 检查用户是否已加入该团队
@@ -124,7 +129,12 @@ def get_current_team(
     return team
 
 
-@router.get("/user-teams", response_model=UserTeamsListResponse, summary="获取用户所有团队", description="获取用户所属的所有团队列表")
+@router.get(
+    "/user-teams",
+    response_model=UserTeamsListResponse,
+    summary="获取用户所有团队",
+    description="获取用户所属的所有团队列表",
+)
 def get_user_teams_list(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -204,7 +214,12 @@ async def invite_member(
     return {"message": "邀请邮件已发送", "email": request.email}
 
 
-@router.get("/{team_id}/members", response_model=List[TeamMemberResponse], summary="获取团队成员列表", description="获取团队成员列表（包含角色信息）")
+@router.get(
+    "/{team_id}/members",
+    response_model=list[TeamMemberResponse],
+    summary="获取团队成员列表",
+    description="获取团队成员列表\uff08包含角色信息\uff09",
+)
 def get_team_members(
     team_id: int,
     current_user: User = Depends(get_current_active_user),
@@ -237,7 +252,11 @@ def get_team_members(
     ]
 
 
-@router.delete("/{team_id}/members/{user_id}", summary="移除团队成员", description="从团队中移除指定成员，同步删除角色关系")
+@router.delete(
+    "/{team_id}/members/{user_id}",
+    summary="移除团队成员",
+    description="从团队中移除指定成员\uff0c同步删除角色关系",
+)
 def remove_member(
     team_id: int,
     user_id: int,
@@ -259,7 +278,7 @@ def remove_member(
             detail="不能移除自己"
         )
 
-    # 移除成员（CRUD 已包含删除角色逻辑）
+    # 移除成员(CRUD 已包含删除角色逻辑)
     success = team_crud.remove_member(db, team_id, user_id)
     if not success:
         raise HTTPException(
@@ -315,7 +334,11 @@ def regenerate_invite_code(
     return {"message": "邀请码已重置", "code": new_code}
 
 
-@router.post("/{team_id}/members", summary="直接添加成员", description="将用户直接添加到团队，无需对方同意，默认分配销售成员角色")
+@router.post(
+    "/{team_id}/members",
+    summary="直接添加成员",
+    description="将用户直接添加到团队\uff0c无需对方同意\uff0c默认分配销售成员角色",
+)
 def add_member_direct(
     team_id: int,
     request: AddMemberRequest,
@@ -363,7 +386,11 @@ def add_member_direct(
     return {"message": "成员已添加", "user_id": request.user_id}
 
 
-@router.post("/{team_id}/members/{user_id}/roles", summary="分配成员角色", description="为团队成员分配角色（替换模式）")
+@router.post(
+    "/{team_id}/members/{user_id}/roles",
+    summary="分配成员角色",
+    description="为团队成员分配角色\uff08替换模式\uff09",
+)
 def assign_member_roles(
     team_id: int,
     user_id: int,
@@ -379,7 +406,7 @@ def assign_member_roles(
             detail="只有团队管理员可以分配角色"
         )
 
-    # 不能修改自己的角色（防止误删自己的 TEAM_ADMIN）
+    # 不能修改自己的角色(防止误删自己的 TEAM_ADMIN)
     if user_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -402,13 +429,18 @@ def assign_member_roles(
                 detail=f"角色 ID {role_id} 不存在"
             )
 
-    # 批量分配角色（替换模式）
+    # 批量分配角色(替换模式)
     role_crud.assign_roles_to_user(db, user_id, request.role_ids, team_id)
 
     return {"message": "角色已分配", "user_id": user_id, "role_ids": request.role_ids}
 
 
-@router.get("/{team_id}/members/{user_id}/roles", response_model=List[RoleSimpleResponse], summary="获取成员角色", description="获取团队成员的角色列表")
+@router.get(
+    "/{team_id}/members/{user_id}/roles",
+    response_model=list[RoleSimpleResponse],
+    summary="获取成员角色",
+    description="获取团队成员的角色列表",
+)
 def get_member_roles(
     team_id: int,
     user_id: int,
@@ -434,7 +466,11 @@ def get_member_roles(
     return [RoleSimpleResponse(id=r.id, name=r.name, code=r.code) for r in roles]
 
 
-@router.put("/{team_id}/members/{user_id}/name", summary="修改成员用户名", description="修改团队成员用户名（仅 TEAM_ADMIN 可调用）")
+@router.put(
+    "/{team_id}/members/{user_id}/name",
+    summary="修改成员用户名",
+    description="修改团队成员用户名\uff08仅 TEAM_ADMIN 可调用\uff09",
+)
 async def update_member_name(
     team_id: int,
     user_id: int,
@@ -443,9 +479,9 @@ async def update_member_name(
     db: Session = Depends(get_db)
 ):
     """
-    修改团队成员用户名（仅 TEAM_ADMIN 可调用）
+    修改团队成员用户名\uff08仅 TEAM_ADMIN 可调用\uff09
     """
-    # 权限检查：仅 TEAM_ADMIN 可调用
+    # 权限检查:仅 TEAM_ADMIN 可调用
     if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -474,7 +510,11 @@ async def update_member_name(
     return {"message": f"已修改 {target_user.email} 的用户名", "user_id": target_user.id, "name": target_user.name}
 
 
-@router.post("/{team_id}/members/{user_id}/reset-password", summary="重置成员密码", description="重置团队成员密码（仅 TEAM_ADMIN 可调用）")
+@router.post(
+    "/{team_id}/members/{user_id}/reset-password",
+    summary="重置成员密码",
+    description="重置团队成员密码\uff08仅 TEAM_ADMIN 可调用\uff09",
+)
 async def reset_member_password(
     team_id: int,
     user_id: int,
@@ -483,11 +523,11 @@ async def reset_member_password(
     db: Session = Depends(get_db)
 ):
     """
-    重置团队成员密码（仅 TEAM_ADMIN 可调用）
+    重置团队成员密码\uff08仅 TEAM_ADMIN 可调用\uff09
 
-    直接设置新密码，无需验证旧密码
+    直接设置新密码\uff0c无需验证旧密码
     """
-    # 权限检查：仅 TEAM_ADMIN 可调用
+    # 权限检查:仅 TEAM_ADMIN 可调用
     if not is_team_admin(db, team_id, current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -502,7 +542,7 @@ async def reset_member_password(
             detail="用户不存在"
         )
 
-    # 检查目标用户是否属于该团队（通过角色关联）
+    # 检查目标用户是否属于该团队(通过角色关联)
     user_roles = role_crud.get_user_roles(db, user_id, team_id)
     if not user_roles:
         raise HTTPException(
@@ -510,7 +550,7 @@ async def reset_member_password(
             detail="该用户不属于当前团队"
         )
 
-    # 更新密码（复用现有 CRUD 方法）
+    # 更新密码(复用现有 CRUD 方法)
     user_crud.set_password(db, target_user, request.new_password)
 
     return {"message": f"已重置 {target_user.name} 的密码"}

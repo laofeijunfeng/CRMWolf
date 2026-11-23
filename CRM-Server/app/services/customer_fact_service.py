@@ -5,9 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal, TypeAlias
-from sqlalchemy import exists, or_, select
-
-from app.services.customer_activity_source_isolation import eligible_activity_source
 
 from app.models.customer_fact import (
     CustomerFact,

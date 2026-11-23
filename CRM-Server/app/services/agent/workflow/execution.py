@@ -33,7 +33,6 @@ from app.services.agent.workflow.resources import (
     WorkflowResourceResolutionError,
 )
 
-
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -299,7 +298,7 @@ class CRMWorkflowEffectExecutor:
             if suggestion_trigger:
                 return WorkflowEffectResult(
                     success=True,
-                    message="商机状态已变化，本次不再重复推进。",
+                    message="商机状态已变化\uff0c本次不再重复推进。",
                 )
             return WorkflowEffectResult(
                 success=False,
@@ -639,20 +638,20 @@ def _user_facing_effect_failure(
         lead = committed[0]
         if "method" in original or "跟进方式" in original or original.startswith("请求参数验证失败"):
             return (
-                f"已创建线索「{lead.display_name}」，但首次跟进没写上：跟进方式无效。\n"
-                "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+                f"已创建线索「{lead.display_name}」\uff0c但首次跟进没写上\uff1a跟进方式无效。\n"
+                "请直接为这条线索补充跟进\uff08电话 / 微信 / 拜访 / 邮件 / 其他\uff09\uff0c不要再创建同一条线索。"
             )
         return (
-            f"已创建线索「{lead.display_name}」，但首次跟进没写上。\n"
-            "请直接为这条线索补充跟进（电话 / 微信 / 拜访 / 邮件 / 其他），不要再创建同一条线索。"
+            f"已创建线索「{lead.display_name}」\uff0c但首次跟进没写上。\n"
+            "请直接为这条线索补充跟进\uff08电话 / 微信 / 拜访 / 邮件 / 其他\uff09\uff0c不要再创建同一条线索。"
         )
     if command.tool_name == "create_customer_activity" and committed:
         customer = committed[0]
         return (
-            f"已创建客户「{customer.display_name}」，但首次跟进没写上。\n"
-            "请直接为这个客户记录跟进，不要再创建同一客户。"
+            f"已创建客户「{customer.display_name}」\uff0c但首次跟进没写上。\n"
+            "请直接为这个客户记录跟进\uff0c不要再创建同一客户。"
         )
     if committed:
         names = "、".join(f"「{item.display_name}」" for item in committed)
-        return f"已完成{names}，但后续写入没完成。请针对已有对象继续操作，不要重复创建。"
-    return "操作没完成，确认已失效，请改数据后重新描述。"
+        return f"已完成{names}\uff0c但后续写入没完成。请针对已有对象继续操作\uff0c不要重复创建。"
+    return "操作没完成\uff0c确认已失效\uff0c请改数据后重新描述。"

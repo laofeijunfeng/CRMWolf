@@ -20,7 +20,7 @@ class ApprovalPhase(str, Enum):
     """
 
     DRAFT = "draft"           # 草稿/待提交
-    PENDING_REVIEW = "pending_review"  # 待审批（整个审批流程中）
+    PENDING_REVIEW = "pending_review"  # 待审批(整个审批流程中)
     APPROVED = "approved"     # 审批通过
     REJECTED = "rejected"     # 审批拒绝
 

@@ -1,4 +1,4 @@
-"""自动化工作流 API：CRMWolf 自有 Workflow DSL 的 CRUD、状态流转、乐观锁与团队隔离。"""
+"""自动化工作流 API\uff1aCRMWolf 自有 Workflow DSL 的 CRUD、状态流转、乐观锁与团队隔离。"""
 
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ router = APIRouter(prefix="/v1/workflows", tags=["自动化工作流"])
 
 def _status_literal(value: object) -> WorkflowStatusLiteral:
     if value in ("draft", "published", "paused"):
-        return value  # noqa: TC003  # mypy narrows via literal membership
+        return value  # mypy narrows via literal membership
     return "draft"
 
 
 def _serialize_dsl(dsl_value: Any) -> dict[str, Any]:
-    """sqlite 下 JSON 列以 Text 存储，读取时容错反序列化；MySQL JSON 直接返回 dict。"""
+    """sqlite 下 JSON 列以 Text 存储\uff0c读取时容错反序列化\uff1bMySQL JSON 直接返回 dict。"""
     if isinstance(dsl_value, dict):
         return dsl_value
     if isinstance(dsl_value, str):
@@ -162,7 +162,7 @@ def update_workflow(
     if workflow.last_modified_time != payload.expected_last_modified_time:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="工作流已被他人修改，请刷新后重试",
+            detail="工作流已被他人修改\uff0c请刷新后重试",
         )
     dsl_payload = payload.dsl.model_dump()
     _ensure_valid_dsl(dsl_payload)

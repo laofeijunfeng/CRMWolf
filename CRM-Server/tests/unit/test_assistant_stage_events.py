@@ -145,6 +145,48 @@ async def test_text_turn_emits_classify_structure_gate(db_session):
     assert stages.index(("structure", "done")) < stages.index(("quality_gate", "start"))
 
 
+@pytest.mark.parametrize("commitments_status,context_phase", [("empty", "done"), ("failed", "failed")])
+async def test_context_stage_closes_before_follow_up_continues(db_session, commitments_status, context_phase):
+    from app.services.assistant.follow_up_context import EvidencePack, RealFollowUpContext
+
+    class Context(RealFollowUpContext):
+        async def locate_customer(self, db, **kwargs):
+            return "广州睿狐科技有限公司"
+
+        def read_evidence(self, db, **kwargs):
+            return EvidencePack(commitments_status=commitments_status)
+
+    task = _task(db_session, activity_kind="FOLLOW_UP")
+    reporter = SSEProgressReporter()
+    coordinator = AssistantCoordinator(
+        Chooser(), structurer=Structurer(), quality_gate=PassGate(), follow_up=Context(None)
+    )
+    await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text="聊了 POC"), reporter=reporter)
+    stages = stages_of(reporter)
+    assert [(name, phase) for name, phase in stages if name in {"locate", "context", "judge"}] == [
+        ("locate", "start"), ("locate", "done"), ("context", "start"), ("context", context_phase),
+    ]
+    assert stages[-2:] == [("context", "start"), ("context", context_phase)]
+
+
+async def test_locator_failure_closes_stage_without_preparing_a_write(db_session):
+    from app.services.assistant.follow_up_context import RealFollowUpContext
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class Context(RealFollowUpContext):
+        async def locate_customer(self, db, **kwargs):
+            raise AssistantLLMError("unavailable")
+
+    task = _task(db_session, activity_kind="FOLLOW_UP")
+    reporter = SSEProgressReporter()
+    coordinator = AssistantCoordinator(
+        Chooser(), structurer=Structurer(), quality_gate=PassGate(), follow_up=Context(None)
+    )
+    outcome = await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text="聊了 POC"), reporter)
+    assert stages_of(reporter)[-2:] == [("locate", "start"), ("locate", "failed")]
+    assert outcome.reply.waiting is None and outcome.task.last_error_code == "CUSTOMER_LOCATOR_UNAVAILABLE"
+
+
 async def test_gate_done_carries_score(db_session):
     task = _task(db_session)
     reporter = SSEProgressReporter()

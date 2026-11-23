@@ -3,30 +3,40 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from operator import attrgetter
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from fastapi import HTTPException
 
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
-from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
 from app.services.assistant.action_evidence import validate_action_evidence
-from app.services.assistant.crm_effects import AssistantCRMCommand, checked_effect
+from app.services.assistant.crm_effects import AssistantCRMCommand, AssistantCRMNoEffect, checked_effect
 from app.services.assistant.opportunity_target_matching import match_opportunity_target
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from sqlalchemy.orm import Session
 
     from app.models.assistant import AssistantTask
+    from app.models.assistant_crm_effect import AssistantCRMEffect
     from app.models.opportunity import Opportunity
-    from app.models.procurement import ProcurementStageTemplate
+    from app.models.procurement import OpportunityStageSnapshot, ProcurementStageTemplate
     from app.models.user import User
+    from app.services.assistant.contracts import ProposalKind
 
-REMOVED_FACT_TYPES = frozenset({
-    "need", "budget", "risk", "stage", "stakeholder_attitude",
-    "competitor", "next_step", "preference", "summary",
-})
+# Candidate mappings retain the exact serialized shape, including omitted keys.
+ProposalData = dict[str, Any]
+
+
+class ProposalOutcome(TypedDict):
+    kind: ProposalKind
+    public_id: str
+    approval_phase: NotRequired[Literal["pending_review"]]
+    approval_id: NotRequired[int]
 
 
 def source_activity(db: Session, task: AssistantTask) -> CustomerActivity | None:
@@ -102,23 +112,29 @@ def _opportunity(db: Session, task: AssistantTask, public_id: str) -> Opportunit
     )
 
 
-def _stage(
-    db: Session, task: AssistantTask, opportunity: Opportunity, target_id: int
-) -> ProcurementStageTemplate | None:
+def adjacent_stage(
+    db: Session, task: AssistantTask, opportunity: Opportunity
+) -> tuple[OpportunityStageSnapshot | None, ProcurementStageTemplate] | None:
+    """Resolve the current snapshot and only legal next template for this opportunity."""
     from app.crud.procurement import procurement_stage_template_crud
     from app.models.procurement import OpportunityStageSnapshot
 
-    stages = procurement_stage_template_crud.get_by_method(db, opportunity.procurement_method_id, task.team_id)
-    snapshot = (
-        db.query(OpportunityStageSnapshot)
-        .filter(
-            OpportunityStageSnapshot.id == opportunity.current_stage_snapshot_id,
-            OpportunityStageSnapshot.team_id == task.team_id,
+    if opportunity.team_id != task.team_id or opportunity.procurement_method_id is None:
+        return None
+    snapshot = None
+    if opportunity.current_stage_snapshot_id is not None:
+        snapshot = (
+            db.query(OpportunityStageSnapshot)
+            .filter(
+                OpportunityStageSnapshot.id == opportunity.current_stage_snapshot_id,
+                OpportunityStageSnapshot.team_id == task.team_id,
+                OpportunityStageSnapshot.opportunity_id == opportunity.id,
+            )
+            .one_or_none()
         )
-        .one_or_none()
-        if opportunity.current_stage_snapshot_id
-        else None
-    )
+        if snapshot is None:
+            return None
+    stages = procurement_stage_template_crud.get_by_method(db, opportunity.procurement_method_id, task.team_id)
     if snapshot is not None:
         next_stage = next(
             (
@@ -132,30 +148,74 @@ def _stage(
         )
     else:
         next_stage = next((stage for stage in stages if stage.is_default_start), stages[0] if stages else None)
-    return next_stage if next_stage and int(next_stage.id) == target_id else None
+    return (snapshot, next_stage) if next_stage is not None else None
 
 
-def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dict | None:
-    """Bind model hints to persisted source and actual CRM rows, never model authority."""
+ProposalRejection = Literal["schema", "literal", "target", "permission"]
+
+
+def _matches_create_segment(activity: CustomerActivity, segment_id: object, quote: str) -> bool:
+    if not isinstance(segment_id, str) or not segment_id:
+        return False
+    content_json: str | None = attrgetter("content_json")(activity)
+    source_content: str = attrgetter("source_content")(activity)
+    try:
+        content = json.loads(content_json or "{}")
+    except (TypeError, ValueError):
+        content = {}
+    records = content.get("source_records") if isinstance(content, dict) else None
+    segments = [
+        (str(record["segment_id"]), str(record["text"]))
+        for record in (records if isinstance(records, list) else [])
+        if isinstance(record, dict) and record.get("segment_id") and record.get("text")
+    ] or [("seg_primary", source_content or "")]
+    matches = [text for identifier, text in segments if identifier == segment_id]
+    return len(matches) == 1 and quote in matches[0]
+
+
+def validate_candidate(
+    db: Session,
+    task: AssistantTask,
+    candidate: Mapping[str, object],
+    *,
+    on_reject: Callable[[ProposalRejection], None] | None = None,
+) -> ProposalData | None:
+    """Bind model hints to persisted source and tenant-scoped CRM rows."""
+
+    def reject(reason: ProposalRejection) -> None:
+        if on_reject is not None:
+            on_reject(reason)
+
+    kind = candidate.get("kind")
+    if kind not in ("follow_up_task_create", "opportunity_stage", "opportunity_create"):
+        reject("schema")
+        return None
     activity = source_activity(db, task)
     if activity is None:
+        reject("target")
         return None
     customer = _customer(db, task, activity)
     if customer is None:
+        reject("target")
         return None
-    kind = candidate.get("kind")
-    if kind == "customer_fact":
-        return None
+    # Legacy Column declarations describe the SQL expression, not the instance value.
+    source_content: str = attrgetter("source_content")(activity)
     quote = candidate.get("evidence_quote")
     payload = candidate.get("payload")
-    if not isinstance(quote, str) or not quote.strip() or quote.strip() not in (activity.source_content or ""):
+    if not isinstance(quote, str) or not quote.strip():
+        reject("schema")
+        return None
+    if quote.strip() not in (source_content or ""):
+        reject("literal")
         return None
     if not isinstance(payload, dict):
+        reject("schema")
+        return None
+    if kind == "opportunity_stage" and not candidate.get("target_public_id"):
+        reject("schema")
         return None
     try:
         codes = _permissions(db, task)
-        if kind == "customer_fact":
-            return None
         if kind == "follow_up_task_create":
             from datetime import datetime, time
 
@@ -163,24 +223,32 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
             from app.models.sales_commitment import FollowUpTaskSourceType
 
             title = payload.get("action")
-            if not isinstance(title, str) or not title.strip() or title.strip() not in activity.source_content:
+            if not isinstance(title, str) or not title.strip():
+                reject("schema")
+                return None
+            if title.strip() not in (source_content or ""):
+                reject("literal")
                 return None
             if activity.owner_id != str(task.user_id):
+                reject("permission")
                 return None
             owner = str(payload.get("owner") or "").strip()
             user = _user(db, task)
             if owner and owner not in {str(task.user_id), user.name, "我", "本人"}:
+                reject("permission")
                 return None
-            import json
 
             action_id = candidate.get("action_id")
             if not isinstance(action_id, str) or not owner:
+                reject("schema")
                 return None
+            content_json: str | None = attrgetter("content_json")(activity)
             try:
-                canonical = json.loads(activity.content_json or "{}")
+                canonical = json.loads(content_json or "{}")
             except (ValueError, TypeError):
+                reject("schema")
                 return None
-            evidence = validate_action_evidence(canonical, action_id, source_content=activity.source_content or "")
+            evidence = validate_action_evidence(canonical, action_id, source_content=source_content or "")
             if (
                 evidence is None
                 or evidence.due_at is None
@@ -192,6 +260,7 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
                 )
                 or payload.get("due_date") != evidence.due_at.isoformat()
             ):
+                reject("literal")
                 return None
             due = evidence.due_at
             if evidence.granularity == "DATE":
@@ -204,6 +273,7 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
                 source_key=f"activity:{activity.id}",
                 task_hash=task_hash,
             ):
+                reject("target")
                 return None
             return {
                 **candidate,
@@ -213,41 +283,6 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
                 "task_hash": task_hash,
                 "due_date_granularity": evidence.granularity,
             }
-        if kind == "follow_up_task":
-            action_name = payload.get("action")
-            if action_name not in {"complete", "postpone", "cancel", "unrelated"} or not isinstance(
-                candidate.get("target_public_id"), str
-            ):
-                return None
-            if action_name == "postpone" and not isinstance(payload.get("due_date"), str):
-                return None
-            row = (
-                db.query(FollowUpTask)
-                .filter(
-                    FollowUpTask.public_id == candidate["target_public_id"],
-                    FollowUpTask.team_id == task.team_id,
-                    FollowUpTask.customer_id == customer.id,
-                    FollowUpTask.status == FollowUpTaskStatus.OPEN,
-                )
-                .one_or_none()
-            )
-            if (
-                row is None
-                or row.title.strip() not in quote
-                or (
-                    row.owner_id != str(task.user_id)
-                    and not codes.intersection({"follow_up_task:operate:all", "follow_up_task:edit:all"})
-                )
-            ):
-                return None
-            return {
-                **candidate,
-                "activity_id": activity.id,
-                "customer_id": customer.id,
-                "source_revision": activity.activity_revision,
-                "prior_status": row.status,
-                "task_owner_id": row.owner_id,
-            }
         if kind == "opportunity_stage":
             opportunity = _opportunity(db, task, str(candidate.get("target_public_id") or ""))
             if (
@@ -255,29 +290,62 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
                 or opportunity.customer_id != customer.id
                 or str(opportunity.status) not in {"0", "OpportunityStatus.FOLLOWING"}
             ):
+                reject("target")
                 return None
             if not (
                 "opportunity:edit:all" in codes
                 or ("opportunity:edit:own" in codes and opportunity.owner_id == str(task.user_id))
             ):
+                reject("permission")
                 return None
             from app.api.opportunities import _ensure_opportunity_approved
 
             _ensure_opportunity_approved(db, opportunity, task.team_id)
-            try:
-                stage_id = int(payload.get("stage_template_id"))
-            except (TypeError, ValueError):
+            transition = adjacent_stage(db, task, opportunity)
+            if transition is None:
+                reject("target")
                 return None
-            stage = _stage(db, task, opportunity, stage_id)
-            if stage is None or stage.stage_name not in quote:
+            snapshot, stage = transition
+            stage_name: str = attrgetter("stage_name")(stage)
+            # A ref identifies the transition offered to the model, not whatever happens to be next later.
+            if "_nominated_transition" in candidate and candidate["_nominated_transition"] != (
+                activity.activity_revision,
+                opportunity.current_stage_snapshot_id,
+                opportunity.version,
+                stage.id,
+                stage_name,
+            ):
+                reject("target")
                 return None
-            return {
-                **candidate,
+            if stage_name not in quote:
+                reject("literal")
+                return None
+            stage_payload = {
+                "stage_template_id": stage.id,
+                "stage_name": stage_name,
+                "current_stage_name": snapshot.stage_name if snapshot is not None else None,
+                "opportunity_name": opportunity.opportunity_name,
+            }
+            fences = {
                 "activity_id": activity.id,
                 "customer_id": customer.id,
                 "source_revision": activity.activity_revision,
                 "prior_stage_snapshot_id": opportunity.current_stage_snapshot_id,
                 "prior_version": opportunity.version,
+            }
+            if "prior_version" in candidate and (
+                any(candidate.get(field) != value for field, value in fences.items())
+                or payload.get("stage_template_id") != stage.id
+                or any(field in payload and payload[field] != value for field, value in stage_payload.items())
+            ):
+                reject("target")
+                return None
+            return {
+                "kind": kind,
+                "target_public_id": opportunity.public_id,
+                "evidence_quote": quote,
+                "payload": stage_payload,
+                **fences,
             }
         if kind == "opportunity_create":
             from pydantic import ValidationError
@@ -285,42 +353,65 @@ def validate_candidate(db: Session, task: AssistantTask, candidate: dict) -> dic
             from app.schemas.opportunity import OpportunityCreate
 
             if "opportunity:create" not in codes:
+                reject("permission")
                 return None
             _customer_edit(db, task, customer)
-            try:
-                data = OpportunityCreate.model_validate({**payload, "customer_id": customer.public_id})
-            except ValidationError:
+            segment_id = candidate.get("segment_id")
+            if segment_id is not None and not _matches_create_segment(activity, segment_id, quote.strip()):
+                reject("literal")
                 return None
-            if not all(
-                str(value) in (activity.source_content or "")
-                for value in (
-                    data.total_amount,
-                    data.user_count,
-                    data.expected_closing_date,
-                )
-            ):
-                return None
-            match = match_opportunity_target(db, team_id=task.team_id, customer_id=customer.id, data=data)
-            if match.status != "DISTINCT":
-                return None
+            execution_values = candidate.get("form_values")
+            if "form_values" in candidate:
+                if not isinstance(execution_values, dict) or execution_values.get("customer_id") != customer.public_id:
+                    reject("target")
+                    return None
+                data = OpportunityCreate.model_validate(execution_values)
+                if data.model_dump(mode="json") != execution_values:
+                    reject("schema")
+                    return None
+            elif payload:
+                # Only a hint with enough information to identify a target can
+                # be deduplicated here. Missing form fields never block nomination.
+                try:
+                    data = OpportunityCreate.model_validate({**payload, "customer_id": customer.public_id})
+                except ValidationError:
+                    data = None
+                customer_id: int = attrgetter("id")(customer)
+                if data is not None and match_opportunity_target(
+                    db, team_id=task.team_id, customer_id=customer_id, data=data,
+                ).status != "DISTINCT":
+                    reject("target")
+                    return None
             return {
                 **candidate,
                 "activity_id": activity.id,
                 "customer_id": customer.id,
                 "source_revision": activity.activity_revision,
             }
-    except (HTTPException, PermissionError, ValueError):
+    except (HTTPException, PermissionError):
+        reject("permission")
         return None
+    except ValueError:
+        reject("schema")
+        return None
+    reject("schema")
     return None
 
 
-def build_proposal_command(task: AssistantTask, proposal: dict) -> AssistantCRMCommand:
+def build_proposal_command(task: AssistantTask, proposal: ProposalData) -> AssistantCRMCommand:
     """Bind the frozen proposal to one durable, actor-scoped target transaction."""
+    fingerprint = proposal["key"]
+    if proposal["kind"] == "opportunity_create" and "form_values" in proposal:
+        frozen_input = json.dumps(
+            {"candidate_key": proposal["key"], "form_values": proposal["form_values"]},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+        )
+        fingerprint = sha256(frozen_input.encode()).hexdigest()
     return AssistantCRMCommand(
         command_id=sha256(f"assistant:{task.team_id}:{task.public_id}:{proposal['key']}".encode()).hexdigest(),
         team_id=task.team_id,
         actor_id=task.user_id,
-        fingerprint=proposal["key"],
+        fingerprint=fingerprint,
         expected_snapshot_id=proposal.get("prior_stage_snapshot_id")
         if proposal["kind"] == "opportunity_stage"
         else None,
@@ -328,16 +419,40 @@ def build_proposal_command(task: AssistantTask, proposal: dict) -> AssistantCRMC
     )
 
 
+def opportunity_create_receipt_outcome(effect: AssistantCRMEffect | None) -> ProposalOutcome | None:
+    """Project the original submission outcome from an already checked receipt."""
+    if effect is None or not (effect.target_public_id or "").strip() or effect.approval_id is None:
+        return None
+    # The creation transaction records an approval ID only when it submits for review.
+    return {
+        "kind": "opportunity_create",
+        "public_id": effect.target_public_id,
+        "approval_phase": "pending_review",
+        "approval_id": effect.approval_id,
+    }
+
+
 class RealCRMProposalExecutor:
     """Execute one currently valid proposal through existing CRM domain boundaries."""
 
-    async def __call__(self, db: Session, task: AssistantTask, proposal: dict) -> dict:
+    async def __call__(self, db: Session, task: AssistantTask, proposal: ProposalData) -> ProposalOutcome:
         return await self.execute(db, task, proposal)
 
-    async def execute(self, db: Session, task: AssistantTask, proposal: dict) -> dict:
+    async def execute(self, db: Session, task: AssistantTask, proposal: ProposalData) -> ProposalOutcome:
+        kind = proposal["kind"]
+        rejection_error = ValueError
+        if kind == "opportunity_create":
+            from app.crud.product import product_crud
+
+            rejection_error = AssistantCRMNoEffect
+            if not isinstance(proposal.get("form_values"), dict):
+                raise AssistantCRMNoEffect("请先提交并校验商机表单")
+            # The CRM creation path takes this same fence before writing. Take
+            # it before reading current state and keep it through the commit.
+            product_crud.lock_catalog_team(db, task.team_id)
         validated = validate_candidate(db, task, proposal)
         if validated is None:
-            raise ValueError("提议的客户数据、证据或操作权限已变化，请刷新后重试")
+            raise rejection_error("CRM 状态已变化，或提议的证据或操作权限已失效，请刷新后重试")
         if any(
             validated.get(field) != proposal.get(field)
             for field in (
@@ -353,12 +468,10 @@ class RealCRMProposalExecutor:
                 "due_date_granularity",
             )
         ):
-            raise ValueError("CRM 状态已变化，不能继续执行旧提议")
-        kind = proposal["kind"]
+            raise rejection_error("CRM 状态已变化，不能继续执行旧提议")
         payload = proposal["payload"]
 
         if kind == "follow_up_task_create":
-            import json
             from datetime import datetime, time
 
             from app.crud.sales_commitment import follow_up_task_crud, follow_up_task_event_crud
@@ -402,70 +515,18 @@ class RealCRMProposalExecutor:
                 previous_status=None,
                 commit=False,
             )
-            return {"kind": "follow_up_task_create", "public_id": row.public_id}
-        if kind == "follow_up_task":
-            from app.services.follow_up_task_reconciliation_evaluation_service import (
-                FollowUpTaskReconciliationDecision,
-                FollowUpTaskReconciliationTaskDecision,
-            )
-            from app.services.follow_up_task_transition_execution_service import (
-                FollowUpTaskTransitionExecutionStatus,
-                follow_up_task_transition_execution_service,
-            )
-            from app.services.follow_up_task_transition_plan_service import (
-                FollowUpTaskTransitionAction,
-                FollowUpTaskTransitionPlan,
-            )
-
-            target = proposal["target_public_id"]
-            requested = {"complete": "COMPLETE", "postpone": "POSTPONE", "cancel": "CANCEL", "unrelated": "KEEP_OPEN"}[
-                payload["action"]
-            ]
-            if requested == "KEEP_OPEN":
-                return {"kind": "follow_up_task", "public_id": target}
-            action = FollowUpTaskTransitionAction(
-                action=requested,
-                task_public_id=target,
-                confidence=1.0,
-                executable=True,
-                requires_confirmation=False,
-                reason="assistant_confirmed_task_transition",
-                evidence_terms=(proposal["evidence_quote"],),
-                source_activity_public_id=str(validated["activity_id"]),
-                proposed_due_at=payload.get("due_date"),
-            )
-            plan = FollowUpTaskTransitionPlan(
-                decision=FollowUpTaskReconciliationDecision(
-                    candidate_public_ids=(target,),
-                    task_decisions=(
-                        FollowUpTaskReconciliationTaskDecision(
-                            decision=requested, confidence=1.0, task_public_id=target
-                        ),
-                    ),
-                ),
-                actions=(action,),
-                plan_source="assistant_confirmation",
-            )
-            result = follow_up_task_transition_execution_service.execute_action(
-                db,
-                team_id=task.team_id,
-                action=action,
-                plan=plan,
-                actor_id=str(task.user_id),
-                expected_owner_id=validated["task_owner_id"],
-                commit=False,
-            )
-            if result.status != FollowUpTaskTransitionExecutionStatus.EXECUTED:
-                raise ValueError(result.skip_reason or "跟进任务状态未更新")
-            return {"kind": "follow_up_task", "public_id": target}
+            return {"kind": "follow_up_task_create", "public_id": attrgetter("public_id")(row)}
         if kind == "opportunity_stage":
             from app.api.opportunities import move_opportunity_stage
             from app.schemas.opportunity import OpportunityMoveToStage
 
+            stage_id = validated["payload"]["stage_template_id"]
+            if stage_id != payload.get("stage_template_id"):
+                raise ValueError("CRM 状态已变化，不能继续执行旧提议")
             command = build_proposal_command(task, proposal)
             await move_opportunity_stage(
                 opportunity_id=proposal["target_public_id"],
-                stage_move=OpportunityMoveToStage(stage_template_id=payload["stage_template_id"]),
+                stage_move=OpportunityMoveToStage(stage_template_id=stage_id),
                 db_opportunity=_opportunity(db, task, proposal["target_public_id"]),
                 current_user=_user(db, task),
                 db=db,
@@ -479,18 +540,28 @@ class RealCRMProposalExecutor:
             from app.api.opportunities import create_opportunity
             from app.schemas.opportunity import OpportunityCreate
 
-            command = build_proposal_command(task, proposal)
+            command = build_proposal_command(task, validated)
+            existing = checked_effect(db, command, kind)
+            if existing is not None:
+                outcome = opportunity_create_receipt_outcome(existing)
+                if outcome is None:
+                    raise ValueError("商机创建命令缺少精确审批凭据")
+                return outcome
+            data = OpportunityCreate.model_validate(validated["form_values"])
+            if match_opportunity_target(
+                db, team_id=task.team_id, customer_id=validated["customer_id"], data=data,
+                current_read=True,
+            ).status != "DISTINCT":
+                raise AssistantCRMNoEffect("已存在相同或无法区分的商机，未创建新商机")
             result = await create_opportunity(
-                opportunity=OpportunityCreate.model_validate(
-                    {**payload, "customer_id": _customer(db, task, source_activity(db, task)).public_id}
-                ),
+                opportunity=data,
                 team_id=task.team_id,
                 current_user=_user(db, task),
                 db=db,
                 assistant_command=command,
             )
-            effect = checked_effect(db, command, kind)
-            if effect is None or not result or effect.target_public_id != result.public_id:
+            outcome = opportunity_create_receipt_outcome(checked_effect(db, command, kind))
+            if outcome is None or not result or outcome["public_id"] != result.public_id:
                 raise ValueError("商机创建命令缺少精确提交凭据")
-            return {"kind": "opportunity_create", "public_id": effect.target_public_id}
+            return outcome
         raise ValueError("不支持的 CRM 提议")

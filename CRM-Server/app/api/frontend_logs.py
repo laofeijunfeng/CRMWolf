@@ -7,14 +7,15 @@ Frontend Logs API
 """
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
+
+from app.core.logging import get_logger
 from app.schemas.frontend_log import FrontendLogBatchRequest, FrontendLogBeaconRequest
 from app.services.frontend_log_service import FrontendLogService
-from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/logs", tags=["frontend-logs"])
 
-# 服务实例（单例）
+# 服务实例(单例)
 log_service = FrontendLogService()
 
 
@@ -41,7 +42,7 @@ async def receive_log_batch(request: FrontendLogBatchRequest):
 
     except Exception as e:
         logger.error(f"Failed to write frontend logs: {e}")
-        # 即使失败也返回 200，避免前端重试导致雪崩
+        # 即使失败也返回 200,避免前端重试导致雪崩
         return {"received": 0, "error": str(e)}
 
 
@@ -66,7 +67,7 @@ async def receive_beacon_logs(request: Request):
 
         logger.debug(f"Received beacon logs: {len(log_request.logs)} entries")
 
-        # 返回 204 No Content（sendBeacon 不关心响应）
+        # 返回 204 No Content(sendBeacon 不关心响应)
         return Response(status_code=204)
 
     except Exception as e:

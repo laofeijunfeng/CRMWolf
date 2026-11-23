@@ -19,7 +19,6 @@ from app.services.agent.query.adapters import (
     DeploymentInfosAPIAdapter,
     FollowUpTasksAPIAdapter,
 )
-from app.services.agent.query.registry import FollowUpTaskDetailRequest
 from app.services.agent.query.catalog import CRMQueryCatalog
 from app.services.agent.query.cursor import CRMQueryCursorError
 from app.services.agent.query.policy import QueryPolicyError, QueryPolicyValidator
@@ -27,6 +26,7 @@ from app.services.agent.query.schemas import CRMQueryResult, CRMQuerySpec, Entit
 from app.services.agent.tools.api_client import CRMAPIClientError, InternalCRMAPIClient
 
 if TYPE_CHECKING:
+    from app.services.agent.query.registry import FollowUpTaskDetailRequest
     from app.services.agent.tools.base import AgentToolContext
 
 
@@ -80,7 +80,7 @@ class FollowUpTaskDetailAPIAdapter:
                 raise CRMQueryExecutionError(
                     QueryError(
                         code="PERMISSION_DENIED",
-                        message="无权查看该待办，或待办已不在当前权限范围内。",
+                        message="无权查看该待办\uff0c或待办已不在当前权限范围内。",
                         retryable=False,
                     )
                 ) from exc

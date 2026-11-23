@@ -2,7 +2,7 @@
 操作记录服务助手
 
 该模块提供便捷的方法供业务模块记录操作日志。
-使用示例：
+使用示例\uff1a
 
     from app.services.operation_log_service import operation_log_service
     from app.constants.operation_log_events import EventTypes, ResourceTypes, EventActions
@@ -24,10 +24,12 @@
     )
 """
 
+from typing import Any
+
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any, List
-from app.schemas.operation_log import OperationLogCreate
+
 from app.crud.operation_log import operation_log_crud
+from app.schemas.operation_log import OperationLogCreate
 
 
 class OperationLogService:
@@ -41,15 +43,15 @@ class OperationLogService:
         resource_type: str,
         resource_id: int,
         operator_id: str,
-        content: Dict[str, Any],
-        operator_name: Optional[str] = None,
-        secondary_resource_type: Optional[str] = None,
-        secondary_resource_id: Optional[int] = None,
-        remark: Optional[str] = None,
-        team_id: Optional[int] = None,
+        content: dict[str, Any],
+        operator_name: str | None = None,
+        secondary_resource_type: str | None = None,
+        secondary_resource_id: int | None = None,
+        remark: str | None = None,
+        team_id: int | None = None,
         commit: bool = True,
         required: bool = False,
-    ) -> Optional[object]:
+    ) -> object | None:
         """
         记录操作日志
 
@@ -84,7 +86,7 @@ class OperationLogService:
         except Exception as e:
             if required:
                 raise
-            print(f"记录操作日志失败: {str(e)}")
+            print(f"记录操作日志失败: {e!s}")
             return None
 
     def log_lead_created(
@@ -95,8 +97,8 @@ class OperationLogService:
         source: str,
         city: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-    ):
+        operator_name: str | None = None,
+    ) -> object | None:
         """记录线索创建"""
         return self.log(
             db=db,
@@ -117,10 +119,10 @@ class OperationLogService:
         customer_id: int,
         customer_name: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-        team_id: Optional[int] = None,
+        operator_name: str | None = None,
+        team_id: int | None = None,
         commit: bool = True,
-    ):
+    ) -> object | None:
         """记录线索转化"""
         return self.log(
             db=db,
@@ -144,14 +146,14 @@ class OperationLogService:
         activity_content: str,
         activity_kind: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-        next_follow_time: Optional[str] = None,
-        next_action: Optional[str] = None,
-        team_id: Optional[int] = None,
-        activity_id: Optional[int] = None,
+        operator_name: str | None = None,
+        next_follow_time: str | None = None,
+        next_action: str | None = None,
+        team_id: int | None = None,
+        activity_id: int | None = None,
         commit: bool = True,
         required: bool = False,
-    ):
+    ) -> object | None:
         """记录客户活动"""
         content_data = {"content": activity_content, "activity_kind": activity_kind}
         if next_follow_time:
@@ -184,12 +186,12 @@ class OperationLogService:
         follow_up_content: str,
         method: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-        next_follow_time: Optional[str] = None,
-        next_action: Optional[str] = None,
-        team_id: Optional[int] = None,
-        follow_up_id: Optional[int] = None,
-    ):
+        operator_name: str | None = None,
+        next_follow_time: str | None = None,
+        next_action: str | None = None,
+        team_id: int | None = None,
+        follow_up_id: int | None = None,
+    ) -> object | None:
         """记录线索跟进"""
         content_data = {"content": follow_up_content, "method": method}
         if next_follow_time:
@@ -219,8 +221,8 @@ class OperationLogService:
         expected_amount: float,
         stage: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-    ):
+        operator_name: str | None = None,
+    ) -> object | None:
         """记录商机创建"""
         return self.log(
             db=db,
@@ -240,8 +242,8 @@ class OperationLogService:
         contract_name: str,
         amount: float,
         operator_id: str,
-        operator_name: Optional[str] = None,
-    ):
+        operator_name: str | None = None,
+    ) -> object | None:
         """记录合同创建"""
         return self.log(
             db=db,
@@ -261,8 +263,8 @@ class OperationLogService:
         previous_status: str,
         current_status: str,
         operator_id: str,
-        operator_name: Optional[str] = None,
-    ):
+        operator_name: str | None = None,
+    ) -> object | None:
         """记录合同状态变更"""
         return self.log(
             db=db,

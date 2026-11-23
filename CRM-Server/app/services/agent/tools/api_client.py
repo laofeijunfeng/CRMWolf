@@ -3,7 +3,6 @@
 The Agent must call existing backend APIs so auth, team scoping, validation and
 approval side effects stay in the current system boundary.
 """
-from typing import Dict, Optional
 
 import httpx
 
@@ -11,7 +10,7 @@ from app.core.config import get_settings
 
 
 class CRMAPIClientError(Exception):
-    def __init__(self, message: str, status_code: Optional[int] = None, response_json: object = None) -> None:
+    def __init__(self, message: str, status_code: int | None = None, response_json: object = None) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
@@ -19,7 +18,7 @@ class CRMAPIClientError(Exception):
 
 
 class InternalCRMAPIClient:
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0) -> None:
+    def __init__(self, base_url: str | None = None, timeout: float = 30.0) -> None:
         settings = get_settings()
         self.base_url = (base_url or settings.AGENT_INTERNAL_API_BASE_URL).rstrip("/")
         self.timeout = timeout
@@ -30,9 +29,9 @@ class InternalCRMAPIClient:
         path: str,
         authorization: str,
         *,
-        params: Optional[Dict[str, object]] = None,
-        json: Optional[Dict[str, object]] = None,
-        idempotency_key: Optional[str] = None,
+        params: dict[str, object] | None = None,
+        json: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
     ) -> object:
         headers = {"Authorization": authorization}
         if idempotency_key:
@@ -68,7 +67,7 @@ class InternalCRMAPIClient:
                     if parts:
                         return f"{detail} ({'; '.join(parts[:5])})"
                 return detail
-        return f"CRM API调用失败：{status_code}"
+        return f"CRM API调用失败\uff1a{status_code}"
 
     @staticmethod
     def _safe_json(response: httpx.Response) -> object:

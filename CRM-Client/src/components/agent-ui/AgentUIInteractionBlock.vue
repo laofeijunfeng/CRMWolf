@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AlertCircle, Check, ChevronRight, Circle, Info, LoaderCircle } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
@@ -20,7 +21,6 @@ import type { InteractionNotice } from './interactionNotice'
 type InteractionBlock = Extract<AgentUIBlock, { type: 'interaction' }>
 type InteractionField = InteractionBlock['fields'][number]
 type InteractionOption = InteractionBlock['options'][number]
-type DispositionItem = InteractionBlock['disposition_items'][number]
 
 interface TileOption {
   value: string
@@ -50,6 +50,17 @@ const manualDate = ref('')
 const fieldValues = ref<Record<string, JsonValue>>({})
 const validationAttempted = ref(false)
 const submitting = ref(false)
+const cancelReasonsOpen = ref(false)
+const cancelReasonsRef = ref<HTMLElement | null>(null)
+const editedFieldErrors = ref<Record<string, boolean>>({})
+
+const availableFieldOptions = (field: InteractionField): InteractionField['options'] => {
+  if (field.depends_on_key == null) return field.options
+  const parentValue = fieldValues.value[field.depends_on_key]
+  return field.options.filter(option => option.depends_on_value == null || (
+    Array.isArray(parentValue) ? parentValue.includes(option.depends_on_value) : parentValue === option.depends_on_value
+  ))
+}
 
 const submittedChoiceValue = computed<string | null>(() => {
   if (props.block.state !== 'SUBMITTED' ||
@@ -77,6 +88,8 @@ const resetValues = (): void => {
   fieldValues.value = Object.fromEntries(
     props.block.fields.map(field => [field.key, field.default_value])
   )
+  cancelReasonsOpen.value = false
+  editedFieldErrors.value = {}
   validationAttempted.value = false
   submitting.value = false
   manualDate.value = ''
@@ -94,20 +107,21 @@ watch(
   { immediate: true }
 )
 
+watch(() => props.block.fields, () => { editedFieldErrors.value = {} })
+
 watch(() => props.locked, (locked, previous) => {
   if (previous !== true || locked === true || props.block.state !== 'ACTIVE') return
-  const releaseTextInput = props.block.interaction_type === 'text_input'
-  const releaseFollowUpForm = props.block.interaction_type === 'form'
-    && props.block.business_action === 'provide_follow_up_content'
-  if (releaseTextInput || releaseFollowUpForm) submitting.value = false
+  const releaseForm = props.block.interaction_type === 'form' && props.block.allow_cancel
+  if (props.block.interaction_type === 'text_input' || releaseForm || isOpenFollowUpDisposition.value) submitting.value = false
 })
 
 const isActive = computed(() => props.block.state === 'ACTIVE' && props.block.submit_action_id !== null)
 const canCancel = computed(() => (
   isActive.value
   && props.block.allow_cancel === true
-  && props.block.business_action === 'provide_follow_up_content'
-  && (props.block.interaction_type === 'text_input' || props.block.interaction_type === 'form')
+  && (props.block.interaction_type === 'form' || (
+    props.block.interaction_type === 'text_input' && props.block.business_action === 'provide_follow_up_content'
+  ))
 ))
 const readonly = computed(() => props.block.state === 'READ_ONLY')
 const isCompactTaskCompletion = computed(() => (
@@ -116,13 +130,17 @@ const isCompactTaskCompletion = computed(() => (
 const isOpenFollowUpDisposition = computed(() => (
   props.block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION'
 ))
-const dispositionItems = computed(() => props.block.disposition_items ?? [])
-const dispositionTotal = computed(() => dispositionItems.value.length)
-const dispositionCurrentIndex = computed(() => {
-  const index = dispositionItems.value.findIndex(item => item.state === 'current')
-  return index === -1 ? null : index + 1
-})
-const dispositionProgress = computed(() => `${dispositionCurrentIndex.value ?? dispositionTotal.value} / ${dispositionTotal.value}`)
+const dispositionGroups = computed(() => [
+  props.block.disposition_items.slice(0, 10),
+  props.block.disposition_items.slice(10),
+].filter(items => items.length > 0))
+const dispositionStateLabels = {
+  current: '待处理', waiting: '待处理', complete: '已完成', hold: '保持未完成',
+  skip: '已跳过', failed: '处理失败', unknown: '结果待核对',
+}
+const cancelReasons = computed(() => props.block.cancel_reasons ?? [])
+const confirmationEdit = computed(() => props.block.secondary_action?.value === 'request_edit' ? props.block.secondary_action : null)
+const weeklySuppression = computed(() => props.block.secondary_action?.value === 'suppress_week' ? props.block.secondary_action : null)
 const evidenceOpenId = ref<string | null>(null)
 const toggleEvidence = (itemId: string): void => {
   evidenceOpenId.value = evidenceOpenId.value === itemId ? null : itemId
@@ -327,20 +345,10 @@ const tileOption = (option: InteractionOption): TileOption => ({
   disabled: option.disabled
 })
 const choiceTileOptions = computed<TileOption[]>(() => choiceOptions.value.map(tileOption))
-// 历史跟进任务的三选一只有单行标签；选项上的 description 是给别处用的说明，不在这里展开。
-const dispositionTileOptions = computed<TileOption[]>(() => props.block.options.map((option) => ({
-  value: option.value,
-  tone: 'choice',
-  label: submitting.value && optionSelected(option.value) ? `${option.label}处理中…` : option.label,
-  disabled: option.disabled
-})))
 // 活动类型的候选也走同一种瓦片语气。
 const kindTileOptions = (options: InteractionOption[] | undefined): TileOption[] => (options ?? []).map((option) => tileOption(option))
 const kindTileValue = (fact: InteractionBlock['facts'][number]): string => (
   (fact.options ?? []).find(option => option.value === fact.value || option.label === fact.value)?.value ?? ''
-)
-const dispositionLabel = (item: DispositionItem): string | undefined => (
-  item.state === 'current' ? '当前' : item.state === 'waiting' ? '待处理' : item.result_title ?? undefined
 )
 
 const retryNoticeChoice = (): void => {
@@ -366,17 +374,49 @@ const reviseActivityKind = (value: string): void => {
   emit('submit', actionId, { revise_activity_kind: value })
 }
 
-const handleOptionClick = (value: string): void => {
-  if (controlsDisabled.value) return
+const submitConfirmationCancel = (reason?: string): void => {
+  const actionId = props.block.submit_action_id
+  const cancelOption = props.block.options.find(option => option.value === 'cancel')
+  if (controlsDisabled.value || actionId === null || !cancelOption || cancelOption.disabled) return
+  if (reason !== undefined && !cancelReasons.value.some(option => option.value === reason && !option.disabled)) return
+  selectedValues.value = ['cancel']
+  submitting.value = true
+  emit('submit', actionId, reason === undefined ? { choice: 'cancel' } : { choice: 'cancel', reason })
+}
+
+const handleOptionClick = async (value: string): Promise<void> => {
+  const actionId = props.block.submit_action_id
+  if (controlsDisabled.value || actionId === null) return
+  if (value === 'cancel' && props.block.interaction_type === 'confirmation' && cancelReasons.value.length > 0) {
+    cancelReasonsOpen.value = !cancelReasonsOpen.value
+    if (cancelReasonsOpen.value) {
+      await nextTick()
+      cancelReasonsRef.value?.querySelector<HTMLElement>('button:not(:disabled)')?.focus()
+    }
+    return
+  }
   if (!submitsOnOptionClick.value) {
     toggleOption(value)
     return
   }
-  const actionId = props.block.submit_action_id
-  if (actionId === null) return
   selectedValues.value = [value]
   submitting.value = true
   emit('submit', actionId, { choice: value })
+}
+
+const submitConfirmationEdit = (): void => {
+  const actionId = props.block.submit_action_id
+  if (controlsDisabled.value || actionId === null || !confirmationEdit.value || confirmationEdit.value.disabled) return
+  submitting.value = true
+  emit('submit', actionId, { choice: 'request_edit' })
+}
+
+const submitDisposition = (suppressWeek: boolean): void => {
+  const actionId = props.block.submit_action_id
+  if (controlsDisabled.value || actionId === null || (suppressWeek && (!weeklySuppression.value || weeklySuppression.value.disabled))) return
+  const choices = props.block.options.filter(option => !option.disabled && optionSelected(option.value)).map(option => option.value)
+  submitting.value = true
+  emit('submit', actionId, { choices, suppress_week: suppressWeek })
 }
 
 const completeCompactTask = (): void => {
@@ -385,26 +425,45 @@ const completeCompactTask = (): void => {
   handleOptionClick(option.value)
 }
 
+const updateFieldValue = (field: InteractionField, value: JsonValue): void => {
+  const previous = fieldValues.value[field.key]
+  if (controlsDisabled.value || previous === value || (
+    Array.isArray(previous) && Array.isArray(value) && previous.length === value.length &&
+    previous.every((item, index) => item === value[index])
+  )) return
+  fieldValues.value[field.key] = value
+  editedFieldErrors.value[field.key] = true
+
+  // Clearing a selector also clears every selector depending on it.
+  const changed = new Set([field.key])
+  for (const key of changed) {
+    for (const dependent of props.block.fields) {
+      if (dependent.depends_on_key !== key || changed.has(dependent.key)) continue
+      fieldValues.value[dependent.key] = dependent.field_type === 'multi_select' ? [] : null
+      editedFieldErrors.value[dependent.key] = true
+      changed.add(dependent.key)
+    }
+  }
+}
+
 const updateTextValue = (field: InteractionField, value: string | number | undefined): void => {
-  fieldValues.value[field.key] = value === undefined ? '' : String(value)
+  updateFieldValue(field, value === undefined ? '' : String(value))
 }
 
 const updateNumberValue = (field: InteractionField, value: string | number | undefined): void => {
-  fieldValues.value[field.key] = value === undefined || value === '' ? null : Number(value)
+  updateFieldValue(field, value === undefined || value === '' ? null : Number(value))
 }
 
 const updateBooleanValue = (field: InteractionField, value: boolean): void => {
-  fieldValues.value[field.key] = value
+  updateFieldValue(field, value)
 }
 
 const updateSelectValue = (field: InteractionField, value: unknown): void => {
-  fieldValues.value[field.key] = typeof value === 'string' ? value : null
+  updateFieldValue(field, typeof value === 'string' && value !== '' ? value : null)
 }
 
 const updateMultiSelectValue = (field: InteractionField, value: unknown): void => {
-  fieldValues.value[field.key] = Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : []
+  updateFieldValue(field, Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
 }
 
 const textValue = (field: InteractionField): string => {
@@ -440,6 +499,12 @@ const fieldError = (field: InteractionField): string | null => {
   if (field.required && field.field_type === 'boolean' && value !== true) {
     return `请确认${field.label}`
   }
+  if (field.depends_on_key != null && !empty) {
+    const choices = Array.isArray(value) ? value : [value]
+    if (choices.some(choice => !availableFieldOptions(field).some(option => option.value === choice && !option.disabled))) {
+      return `请选择有效的${field.label}`
+    }
+  }
   if ((field.field_type === 'text' || field.field_type === 'textarea') && typeof value === 'string' && !empty) {
     if (field.min_length !== undefined && field.min_length !== null && value.length < field.min_length) {
       return `${field.label}至少需要 ${field.min_length} 个字符`
@@ -461,7 +526,8 @@ const fieldError = (field: InteractionField): string | null => {
 }
 
 const visibleFieldError = (field: InteractionField): string | null => (
-  validationAttempted.value ? fieldError(field) : null
+  (isActive.value && editedFieldErrors.value[field.key] !== true ? field.error_message : null)
+  ?? (validationAttempted.value ? fieldError(field) : null)
 )
 
 const selectionError = computed(() => {
@@ -486,7 +552,8 @@ const cancel = (): void => {
   const actionId = props.block.submit_action_id
   if (!canCancel.value || controlsDisabled.value || actionId === null) return
   submitting.value = true
-  emit('submit', actionId, { cancel: true })
+  // The legacy signed follow-up prompt still uses its original resolver.
+  emit('submit', actionId, props.block.business_action === 'provide_follow_up_content' ? { cancel: true } : { choice: 'cancel' })
 }
 
 const submit = async (): Promise<void> => {
@@ -579,29 +646,40 @@ const submit = async (): Promise<void> => {
     :aria-busy="submitting"
   >
     <header class="flex items-start justify-between gap-space-3 px-space-4 pt-space-4">
-      <h4 :id="`${block.id}-prompt`" class="m-0 min-w-0 text-body font-semibold text-foreground [overflow-wrap:anywhere]">历史跟进任务</h4>
-      <Badge
-        variant="secondary"
-        class="shrink-0 font-semibold"
-        :aria-label="`第 ${dispositionProgress.split(' / ')[0]} 项，共 ${dispositionProgress.split(' / ')[1]} 项`"
-      >{{ dispositionProgress }}</Badge>
+      <h4 :id="`${block.id}-prompt`" class="m-0 min-w-0 text-body font-semibold text-foreground [overflow-wrap:anywhere]">{{ block.prompt }}</h4>
+      <Badge variant="secondary" class="shrink-0 font-semibold">共 {{ block.disposition_items.length }} 项</Badge>
     </header>
     <p v-if="block.hint" class="m-0 px-space-4 pt-space-2 text-body text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
-    <ol class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
-      <li
-        v-for="(item, index) in dispositionItems"
-        :key="item.item_id"
-        class="grid gap-space-1 border-b border-border px-space-4 py-space-2 last:border-b-0"
-      >
-        <div class="flex items-start justify-between gap-space-2">
-          <p class="m-0 min-w-0 text-body text-foreground"><span class="mr-space-1 text-muted-foreground">{{ index + 1 }}</span>{{ item.title }}</p>
-          <StatusBadge
-            class="shrink-0"
-            :status="item.state"
-            type="agentDisposition"
-            size="small"
-            :label="dispositionLabel(item)"
-          />
+    <component :is="groupIndex === 0 ? 'div' : 'details'" v-for="(items, groupIndex) in dispositionGroups" :key="groupIndex">
+      <summary v-if="groupIndex > 0" class="min-h-touch-target cursor-pointer px-space-4 py-space-3 text-body text-foreground focus-visible:outline-ring">
+        其余 {{ items.length }} 项
+      </summary>
+      <ol :start="groupIndex * 10 + 1" class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
+        <li
+          v-for="(item, index) in items"
+          :key="item.item_id"
+          class="grid gap-space-1 border-b border-border px-space-4 py-space-2 last:border-b-0"
+        >
+          <div class="flex items-start justify-between gap-space-2">
+            <label v-if="isActive" class="flex min-h-touch-target min-w-0 cursor-pointer items-center gap-space-2 text-body text-foreground">
+              <input
+                type="checkbox"
+                class="size-4 shrink-0 rounded-sm border-input focus-visible:ring-ring"
+                :value="item.item_id"
+                :checked="optionSelected(item.item_id)"
+                :disabled="controlsDisabled || block.options[groupIndex * 10 + index]?.disabled !== false"
+                @change="toggleOption(item.item_id)"
+              />
+              <span><span class="sr-only">标记完成：</span>{{ item.title }}</span>
+            </label>
+            <p v-else class="m-0 min-w-0 text-body text-foreground">{{ item.title }}</p>
+            <StatusBadge
+              class="shrink-0"
+              :status="item.state"
+              type="agentDisposition"
+              size="small"
+              :label="item.result_title || dispositionStateLabels[item.state]"
+            />
         </div>
         <p v-if="item.owner_line" class="m-0 text-caption text-muted-foreground">{{ item.owner_line }}</p>
         <div v-if="item.related && item.evidence_quote" class="grid gap-space-1">
@@ -626,20 +704,31 @@ const submit = async (): Promise<void> => {
             本次跟进：“{{ item.evidence_quote }}”
           </p>
         </div>
-        <SegmentedChoiceControl
-          v-if="item.state === 'current' && isActive"
-          class="mt-space-1 [--segmented-choice-columns:1] sm:[--segmented-choice-columns:3]"
-          :model-value="selectedValues[0] ?? ''"
-          :options="dispositionTileOptions"
-          :disabled="controlsDisabled"
-          :labelled-by="`${block.id}-prompt`"
-          :id-prefix="`${block.id}-disposition`"
-          wrap
-          @update:model-value="handleOptionClick"
-        />
-        <p v-if="item.result_message && !(item.state === 'current' && isActive)" class="m-0 text-caption text-muted-foreground">{{ item.result_message }}</p>
-      </li>
-    </ol>
+          <p v-if="item.result_message" class="m-0 text-caption text-muted-foreground">{{ item.result_message }}</p>
+        </li>
+      </ol>
+    </component>
+    <div v-if="isActive" class="flex flex-wrap gap-space-2 px-space-4 pb-space-4 pt-space-3">
+      <Button type="button" :disabled="controlsDisabled" @click="submitDisposition(false)">
+        {{ block.submit_label }}
+      </Button>
+      <Button
+        v-if="weeklySuppression"
+        type="button"
+        variant="outline"
+        :disabled="controlsDisabled || weeklySuppression.disabled"
+        @click="submitDisposition(true)"
+      >
+        {{ weeklySuppression.label }}
+      </Button>
+    </div>
+    <RouterLink
+      v-if="block.disposition_link"
+      :to="{ name: 'CustomerTracking' }"
+      class="mx-space-4 mb-space-3 inline-flex min-h-touch-target w-fit items-center text-body text-brand underline underline-offset-2 focus-visible:outline-ring"
+    >
+      在客户追踪页处理
+    </RouterLink>
   </section>
 
   <!-- 已处理的选择 / 确认：折叠成一行 -->
@@ -979,6 +1068,33 @@ const submit = async (): Promise<void> => {
         {{ confirmationDisabledHint }}
       </div>
 
+      <div
+        v-if="cancelReasons.length > 0"
+        v-show="cancelReasonsOpen"
+        :id="`${block.id}-cancel-reasons`"
+        ref="cancelReasonsRef"
+        class="grid gap-space-2 rounded-md border border-border p-space-3"
+        role="group"
+        :aria-labelledby="`${block.id}-cancel-reasons-label`"
+      >
+        <p :id="`${block.id}-cancel-reasons-label`" class="m-0 text-body font-medium text-foreground">取消原因（选填）</p>
+        <div class="flex flex-wrap gap-space-2">
+          <Button
+            v-for="reason in cancelReasons"
+            :key="reason.value"
+            type="button"
+            variant="outline"
+            :disabled="controlsDisabled || reason.disabled"
+            @click="submitConfirmationCancel(reason.value)"
+          >
+            {{ reason.label }}
+          </Button>
+          <Button type="button" variant="ghost" :disabled="controlsDisabled" @click="submitConfirmationCancel()">
+            跳过原因
+          </Button>
+        </div>
+      </div>
+
       <template v-if="showsChoiceOptions && block.interaction_type === 'choice'">
         <div v-if="block.hint" class="grid gap-space-1" data-agent-ui-kind-hint>
           <p class="m-0 flex flex-wrap items-center gap-space-2 text-caption text-muted-foreground">
@@ -1048,13 +1164,17 @@ const submit = async (): Promise<void> => {
         <span class="font-medium text-muted-foreground">{{ submittedTextField.label }}：</span>{{ submittedTextField.value }}
       </p>
 
-      <form v-else-if="!(readonly && (block.interaction_type === 'text_input' || block.interaction_type === 'form'))" class="grid gap-space-3" novalidate @submit.prevent="submit">        <template v-for="field in block.fields" :key="field.key">
+      <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
+
+      <form v-else-if="!(readonly && (block.interaction_type === 'text_input' || block.interaction_type === 'form'))" class="grid gap-space-3" novalidate @submit.prevent="submit">
+        <template v-for="field in block.fields" :key="field.key">
           <TextareaField
             v-if="field.field_type === 'textarea'"
             :id="`${block.id}-${field.key}`"
             :label="field.label"
             :model-value="textValue(field)"
             :placeholder="field.placeholder ?? ''"
+            :helper-text="field.source_label ?? ''"
             :required="field.required"
             :disabled="controlsDisabled"
             :error="visibleFieldError(field) ?? ''"
@@ -1071,6 +1191,7 @@ const submit = async (): Promise<void> => {
             :type="field.field_type === 'datetime' ? 'datetime-local' : field.field_type"
             :model-value="textValue(field)"
             :placeholder="field.placeholder ?? ''"
+            :helper-text="field.source_label ?? ''"
             :required="field.required"
             :disabled="controlsDisabled"
             :error="visibleFieldError(field) ?? ''"
@@ -1086,6 +1207,7 @@ const submit = async (): Promise<void> => {
             type="number"
             :model-value="numberValue(field) ?? ''"
             :placeholder="field.placeholder ?? ''"
+            :helper-text="field.source_label ?? ''"
             :required="field.required"
             :disabled="controlsDisabled"
             :error="visibleFieldError(field) ?? ''"
@@ -1098,11 +1220,12 @@ const submit = async (): Promise<void> => {
             v-else-if="field.field_type === 'select'"
             :id="`${block.id}-${field.key}`"
             :label="field.label"
-            :options="field.options"
+            :options="availableFieldOptions(field)"
             :model-value="textValue(field)"
             :placeholder="field.placeholder ?? `请选择${field.label}`"
+            :helper-text="field.source_label ?? ''"
             :required="field.required"
-            :disabled="controlsDisabled"
+            :disabled="controlsDisabled || availableFieldOptions(field).length === 0"
             :error="visibleFieldError(field) ?? ''"
             :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
             @update:model-value="updateSelectValue(field, $event)"
@@ -1111,11 +1234,12 @@ const submit = async (): Promise<void> => {
             v-else-if="field.field_type === 'multi_select'"
             :id="`${block.id}-${field.key}`"
             :label="field.label"
-            :options="field.options"
+            :options="availableFieldOptions(field)"
             :model-value="selectedFieldValues(field)"
             :placeholder="field.placeholder ?? `请选择${field.label}`"
+            :helper-text="field.source_label ?? ''"
             :required="field.required"
-            :disabled="controlsDisabled"
+            :disabled="controlsDisabled || availableFieldOptions(field).length === 0"
             :error="visibleFieldError(field) ?? ''"
             :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
             @update:model-value="updateMultiSelectValue(field, $event)"
@@ -1124,6 +1248,7 @@ const submit = async (): Promise<void> => {
             v-else
             :id="`${block.id}-${field.key}`"
             :label="field.label"
+            :helper-text="field.source_label ?? ''"
             :model-value="booleanValue(field)"
             :required="field.required"
             :disabled="controlsDisabled"
@@ -1150,6 +1275,8 @@ const submit = async (): Promise<void> => {
           :variant="option.value === 'confirm' ? 'default' : 'outline'"
           :loading="option.value === 'confirm' && submitting"
           :disabled="controlsDisabled || option.disabled"
+          :aria-expanded="option.value === 'cancel' && cancelReasons.length > 0 ? cancelReasonsOpen : undefined"
+          :aria-controls="option.value === 'cancel' && cancelReasons.length > 0 ? `${block.id}-cancel-reasons` : undefined"
           @click="handleOptionClick(option.value)"
         >
           {{ option.label }}
@@ -1193,6 +1320,15 @@ const submit = async (): Promise<void> => {
           {{ block.submit_label }}
         </Button>
       </template>
+      <Button
+        v-if="confirmationEdit"
+        type="button"
+        variant="outline"
+        :disabled="controlsDisabled || confirmationEdit.disabled"
+        @click="submitConfirmationEdit"
+      >
+        {{ confirmationEdit.label }}
+      </Button>
     </footer>
   </section>
 </template>

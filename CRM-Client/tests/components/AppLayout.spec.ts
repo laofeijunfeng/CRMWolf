@@ -68,7 +68,6 @@ describe('AppLayout user menu', () => {
         plugins: [createPinia()],
         stubs: {
           ApprovalIcon: true,
-          BottomNav: true,
           TopBarTabs: true,
           'router-view': true,
         },

@@ -1,23 +1,24 @@
+
 from sqlalchemy.orm import Session
-from typing import Optional, List
-from app.models.role import Role
-from app.models.user_role import UserRole
-from app.models.role_permission import RolePermission
+
 from app.models.permission import Permission
+from app.models.role import Role
+from app.models.role_permission import RolePermission
+from app.models.user_role import UserRole
 from app.schemas.role import RoleCreate, RoleUpdate
 
 
 class RoleCRUD:
-    def get_by_id(self, db: Session, role_id: int) -> Optional[Role]:
+    def get_by_id(self, db: Session, role_id: int) -> Role | None:
         return db.query(Role).filter(Role.id == role_id).first()
 
-    def get_by_code(self, db: Session, code: str) -> Optional[Role]:
+    def get_by_code(self, db: Session, code: str) -> Role | None:
         return db.query(Role).filter(Role.code == code).first()
 
-    def get_by_name(self, db: Session, name: str) -> Optional[Role]:
+    def get_by_name(self, db: Session, name: str) -> Role | None:
         return db.query(Role).filter(Role.name == name).first()
 
-    def get_multi(self, db: Session, skip: int = 0, limit: int = 100) -> List[Role]:
+    def get_multi(self, db: Session, skip: int = 0, limit: int = 100) -> list[Role]:
         return db.query(Role).offset(skip).limit(limit).all()
 
     def create(self, db: Session, obj_in: RoleCreate) -> Role:
@@ -83,7 +84,7 @@ class RoleCRUD:
             return True
         return False
 
-    def get_user_roles(self, db: Session, user_id: int, team_id: Optional[int] = None) -> List[Role]:
+    def get_user_roles(self, db: Session, user_id: int, team_id: int | None = None) -> list[Role]:
         """
         获取用户的角色列表
 
@@ -96,7 +97,7 @@ class RoleCRUD:
             query = query.filter(UserRole.team_id == team_id)
         return query.all()
 
-    def get_user_roles_by_team(self, db: Session, user_id: int, team_id: int) -> List[Role]:
+    def get_user_roles_by_team(self, db: Session, user_id: int, team_id: int) -> list[Role]:
         """
         获取用户在指定团队的角色列表
 
@@ -109,7 +110,7 @@ class RoleCRUD:
             UserRole.team_id == team_id
         ).all()
 
-    def get_role_users(self, db: Session, role_id: int, team_id: Optional[int] = None) -> List:
+    def get_role_users(self, db: Session, role_id: int, team_id: int | None = None) -> list:
         """
         获取拥有指定角色的用户列表
 
@@ -123,7 +124,7 @@ class RoleCRUD:
             query = query.filter(UserRole.team_id == team_id)
         return query.all()
 
-    def update_permissions(self, db: Session, role_id: int, permission_ids: List[int]) -> List[Permission]:
+    def update_permissions(self, db: Session, role_id: int, permission_ids: list[int]) -> list[Permission]:
         """批量更新角色权限"""
         # 获取当前角色的权限 ID 列表
         current_permissions = db.query(RolePermission.permission_id).filter(
@@ -179,7 +180,7 @@ class RoleCRUD:
 
         return count
 
-    def assign_roles_to_user(self, db: Session, user_id: int, role_ids: List[int], team_id: int) -> List[UserRole]:
+    def assign_roles_to_user(self, db: Session, user_id: int, role_ids: list[int], team_id: int) -> list[UserRole]:
         """
         为用户批量分配角色（替换模式：先清除再分配）
 
@@ -203,7 +204,7 @@ class RoleCRUD:
 
         db.commit()
 
-        # 清除权限缓存（已在 remove_all_user_roles_in_team 中调用，这里再次确保）
+        # 清除权限缓存(已在 remove_all_user_roles_in_team 中调用,这里再次确保)
         from app.services.permission_service import permission_service
         permission_service.clear_user_permissions_cache(user_id, team_id)
 

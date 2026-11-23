@@ -348,7 +348,7 @@ class CRMQueryAgentExecutor:
         return CRMQueryAgentResult(
             response=CRMQueryAgentResponse(
                 status="CLARIFICATION_REQUIRED",
-                clarification_question="我找到了多个相近的待办，请补充待办名称或内容，我再帮你确认。",
+                clarification_question="我找到了多个相近的待办\uff0c请补充待办名称或内容\uff0c我再帮你确认。",
             ),
             trace=CRMQueryAgentTrace(
                 model=model,
@@ -366,7 +366,7 @@ class CRMQueryAgentExecutor:
         return CRMQueryAgentResult(
             response=CRMQueryAgentResponse(
                 status="CLARIFICATION_REQUIRED",
-                clarification_question="请补充待办的名称或内容，我再帮你确认当前状态。",
+                clarification_question="请补充待办的名称或内容\uff0c我再帮你确认当前状态。",
             ),
             trace=CRMQueryAgentTrace(
                 model=model,

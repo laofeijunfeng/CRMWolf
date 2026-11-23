@@ -1,7 +1,7 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from typing import Optional, List, Tuple
 import uuid
+
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
 
 from app.models.operation_log import OperationLog
 from app.schemas.operation_log import OperationLogCreate
@@ -13,7 +13,7 @@ class OperationLogCRUD:
         self,
         db: Session,
         obj_in: OperationLogCreate,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         *,
         commit: bool = True,
     ) -> OperationLog:
@@ -44,7 +44,7 @@ class OperationLogCRUD:
             db.flush()
         return db_obj
 
-    def get_by_event_id(self, db: Session, event_id: str, team_id: Optional[int] = None) -> Optional[OperationLog]:
+    def get_by_event_id(self, db: Session, event_id: str, team_id: int | None = None) -> OperationLog | None:
         query = db.query(OperationLog).filter(OperationLog.event_id == event_id)
         if team_id is not None:
             query = query.filter(OperationLog.team_id == team_id)
@@ -55,11 +55,11 @@ class OperationLogCRUD:
         db: Session,
         primary_resource_type: str,
         primary_resource_id: int,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 20,
-        event_types: Optional[List[str]] = None,
-    ) -> Tuple[List[OperationLog], int]:
+        event_types: list[str] | None = None,
+    ) -> tuple[list[OperationLog], int]:
         query = db.query(OperationLog).filter(
             OperationLog.primary_resource_type == primary_resource_type,
             OperationLog.primary_resource_id == primary_resource_id,
@@ -77,8 +77,8 @@ class OperationLogCRUD:
         return logs, total
 
     def get_by_operator(
-        self, db: Session, operator_id: str, team_id: Optional[int] = None, skip: int = 0, limit: int = 20
-    ) -> Tuple[List[OperationLog], int]:
+        self, db: Session, operator_id: str, team_id: int | None = None, skip: int = 0, limit: int = 20
+    ) -> tuple[list[OperationLog], int]:
         query = db.query(OperationLog).filter(OperationLog.operator_id == operator_id)
 
         if team_id is not None:
@@ -90,8 +90,8 @@ class OperationLogCRUD:
         return logs, total
 
     def get_by_event_types(
-        self, db: Session, event_types: List[str], team_id: Optional[int] = None, skip: int = 0, limit: int = 20
-    ) -> Tuple[List[OperationLog], int]:
+        self, db: Session, event_types: list[str], team_id: int | None = None, skip: int = 0, limit: int = 20
+    ) -> tuple[list[OperationLog], int]:
         query = db.query(OperationLog).filter(OperationLog.event_type.in_(event_types))
 
         if team_id is not None:
@@ -143,9 +143,9 @@ class OperationLogCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        event_type: Optional[str] = None,
-        operator_id: Optional[str] = None,
-    ) -> Tuple[List[OperationLog], int]:
+        event_type: str | None = None,
+        operator_id: str | None = None,
+    ) -> tuple[list[OperationLog], int]:
         """获取团队的操作日志列表"""
         query = db.query(OperationLog).filter(OperationLog.team_id == team_id)
 

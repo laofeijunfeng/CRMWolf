@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import date, datetime, time
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -17,7 +16,6 @@ from app.services.customer_intelligence_event_publication_service import (
     customer_intelligence_event_publication_service,
 )
 from app.services.customer_intelligence_event_service import JsonObject
-from app.services.legacy_profile_source import event_origin
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
@@ -26,12 +24,13 @@ logger = logging.getLogger(__name__)
 class OpportunityDealJourneyConflictError(ValueError):
     """Raised when an opportunity changed before an association update committed."""
 
-    def __init__(self, *, opportunity_id: int, expected_version: int, current_version: int):
+    def __init__(self, *, opportunity_id: int, expected_version: int, current_version: int) -> None:
         self.opportunity_id = opportunity_id
         self.expected_version = expected_version
         self.current_version = current_version
         super().__init__(
-            f"商机已被其他操作更新，请刷新后重试（期望版本 {expected_version}，当前版本 {current_version}）"
+            f"商机已被其他操作更新\uff0c请刷新后重试\uff08期望版本 {expected_version}"
+            f"\uff0c当前版本 {current_version}\uff09"
         )
 
 
@@ -150,7 +149,7 @@ class DealJourneyService:
             .populate_existing().with_for_update().one_or_none()
         )
         if target is None:
-            raise ValueError("目标业务旅程不存在，或不属于当前客户")
+            raise ValueError("目标业务旅程不存在\uff0c或不属于当前客户")
         if target.status == DealJourneyStatus.ARCHIVED:
             raise ValueError("已归档的业务旅程不能关联商机")
 
@@ -206,7 +205,7 @@ class DealJourneyService:
                 source_id=opportunity.id,
                 event_time=business_now(),
                 actor_id=actor_id,
-                summary=f"商机已移出业务旅程：{previous.name}",
+                summary=f"商机已移出业务旅程\uff1a{previous.name}",
                 metadata={**transition, "journey_side": "previous"},
             )
         self.record_event(
@@ -219,7 +218,7 @@ class DealJourneyService:
             source_id=opportunity.id,
             event_time=business_now(),
             actor_id=actor_id,
-            summary=f"商机已关联业务旅程：{target.name}",
+            summary=f"商机已关联业务旅程\uff1a{target.name}",
             metadata={**transition, "journey_side": "new"},
         )
         return target
@@ -274,7 +273,7 @@ class DealJourneyService:
                 source_id=opportunity.id,
                 event_time=business_now(),
                 actor_id=actor_id,
-                summary=f"商机已解除业务旅程关联：{previous.name}",
+                summary=f"商机已解除业务旅程关联\uff1a{previous.name}",
                 metadata={
                     "transition_id": self._transition_id(
                         opportunity_id=int(opportunity.id),
@@ -329,7 +328,7 @@ class DealJourneyService:
                 .populate_existing().with_for_update().one_or_none()
             )
         if locked is None:
-            raise ValueError("商机不存在，或不属于当前客户")
+            raise ValueError("商机不存在\uff0c或不属于当前客户")
         return locked
 
     def infer_for_customer(self, db: Session, customer_id: int, team_id: int) -> CustomerDealJourney | None:
@@ -352,13 +351,13 @@ class DealJourneyService:
         customer_id: int,
         event_type: str,
         source_type: str,
-        source_id: Optional[int],
+        source_id: int | None,
         event_time: date | datetime | None = None,
         actor_id: str | None = None,
-        summary: Optional[str] = None,
+        summary: str | None = None,
         metadata: JsonObject | None = None,
         enqueue_customer_intelligence: bool = True,
-    ) -> Optional[CustomerDealJourneyEvent]:
+    ) -> CustomerDealJourneyEvent | None:
         if not deal_journey_id:
             return None
         # Serialize both source lookup and event insertion with legacy publication.
@@ -375,7 +374,7 @@ class DealJourneyService:
             .populate_existing().with_for_update().one_or_none()
         )
         if journey is None:
-            raise ValueError("业务旅程不存在，或不属于当前客户")
+            raise ValueError("业务旅程不存在\uff0c或不属于当前客户")
 
         normalized_event_time = self._as_datetime(event_time) or business_now()
         event_query = db.query(CustomerDealJourneyEvent).filter(
@@ -475,7 +474,7 @@ class DealJourneyService:
                 getattr(event, "customer_id", None),
             )
 
-    def record_opportunity_created(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
+    def record_opportunity_created(self, db: Session, opportunity, actor_id: str | None = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         self.record_event(
             db,
@@ -487,10 +486,10 @@ class DealJourneyService:
             source_id=opportunity.id,
             event_time=opportunity.created_time,
             actor_id=actor_id,
-            summary=f"创建商机：{opportunity.opportunity_name}",
+            summary=f"创建商机\uff1a{opportunity.opportunity_name}",
         )
 
-    def record_opportunity_approved(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
+    def record_opportunity_approved(self, db: Session, opportunity, actor_id: str | None = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         self.record_event(
             db,
@@ -502,10 +501,10 @@ class DealJourneyService:
             source_id=opportunity.id,
             event_time=business_now(),
             actor_id=actor_id,
-            summary=f"商机审批通过：{opportunity.opportunity_name}",
+            summary=f"商机审批通过\uff1a{opportunity.opportunity_name}",
         )
 
-    def record_opportunity_stage_changed(self, db: Session, opportunity, snapshot, actor_id: Optional[str] = None) -> None:
+    def record_opportunity_stage_changed(self, db: Session, opportunity, snapshot, actor_id: str | None = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         self.record_event(
             db,
@@ -517,7 +516,7 @@ class DealJourneyService:
             source_id=snapshot.id,
             event_time=snapshot.entered_at,
             actor_id=actor_id,
-            summary=f"商机阶段推进到：{snapshot.stage_name}",
+            summary=f"商机阶段推进到\uff1a{snapshot.stage_name}",
             metadata={
                 "stage_name": snapshot.stage_name,
                 "win_probability": snapshot.win_probability,
@@ -525,7 +524,7 @@ class DealJourneyService:
             },
         )
 
-    def mark_won(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
+    def mark_won(self, db: Session, opportunity, actor_id: str | None = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         journey.status = DealJourneyStatus.WON
         journey.closed_at = None
@@ -539,11 +538,11 @@ class DealJourneyService:
             source_id=opportunity.id,
             event_time=self._closing_time(opportunity) or business_now(),
             actor_id=actor_id,
-            summary=f"商机赢单：{opportunity.opportunity_name}",
+            summary=f"商机赢单\uff1a{opportunity.opportunity_name}",
             metadata={"actual_amount": float(opportunity.actual_amount) if opportunity.actual_amount else None},
         )
 
-    def mark_lost(self, db: Session, opportunity, actor_id: Optional[str] = None) -> None:
+    def mark_lost(self, db: Session, opportunity, actor_id: str | None = None) -> None:
         journey = self.ensure_for_opportunity(db, opportunity, actor_id)
         closed_at = business_now()
         journey.status = DealJourneyStatus.LOST
@@ -558,11 +557,11 @@ class DealJourneyService:
             source_id=opportunity.id,
             event_time=closed_at,
             actor_id=actor_id,
-            summary=f"商机输单：{opportunity.opportunity_name}",
+            summary=f"商机输单\uff1a{opportunity.opportunity_name}",
             metadata={"loss_reason": opportunity.loss_reason},
         )
 
-    def _status_from_opportunity(self, opportunity) -> str:
+    def _status_from_opportunity(self, opportunity: object) -> str:
         status = getattr(opportunity, "status", None)
         if status == 1:
             return DealJourneyStatus.WON
@@ -570,7 +569,7 @@ class DealJourneyService:
             return DealJourneyStatus.LOST
         return DealJourneyStatus.ACTIVE
 
-    def refresh_closure_status(self, db: Session, deal_journey_id: Optional[int]) -> Optional[CustomerDealJourney]:
+    def refresh_closure_status(self, db: Session, deal_journey_id: int | None) -> CustomerDealJourney | None:
         if not deal_journey_id:
             return None
 
@@ -658,20 +657,20 @@ class DealJourneyService:
             journey.closed_at = closed_at
         return journey
 
-    def _closing_time(self, opportunity) -> Optional[datetime]:
+    def _closing_time(self, opportunity: object) -> datetime | None:
         return self._as_datetime(
             getattr(opportunity, "actual_closing_date", None)
             or getattr(opportunity, "last_modified_time", None)
         )
 
-    def _positive_int(self, value: object) -> Optional[int]:
+    def _positive_int(self, value: object) -> int | None:
         try:
             parsed = int(value) if value is not None else 0
         except (TypeError, ValueError):
             return None
         return parsed if parsed > 0 else None
 
-    def _as_datetime(self, value: date | datetime | None) -> Optional[datetime]:
+    def _as_datetime(self, value: date | datetime | None) -> datetime | None:
         if value is None:
             return None
         if isinstance(value, datetime):

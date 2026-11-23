@@ -150,7 +150,7 @@ class FollowUpTaskQueryService:
             "usage_policy": {
                 "task_state_source": "mysql",
                 "semantic_evidence_source": "qdrant",
-                "rule": "任务状态、归属和权限以结构化任务表为准；向量库只提供语义候选和解释证据。",
+                "rule": "任务状态、归属和权限以结构化任务表为准\uff1b向量库只提供语义候选和解释证据。",
             },
         }
 
@@ -166,7 +166,8 @@ class FollowUpTaskQueryService:
         if task is None:
             raise ValueError("任务不存在")
         customer = db.query(Customer).filter(Customer.team_id == team_id, Customer.id == task.customer_id).first()
-        if task.owner_id != str(user_id) and not self._can_view_customer(db, team_id=team_id, user_id=user_id, customer=customer):
+        if task.owner_id != str(user_id) and not self._can_view_customer(db, team_id=team_id,
+            user_id=user_id, customer=customer):
             raise PermissionError("无权查看该任务")
         activity = None
         if task.source_activity_id is not None:
@@ -395,7 +396,8 @@ class FollowUpTaskQueryService:
     ) -> bool:
         if customer is None:
             return False
-        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(db, user_id, team_id)}
+        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(
+            db, user_id, team_id)}
         user_id_text = str(user_id)
         if "customer:view:all" in permission_codes:
             return True

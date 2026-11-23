@@ -1,6 +1,5 @@
 """AI 配置 CRUD"""
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -9,10 +8,12 @@ from app.schemas.ai_config import AIConfigCreate, StructuredOutputMode
 
 
 class AIConfigCRUD:
-    def get_config(self, db: Session, team_id: int) -> Optional[AIConfig]:
+    def get_config(self, db: Session, team_id: int) -> AIConfig | None:
         return db.query(AIConfig).filter(AIConfig.team_id == team_id).first()
 
-    def create_config(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None, team_id: int = 1) -> AIConfig:
+    def create_config(
+        self, db: Session, obj_in: AIConfigCreate, updated_by: int | None = None, team_id: int = 1
+    ) -> AIConfig:
         if not obj_in.api_key:
             raise ValueError("首次配置必须提供 API Key")
         db_obj = AIConfig(
@@ -32,7 +33,9 @@ class AIConfigCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def update_config(self, db: Session, db_obj: AIConfig, obj_in: AIConfigCreate, updated_by: Optional[int] = None) -> AIConfig:
+    def update_config(
+        self, db: Session, db_obj: AIConfig, obj_in: AIConfigCreate, updated_by: int | None = None
+    ) -> AIConfig:
         db_obj.api_host = obj_in.api_host
         if obj_in.api_key:
             db_obj.api_key_encrypted = AIConfig.encrypt_api_key(obj_in.api_key)
@@ -45,13 +48,15 @@ class AIConfigCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def get_decrypted_api_key(self, db: Session, team_id: int) -> Optional[str]:
+    def get_decrypted_api_key(self, db: Session, team_id: int) -> str | None:
         config = self.get_config(db, team_id)
         if config:
             return AIConfig.decrypt_api_key(config.api_key_encrypted)
         return None
 
-    def save_or_update(self, db: Session, obj_in: AIConfigCreate, updated_by: Optional[int] = None, team_id: int = 1) -> AIConfig:
+    def save_or_update(
+        self, db: Session, obj_in: AIConfigCreate, updated_by: int | None = None, team_id: int = 1
+    ) -> AIConfig:
         existing = self.get_config(db, team_id)
         if existing:
             return self.update_config(db, existing, obj_in, updated_by)

@@ -1,5 +1,4 @@
 """部署信息管理 API 端点"""
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -100,7 +99,7 @@ def create_deployment(
     return _deployment_response(created)
 
 
-@router.get("/", response_model=List[DeploymentInfoResponse], summary="获取客户部署信息列表")
+@router.get("/", response_model=list[DeploymentInfoResponse], summary="获取客户部署信息列表")
 def list_deployments(
     customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
@@ -169,7 +168,7 @@ def delete_deployment(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """删除部署信息（软删除）"""
+    """删除部署信息\uff08软删除\uff09"""
     deployment = get_deployment_info(db, team_id, deployment_id)
     if not deployment:
         raise HTTPException(

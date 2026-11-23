@@ -1,25 +1,10 @@
 from datetime import datetime, time, timedelta
-from typing import Any, Dict, Optional, List, Tuple
 from enum import Enum
+from typing import Any
 
-from sqlalchemy import and_, case, exists, or_, func
-from sqlalchemy.orm import Session, selectinload
-from sqlalchemy.orm import Query
+from sqlalchemy import and_, case, exists, func, or_
+from sqlalchemy.orm import Query, Session, selectinload
 
-from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus, CompanyScale
-from app.models.product import Product
-from app.schemas.lead import LeadCreate, LeadUpdate, LeadFollowUpCreate
-from app.crud.product_intent import (
-    EMPTY_CATALOG_MESSAGE,
-    first_active_product,
-    replace_product_links,
-    resolve_writable_product,
-)
-from app.services.acquisition_source_service import (
-    resolve_for_import,
-    resolve_public_ids_to_ids,
-    resolve_source_for_entity_write,
-)
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -31,11 +16,25 @@ from app.core.list_query import (
     uses_unified_list_query,
 )
 from app.core.list_query.catalogs import LEADS_LIST_QUERY_CATALOG
+from app.crud.product_intent import (
+    EMPTY_CATALOG_MESSAGE,
+    first_active_product,
+    replace_product_links,
+    resolve_writable_product,
+)
+from app.models.lead import CompanyScale, Lead, LeadFollowUp, LeadProduct, LeadStatus
+from app.models.product import Product
+from app.schemas.lead import LeadCreate, LeadFollowUpCreate, LeadUpdate
+from app.services.acquisition_source_service import (
+    resolve_for_import,
+    resolve_public_ids_to_ids,
+    resolve_source_for_entity_write,
+)
 from app.utils.time import business_now
 
 
 class LeadCRUD:
-    def get_by_id(self, db: Session, lead_id: int, team_id: Optional[int] = None) -> Optional[Lead]:
+    def get_by_id(self, db: Session, lead_id: int | None, team_id: int | None = None) -> Lead | None:
         query = db.query(Lead).options(
             selectinload(Lead.product_links).selectinload(LeadProduct.product)
         ).filter(Lead.id == lead_id)
@@ -43,7 +42,7 @@ class LeadCRUD:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
 
-    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Lead]:
+    def get_by_public_id(self, db: Session, public_id: str, team_id: int | None = None) -> Lead | None:
         query = db.query(Lead).options(
             selectinload(Lead.product_links).selectinload(LeadProduct.product)
         ).filter(Lead.public_id == public_id)
@@ -51,13 +50,13 @@ class LeadCRUD:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
 
-    def get_by_contact_phone(self, db: Session, contact_phone: str, team_id: Optional[int] = None) -> Optional[Lead]:
+    def get_by_contact_phone(self, db: Session, contact_phone: str, team_id: int | None = None) -> Lead | None:
         query = db.query(Lead).filter(Lead.contact_phone == contact_phone)
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
         return query.first()
 
-    def get_by_name(self, db: Session, lead_name: str, team_id: Optional[int] = None) -> Optional[Lead]:
+    def get_by_name(self, db: Session, lead_name: str, team_id: int | None = None) -> Lead | None:
         query = db.query(Lead).filter(Lead.lead_name == lead_name)
         if team_id is not None:
             query = query.filter(Lead.team_id == team_id)
@@ -112,18 +111,18 @@ class LeadCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[LeadStatus] = None,
-        source_ids: Optional[List[int]] = None,
-        city: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        creator_id: Optional[str] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
+        status: LeadStatus | None = None,
+        source_ids: list[int] | None = None,
+        city: str | None = None,
+        owner_id: str | None = None,
+        creator_id: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
-    ) -> Tuple[List[Lead], int]:
+        order_by: str | None = None,
+        order_dir: str | None = None
+    ) -> tuple[list[Lead], int]:
         query = db.query(Lead).options(
             selectinload(Lead.product_links).selectinload(LeadProduct.product)
         ).filter(Lead.team_id == team_id)
@@ -188,7 +187,7 @@ class LeadCRUD:
 
         return leads, total
 
-    def _apply_filters(self, query, filters: List[Dict[str, Any]], db: Session, team_id: int):
+    def _apply_filters(self, query, filters: list[dict[str, Any]], db: Session, team_id: int):
         field_map = {
             "lead_name": (Lead.lead_name, "text"),
             "contact_name": (Lead.contact_name, "text"),
@@ -344,7 +343,7 @@ class LeadCRUD:
         lead_data['source'] = source_row.name
         lead_data['creator_id'] = creator_id
         lead_data['owner_id'] = creator_id  # 创建人自动成为负责人
-        lead_data['status'] = LeadStatus.FOLLOWING  # 有负责人，状态应为跟进中
+        lead_data['status'] = LeadStatus.FOLLOWING  # 有负责人,状态应为跟进中
         lead_data['team_id'] = team_id
 
         db_obj = Lead(**lead_data)
@@ -405,10 +404,10 @@ class LeadCRUD:
         return resolve_writable_product(db, team_id, product_public_id)
 
 
-    def delete(self, db: Session, lead_id: int) -> Optional[Lead]:
-        """删除线索，同时删除关联的跟进记录
+    def delete(self, db: Session, lead_id: int) -> Lead | None:
+        """删除线索\uff0c同时删除关联的跟进记录
 
-        注意：已转化的线索无法删除（需先删除对应的客户）
+        注意\uff1a已转化的线索无法删除\uff08需先删除对应的客户\uff09
         """
         obj = db.query(Lead).filter(Lead.id == lead_id).first()
         if not obj:
@@ -420,7 +419,7 @@ class LeadCRUD:
             from app.models.customer import Customer
             customer = db.query(Customer).filter(Customer.source_lead_id == lead_id).first()
             if customer:
-                raise ValueError(f"该线索已转化为客户「{customer.account_name}」，无法直接删除。请先删除客户。")
+                raise ValueError(f"该线索已转化为客户「{customer.account_name}」\uff0c无法直接删除。请先删除客户。")
 
         # 删除关联的跟进记录
         follow_ups = db.query(LeadFollowUp).filter(LeadFollowUp.lead_id == lead_id).all()
@@ -431,7 +430,7 @@ class LeadCRUD:
         db.commit()
         return obj
 
-    def assign(self, db: Session, lead_id: int, owner_id: str) -> Optional[Lead]:
+    def assign(self, db: Session, lead_id: int, owner_id: str) -> Lead | None:
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if lead:
             lead.owner_id = owner_id
@@ -441,7 +440,7 @@ class LeadCRUD:
             db.refresh(lead)
         return lead
 
-    def claim(self, db: Session, lead_id: int, user_id: str, team_id: int) -> Optional[Lead]:
+    def claim(self, db: Session, lead_id: int, user_id: str, team_id: int) -> Lead | None:
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if lead:
             lead.owner_id = user_id
@@ -452,7 +451,7 @@ class LeadCRUD:
 
         return lead
 
-    def return_to_pool(self, db: Session, lead_id: int, team_id: int) -> Optional[Lead]:
+    def return_to_pool(self, db: Session, lead_id: int, team_id: int) -> Lead | None:
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if lead:
             lead.owner_id = None
@@ -464,7 +463,7 @@ class LeadCRUD:
         return lead
         return lead
 
-    def convert(self, db: Session, lead_id: int) -> Optional[Lead]:
+    def convert(self, db: Session, lead_id: int) -> Lead | None:
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
         if lead:
             lead.status = LeadStatus.CONVERTED
@@ -473,8 +472,16 @@ class LeadCRUD:
             db.refresh(lead)
         return lead
 
-    def mark_invalid(self, db: Session, lead_id: int, reason: str, operator_id: Optional[str] = None, operator_name: Optional[str] = None, team_id: Optional[int] = None) -> Optional[Lead]:
-        """标记线索为无效，记录无效原因"""
+    def mark_invalid(
+        self,
+        db: Session,
+        lead_id: int,
+        reason: str,
+        operator_id: str | None = None,
+        operator_name: str | None = None,
+        team_id: int | None = None,
+    ) -> Lead | None:
+        """标记线索为无效\uff0c记录无效原因"""
         from app.services.operation_log_service import operation_log_service
 
         lead = db.query(Lead).filter(Lead.id == lead_id).first()
@@ -548,10 +555,10 @@ class LeadCRUD:
         limit: int = 100,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-        search: Optional[str] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None
-    ) -> Tuple[List[Lead], int]:
+        search: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None
+    ) -> tuple[list[Lead], int]:
         query = db.query(Lead).options(
             selectinload(Lead.product_links).selectinload(LeadProduct.product)
         ).filter(
@@ -578,7 +585,7 @@ class LeadCRUD:
             legacy_sorts=lambda legacy_query: self._apply_sort(legacy_query, order_by, order_dir),
         )
 
-    def _apply_sort(self, query, order_by: Optional[str], order_dir: Optional[str]):
+    def _apply_sort(self, query, order_by: str | None, order_dir: str | None):
         allowed_sort_fields = [
             'created_time',
             'lead_name',
@@ -598,7 +605,7 @@ class LeadCRUD:
             return query.order_by(order_column.asc())
         return query.order_by(Lead.created_time.desc())
 
-    def get_statistics(self, db: Session, team_id: int, owner_id: Optional[str] = None) -> dict:
+    def get_statistics(self, db: Session, team_id: int, owner_id: str | None = None) -> dict:
         from sqlalchemy import case
 
         query = db.query(
@@ -624,10 +631,10 @@ class LeadCRUD:
 
 
 class LeadFollowUpCRUD:
-    def get_by_id(self, db: Session, follow_up_id: int) -> Optional[LeadFollowUp]:
+    def get_by_id(self, db: Session, follow_up_id: int) -> LeadFollowUp | None:
         return db.query(LeadFollowUp).filter(LeadFollowUp.id == follow_up_id).first()
 
-    def get_by_lead_id(self, db: Session, lead_id: int, skip: int = 0, limit: int = 100) -> List[LeadFollowUp]:
+    def get_by_lead_id(self, db: Session, lead_id: int, skip: int = 0, limit: int = 100) -> list[LeadFollowUp]:
         return db.query(LeadFollowUp).filter(
             LeadFollowUp.lead_id == lead_id
         ).order_by(LeadFollowUp.created_time.desc()).offset(skip).limit(limit).all()
@@ -639,7 +646,7 @@ class LeadFollowUpCRUD:
         lead_id: int,
         creator_id: str,
         team_id: int,
-        operator_name: Optional[str] = None
+        operator_name: str | None = None
     ) -> LeadFollowUp:
         from app.services.operation_log_service import operation_log_service
 
@@ -669,14 +676,14 @@ class LeadFollowUpCRUD:
 
         return db_obj
 
-    def delete(self, db: Session, follow_up_id: int) -> Optional[LeadFollowUp]:
+    def delete(self, db: Session, follow_up_id: int) -> LeadFollowUp | None:
         obj = db.query(LeadFollowUp).filter(LeadFollowUp.id == follow_up_id).first()
         if obj:
             db.delete(obj)
             db.commit()
         return obj
 
-    def get_upcoming_follow_ups(self, db: Session, team_id: int, user_id: str, days: int = 7) -> List[LeadFollowUp]:
+    def get_upcoming_follow_ups(self, db: Session, team_id: int, user_id: str, days: int = 7) -> list[LeadFollowUp]:
         cutoff_date = business_now() + timedelta(days=days)
         return db.query(LeadFollowUp).join(Lead, Lead.id == LeadFollowUp.lead_id).filter(
             and_(
@@ -687,7 +694,7 @@ class LeadFollowUpCRUD:
             )
         ).order_by(LeadFollowUp.next_follow_time.asc()).all()
 
-    def get_latest_by_lead_id(self, db: Session, lead_id: int) -> Optional[LeadFollowUp]:
+    def get_latest_by_lead_id(self, db: Session, lead_id: int) -> LeadFollowUp | None:
         """获取线索的最新一条跟进记录"""
         return db.query(LeadFollowUp).filter(
             LeadFollowUp.lead_id == lead_id
@@ -698,7 +705,7 @@ class LeadFollowUpCRUD:
         db: Session,
         db_obj: LeadFollowUp,
         next_follow_time: datetime,
-        next_action: Optional[str] = None
+        next_action: str | None = None
     ) -> LeadFollowUp:
         """更新跟进记录的下次跟进时间和下一步动作"""
         db_obj.next_follow_time = next_follow_time

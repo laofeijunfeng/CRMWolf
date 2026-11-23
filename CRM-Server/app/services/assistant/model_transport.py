@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
+from math import ceil
+from threading import Lock
 from time import monotonic
 from typing import Any, Literal, TypeVar
 
@@ -22,6 +25,54 @@ from app.services.assistant.failure_contract import (
 logger = logging.getLogger(__name__)
 OutputMode = Literal["json_object", "json_schema"]
 ResultT = TypeVar("ResultT", bound=BaseModel)
+
+_DEFAULT_CALL_TIMEOUT_SECONDS = 120
+_STAGE_BY_ERROR_PREFIX = {
+    "理解这次沟通": "route",
+    "活动类型判断": "classify",
+    "客户名称定位": "locate",
+    "会议纪要整理": "structure",
+    "跟进整理": "structure",
+    "商机排序": "choose",
+    "变化判断": "judge",
+    "客户活动评分": "quality_gate",
+    "动作选择": "choose",
+    "商机提名": "nominate",
+    "销售助手根决策验证": "capability",
+    "销售助手会议流式验证": "capability",
+    "销售助手质量流式验证": "capability",
+}
+_MODEL_STAGES = frozenset(_STAGE_BY_ERROR_PREFIX.values()) | {"context", "propose"}
+_LATENCY_WINDOW = 128
+_STAGE_LATENCIES: dict[str, deque[int]] = {}
+_LATENCY_LOCK = Lock()
+
+
+def _record_model_call(*, stage: str, elapsed_ms: int, attempt: int, outcome: str) -> None:
+    # Fixed stage labels and a rolling window bound both memory and sorting work per worker.
+    with _LATENCY_LOCK:
+        samples = _STAGE_LATENCIES.get(stage)
+        if samples is None:
+            samples = _STAGE_LATENCIES[stage] = deque(maxlen=_LATENCY_WINDOW)
+        samples.append(elapsed_ms)
+        ordered = sorted(samples)
+    count = len(ordered)
+    fields = {
+        "stage": stage,
+        "elapsed_ms": elapsed_ms,
+        "attempt": attempt,
+        "outcome": outcome,
+        "sample_count": count,
+        "p50_ms": ordered[ceil(count * 0.50) - 1],
+        "p95_ms": ordered[ceil(count * 0.95) - 1],
+    }
+    # The default app formatter emits message text; structured collectors can also use extra_fields.
+    logger.info(
+        "assistant_model_call stage=%(stage)s elapsed_ms=%(elapsed_ms)s attempt=%(attempt)s outcome=%(outcome)s "
+        "sample_count=%(sample_count)s p50_ms=%(p50_ms)s p95_ms=%(p95_ms)s",
+        fields,
+        extra={"extra_fields": fields},
+    )
 
 
 class AssistantLLMError(RuntimeError):
@@ -48,9 +99,21 @@ class AssistantModelTransport:
     async def ainvoke_structured(self, *, api_host: str, api_key: str, model: str,
                                  temperature: float, system_prompt: str, user_prompt: str,
                                  response_model: type[ResultT], error_prefix: str,
-                                 timeout_seconds: float = 120, stream: bool = False,
+                                 timeout_seconds: float | None = None, stream: bool = False,
                                  retry_timeouts: bool = False,
-                                 output_mode: OutputMode = "json_object") -> ResultT:
+                                 output_mode: OutputMode = "json_object", stage: str | None = None) -> ResultT:
+        """Use the turn's remainder, capped by an explicit call limit when supplied."""
+        started = monotonic()
+        turn_remaining = attempt_budget_remaining()
+        limit = timeout_seconds
+        if limit is None:
+            limit = _DEFAULT_CALL_TIMEOUT_SECONDS if turn_remaining is None else turn_remaining
+        if turn_remaining is not None:
+            limit = min(limit, turn_remaining)
+        deadline = started + limit
+        model_stage = stage or _STAGE_BY_ERROR_PREFIX.get(error_prefix, "other")
+        if model_stage not in _MODEL_STAGES:
+            model_stage = "other"
         if not api_host or not api_key or not model:
             raise AssistantLLMError(f"{error_prefix}：AI 配置不完整", code=AssistantFailureCode.CONFIGURATION_ERROR)
         if output_mode not in {"json_object", "json_schema"}:
@@ -58,28 +121,42 @@ class AssistantModelTransport:
         payload = _request_payload(model=model, temperature=temperature, system_prompt=system_prompt,
                                    user_prompt=user_prompt, response_model=response_model,
                                    stream=stream, output_mode=output_mode)
-        deadline = monotonic() + timeout_seconds
-        for attempt in range(2):
+        for attempt in range(1, 3):
+            attempt_started = monotonic()
+            remaining = deadline - attempt_started
             turn_remaining = attempt_budget_remaining()
-            if attempt == 0 and turn_remaining is None:
-                remaining = timeout_seconds
-            else:
-                remaining = deadline - monotonic()
-                if turn_remaining is not None:
-                    remaining = min(remaining, turn_remaining)
+            if turn_remaining is not None:
+                remaining = min(remaining, turn_remaining)
             if remaining <= 0:
                 raise AssistantLLMError(f"{error_prefix}：AI 请求超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
             try:
-                return await self._invoke_once(api_host=api_host, api_key=api_key, payload=payload,
-                                               response_model=response_model, error_prefix=error_prefix,
-                                               timeout_seconds=remaining, stream=stream)
+                outcome = AssistantFailureCode.INTERNAL_ERROR.value
+                try:
+                    result = await self._invoke_once(api_host=api_host, api_key=api_key, payload=payload,
+                                                     response_model=response_model, error_prefix=error_prefix,
+                                                     timeout_seconds=remaining, stream=stream)
+                    # A synchronous parse or a cancellation-suppressing client can finish after the timer.
+                    if monotonic() - attempt_started >= remaining:
+                        raise AssistantLLMError(f"{error_prefix}：AI 请求超时",
+                                                code=AssistantFailureCode.UPSTREAM_TIMEOUT)
+                    outcome = "success"
+                    return result
+                except AssistantLLMError as exc:
+                    outcome = exc.code.value
+                    raise
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    raise
+                finally:
+                    _record_model_call(stage=model_stage, elapsed_ms=round((monotonic() - attempt_started) * 1000),
+                                       attempt=attempt, outcome=outcome)
             except AssistantLLMError as exc:
                 logger.warning("assistant_model_failure stage=%s mode=%s stream=%s attempt=%s code=%s "
                                "status=%s request_id=%s provider_type=%s provider_param=%s",
-                               error_prefix, output_mode, stream, attempt + 1, exc.code.value,
+                               model_stage, output_mode, stream, attempt, exc.code.value,
                                exc.provider_status, exc.provider_request_id, exc.provider_error_type,
                                exc.provider_error_param)
-                if attempt:
+                if attempt == 2:
                     raise
                 if exc.code is AssistantFailureCode.MODEL_OUTPUT_INVALID and _is_bounded_correction(exc):
                     validation_errors = exc.cause.errors(
@@ -101,21 +178,21 @@ class AssistantModelTransport:
                            response_model: type[ResultT], error_prefix: str,
                            timeout_seconds: float, stream: bool) -> ResultT:
         try:
-            if stream:
-                return await _invoke_stream(api_host=api_host, api_key=api_key, payload=payload,
-                                            response_model=response_model, error_prefix=error_prefix,
-                                            timeout_seconds=timeout_seconds)
             async with asyncio.timeout(timeout_seconds):
+                if stream:
+                    return await _invoke_stream(api_host=api_host, api_key=api_key, payload=payload,
+                                                response_model=response_model, error_prefix=error_prefix,
+                                                timeout_seconds=timeout_seconds)
                 async with httpx.AsyncClient(timeout=timeout_seconds, trust_env=False) as client:
                     response = await client.post(
                         f"{api_host.rstrip('/')}/chat/completions",
                         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                         json=payload,
                     )
-            failure = _status_failure(response, error_prefix, api_key)
-            if failure is not None:
-                raise failure
-            return _parse_structured(response, response_model, error_prefix)
+                failure = _status_failure(response, error_prefix, api_key)
+                if failure is not None:
+                    raise failure
+                return _parse_structured(response, response_model, error_prefix)
         except (httpx.TimeoutException, TimeoutError) as exc:
             raise AssistantLLMError(f"{error_prefix}：AI 请求超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT,
                                     cause=exc) from exc
@@ -288,58 +365,57 @@ async def _invoke_stream(*, api_host: str, api_key: str, payload: dict[str, Any]
                          response_model: type[ResultT], error_prefix: str, timeout_seconds: float) -> ResultT:
     from app.core.config import get_settings
     from app.services.ai_http_client import ai_httpx_streaming_timeout
-    read_timeout = max(0.001, min(get_settings().AGENT_STRUCTURED_STREAM_CHUNK_TIMEOUT, timeout_seconds))
+
+    def cap(configured: float | None) -> float:
+        return timeout_seconds if configured is None else min(configured, timeout_seconds)
+
+    phase_timeouts = ai_httpx_streaming_timeout(read=get_settings().AGENT_STRUCTURED_STREAM_CHUNK_TIMEOUT)
+    streaming_timeout = httpx.Timeout(
+        connect=cap(phase_timeouts.connect), write=cap(phase_timeouts.write),
+        read=cap(phase_timeouts.read), pool=cap(phase_timeouts.pool),
+    )
     chunks: list[str] = []
     finished = False
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            streaming_timeout = ai_httpx_streaming_timeout(read=read_timeout)
-            async with httpx.AsyncClient(timeout=streaming_timeout, trust_env=False) as client, client.stream(
-                "POST", f"{api_host.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            ) as response:
-                if response.status_code >= 400:
-                    await response.aread()
-                    failure = _status_failure(response, error_prefix, api_key)
-                    assert failure is not None
-                    raise failure
-                if response.headers.get("content-type", "").startswith("application/json"):
-                    await response.aread()
-                    return _parse_structured(response, response_model, error_prefix)
-                async for line in response.aiter_lines():
-                    if line.strip() == "data: [DONE]":
-                        finished = True
-                        continue
-                    event = _stream_event(line)
-                    if event is None:
-                        continue
-                    if event.get("error"):
-                        raise AssistantLLMError(f"{error_prefix}：流式响应失败",
-                                                code=AssistantFailureCode.UPSTREAM_UNAVAILABLE)
-                    choices = event.get("choices")
-                    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-                        choice = choices[0]
-                        delta = choice.get("delta", choice.get("message", {}))
-                        finish_reason = choice.get("finish_reason")
-                        refused = isinstance(delta, dict) and delta.get("refusal")
-                        if finish_reason not in {None, "stop"} or refused:
-                            raise AssistantLLMError(f"{error_prefix}：流式结果不完整或被拒绝",
-                                                    code=AssistantFailureCode.MODEL_OUTPUT_INVALID)
-                        if finish_reason == "stop":
-                            finished = True
-                    piece = _stream_piece(line)
-                    if piece:
-                        chunks.append(piece)
-                if not finished:
-                    raise AssistantLLMError(f"{error_prefix}：流式结果未正常结束",
+    async with httpx.AsyncClient(timeout=streaming_timeout, trust_env=False) as client, client.stream(
+        "POST", f"{api_host.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+    ) as response:
+        if response.status_code >= 400:
+            await response.aread()
+            failure = _status_failure(response, error_prefix, api_key)
+            assert failure is not None
+            raise failure
+        if response.headers.get("content-type", "").startswith("application/json"):
+            await response.aread()
+            return _parse_structured(response, response_model, error_prefix)
+        async for line in response.aiter_lines():
+            if line.strip() == "data: [DONE]":
+                finished = True
+                continue
+            event = _stream_event(line)
+            if event is None:
+                continue
+            if event.get("error"):
+                raise AssistantLLMError(f"{error_prefix}：流式响应失败",
+                                        code=AssistantFailureCode.UPSTREAM_UNAVAILABLE)
+            choices = event.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                choice = choices[0]
+                delta = choice.get("delta", choice.get("message", {}))
+                finish_reason = choice.get("finish_reason")
+                refused = isinstance(delta, dict) and delta.get("refusal")
+                if finish_reason not in {None, "stop"} or refused:
+                    raise AssistantLLMError(f"{error_prefix}：流式结果不完整或被拒绝",
                                             code=AssistantFailureCode.MODEL_OUTPUT_INVALID)
-    except (TimeoutError, httpx.TimeoutException) as exc:
-        raise AssistantLLMError(f"{error_prefix}：AI 请求超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT,
-                                cause=exc) from exc
-    except httpx.HTTPError as exc:
-        raise AssistantLLMError(f"{error_prefix}：AI 请求失败", code=AssistantFailureCode.UPSTREAM_UNAVAILABLE,
-                                cause=exc) from exc
+                if finish_reason == "stop":
+                    finished = True
+            piece = _stream_piece(line)
+            if piece:
+                chunks.append(piece)
+        if not finished:
+            raise AssistantLLMError(f"{error_prefix}：流式结果未正常结束",
+                                    code=AssistantFailureCode.MODEL_OUTPUT_INVALID)
     return _validate_content("".join(chunks), response_model, error_prefix)
 
 

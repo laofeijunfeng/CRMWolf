@@ -48,7 +48,8 @@ export const EntityRefSchema = z.object({
   resource: CRMResourceSchema,
   public_id: z.string().min(1).max(128),
   display_name: z.string().min(1).max(200),
-  result_set_id: z.string().min(1).max(128).nullable().optional()
+  result_set_id: z.string().min(1).max(128).nullable().optional(),
+  attributes: JsonObjectSchema.nullable().optional(),
 }).strict()
 
 export type CRMResource = z.infer<typeof CRMResourceSchema>

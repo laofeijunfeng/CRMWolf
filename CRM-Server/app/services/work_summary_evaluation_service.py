@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from app.services.agent.schemas import WorkSummaryNarrativeResult
+if TYPE_CHECKING:
+    from app.services.agent.schemas import WorkSummaryNarrativeResult
 
 WORK_SUMMARY_FACT_CATEGORIES = {
     "completed_follow_up_task": "completed_work",
@@ -205,7 +206,8 @@ class WorkSummaryEvaluationService:
         facts_by_id: dict[str, dict[str, Any]],
     ) -> list[str]:
         fact_types = {str(fact.get("fact_type") or "") for fact in facts_by_id.values()}
-        return [f"fact_type_missing:{fact_type}" for fact_type in case.required_fact_types if fact_type not in fact_types]
+        return [f"fact_type_missing:{fact_type}" for fact_type in case.required_fact_types
+            if fact_type not in fact_types]
 
     def _source_count_failures(self, case: WorkSummaryEvaluationCase) -> list[str]:
         source_total_counts = case.work_facts.get("source_total_counts")
@@ -345,13 +347,15 @@ class WorkSummaryEvaluationService:
             recall_total += len(case.required_fact_ids)
             recall_covered += sum(1 for fact_id in case.required_fact_ids if fact_id in referenced_fact_ids)
             citation_total += sum(1 for fact_id in referenced_fact_ids if fact_id in facts_by_id)
-            citation_covered += sum(1 for fact_id in referenced_fact_ids if fact_id in facts_by_id and fact_id in citations_by_id)
+            citation_covered += sum(1 for fact_id in referenced_fact_ids
+                if fact_id in facts_by_id and fact_id in citations_by_id)
             referenced_total += len(referenced_fact_ids)
             hallucinated_refs += sum(1 for fact_id in referenced_fact_ids if fact_id not in facts_by_id)
 
             case_classification_errors = self._classification_failures(case, facts_by_id)
             classification_errors += len(case_classification_errors)
-            classification_total += sum(1 for item in [*case.result.highlights, *case.result.customer_summaries] for fact_id in item.fact_ids if fact_id in facts_by_id)
+            classification_total += sum(1 for item in [*case.result.highlights,
+                *case.result.customer_summaries] for fact_id in item.fact_ids if fact_id in facts_by_id)
 
             if case.expected_owner_id is not None:
                 owner_case_total += 1

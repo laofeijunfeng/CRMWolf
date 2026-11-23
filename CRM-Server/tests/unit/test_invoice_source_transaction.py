@@ -1,4 +1,4 @@
-"""Invoice source revisions and journey events share the business transaction."""
+"""Invoice writes and journey events share the business transaction."""
 
 from datetime import date
 from decimal import Decimal
@@ -15,7 +15,6 @@ from app.crud.invoice import invoice_application_crud
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceTitle, InvoiceType
 from app.models.opportunity import Opportunity
@@ -39,7 +38,7 @@ def db():
         return statement, parameters
 
     Base.metadata.create_all(engine, tables=[
-        Customer.__table__, CustomerLegacySourceProgress.__table__,
+        Customer.__table__,
         Opportunity.__table__, Contract.__table__, PaymentPlan.__table__,
         InvoiceTitle.__table__, InvoiceApplication.__table__,
         CustomerDealJourney.__table__, CustomerDealJourneyEvent.__table__,
@@ -79,11 +78,6 @@ def db():
         engine.dispose()
 
 
-def _revision(db):
-    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one_or_none()
-    return progress.eligible_revision if progress else 0
-
-
 def _event_types(db):
     return [row.event_type for row in db.query(CustomerDealJourneyEvent).order_by(CustomerDealJourneyEvent.id)]
 
@@ -106,11 +100,11 @@ def test_invoice_create_and_issue_rollback_when_qualified_event_cannot_be_writte
     db.rollback()
     assert db.query(InvoiceApplication).count() == 0
     assert _event_types(db) == []
-    assert _revision(db) == 0
 
     application = invoice_application_crud.create(db, request, "1", 1)
     assert _event_types(db) == [DealJourneyEventType.INVOICE_APPLIED]
-    assert _revision(db) == 2  # invoice row and qualifying event
+    assert application.status == InvoiceApplicationStatus.DRAFT
+    assert application.invoice_amount == Decimal("800")
 
     application.status = InvoiceApplicationStatus.APPROVED
     db.add(Approval(
@@ -129,25 +123,28 @@ def test_invoice_create_and_issue_rollback_when_qualified_event_cannot_be_writte
     assert application.status == InvoiceApplicationStatus.APPROVED
     assert application.invoice_number is None
     assert _event_types(db) == [DealJourneyEventType.INVOICE_APPLIED]
-    assert _revision(db) == 2
+    assert application.issued_time is None
 
     issued = invoice_application_crud.mark_issued(db, application.id, team_id=1, invoice_number="NO-1")
     assert issued.status == InvoiceApplicationStatus.ISSUED
     assert _event_types(db) == [DealJourneyEventType.INVOICE_APPLIED, DealJourneyEventType.INVOICE_ISSUED]
-    assert _revision(db) == 4
+    assert issued.invoice_number == "NO-1"
+    assert issued.issued_time is not None
 
 
-def test_invoice_update_advances_only_when_invoice_changes(db):
+def test_invoice_amount_update_preserves_event_history(db):
     application = invoice_application_crud.create(db, InvoiceApplicationCreate(
         payment_plan_id=1, invoice_title_id=1,
         invoice_amount=Decimal("800"), invoice_type=InvoiceType.VAT_NORMAL,
     ), "1", 1)
-    assert _revision(db) == 2
-    invoice_application_crud.update(db, application, InvoiceApplicationUpdate(invoice_amount=Decimal("800")))
-    assert _revision(db) == 2
+    original_modified_time = application.last_modified_time
+    unchanged = invoice_application_crud.update(
+        db, application, InvoiceApplicationUpdate(invoice_amount=Decimal("800")),
+    )
+    db.refresh(unchanged)
+    assert unchanged.last_modified_time == original_modified_time
     updated = invoice_application_crud.update(db, application, InvoiceApplicationUpdate(invoice_amount=Decimal("900")))
     assert updated.invoice_amount == Decimal("900")
-    assert _revision(db) == 3
     assert _event_types(db) == [DealJourneyEventType.INVOICE_APPLIED]
 
 
@@ -164,9 +161,10 @@ def test_invoice_update_checks_locked_current_status_not_stale_instance(db):
 
     with pytest.raises(ValueError, match="只有草稿或已拒绝状态"):
         invoice_application_crud.update(db, application, InvoiceApplicationUpdate(invoice_amount=Decimal("900")))
+    assert application.status == InvoiceApplicationStatus.APPROVED
     db.rollback()
     assert db.query(InvoiceApplication).filter_by(id=application.id).one().invoice_amount == Decimal("800")
-    assert _revision(db) == 2
+    assert _event_types(db) == [DealJourneyEventType.INVOICE_APPLIED]
 
 
 def test_invoice_remark_is_optional_and_editable_before_approval(db):

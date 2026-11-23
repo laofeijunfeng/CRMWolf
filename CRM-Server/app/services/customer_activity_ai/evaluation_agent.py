@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.crud.ai_config import ai_config_crud
 from app.services.agent.langchain_runtime import AgentLangChainRuntime
-from app.services.customer_activity_ai.rules import ActivityEvaluationRubric
 from app.services.customer_activity_ai.schemas import ActivityEvaluationResult
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.customer_activity_ai.rules import ActivityEvaluationRubric
 
 
 class ActivityEvaluationError(Exception):
@@ -20,7 +24,7 @@ class ActivityEvaluationAgent:
 
     async def evaluate(
         self,
-        db,
+        db: Session,
         *,
         team_id: int,
         context: dict[str, Any],
@@ -39,7 +43,7 @@ class ActivityEvaluationAgent:
             model=config.model_name,
             temperature=min(float(config.temperature or 0.1), 0.2),
             system_prompt=self._system_prompt(rubric),
-            user_prompt="请评估以下客户活动是否有效：\n" + json.dumps(context, ensure_ascii=False, default=str),
+            user_prompt="请评估以下客户活动是否有效\uff1a\n" + json.dumps(context, ensure_ascii=False, default=str),
             response_model=ActivityEvaluationResult,
             error_prefix="客户活动评分 structured output",
         )
@@ -55,21 +59,21 @@ class ActivityEvaluationAgent:
     def _system_prompt(self, rubric: ActivityEvaluationRubric) -> str:
         return f"""你是 CRM 系统中的客户活动质检 Agent。
 
-任务：判断一条客户活动记录是否对销售推进和团队接力有价值。
+任务\uff1a判断一条客户活动记录是否对销售推进和团队接力有价值。
 
-评分规则：{rubric.title}
+评分规则\uff1a{rubric.title}
 {rubric.principles}
 
-评估重点：
+评估重点\uff1a
 {rubric.emphasis}
 
-硬性要求：
-- 只基于输入内容和上下文评分，不要编造。
+硬性要求\uff1a
+- 只基于输入内容和上下文评分\uff0c不要编造。
 - score 必须是 0-100 的整数。
 - is_valid 必须等于 score >= 60。
-- reason 必须是一句话，最长 80 个中文字符。
+- reason 必须是一句话\uff0c最长 80 个中文字符。
 - principle_scores 必须对应评分规则逐项给分和简短原因。
-- 输出必须符合结构化 schema，不要输出 Markdown 或解释文字。"""
+- 输出必须符合结构化 schema\uff0c不要输出 Markdown 或解释文字。"""
 
 
 activity_evaluation_agent = ActivityEvaluationAgent()

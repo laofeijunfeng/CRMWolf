@@ -1,4 +1,16 @@
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from app.core.database import Base
 from app.services.customer_activity_contracts import (
@@ -14,9 +26,18 @@ class CustomerActivity(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=True, comment="关联客户ID")
-    deal_journey_id = Column(BigInteger, ForeignKey("crm_customer_deal_journeys.id", ondelete="SET NULL"), nullable=True, comment="成交旅程ID")
-    original_lead_id = Column(BigInteger, ForeignKey("crm_leads.id", ondelete="SET NULL"), nullable=True, comment="原始线索ID")
+    customer_id = Column(
+        BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=True, comment="关联客户ID"
+    )
+    deal_journey_id = Column(
+        BigInteger,
+        ForeignKey("crm_customer_deal_journeys.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="成交旅程ID",
+    )
+    original_lead_id = Column(
+        BigInteger, ForeignKey("crm_leads.id", ondelete="SET NULL"), nullable=True, comment="原始线索ID"
+    )
     activity_kind = Column(String(50), nullable=False, comment="活动分类")
     title = Column(String(255), nullable=True, comment="活动标题")
     source_content = Column(Text, nullable=False, comment="原始输入内容")
@@ -26,28 +47,32 @@ class CustomerActivity(Base):
         String(30),
         nullable=False,
         default=CustomerActivitySubmissionSource.FORM.value,
-        comment="活动提交来源：AGENT/ASSISTANT_2/FORM/CUTOVER_MIGRATION",
+        comment="活动提交来源\uff1aAGENT/ASSISTANT_2/FORM/CUTOVER_MIGRATION",
     )
-    submission_id = Column(String(120), nullable=True, comment="提交幂等ID；ASSISTANT_2 必填")
-    submission_fingerprint = Column(String(64), nullable=True, comment="提交请求指纹；ASSISTANT_2 必填")
+    submission_id = Column(String(120), nullable=True, comment="提交幂等ID\uff1bASSISTANT_2 必填")
+    submission_fingerprint = Column(String(64), nullable=True, comment="提交请求指纹\uff1bASSISTANT_2 必填")
     processing_status = Column(
         String(20),
         nullable=False,
         default=CustomerActivityProcessingStatus.PENDING.value,
-        comment="整理状态：PENDING/PROCESSING/COMPLETED/FAILED",
+        comment="整理状态\uff1aPENDING/PROCESSING/COMPLETED/FAILED",
     )
     processing_error = Column(Text, nullable=True, comment="整理失败原因")
     processed_at = Column(DateTime, nullable=True, comment="整理完成时间")
     next_follow_time = Column(DateTime, nullable=True, comment="计划下次跟进时间")
-    next_follow_time_source = Column(String(30), nullable=True, comment="下次跟进时间来源：UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED")
+    next_follow_time_source = Column(
+        String(30), nullable=True, comment="下次跟进时间来源\uff1aUI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED"
+    )
     next_action = Column(Text, nullable=True, comment="下一步动作内容")
-    next_action_source = Column(String(30), nullable=True, comment="下一步动作来源: UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED")
+    next_action_source = Column(
+        String(30), nullable=True, comment="下一步动作来源: UI_DEFAULT/USER/AI_EXTRACTED/AGENT/MIGRATED"
+    )
     occurred_at = Column(DateTime, nullable=False, default=business_now, comment="活动发生时间")
     creator_id = Column(String(100), nullable=False, comment="记录创建人")
     owner_id = Column(String(100), nullable=False, comment="跟进归属人")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="记录创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
-    effectiveness_score = Column(Integer, nullable=True, comment="AI评估活动有效性得分，满分100")
+    effectiveness_score = Column(Integer, nullable=True, comment="AI评估活动有效性得分\uff0c满分100")
     effectiveness_is_valid = Column(Boolean, nullable=True, comment="AI评估是否有效")
     effectiveness_reason = Column(Text, nullable=True, comment="AI评估原因摘要")
     effectiveness_detail_json = Column(Text, nullable=True, comment="AI评估分项明细JSON")
@@ -55,7 +80,7 @@ class CustomerActivity(Base):
         String(20),
         nullable=True,
         default=CustomerActivityEffectivenessStatus.PENDING.value,
-        comment="AI评估状态：PENDING/GENERATING/COMPLETED/FAILED",
+        comment="AI评估状态\uff1aPENDING/GENERATING/COMPLETED/FAILED",
     )
     effectiveness_evaluated_time = Column(DateTime, nullable=True, comment="AI评估完成时间")
     effectiveness_error_message = Column(Text, nullable=True, comment="AI评估失败原因")

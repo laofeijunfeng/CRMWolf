@@ -10,14 +10,20 @@ from app.services.assistant.action_evidence import (
     SourceSegment,  # noqa: TC001 - Pydantic resolves the source-record schema at runtime.
 )
 
-WaitingType = Literal["FIELD", "CONFIRMATION", "ACTIVITY_KIND", "OBJECT_SELECTION", "FOLLOW_UP_DISPOSITION"]
+WaitingType = Literal[
+    "FIELD",
+    "CONFIRMATION",
+    "ACTIVITY_KIND",
+    "OBJECT_SELECTION",
+    "FOLLOW_UP_DISPOSITION",
+    "PROPOSAL_FORM",
+    "CONFIRMATION_EDIT",
+]
 TemporalWaitingReason = Literal["DATE", "MONTH", "ROLE", "STATUS", "PRIMARY"]
 Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
-ProposalKind = Literal[
-    "customer_fact", "follow_up_task_create", "follow_up_task", "opportunity_stage", "opportunity_create"
-]
+ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunity_create"]
 
 
 class ContextEvidence(BaseModel):
@@ -137,6 +143,7 @@ class ProposalCandidate(BaseModel):
     customer_id: int
     due_date_granularity: Literal["DATE", "DATETIME", "UNKNOWN"] | None = None
     source_revision: int
+    segment_id: str | None = None
     target_public_id: str | None = None
     prior_status: str | None = None
     task_owner_id: str | None = None
@@ -147,7 +154,7 @@ class ProposalCandidate(BaseModel):
 
     @model_validator(mode="after")
     def require_existing_target(self) -> ProposalCandidate:
-        if self.kind in {"follow_up_task", "opportunity_stage"} and not self.target_public_id:
+        if self.kind == "opportunity_stage" and not self.target_public_id:
             raise ValueError("existing-object proposal requires a target")
         return self
 
@@ -175,19 +182,26 @@ class CustomerActivityReceipt(BaseModel):
     kind: Literal["customer_activity"]
     public_id: str = Field(min_length=1)
     customer_id: int | None = None
+    customer_public_id: str | None = None
 
 
 class AcceptedProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    kind: ProposalKind
+    kind: ProposalKind | Literal["customer_fact", "follow_up_task"]
     public_id: str = Field(min_length=1)
     proposal_key: str = Field(min_length=1)
+    customer_id: int | None = None
+    customer_public_id: str | None = None
+    approval_id: int | None = None
+    approval_phase: Literal["pending_review"] | None = None
+    detail: str | None = None
 
 
 class RefusedProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    # Historical snapshots retain retired proposal kinds for read compatibility.
     kind: Literal[
         "refused:customer_fact",
         "refused:follow_up_task_create",
@@ -282,9 +296,16 @@ class TaskWaiting(BaseModel):
     hint: str | None = Field(default=None, max_length=400)
     temporal_target: TemporalWaitingTarget | None = None
     confirmation_payload: ConfirmationPayload | None = None
+    # Form waits (PROPOSAL_FORM, CONFIRMATION_EDIT) only: bumped on every form edit; submit_form must echo it.
+    form_revision: int | None = Field(default=None, ge=0)
+    form_fields: list[dict[str, object]] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def match_confirmation_command(self) -> TaskWaiting:
+        if (self.form_revision is not None) != (self.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}):
+            raise ValueError("form_revision is required on form waits and forbidden elsewhere")
+        if self.form_fields is not None and self.form_revision is None:
+            raise ValueError("form fields require a form wait")
         payload = self.confirmation_payload
         if self.type != "CONFIRMATION":
             if payload is not None:
@@ -317,6 +338,9 @@ class TaskAuthority(BaseModel):
     confirmation_receipt: str | None = Field(default=None, max_length=128)
     frozen_activity_command: dict[str, object] | None = None
     open_follow_up_batch: dict[str, object] | None = None
+    proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
+    proposal_queue: list[ProposalCandidate] | None = None
+    proposal_form: dict[str, object] | None = None
 
 
 class AssistantTaskSnapshot(BaseModel):

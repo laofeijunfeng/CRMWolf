@@ -7,7 +7,8 @@ export const InteractionOptionSchema = z.object({
   label: z.string().min(1).max(200),
   description: z.string().max(1000).nullable().optional(),
   group: z.string().max(40).nullable().optional(),
-  disabled: z.boolean().default(false)
+  disabled: z.boolean().default(false),
+  depends_on_value: z.string().min(1).max(500).nullable().optional(),
 }).strict()
 
 export const InteractionFieldSchema = z.object({
@@ -21,7 +22,10 @@ export const InteractionFieldSchema = z.object({
   max_length: z.number().int().min(1).max(10000).nullable().optional(),
   minimum: z.number().nullable().optional(),
   maximum: z.number().nullable().optional(),
-  options: z.array(InteractionOptionSchema).max(50).default([])
+  options: z.array(InteractionOptionSchema).max(50).default([]),
+  source_label: z.string().max(40).nullable().optional(),
+  depends_on_key: z.string().max(128).regex(/^[a-z][a-z0-9_]*$/).nullable().optional(),
+  error_message: z.string().min(1).max(500).nullable().optional(),
 }).strict().superRefine((field, context) => {
   if (field.min_length != null && field.max_length != null && field.min_length > field.max_length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'min_length cannot exceed max_length', path: ['min_length'] })
@@ -34,6 +38,12 @@ export const InteractionFieldSchema = z.object({
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'select fields require options', path: ['options'] })
   } else if (!isSelect && field.options.length > 0) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'options are only valid for select fields', path: ['options'] })
+  }
+  if (field.depends_on_key != null && !isSelect) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'depends_on_key is only valid for select fields', path: ['depends_on_key'] })
+  }
+  if (field.depends_on_key == null && field.options.some(option => option.depends_on_value != null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'dependent options require depends_on_key', path: ['depends_on_key'] })
   }
   if (new Set(field.options.map(option => option.value)).size !== field.options.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'interaction field option values must be unique', path: ['options'] })
@@ -69,6 +79,11 @@ export const OpenFollowUpDispositionCardItemSchema = z.object({
   result_message: z.string().max(500).nullable().optional()
 }).strict()
 
+const SecondaryActionSchema = InteractionOptionSchema.extend({ value: z.enum(['request_edit', 'suppress_week']) })
+const CancelReasonSchema = InteractionOptionSchema.extend({
+  value: z.enum(['wrong_customer', 'wrong_content', 'should_not_record', 'other']),
+})
+
 export const InteractionBlockObjectSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.literal('interaction'),
@@ -77,21 +92,24 @@ export const InteractionBlockObjectSchema = z.object({
   business_action: z.string().min(1).max(128).nullable().optional(),
   presentation: z.enum(['COMPACT_TASK_COMPLETION', 'OPEN_FOLLOW_UP_DISPOSITION']).nullable().optional(),
   disposition_items: z.array(OpenFollowUpDispositionCardItemSchema).max(100).default([]),
+  disposition_link: z.boolean().optional(),
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
   hint: z.string().max(400).nullable().optional(),
   fields: z.array(InteractionFieldSchema).max(20).default([]),
   facts: z.array(InteractionConfirmationFactSchema).max(20).default([]),
-  options: z.array(InteractionOptionSchema).max(50).default([]),
+  options: z.array(InteractionOptionSchema).max(100).default([]),
   selection_mode: z.enum(['single', 'multiple']).nullable().optional(),
-  min_selections: z.number().int().min(0).max(50).nullable().optional(),
-  max_selections: z.number().int().min(1).max(50).nullable().optional(),
+  min_selections: z.number().int().min(0).max(100).nullable().optional(),
+  max_selections: z.number().int().min(1).max(100).nullable().optional(),
   allow_blank: z.boolean().nullable().optional(),
   allow_cancel: z.boolean().default(false),
   submit_on_select: z.boolean().optional(),
   submit_label: z.string().min(1).max(200).default('提交'),
   submit_action_id: z.string().min(1).max(128).nullable(),
-  submitted_values: z.record(JsonValueSchema).nullable().optional()
+  submitted_values: z.record(JsonValueSchema).nullable().optional(),
+  secondary_action: SecondaryActionSchema.nullable().optional(),
+  cancel_reasons: z.array(CancelReasonSchema).max(4).optional(),
 }).strict()
 
 
@@ -103,6 +121,12 @@ export function validateInteractionBlock(
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'active interaction requires submit_action_id', path: ['submit_action_id'] })
   } else if (block.state !== 'ACTIVE' && block.submit_action_id != null) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'non-active interaction cannot expose submit_action_id', path: ['submit_action_id'] })
+  }
+  if (block.allow_cancel && !(
+    (block.business_action === 'provide_follow_up_content' && ['text_input', 'form'].includes(block.interaction_type)) ||
+    (block.interaction_type === 'form' && ['create_opportunity_proposal', 'edit_confirmation'].includes(block.business_action ?? ''))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'cancellation is only available for follow-up content input and assistant forms', path: ['allow_cancel'] })
   }
   if (new Set(block.options.map(option => option.value)).size !== block.options.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'interaction option values must be unique', path: ['options'] })
@@ -126,28 +150,26 @@ export function validateInteractionBlock(
     })
   }
   if (block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION') {
-    const activeShape = block.state === 'ACTIVE' && block.submit_on_select === true && block.options.length === 3
-    const readonlyShape = block.state !== 'ACTIVE' && block.submit_on_select !== true
-    if (
-      block.interaction_type !== 'choice' ||
-      block.selection_mode !== 'single' ||
-      block.min_selections !== 1 ||
-      block.max_selections !== 1 ||
-      block.disposition_items.length === 0 ||
-      (!activeShape && !readonlyShape)
-    ) {
+    const archivedLegacy = block.state !== 'ACTIVE' && block.selection_mode === 'single' &&
+      block.min_selections === 1 && block.max_selections === 1 && block.options.length <= 50
+    const batch = block.selection_mode === 'multiple' && block.min_selections === 0 &&
+      block.max_selections === block.options.length && block.options.length === block.disposition_items.length &&
+      block.options.every((option, index) => option.value === block.disposition_items[index]?.item_id)
+    if (block.interaction_type !== 'choice' || block.submit_on_select === true ||
+      block.disposition_items.length === 0 || (!batch && !archivedLegacy)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'open follow-up disposition requires the frozen task list and one current choice',
+        message: 'open follow-up disposition requires one optional checkbox per frozen task',
         path: ['presentation']
       })
     }
-  } else if (block.disposition_items.length > 0) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'disposition items require the open follow-up presentation',
-      path: ['disposition_items']
-    })
+  } else {
+    if (block.disposition_items.length > 0 || block.disposition_link === true) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'disposition items and link require the open follow-up presentation', path: ['presentation'] })
+    }
+    if (block.options.length > 50 || (block.max_selections ?? 0) > 50) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'generic interactions support at most 50 options', path: ['options'] })
+    }
   }
 
   if (block.interaction_type === 'choice') {
@@ -212,6 +234,17 @@ export function validateInteractionBlock(
         path: ['submit_on_select']
       })
     }
+  }
+  if (block.secondary_action != null) {
+    const expected = block.interaction_type === 'confirmation' ? 'request_edit'
+      : block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION' ? 'suppress_week' : null
+    if (block.state !== 'ACTIVE' || block.secondary_action.value !== expected) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: 'secondary_action is limited to confirmation edit and disposition weekly suppression', path: ['secondary_action'] })
+    }
+  }
+  if (block.cancel_reasons != null && block.cancel_reasons.length > 0 && (block.state !== 'ACTIVE' || block.interaction_type !== 'confirmation' ||
+    new Set(block.cancel_reasons.map(reason => reason.value)).size !== block.cancel_reasons.length)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'cancel_reasons are unique closed reasons on an active confirmation', path: ['cancel_reasons'] })
   }
 }
 

@@ -1,22 +1,18 @@
 import logging
 import os
+from collections.abc import Callable, Iterator
 from datetime import date
 from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import text
+from sqlalchemy.orm import Query as OrmQuery
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.core.list_query.license_status import license_expiry_text
-from app.core.list_query import (
-    enforce_owner_view_scope,
-    optional_request_list_query,
-    run_or_400,
-    uses_unified_list_query,
-)
+from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_contract_delete_permission,
     check_contract_edit_permission,
@@ -27,9 +23,6 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
-from app.crud.contract import ApprovalService, contract_crud
-from app.crud.customer import contact_crud
-from app.crud.opportunity import opportunity_crud
 from app.core.list_export import (
     CONTRACTS_LIST_EXPORT_CATALOG,
     create_list_export_file,
@@ -37,52 +30,131 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
-from app.core.database import SessionLocal
-from app.schemas.list_export import ContractListExportRequest
-from fastapi.responses import FileResponse
-from typing import Iterator
-from app.schemas.common import PaginatedResponse
-from app.models.opportunity import Opportunity
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
+from app.core.list_query.license_status import license_expiry_text
+from app.crud.contract import ApprovalService, contract_crud
+from app.crud.customer import contact_crud
+from app.crud.opportunity import opportunity_crud
 from app.models.contract import Contract
 from app.models.customer import Customer
+from app.models.opportunity import Opportunity
+from app.models.user import User
+from app.schemas.common import PaginatedResponse
 from app.schemas.contract import (
+    ContractChangeCreate,
+    ContractChangeResponse,
     ContractChartBucketContracts,
     ContractChartResponse,
     ContractCreate,
-    ContractInternalCreate,
     ContractDetailResponse,
+    ContractFinancialSnapshotResponse,
+    ContractInternalCreate,
     ContractListResponse,
     ContractResponse,
     ContractStatusEnum,
     ContractUpdate,
-    ContractChangeCreate,
-    ContractChangeResponse,
-    ContractFinancialSnapshotResponse,
-    contract_change_response,
     MessageResponse,
+    contract_change_response,
 )
+from app.schemas.list_export import ContractListExportRequest
 from app.services import contract_chart_stats
-from app.services.customer_business_object_intelligence_service import (
-    CustomerBusinessObjectChangeRefreshInput,
-    customer_business_object_intelligence_service,
-)
-from app.services.outbound_notification_job_service import outbound_notification_job_service
-from app.services.file_storage import FileStorageError, file_storage_service
 from app.services.contract_change import (
     ContractChangeAttachment,
     ContractChangeError,
     ContractNotFoundError,
     contract_change_service,
 )
+from app.services.customer_business_object_intelligence_service import (
+    CustomerBusinessObjectChangeRefreshInput,
+    customer_business_object_intelligence_service,
+)
+from app.services.file_storage import FileStorageError, file_storage_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.utils.public_id import is_opportunity_public_id
 
+if TYPE_CHECKING:
+    from app.models.approval import Approval
+
+_team_dependency = Depends(get_current_user_team)
+_user_dependency = Depends(get_current_active_user)
+_db_dependency = Depends(get_db)
+_contract_view_dependency = Depends(check_contract_view_permission)
+_contract_edit_dependency = Depends(check_contract_edit_permission)
+_contract_delete_dependency = Depends(check_contract_delete_permission)
+_required_contract_file = File(..., description="合同邮件附件\uff08PDF/DOCX\uff0c必传\uff09")
+_optional_change_file = File(None)
+_standard_unit_price_query = Query(None, description="按客单价筛选")
+_standard_unit_price_exclude_query = Query(None, description="排除的客单价")
+_signing_date_start_query = Query(None, description="签署日期起始")
+_signing_date_end_query = Query(None, description="签署日期结束")
+_effective_date_start_query = Query(None, description="生效日期起始")
+_effective_date_end_query = Query(None, description="生效日期结束")
+_expiry_date_start_query = Query(None, description="到期日期起始")
+_expiry_date_end_query = Query(None, description="到期日期结束")
+_license_expiry_date_start_query = Query(
+    None, description="授权时间起始\uff0c按最新已签发正式 License 到期时间筛选",
+)
+_license_expiry_date_end_query = Query(
+    None, description="授权时间结束\uff0c按最新已签发正式 License 到期时间筛选",
+)
+_status_query = Query(
+    None,
+    description=(
+        "按合同状态筛选\uff0c可选值\uff1aDRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、"
+        "EXPIRED(已到期)、TERMINATED(已终止)"
+    ),
+)
+_chart_standard_unit_price_query = Query(None)
+_chart_standard_unit_price_exclude_query = Query(None)
+_chart_signing_date_start_query = Query(None)
+_chart_signing_date_end_query = Query(None)
+_chart_effective_date_start_query = Query(None)
+_chart_effective_date_end_query = Query(None)
+_chart_expiry_date_start_query = Query(None)
+_chart_expiry_date_end_query = Query(None)
+_chart_license_expiry_date_start_query = Query(None)
+_chart_license_expiry_date_end_query = Query(None)
+
 logger = logging.getLogger(__name__)
+
+
+class _UserInfo(TypedDict):
+    id: str
+    name: str | None
+    email: str | None
+    mobile: str | None
+    avatar_url: str | None
+
+
+class _CustomerInfo(TypedDict):
+    id: str
+    public_id: str
+    account_name: str | None
+
+
+class _OpportunityInfo(TypedDict):
+    id: str
+    opportunity_name: str | None
+    purchase_type: str | None
+
+
+class _LicenseInfo(TypedDict):
+    authorized_users: int | None
+    expiry_date: date | None
+    is_permanent: bool
 
 
 router = APIRouter(prefix="/v1/contracts", tags=["合同管理"])
 
 
-def _queue_pending_approval_notification(db: Session, approval, *, actor_id=None) -> None:
+def _queue_pending_approval_notification(
+    db: Session, approval: "Approval | None", *, actor_id: str | None = None,
+) -> None:
     if approval is None or approval.current_node_id is None:
         return
     try:
@@ -94,7 +166,7 @@ def _queue_pending_approval_notification(db: Session, approval, *, actor_id=None
         )
     except Exception as notify_error:
         logger.error(
-            "合同审批通知入队失败（contract_id=%s）: %s",
+            "合同审批通知入队失败\uff08contract_id=%s\uff09: %s",
             getattr(approval, "business_id", None),
             notify_error,
             exc_info=True,
@@ -103,7 +175,7 @@ def _queue_pending_approval_notification(db: Session, approval, *, actor_id=None
     outbound_notification_job_service.commit_and_kick(db, request)
 
 
-def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
+def _get_user_basic_info(db: Session, user_id: str | None) -> _UserInfo | None:
     if not user_id:
         return None
 
@@ -125,7 +197,7 @@ def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
     }
 
 
-def _get_customer_basic_info(db: Session, customer_id: Optional[int]) -> Optional[dict]:
+def _get_customer_basic_info(db: Session, customer_id: int | None) -> _CustomerInfo | None:
     if not customer_id:
         return None
     customer_data = db.execute(text("""
@@ -142,7 +214,7 @@ def _get_customer_basic_info(db: Session, customer_id: Optional[int]) -> Optiona
     }
 
 
-def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Optional[dict]:
+def _get_opportunity_list_info(db: Session, opportunity_id: int | None) -> _OpportunityInfo | None:
     if not opportunity_id:
         return None
 
@@ -163,7 +235,7 @@ def _get_opportunity_list_info(db: Session, opportunity_id: Optional[int]) -> Op
 
 
 
-def _ensure_opportunity_ready_for_contract(db: Session, opportunity, team_id: int) -> None:
+def _ensure_opportunity_ready_for_contract(db: Session, opportunity: Opportunity, team_id: int) -> None:
     from app.models.opportunity import OpportunityStatus
     from app.services.opportunity_presenter import resolve_opportunity_approval_phase
 
@@ -179,7 +251,7 @@ def _ensure_opportunity_ready_for_contract(db: Session, opportunity, team_id: in
         )
 
 
-def _get_opportunity_by_public_id_or_404(db: Session, opportunity_id: str, team_id: int):
+def _get_opportunity_by_public_id_or_404(db: Session, opportunity_id: str, team_id: int) -> Opportunity:
     if not is_opportunity_public_id(opportunity_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -195,7 +267,7 @@ def _get_opportunity_by_public_id_or_404(db: Session, opportunity_id: str, team_
     return opportunity
 
 
-def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -> Optional[dict]:
+def _get_latest_official_license_info(db: Session, contract_id: int | None) -> _LicenseInfo | None:
     if not contract_id:
         return None
 
@@ -221,11 +293,11 @@ def _get_latest_official_license_info(db: Session, contract_id: Optional[int]) -
 
 def _contract_response_base(
     db: Session,
-    contract,
+    contract: Contract,
     *,
-    customer_info: Optional[dict] = None,
-    opportunity_info: Optional[dict] = None,
-) -> dict:
+    customer_info: _CustomerInfo | None = None,
+    opportunity_info: _OpportunityInfo | None = None,
+) -> dict[str, Any]:
     if customer_info is None:
         customer_info = _get_customer_basic_info(db, contract.customer_id)
     if opportunity_info is None:
@@ -260,11 +332,11 @@ def _contract_response_base(
 
 def _contract_list_response_dict(
     db: Session,
-    contract,
+    contract: Contract,
     *,
-    customer_info: Optional[dict] = None,
-    opportunity_info: Optional[dict] = None,
-) -> dict:
+    customer_info: _CustomerInfo | None = None,
+    opportunity_info: _OpportunityInfo | None = None,
+) -> dict[str, Any]:
     customer_info = customer_info if customer_info is not None else _get_customer_basic_info(db, contract.customer_id)
     opportunity_info = (
         opportunity_info
@@ -304,8 +376,8 @@ def _parse_contract_payload(contract_payload: str) -> ContractCreate:
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"合同参数格式错误：{e}",
-        )
+            detail=f"合同参数格式错误\uff1a{e}",
+        ) from e
 
 
 def _contract_file_content_type(file_path: str) -> str:
@@ -325,7 +397,7 @@ def _content_disposition(filename: str) -> str:
 
 
 def _build_contract_intelligence_change(
-    contract,
+    contract: Contract,
     *,
     change_type: Literal["created", "updated", "deleted"],
     actor_id: str | None,
@@ -343,18 +415,18 @@ def _build_contract_intelligence_change(
 
 
 async def _trigger_contract_intelligence_refresh(
-    db: Session,
+    _db: Session,
     change: CustomerBusinessObjectChangeRefreshInput,
 ) -> None:
     customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
 def _lock_created_contract_for_file_commit(
-    db: Session, contract: Contract, *, team_id: int, deleted: bool = False,
+    db: Session, contract: Contract, *, team_id: int,
 ) -> Contract:
     """Fence the file transaction on the owning customer before touching the contract."""
     if int(contract.team_id) != int(team_id):
-        raise ValueError("合同所属团队已变更，请重试")
+        raise ValueError("合同所属团队已变更\uff0c请重试")
     customer_id = int(contract.customer_id)
     with db.no_autoflush:
         locked = db.query(Contract).filter(
@@ -362,30 +434,36 @@ def _lock_created_contract_for_file_commit(
         ).populate_existing().with_for_update().one_or_none()
     if locked is None or int(locked.customer_id) != customer_id:
         db.rollback()
-        raise ValueError("合同所属客户已变更，请重试")
+        raise ValueError("合同所属客户已变更\uff0c请重试")
     return locked
 
 
-@router.post("/", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="创建合同", description="""
-手动创建新合同，系统自动生成合同编号并计算标准单价。
+@router.post(
+    "/",
+    response_model=ContractResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建合同",
+    description="""
+手动创建新合同\uff0c系统自动生成合同编号并计算标准单价。
 
-**功能说明：**
-- 创建合同实例，自动生成唯一合同编号
+**功能说明\uff1a**
+- 创建合同实例\uff0c自动生成唯一合同编号
 - 根据合同金额、用户数、授权模式计算标准单价
 - 根据授权模式和订阅年限计算到期日期
-- 初始状态为草稿（DRAFT），可编辑
+- 初始状态为草稿\uff08DRAFT\uff09\uff0c可编辑
 
-**业务场景：**
+**业务场景\uff1a**
 - 销售人员为客户创建合同
 - 商务谈判达成后建立合同记录
-""")
+""",
+)
 async def create_contract(
     contract_payload: str = Form(..., description="合同 JSON 数据"),
-    file: UploadFile = File(..., description="合同邮件附件（PDF/DOCX，必传）"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    file: UploadFile = _required_contract_file,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractResponse:
     contract = _parse_contract_payload(contract_payload)
     file_content = await file.read()
     if not file.filename:
@@ -449,13 +527,13 @@ async def create_contract(
                 content=file_content,
             )
         except FileStorageError as file_error:
-            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id, deleted=True)
+            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
             db.delete(db_contract)
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(file_error)
-            )
+            ) from file_error
 
         db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
         db_contract.contract_file_path = contract_file_path
@@ -482,7 +560,7 @@ async def create_contract(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 @router.get(
@@ -492,8 +570,8 @@ async def create_contract(
 )
 async def download_contract_file(
     contract_id: int,
-    contract = Depends(check_contract_view_permission),
-):
+    contract: Contract = _contract_view_dependency,
+) -> Response:
     if not contract.contract_file_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -502,11 +580,11 @@ async def download_contract_file(
 
     try:
         full_path = file_storage_service.get_full_path(contract.contract_file_path)
-    except FileStorageError:
+    except FileStorageError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="文件路径非法",
-        )
+        ) from exc
 
     if not os.path.exists(full_path):
         raise HTTPException(
@@ -517,7 +595,9 @@ async def download_contract_file(
     with open(full_path, "rb") as f:
         content = f.read()
 
-    filename = contract.contract_file_name or f"contract_{contract_id}{os.path.splitext(contract.contract_file_path)[1].lower()}"
+    filename = contract.contract_file_name or (
+        f"contract_{contract_id}{os.path.splitext(contract.contract_file_path)[1].lower()}"
+    )
     return Response(
         content=content,
         media_type=contract.contract_file_mime_type or _contract_file_content_type(contract.contract_file_path),
@@ -527,28 +607,34 @@ async def download_contract_file(
     )
 
 
-@router.post("/from-opportunity/{opportunity_id}", response_model=ContractResponse, status_code=status.HTTP_201_CREATED, summary="根据商机创建合同", description="""
-从赢单商机快速创建合同，简化销售流程。
+@router.post(
+    "/from-opportunity/{opportunity_id}",
+    response_model=ContractResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="根据商机创建合同",
+    description="""
+从赢单商机快速创建合同\uff0c简化销售流程。
 
-**功能说明：**
+**功能说明\uff1a**
 - 根据赢单商机快速生成合同
 - 自动使用商机的实际成交金额
 - 自动关联客户和签约联系人
 - 生成的合同为草稿状态
 
-**业务场景：**
+**业务场景\uff1a**
 - 商机赢单后直接生成合同
 - 减少手动创建合同的工作量
-""")
+""",
+)
 async def create_contract_from_opportunity(
     opportunity_id: str,
-    contract_name: str = Form(..., description="合同名称，如：XX公司软件采购合同"),
-    signing_contact_id: int = Form(..., description="签约联系人ID，必须是该商机的客户下的联系人"),
-    file: UploadFile = File(..., description="合同邮件附件（PDF/DOCX，必传）"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    contract_name: str = Form(..., description="合同名称\uff0c如\uff1aXX公司软件采购合同"),
+    signing_contact_id: int = Form(..., description="签约联系人ID\uff0c必须是该商机的客户下的联系人"),
+    file: UploadFile = _required_contract_file,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractResponse:
     from app.models.opportunity import OpportunityStatus
 
     opportunity = _get_opportunity_by_public_id_or_404(db, opportunity_id, team_id)
@@ -598,13 +684,13 @@ async def create_contract_from_opportunity(
                 content=file_content,
             )
         except FileStorageError as file_error:
-            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id, deleted=True)
+            db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
             db.delete(db_contract)
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(file_error)
-            )
+            ) from file_error
 
         db_contract = _lock_created_contract_for_file_commit(db, db_contract, team_id=team_id)
         db_contract.contract_file_path = contract_file_path
@@ -631,61 +717,63 @@ async def create_contract_from_opportunity(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 @router.get("/", response_model=PaginatedResponse[ContractListResponse], summary="查询合同列表", description="""
-查询合同列表，支持多条件筛选和分页。
+查询合同列表\uff0c支持多条件筛选和分页。
 
-**功能说明：**
+**功能说明\uff1a**
 - 支持分页查询合同列表
 - 可按客户、状态、授权模式等多条件筛选
 - 返回合同及其关联的客户、商机、创建人信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看所有合同
 - 按客户筛选合同
 - 按状态筛选草稿、审批中、已签署等合同
 """)
 def get_contracts(
-    skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始，默认为0表示第一页"),
-    limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
-    customer_id: Optional[str] = Query(None, description="按客户对外ID筛选，传入客户ID后只返回该客户的合同"),
-    contract_status: Optional[str] = Query(None, alias="status", description="按合同状态筛选，多个值用逗号分隔"),
-    status_exclude: Optional[str] = Query(None, description="排除的合同状态，多个值用逗号分隔"),
-    license_type: Optional[str] = Query(None, description="按授权模式筛选，多个值用逗号分隔"),
-    license_type_exclude: Optional[str] = Query(None, description="排除的授权模式，多个值用逗号分隔"),
-    purchase_type: Optional[str] = Query(None, description="按采购类型筛选，多个值用逗号分隔"),
-    purchase_type_exclude: Optional[str] = Query(None, description="排除的采购类型，多个值用逗号分隔"),
-    subscription_years: Optional[int] = Query(None, description="按采购年限筛选"),
-    subscription_years_exclude: Optional[int] = Query(None, description="排除的采购年限"),
-    license_authorized_users: Optional[int] = Query(None, description="按授权数量筛选，优先使用最新已签发正式 License 授权数量"),
-    license_authorized_users_exclude: Optional[int] = Query(None, description="排除的授权数量"),
-    standard_unit_price: Optional[Decimal] = Query(None, description="按客单价筛选"),
-    standard_unit_price_exclude: Optional[Decimal] = Query(None, description="排除的客单价"),
-    contract_number: Optional[str] = Query(None, description="按合同编号模糊搜索，支持部分匹配"),
-    keyword: Optional[str] = Query(None, description="关键词搜索，可搜索合同名称、合同编号等字段"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索合同编号、合同名称、客户或商机"),
-    customer_keyword: Optional[str] = Query(None, description="客户名称关键词"),
-    opportunity_keyword: Optional[str] = Query(None, description="商机名称关键词"),
-    owner_id: Optional[str] = Query(None, description="按合同负责人ID筛选"),
-    owner_id_exclude: Optional[str] = Query(None, description="排除的合同负责人ID，多个值用逗号分隔"),
-    signing_date_start: Optional[date] = Query(None, description="签署日期起始"),
-    signing_date_end: Optional[date] = Query(None, description="签署日期结束"),
-    effective_date_start: Optional[date] = Query(None, description="生效日期起始"),
-    effective_date_end: Optional[date] = Query(None, description="生效日期结束"),
-    expiry_date_start: Optional[date] = Query(None, description="到期日期起始"),
-    expiry_date_end: Optional[date] = Query(None, description="到期日期结束"),
-    license_expiry_date_start: Optional[date] = Query(None, description="授权时间起始，按最新已签发正式 License 到期时间筛选"),
-    license_expiry_date_end: Optional[date] = Query(None, description="授权时间结束，按最新已签发正式 License 到期时间筛选"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    skip: int = Query(0, ge=0, description="分页跳过记录数\uff0c从0开始\uff0c默认为0表示第一页"),
+    limit: int = Query(100, ge=1, le=100, description="每页记录数\uff0c默认100\uff0c最大100"),
+    customer_id: str | None = Query(None, description="按客户对外ID筛选\uff0c传入客户ID后只返回该客户的合同"),
+    contract_status: str | None = Query(None, alias="status", description="按合同状态筛选\uff0c多个值用逗号分隔"),
+    status_exclude: str | None = Query(None, description="排除的合同状态\uff0c多个值用逗号分隔"),
+    license_type: str | None = Query(None, description="按授权模式筛选\uff0c多个值用逗号分隔"),
+    license_type_exclude: str | None = Query(None, description="排除的授权模式\uff0c多个值用逗号分隔"),
+    purchase_type: str | None = Query(None, description="按采购类型筛选\uff0c多个值用逗号分隔"),
+    purchase_type_exclude: str | None = Query(None, description="排除的采购类型\uff0c多个值用逗号分隔"),
+    subscription_years: int | None = Query(None, description="按采购年限筛选"),
+    subscription_years_exclude: int | None = Query(None, description="排除的采购年限"),
+    license_authorized_users: int | None = Query(
+        None, description="按授权数量筛选\uff0c优先使用最新已签发正式 License 授权数量",
+    ),
+    license_authorized_users_exclude: int | None = Query(None, description="排除的授权数量"),
+    standard_unit_price: Decimal | None = _standard_unit_price_query,
+    standard_unit_price_exclude: Decimal | None = _standard_unit_price_exclude_query,
+    contract_number: str | None = Query(None, description="按合同编号模糊搜索\uff0c支持部分匹配"),
+    keyword: str | None = Query(None, description="关键词搜索\uff0c可搜索合同名称、合同编号等字段"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索合同编号、合同名称、客户或商机"),
+    customer_keyword: str | None = Query(None, description="客户名称关键词"),
+    opportunity_keyword: str | None = Query(None, description="商机名称关键词"),
+    owner_id: str | None = Query(None, description="按合同负责人ID筛选"),
+    owner_id_exclude: str | None = Query(None, description="排除的合同负责人ID\uff0c多个值用逗号分隔"),
+    signing_date_start: date | None = _signing_date_start_query,
+    signing_date_end: date | None = _signing_date_end_query,
+    effective_date_start: date | None = _effective_date_start_query,
+    effective_date_end: date | None = _effective_date_end_query,
+    expiry_date_start: date | None = _expiry_date_start_query,
+    expiry_date_end: date | None = _expiry_date_end_query,
+    license_expiry_date_start: date | None = _license_expiry_date_start_query,
+    license_expiry_date_end: date | None = _license_expiry_date_end_query,
+    order_by: str | None = Query(None, description="排序字段"),
+    order_dir: str | None = Query(None, description="排序方向\uff08asc/desc\uff09"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> PaginatedResponse[ContractListResponse]:
     from app.crud.permission import permission_crud
 
     # 获取用户权限码
@@ -704,15 +792,21 @@ def get_contracts(
             parsed_filters or [],
             current_user_id=str(current_user.id),
             has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+            permission_detail="只能查看自己负责的合同\uff0c或需要 contract:view:all 权限查看他人数据",
         )
     else:
         actual_owner_id = owner_id
-        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-        if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids) and not has_view_all:
+        requested_owner_ids = (
+            [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        )
+        if (
+            requested_owner_ids
+            and any(item != str(current_user.id) for item in requested_owner_ids)
+            and not has_view_all
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据"
+                detail="只能查看自己负责的合同\uff0c或需要 contract:view:all 权限查看他人数据"
             )
         if actual_owner_id is None and not has_view_all:
             actual_owner_id = str(current_user.id)
@@ -776,7 +870,9 @@ def get_contracts(
     )
 
 
-def _build_contract_list_responses(projection_db, contracts, team_id: int) -> List[ContractListResponse]:
+def _build_contract_list_responses(
+    projection_db: Session, contracts: list[Contract], team_id: int,
+) -> list[ContractListResponse]:
     """Batch-project contract ORM rows into list responses with display info."""
     contract_ids = [c.id for c in contracts]
     customer_ids = {c.customer_id for c in contracts if c.customer_id}
@@ -805,7 +901,7 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
         """), {f'user_{i}': int(uid) for i, uid in enumerate(user_ids)}).fetchall()
         users_info = {str(row[0]): {"id": str(row[0]), "name": row[1], "avatar_url": row[2]} for row in user_rows}
 
-    latest_licenses = {}
+    latest_licenses: dict[int, _LicenseInfo] = {}
     if contract_ids:
         placeholders = ','.join(f':contract_{i}' for i in range(len(contract_ids)))
         license_rows = projection_db.execute(text(f"""
@@ -826,12 +922,12 @@ def _build_contract_list_responses(projection_db, contracts, team_id: int) -> Li
         customer = customers.get(contract.customer_id)
         opportunity = opportunities.get(contract.opportunity_id)
         latest_license = latest_licenses.get(contract.id)
-        customer_info = {
+        customer_info: _CustomerInfo | None = {
             "id": customer.public_id,
             "public_id": customer.public_id,
             "account_name": customer.account_name,
         } if customer else None
-        opportunity_info = {
+        opportunity_info: _OpportunityInfo | None = {
             "id": opportunity.public_id,
             "opportunity_name": opportunity.opportunity_name,
             "purchase_type": opportunity.purchase_type,
@@ -871,6 +967,7 @@ PURCHASE_TYPE_LABELS = {"NEW": "新购", "RENEWAL": "续购", "EXPANSION": "增�
 
 
 def _contract_export_row(item: ContractListResponse) -> dict[str, object]:
+    purchase_type = item.purchase_type
     return {
         "contract_number": item.contract_number,
         "contract_name": item.contract_name,
@@ -878,7 +975,7 @@ def _contract_export_row(item: ContractListResponse) -> dict[str, object]:
         "opportunity_name": item.opportunity_name,
         "total_amount": item.total_amount,
         "license_type": LICENSE_TYPE_LABELS.get(item.license_type, item.license_type),
-        "purchase_type": PURCHASE_TYPE_LABELS.get(item.purchase_type, item.purchase_type),
+        "purchase_type": PURCHASE_TYPE_LABELS.get(purchase_type, purchase_type) if purchase_type is not None else None,
         "subscription_years": item.subscription_years,
         "license_authorized_users": item.license_authorized_users,
         "standard_unit_price": item.standard_unit_price,
@@ -889,7 +986,11 @@ def _contract_export_row(item: ContractListResponse) -> dict[str, object]:
     }
 
 
-def _iter_contract_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+def _iter_contract_export_rows(
+    stream: "OrmQuery[Contract]",
+    team_id: int,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
+) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
         try:
@@ -907,9 +1008,9 @@ def _iter_contract_export_rows(stream, team_id: int, projection_session_factory=
 )
 def export_contracts(
     request: ContractListExportRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> FileResponse:
     from app.crud.permission import permission_crud
 
@@ -922,7 +1023,7 @@ def export_contracts(
         request.filters,
         current_user_id=str(current_user.id),
         has_view_all=has_view_all,
-        permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+        permission_detail="只能查看自己负责的合同\uff0c或需要 contract:view:all 权限查看他人数据",
     )
 
     query = run_or_400(lambda: contract_crud.build_list_query(
@@ -940,29 +1041,38 @@ def export_contracts(
         catalog=CONTRACTS_LIST_EXPORT_CATALOG,
         selected_keys=request.fields,
         rows=rows,
-        file_stem=f"合同列表-{CONTRACT_STATUS_LABELS.get(request.tab, '全部合同') if request.tab != 'all' else '全部合同'}",
+        file_stem=(
+            f"合同列表-"
+            f"{CONTRACT_STATUS_LABELS.get(request.tab, '全部合同') if request.tab != 'all' else '全部合同'}"
+        ),
     ))
     return list_export_file_response(generated)
 
 
-@router.get("/opportunity/{opportunity_id}", response_model=Optional[ContractListResponse], summary="根据商机获取合同", description="""
+@router.get(
+    "/opportunity/{opportunity_id}",
+    response_model=ContractListResponse | None,
+    summary="根据商机获取合同",
+    description="""
 获取指定商机关联的合同信息。
 
-**功能说明：**
+**功能说明\uff1a**
 - 根据商机对外ID查询其关联的合同
 - 返回合同的完整列表信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 在商机详情页查看关联的合同
 - 确认商机是否已生成合同
 - 了解商机的合同转化情况
-""")
+""",
+)
 def get_contract_by_opportunity(
     opportunity_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractListResponse | None:
+    del current_user  # The dependency still requires an active user.
     opportunity = _get_opportunity_by_public_id_or_404(db, opportunity_id, team_id)
 
     contract = contract_crud.get_by_opportunity_id(db, opportunity.id, team_id)
@@ -970,7 +1080,7 @@ def get_contract_by_opportunity(
         return None
     
     customer_info = _get_customer_basic_info(db, contract.customer_id)
-    opportunity_info = {
+    opportunity_info: _OpportunityInfo = {
         "id": opportunity.public_id,
         "opportunity_name": opportunity.opportunity_name,
         "purchase_type": opportunity.purchase_type,
@@ -1019,7 +1129,7 @@ class _ChartQuery:
         filters: str | None = None,
         sorts: str | None = None,
         team_id: int,
-        current_user,
+        current_user: User,
         db: Session,
     ) -> None:
         self.customer_public_id = customer_public_id
@@ -1070,27 +1180,27 @@ def _chart_query(
     subscription_years_exclude: int | None = Query(None),
     license_authorized_users: int | None = Query(None),
     license_authorized_users_exclude: int | None = Query(None),
-    standard_unit_price: Decimal | None = Query(None),
-    standard_unit_price_exclude: Decimal | None = Query(None),
+    standard_unit_price: Decimal | None = _chart_standard_unit_price_query,
+    standard_unit_price_exclude: Decimal | None = _chart_standard_unit_price_exclude_query,
     keyword: str | None = Query(None),
     customer_keyword: str | None = Query(None),
     opportunity_keyword: str | None = Query(None),
     search: str | None = Query(None),
     owner_id: str | None = Query(None),
     owner_id_exclude: str | None = Query(None),
-    signing_date_start: date | None = Query(None),
-    signing_date_end: date | None = Query(None),
-    effective_date_start: date | None = Query(None),
-    effective_date_end: date | None = Query(None),
-    expiry_date_start: date | None = Query(None),
-    expiry_date_end: date | None = Query(None),
-    license_expiry_date_start: date | None = Query(None),
-    license_expiry_date_end: date | None = Query(None),
+    signing_date_start: date | None = _chart_signing_date_start_query,
+    signing_date_end: date | None = _chart_signing_date_end_query,
+    effective_date_start: date | None = _chart_effective_date_start_query,
+    effective_date_end: date | None = _chart_effective_date_end_query,
+    expiry_date_start: date | None = _chart_expiry_date_start_query,
+    expiry_date_end: date | None = _chart_expiry_date_end_query,
+    license_expiry_date_start: date | None = _chart_license_expiry_date_start_query,
+    license_expiry_date_end: date | None = _chart_license_expiry_date_end_query,
     filters: str | None = Query(None),
     sorts: str | None = Query(None),
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> _ChartQuery:
     return _ChartQuery(
         customer_public_id=customer_public_id,
@@ -1128,8 +1238,11 @@ def _chart_query(
         db=db,
     )
 
+_chart_dependency = Depends(_chart_query)
 
-def _chart_population(query: _ChartQuery):
+
+
+def _chart_population(query: _ChartQuery) -> list[Contract]:
     from app.crud.permission import permission_crud
 
     user_permissions = permission_crud.get_user_permissions(query.db, query.current_user.id, query.team_id)
@@ -1145,13 +1258,18 @@ def _chart_population(query: _ChartQuery):
             parsed_filters or [],
             current_user_id=current_user_id,
             has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据",
+            permission_detail="只能查看自己负责的合同\uff0c或需要 contract:view:all 权限查看他人数据",
         )
     else:
         actual_owner_id = query.owner_id
-        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        requested_owner_ids = (
+            [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        )
         if requested_owner_ids and any(item != current_user_id for item in requested_owner_ids) and not has_view_all:
-            raise HTTPException(status_code=403, detail="只能查看自己负责的合同，或需要 contract:view:all 权限查看他人数据")
+            raise HTTPException(
+                status_code=403,
+                detail="只能查看自己负责的合同\uff0c或需要 contract:view:all 权限查看他人数据",
+            )
         if actual_owner_id is None and not has_view_all:
             actual_owner_id = current_user_id
     return run_or_400(lambda: contract_crud.build_population_query(
@@ -1191,7 +1309,7 @@ def _chart_population(query: _ChartQuery):
 
 
 @router.get("/chart", response_model=ContractChartResponse, summary="查询合同图表")
-def get_contract_chart(query: _ChartQuery = Depends(_chart_query)) -> ContractChartResponse:
+def get_contract_chart(query: _ChartQuery = _chart_dependency) -> ContractChartResponse:
     population = _chart_population(query)
     payload = contract_chart_stats.build_contract_chart(query.db, query.team_id, population)
     return ContractChartResponse.model_validate(payload)
@@ -1203,7 +1321,7 @@ def get_contract_chart_bucket_contracts(
     bucket: str = Query(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
-    query: _ChartQuery = Depends(_chart_query),
+    query: _ChartQuery = _chart_dependency,
 ) -> ContractChartBucketContracts:
     population = _chart_population(query)
     try:
@@ -1212,17 +1330,24 @@ def get_contract_chart_bucket_contracts(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
-    return ContractChartBucketContracts(chart=chart, bucket=bucket, total=total, contracts=contracts)
+    return ContractChartBucketContracts.model_validate({
+        "chart": chart, "bucket": bucket, "total": total, "contracts": contracts,
+    })
 
 
-@router.post("/{contract_id}/changes", response_model=ContractChangeResponse, status_code=status.HTTP_201_CREATED, summary="申请变更合同")
+@router.post(
+    "/{contract_id}/changes",
+    response_model=ContractChangeResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="申请变更合同",
+)
 async def create_contract_change(
     contract_id: int,
     change_payload: str = Form(...),
-    file: Optional[UploadFile] = File(None),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    file: UploadFile | None = _optional_change_file,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> ContractChangeResponse:
     try:
         payload = ContractChangeCreate.model_validate_json(change_payload)
@@ -1251,48 +1376,52 @@ async def create_contract_change(
     return contract_change_response(change)
 
 
-@router.get("/{contract_id}/changes", response_model=List[ContractChangeResponse], summary="查询合同变更记录")
+@router.get("/{contract_id}/changes", response_model=list[ContractChangeResponse], summary="查询合同变更记录")
 def list_contract_changes(
     contract_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-) -> List[ContractChangeResponse]:
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> list[ContractChangeResponse]:
     check_contract_view_permission(contract_id, team_id, current_user, db)
     return [contract_change_response(item) for item in contract_change_service.list_history(db, team_id, contract_id)]
 
 
-@router.get("/{contract_id}/changes/pending", response_model=Optional[ContractChangeResponse], summary="查询审批中的合同变更")
+@router.get(
+    "/{contract_id}/changes/pending",
+    response_model=ContractChangeResponse | None,
+    summary="查询审批中的合同变更",
+)
 def get_pending_contract_change(
     contract_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-) -> Optional[ContractChangeResponse]:
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractChangeResponse | None:
     check_contract_view_permission(contract_id, team_id, current_user, db)
     change = contract_change_service.get_pending(db, team_id, contract_id)
     return contract_change_response(change) if change else None
 
 
 @router.get("/{contract_id}", response_model=ContractDetailResponse, summary="获取合同详情", description="""
-获取指定合同的完整详情，包括关联的客户、商机、联系人等信息。
+获取指定合同的完整详情\uff0c包括关联的客户、商机、联系人等信息。
 
-**功能说明：**
+**功能说明\uff1a**
 - 返回合同的完整信息
 - 包含关联的客户、商机、签约联系人、创建人详情
 - 支持查看合同的完整上下文信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看合同详情
 - 核对合同关联信息
 - 了解合同的完整上下文
 """)
 def get_contract(
     contract_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractDetailResponse:
     contract = check_contract_view_permission(contract_id, team_id, current_user, db)
     
     customer_info = _get_customer_basic_info(db, contract.customer_id)
@@ -1333,7 +1462,7 @@ def get_contract(
     can_request_change = contract_change_service.can_request(contract, str(current_user.id)) and pending_change is None
     disabled_reason = None
     if pending_change is not None:
-        disabled_reason = "已有一条变更在审批中，审批结束前不能再次发起"
+        disabled_reason = "已有一条变更在审批中\uff0c审批结束前不能再次发起"
     elif not contract_change_service.can_request(contract, str(current_user.id)):
         disabled_reason = "只有合同创建人可以申请变更合同"
     contract_dict.update({
@@ -1357,31 +1486,36 @@ def get_contract(
     return ContractDetailResponse(**contract_dict)
 
 
-@router.get("/customer/{customer_id}", response_model=List[ContractListResponse], summary="获取客户合同列表", description="""
+@router.get(
+    "/customer/{customer_id}",
+    response_model=list[ContractListResponse],
+    summary="获取客户合同列表",
+    description="""
 获取指定客户的所有合同记录。
 
-**功能说明：**
+**功能说明\uff1a**
 - 按客户ID筛选该客户的所有合同
 - 支持分页和状态筛选
 - 返回合同及客户基本信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 在客户详情页查看该客户的合同列表
 - 了解客户的历史合同情况
 - 按状态查看客户的不同阶段合同
-""")
+""",
+)
 def get_customer_contracts(
     customer_id: str,
-    skip: int = Query(0, ge=0, description="分页跳过记录数，从0开始"),
-    limit: int = Query(100, ge=1, le=100, description="每页记录数，默认100，最大100"),
-    status: Optional[ContractStatusEnum] = Query(None, description="按合同状态筛选，可选值：DRAFT(草稿)、PENDING_REVIEW(待审核)、SIGNED(已签署)、EXPIRED(已到期)、TERMINATED(已终止)"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    skip: int = Query(0, ge=0, description="分页跳过记录数\uff0c从0开始"),
+    limit: int = Query(100, ge=1, le=100, description="每页记录数\uff0c默认100\uff0c最大100"),
+    status: ContractStatusEnum | None = _status_query,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> list[ContractListResponse]:
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     
-    contracts, total = contract_crud.get_by_customer_id(
+    contracts, _total = contract_crud.get_by_customer_id(
         db=db,
         customer_id=customer.id,
         team_id=team_id,
@@ -1392,7 +1526,7 @@ def get_customer_contracts(
     
     result = []
     for contract in contracts:
-        customer_info = {
+        customer_info: _CustomerInfo = {
             "id": customer.public_id,
             "public_id": customer.public_id,
             "account_name": customer.account_name
@@ -1407,33 +1541,34 @@ def get_customer_contracts(
 
 
 @router.put("/{contract_id}", response_model=ContractResponse, summary="编辑合同", description="""
-更新合同信息，仅草稿状态的合同可编辑。
+更新合同信息\uff0c仅草稿状态的合同可编辑。
 
-**功能说明：**
+**功能说明\uff1a**
 - 修改草稿状态的合同信息
 - 支持修改合同基本信息
 - 修改后自动重新计算标准单价和到期日期
 
-**业务场景：**
+**业务场景\uff1a**
 - 草拟阶段修改合同内容
 - 调整合同金额或其他条款
 
-**业务规则：**
-- 只能编辑草稿（DRAFT）状态的合同
+**业务规则\uff1a**
+- 只能编辑草稿\uff08DRAFT\uff09状态的合同
 - 不能修改客户ID、商机ID等核心关联关系
 - 修改金额或用户数会自动重新计算标准单价
 
-**注意事项：**
+**注意事项\uff1a**
 - 已提交审批或已签署的合同不可编辑
 - 修改后标准单价会自动更新
 """)
 async def update_contract(
     contract_id: int,
     contract_update: ContractUpdate,
-    contract = Depends(check_contract_edit_permission),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    contract: Contract = _contract_edit_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> ContractResponse:
+    del contract_id
     # check_contract_edit_permission 已处理存在性和权限检查
     # 这里只需检查状态
     
@@ -1463,35 +1598,35 @@ async def update_contract(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 @router.delete("/{contract_id}", response_model=MessageResponse, summary="删除合同", description="""
-删除指定合同，仅草稿且未处于审批中/审批通过的合同可删除。
+删除指定合同\uff0c仅草稿且未处于审批中/审批通过的合同可删除。
 
-**功能说明：**
+**功能说明\uff1a**
 - 删除未提交审批或审批拒绝后回到草稿状态的合同
-- 删除后不可恢复，请谨慎操作
+- 删除后不可恢复\uff0c请谨慎操作
 
-**业务场景：**
+**业务场景\uff1a**
 - 删除错误的草稿合同
 - 清理无效的合同数据
 
-**业务规则：**
-- 只能删除草稿（DRAFT）状态且 approval_phase 不是 pending_review/approved 的合同
+**业务规则\uff1a**
+- 只能删除草稿\uff08DRAFT\uff09状态且 approval_phase 不是 pending_review/approved 的合同
 - 审批中、审批通过或已进入后续业务状态的合同不可删除
 
-**注意事项：**
-- 删除操作不可逆，请谨慎
+**注意事项\uff1a**
+- 删除操作不可逆\uff0c请谨慎
 - 建议在删除前确认合同状态
 - 删除后合同相关的回款计划也会被清理
 """)
 async def delete_contract(
     contract_id: int,
-    contract = Depends(check_contract_delete_permission),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    contract: Contract = _contract_delete_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> MessageResponse:
     # check_contract_delete_permission 已处理存在性和权限检查
     # 业务状态和审批状态由 CRUD 层统一拦截
     if not contract:
@@ -1516,4 +1651,4 @@ async def delete_contract(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e

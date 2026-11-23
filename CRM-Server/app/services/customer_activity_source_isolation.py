@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from sqlalchemy import and_, exists, or_, select
+from typing import TYPE_CHECKING
+
+from sqlalchemy import exists, or_, select
 
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
 from app.services.customer_activity_contracts import CustomerActivitySubmissionSource
 
+if TYPE_CHECKING:
+    from sqlalchemy.sql.elements import ColumnElement
 
-def eligible_activity_source(team_id: int, customer_id: int, activity_id: object):
+
+def eligible_activity_source(team_id: int, customer_id: int, activity_id: object) -> ColumnElement[bool]:
     """SQL predicate requiring a live activity or deletion tombstone of legacy origin."""
     return or_(
         exists(
@@ -25,7 +30,8 @@ def eligible_activity_source(team_id: int, customer_id: int, activity_id: object
                 CustomerActivityDeletionTombstone.team_id == team_id,
                 CustomerActivityDeletionTombstone.customer_id == customer_id,
                 CustomerActivityDeletionTombstone.activity_id == activity_id,
-                CustomerActivityDeletionTombstone.submission_source != CustomerActivitySubmissionSource.ASSISTANT_2.value,
+                CustomerActivityDeletionTombstone.submission_source
+                != CustomerActivitySubmissionSource.ASSISTANT_2.value,
             )
         ),
     )

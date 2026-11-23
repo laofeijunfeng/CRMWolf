@@ -1,17 +1,15 @@
 """Pure business rules used by the CRM agent."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
-
 from app.services.agent import action_workflow, agent_copy
 from app.utils.name_normalizer import normalize_corp_name
 
 
 def customer_not_found_response(customer_name: str) -> str:
-    return f"我识别到客户「{customer_name}」，但没有找到你可访问的客户。可以换成客户全称试试。"
+    return f"我识别到客户「{customer_name}」\uff0c但没有找到你可访问的客户。可以换成客户全称试试。"
 
 
-def context_items(value: object) -> List[Dict[str, object]]:
+def context_items(value: object) -> list[dict[str, object]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
@@ -25,11 +23,11 @@ def _ids_match(left: object, right: object) -> bool:
     return left is not None and right is not None and str(left) == str(right)
 
 
-def extract_customer_candidates(data: object) -> List[Dict[str, object]]:
+def extract_customer_candidates(data: object) -> list[dict[str, object]]:
     if not isinstance(data, dict):
         return []
     items = data.get("items") or []
-    candidates = []
+    candidates: list[dict[str, object]] = []
     for item in items[:10]:
         if not isinstance(item, dict):
             continue
@@ -43,7 +41,7 @@ def extract_customer_candidates(data: object) -> List[Dict[str, object]]:
     return candidates
 
 
-def creation_duplicate_keywords(name: Optional[str]) -> List[str]:
+def creation_duplicate_keywords(name: str | None) -> list[str]:
     if not name:
         return []
     keywords = []
@@ -53,7 +51,7 @@ def creation_duplicate_keywords(name: Optional[str]) -> List[str]:
     return keywords
 
 
-def build_creation_duplicate_response(duplicate_candidates: Dict[str, object]) -> str:
+def build_creation_duplicate_response(duplicate_candidates: dict[str, object]) -> str:
     customers = duplicate_candidates.get("customers") or []
     leads = duplicate_candidates.get("leads") or []
     hidden_customer_count = duplicate_candidates.get("hidden_customer_count") or 0
@@ -80,18 +78,18 @@ def build_creation_duplicate_response(duplicate_candidates: Dict[str, object]) -
     if hidden_lead_count:
         parts.append("团队内线索")
     matched = "、".join(parts) if parts else "记录"
-    return f"已存在：{matched}。"
+    return f"已存在\uff1a{matched}。"
 
 
-def drop_empty_values(payload: Dict[str, object]) -> Dict[str, object]:
+def drop_empty_values(payload: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in payload.items() if value not in (None, "")}
 
 
-def customer_requires_procurement_method(customer: Dict[str, object]) -> bool:
+def customer_requires_procurement_method(customer: dict[str, object]) -> bool:
     return "default_procurement_method_id" in customer and not customer.get("default_procurement_method_id")
 
 
-def customer_default_procurement_method_id(customer: Dict[str, object]) -> Optional[int]:
+def customer_default_procurement_method_id(customer: dict[str, object]) -> int | None:
     value = customer.get("default_procurement_method_id")
     if isinstance(value, int) and value > 0:
         return value
@@ -100,7 +98,7 @@ def customer_default_procurement_method_id(customer: Dict[str, object]) -> Optio
     return None
 
 
-def opportunity_interaction_fields(missing_fields: List[str]) -> List[str]:
+def opportunity_interaction_fields(missing_fields: list[str]) -> list[str]:
     fields = list(dict.fromkeys(missing_fields))
     if "license_type" in fields and "subscription_years" not in fields:
         fields.insert(fields.index("license_type") + 1, "subscription_years")
@@ -109,11 +107,13 @@ def opportunity_interaction_fields(missing_fields: List[str]) -> List[str]:
     return fields
 
 
-def opportunity_missing_display_fields(missing_fields: List[str]) -> List[str]:
+def opportunity_missing_display_fields(missing_fields: list[str]) -> list[str]:
     return opportunity_interaction_fields(missing_fields)
 
 
-def customer_opportunity_product_defaults(db, team_id: int, customer: dict) -> dict:
+def customer_opportunity_product_defaults(
+    db, team_id: int, customer: dict[str, object]
+) -> dict[str, str | list[str]]:
     from app.crud.product import product_crud
     from app.crud.product_intent import base_module_public_id, first_active_product
 
@@ -128,18 +128,18 @@ def customer_opportunity_product_defaults(db, team_id: int, customer: dict) -> d
     if product is None:
         return {}
     module_id = base_module_public_id(product)
-    defaults = {"product_public_id": product.public_id}
+    defaults: dict[str, str | list[str]] = {"product_public_id": product.public_id}
     if module_id:
         defaults["product_module_public_ids"] = [module_id]
     return defaults
 
 
 def opportunity_field_defaults(
-    customer: Dict[str, object],
+    customer: dict[str, object],
     db: object | None = None,
-    team_id: Optional[int] = None,
-) -> Dict[str, object]:
-    defaults: Dict[str, object] = {}
+    team_id: int | None = None,
+) -> dict[str, object]:
+    defaults: dict[str, object] = {}
     default_procurement_method_id = customer_default_procurement_method_id(customer)
     if default_procurement_method_id is not None:
         defaults["procurement_method_id"] = default_procurement_method_id
@@ -163,11 +163,11 @@ def opportunity_field_defaults(
 
 
 def apply_customer_opportunity_product_defaults(
-    opportunity: Dict[str, object],
-    customer: Dict[str, object],
+    opportunity: dict[str, object],
+    customer: dict[str, object],
     db: object | None,
-    team_id: Optional[int],
-) -> Dict[str, object]:
+    team_id: int | None,
+) -> dict[str, object]:
     if db is None or team_id is None:
         return opportunity
     defaults = customer_opportunity_product_defaults(db, int(team_id), customer)
@@ -177,7 +177,7 @@ def apply_customer_opportunity_product_defaults(
     return opportunity
 
 
-def append_suggestions_to_response(response: str, suggestions: List[object]) -> str:
+def append_suggestions_to_response(response: str, suggestions: list[object]) -> str:
     actionable = [
         suggestion
         for suggestion in suggestions
@@ -189,16 +189,16 @@ def append_suggestions_to_response(response: str, suggestions: List[object]) -> 
         f"{index}. {suggestion.title}"
         for index, suggestion in enumerate(actionable[:3], start=1)
     ]
-    return response + "\n\n基于客户上下文，我建议下一步可以：" + "；".join(suggestion_lines) + "。"
+    return response + "\n\n基于客户上下文\uff0c我建议下一步可以\uff1a" + "\uff1b".join(suggestion_lines) + "。"
 
 
 def opportunity_next_task_from_suggestions(
-    suggestions: List[object],
-    parsed: Dict[str, object],
-    customer: Dict[str, object],
+    suggestions: list[object],
+    parsed: dict[str, object],
+    customer: dict[str, object],
     db: object | None = None,
-    team_id: Optional[int] = None,
-) -> Optional[Dict[str, object]]:
+    team_id: int | None = None,
+) -> dict[str, object] | None:
     if not customer.get("id"):
         return None
     suggestion = next(
@@ -256,7 +256,7 @@ def opportunity_next_task_from_suggestions(
             "customer_id": customer.get("id"),
             "opportunity": opportunity,
         },
-        "content": f"这条还像「{title}」，{format_opportunity_summary(opportunity)}。要创建吗？",
+        "content": f"这条还像「{title}」\uff0c{format_opportunity_summary(opportunity)}。要创建吗\uff1f",
     }
     return action_workflow.attach_workflow(
         next_task,
@@ -265,10 +265,10 @@ def opportunity_next_task_from_suggestions(
 
 
 def stage_move_action_from_suggestions(
-    suggestions: List[object],
-    customer: Dict[str, object],
-    business_context: Dict[str, object],
-) -> Optional[Dict[str, object]]:
+    suggestions: list[object],
+    customer: dict[str, object],
+    business_context: dict[str, object],
+) -> dict[str, object] | None:
     if not customer.get("id"):
         return None
     stage_suggestion = next(
@@ -323,10 +323,10 @@ def stage_move_action_from_suggestions(
 
 
 def stage_move_selection_action_from_suggestions(
-    suggestions: List[object],
-    customer: Dict[str, object],
-    business_context: Dict[str, object],
-) -> Optional[Dict[str, object]]:
+    suggestions: list[object],
+    customer: dict[str, object],
+    business_context: dict[str, object],
+) -> dict[str, object] | None:
     if not customer.get("id"):
         return None
     stage_suggestion = next(
@@ -352,7 +352,7 @@ def stage_move_selection_action_from_suggestions(
     target_stage_name = candidates[0].get("target_stage_name")
     content = (
         "我识别到这次跟进可能需要推进商机阶段"
-        f"{f'到「{target_stage_name}」' if target_stage_name else ''}，"
+        f"{f'到「{target_stage_name}」' if target_stage_name else ''}\uff0c"
         "但该客户有多个可推进商机。请选择要推进哪一个。"
     )
     return {
@@ -373,9 +373,9 @@ def stage_move_selection_action_from_suggestions(
 def stage_move_action_from_candidate(
     *,
     stage_suggestion: object,
-    customer: Dict[str, object],
-    candidate: Dict[str, object],
-) -> Optional[Dict[str, object]]:
+    customer: dict[str, object],
+    candidate: dict[str, object],
+) -> dict[str, object] | None:
     opportunity_id = candidate.get("id")
     stage_template_id = candidate.get("target_stage_template_id")
     if opportunity_id is None or stage_template_id is None:
@@ -407,10 +407,10 @@ def stage_move_action_from_candidate(
 
 
 def stage_move_candidates(
-    business_context: Dict[str, object],
+    business_context: dict[str, object],
     stage_template_id: int,
-) -> List[Dict[str, object]]:
-    candidates: List[Dict[str, object]] = []
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
     for item in context_items(business_context.get("active_opportunity_stage_context")):
         opportunity = item.get("opportunity") if isinstance(item.get("opportunity"), dict) else {}
         if not _is_active_approved_opportunity(opportunity):
@@ -428,7 +428,8 @@ def stage_move_candidates(
             continue
         candidates.append({
             "id": opportunity_id,
-            "opportunity_name": opportunity.get("opportunity_name") or opportunity.get("name") or f"商机 {opportunity_id}",
+            "opportunity_name": opportunity.get("opportunity_name") or opportunity.get(
+                "name") or f"商机 {opportunity_id}",
             "current_stage_name": current_stage.get("stage_name") if current_stage else None,
             "target_stage_template_id": int(stage_template_id),
             "target_stage_name": target_stage.get("stage_name"),
@@ -438,10 +439,10 @@ def stage_move_candidates(
 
 
 def resolve_stage_move_plan(
-    business_context: Dict[str, object],
-    opportunity_id: Union[str, int],
+    business_context: dict[str, object],
+    opportunity_id: str | int,
     target_stage_template_id: int,
-) -> Optional[Dict[str, object]]:
+) -> dict[str, object] | None:
     for item in context_items(business_context.get("active_opportunity_stage_context")):
         opportunity = item.get("opportunity") if isinstance(item.get("opportunity"), dict) else {}
         if not _ids_match(opportunity.get("id"), opportunity_id):
@@ -466,21 +467,21 @@ def resolve_stage_move_plan(
 
 def build_stage_move_confirmation_content(
     opportunity_name: object,
-    stage_target: Dict[str, object],
+    stage_target: dict[str, object],
 ) -> str:
     target_stage_name = stage_target.get("target_stage_name")
     return (
         f"我还识别到商机「{opportunity_name}」可能需要推进阶段"
         f"{f'到「{target_stage_name}」' if target_stage_name else ''}。"
-        "请确认是否推进？"
+        "请确认是否推进\uff1f"
     )
 
 
-def _is_active_approved_opportunity(opportunity: Dict[str, object]) -> bool:
+def _is_active_approved_opportunity(opportunity: dict[str, object]) -> bool:
     return str(opportunity.get("status")) == "0" and str(opportunity.get("approval_phase") or "").lower() == "approved"
 
 
-def _stage_by_template_id(stages: List[Dict[str, object]], stage_template_id: int) -> Optional[Dict[str, object]]:
+def _stage_by_template_id(stages: list[dict[str, object]], stage_template_id: int) -> dict[str, object] | None:
     return next(
         (
             stage
@@ -492,10 +493,10 @@ def _stage_by_template_id(stages: List[Dict[str, object]], stage_template_id: in
 
 
 def _forward_stage_move_plan(
-    stages: List[Dict[str, object]],
+    stages: list[dict[str, object]],
     current_stage: object,
-    target_stage: Dict[str, object],
-) -> List[Dict[str, object]]:
+    target_stage: dict[str, object],
+) -> list[dict[str, object]]:
     target_order = _stage_sort_order(target_stage)
     if target_stage.get("id") is None or target_order is None:
         return []
@@ -523,9 +524,9 @@ def _forward_stage_move_plan(
 
 
 def _next_stage_after_current(
-    stages: List[Dict[str, object]],
+    stages: list[dict[str, object]],
     current_stage: object,
-) -> Optional[Dict[str, object]]:
+) -> dict[str, object] | None:
     if not stages:
         return None
     if not isinstance(current_stage, dict):
@@ -548,14 +549,14 @@ def _next_stage_after_current(
     return min(forward_stages, key=lambda stage: int(_stage_sort_order(stage) or 0))
 
 
-def _first_sorted_stage(stages: List[Dict[str, object]]) -> Optional[Dict[str, object]]:
+def _first_sorted_stage(stages: list[dict[str, object]]) -> dict[str, object] | None:
     sortable = [stage for stage in stages if _stage_sort_order(stage) is not None]
     if not sortable:
         return None
     return min(sortable, key=lambda stage: int(_stage_sort_order(stage) or 0))
 
 
-def _stage_sort_order(stage: Dict[str, object]) -> Optional[int]:
+def _stage_sort_order(stage: dict[str, object]) -> int | None:
     if stage.get("sort_order") is None:
         return None
     try:
@@ -564,7 +565,7 @@ def _stage_sort_order(stage: Dict[str, object]) -> Optional[int]:
         return None
 
 
-def _is_backward_stage_move(current_stage: object, target_stage: Dict[str, object]) -> bool:
+def _is_backward_stage_move(current_stage: object, target_stage: dict[str, object]) -> bool:
     if not isinstance(current_stage, dict):
         return False
     if target_stage.get("sort_order") is None or current_stage.get("sort_order") is None:
@@ -575,7 +576,7 @@ def _is_backward_stage_move(current_stage: object, target_stage: Dict[str, objec
         return True
 
 
-def find_opportunity_in_context(business_context: Dict[str, object], opportunity_id: Union[str, int]) -> Dict[str, object]:
+def find_opportunity_in_context(business_context: dict[str, object], opportunity_id: str | int) -> dict[str, object]:
     for opportunity in context_items(business_context.get("opportunities")):
         if _ids_match(opportunity.get("id"), opportunity_id):
             return opportunity
@@ -586,38 +587,40 @@ def find_opportunity_in_context(business_context: Dict[str, object], opportunity
     return {"id": opportunity_id}
 
 
-def missing_contact_fields(contact: Dict[str, object]) -> List[str]:
+def missing_contact_fields(contact: dict[str, object]) -> list[str]:
     required_fields = ["name", "mobile", "position", "gender"]
     return [field for field in required_fields if not contact.get(field)]
 
 
-def missing_lead_fields(lead: Dict[str, object]) -> List[str]:
+def missing_lead_fields(lead: dict[str, object]) -> list[str]:
     required_fields = ["lead_name", "city", "contact_name", "contact_phone", "product_public_id"]
     return [field for field in required_fields if not lead.get(field)]
 
 
-def missing_customer_fields(customer: Dict[str, object]) -> List[str]:
+def missing_customer_fields(customer: dict[str, object]) -> list[str]:
     missing = [field for field in ["account_name", "city", "product_public_id"] if not customer.get(field)]
-    has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"])
+    has_contact = any(customer.get(field) for field in ["contact_name", "contact_phone",
+        "contact_position", "contact_gender"])
     if has_contact:
-        missing.extend(field for field in ["contact_name", "contact_phone", "contact_position", "contact_gender"] if not customer.get(field))
+        missing.extend(field for field in ["contact_name", "contact_phone",
+            "contact_position", "contact_gender"] if not customer.get(field))
     return list(dict.fromkeys(missing))
 
 
-def format_customer_missing_fields(fields: List[str]) -> str:
+def format_customer_missing_fields(fields: list[str]) -> str:
     labels = {
         "account_name": "客户名称",
         "city": "所在城市",
         "contact_name": "主联系人姓名",
         "contact_phone": "主联系人手机号",
         "contact_position": "主联系人职务",
-        "contact_gender": "主联系人性别（男/女/未知）",
+        "contact_gender": "主联系人性别\uff08男/女/未知\uff09",
         "product_public_id": "产品",
     }
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def format_lead_missing_fields(fields: List[str]) -> str:
+def format_lead_missing_fields(fields: list[str]) -> str:
     labels = {
         "lead_name": "线索名称",
         "city": "所在城市",
@@ -630,50 +633,50 @@ def format_lead_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def format_contact_missing_fields(fields: List[str]) -> str:
+def format_contact_missing_fields(fields: list[str]) -> str:
     labels = {
         "name": "联系人姓名",
         "mobile": "手机号",
         "position": "职务",
-        "gender": "性别（男/女/未知）",
+        "gender": "性别\uff08男/女/未知\uff09",
     }
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_invoice_title_fields(invoice_title: Dict[str, object]) -> List[str]:
+def missing_invoice_title_fields(invoice_title: dict[str, object]) -> list[str]:
     required_fields = ["title_type", "title", "taxpayer_id"]
     return [field for field in required_fields if not invoice_title.get(field)]
 
 
-def format_invoice_title_missing_fields(fields: List[str]) -> str:
+def format_invoice_title_missing_fields(fields: list[str]) -> str:
     labels = {
-        "title_type": "抬头类型（单位/个人）",
+        "title_type": "抬头类型\uff08单位/个人\uff09",
         "title": "开票抬头",
         "taxpayer_id": "纳税人识别号",
     }
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_deployment_info_fields(deployment_info: Dict[str, object]) -> List[str]:
+def missing_deployment_info_fields(deployment_info: dict[str, object]) -> list[str]:
     required_fields = ["deployment_name", "server_address"]
     return [field for field in required_fields if not deployment_info.get(field)]
 
 
-def format_deployment_info_missing_fields(fields: List[str]) -> str:
+def format_deployment_info_missing_fields(fields: list[str]) -> str:
     labels = {
         "deployment_name": "部署名称",
-        "server_address": "服务器地址（需以 http:// 或 https:// 开头）",
+        "server_address": "服务器地址\uff08需以 http:// 或 https:// 开头\uff09",
     }
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def missing_customer_member_fields(member: Dict[str, object]) -> List[str]:
+def missing_customer_member_fields(member: dict[str, object]) -> list[str]:
     if member.get("user_id") or member.get("user_name"):
         return []
     return ["user_name"]
 
 
-def format_customer_member_missing_fields(fields: List[str]) -> str:
+def format_customer_member_missing_fields(fields: list[str]) -> str:
     labels = {
         "user_name": "成员姓名",
         "user_id": "成员用户 ID",
@@ -681,7 +684,8 @@ def format_customer_member_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def resolve_customer_member(member: Dict[str, object], business_context: Dict[str, object]) -> tuple[Dict[str, object], Optional[str]]:
+def resolve_customer_member(member: dict[str, object], business_context: dict[str,
+    object]) -> tuple[dict[str, object], str | None]:
     normalized = {
         "user_id": member.get("user_id"),
         "member_role": member.get("member_role") or "PRESALES",
@@ -700,7 +704,7 @@ def resolve_customer_member(member: Dict[str, object], business_context: Dict[st
 
     candidates_value = business_context.get("member_candidates")
     if isinstance(candidates_value, dict) and candidates_value.get("error"):
-        return member, f"我识别到要添加客户成员「{user_name}」，但读取成员候选人失败。请确认你有客户成员管理权限。"
+        return member, f"我识别到要添加客户成员「{user_name}」\uff0c但读取成员候选人失败。请确认你有客户成员管理权限。"
 
     candidates = context_items(candidates_value)
     matches = [
@@ -718,14 +722,14 @@ def resolve_customer_member(member: Dict[str, object], business_context: Dict[st
             "user_name": candidate.get("name"),
         }), None
     if len(matches) == 1 and matches[0].get("already_member"):
-        return member, f"「{matches[0].get('name')}」已经是这个客户的负责人或成员，不需要重复添加。"
+        return member, f"「{matches[0].get('name')}」已经是这个客户的负责人或成员\uff0c不需要重复添加。"
     if len(available_matches) > 1:
-        names = "；".join(f"{index}. {item.get('name')}" for index, item in enumerate(available_matches, start=1))
-        return member, f"我找到了多个叫「{user_name}」的候选成员，请补充更明确的成员信息：{names}"
-    return member, f"我没在客户成员候选人里找到「{user_name}」。请确认成员姓名，或先把这个人加入团队。"
+        names = "\uff1b".join(f"{index}. {item.get('name')}" for index, item in enumerate(available_matches, start=1))
+        return member, f"我找到了多个叫「{user_name}」的候选成员\uff0c请补充更明确的成员信息\uff1a{names}"
+    return member, f"我没在客户成员候选人里找到「{user_name}」。请确认成员姓名\uff0c或先把这个人加入团队。"
 
 
-def missing_payment_fields(actual_amount: object, payment_date: object) -> List[str]:
+def missing_payment_fields(actual_amount: object, payment_date: object) -> list[str]:
     fields = []
     if not actual_amount:
         fields.append("actual_amount")
@@ -735,10 +739,10 @@ def missing_payment_fields(actual_amount: object, payment_date: object) -> List[
 
 
 def missing_opportunity_fields(
-    opportunity: Dict[str, object],
+    opportunity: dict[str, object],
     *,
     require_procurement_method: bool = False,
-) -> List[str]:
+) -> list[str]:
     fields = []
     required_fields = [
         "total_amount",
@@ -761,7 +765,7 @@ def missing_opportunity_fields(
     return fields
 
 
-def format_payment_missing_fields(fields: List[str]) -> str:
+def format_payment_missing_fields(fields: list[str]) -> str:
     labels = {
         "actual_amount": "实际回款金额",
         "payment_date": "实际回款日期",
@@ -769,13 +773,13 @@ def format_payment_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def format_opportunity_missing_fields(fields: List[str]) -> str:
+def format_opportunity_missing_fields(fields: list[str]) -> str:
     labels = {
         "total_amount": "预计成交金额",
         "user_count": "采购用户数",
         "license_type": "授权模式",
         "subscription_years": "订阅年限",
-        "purchase_type": "采购类型（新购/续购/增购）",
+        "purchase_type": "采购类型\uff08新购/续购/增购\uff09",
         "procurement_method_id": "采购方式",
         "expected_closing_date": "预计成交日期",
         "product_public_id": "产品",
@@ -784,7 +788,7 @@ def format_opportunity_missing_fields(fields: List[str]) -> str:
     return "、".join(labels.get(field, field) for field in fields)
 
 
-def format_opportunity_summary(opportunity: Dict[str, object]) -> str:
+def format_opportunity_summary(opportunity: dict[str, object]) -> str:
     parts = []
     if opportunity.get("total_amount"):
         parts.append(f"预计金额 {opportunity.get('total_amount')}")
@@ -795,10 +799,10 @@ def format_opportunity_summary(opportunity: Dict[str, object]) -> str:
         parts.append(f"订阅 {years} 年")
     elif opportunity.get("license_type") == "PERPETUAL":
         parts.append("买断")
-    return "，".join(parts) if parts else "商机名称将由系统自动生成"
+    return "\uff0c".join(parts) if parts else "商机名称将由系统自动生成"
 
 
-def is_open_payment_plan(plan: Dict[str, object]) -> bool:
+def is_open_payment_plan(plan: dict[str, object]) -> bool:
     status = str(plan.get("status") or "").upper()
     remaining_amount = plan.get("remaining_amount")
     try:
@@ -808,7 +812,7 @@ def is_open_payment_plan(plan: Dict[str, object]) -> bool:
     return status != "COMPLETED" and has_remaining
 
 
-def resolve_commission_member_id(customer: Dict[str, object]) -> Optional[str]:
+def resolve_commission_member_id(customer: dict[str, object]) -> str | None:
     collaborators = customer.get("collaborator_infos") or []
     if collaborators:
         first = collaborators[0] or {}
@@ -820,7 +824,8 @@ def resolve_commission_member_id(customer: Dict[str, object]) -> Optional[str]:
     return str(owner_id) if owner_id else None
 
 
-def payment_record_payload(plan: Dict[str, object], payment: Dict[str, object], commission_member_id: str) -> Dict[str, object]:
+def payment_record_payload(plan: dict[str, object], payment: dict[str, object],
+    commission_member_id: str) -> dict[str, object]:
     return {
         "payment_plan_id": plan.get("id"),
         "actual_amount": payment.get("actual_amount"),
@@ -831,7 +836,8 @@ def payment_record_payload(plan: Dict[str, object], payment: Dict[str, object], 
     }
 
 
-def payment_plan_payload(contract: Dict[str, object], payment: Dict[str, object], commission_member_id: Optional[str]) -> Dict[str, object]:
+def payment_plan_payload(contract: dict[str, object], payment: dict[str, object],
+    commission_member_id: str | None) -> dict[str, object]:
     return {
         "contract_id": contract.get("id"),
         "stage_name": "AI登记回款计划",

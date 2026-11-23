@@ -1,23 +1,23 @@
+
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from typing import Optional, List, Tuple
+
+from app.core.security import get_password_hash
 from app.models.user import User, UserStatus
 from app.schemas.user import UserCreate, UserUpdate
-from app.core.security import get_password_hash
 
 
 class UserCRUD:
-    def get_by_id(self, db: Session, user_id: int) -> Optional[User]:
+    def get_by_id(self, db: Session, user_id: int) -> User | None:
         return db.query(User).filter(User.id == user_id).first()
 
-    def get_by_email(self, db: Session, email: str) -> Optional[User]:
+    def get_by_email(self, db: Session, email: str) -> User | None:
         return db.query(User).filter(User.email == email).first()
 
-    def get_by_feishu_open_id(self, db: Session, feishu_open_id: str) -> Optional[User]:
+    def get_by_feishu_open_id(self, db: Session, feishu_open_id: str) -> User | None:
         """已废弃，保留兼容"""
         return db.query(User).filter(User.feishu_open_id == feishu_open_id).first()
 
-    def get_by_mobile(self, db: Session, mobile: str) -> Optional[User]:
+    def get_by_mobile(self, db: Session, mobile: str) -> User | None:
         return db.query(User).filter(User.mobile == mobile).first()
 
     def get_multi(
@@ -25,9 +25,9 @@ class UserCRUD:
         db: Session,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[UserStatus] = None,
-        region: Optional[str] = None
-    ) -> Tuple[List[User], int]:
+        status: UserStatus | None = None,
+        region: str | None = None
+    ) -> tuple[list[User], int]:
         query = db.query(User)
 
         if status:
@@ -55,9 +55,9 @@ class UserCRUD:
         db: Session,
         email: str,
         name: str,
-        password: Optional[str] = None,
-        mobile: Optional[str] = None,
-        region: Optional[str] = None
+        password: str | None = None,
+        mobile: str | None = None,
+        region: str | None = None
     ) -> User:
         """通过邮箱创建用户"""
         user_data = {
@@ -93,7 +93,7 @@ class UserCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def delete(self, db: Session, user_id: int) -> Optional[User]:
+    def delete(self, db: Session, user_id: int) -> User | None:
         obj = db.query(User).filter(User.id == user_id).first()
         if obj:
             db.delete(obj)

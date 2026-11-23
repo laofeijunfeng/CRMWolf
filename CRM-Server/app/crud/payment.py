@@ -1,22 +1,13 @@
-from sqlalchemy.orm import Query, Session
-from sqlalchemy import and_, or_, func, text, case, cast, Integer, inspect
-from sqlalchemy.orm import contains_eager, joinedload
-from typing import Any, Dict, Optional, List, Tuple
-from datetime import date, datetime, time
-from decimal import Decimal
 import hashlib
 import json
+from datetime import date, datetime, time
+from decimal import Decimal
+from typing import Any
 
-from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
-from app.models.contract import Contract, ContractStatus, PaymentStatus
+from sqlalchemy import Integer, and_, case, cast, func, inspect, or_
+from sqlalchemy.orm import Query, Session, contains_eager, joinedload
+
 from app.constants.business_types import BusinessType
-from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.schemas.payment import (
-    PaymentPlanCreate, PaymentPlanUpdate, PaymentPlanBatchCreate,
-    PaymentRecordCreate, PaymentRecordUpdate
-)
-from app.services.business_number_generator import BusinessNumberGenerator
-from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -27,24 +18,35 @@ from app.core.list_query import (
     without_filter_field,
 )
 from app.core.list_query.catalogs import PAYMENT_PLANS_LIST_QUERY_CATALOG, PAYMENT_RECORDS_LIST_QUERY_CATALOG
+from app.models.contract import Contract, PaymentStatus
+from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
+from app.schemas.payment import (
+    PaymentPlanCreate,
+    PaymentPlanUpdate,
+    PaymentRecordCreate,
+    PaymentRecordUpdate,
+)
+from app.services.business_number_generator import BusinessNumberGenerator
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.time import business_now
 
 
 def _is_approved_payment_record(record: PaymentRecord) -> bool:
     return getattr(record.approval_phase, "value", record.approval_phase) == "approved"
 
 
-def sum_approved_payment_amount(records: List[PaymentRecord]) -> float:
+def sum_approved_payment_amount(records: list[PaymentRecord]) -> float:
     return sum(float(r.actual_amount) for r in records if _is_approved_payment_record(r))
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def _parse_sort(value: Optional[str], order_by: Optional[str] = None, order_dir: Optional[str] = None) -> List[Tuple[str, str]]:
-    sort_specs: List[Tuple[str, str]] = []
+def _parse_sort(value: str | None, order_by: str | None = None, order_dir: str | None = None) -> list[tuple[str, str]]:
+    sort_specs: list[tuple[str, str]] = []
 
     if value:
         for item in str(value).split(","):
@@ -88,13 +90,15 @@ def _plan_customer_id(db: Session, *, plan_id: int, team_id: int) -> int:
 
 
 class PaymentPlanCRUD:
-    def get_by_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> Optional[PaymentPlan]:
+    def get_by_id(self, db: Session, plan_id: int, team_id: int | None = None) -> PaymentPlan | None:
         query = db.query(PaymentPlan).filter(PaymentPlan.id == plan_id)
         if team_id is not None:
             query = query.filter(PaymentPlan.team_id == team_id)
         return query.first()
 
-    def get_by_contract_id(self, db: Session, contract_id: int, team_id: Optional[int] = None, status: Optional[str] = None) -> List[PaymentPlan]:
+    def get_by_contract_id(
+        self, db: Session, contract_id: int, team_id: int | None = None, status: str | None = None
+    ) -> list[PaymentPlan]:
         query = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id)
 
         if team_id is not None:
@@ -105,7 +109,9 @@ class PaymentPlanCRUD:
 
         return query.order_by(PaymentPlan.due_date.asc()).all()
 
-    def get_multi(self, db: Session, team_id: int, skip: int = 0, limit: int = 100, status: Optional[str] = None) -> Tuple[List[PaymentPlan], int]:
+    def get_multi(
+        self, db: Session, team_id: int, skip: int = 0, limit: int = 100, status: str | None = None
+    ) -> tuple[list[PaymentPlan], int]:
         query = db.query(PaymentPlan).filter(PaymentPlan.team_id == team_id)
 
         if status:
@@ -257,20 +263,20 @@ class PaymentPlanCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
-        status_exclude: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        due_date_start: Optional[date] = None,
-        due_date_end: Optional[date] = None,
-        sort: Optional[str] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
-        current_user_id: Optional[str] = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        owner_id: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        due_date_start: date | None = None,
+        due_date_end: date | None = None,
+        sort: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        current_user_id: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[PaymentPlan], int]:
+    ) -> tuple[list[PaymentPlan], int]:
         plans_query = self.build_population_query(
             db,
             team_id=team_id,
@@ -308,7 +314,7 @@ class PaymentPlanCRUD:
         self,
         db: Session,
         contract_id: int,
-        exclude_plan_id: Optional[int] = None,
+        exclude_plan_id: int | None = None,
     ) -> Decimal:
         plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
         for plan in plans:
@@ -331,7 +337,7 @@ class PaymentPlanCRUD:
             )
 
     def create(self, db: Session, contract_id: int, obj_in: PaymentPlanCreate, team_id: int) -> PaymentPlan:
-        customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
+        _customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
         contract = self._lock_contract(db, contract_id)
         new_total = self._existing_planned_total(db, contract_id) + as_money(obj_in.planned_amount)
         self._assert_planned_total_within_contract(contract, new_total)
@@ -359,22 +365,24 @@ class PaymentPlanCRUD:
             source_type=DealJourneySourceType.PAYMENT_PLAN,
             source_id=db_plan.id,
             event_time=db_plan.created_time,
-            summary=f"创建回款计划：{db_plan.stage_name}",
+            summary=f"创建回款计划\uff1a{db_plan.stage_name}",
         )
         deal_journey_service.refresh_closure_status(db, db_plan.deal_journey_id)
         db.commit()
         db.refresh(db_plan)
         return db_plan
 
-    def batch_create(self, db: Session, contract_id: int, plans_data: List[PaymentPlanCreate], creator_id: str, team_id: int) -> List[PaymentPlan]:
-        from app.crud.user import user_crud
+    def batch_create(
+        self, db: Session, contract_id: int, plans_data: list[PaymentPlanCreate], creator_id: str, team_id: int
+    ) -> list[PaymentPlan]:
         from app.crud.customer import customer_crud
+        from app.crud.user import user_crud
         from app.models.payment import PaymentPlan
         from app.services.operation_log_service import operation_log_service
 
         if not plans_data:
             return []
-        customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
+        _customer_id = _contract_customer_id(db, contract_id=contract_id, team_id=team_id)
         contract = self._lock_contract(db, contract_id)
         requested_total = sum((as_money(plan.planned_amount) for plan in plans_data), Decimal("0.00"))
         new_total = self._existing_planned_total(db, contract_id) + requested_total
@@ -413,7 +421,7 @@ class PaymentPlanCRUD:
                 source_id=plan.id,
                 event_time=plan.created_time,
                 actor_id=creator_id,
-                summary=f"创建回款计划：{plan.stage_name}",
+                summary=f"创建回款计划\uff1a{plan.stage_name}",
             )
         deal_journey_service.refresh_closure_status(db, contract.deal_journey_id)
 
@@ -447,7 +455,7 @@ class PaymentPlanCRUD:
 
     def update(self, db: Session, db_obj: PaymentPlan, obj_in: PaymentPlanUpdate) -> PaymentPlan:
         update_data = obj_in.model_dump(exclude_unset=True)
-        customer_id = _contract_customer_id(db, contract_id=db_obj.contract_id, team_id=db_obj.team_id)
+        _customer_id = _contract_customer_id(db, contract_id=db_obj.contract_id, team_id=db_obj.team_id)
         db.refresh(db_obj)
         contract = self._lock_contract(db, db_obj.contract_id)
         old_total = self._existing_planned_total(db, db_obj.contract_id)
@@ -484,7 +492,7 @@ class PaymentPlanCRUD:
         if not plan:
             return False
         if plan.payment_records:
-            raise ValueError("存在关联的回款记录，无法删除")
+            raise ValueError("存在关联的回款记录\uff0c无法删除")
 
         contract_id = plan.contract_id
         deal_journey_id = plan.deal_journey_id
@@ -500,7 +508,7 @@ class PaymentPlanCRUD:
     def update_status(self, db: Session, plan: PaymentPlan, commit: bool = True) -> PaymentPlan:
         from app.models.payment import PaymentRecord
         
-        customer_id = _plan_customer_id(db, plan_id=int(plan.id), team_id=int(plan.team_id))
+        _customer_id = _plan_customer_id(db, plan_id=int(plan.id), team_id=int(plan.team_id))
         if not inspect(plan).modified:
             db.refresh(plan)
         payment_records = db.query(PaymentRecord).filter(
@@ -528,7 +536,7 @@ class PaymentPlanCRUD:
             db.refresh(plan)
         return plan
     
-    def get_overdue_payments(self, db: Session, team_id: int) -> List[PaymentPlan]:
+    def get_overdue_payments(self, db: Session, team_id: int) -> list[PaymentPlan]:
         from app.models.contract import Contract
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
@@ -562,7 +570,7 @@ class PaymentRecordIdempotencyConflict(ValueError):
 
 
 class PaymentRecordIdempotentReplay(ValueError):
-    """并发请求已完成同一回款登记，调用方应直接返回已有记录。"""
+    """并发请求已完成同一回款登记\uff0c调用方应直接返回已有记录。"""
 
     def __init__(self, record: PaymentRecord):
         super().__init__("回款登记已完成")
@@ -582,7 +590,7 @@ def payment_record_request_body(obj_in: PaymentRecordCreate) -> dict:
 
 
 def payment_record_request_fingerprint(plan_id: int, obj_in: PaymentRecordCreate) -> str:
-    """生成稳定的回款登记请求指纹，避免重试时重复写入或错用幂等键。"""
+    """生成稳定的回款登记请求指纹\uff0c避免重试时重复写入或错用幂等键。"""
     payload = {"plan_id": plan_id, **payment_record_request_body(obj_in)}
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -591,7 +599,7 @@ def payment_record_request_fingerprint(plan_id: int, obj_in: PaymentRecordCreate
 class PaymentRecordCRUD:
     def get_by_idempotency_key(
         self, db: Session, team_id: int, idempotency_key: str
-    ) -> Optional[PaymentRecord]:
+    ) -> PaymentRecord | None:
         return (
             db.query(PaymentRecord)
             .filter(
@@ -601,13 +609,13 @@ class PaymentRecordCRUD:
             .first()
         )
 
-    def get_by_id(self, db: Session, record_id: int, team_id: Optional[int] = None) -> Optional[PaymentRecord]:
+    def get_by_id(self, db: Session, record_id: int, team_id: int | None = None) -> PaymentRecord | None:
         query = db.query(PaymentRecord).filter(PaymentRecord.id == record_id)
         if team_id is not None:
             query = query.filter(PaymentRecord.team_id == team_id)
         return query.first()
 
-    def get_by_plan_id(self, db: Session, plan_id: int, team_id: Optional[int] = None) -> List[PaymentRecord]:
+    def get_by_plan_id(self, db: Session, plan_id: int, team_id: int | None = None) -> list[PaymentRecord]:
         query = db.query(PaymentRecord).filter(
             PaymentRecord.payment_plan_id == plan_id
         )
@@ -714,8 +722,8 @@ class PaymentRecordCRUD:
 
         from app.models.contract import Contract
         from app.models.customer import Customer
-        from app.models.opportunity import Opportunity
         from app.models.invoice import InvoiceApplication
+        from app.models.opportunity import Opportunity
         from app.models.user import User
         from app.services.payment_approval_status import (
             PaymentApprovalReadStatus,
@@ -820,7 +828,9 @@ class PaymentRecordCRUD:
                 predicates.append(latest_invoice_title_expr.ilike(like_keyword))
             records_query = records_query.filter(or_(*predicates))
 
-        def apply_text(query: Query, expression: ColumnElement, include_value: str | None, exclude_value: str | None) -> Query:
+        def apply_text(
+            query: Query, expression: ColumnElement, include_value: str | None, exclude_value: str | None
+        ) -> Query:
             if include_value and include_value.strip():
                 query = query.filter(expression.ilike(f"%{include_value.strip()}%"))
             if exclude_value and exclude_value.strip():
@@ -829,12 +839,18 @@ class PaymentRecordCRUD:
 
         records_query = apply_text(records_query, PaymentRecord.record_number, record_number, record_number_exclude)
         records_query = apply_text(records_query, Customer.account_name, customer_name, customer_name_exclude)
-        records_query = apply_text(records_query, PaymentRecord.actual_payer_name, actual_payer_name, actual_payer_name_exclude)
+        records_query = apply_text(
+            records_query, PaymentRecord.actual_payer_name, actual_payer_name, actual_payer_name_exclude
+        )
         if latest_invoice_title_expr is not None:
-            records_query = apply_text(records_query, latest_invoice_title_expr, invoice_title_text, invoice_title_text_exclude)
+            records_query = apply_text(
+                records_query, latest_invoice_title_expr, invoice_title_text, invoice_title_text_exclude
+            )
         records_query = apply_text(records_query, Contract.contract_name, contract_name, contract_name_exclude)
         records_query = apply_text(records_query, owner_name_expr, owner_name, owner_name_exclude)
-        records_query = apply_text(records_query, PaymentRecord.commission_member_name, commission_member_name, commission_member_name_exclude)
+        records_query = apply_text(
+            records_query, PaymentRecord.commission_member_name, commission_member_name, commission_member_name_exclude
+        )
         confirmation_values = _split_csv(confirmation_status)
         if confirmation_values:
             records_query = records_query.filter(PaymentRecord.confirmation_status.in_(confirmation_values))
@@ -842,9 +858,13 @@ class PaymentRecordCRUD:
         if confirmation_excluded:
             records_query = records_query.filter(PaymentRecord.confirmation_status.notin_(confirmation_excluded))
         if created_time_start:
-            records_query = records_query.filter(PaymentRecord.created_time >= datetime.combine(created_time_start, time.min))
+            records_query = records_query.filter(
+                PaymentRecord.created_time >= datetime.combine(created_time_start, time.min)
+            )
         if created_time_end:
-            records_query = records_query.filter(PaymentRecord.created_time <= datetime.combine(created_time_end, time.max))
+            records_query = records_query.filter(
+                PaymentRecord.created_time <= datetime.combine(created_time_end, time.max)
+            )
         confirmation_order = case(
             (PaymentRecord.confirmation_status == PaymentConfirmationStatus.PENDING, 0),
             (PaymentRecord.confirmation_status == PaymentConfirmationStatus.CONFIRMED, 1),
@@ -906,42 +926,42 @@ class PaymentRecordCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        contract_id: Optional[int] = None,
-        payment_plan_id: Optional[int] = None,
-        payment_date_start: Optional[date] = None,
-        payment_date_end: Optional[date] = None,
-        min_amount: Optional[float] = None,
-        actual_amount: Optional[float] = None,
-        creator_id: Optional[str] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        record_number: Optional[str] = None,
-        record_number_exclude: Optional[str] = None,
-        customer_name: Optional[str] = None,
-        customer_name_exclude: Optional[str] = None,
-        actual_payer_name: Optional[str] = None,
-        actual_payer_name_exclude: Optional[str] = None,
-        invoice_title_text: Optional[str] = None,
-        invoice_title_text_exclude: Optional[str] = None,
-        contract_name: Optional[str] = None,
-        contract_name_exclude: Optional[str] = None,
-        owner_name: Optional[str] = None,
-        owner_name_exclude: Optional[str] = None,
-        commission_member_name: Optional[str] = None,
-        commission_member_name_exclude: Optional[str] = None,
-        confirmation_status: Optional[str] = None,
-        confirmation_status_exclude: Optional[str] = None,
-        created_time_start: Optional[date] = None,
-        created_time_end: Optional[date] = None,
-        current_user_id: Optional[str] = None,
-        approval_status: Optional[str] = None,
-        approval_status_exclude: Optional[str] = None,
-        sort: Optional[str] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
+        contract_id: int | None = None,
+        payment_plan_id: int | None = None,
+        payment_date_start: date | None = None,
+        payment_date_end: date | None = None,
+        min_amount: float | None = None,
+        actual_amount: float | None = None,
+        creator_id: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        record_number: str | None = None,
+        record_number_exclude: str | None = None,
+        customer_name: str | None = None,
+        customer_name_exclude: str | None = None,
+        actual_payer_name: str | None = None,
+        actual_payer_name_exclude: str | None = None,
+        invoice_title_text: str | None = None,
+        invoice_title_text_exclude: str | None = None,
+        contract_name: str | None = None,
+        contract_name_exclude: str | None = None,
+        owner_name: str | None = None,
+        owner_name_exclude: str | None = None,
+        commission_member_name: str | None = None,
+        commission_member_name_exclude: str | None = None,
+        confirmation_status: str | None = None,
+        confirmation_status_exclude: str | None = None,
+        created_time_start: date | None = None,
+        created_time_end: date | None = None,
+        current_user_id: str | None = None,
+        approval_status: str | None = None,
+        approval_status_exclude: str | None = None,
+        sort: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[PaymentRecord], int]:
+    ) -> tuple[list[PaymentRecord], int]:
         records_query = self.build_population_query(
             db,
             team_id=team_id,
@@ -992,11 +1012,11 @@ class PaymentRecordCRUD:
         creator_id: str,
         creator_name: str,
         team_id: int,
-        idempotency_key: Optional[str] = None,
+        idempotency_key: str | None = None,
         commit: bool = True,
     ) -> PaymentRecord:
-        from app.crud.user import user_crud
         from app.crud.customer import customer_crud
+        from app.crud.user import user_crud
         from app.services.operation_log_service import operation_log_service
 
         fingerprint = payment_record_request_fingerprint(plan_id, obj_in)
@@ -1007,8 +1027,8 @@ class PaymentRecordCRUD:
                     raise PaymentRecordIdempotencyConflict("幂等键已用于其他回款登记请求")
                 return existing
 
-        customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
-        # 锁住计划及其已有记录，保证并发登记不能同时通过金额校验。
+        _customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
+        # 锁住计划及其已有记录,保证并发登记不能同时通过金额校验。
         plan = (
             db.query(PaymentPlan)
             .filter(PaymentPlan.id == plan_id, PaymentPlan.team_id == team_id)
@@ -1020,7 +1040,7 @@ class PaymentRecordCRUD:
             raise ValueError("回款计划不存在")
 
         # 计划行锁释放前再次检查幂等键。并发请求可能在第一次查询时看不到
-        # 已提交结果，但等待计划锁后必须复用第一笔记录，不能因金额已占满而误报超额。
+        # 已提交结果,但等待计划锁后必须复用第一笔记录,不能因金额已占满而误报超额。
         if idempotency_key:
             existing = self.get_by_idempotency_key(db, team_id, idempotency_key)
             if existing:
@@ -1040,7 +1060,7 @@ class PaymentRecordCRUD:
 
         if total_paid + requested_amount > planned:
             raise ValueError(
-                f"回款金额超出计划，计划金额: {planned}，已登记: {total_paid}，本次: {requested_amount}"
+                f"回款金额超出计划\uff0c计划金额: {planned}\uff0c已登记: {total_paid}\uff0c本次: {requested_amount}"
             )
         # 生成记录编号
         record_number = BusinessNumberGenerator.generate('PAY', db)
@@ -1086,12 +1106,12 @@ class PaymentRecordCRUD:
         payment_plan_crud.update_status(db, plan, commit=False)
         self._update_contract_payment_status(db, plan.contract_id, commit=False)
 
-        # 审批创建成功时统一提交回款记录、计划/合同状态和审批实例；
-        # 审批创建失败时由 API 层 rollback，避免留下无审批的半成功回款记录。
+        # 审批创建成功时统一提交回款记录、计划/合同状态和审批实例;
+        # 审批创建失败时由 API 层 rollback,避免留下无审批的半成功回款记录。
         self._auto_submit_approval(db, db_record, creator_id, creator_name)
         db.refresh(db_record)
 
-        # 填充关联对象，避免 DetachedInstanceError
+        # 填充关联对象,避免 DetachedInstanceError
         db_record.payment_plan = plan
         if plan.contract:
             db_record.payment_plan.contract = plan.contract
@@ -1112,7 +1132,7 @@ class PaymentRecordCRUD:
                 source_id=db_record.id,
                 event_time=db_record.created_time,
                 actor_id=creator_id,
-                summary=f"登记回款：{db_record.actual_amount}",
+                summary=f"登记回款\uff1a{db_record.actual_amount}",
                 metadata={
                     "confirmation_status": db_record.confirmation_status,
                     "payment_date": db_record.payment_date.isoformat() if db_record.payment_date else None,
@@ -1149,7 +1169,7 @@ class PaymentRecordCRUD:
             )
 
         # 回款记录、审批实例、计划/合同状态、旅程事件和操作日志在同一
-        # 业务事务中提交；任一主流程失败都由调用方 rollback。
+        # 业务事务中提交;任一主流程失败都由调用方 rollback。
         if commit:
             db.commit()
         db.refresh(db_record)
@@ -1157,7 +1177,7 @@ class PaymentRecordCRUD:
     
     def update(self, db: Session, db_obj: PaymentRecord, obj_in: PaymentRecordUpdate) -> PaymentRecord:
         from app.crud.user import user_crud
-        customer_id = _plan_customer_id(
+        _customer_id = _plan_customer_id(
             db, plan_id=int(db_obj.payment_plan_id), team_id=int(db_obj.team_id),
         )
         db.refresh(db_obj)
@@ -1169,7 +1189,7 @@ class PaymentRecordCRUD:
         plan = None
 
         if "actual_amount" in update_data:
-            # 锁住计划，串行化“修改金额 -> 重算累计金额”的关键区段。
+            # 锁住计划,串行化“修改金额 -> 重算累计金额”的关键区段。
             plan = (
                 db.query(PaymentPlan)
                 .filter(
@@ -1196,7 +1216,7 @@ class PaymentRecordCRUD:
             new_amount = Decimal(str(update_data["actual_amount"]))
             if other_amount + new_amount > Decimal(str(plan.planned_amount)):
                 raise ValueError(
-                    f"回款金额超出计划，计划金额: {plan.planned_amount}，其他已登记: {other_amount}，本次: {new_amount}"
+                    f"回款金额超出计划\uff0c计划金额: {plan.planned_amount}\uff0c其他已登记: {other_amount}\uff0c本次: {new_amount}"
                 )
         for field, value in update_data.items():
             setattr(db_obj, field, value)
@@ -1231,7 +1251,7 @@ class PaymentRecordCRUD:
             # 回款记录、计划状态、合同状态和成交旅程状态在一个事务中落库。
             payment_plan_crud.update_status(db, plan, commit=False)
             self._update_contract_payment_status(db, plan.contract_id, commit=False)
-            # 测试数据/历史记录可能没有成交旅程；没有旅程时无需刷新，
+            # 测试数据/历史记录可能没有成交旅程;没有旅程时无需刷新,
             # 也不能让与回款更新无关的投影查询阻断主事务。
             if plan.deal_journey_id is not None:
                 from app.services.deal_journey_service import deal_journey_service
@@ -1248,7 +1268,7 @@ class PaymentRecordCRUD:
             ).scalar()
         if plan_id is None:
             return False
-        customer_id = _plan_customer_id(db, plan_id=int(plan_id), team_id=team_id)
+        _customer_id = _plan_customer_id(db, plan_id=int(plan_id), team_id=team_id)
         record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
         if not record:
             return False
@@ -1272,7 +1292,7 @@ class PaymentRecordCRUD:
         if plan:
             payment_plan_crud.update_status(db, plan, commit=False)
             self._update_contract_payment_status(db, plan.contract_id, commit=False)
-            # 历史回款记录可能没有成交旅程；删除回款本身不应依赖
+            # 历史回款记录可能没有成交旅程;删除回款本身不应依赖
             # 不存在的可选关联对象。
             if plan.deal_journey_id is not None:
                 from app.services.deal_journey_service import deal_journey_service
@@ -1288,18 +1308,18 @@ class PaymentRecordCRUD:
         confirmer_id: str,
         confirmer_name: str,
         action: str,
-        notes: Optional[str] = None,
-        invoice_application_ids: Optional[List[int]] = None
-    ) -> Optional[PaymentRecord]:
+        notes: str | None = None,
+        invoice_application_ids: list[int] | None = None
+    ) -> PaymentRecord | None:
         """
         [已废弃] 财务直接确认回款入账
 
-        所有回款统一走审批流程，审批通过后自动确认入账（adapter.on_approved）。
-        此方法已废弃，保留仅用于适配器内部调用（PaymentRecordAdapter.on_approved）。
-        请勿直接调用此方法，使用审批中心进行审批操作。
+        所有回款统一走审批流程\uff0c审批通过后自动确认入账\uff08adapter.on_approved\uff09。
+        此方法已废弃\uff0c保留仅用于适配器内部调用\uff08PaymentRecordAdapter.on_approved\uff09。
+        请勿直接调用此方法\uff0c使用审批中心进行审批操作。
         """
-        from app.models.payment import PaymentConfirmationStatus
         from app.models.invoice import InvoiceApplication
+        from app.models.payment import PaymentConfirmationStatus
 
         with db.no_autoflush:
             owner = db.query(PaymentRecord.team_id, PaymentRecord.payment_plan_id).filter(
@@ -1309,7 +1329,7 @@ class PaymentRecordCRUD:
             return None
 
         team_id, plan_id = map(int, owner)
-        customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
+        _customer_id = _plan_customer_id(db, plan_id=plan_id, team_id=team_id)
         record = db.query(PaymentRecord).filter_by(id=record_id, team_id=team_id).populate_existing().first()
         if not record:
             return None
@@ -1318,11 +1338,11 @@ class PaymentRecordCRUD:
 
         if action not in ("confirm", "dispute"):
             raise ValueError("无效的确认操作")
-        # action=dispute 已废弃（无实际业务使用）
+        # action=dispute 已废弃(无实际业务使用)
         if action == "confirm":
             record.confirmation_status = PaymentConfirmationStatus.CONFIRMED
         elif action == "dispute":
-            # DISPUTED 状态已废弃，此处仅保留向后兼容
+            # DISPUTED 状态已废弃,此处仅保留向后兼容
             record.confirmation_status = PaymentConfirmationStatus.DISPUTED
         else:
             raise ValueError("无效的确认操作")
@@ -1364,7 +1384,7 @@ class PaymentRecordCRUD:
             owner = db.query(Contract.team_id, Contract.customer_id).filter(Contract.id == contract_id).first()
         if not owner:
             return
-        team_id, customer_id = map(int, owner)
+        _team_id, _customer_id = map(int, owner)
         with db.no_autoflush:
             contract = db.query(Contract).filter(Contract.id == contract_id).first()
             plans = db.query(PaymentPlan).filter(PaymentPlan.contract_id == contract_id).all()
@@ -1382,7 +1402,7 @@ class PaymentRecordCRUD:
             total_paid = sum(sum_approved_payment_amount(p.payment_records) for p in plans)
             total_planned = sum(float(p.planned_amount) for p in plans)
             has_overdue = any(p.status == PaymentPlanStatus.OVERDUE for p in plans)
-            all_completed = all(p.status == PaymentPlanStatus.COMPLETED for p in plans)
+            _all_completed = all(p.status == PaymentPlanStatus.COMPLETED for p in plans)
 
             if has_overdue:
                 payment_status = PaymentStatus.OVERDUE
@@ -1401,20 +1421,20 @@ class PaymentRecordCRUD:
 
     def _auto_submit_approval(self, db: Session, record: PaymentRecord, creator_id: str, creator_name: str):
         """
-        登记回款后自动提交审批（重构：统一走审批流程）
+        登记回款后自动提交审批\uff08重构\uff1a统一走审批流程\uff09
 
-        流程：
+        流程\uff1a
         1. 调用 match_flow_generic 匹配 PAYMENT 审批流程
-        2. 未匹配 -> 报错（强制走审批流程）
+        2. 未匹配 -> 报错\uff08强制走审批流程\uff09
         3. 匹配 -> create_approval_only 创建审批实例
-        4. 由调用方在同一事务中完成提交，通知在 API 层异步发送
+        4. 由调用方在同一事务中完成提交\uff0c通知在 API 层异步发送
 
-        注意：所有回款必须走审批流程，审批通过后自动确认入账。
+        注意\uff1a所有回款必须走审批流程\uff0c审批通过后自动确认入账。
         """
         from app.crud.approval import approval_crud, approval_flow_crud
         from app.models.approval import BusinessType
 
-        # 匹配 PAYMENT 审批流程（金额=回款金额）
+        # 匹配 PAYMENT 审批流程(金额=回款金额)
         flow, error_msg = approval_flow_crud.match_flow_generic(
             db,
             business_type=BusinessType.PAYMENT,
@@ -1425,9 +1445,9 @@ class PaymentRecordCRUD:
 
         # 未匹配审批流时统一报错
         if flow is None:
-            raise ValueError(error_msg or "未找到匹配的回款审批流程，请联系管理员配置完整的审批流程覆盖范围")
+            raise ValueError(error_msg or "未找到匹配的回款审批流程\uff0c请联系管理员配置完整的审批流程覆盖范围")
 
-        # 与回款记录、计划/合同状态放在同一事务提交，避免出现“回款已写入但审批未创建”。
+        # 与回款记录、计划/合同状态放在同一事务提交,避免出现“回款已写入但审批未创建”。
         approval = approval_crud.create_approval_only(
             db,
             business_type=BusinessType.PAYMENT,
@@ -1444,16 +1464,16 @@ class PaymentRecordCRUD:
         db.flush()
         db.refresh(approval)
 
-        # 注意：通知发送移至 API 层（异步上下文）
-        # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
+        # 注意:通知发送移至 API 层(异步上下文)
+        # CRUD 层不再包含异步通知逻辑,避免 "no running event loop" 错误
 
         return approval
 
 
 def query_pending_approval_me(db: Session, team_id: int, user_id: int | str) -> int:
     """查询当前用户可处理的待审批回款记录数量。"""
-    from app.models.approval import Approval, ApprovalStatus
     from app.constants.business_types import BusinessType
+    from app.models.approval import Approval, ApprovalStatus
     from app.services.approval_routing import current_approver_ids
 
     try:

@@ -1,6 +1,5 @@
 """License 申请管理 API 端点"""
 import os
-from typing import List
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,7 +16,6 @@ from app.core.deps import (
     require_permission,
 )
 from app.core.logging import get_logger
-from app.utils.time import business_now
 from app.crud.approval import approval_crud
 from app.crud.crud_license_application import (
     create_license_application,
@@ -40,8 +38,9 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeType,
     customer_business_object_intelligence_service,
 )
-from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.license_export_service import export_license_document
+from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/license-applications", tags=["License申请管理"])
 logger = get_logger(__name__)
@@ -58,7 +57,7 @@ def _sanitize_filename_part(value: str) -> str:
     return value.translate(str.maketrans('', '', '\\/:*?"<>|\r\n')).strip()
 
 
-def _export_filename(application) -> str:
+def _export_filename(application: LicenseApplication) -> str:
     customer_name = application.customer.account_name if application.customer else "客户"
     safe_customer_name = _sanitize_filename_part(customer_name) or "客户"
     current_date = business_now().strftime("%Y%m%d")
@@ -124,14 +123,19 @@ def _enqueue_license_application_intelligence_refresh(
         customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
-@router.post("/", response_model=LicenseApplicationResponse, status_code=status.HTTP_201_CREATED, summary="创建License申请")
+@router.post(
+    "/",
+    response_model=LicenseApplicationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建License申请",
+)
 def create_application(
     application: LicenseApplicationCreate,
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """创建 License 申请（草稿状态）"""
+    """创建 License 申请\uff08草稿状态\uff09"""
     customer = check_customer_edit_permission(application.customer_id, team_id, current_user, db)
     internal_application = LicenseApplicationInternalCreate(
         customer_id=customer.id,
@@ -160,7 +164,7 @@ def create_application(
     return _license_application_response(created)
 
 
-@router.get("/", response_model=List[LicenseApplicationResponse], summary="获取客户License申请列表")
+@router.get("/", response_model=list[LicenseApplicationResponse], summary="获取客户License申请列表")
 def list_applications(
     customer_id: str = Query(..., description="客户对外ID"),
     team_id: int = Depends(get_current_user_team),
@@ -199,7 +203,7 @@ def update_application(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """更新 License 申请（仅草稿状态可编辑）"""
+    """更新 License 申请\uff08仅草稿状态可编辑\uff09"""
     existing = get_license_application(db, team_id, application_id)
     if not existing:
         raise HTTPException(
@@ -234,7 +238,7 @@ def delete_application(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """删除 License 申请（审批中或审批通过后不可删除）"""
+    """删除 License 申请\uff08审批中或审批通过后不可删除\uff09"""
     existing = get_license_application(db, team_id, application_id)
     if not existing:
         raise HTTPException(
@@ -264,12 +268,12 @@ def submit_application(
     db: Session = Depends(get_db)
 ):
     """
-    提交 License 申请（接入审批引擎）
+    提交 License 申请\uff08接入审批引擎\uff09
 
-    流程：
+    流程\uff1a
     1. 验证申请存在且状态为 DRAFT
-    2. 匹配审批流程（按 license_type）
-    3. 创建审批实例（Approval + ApprovalRecord）
+    2. 匹配审批流程\uff08按 license_type\uff09
+    3. 创建审批实例\uff08Approval + ApprovalRecord\uff09
     4. 通过审批事务管理器发送待处理通知给当前节点审批人
     5. 返回申请信息
     """
@@ -313,7 +317,12 @@ def submit_application(
         )
 
 
-@router.post("/{application_id}/approve", response_model=LicenseApplicationResponse, summary="[已废弃] 审批通过License申请", deprecated=True)
+@router.post(
+    "/{application_id}/approve",
+    response_model=LicenseApplicationResponse,
+    summary="[已废弃] 审批通过License申请",
+    deprecated=True,
+)
 def approve_application(
     application_id: int,
     approve_data: LicenseApplicationApprove,
@@ -327,7 +336,12 @@ def approve_application(
     )
 
 
-@router.post("/{application_id}/approve-full", response_model=LicenseApplicationResponse, summary="[已废弃] 审批通过License申请（完整版本）", deprecated=True)
+@router.post(
+    "/{application_id}/approve-full",
+    response_model=LicenseApplicationResponse,
+    summary="[已废弃] 审批通过License申请\uff08完整版本\uff09",
+    deprecated=True,
+)
 def approve_application_full(
     application_id: int,
     approve_data: LicenseApplicationApproveFull,
@@ -337,11 +351,19 @@ def approve_application_full(
 ):
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
-        detail="该接口已废弃。请先使用通用审批接口完成审批，再调用 /v1/license-applications/{application_id}/issue 发放License。",
+        detail=(
+            "该接口已废弃。请先使用通用审批接口完成审批\uff0c再调用 "
+            "/v1/license-applications/{application_id}/issue 发放License。"
+        ),
     )
 
 
-@router.post("/{application_id}/reject", response_model=LicenseApplicationResponse, summary="[已废弃] 审批拒绝License申请", deprecated=True)
+@router.post(
+    "/{application_id}/reject",
+    response_model=LicenseApplicationResponse,
+    summary="[已废弃] 审批拒绝License申请",
+    deprecated=True,
+)
 def reject_application(
     application_id: int,
     reason: str = Query(..., description="拒绝原因"),
@@ -373,7 +395,7 @@ async def issue_application(
     if existing.status != LicenseApplicationStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"License申请状态为 {existing.status}，不可发放"
+            detail=f"License申请状态为 {existing.status}\uff0c不可发放"
         )
     approval = approval_crud.get_by_entity(db, BusinessType.LICENSE, application_id, team_id)
     try:
@@ -404,7 +426,8 @@ async def issue_application(
                 outbound_notification_job_service.commit_and_kick(db, notify_request)
             except Exception as notify_error:
                 logger.error(
-                    f"[License] Issue notification enqueue failed: application_id={application_id}, error={str(notify_error)}"
+                    f"[License] Issue notification enqueue failed: application_id={application_id}, "
+                    f"error={notify_error!s}"
                 )
         return _license_application_response(issued)
     except ValueError as e:
@@ -424,7 +447,7 @@ def export_application(
     """
     导出 License Word 文档
 
-    仅已发放状态的申请可以导出，文件名格式：
+    仅已发放状态的申请可以导出\uff0c文件名格式\uff1a
     私有化{试用/正式}License-{客户名称}_{当前日期}.docx
     """
     existing = get_license_application(db, team_id, application_id)

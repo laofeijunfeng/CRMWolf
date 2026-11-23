@@ -4,10 +4,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 from app.crud.product_intent import format_active_product_catalog
@@ -32,7 +31,11 @@ from app.services.agent.schemas import (
     AgentTurnIntentDecision,
     AgentTurnRelationDecision,
 )
-from app.services.agent.types import JSONDict
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.agent.types import JSONDict
 
 
 class AgentSemanticParserError(Exception):
@@ -62,8 +65,8 @@ class AgentSemanticParser:
         *,
         team_id: int,
         user_message: str,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentSemanticParseResult:
         envelope = await self.parse_with_metadata(
             db,
@@ -81,14 +84,14 @@ class AgentSemanticParser:
         team_id: int,
         user_message: str,
         pending_task: dict,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentPendingInterruptionDecision:
         config, api_key = self._require_ai_config(
             db,
             team_id,
-            missing_config_message="AI 配置未设置，无法判断挂起任务是否需要切换。",
-            missing_key_message="AI API Key 未设置，无法判断挂起任务是否需要切换。",
+            missing_config_message="AI 配置未设置\uff0c无法判断挂起任务是否需要切换。",
+            missing_key_message="AI API Key 未设置\uff0c无法判断挂起任务是否需要切换。",
         )
         result = await self._assess_pending_interruption_with_langchain(
             api_host=config.api_host,
@@ -112,13 +115,13 @@ class AgentSemanticParser:
         action_name: str,
         target: JSONDict,
         candidates: list[JSONDict],
-        current_date: Optional[date] = None,
+        current_date: date | None = None,
     ) -> list[JSONDict]:
         config, api_key = self._require_ai_config(
             db,
             team_id,
-            missing_config_message="AI 配置未设置，无法进行业务对象语义选择。",
-            missing_key_message="AI API Key 未设置，无法进行业务对象语义选择。",
+            missing_config_message="AI 配置未设置\uff0c无法进行业务对象语义选择。",
+            missing_key_message="AI API Key 未设置\uff0c无法进行业务对象语义选择。",
         )
         result = await self._rank_resource_candidates_with_langchain(
             api_host=config.api_host,
@@ -144,16 +147,16 @@ class AgentSemanticParser:
         *,
         team_id: int,
         user_message: str,
-        active_task: Optional[dict] = None,
-        suspended_tasks: Optional[list[dict]] = None,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        active_task: dict | None = None,
+        suspended_tasks: list[dict] | None = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentTurnRelationDecision:
         config, api_key = self._require_ai_config(
             db,
             team_id,
-            missing_config_message="AI 配置未设置，无法判断本轮与业务状态的关系。",
-            missing_key_message="AI API Key 未设置，无法判断本轮与业务状态的关系。",
+            missing_config_message="AI 配置未设置\uff0c无法判断本轮与业务状态的关系。",
+            missing_key_message="AI API Key 未设置\uff0c无法判断本轮与业务状态的关系。",
         )
         result = await self._assess_turn_relation_with_langchain(
             api_host=config.api_host,
@@ -174,17 +177,17 @@ class AgentSemanticParser:
         *,
         team_id: int,
         user_message: str,
-        current_interrupt: Optional[dict] = None,
-        active_task: Optional[dict] = None,
-        suspended_tasks: Optional[list[dict]] = None,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        current_interrupt: dict | None = None,
+        active_task: dict | None = None,
+        suspended_tasks: list[dict] | None = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentTurnIntentDecision:
         config, api_key = self._require_ai_config(
             db,
             team_id,
-            missing_config_message="AI 配置未设置，无法判断本轮意图。",
-            missing_key_message="AI API Key 未设置，无法判断本轮意图。",
+            missing_config_message="AI 配置未设置\uff0c无法判断本轮意图。",
+            missing_key_message="AI API Key 未设置\uff0c无法判断本轮意图。",
         )
         result = await self._assess_turn_intent_with_langchain(
             api_host=config.api_host,
@@ -206,14 +209,14 @@ class AgentSemanticParser:
         *,
         team_id: int,
         user_message: str,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentSemanticParseEnvelope:
         config, api_key = self._require_ai_config(
             db,
             team_id,
-            missing_config_message="AI 配置未设置，无法进行 Agent 语义理解。",
-            missing_key_message="AI API Key 未设置，无法进行 Agent 语义理解。",
+            missing_config_message="AI 配置未设置\uff0c无法进行 Agent 语义理解。",
+            missing_key_message="AI API Key 未设置\uff0c无法进行 Agent 语义理解。",
         )
         catalog_text, names_enum = format_active_product_catalog(db, team_id)
         result = await self._parse_with_langchain(
@@ -244,12 +247,12 @@ class AgentSemanticParser:
         user_message: str,
         memory_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-        source_names: Optional[list[str]] = None,
-        default_source_name: Optional[str] = None,
-        product_catalog_text: Optional[str] = None,
-        product_names_enum: Optional[str] = None,
-    ) -> Optional[AgentSemanticParseResult]:
+        current_date: date | None = None,
+        source_names: list[str] | None = None,
+        default_source_name: str | None = None,
+        product_catalog_text: str | None = None,
+        product_names_enum: str | None = None,
+    ) -> AgentSemanticParseResult | None:
         prompt_date = current_date or date.today()
         system_prompt = (
             f"{render_semantic_system_prompt(source_names, default_source_name, product_catalog_text, product_names_enum)}"
@@ -277,8 +280,8 @@ class AgentSemanticParser:
         pending_task_json: str,
         memory_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentPendingInterruptionDecision]:
+        current_date: date | None = None,
+    ) -> AgentPendingInterruptionDecision | None:
         prompt_date = current_date or date.today()
         return await self._invoke_structured(
             api_host=api_host,
@@ -312,8 +315,8 @@ class AgentSemanticParser:
         suspended_tasks_json: str,
         memory_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentTurnRelationDecision]:
+        current_date: date | None = None,
+    ) -> AgentTurnRelationDecision | None:
         prompt_date = current_date or date.today()
         return await self._invoke_structured(
             api_host=api_host,
@@ -349,8 +352,8 @@ class AgentSemanticParser:
         target_json: str,
         candidates_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentResourceResolutionResult]:
+        current_date: date | None = None,
+    ) -> AgentResourceResolutionResult | None:
         prompt_date = current_date or date.today()
         return await self._invoke_structured(
             api_host=api_host,
@@ -387,8 +390,8 @@ class AgentSemanticParser:
         suspended_tasks_json: str,
         memory_json: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentTurnIntentDecision]:
+        current_date: date | None = None,
+    ) -> AgentTurnIntentDecision | None:
         prompt_date = current_date or date.today()
         return await self._invoke_structured(
             api_host=api_host,
@@ -426,7 +429,7 @@ class AgentSemanticParser:
         user_prompt: str,
         response_model: type[StructuredDecisionT],
         error_prefix: str,
-    ) -> Optional[StructuredDecisionT]:
+    ) -> StructuredDecisionT | None:
         try:
             return await self.langchain_runtime.ainvoke_structured(
                 api_host=api_host,
@@ -461,7 +464,7 @@ class AgentSemanticParser:
 
     @staticmethod
     def _require_structured_result(
-        result: Optional[StructuredDecisionT],
+        result: StructuredDecisionT | None,
         unavailable_message: str,
     ) -> StructuredDecisionT:
         if result is None:

@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
+import { JsonObjectSchema } from '@/schemas/agent-contracts/common'
 import { AgentUIEnvelopeSchema } from '@/schemas/agent-contracts/ui-envelope'
+import { InteractionFieldSchema } from '@/schemas/agent-contracts/ui-interactions'
 
 export const DraftFieldStatusSchema = z.enum(['MISSING', 'CANDIDATE', 'ACCEPTED', 'EXPLICITLY_NONE'])
 export type DraftFieldStatus = z.infer<typeof DraftFieldStatusSchema>
@@ -96,9 +98,7 @@ export const ActivityPreviewSchema = z.object({
   ignored_noise_summary: z.string().nullable().optional()
 }).strict()
 
-export const ProposalKindSchema = z.enum([
-  'customer_fact', 'follow_up_task_create', 'follow_up_task', 'opportunity_stage', 'opportunity_create'
-])
+export const ProposalKindSchema = z.enum(['follow_up_task_create', 'opportunity_stage', 'opportunity_create'])
 export type ProposalKind = z.infer<typeof ProposalKindSchema>
 
 export const ProposalCandidateSchema = z.object({
@@ -110,6 +110,7 @@ export const ProposalCandidateSchema = z.object({
   activity_id: z.number().int(),
   customer_id: z.number().int(),
   source_revision: z.number().int(),
+  segment_id: z.string().nullable().optional(),
   due_date_granularity: z.enum(['DATE', 'DATETIME', 'UNKNOWN']).nullable().optional(),
   target_public_id: z.string().nullable().optional(),
   prior_status: z.string().nullable().optional(),
@@ -119,7 +120,7 @@ export const ProposalCandidateSchema = z.object({
   prior_fact_version: z.number().int().nullable().optional(),
   task_hash: z.string().nullable().optional()
 }).strict().superRefine((candidate, ctx) => {
-  if ((candidate.kind === 'follow_up_task' || candidate.kind === 'opportunity_stage')
+  if (candidate.kind === 'opportunity_stage'
     && (candidate.target_public_id === undefined || candidate.target_public_id === null || candidate.target_public_id === '')) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['target_public_id'], message: '现有对象提议缺少目标' })
   }
@@ -138,7 +139,7 @@ export type ProposalConfirmation = Extract<ConfirmationPayload, { kind: 'proposa
 
 
 export const TaskWaitingSchema = z.object({
-  type: z.enum(['FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION', 'FOLLOW_UP_DISPOSITION']),
+  type: z.enum(['FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION', 'FOLLOW_UP_DISPOSITION', 'PROPOSAL_FORM', 'CONFIRMATION_EDIT']),
   field: z.string().nullable().optional(),
   question_id: z.string().min(1),
   prompt: z.string().min(1),
@@ -156,8 +157,17 @@ export const TaskWaitingSchema = z.object({
     }).strict()
   ])).optional(),
   hint: z.string().max(400).nullable().optional(),
-  confirmation_payload: ConfirmationPayloadSchema.nullable().optional()
+  confirmation_payload: ConfirmationPayloadSchema.nullable().optional(),
+  form_revision: z.number().int().nonnegative().nullable().optional(),
+  form_fields: z.array(InteractionFieldSchema).max(20).nullable().optional()
 }).strict().superRefine((waiting, ctx) => {
+  const isForm = waiting.type === 'PROPOSAL_FORM' || waiting.type === 'CONFIRMATION_EDIT'
+  if (isForm !== (waiting.form_revision != null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['form_revision'], message: '仅表单等待需要表单版本' })
+  }
+  if (!isForm && waiting.form_fields != null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['form_fields'], message: '仅表单等待可携带表单字段' })
+  }
   const payload = waiting.confirmation_payload
   if (waiting.type !== 'CONFIRMATION') {
     if (payload != null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['confirmation_payload'], message: '非确认等待不能携带命令' })
@@ -176,22 +186,27 @@ export type AssistantTaskStatus = z.infer<typeof AssistantTaskStatusSchema>
 const CustomerActivityReceiptSchema = z.object({
   kind: z.literal('customer_activity'),
   public_id: z.string().min(1),
-  customer_id: z.number().int().nullable().optional()
+  customer_id: z.number().int().nullable().optional(),
+  customer_public_id: z.string().min(1).nullable().optional()
 }).strict()
 
 export const AssistantTurnStatusSchema = z.enum(['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED'])
 
 const AcceptedProposalReceiptSchema = z.object({
-  kind: ProposalKindSchema,
+  kind: z.enum(['follow_up_task_create', 'opportunity_stage', 'opportunity_create', 'customer_fact', 'follow_up_task']),
   public_id: z.string().min(1),
-  proposal_key: z.string().min(1)
+  proposal_key: z.string().min(1),
+  customer_id: z.number().int().nullable().optional(),
+  customer_public_id: z.string().min(1).nullable().optional(),
+  approval_id: z.number().int().nullable().optional(),
+  approval_phase: z.literal('pending_review').nullable().optional(),
+  detail: z.string().nullable().optional()
 }).strict()
 
 const RefusedProposalReceiptSchema = z.object({
   kind: z.enum([
     'refused:customer_fact', 'refused:follow_up_task_create', 'refused:follow_up_task',
-    'refused:opportunity_stage', 'refused:opportunity_create',
-    'refused:opportunity'
+    'refused:opportunity_stage', 'refused:opportunity_create', 'refused:opportunity'
   ]),
   proposal_key: z.string().min(1).optional()
 }).strict()
@@ -216,6 +231,8 @@ export const AssistantTaskViewSchema = z.object({
   processing_turn_id: z.string().min(1).nullable().optional(),
   processing_turn_status: AssistantTurnStatusSchema.nullable().optional(),
   reprocess_turn_id: z.string().min(1).nullable().optional(),
+  proposal_outcome: z.enum(['proposal_failed', 'proposal_rejected']).nullable().optional(),
+  reconciliation_required: z.boolean().optional(),
   follow_up_disposition: z.object({
     batch_id: z.string().min(1).nullable().optional(),
     activity_public_id: z.string().min(1).nullable().optional(),
@@ -224,6 +241,9 @@ export const AssistantTaskViewSchema = z.object({
     activity_kind_label: z.string(),
     total: z.number().int().nonnegative(),
     current_index: z.number().int().positive().nullable(),
+    settling: z.boolean().optional(),
+    visible_count: z.number().int().nonnegative().optional(),
+    suppression_status: z.enum(['applied', 'stale']).nullable().optional(),
     items: z.array(z.object({
       item_id: z.string().min(1),
       task_public_id: z.string().min(1).nullable().optional(),
@@ -234,7 +254,8 @@ export const AssistantTaskViewSchema = z.object({
       evidence_reason: z.string().nullable().optional(),
       state: z.enum(['current', 'waiting', 'complete', 'hold', 'skip', 'failed', 'unknown']),
       result_title: z.string().nullable().optional(),
-      result_message: z.string().nullable().optional()
+      result_message: z.string().nullable().optional(),
+      failure_code: z.string().nullable().optional()
     }).strict()).max(100)
   }).strict().nullable().optional(),
 }).strict().superRefine((task, ctx) => {
@@ -256,8 +277,11 @@ export function parseAssistantTaskList(payload: unknown): { tasks: AssistantTask
   return { tasks, skipped }
 }
 
-export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel', 'revise_activity_kind'])
+export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel', 'revise_activity_kind', 'submit_form', 'request_edit'])
 export type AssistantInputKind = z.infer<typeof AssistantInputKindSchema>
+
+export const AssistantRejectReasonSchema = z.enum(['wrong_customer', 'wrong_content', 'should_not_record', 'other'])
+export type AssistantRejectReason = z.infer<typeof AssistantRejectReasonSchema>
 
 export const SubmitInputResponseSchema = z.object({
   task: AssistantTaskViewSchema,
@@ -285,7 +309,7 @@ export type ConversationProjection = z.infer<typeof ConversationProjectionSchema
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
-  outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed']).nullable(),
+  outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed', 'proposal_unavailable']).nullable(),
   ui: AgentUIEnvelopeSchema.nullable(), projection: ConversationProjectionSchema.nullable().optional()
 }).strict()
 export const ConversationViewSchema = z.object({
@@ -300,8 +324,14 @@ export const ConversationReplySchema = z.object({
   submission: z.object({
     task_public_id: z.string().min(1), turn_id: z.string().min(1),
     input: z.object({
-      kind: AssistantInputKindSchema, text: z.string().nullable(), choice: z.string().nullable(),
-      client_request_id: z.string().min(8), action_id: z.string().nullable(), expected_version: z.number().int().nonnegative().nullable()
+      kind: AssistantInputKindSchema, text: z.string().nullable().optional(), choice: z.string().nullable().optional(),
+      client_request_id: z.string().min(8), action_id: z.string().nullable().optional(),
+      expected_version: z.number().int().nonnegative().nullable().optional(),
+      values: JsonObjectSchema.nullable().optional(),
+      form_revision: z.number().int().nonnegative().nullable().optional(),
+      choices: z.array(z.string().min(1).max(64)).max(100).nullable().optional(),
+      suppress_week: z.boolean().optional(),
+      reason: AssistantRejectReasonSchema.nullable().optional()
     }).strict()
   }).strict().nullable()
 }).strict()

@@ -21,9 +21,20 @@ from app.models.agent_persistence import (
     AgentUIActionConsumptionMode,
     AgentUIActionStatus,
 )
-from app.models.agent_turn_execution import AgentTurnExecution, AgentTurnExecutionStatus
+from app.models.agent_turn_execution import AgentTurnExecution as AgentTurnExecution
+from app.models.agent_turn_execution import AgentTurnExecutionStatus as AgentTurnExecutionStatus
 from app.models.ai_config import AIConfig
 from app.models.approval import Approval, ApprovalFlow, ApprovalNode, ApprovalRecord
+from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
+from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
+from app.models.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJob as AssistantFollowUpProjectionJob,
+)
+from app.models.assistant_follow_up_projection_job import (
+    AssistantFollowUpProjectionJobStatus as AssistantFollowUpProjectionJobStatus,
+)
+from app.models.assistant_open_follow_up_suppression import AssistantOpenFollowUpSuppression
+from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.models.command_execution import CommandExecution, CommandExecutionStatus
 from app.models.contract import Contract, ContractStatus, PaymentStatus
 from app.models.contract_change import ContractChangeRequest
@@ -38,11 +49,8 @@ from app.models.customer_activity_post_commit_job import (
     CustomerActivityPostCommitJob,
     CustomerActivityPostCommitJobStatus,
 )
-from app.models.assistant_follow_up_projection_job import (
-    AssistantFollowUpProjectionJob,
-    AssistantFollowUpProjectionJobStatus,
-)
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
+from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.customer_fact import (
     CustomerFact,
     CustomerFactRevision,
@@ -56,7 +64,6 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermStatus,
     CustomerIdentityTermType,
 )
-from app.models.customer_enrichment_job import CustomerEnrichmentJob
 from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.customer_opportunity_suggestion_job import CustomerOpportunitySuggestionJob
@@ -102,12 +109,18 @@ from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, Le
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 from app.models.operation_log import EventAction, OperationLog, PrimaryResourceType
+from app.models.opportunity import (
+    Opportunity,
+    OpportunityProductModule,
+    OpportunityStage,
+    PurchaseType,
+)
+from app.models.opportunity import OpportunityStatus as OpportunityStatus
 from app.models.outbound_notification_job import (
     OutboundNotificationEventType,
     OutboundNotificationJob,
     OutboundNotificationJobStatus,
 )
-from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus, PurchaseType
 from app.models.payment import PaymentPlan, PaymentPlanStatus, PaymentRecord
 from app.models.permission import Permission
 from app.models.procurement import (
@@ -116,6 +129,9 @@ from app.models.procurement import (
     ProcurementStageTemplate,
     StageTemplateChangeLog,
 )
+from app.models.product import Product, ProductModule, ProductModuleRole
+from app.models.reminder_rule import ReminderRule as ReminderRule
+from app.models.reminder_rule_run import ReminderRuleRun as ReminderRuleRun
 from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.sales_commitment import (
@@ -149,22 +165,12 @@ from app.models.system_config import ConfigType, SystemConfig
 from app.models.team import Team, UserTeam
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
-from app.models.reminder_rule import ReminderRule
-from app.models.reminder_rule_run import ReminderRuleRun
-from app.models.workflow import VALID_TRANSITIONS, Workflow, WorkflowStatus
 from app.models.view_preference import ViewPreference, ViewPreferenceScope
-from app.models.product import Product, ProductModule, ProductModuleRole
-from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
-from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
-from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
+from app.models.workflow import VALID_TRANSITIONS, Workflow, WorkflowStatus
 
 __all__ = [
-    "AssistantConversation",
-    "AssistantConversationEntry",
+    "VALID_TRANSITIONS",
     "AIConfig",
-    "AssistantRequest",
-    "AssistantTurn",
-    "AssistantTurnEvent",
     "AcquisitionSource",
     "AgentAsyncOperation",
     "AgentAsyncOperationEvent",
@@ -187,17 +193,26 @@ __all__ = [
     "ApprovalFlow",
     "ApprovalNode",
     "ApprovalRecord",
+    "AssistantAction",
+    "AssistantConversation",
+    "AssistantConversationEntry",
+    "AssistantOpenFollowUpSuppression",
+    "AssistantRequest",
+    "AssistantTask",
+    "AssistantTaskStatus",
+    "AssistantTurn",
+    "AssistantTurnEvent",
+    "AssistantWaitingType",
+    "CommandExecution",
+    "CommandExecutionStatus",
     "CompanyScale",
     "ConfigType",
     "Contact",
-    "CommandExecution",
-    "CommandExecutionStatus",
     "Contract",
+    "ContractChangeRequest",
     "ContractStatus",
     "ConversationLog",
-    "ContractChangeRequest",
     "Customer",
-    "CustomerProduct",
     "CustomerActivity",
     "CustomerActivityAIJob",
     "CustomerActivityAgentOrigin",
@@ -208,6 +223,7 @@ __all__ = [
     "CustomerContextAnswerTelemetry",
     "CustomerDealJourney",
     "CustomerDealJourneyEvent",
+    "CustomerEnrichmentJob",
     "CustomerFact",
     "CustomerFactRevision",
     "CustomerFactRevisionType",
@@ -217,12 +233,12 @@ __all__ = [
     "CustomerIdentityTermSource",
     "CustomerIdentityTermStatus",
     "CustomerIdentityTermType",
-    "CustomerEnrichmentJob",
     "CustomerIntelligenceRun",
     "CustomerIntelligenceRunStatus",
     "CustomerLegacySourceProgress",
     "CustomerMember",
     "CustomerOpportunitySuggestionJob",
+    "CustomerProduct",
     "CustomerProfileCurrent",
     "CustomerProfileProjectionVersion",
     "CustomerProfilePublicationStatus",
@@ -273,8 +289,8 @@ __all__ = [
     "InvoiceTitle",
     "InvoiceType",
     "Lead",
-    "LeadProduct",
     "LeadFollowUp",
+    "LeadProduct",
     "LeadSource",
     "LeadStatus",
     "LicenseApplication",
@@ -282,13 +298,13 @@ __all__ = [
     "LicenseType",
     "OAuthProviderConfig",
     "OperationLog",
-    "OutboundNotificationEventType",
-    "OutboundNotificationJob",
-    "OutboundNotificationJobStatus",
     "Opportunity",
     "OpportunityProductModule",
     "OpportunityStage",
     "OpportunityStageSnapshot",
+    "OutboundNotificationEventType",
+    "OutboundNotificationJob",
+    "OutboundNotificationJobStatus",
     "PaymentPlan",
     "PaymentPlanStatus",
     "PaymentRecord",
@@ -297,6 +313,9 @@ __all__ = [
     "PrimaryResourceType",
     "ProcurementMethod",
     "ProcurementStageTemplate",
+    "Product",
+    "ProductModule",
+    "ProductModuleRole",
     "PurchaseType",
     "Role",
     "RolePermission",
@@ -314,14 +333,6 @@ __all__ = [
     "VerificationPurpose",
     "ViewPreference",
     "ViewPreferenceScope",
-    "VALID_TRANSITIONS",
     "Workflow",
     "WorkflowStatus",
-    "Product",
-    "ProductModule",
-    "ProductModuleRole",
-    "AssistantAction",
-    "AssistantTask",
-    "AssistantTaskStatus",
-    "AssistantWaitingType",
 ]

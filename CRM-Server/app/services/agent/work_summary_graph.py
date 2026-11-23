@@ -129,7 +129,9 @@ class WorkSummaryGraphService:
             raise ValueError("chunk_size 必须大于 0")
         required_chunks = (max_facts_per_summary + chunk_size - 1) // chunk_size
         if required_chunks > DEFAULT_WORK_SUMMARY_SYNTHESIS_CHUNK_BUDGET:
-            raise ValueError("工作总结配置超出 synthesis chunk budget；请增大 chunk_size 或降低 max_facts_per_summary")
+            raise ValueError(
+                "工作总结配置超出 synthesis chunk budget\uff1b请增大 chunk_size 或降低 max_facts_per_summary"
+            )
         self.chunk_size = chunk_size
         self._graph = self._build_graph()
 
@@ -451,13 +453,13 @@ def _render_answer(answer: str, coverage: WorkSummaryCoverage) -> str:
         return text
     if coverage.stop_reason == "source_failed":
         coverage_notice = (
-            f"> 数据读取中断，本次总结覆盖了 {coverage.summarized_total} 条可确认事实；"
-            f"当前时间范围内共 {coverage.available_total} 条，结果并非完整总结。"
+            f"> 数据读取中断\uff0c本次总结覆盖了 {coverage.summarized_total} 条可确认事实\uff1b"
+            f"当前时间范围内共 {coverage.available_total} 条\uff0c结果并非完整总结。"
         )
     else:
         coverage_notice = (
-            f"> 本次总结仅覆盖前 {coverage.summarized_total} 条可确认事实；"
-            f"当前时间范围内共 {coverage.available_total} 条，结果并非完整总结。"
+            f"> 本次总结仅覆盖前 {coverage.summarized_total} 条可确认事实\uff1b"
+            f"当前时间范围内共 {coverage.available_total} 条\uff0c结果并非完整总结。"
         )
     if not text:
         return coverage_notice

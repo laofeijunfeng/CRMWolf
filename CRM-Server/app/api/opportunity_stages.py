@@ -1,24 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
-from typing import List
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
-from app.models.user import User
-from app.schemas.procurement import (
-    OpportunityStageSnapshotResponse,
-    ProcurementStageTemplateResponse
-)
-from app.crud.procurement import opportunity_stage_snapshot_crud
 from app.crud.opportunity import _bump_opportunity_version, _lock_opportunity, opportunity_crud
-from app.crud.procurement import procurement_stage_template_crud
+from app.crud.procurement import opportunity_stage_snapshot_crud, procurement_stage_template_crud
+from app.models.opportunity import Opportunity
+from app.models.procurement import OpportunityStageSnapshot
+from app.models.user import User
+from app.schemas.procurement import OpportunityStageSnapshotResponse, ProcurementStageTemplateResponse
 from app.utils.public_id import is_opportunity_public_id
-
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机阶段管理"])
 
 
-def _get_opportunity_or_404(db: Session, opportunity_id: str, team_id: int):
+def _get_opportunity_or_404(db: Session, opportunity_id: str, team_id: int) -> Opportunity:
     if not is_opportunity_public_id(opportunity_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -33,7 +29,7 @@ def _get_opportunity_or_404(db: Session, opportunity_id: str, team_id: int):
     return opportunity
 
 
-def _snapshot_response(snapshot, opportunity_public_id: str) -> dict:
+def _snapshot_response(snapshot: OpportunityStageSnapshot, opportunity_public_id: str) -> dict:
     return {
         "id": snapshot.id,
         "opportunity_id": opportunity_public_id,
@@ -48,13 +44,18 @@ def _snapshot_response(snapshot, opportunity_public_id: str) -> dict:
     }
 
 
-@router.get("/{opportunity_id}/current-stage", response_model=OpportunityStageSnapshotResponse, summary="获取商机当前阶段", description="""
+@router.get(
+    "/{opportunity_id}/current-stage",
+    response_model=OpportunityStageSnapshotResponse,
+    summary="获取商机当前阶段",
+    description="""
 获取商机当前所在的阶段快照信息。
 
 **业务规则：**
 - 返回最新的未退出的阶段快照
 - 包含阶段名称、赢率、进入时间等信息
-""")
+""",
+)
 def get_opportunity_current_stage(
     opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
@@ -72,14 +73,19 @@ def get_opportunity_current_stage(
     return _snapshot_response(snapshot, opportunity.public_id)
 
 
-@router.get("/{opportunity_id}/stage-history", response_model=List[OpportunityStageSnapshotResponse], summary="获取商机阶段历史", description="""
+@router.get(
+    "/{opportunity_id}/stage-history",
+    response_model=list[OpportunityStageSnapshotResponse],
+    summary="获取商机阶段历史",
+    description="""
 获取商机的所有阶段历史记录。
 
 **业务规则：**
 - 按进入时间倒序返回
 - 包含已退出的历史阶段
 - 显示每个阶段的停留时间
-""")
+""",
+)
 def get_opportunity_stage_history(
     opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
@@ -92,14 +98,19 @@ def get_opportunity_stage_history(
     return [_snapshot_response(snapshot, opportunity.public_id) for snapshot in history]
 
 
-@router.get("/{opportunity_id}/available-stages", response_model=List[ProcurementStageTemplateResponse], summary="获取可推进到的阶段", description="""
+@router.get(
+    "/{opportunity_id}/available-stages",
+    response_model=list[ProcurementStageTemplateResponse],
+    summary="获取可推进到的阶段",
+    description="""
 获取商机可以推进到的阶段列表。
 
 **业务规则：**
 - 只返回当前阶段之后的阶段
 - 包括允许跳过的阶段
 - 按sort_order排序
-""")
+""",
+)
 def get_available_stages(
     opportunity_id: str = Path(..., description="商机对外ID（路径参数）"),
     team_id: int = Depends(get_current_user_team),
@@ -113,7 +124,11 @@ def get_available_stages(
     return available
 
 
-@router.post("/{opportunity_id}/set-procurement-method", response_model=OpportunityStageSnapshotResponse, summary="设置商机采购方式", description="""
+@router.post(
+    "/{opportunity_id}/set-procurement-method",
+    response_model=OpportunityStageSnapshotResponse,
+    summary="设置商机采购方式",
+    description="""
 为商机设置采购方式，并自动进入默认起始阶段。
 
 **业务规则：**
@@ -124,7 +139,8 @@ def get_available_stages(
 **使用场景：**
 - 创建商机时没有选择采购方式
 - 需要修改商机的采购方式
-""")
+""",
+)
 def set_opportunity_procurement_method(
     opportunity_id: str,
     procurement_method_id: int,

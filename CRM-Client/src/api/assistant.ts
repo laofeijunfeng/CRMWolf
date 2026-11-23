@@ -4,35 +4,21 @@ import {
   AssistantTaskViewSchema,
   ConversationViewSchema, ConversationReplySchema,
   AssistantTurnStatusSchema,
-  parseAssistantTaskList,
-  SubmitInputResponseSchema,
-  type ConversationView, type ConversationReply,
-  type AssistantInputKind,
-  type AssistantTaskView,
-  type SubmitInputResponse
 } from '@/schemas/assistant-contracts'
+import type { AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationView } from '@/schemas/assistant-contracts'
+import type { JsonObject } from '@/schemas/agent-contracts/common'
 import { useUserStore } from '@/stores/user'
 import request from '@/utils/request'
 
-const AssistantTaskActionSchema = z.object({
-  actor: z.string(),
-  action: z.string(),
-  input: z.record(z.unknown()),
-  result: z.record(z.unknown()),
-  event_type: z.string().nullable().optional(),
-  event_key: z.string().nullable().optional(),
-  correlation_id: z.string().nullable().optional(),
-  created_time: z.string()
-}).strict()
-
-export type AssistantTaskAction = z.infer<typeof AssistantTaskActionSchema>
-
-export const StageNameSchema = z.enum(['classify', 'structure', 'quality_gate', 'write'])
+export const StageNameSchema = z.enum([
+  'route', 'locate', 'context', 'judge', 'propose', 'classify', 'structure', 'quality_gate', 'write'
+])
 export type StageName = z.infer<typeof StageNameSchema>
+export const StagePhaseSchema = z.enum(['start', 'done', 'failed'])
 
 export interface StageEvent {
   stage: StageName
-  phase: 'start' | 'done'
+  phase: z.infer<typeof StagePhaseSchema>
   ms?: number | undefined
   score?: number | undefined
 }
@@ -167,11 +153,11 @@ export async function submitInputStream(
     }
     if (parsed.event === 'stage') {
       const stage = StageNameSchema.safeParse(payload['stage'])
-      const phase = payload['phase'] === 'done' ? 'done' : 'start'
-      if (stage.success) {
+      const phase = StagePhaseSchema.safeParse(payload['phase'])
+      if (stage.success && phase.success) {
         handlers.onStage({
           stage: stage.data,
-          phase,
+          phase: phase.data,
           ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
           score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
           seq: sequence
@@ -231,8 +217,9 @@ export async function submitInputStream(
       body: JSON.stringify({
         kind: input.kind, text: input.text ?? null, choice: input.choice ?? null,
         client_request_id: input.client_request_id,
-        ...(input.action_id !== undefined ? { action_id: input.action_id } : {}),
-        ...(input.expected_version !== undefined ? { expected_version: input.expected_version } : {})
+        action_id: input.action_id, expected_version: input.expected_version,
+        values: input.values, form_revision: input.form_revision, choices: input.choices,
+        suppress_week: input.suppress_week, reason: input.reason
       })
     })
     if (!response.ok || response.body === null) {
@@ -277,7 +264,15 @@ export interface SubmitAssistantInput {
   client_request_id?: string | undefined
   action_id?: string | undefined
   expected_version?: number | undefined
+  values?: JsonObject | undefined
+  form_revision?: number | undefined
+  choices?: string[] | undefined
+  suppress_week?: boolean | undefined
+  reason?: AssistantRejectReason | undefined
 }
+
+// Leave room for the server's 180-second understanding budget.
+const CONVERSATION_UNDERSTANDING_TIMEOUT_MS = 190_000
 
 export const assistantApi = {
   async openConversation(): Promise<ConversationView> {
@@ -292,7 +287,7 @@ export const assistantApi = {
   },
   async conversationText(input: { text: string; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/messages', input, { timeout: 150_000 })
+    const payload: unknown = await request.post('/v1/assistant/conversation/messages', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async retryConversationEntry(entryId: string, expectedVersion: number): Promise<ConversationReply> {
@@ -300,7 +295,7 @@ export const assistantApi = {
     const payload: unknown = await request.post(
       `/v1/assistant/conversation/entries/${encodeURIComponent(entryId)}/retry`,
       { expected_version: expectedVersion },
-      { timeout: 150_000 }
+      { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS }
     )
     return ConversationReplySchema.parse(payload)
   },
@@ -316,21 +311,9 @@ export const assistantApi = {
   },
   async resumeConversation(): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/resume', undefined, { timeout: 150_000 })
+    const payload: unknown = await request.post('/v1/assistant/conversation/resume', undefined, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
-  async conversationKind(input: { task_public_id: string; kind: 'FOLLOW_UP' | 'ONLINE_MEETING' | 'OFFLINE_MEETING';
-    task_version: number; expected_version: number; client_request_id: string }): Promise<ConversationReply> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/change-kind', input)
-    return ConversationReplySchema.parse(payload)
-  },
-  async createTask(goal: string, clientRequestId: string = crypto.randomUUID()): Promise<AssistantTaskView> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
-    const payload: unknown = await request.post('/v1/assistant/tasks', { goal, client_request_id: clientRequestId })
-    return AssistantTaskViewSchema.parse(payload)
-  },
-
   async getTask(publicId: string): Promise<AssistantTaskView> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
     const payload: unknown = await request.get(`/v1/assistant/tasks/${encodeURIComponent(publicId)}`)
@@ -352,45 +335,4 @@ export const assistantApi = {
     )
     return AssistantTurnSchema.parse(payload)
   },
-  async listTasks(statusFilter?: string): Promise<{ tasks: AssistantTaskView[]; skipped: number[] }> {
-    const params = statusFilter !== undefined ? { status_filter: statusFilter } : undefined
-    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
-    const payload: unknown = await request.get('/v1/assistant/tasks', { params })
-    return parseAssistantTaskList(payload)
-  },
-
-  async latestActiveTask(): Promise<AssistantTaskView | null> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- 204/None path returns null
-    const payload: unknown = await request.get('/v1/assistant/tasks/latest/active')
-    if (payload === null || payload === undefined) return null
-    return AssistantTaskViewSchema.parse(payload)
-  },
-
-  async changeKind(publicId: string, kind: 'FOLLOW_UP' | 'ONLINE_MEETING' | 'OFFLINE_MEETING'): Promise<AssistantTaskView> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
-    const payload: unknown = await request.post(
-      `/v1/assistant/tasks/${encodeURIComponent(publicId)}/change-kind`,
-      { kind }
-    )
-    return AssistantTaskViewSchema.parse(payload)
-  },
-
-  async listTaskActions(publicId: string): Promise<AssistantTaskAction[]> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
-    const payload: unknown = await request.get(`/v1/assistant/tasks/${encodeURIComponent(publicId)}/actions`)
-    return z.array(AssistantTaskActionSchema).parse(payload)
-  },
-
-  async submitInput(publicId: string, input: SubmitAssistantInput): Promise<SubmitInputResponse> {
-    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
-    const payload: unknown = await request.post(`/v1/assistant/tasks/${encodeURIComponent(publicId)}/submit`, {
-      kind: input.kind,
-      text: input.text ?? null,
-      choice: input.choice ?? null,
-      client_request_id: input.client_request_id,
-      ...(input.action_id !== undefined ? { action_id: input.action_id } : {}),
-      ...(input.expected_version !== undefined ? { expected_version: input.expected_version } : {})
-    })
-    return SubmitInputResponseSchema.parse(payload)
-  }
 }

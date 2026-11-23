@@ -1,7 +1,8 @@
 import logging
 import os
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import date
-from typing import Iterator, Literal, Optional
+from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
@@ -10,14 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
 from app.core.database import SessionLocal, get_db
-from app.core.list_export import (
-    INVOICES_LIST_EXPORT_CATALOG,
-    create_list_export_file,
-    iter_batches,
-    list_export_file_response,
-    run_list_export_or_400,
-)
-from app.core.list_query import optional_request_list_query, run_or_400
 from app.core.deps import (
     check_customer_edit_permission,
     check_customer_view_permission,
@@ -30,25 +23,43 @@ from app.core.deps import (
     get_viewable_customer_ids,
     require_permission,
 )
+from app.core.list_export import (
+    INVOICES_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
+from app.core.list_query import optional_request_list_query, run_or_400
 from app.crud.approval import approval_crud
-from app.crud.invoice import invoice_application_crud, invoice_red_offset_crud, invoice_reissue_application_crud, invoice_title_crud
+from app.crud.invoice import (
+    invoice_application_crud,
+    invoice_red_offset_crud,
+    invoice_reissue_application_crud,
+    invoice_title_crud,
+)
 from app.models.approval import ApprovalStatus
 from app.models.contract import Contract
 from app.models.customer import Customer
-from app.models.invoice import InvoiceApplicationStatus
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceRedOffset,
+    InvoiceReissueApplication,
+    InvoiceTitle,
+)
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan
 from app.models.user import User
-from app.schemas.list_export import InvoiceListExportRequest
 from app.schemas.invoice import (
     InvoiceApplicationCreate,
     InvoiceApplicationListResponse,
     InvoiceApplicationResponse,
     InvoiceApplicationUpdate,
+    InvoiceRedOffsetResponse,
     InvoiceReissueApplicationCreate,
     InvoiceReissueApplicationResponse,
     InvoiceReissueApplicationUpdate,
-    InvoiceRedOffsetResponse,
     InvoiceTitleCreate,
     InvoiceTitleListResponse,
     InvoiceTitleResponse,
@@ -56,25 +67,54 @@ from app.schemas.invoice import (
     MessageResponse,
     PaymentPlanInvoiceSummary,
 )
+from app.schemas.list_export import InvoiceListExportRequest
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     CustomerBusinessObjectChangeType,
     customer_business_object_intelligence_service,
 )
-from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.services.file_storage import FileStorageError, file_storage_service
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 
 logger = logging.getLogger(__name__)
+
+_TEAM = Depends(get_current_user_team)
+_ACTIVE_USER = Depends(get_current_active_user)
+_DB = Depends(get_db)
+_CREATE_TITLE_USER = Depends(require_permission("invoice:title:create"))
+_EDIT_TITLE_USER = Depends(require_permission("invoice:title:edit"))
+_SET_DEFAULT_TITLE_USER = Depends(require_permission("invoice:title:set_default"))
+_DELETE_TITLE_USER = Depends(require_permission("invoice:title:delete"))
+_CREATE_INVOICE_USER = Depends(require_permission("invoice:create"))
+_CREATE_REISSUE_USER = Depends(require_permission("invoice_reissue:create"))
+_COMPLETE_REISSUE_USER = Depends(require_permission("invoice:mark_issued"))
+_MARK_ISSUED_USER = Depends(require_permission("invoice:mark_issued"))
+_RED_OFFSET_USER = Depends(require_permission("invoice:mark_issued"))
+_CREATED_TIME_START = Query(None, description="创建时间起始")
+_CREATED_TIME_END = Query(None, description="创建时间结束")
+_COMPLETE_RED_FILE = File(..., description="红字发票文件")
+_COMPLETE_NEW_FILE = File(..., description="新蓝字发票文件")
+_ISSUED_FILE = File(None, description="发票文件\uff08PDF/JPG/PNG/OFD\uff0c可选\uff09")
+_RED_OFFSET_FILE = File(..., description="红字发票文件")
+# Keep the optional default without advertising a nullable body in OpenAPI.
+_EMPTY_TITLE_DATA = cast("InvoiceTitleCreate", None)
+
+
+class _InvoiceTitleListPayload(TypedDict):
+    invoice_titles: list[InvoiceTitleResponse]
+
 
 router = APIRouter(prefix="/invoice-titles", tags=["开票抬头管理"])
 
 
-def _invoice_title_response(db: Session, title, team_id: Optional[int] = None) -> InvoiceTitleResponse:
+def _invoice_title_response(
+    db: Session, title: InvoiceTitle, team_id: int | None = None
+) -> InvoiceTitleResponse:
     customer_query = db.query(Customer).filter(Customer.id == title.customer_id)
     if team_id is not None:
         customer_query = customer_query.filter(Customer.team_id == team_id)
     customer = customer_query.first()
-    return InvoiceTitleResponse(**{
+    return InvoiceTitleResponse.model_validate({
         "id": title.id,
         "customer_id": customer.public_id if customer else None,
         "title_type": title.title_type,
@@ -91,7 +131,7 @@ def _invoice_title_response(db: Session, title, team_id: Optional[int] = None) -
 
 
 def _build_invoice_title_intelligence_change(
-    title,
+    title: InvoiceTitle,
     *,
     change_type: Literal["created", "updated", "deleted"],
     actor_id: str | None,
@@ -109,7 +149,7 @@ def _build_invoice_title_intelligence_change(
 
 
 def _enqueue_invoice_business_object_intelligence_refresh(
-    db: Session,
+    _db: Session,
     change: CustomerBusinessObjectChangeRefreshInput | None,
 ) -> None:
     if change is None:
@@ -118,7 +158,7 @@ def _enqueue_invoice_business_object_intelligence_refresh(
 
 
 def _build_invoice_application_intelligence_change(
-    application,
+    application: InvoiceApplication | None,
     *,
     change_type: CustomerBusinessObjectChangeType,
     actor_id: str | None,
@@ -145,11 +185,11 @@ def _enqueue_invoice_application_intelligence_refresh(
 @router.post("", response_model=InvoiceTitleResponse, summary="添加开票抬头", description="为指定客户添加开票抬头信息")
 def create_invoice_title(
     customer_id: str = Query(..., description="客户对外ID"),
-    title_data: InvoiceTitleCreate = None,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:title:create")),
-    db: Session = Depends(get_db)
-):
+    title_data: InvoiceTitleCreate = _EMPTY_TITLE_DATA,
+    team_id: int = _TEAM,
+    current_user: User = _CREATE_TITLE_USER,
+    db: Session = _DB
+) -> InvoiceTitleResponse:
     customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
 
     existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer.id, title_data.taxpayer_id, team_id)
@@ -171,25 +211,35 @@ def create_invoice_title(
     return _invoice_title_response(db, title, team_id)
 
 
-@router.get("", response_model=InvoiceTitleListResponse, summary="查询开票抬头列表", description="获取指定客户的所有开票抬头")
+@router.get(
+    "",
+    response_model=InvoiceTitleListResponse,
+    summary="查询开票抬头列表",
+    description="获取指定客户的所有开票抬头",
+)
 def list_invoice_titles(
     customer_id: str = Query(..., description="客户对外ID"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> _InvoiceTitleListPayload:
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     titles = invoice_title_crud.get_by_customer_id(db, customer.id, team_id)
     return {"invoice_titles": [_invoice_title_response(db, title, team_id) for title in titles]}
 
 
-@router.get("/{title_id}", response_model=InvoiceTitleResponse, summary="获取开票抬头详情", description="获取指定开票抬头的详细信息")
+@router.get(
+    "/{title_id}",
+    response_model=InvoiceTitleResponse,
+    summary="获取开票抬头详情",
+    description="获取指定开票抬头的详细信息",
+)
 def get_invoice_title(
     title_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> InvoiceTitleResponse:
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -200,14 +250,19 @@ def get_invoice_title(
     return _invoice_title_response(db, title, team_id)
 
 
-@router.put("/{title_id}", response_model=InvoiceTitleResponse, summary="修改开票抬头", description="修改指定的开票抬头信息")
+@router.put(
+    "/{title_id}",
+    response_model=InvoiceTitleResponse,
+    summary="修改开票抬头",
+    description="修改指定的开票抬头信息",
+)
 def update_invoice_title(
     title_id: int,
     title_data: InvoiceTitleUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:title:edit")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _EDIT_TITLE_USER,
+    db: Session = _DB
+) -> InvoiceTitleResponse:
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -228,13 +283,18 @@ def update_invoice_title(
     return _invoice_title_response(db, updated_title, team_id)
 
 
-@router.patch("/{title_id}/set-default", response_model=InvoiceTitleResponse, summary="设置默认抬头", description="设置指定的开票抬头为默认抬头，自动取消原默认抬头")
+@router.patch(
+    "/{title_id}/set-default",
+    response_model=InvoiceTitleResponse,
+    summary="设置默认抬头",
+    description="设置指定的开票抬头为默认抬头\uff0c自动取消原默认抬头",
+)
 def set_default_invoice_title(
     title_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:title:set_default")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _SET_DEFAULT_TITLE_USER,
+    db: Session = _DB
+) -> InvoiceTitleResponse:
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -263,10 +323,10 @@ def set_default_invoice_title(
 @router.delete("/{title_id}", response_model=MessageResponse, summary="删除开票抬头", description="删除指定的开票抬头")
 def delete_invoice_title(
     title_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:title:delete")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _DELETE_TITLE_USER,
+    db: Session = _DB
+) -> dict[str, str]:
     title = invoice_title_crud.get_by_id(db, title_id, team_id)
     if not title:
         raise HTTPException(
@@ -288,6 +348,13 @@ def delete_invoice_title(
         )
     _enqueue_invoice_business_object_intelligence_refresh(db, change)
     return {"message": "删除成功"}
+
+
+class _InvoiceApplicationListPayload(TypedDict):
+    items: list[InvoiceApplicationResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 invoice_router = APIRouter(prefix="/invoice-applications", tags=["发票申请管理"])
@@ -323,7 +390,9 @@ INVOICE_TAB_STEMS = {
 }
 
 
-def _invoice_view_scope(db: Session, current_user, team_id: int, *, me: bool = False):
+def _invoice_view_scope(
+    db: Session, current_user: User, team_id: int, *, me: bool = False
+) -> tuple[str | None, set[int] | None]:
     from app.crud.permission import permission_crud
 
     permission_codes = {
@@ -351,9 +420,9 @@ def _invoice_view_scope(db: Session, current_user, team_id: int, *, me: bool = F
 
 
 def _invoice_effective_status_from_maps(
-    application,
-    reissues_by_original: dict[int, list],
-    red_offsets_by_invoice: dict[int, list],
+    application: InvoiceApplication,
+    reissues_by_original: dict[int, list[InvoiceReissueApplication]],
+    red_offsets_by_invoice: dict[int, list[InvoiceRedOffset]],
 ) -> tuple[str, str]:
     reissues = reissues_by_original.get(application.id, [])
     red_offsets = red_offsets_by_invoice.get(application.id, [])
@@ -374,7 +443,11 @@ def _invoice_effective_status_from_maps(
     return "NONE", "ACTIVE"
 
 
-def _current_invoice_file_fields(application, reissues: list, red_offsets: list) -> tuple[str | None, str | None, str | None, int | None]:
+def _current_invoice_file_fields(
+    application: InvoiceApplication,
+    reissues: Sequence[InvoiceReissueApplication],
+    red_offsets: Sequence[InvoiceRedOffset],
+) -> tuple[str | None, str | None, str | None, int | None]:
     latest_completed_reissue = max(
         [
             reissue
@@ -412,9 +485,9 @@ def _current_invoice_file_fields(application, reissues: list, red_offsets: list)
     )
 
 
-def _populate_application_list_info(projection_db: Session, applications, team_id: int):
-    from app.models.invoice import InvoiceRedOffset, InvoiceReissueApplication
-
+def _populate_application_list_info(
+    projection_db: Session, applications: Sequence[InvoiceApplication], team_id: int | None
+) -> list[InvoiceApplicationResponse]:
     if not applications:
         return []
     application_ids = [application.id for application in applications]
@@ -462,8 +535,8 @@ def _populate_application_list_info(projection_db: Session, applications, team_i
         for user in projection_db.query(User).filter(User.id.in_(user_ids)).all()
     } if user_ids else {}
 
-    reissues_by_original: dict[int, list] = {}
-    red_offsets_by_invoice: dict[int, list] = {}
+    reissues_by_original: dict[int, list[InvoiceReissueApplication]] = {}
+    red_offsets_by_invoice: dict[int, list[InvoiceRedOffset]] = {}
     bind = projection_db.bind
     has_reissue_table = bind is None or inspect(bind).has_table(InvoiceReissueApplication.__tablename__)
     has_red_offset_table = bind is None or inspect(bind).has_table(InvoiceRedOffset.__tablename__)
@@ -500,60 +573,62 @@ def _populate_application_list_info(projection_db: Session, applications, team_i
         current_invoice_file_kind, current_invoice_file_path, current_invoice_number, current_reissue_id = (
             _current_invoice_file_fields(application, reissues, red_offsets)
         )
-        items.append(InvoiceApplicationResponse(
-            id=application.id,
-            application_number=application.application_number,
-            customer_id=customer.public_id if customer else None,
-            contract_id=application.contract_id,
-            opportunity_id=application.opportunity_id,
-            payment_plan_id=application.payment_plan_id,
-            invoice_title_id=application.invoice_title_id,
-            invoice_amount=float(application.invoice_amount),
-            invoice_type=application.invoice_type,
-            status=application.status,
-            applicant_id=application.applicant_id,
-            reviewer_id=application.reviewer_id,
-            review_comment=application.review_comment,
-            reviewed_time=application.reviewed_time,
-            payment_record_id=application.payment_record_id,
-            invoice_title_type=application.invoice_title_type,
-            invoice_title_text=application.invoice_title_text,
-            invoice_taxpayer_id=application.invoice_taxpayer_id,
-            invoice_bank_name=application.invoice_bank_name,
-            invoice_bank_account=application.invoice_bank_account,
-            invoice_address=application.invoice_address,
-            invoice_phone=application.invoice_phone,
-            remark=application.remark,
-            created_time=application.created_time,
-            last_modified_time=application.last_modified_time,
-            invoice_file_path=application.invoice_file_path,
-            invoice_number=application.invoice_number,
-            issued_time=application.issued_time,
-            customer_name=customer.account_name if customer else None,
-            contract_name=contract.contract_name if contract else None,
-            opportunity_name=opportunity.opportunity_name if opportunity else None,
-            payment_plan_stage_name=payment_plan.stage_name if payment_plan else None,
-            invoice_title_title=application.invoice_title_text,
-            applicant_name=applicant.name if applicant else None,
-            reviewer_name=reviewer.name if reviewer else None,
-            reissue_status=reissue_status,
-            invoice_effective_status=invoice_effective_status,
-            current_invoice_file_kind=current_invoice_file_kind,
-            current_invoice_file_path=current_invoice_file_path,
-            current_invoice_number=current_invoice_number,
-            current_reissue_id=current_reissue_id,
-            red_offsets=[_populate_red_offset_info(projection_db, red_offset) for red_offset in red_offsets],
-            reissue_applications=[_populate_reissue_application_info(projection_db, reissue) for reissue in reissues],
-        ))
+        items.append(InvoiceApplicationResponse.model_validate({
+            "id": application.id,
+            "application_number": application.application_number,
+            "customer_id": customer.public_id if customer else None,
+            "contract_id": application.contract_id,
+            "opportunity_id": application.opportunity_id,
+            "payment_plan_id": application.payment_plan_id,
+            "invoice_title_id": application.invoice_title_id,
+            "invoice_amount": float(application.invoice_amount),
+            "invoice_type": application.invoice_type,
+            "status": application.status,
+            "applicant_id": application.applicant_id,
+            "reviewer_id": application.reviewer_id,
+            "review_comment": application.review_comment,
+            "reviewed_time": application.reviewed_time,
+            "payment_record_id": application.payment_record_id,
+            "invoice_title_type": application.invoice_title_type,
+            "invoice_title_text": application.invoice_title_text,
+            "invoice_taxpayer_id": application.invoice_taxpayer_id,
+            "invoice_bank_name": application.invoice_bank_name,
+            "invoice_bank_account": application.invoice_bank_account,
+            "invoice_address": application.invoice_address,
+            "invoice_phone": application.invoice_phone,
+            "remark": application.remark,
+            "created_time": application.created_time,
+            "last_modified_time": application.last_modified_time,
+            "invoice_file_path": application.invoice_file_path,
+            "invoice_number": application.invoice_number,
+            "issued_time": application.issued_time,
+            "customer_name": customer.account_name if customer else None,
+            "contract_name": contract.contract_name if contract else None,
+            "opportunity_name": opportunity.opportunity_name if opportunity else None,
+            "payment_plan_stage_name": payment_plan.stage_name if payment_plan else None,
+            "invoice_title_title": application.invoice_title_text,
+            "applicant_name": applicant.name if applicant else None,
+            "reviewer_name": reviewer.name if reviewer else None,
+            "reissue_status": reissue_status,
+            "invoice_effective_status": invoice_effective_status,
+            "current_invoice_file_kind": current_invoice_file_kind,
+            "current_invoice_file_path": current_invoice_file_path,
+            "current_invoice_number": current_invoice_number,
+            "current_reissue_id": current_reissue_id,
+            "red_offsets": [_populate_red_offset_info(projection_db, red_offset) for red_offset in red_offsets],
+            "reissue_applications": [
+                _populate_reissue_application_info(projection_db, reissue) for reissue in reissues
+            ],
+        }))
     return items
 
 
 def _invoice_export_row(
-    application,
+    application: InvoiceApplication,
     *,
-    customer,
-    contract,
-    applicant,
+    customer: Customer | None,
+    contract: Contract | None,
+    applicant: User | None,
     invoice_effective_status: str,
 ) -> dict[str, object]:
     status_value = getattr(application.status, "value", application.status)
@@ -574,9 +649,11 @@ def _invoice_export_row(
     }
 
 
-def _iter_invoice_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
-    from app.models.invoice import InvoiceRedOffset, InvoiceReissueApplication
-
+def _iter_invoice_export_rows(
+    stream: Iterable[InvoiceApplication],
+    team_id: int,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
+) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
         try:
@@ -608,8 +685,8 @@ def _iter_invoice_export_rows(stream, team_id: int, projection_session_factory=S
                 str(user.id): user
                 for user in projection_db.query(User).filter(User.id.in_(user_ids)).all()
             } if user_ids else {}
-            reissues_by_original: dict[int, list] = {}
-            red_offsets_by_invoice: dict[int, list] = {}
+            reissues_by_original: dict[int, list[InvoiceReissueApplication]] = {}
+            red_offsets_by_invoice: dict[int, list[InvoiceRedOffset]] = {}
             bind = projection_db.bind
             has_reissue_table = bind is None or inspect(bind).has_table(InvoiceReissueApplication.__tablename__)
             has_red_offset_table = bind is None or inspect(bind).has_table(InvoiceRedOffset.__tablename__)
@@ -645,13 +722,18 @@ def _iter_invoice_export_rows(stream, team_id: int, projection_session_factory=S
 
 
 
-@invoice_router.post("", response_model=InvoiceApplicationResponse, summary="创建发票申请", description="创建新的发票申请，自动关联业务上下文（客户、合同、商机、回款计划）")
+@invoice_router.post(
+    "",
+    response_model=InvoiceApplicationResponse,
+    summary="创建发票申请",
+    description="创建新的发票申请\uff0c自动关联业务上下文\uff08客户、合同、商机、回款计划\uff09",
+)
 def create_invoice_application(
     application_data: InvoiceApplicationCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:create")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _CREATE_INVOICE_USER,
+    db: Session = _DB
+) -> InvoiceApplicationResponse:
     try:
         application = invoice_application_crud.create(
             db,
@@ -672,44 +754,52 @@ def create_invoice_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@invoice_router.get("", response_model=InvoiceApplicationListResponse, summary="查询发票申请列表", description="支持按客户、合同、状态等多条件筛选发票申请")
+@invoice_router.get(
+    "",
+    response_model=InvoiceApplicationListResponse,
+    summary="查询发票申请列表",
+    description="支持按客户、合同、状态等多条件筛选发票申请",
+)
 def list_invoice_applications(
-    customer_id: Optional[str] = Query(None, description="客户对外ID"),
-    contract_id: Optional[int] = Query(None, description="合同ID"),
-    payment_plan_id: Optional[int] = Query(None, description="回款计划ID"),
-    application_status: Optional[str] = Query(None, alias="status", description="申请状态，多个值用逗号分隔"),
-    status_exclude: Optional[str] = Query(None, description="排除的申请状态，多个值用逗号分隔"),
-    invoice_type: Optional[str] = Query(None, description="发票类型，多个值用逗号分隔"),
-    invoice_type_exclude: Optional[str] = Query(None, description="排除的发票类型，多个值用逗号分隔"),
-    invoice_effective_status: Optional[str] = Query(None, description="发票有效状态，多个值用逗号分隔：ACTIVE/REISSUE_PENDING/RED_OFFSET/REISSUED"),
-    applicant_id: Optional[str] = Query(None, description="申请人ID"),
-    keyword: Optional[str] = Query(None, description="关键词，支持申请编号、客户、合同、抬头、税号、发票号码"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索申请编号、客户、合同、抬头、税号或发票号码"),
-    created_time_start: Optional[date] = Query(None, description="创建时间起始"),
-    created_time_end: Optional[date] = Query(None, description="创建时间结束"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向 asc/desc"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    page: Optional[int] = Query(None, ge=1, description="页码（兼容前端 page/page_size）"),
-    page_size: Optional[int] = Query(None, ge=1, le=100, description="每页记录数（兼容前端 page/page_size）"),
+    customer_id: str | None = Query(None, description="客户对外ID"),
+    contract_id: int | None = Query(None, description="合同ID"),
+    payment_plan_id: int | None = Query(None, description="回款计划ID"),
+    application_status: str | None = Query(None, alias="status", description="申请状态\uff0c多个值用逗号分隔"),
+    status_exclude: str | None = Query(None, description="排除的申请状态\uff0c多个值用逗号分隔"),
+    invoice_type: str | None = Query(None, description="发票类型\uff0c多个值用逗号分隔"),
+    invoice_type_exclude: str | None = Query(None, description="排除的发票类型\uff0c多个值用逗号分隔"),
+    invoice_effective_status: str | None = Query(
+        None,
+        description="发票有效状态\uff0c多个值用逗号分隔\uff1aACTIVE/REISSUE_PENDING/RED_OFFSET/REISSUED",
+    ),
+    applicant_id: str | None = Query(None, description="申请人ID"),
+    keyword: str | None = Query(None, description="关键词\uff0c支持申请编号、客户、合同、抬头、税号、发票号码"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索申请编号、客户、合同、抬头、税号或发票号码"),
+    created_time_start: date | None = _CREATED_TIME_START,
+    created_time_end: date | None = _CREATED_TIME_END,
+    order_by: str | None = Query(None, description="排序字段"),
+    order_dir: str | None = Query(None, description="排序方向 asc/desc"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    page: int | None = Query(None, ge=1, description="页码\uff08兼容前端 page/page_size\uff09"),
+    page_size: int | None = Query(None, ge=1, le=100, description="每页记录数\uff08兼容前端 page/page_size\uff09"),
     me: bool = Query(False, description="是否只查询当前用户申请的数据"),
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> _InvoiceApplicationListPayload:
     """
-    查询发票申请列表（添加权限隔离）
+    查询发票申请列表\uff08添加权限隔离\uff09
 
-    权限逻辑：
+    权限逻辑\uff1a
     - invoice:view:all → 可查看所有发票申请
     - 指定 customer_id 且能查看该客户 → 返回该客户树上的发票
-    - invoice:view:own / 客户可见范围 → 自己申请的发票，或所属客户对自己可见的发票
+    - invoice:view:own / 客户可见范围 → 自己申请的发票\uff0c或所属客户对自己可见的发票
     """
     from app.crud.permission import permission_crud
 
@@ -785,7 +875,7 @@ def list_invoice_applications(
 
     populated_applications = _populate_application_list_info(db, applications, team_id)
 
-    # 计算页码（skip/limit + 1）
+    # 计算页码(skip/limit + 1)
     current_page = page if page is not None else (effective_skip // effective_limit + 1 if effective_limit > 0 else 1)
 
     return {
@@ -804,9 +894,9 @@ def list_invoice_applications(
 )
 def export_invoice_applications(
     request: InvoiceListExportRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB,
 ) -> FileResponse:
     current_user_id, visible_customer_ids = _invoice_view_scope(db, current_user, team_id)
     query = run_or_400(lambda: invoice_application_crud.build_list_query(
@@ -835,15 +925,15 @@ def export_invoice_applications(
     "/{application_id}/reissues",
     response_model=InvoiceReissueApplicationResponse,
     summary="创建发票重开申请",
-    description="对已开票的发票申请创建重开申请，原发票不被替换",
+    description="对已开票的发票申请创建重开申请\uff0c原发票不被替换",
 )
 def create_invoice_reissue_application(
     application_id: int,
     reissue_data: InvoiceReissueApplicationCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice_reissue:create")),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _TEAM,
+    current_user: User = _CREATE_REISSUE_USER,
+    db: Session = _DB,
+) -> InvoiceReissueApplicationResponse:
     original_invoice = check_invoice_write_scope(application_id, team_id, current_user, db)
     try:
         reissue = invoice_reissue_application_crud.create(
@@ -858,7 +948,7 @@ def create_invoice_reissue_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
 
 
 @invoice_router.put(
@@ -870,10 +960,10 @@ def create_invoice_reissue_application(
 def update_invoice_reissue_application(
     reissue_id: int,
     reissue_data: InvoiceReissueApplicationUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB,
+) -> InvoiceReissueApplicationResponse:
     reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
     if not reissue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
@@ -884,7 +974,7 @@ def update_invoice_reissue_application(
         updated = invoice_reissue_application_crud.update(db, reissue, reissue_data)
         return _populate_reissue_application_info(db, updated)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @invoice_router.post(
@@ -895,14 +985,15 @@ def update_invoice_reissue_application(
 )
 async def complete_invoice_reissue(
     reissue_id: int,
-    red_file: UploadFile = File(..., description="红字发票文件"),
-    new_file: UploadFile = File(..., description="新蓝字发票文件"),
-    red_invoice_number: Optional[str] = Form(None, description="红字发票号码"),
-    new_invoice_number: Optional[str] = Form(None, description="新蓝字发票号码"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:mark_issued")),
-    db: Session = Depends(get_db),
-):
+    red_file: UploadFile = _COMPLETE_RED_FILE,
+    new_file: UploadFile = _COMPLETE_NEW_FILE,
+    red_invoice_number: str | None = Form(None, description="红字发票号码"),
+    new_invoice_number: str | None = Form(None, description="新蓝字发票号码"),
+    team_id: int = _TEAM,
+    current_user: User = _COMPLETE_REISSUE_USER,
+    db: Session = _DB,
+) -> InvoiceReissueApplicationResponse:
+    _ = current_user  # Permission is enforced by the dependency; no actor is needed here.
     reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
     if not reissue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
@@ -924,7 +1015,7 @@ async def complete_invoice_reissue(
             content=await new_file.read(),
         )
     except FileStorageError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     try:
         completed = invoice_reissue_application_crud.complete(
@@ -940,21 +1031,21 @@ async def complete_invoice_reissue(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
         return _populate_reissue_application_info(db, completed)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 @invoice_router.get(
     "/reissues/{reissue_id}/{file_kind}-file",
     summary="下载发票重开相关文件",
-    description="下载红字发票或新蓝字发票文件，file_kind 为 red 或 new",
+    description="下载红字发票或新蓝字发票文件\uff0cfile_kind 为 red 或 new",
 )
 async def download_invoice_reissue_file(
     reissue_id: int,
     file_kind: Literal["red", "new"],
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB,
+) -> Response:
     reissue = invoice_reissue_application_crud.get_by_id(db, reissue_id, team_id)
     if not reissue:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票重开申请不存在")
@@ -981,10 +1072,10 @@ async def download_invoice_reissue_file(
 )
 async def download_invoice_red_offset_file(
     red_offset_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB,
+) -> Response:
     red_offset = invoice_red_offset_crud.get_by_id(db, red_offset_id, team_id)
     if not red_offset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票冲红记录不存在")
@@ -994,26 +1085,36 @@ async def download_invoice_red_offset_file(
     return _download_invoice_path(red_offset.red_invoice_file_path, filename_base)
 
 
-@invoice_router.get("/{application_id}", response_model=InvoiceApplicationResponse, summary="获取发票申请详情", description="获取指定发票申请的完整信息及关联业务数据")
+@invoice_router.get(
+    "/{application_id}",
+    response_model=InvoiceApplicationResponse,
+    summary="获取发票申请详情",
+    description="获取指定发票申请的完整信息及关联业务数据",
+)
 def get_invoice_application(
     application_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> InvoiceApplicationResponse:
     application = check_invoice_view_permission(application_id, team_id, current_user, db)
 
     return _populate_application_info(db, application, team_id)
 
 
-@invoice_router.put("/{application_id}", response_model=InvoiceApplicationResponse, summary="修改发票申请", description="修改指定的发票申请信息（仅草稿状态可编辑）")
+@invoice_router.put(
+    "/{application_id}",
+    response_model=InvoiceApplicationResponse,
+    summary="修改发票申请",
+    description="修改指定的发票申请信息\uff08仅草稿状态可编辑\uff09",
+)
 def update_invoice_application(
     application_id: int,
     application_data: InvoiceApplicationUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> InvoiceApplicationResponse:
     application = check_invoice_edit_permission(application_id, team_id, current_user, db)
 
     try:
@@ -1031,23 +1132,23 @@ def update_invoice_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 @invoice_router.post(
     "/{application_id}/mark-issued",
     response_model=InvoiceApplicationResponse,
     summary="标记为已开票",
-    description="审批通过后执行开票业务动作，可选上传发票文件和填写发票号码",
+    description="审批通过后执行开票业务动作\uff0c可选上传发票文件和填写发票号码",
 )
 async def mark_invoice_issued(
     application_id: int,
-    file: Optional[UploadFile] = File(None, description="发票文件（PDF/JPG/PNG/OFD，可选）"),
-    invoice_number: Optional[str] = Form(None, description="发票号码（可选）"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:mark_issued")),
-    db: Session = Depends(get_db)
-):
+    file: UploadFile | None = _ISSUED_FILE,
+    invoice_number: str | None = Form(None, description="发票号码\uff08可选\uff09"),
+    team_id: int = _TEAM,
+    current_user: User = _MARK_ISSUED_USER,
+    db: Session = _DB
+) -> InvoiceApplicationResponse:
     application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(
@@ -1059,13 +1160,13 @@ async def mark_invoice_issued(
     if not approval or approval.status != ApprovalStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="发票未通过审批，不可开票"
+            detail="发票未通过审批\uff0c不可开票"
         )
 
     if application.status != InvoiceApplicationStatus.APPROVED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"发票申请状态为 {application.status}，不可开票"
+            detail=f"发票申请状态为 {application.status}\uff0c不可开票"
         )
 
     invoice_file_path = None
@@ -1082,7 +1183,7 @@ async def mark_invoice_issued(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e),
-            )
+            ) from e
 
     normalized_invoice_number = invoice_number.strip() if invoice_number and invoice_number.strip() else None
 
@@ -1102,6 +1203,8 @@ async def mark_invoice_issued(
                 actor_id=str(current_user.id),
             ),
         )
+        # Building the refresh requires a persisted invoice and raises if the CRUD returned None.
+        issued_application = cast("InvoiceApplication", issued_application)
         try:
             notify_request = outbound_notification_job_service.enqueue_issued(
                 db,
@@ -1116,31 +1219,31 @@ async def mark_invoice_issued(
             outbound_notification_job_service.commit_and_kick(db, notify_request)
         except Exception as notify_error:
             logger.error(
-                f"[Invoice] Issue notification enqueue failed: application_id={application_id}, error={str(notify_error)}"
+                f"[Invoice] Issue notification enqueue failed: application_id={application_id}, error={notify_error!s}"
             )
         return _populate_application_info(db, issued_application, team_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 @invoice_router.post(
     "/{application_id}/red-offset",
     response_model=InvoiceApplicationResponse,
     summary="冲红发票",
-    description="财务上传红字发票后，将已开票发票标记为已冲红；不进入审批流程",
+    description="财务上传红字发票后\uff0c将已开票发票标记为已冲红\uff1b不进入审批流程",
 )
 async def red_offset_invoice(
     application_id: int,
-    file: UploadFile = File(..., description="红字发票文件"),
-    red_invoice_number: Optional[str] = Form(None, description="红字发票号码"),
-    reason: Optional[str] = Form(None, description="冲红原因"),
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(require_permission("invoice:mark_issued")),
-    db: Session = Depends(get_db),
-):
+    file: UploadFile = _RED_OFFSET_FILE,
+    red_invoice_number: str | None = Form(None, description="红字发票号码"),
+    reason: str | None = Form(None, description="冲红原因"),
+    team_id: int = _TEAM,
+    current_user: User = _RED_OFFSET_USER,
+    db: Session = _DB,
+) -> InvoiceApplicationResponse:
     application = invoice_application_crud.get_by_id(db, application_id, team_id)
     if not application:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票申请不存在")
@@ -1148,7 +1251,7 @@ async def red_offset_invoice(
     try:
         invoice_red_offset_crud.assert_can_create_manual(db, application, team_id=team_id)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     try:
         red_file_path = file_storage_service.save_invoice_file(
@@ -1158,7 +1261,7 @@ async def red_offset_invoice(
             content=await file.read(),
         )
     except FileStorageError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     red_number = red_invoice_number.strip() if red_invoice_number and red_invoice_number.strip() else None
     normalized_reason = reason.strip() if reason and reason.strip() else None
@@ -1176,16 +1279,21 @@ async def red_offset_invoice(
         db.refresh(application)
         return _populate_application_info(db, application, team_id)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
-@invoice_router.delete("/{application_id}", response_model=MessageResponse, summary="删除发票申请", description="删除指定的发票申请（审批中或审批通过后不可删除）")
+@invoice_router.delete(
+    "/{application_id}",
+    response_model=MessageResponse,
+    summary="删除发票申请",
+    description="删除指定的发票申请\uff08审批中或审批通过后不可删除\uff09",
+)
 def delete_invoice_application(
     application_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> dict[str, str]:
     try:
         application = check_invoice_edit_permission(application_id, team_id, current_user, db)
         change = _build_invoice_application_intelligence_change(
@@ -1205,54 +1313,54 @@ def delete_invoice_application(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
 # ============================================================================
-# Task 4: 发票文件下载端点（GET /invoice-applications/{application_id}/file）
+# Task 4: 发票文件下载端点(GET /invoice-applications/{application_id}/file)
 # ============================================================================
-# 设计要点：
+# 设计要点:
 # - application_id: 发票申请 ID
-# - 权限：get_current_active_user（登录用户即可，发票文件无敏感信息）
-# - 安全校验：FileStorageService.get_full_path 防路径穿越
-# - 文件存在检查：os.path.exists
-# - Content-Type 映射：按扩展名设置正确的 MIME 类型
-# - Content-Disposition：attachment，文件名用 invoice_number 或 application_id
+# - 权限:get_current_active_user(登录用户即可,发票文件无敏感信息)
+# - 安全校验:FileStorageService.get_full_path 防路径穿越
+# - 文件存在检查:os.path.exists
+# - Content-Type 映射:按扩展名设置正确的 MIME 类型
+# - Content-Disposition:attachment,文件名用 invoice_number 或 application_id
 # ============================================================================
 
 
 @invoice_router.get(
     "/{application_id}/file",
-    summary="下载发票文件（Task 4）",
+    summary="下载发票文件\uff08Task 4\uff09",
     description="""
 下载已上传的发票文件。
 
-**功能说明：**
-- 仅已开票状态（ISSUED）的发票可下载
-- 自动设置正确的 Content-Type（PDF/JPG/PNG/OFD）
+**功能说明\uff1a**
+- 仅已开票状态\uff08ISSUED\uff09的发票可下载
+- 自动设置正确的 Content-Type\uff08PDF/JPG/PNG/OFD\uff09
 - 文件名使用发票号码或申请 ID
 
-**路径参数：**
+**路径参数\uff1a**
 - application_id: 发票申请 ID
 
-**返回：**
-- 文件内容（二进制流）
+**返回\uff1a**
+- 文件内容\uff08二进制流\uff09
 - Content-Type: application/pdf / image/jpeg / image/png / application/octet-stream
 - Content-Disposition: attachment
 
-**错误情况：**
-- 发票申请不存在：404
-- 未上传文件：404
-- 文件不存在：404
-- 文件路径非法：400
+**错误情况\uff1a**
+- 发票申请不存在\uff1a404
+- 未上传文件\uff1a404
+- 文件不存在\uff1a404
+- 文件路径非法\uff1a400
 """,
 )
 async def download_invoice_file(
     application_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB,
+) -> Response:
     """下载发票文件"""
 
     application = check_invoice_view_permission(application_id, team_id, current_user, db)
@@ -1263,16 +1371,23 @@ async def download_invoice_file(
             detail="该发票未上传文件",
         )
 
-    return _download_invoice_path(application.invoice_file_path, application.invoice_number or f"invoice_{application_id}")
+    return _download_invoice_path(
+        application.invoice_file_path, application.invoice_number or f"invoice_{application_id}"
+    )
 
 
-@invoice_router.get("/payment-plans/{payment_plan_id}/invoices", response_model=PaymentPlanInvoiceSummary, summary="获取回款计划关联发票", description="查询指定回款计划关联的所有发票申请及状态")
+@invoice_router.get(
+    "/payment-plans/{payment_plan_id}/invoices",
+    response_model=PaymentPlanInvoiceSummary,
+    summary="获取回款计划关联发票",
+    description="查询指定回款计划关联的所有发票申请及状态",
+)
 def get_payment_plan_invoices(
     payment_plan_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _TEAM,
+    current_user: User = _ACTIVE_USER,
+    db: Session = _DB
+) -> PaymentPlanInvoiceSummary:
     check_payment_view_permission(payment_plan_id, team_id, current_user, db)
 
     summary = invoice_application_crud.get_payment_plan_invoice_summary(db, payment_plan_id, team_id)
@@ -1294,12 +1409,14 @@ def get_payment_plan_invoices(
     )
 
 
-def _populate_application_info(db: Session, application, team_id: Optional[int] = None) -> InvoiceApplicationResponse:
+def _populate_application_info(
+    db: Session, application: InvoiceApplication, team_id: int | None = None
+) -> InvoiceApplicationResponse:
     """填充发票申请完整响应信息
 
     Changes:
-    - 返回 InvoiceApplicationResponse（而非 dict）类型安全
-    - 添加 invoice_file_path / invoice_number / issued_time（修复 bug）
+    - 返回 InvoiceApplicationResponse\uff08而非 dict\uff09类型安全
+    - 添加 invoice_file_path / invoice_number / issued_time\uff08修复 bug\uff09
     """
     customer_query = db.query(Customer).filter(Customer.id == application.customer_id)
     if team_id is not None:
@@ -1344,58 +1461,58 @@ def _populate_application_info(db: Session, application, team_id: Optional[int] 
         _current_invoice_file_fields(application, reissues, red_offsets)
     )
 
-    return InvoiceApplicationResponse(
-        id=application.id,
-        application_number=application.application_number,
-        customer_id=customer.public_id if customer else None,
-        contract_id=application.contract_id,
-        opportunity_id=application.opportunity_id,
-        payment_plan_id=application.payment_plan_id,
-        invoice_title_id=application.invoice_title_id,
-        invoice_amount=float(application.invoice_amount),
-        invoice_type=application.invoice_type,
-        status=application.status,
-        applicant_id=application.applicant_id,
-        reviewer_id=application.reviewer_id,
-        review_comment=application.review_comment,
-        reviewed_time=application.reviewed_time,
-        payment_record_id=application.payment_record_id,
-        invoice_title_type=application.invoice_title_type,
-        invoice_title_text=application.invoice_title_text,
-        invoice_taxpayer_id=application.invoice_taxpayer_id,
-        invoice_bank_name=application.invoice_bank_name,
-        invoice_bank_account=application.invoice_bank_account,
-        invoice_address=application.invoice_address,
-        invoice_phone=application.invoice_phone,
-        remark=application.remark,
-        created_time=application.created_time,
-        last_modified_time=application.last_modified_time,
+    return InvoiceApplicationResponse.model_validate({
+        "id": application.id,
+        "application_number": application.application_number,
+        "customer_id": customer.public_id if customer else None,
+        "contract_id": application.contract_id,
+        "opportunity_id": application.opportunity_id,
+        "payment_plan_id": application.payment_plan_id,
+        "invoice_title_id": application.invoice_title_id,
+        "invoice_amount": float(application.invoice_amount),
+        "invoice_type": application.invoice_type,
+        "status": application.status,
+        "applicant_id": application.applicant_id,
+        "reviewer_id": application.reviewer_id,
+        "review_comment": application.review_comment,
+        "reviewed_time": application.reviewed_time,
+        "payment_record_id": application.payment_record_id,
+        "invoice_title_type": application.invoice_title_type,
+        "invoice_title_text": application.invoice_title_text,
+        "invoice_taxpayer_id": application.invoice_taxpayer_id,
+        "invoice_bank_name": application.invoice_bank_name,
+        "invoice_bank_account": application.invoice_bank_account,
+        "invoice_address": application.invoice_address,
+        "invoice_phone": application.invoice_phone,
+        "remark": application.remark,
+        "created_time": application.created_time,
+        "last_modified_time": application.last_modified_time,
 
-        # Bug 修复：添加三个缺失字段
-        invoice_file_path=application.invoice_file_path,
-        invoice_number=application.invoice_number,
-        issued_time=application.issued_time,
+        # Bug 修复:添加三个缺失字段
+        "invoice_file_path": application.invoice_file_path,
+        "invoice_number": application.invoice_number,
+        "issued_time": application.issued_time,
 
         # 关联业务信息
-        customer_name=customer.account_name if customer else None,
-        contract_name=contract.contract_name if contract else None,
-        opportunity_name=opportunity.opportunity_name if opportunity else None,
-        payment_plan_stage_name=payment_plan.stage_name if payment_plan else None,
-        invoice_title_title=application.invoice_title_text,
-        applicant_name=applicant_name,
-        reviewer_name=reviewer_name,
-        reissue_status=reissue_status,
-        invoice_effective_status=invoice_effective_status,
-        current_invoice_file_kind=current_invoice_file_kind,
-        current_invoice_file_path=current_invoice_file_path,
-        current_invoice_number=current_invoice_number,
-        current_reissue_id=current_reissue_id,
-        red_offsets=[_populate_red_offset_info(db, red_offset) for red_offset in red_offsets],
-        reissue_applications=[_populate_reissue_application_info(db, reissue) for reissue in reissues],
-    )
+        "customer_name": customer.account_name if customer else None,
+        "contract_name": contract.contract_name if contract else None,
+        "opportunity_name": opportunity.opportunity_name if opportunity else None,
+        "payment_plan_stage_name": payment_plan.stage_name if payment_plan else None,
+        "invoice_title_title": application.invoice_title_text,
+        "applicant_name": applicant_name,
+        "reviewer_name": reviewer_name,
+        "reissue_status": reissue_status,
+        "invoice_effective_status": invoice_effective_status,
+        "current_invoice_file_kind": current_invoice_file_kind,
+        "current_invoice_file_path": current_invoice_file_path,
+        "current_invoice_number": current_invoice_number,
+        "current_reissue_id": current_reissue_id,
+        "red_offsets": [_populate_red_offset_info(db, red_offset) for red_offset in red_offsets],
+        "reissue_applications": [_populate_reissue_application_info(db, reissue) for reissue in reissues],
+    })
 
 
-def _populate_red_offset_info(db: Session, red_offset) -> InvoiceRedOffsetResponse:
+def _populate_red_offset_info(db: Session, red_offset: InvoiceRedOffset) -> InvoiceRedOffsetResponse:
     created_by_name = None
     if red_offset.created_by and str(red_offset.created_by).isdigit():
         creator = db.query(User).filter(User.id == int(red_offset.created_by)).first()
@@ -1418,48 +1535,50 @@ def _populate_red_offset_info(db: Session, red_offset) -> InvoiceRedOffsetRespon
     )
 
 
-def _populate_reissue_application_info(db: Session, reissue) -> InvoiceReissueApplicationResponse:
+def _populate_reissue_application_info(
+    db: Session, reissue: InvoiceReissueApplication
+) -> InvoiceReissueApplicationResponse:
     applicant_name = None
     if reissue.applicant_id:
         applicant = db.query(User).filter(User.id == int(reissue.applicant_id)).first()
         if applicant:
             applicant_name = applicant.name
 
-    return InvoiceReissueApplicationResponse(
-        id=reissue.id,
-        application_number=reissue.application_number,
-        original_invoice_application_id=reissue.original_invoice_application_id,
-        applicant_id=reissue.applicant_id,
-        applicant_name=applicant_name,
-        reason=reissue.reason,
-        status=reissue.status,
-        approval_phase=reissue.approval_phase,
-        invoice_title_type=reissue.invoice_title_type,
-        invoice_title_text=reissue.invoice_title_text,
-        invoice_taxpayer_id=reissue.invoice_taxpayer_id,
-        invoice_bank_name=reissue.invoice_bank_name,
-        invoice_bank_account=reissue.invoice_bank_account,
-        invoice_address=reissue.invoice_address,
-        invoice_phone=reissue.invoice_phone,
-        invoice_amount=reissue.invoice_amount,
-        invoice_type=reissue.invoice_type,
-        red_invoice_file_path=reissue.red_invoice_file_path,
-        red_invoice_number=reissue.red_invoice_number,
-        red_issued_time=reissue.red_issued_time,
-        new_invoice_file_path=reissue.new_invoice_file_path,
-        new_invoice_number=reissue.new_invoice_number,
-        new_issued_time=reissue.new_issued_time,
-        completed_time=reissue.completed_time,
-        created_time=reissue.created_time,
-        last_modified_time=reissue.last_modified_time,
-    )
+    return InvoiceReissueApplicationResponse.model_validate({
+        "id": reissue.id,
+        "application_number": reissue.application_number,
+        "original_invoice_application_id": reissue.original_invoice_application_id,
+        "applicant_id": reissue.applicant_id,
+        "applicant_name": applicant_name,
+        "reason": reissue.reason,
+        "status": reissue.status,
+        "approval_phase": reissue.approval_phase,
+        "invoice_title_type": reissue.invoice_title_type,
+        "invoice_title_text": reissue.invoice_title_text,
+        "invoice_taxpayer_id": reissue.invoice_taxpayer_id,
+        "invoice_bank_name": reissue.invoice_bank_name,
+        "invoice_bank_account": reissue.invoice_bank_account,
+        "invoice_address": reissue.invoice_address,
+        "invoice_phone": reissue.invoice_phone,
+        "invoice_amount": reissue.invoice_amount,
+        "invoice_type": reissue.invoice_type,
+        "red_invoice_file_path": reissue.red_invoice_file_path,
+        "red_invoice_number": reissue.red_invoice_number,
+        "red_issued_time": reissue.red_issued_time,
+        "new_invoice_file_path": reissue.new_invoice_file_path,
+        "new_invoice_number": reissue.new_invoice_number,
+        "new_issued_time": reissue.new_issued_time,
+        "completed_time": reissue.completed_time,
+        "created_time": reissue.created_time,
+        "last_modified_time": reissue.last_modified_time,
+    })
 
 
 def _download_invoice_path(file_path: str, filename_base: str) -> Response:
     try:
         full_path = file_storage_service.get_full_path(file_path)
-    except FileStorageError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径非法")
+    except FileStorageError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件路径非法") from e
 
     if not os.path.exists(full_path):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")

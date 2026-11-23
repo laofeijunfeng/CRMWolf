@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.services.assistant.contracts import DraftField
+from app.services.assistant.failure_contract import ACTIVITY_COMMIT_UNKNOWN_MESSAGE
 from app.services.assistant.task_state import InvalidTaskTransitionError, TaskUpdate, apply_task_update, load_draft
 
 if TYPE_CHECKING:
@@ -13,8 +14,15 @@ if TYPE_CHECKING:
     from app.models.assistant import AssistantTask
 
 
+def activity_commit_is_unknown(task: AssistantTask) -> bool:
+    """Check the activity fence, not the separate proposal claim state."""
+    return task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+
+
 def reset_activity_kind(db: Session, task: AssistantTask, kind: str) -> AssistantTask:
     """Keep the pre-existing reset semantics and customer binding in one CAS."""
+    if activity_commit_is_unknown(task):
+        raise InvalidTaskTransitionError(ACTIVITY_COMMIT_UNKNOWN_MESSAGE)
     if (
         task.status != "ACTIVE"
         or task.active_turn_id is not None

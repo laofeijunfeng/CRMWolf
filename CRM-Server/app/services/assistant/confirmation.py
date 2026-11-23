@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from app.models.assistant import AssistantTask, AssistantWaitingType
-from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
+from app.services.assistant.contracts import (
+    ActivityWriteConfirmation,
+    DraftField,
+    TaskAuthority,
+    TaskDraft,
+    TaskWaiting,
+)
 from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority
 from app.utils.public_id import generate_public_id
 
@@ -20,6 +26,31 @@ if TYPE_CHECKING:
 # ruff: noqa: RUF001
 
 CONFIRM_PROMPT = "确认后写入这条客户活动？"
+_ACTIVITY_PREVIEW_KEYS = (
+    "customer_name",
+    "activity_kind",
+    "title",
+    "summary",
+    "content_json",
+    "source_content",
+    "score",
+    "score_reason",
+    "next_action",
+    "next_follow_time",
+    "next_follow_time_text",
+    "next_follow_time_granularity",
+    "channel_status",
+    "channel_status_label",
+    "channel_source_text",
+    "channel_options",
+    "ignored_noise_summary",
+)
+
+
+def _activity_preview(command: dict[str, object]) -> dict[str, object]:
+    from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
+
+    return {key: command[key] for key in (*_ACTIVITY_PREVIEW_KEYS, *CONTEXT_COMMAND_KEYS) if key in command}
 
 
 @dataclass(frozen=True)
@@ -55,20 +86,22 @@ def command_fingerprint(command: dict[str, object]) -> str:
     ).hexdigest()
 
 
-def freeze_confirmation(
-    db: Session,
+def build_activity_confirmation(
     task: AssistantTask,
     *,
+    draft: TaskDraft,
     customer: object,
     next_follow_time: datetime | None = None,
     next_follow_time_granularity: str = "UNKNOWN",
     context_card: dict[str, object] | None = None,
-) -> tuple[AssistantTask, TaskWaiting]:
+) -> tuple[dict[str, object], TaskWaiting]:
+    """Build the frozen command and its signed card without touching the task row."""
+
     from app.crud.customer_activity import customer_activity_crud
     from app.services.assistant.activity_channel import CANONICAL_KINDS, MEETING_KINDS
+    from app.services.assistant.activity_edit import edited_activity_summary
     from app.services.assistant.noise import ignored_noise_summary
 
-    draft = TaskDraft.model_validate(task.draft_json or {})
     if draft.quality_score.status != "CANDIDATE" or not draft.score_reason:
         raise ValueError("activity cannot be confirmed without a final quality score")
     score = int(draft.quality_score.value or 0)
@@ -94,7 +127,8 @@ def freeze_confirmation(
         "source_segments": draft.source_segments,
         "source_content": source_content,
         "title": customer_activity_crud.build_title(kind, draft.content_json) if kind is not None else None,
-        "summary": customer_activity_crud.build_summary(kind or "OTHER_FOLLOW_UP", draft.content_json, source_content),
+        "summary": edited_activity_summary(draft.content_json)
+        or customer_activity_crud.build_summary(kind or "OTHER_FOLLOW_UP", draft.content_json, source_content),
         "channel_status": channel_status,
         "channel_status_label": draft.channel_status_label
         or ("未识别 · 需要确认" if channel_status == "required" else None),
@@ -118,32 +152,12 @@ def freeze_confirmation(
         "draft_version": task.version,
         "submission_id": generate_public_id("asub"),
     }
-    preview_keys = [
-        "customer_name",
-        "activity_kind",
-        "title",
-        "summary",
-        "content_json",
-        "source_content",
-        "score",
-        "score_reason",
-        "next_action",
-        "next_follow_time",
-        "next_follow_time_text",
-        "next_follow_time_granularity",
-        "channel_status",
-        "channel_status_label",
-        "channel_source_text",
-        "channel_options",
-        "ignored_noise_summary",
-    ]
     if context_card:
         from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
 
         for key in CONTEXT_COMMAND_KEYS:
             if key in context_card:
                 command[key] = context_card[key]
-                preview_keys.append(key)
     command["fingerprint"] = command_fingerprint(command)
     command["execution_status"] = "PENDING"
     waiting = TaskWaiting(
@@ -155,28 +169,49 @@ def freeze_confirmation(
         fingerprint=command["fingerprint"],
         confirmation_payload={
             "kind": "activity_write",
-            "preview": {key: command[key] for key in preview_keys},
+            "preview": _activity_preview(command),
         },
     )
-    persisted_waiting = waiting.model_dump(mode="json")
+    return command, waiting
+
+
+def persist_activity_confirmation(
+    db: Session,
+    task: AssistantTask,
+    *,
+    draft: TaskDraft,
+    command: dict[str, object],
+    waiting: TaskWaiting,
+    action_name: str = "freeze_activity",
+    action_input: dict[str, object] | None = None,
+    context_authority: dict[str, object] | None = None,
+    clear_opportunity: bool = False,
+) -> tuple[AssistantTask, TaskWaiting]:
+    """Publish the draft, authority and signed card in a single compare-and-swap."""
+
+    authority_payload: dict[str, object] = {
+        "customer_public_id": str(command["customer_public_id"]),
+        "opportunity_public_id": load_authority(task).opportunity_public_id,
+        "opportunity_stage_name": load_authority(task).opportunity_stage_name,
+        "frozen_activity_command": command,
+    }
+    if context_authority:
+        authority_payload.update({key: value for key, value in context_authority.items() if value is not None})
     result = apply_task_update(
         db,
         task,
         TaskUpdate(
             draft=draft,
-            authority=TaskAuthority(
-                customer_public_id=customer.public_id,
-                opportunity_public_id=load_authority(task).opportunity_public_id,
-                opportunity_stage_name=load_authority(task).opportunity_stage_name,
-                frozen_activity_command=command,
-            ),
+            authority=TaskAuthority.model_validate(authority_payload),
+            clear_follow_up_opportunity=clear_opportunity,
             waiting=waiting,
             action_actor="SYSTEM",
-            action_name="freeze_activity",
+            action_name=action_name,
+            action_input=action_input or {},
             action_result={
                 "fingerprint": command["fingerprint"],
                 "submission_id": command["submission_id"],
-                "confirmation": persisted_waiting,
+                "confirmation": waiting.model_dump(mode="json"),
             },
             event_type="meeting_card"
             if task.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}
@@ -192,6 +227,27 @@ def freeze_confirmation(
             "expected_version": result.task.version,
         }
     )
+
+
+def freeze_confirmation(
+    db: Session,
+    task: AssistantTask,
+    *,
+    customer: object,
+    next_follow_time: datetime | None = None,
+    next_follow_time_granularity: str = "UNKNOWN",
+    context_card: dict[str, object] | None = None,
+) -> tuple[AssistantTask, TaskWaiting]:
+    draft = TaskDraft.model_validate(task.draft_json or {})
+    command, waiting = build_activity_confirmation(
+        task,
+        draft=draft,
+        customer=customer,
+        next_follow_time=next_follow_time,
+        next_follow_time_granularity=next_follow_time_granularity,
+        context_card=context_card,
+    )
+    return persist_activity_confirmation(db, task, draft=draft, command=command, waiting=waiting)
 
 
 def _projection_receipt_fields(projection: FollowUpProjectionReceipt | None) -> dict[str, object]:
@@ -269,7 +325,8 @@ async def execute_confirmation(
                 frozen_activity_command={**command, "execution_status": "SUCCEEDED"},
             ),
             append_committed=[
-                {"kind": "customer_activity", "public_id": write.activity_public_id, "customer_id": write.customer_id}
+                {"kind": "customer_activity", "public_id": write.activity_public_id,
+                 "customer_id": write.customer_id, "customer_public_id": str(command["customer_public_id"])}
             ],
             action_actor="USER",
             action_name="confirm_write",
@@ -343,30 +400,6 @@ def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> 
         updated["title"] = label
     updated.pop("fingerprint", None)
     updated["fingerprint"] = command_fingerprint(updated)
-    preview_keys = [
-        "customer_name",
-        "activity_kind",
-        "title",
-        "summary",
-        "content_json",
-        "source_content",
-        "score",
-        "score_reason",
-        "next_action",
-        "next_follow_time",
-        "next_follow_time_text",
-        "next_follow_time_granularity",
-        "channel_status",
-        "channel_status_label",
-        "channel_source_text",
-        "channel_options",
-        "ignored_noise_summary",
-    ]
-    from app.services.assistant.follow_up_context import CONTEXT_COMMAND_KEYS
-
-    for key in CONTEXT_COMMAND_KEYS:
-        if key in updated and key not in preview_keys:
-            preview_keys.append(key)
     draft = TaskDraft.model_validate(task.draft_json or {}).model_copy(
         update={
             "channel_status": status,
@@ -385,7 +418,7 @@ def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> 
         fingerprint=updated["fingerprint"],
         confirmation_payload={
             "kind": "activity_write",
-            "preview": {key: updated[key] for key in preview_keys if key in updated},
+            "preview": _activity_preview(updated),
         },
     )
     authority = load_authority(task).model_copy(update={"frozen_activity_command": updated})
@@ -403,6 +436,78 @@ def revise_frozen_activity_kind(db: Session, task: AssistantTask, kind: str) -> 
             action_result={"accepted": True, "kind": kind, "fingerprint": updated["fingerprint"]},
             event_type="user_choice",
             event_key=f"kind:{updated['fingerprint'][:24]}",
+            correlation_id=waiting.action_id,
+        ),
+    )
+    return result.task, TaskWaiting.model_validate(
+        {
+            **waiting.model_dump(),
+            "action_id": result.task.waiting_json["action_id"],
+            "expected_version": result.task.version,
+        }
+    )
+
+
+def restore_activity_confirmation(
+    db: Session,
+    task: AssistantTask,
+    *,
+    action_name: str = "cancel_activity_edit",
+) -> tuple[AssistantTask, TaskWaiting]:
+    """Restore an unchanged pending activity command under a fresh action id.
+
+    Cancelling an edit never rebuilds or re-scores the draft. The frozen command,
+    customer authority, source provenance, and its business ``draft_version``
+    remain byte-for-byte unchanged; only the confirmation envelope is re-signed.
+    """
+
+    command = load_authority(task).frozen_activity_command
+    waiting_payload = (task.waiting_json or {}).get("payload")
+    if (
+        task.waiting_type not in {AssistantWaitingType.CONFIRMATION_EDIT, AssistantWaitingType.CONFIRMATION}
+        or task.waiting_field != "activity_write"
+        or not isinstance(waiting_payload, dict)
+        or not isinstance(command, dict)
+        or command.get("execution_status") != "PENDING"
+    ):
+        raise ValueError("activity edit can only be cancelled for a pending frozen activity")
+    fingerprint = command.get("fingerprint")
+    if not isinstance(fingerprint, str) or fingerprint != command_fingerprint(command):
+        raise ValueError("frozen activity fingerprint is invalid")
+    waiting_fingerprint = waiting_payload.get("fingerprint")
+    if waiting_fingerprint != fingerprint and (
+        task.waiting_type == AssistantWaitingType.CONFIRMATION or waiting_fingerprint is not None
+    ):
+        raise ValueError("confirmation does not match the frozen activity")
+    waiting = TaskWaiting(
+        type="CONFIRMATION",
+        field="activity_write",
+        action_id=generate_public_id("awa"),
+        question_id=f"q_confirm_{task.public_id}_{task.version}",
+        prompt=CONFIRM_PROMPT,
+        fingerprint=fingerprint,
+        confirmation_payload=ActivityWriteConfirmation.model_validate({
+            "kind": "activity_write",
+            "preview": _activity_preview(command),
+        }),
+    )
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            waiting=waiting,
+            preserve_version=True,
+            action_actor="USER",
+            action_name=action_name,
+            action_result={
+                "restored": True,
+                "fingerprint": fingerprint,
+                "confirmation": waiting.model_dump(mode="json"),
+            },
+            event_type=(
+                "meeting_card" if task.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"} else "follow_up_card"
+            ),
+            event_key=f"card:{waiting.action_id}",
             correlation_id=waiting.action_id,
         ),
     )

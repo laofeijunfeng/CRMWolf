@@ -97,14 +97,14 @@ def _system_prompt(requested_fields: Sequence[str]) -> str:
     field_list = ", ".join(requested_fields)
     return f"""你是 CRM 客户初始主数据补全模型。
 
-本次只允许返回这些字段：{field_list}。
-规则：
-- 每个 requested field 必须且只能出现一次，不得遗漏或重复。
-- industry 必须从输入提供的启用行业目录中选择精确 code，禁止输出名称或自由文本。
-- 业务信息不足、无法判断行业时，返回目录中的 other code。
+本次只允许返回这些字段\uff1a{field_list}。
+规则\uff1a
+- 每个 requested field 必须且只能出现一次\uff0c不得遗漏或重复。
+- industry 必须从输入提供的启用行业目录中选择精确 code\uff0c禁止输出名称或自由文本。
+- 业务信息不足、无法判断行业时\uff0c返回目录中的 other code。
 - 不得返回未注册字段。
 - 不得返回 confidence、置信度或推理过程。
-- reason 只写简短业务依据，不包含 chain-of-thought。
+- reason 只写简短业务依据\uff0c不包含 chain-of-thought。
 """
 
 

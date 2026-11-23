@@ -122,6 +122,7 @@ const NoticeBlockObjectSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.literal('notice'),
   tone: z.enum(['info', 'success', 'warning']),
+  code: z.literal('PROPOSAL_UNAVAILABLE').nullable().optional(),
   title: z.string().max(200).nullable().optional(),
   text: z.string().min(1).max(10000)
 }).strict()

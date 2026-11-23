@@ -1,14 +1,15 @@
-from sqlalchemy import Boolean, Column, BigInteger, Integer, String, DateTime, Date, Text, ForeignKey, Index
-from sqlalchemy.sql import expression
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
-from app.core.database import Base
+from sqlalchemy.sql import expression
+
 from app.constants.approval_phase import ApprovalPhase
+from app.core.database import Base
 from app.utils.time import business_now
 
 
 class LicenseApplicationStatus:
     DRAFT = "DRAFT"
-    PENDING_REVIEW = "PENDING_REVIEW"  # 统一命名（原 PENDING）
+    PENDING_REVIEW = "PENDING_REVIEW"  # 统一命名(原 PENDING)
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     ISSUED = "ISSUED"
@@ -25,13 +26,24 @@ class LicenseApplication(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    application_number = Column(String(50), nullable=False, unique=True, comment="申请单号（自动生成）")
+    application_number = Column(String(50), nullable=False, unique=True, comment="申请单号\uff08自动生成\uff09")
 
-    customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
-    deployment_info_id = Column(BigInteger, ForeignKey('crm_deployment_infos.id', ondelete='SET NULL'), nullable=True, comment="关联部署信息ID")
-    contract_id = Column(BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID")
-    product_id = Column(BigInteger, ForeignKey('crm_products.id', ondelete='SET NULL'), nullable=True, comment="申请产品ID")
-    product_name = Column(String(100), nullable=True, comment="申请产品名称快照（授权文件标题）")
+    customer_id = Column(
+        BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID"
+    )
+    deployment_info_id = Column(
+        BigInteger,
+        ForeignKey('crm_deployment_infos.id', ondelete='SET NULL'),
+        nullable=True,
+        comment="关联部署信息ID",
+    )
+    contract_id = Column(
+        BigInteger, ForeignKey('crm_contracts.id', ondelete='SET NULL'), nullable=True, comment="关联合同ID"
+    )
+    product_id = Column(
+        BigInteger, ForeignKey('crm_products.id', ondelete='SET NULL'), nullable=True, comment="申请产品ID"
+    )
+    product_name = Column(String(100), nullable=True, comment="申请产品名称快照\uff08授权文件标题\uff09")
 
     expiry_date = Column(Date, nullable=True, comment="到期时间")
     is_permanent = Column(
@@ -39,39 +51,48 @@ class LicenseApplication(Base):
         nullable=False,
         default=False,
         server_default=expression.false(),
-        comment="是否永久授权（仅正式 License，永久时到期时间为空）",
+        comment="是否永久授权\uff08仅正式 License\uff0c永久时到期时间为空\uff09",
     )
     license_type = Column(String(20), nullable=False, comment="License 类型")
     authorized_users = Column(Integer, nullable=False, comment="本次申请使用人数")
 
-    # 审批人回填的 License 详细信息（补充需求）
-    enterprise_id = Column(String(50), nullable=True, comment="企业编号（审批人回填，如：15739）")
-    supported_modules = Column(String(500), nullable=True, comment="支持模块（审批人回填，如：desktop,web,branch）")
-    server_license_code = Column(Text, nullable=True, comment="服务端 License（审批人回填）")
-    client_license_code = Column(Text, nullable=True, comment="客户端 License（审批人回填）")
+    # 审批人回填的 License 详细信息(补充需求)
+    enterprise_id = Column(String(50), nullable=True, comment="企业编号\uff08审批人回填\uff0c如\uff1a15739\uff09")
+    supported_modules = Column(
+        String(500), nullable=True, comment="支持模块\uff08审批人回填\uff0c如\uff1adesktop,web,branch\uff09"
+    )
+    server_license_code = Column(Text, nullable=True, comment="服务端 License\uff08审批人回填\uff09")
+    client_license_code = Column(Text, nullable=True, comment="客户端 License\uff08审批人回填\uff09")
 
-    # 申请人备注（补充需求）
-    remark = Column(Text, nullable=True, comment="备注（申请时填写，如：需要开通 desktop,web,branch）")
+    # 申请人备注(补充需求)
+    remark = Column(Text, nullable=True, comment="备注\uff08申请时填写\uff0c如\uff1a需要开通 desktop,web,branch\uff09")
 
-    # 原有授权码字段（兼容保留）
-    license_code = Column(Text, nullable=True, comment="授权码（审批人回填，旧字段）")
+    # 原有授权码字段(兼容保留)
+    license_code = Column(Text, nullable=True, comment="授权码\uff08审批人回填\uff0c旧字段\uff09")
 
     status = Column(String(20), nullable=False, default=LicenseApplicationStatus.DRAFT, comment="申请状态")
     approval_phase = Column(
         String(20),
         nullable=False,
         default=ApprovalPhase.DRAFT.value,
-        comment="审批流程状态：draft/pending_review/approved/rejected"
+        comment="审批流程状态\uff1adraft/pending_review/approved/rejected"
     )
     applicant_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
     approver_id = Column(String(100), nullable=True, comment="审批人系统用户ID")
     approved_time = Column(DateTime, nullable=True, comment="审批时间")
 
-    # 审批关联字段（支持审批引擎）
-    approval_id = Column(BigInteger, ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'), nullable=True, comment="审批实例ID")
+    # 审批关联字段(支持审批引擎)
+    approval_id = Column(
+        BigInteger,
+        ForeignKey('crm_contract_approvals.id', ondelete='SET NULL'),
+        nullable=True,
+        comment="审批实例ID",
+    )
 
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
+    last_modified_time = Column(
+        DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间"
+    )
 
     customer = relationship("Customer", back_populates="license_applications")
     deployment_info = relationship("DeploymentInfo", back_populates="license_applications")

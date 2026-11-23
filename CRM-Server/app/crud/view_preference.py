@@ -1,6 +1,5 @@
 import json
 from uuid import uuid4
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +17,7 @@ class ViewPreferenceCRUD:
         scope: str,
         user_id: int,
         preference_key: str = "default",
-    ) -> Optional[ViewPreference]:
+    ) -> ViewPreference | None:
         return db.query(ViewPreference).filter(
             ViewPreference.team_id == team_id,
             ViewPreference.view_key == view_key,
@@ -27,7 +26,7 @@ class ViewPreferenceCRUD:
             ViewPreference.preference_key == preference_key,
         ).first()
 
-    def get_personal(self, db: Session, *, team_id: int, view_key: str, user_id: int) -> Optional[ViewPreference]:
+    def get_personal(self, db: Session, *, team_id: int, view_key: str, user_id: int) -> ViewPreference | None:
         return self.get(
             db,
             team_id=team_id,
@@ -36,7 +35,7 @@ class ViewPreferenceCRUD:
             user_id=user_id,
         )
 
-    def get_team(self, db: Session, *, team_id: int, view_key: str) -> Optional[ViewPreference]:
+    def get_team(self, db: Session, *, team_id: int, view_key: str) -> ViewPreference | None:
         return self.get(
             db,
             team_id=team_id,
@@ -158,7 +157,7 @@ class ViewPreferenceCRUD:
         view_key: str,
         user_id: int,
         preference_id: int,
-    ) -> Optional[ViewPreference]:
+    ) -> ViewPreference | None:
         return db.query(ViewPreference).filter(
             ViewPreference.id == preference_id,
             ViewPreference.team_id == team_id,
@@ -180,7 +179,7 @@ class ViewPreferenceCRUD:
         name: str | None = None,
         config: ViewPreferenceConfig | None = None,
         sort_order: int | None = None,
-    ) -> Optional[ViewPreference]:
+    ) -> ViewPreference | None:
         preference = self.get_custom_view(
             db,
             team_id=team_id,

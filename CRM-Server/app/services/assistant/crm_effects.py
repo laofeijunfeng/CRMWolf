@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.models.assistant_crm_effect import AssistantCRMEffect
 
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,8 @@ def checked_effect(db: Session, command: AssistantCRMCommand, effect_kind: str) 
     ).all()
     if any(effect.fingerprint != command.fingerprint or effect.actor_id != command.actor_id for effect in effects):
         raise AssistantCRMFingerprintConflict("Assistant CRM command fingerprint or actor conflict")
-    allowed_kinds = {"opportunity_stage", "opportunity_auto_won"} if effect_kind in {"opportunity_stage", "opportunity_auto_won"} else {effect_kind}
+    allowed_kinds = {"opportunity_stage", "opportunity_auto_won"} if effect_kind in {
+        "opportunity_stage", "opportunity_auto_won"} else {effect_kind}
     if any(effect.effect_kind not in allowed_kinds for effect in effects):
         raise AssistantCRMFingerprintConflict("Assistant CRM command effect kind conflict")
     return next((effect for effect in effects if effect.effect_kind == effect_kind), None)

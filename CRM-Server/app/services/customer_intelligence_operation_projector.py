@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, or_
 
 from app.models.agent_async_operation import AgentAsyncOperation
-from app.models.customer_intelligence_run import CustomerIntelligenceRun, CustomerIntelligenceRunStatus
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.services.agent.async_operation_service import (
     TERMINAL_OPERATION_STATUSES,
     AgentAsyncOperationService,

@@ -1,8 +1,8 @@
-from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.models.user import User
+
 from app.models.role import Role
+from app.models.user import User
 from app.models.user_role import UserRole
 
 

@@ -19,27 +19,27 @@ class ContractChangeRequest(Base):
         comment="原合同ID",
     )
     creator_id = Column(String(100), nullable=False, comment="申请人系统用户ID")
-    change_items_json = Column(JSON, nullable=False, comment="不可变变更项目快照；金额值以字符串保存")
+    change_items_json = Column(JSON, nullable=False, comment="不可变变更项目快照\uff1b金额值以字符串保存")
     reason = Column(Text, nullable=False, comment="变更原因")
     approval_phase = Column(
         String(20),
         nullable=False,
         default=ApprovalPhase.DRAFT.value,
         server_default=ApprovalPhase.DRAFT.value,
-        comment="审批流程状态：draft/pending_review/approved/rejected",
+        comment="审批流程状态\uff1adraft/pending_review/approved/rejected",
     )
     pending_guard = Column(
         String(20),
         nullable=True,
-        comment="待审批唯一性保护标记；待审批时由服务层设为 pending，终态置空",
+        comment="待审批唯一性保护标记\uff1b待审批时由服务层设为 pending\uff0c终态置空",
     )
-    attachment_path = Column(String(500), nullable=True, comment="变更附件路径（相对路径）")
+    attachment_path = Column(String(500), nullable=True, comment="变更附件路径\uff08相对路径\uff09")
     attachment_name = Column(String(255), nullable=True, comment="变更附件原始文件名")
-    attachment_size = Column(BigInteger, nullable=True, comment="变更附件大小（字节）")
+    attachment_size = Column(BigInteger, nullable=True, comment="变更附件大小\uff08字节\uff09")
     attachment_mime_type = Column(String(100), nullable=True, comment="变更附件 MIME 类型")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
-    deleted_at = Column(DateTime, nullable=True, comment="删除时间（软删除标记）")
+    deleted_at = Column(DateTime, nullable=True, comment="删除时间\uff08软删除标记\uff09")
 
     __table_args__ = (
         UniqueConstraint(

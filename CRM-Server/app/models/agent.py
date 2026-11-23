@@ -60,7 +60,7 @@ class AgentMemoryEntry(Base):
     __tablename__ = "crm_agent_memory_entries"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
-    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID，当前与团队ID一致")
+    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID, 当前与团队ID一致")
     namespace = Column(String(500), nullable=False, index=True, comment="LangGraph Store namespace")
     key = Column(String(200), nullable=False, comment="namespace内记忆键")
     value_json = Column(JSON, nullable=False, comment="JSON可序列化记忆内容")
@@ -278,7 +278,9 @@ class AgentWorkflowAction(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     workflow_id = Column(String(64), nullable=False, index=True, comment="Agent工作流ID")
     action_id = Column(String(64), nullable=False, comment="Agent动作ID")
-    parent_action_id = Column(String(64), nullable=True, index=True, comment="父动作ID")
+    parent_action_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, comment="父动作ID"
+    )
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     user_id = Column(BigInteger, nullable=True, index=True, comment="系统用户ID")
     session_id = Column(
@@ -316,8 +318,8 @@ class AgentWorkflowAction(Base):
     result_json = Column(JSON, nullable=True, comment="动作结果")
     decision_json = Column(JSON, nullable=True, comment="用户或路由决策")
     idempotency_key = Column(String(160), nullable=True, index=True, comment="业务幂等键")
-    status_reason = Column(Text, nullable=True, comment="状态原因")
-    error_message = Column(Text, nullable=True, comment="错误信息")
+    status_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="状态原因")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="错误信息")
     started_time = Column(DateTime, nullable=True, comment="开始时间")
     finished_time = Column(DateTime, nullable=True, comment="结束时间")
     created_time = Column(DateTime, nullable=False, default=business_now, index=True, comment="创建时间")

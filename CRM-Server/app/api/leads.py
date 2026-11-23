@@ -1,44 +1,21 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status, Query
-from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy.orm import Session
-from typing import Iterator, List, Optional
-from datetime import datetime, timedelta
 import json
-from app.core.database import SessionLocal, get_db
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.orm import Query as OrmQuery
+from sqlalchemy.orm import Session
+
 from app.api.customers import convert_from_lead as customers_convert_from_lead
-from app.core.deps import get_current_active_user, check_lead_access, check_lead_owner, require_permission, get_current_user_team, check_lead_delete_permission
-from app.crud.customer import customer_crud
-from app.crud.lead import lead_crud, lead_follow_up_crud
-from app.crud.product_intent import ProductNotFoundError, product_intent_payload, product_intent_payloads_by_owner
-from app.crud.user import user_crud
-from app.schemas.lead import (
-    LeadCreate, LeadUpdate, LeadResponse, LeadListResponse, LeadDetailResponse,
-    LeadFollowUpCreate, LeadFollowUpResponse,
-    LeadAssignRequest, LeadConvertRequest,
-    LeadBatchImportRequest, LeadBatchImportResponse,
-    LeadTrendResponse, LeadConversionResponse, LeadMarkInvalidRequest,
-)
-from app.schemas.lead_parse import LeadParseRequest
-from app.schemas.list_export import LeadListExportRequest
-from app.schemas.common import PaginatedResponse
-from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
-from app.models.lead import LeadProduct, LeadStatus
-from app.models.user import User
-from app.services.acquisition_source_service import (
-    AcquisitionSourceError,
-    build_source_info,
-    get_by_id,
-    map_sources_by_ids,
-    resolve_public_ids_to_ids,
-)
-from app.utils.time import business_now
-from app.models.outbound_notification_job import OutboundNotificationEventType
-from app.services.outbound_notification_job_service import outbound_notification_job_service
-from app.core.list_query import (
-    enforce_owner_view_scope,
-    optional_request_list_query,
-    run_or_400,
-    uses_unified_list_query,
+from app.core.database import SessionLocal, get_db
+from app.core.deps import (
+    check_lead_access,
+    check_lead_delete_permission,
+    check_lead_owner,
+    get_current_active_user,
+    get_current_user_team,
+    require_permission,
 )
 from app.core.list_export import (
     LEADS_LIST_EXPORT_CATALOG,
@@ -47,7 +24,50 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
+from app.crud.customer import customer_crud
+from app.crud.lead import lead_crud, lead_follow_up_crud
+from app.crud.product_intent import ProductNotFoundError, product_intent_payload, product_intent_payloads_by_owner
+from app.crud.user import user_crud
+from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus
+from app.models.outbound_notification_job import OutboundNotificationEventType
+from app.models.user import User
+from app.schemas.common import PaginatedResponse
+from app.schemas.customer import ConvertLeadToCustomer, ConvertResponse
+from app.schemas.lead import (
+    LeadAssignRequest,
+    LeadBatchImportRequest,
+    LeadBatchImportResponse,
+    LeadConversionResponse,
+    LeadConvertRequest,
+    LeadCreate,
+    LeadDetailResponse,
+    LeadFollowUpCreate,
+    LeadFollowUpResponse,
+    LeadListResponse,
+    LeadMarkInvalidRequest,
+    LeadResponse,
+    LeadTrendResponse,
+    LeadUpdate,
+    OwnerInfo,
+)
+from app.schemas.lead_parse import LeadParseRequest
+from app.schemas.list_export import LeadListExportRequest
+from app.services.acquisition_source_service import (
+    AcquisitionSourceError,
+    build_source_info,
+    get_by_id,
+    map_sources_by_ids,
+    resolve_public_ids_to_ids,
+)
 from app.services.ai_parser.factory import EntityAIParserFactory
+from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
 
@@ -60,7 +80,9 @@ LEAD_STATUS_LABELS = {
 }
 
 
-def _build_lead_follow_up_response(follow_up, lead_public_id: str, creator_info=None) -> LeadFollowUpResponse:
+def _build_lead_follow_up_response(
+    follow_up: LeadFollowUp, lead_public_id: str, creator_info: OwnerInfo | None = None,
+) -> LeadFollowUpResponse:
     return LeadFollowUpResponse(
         id=follow_up.id,
         lead_id=lead_public_id,
@@ -74,11 +96,11 @@ def _build_lead_follow_up_response(follow_up, lead_public_id: str, creator_info=
     )
 
 
-def _lead_name_conflict_error(db: Session, lead_name: str, team_id: int) -> Optional[str]:
+def _lead_name_conflict_error(db: Session, lead_name: str, team_id: int) -> str | None:
     if lead_crud.get_by_name(db, lead_name, team_id):
         return "线索名称已存在"
     if customer_crud.get_by_name(db, lead_name, team_id):
-        return "该名称已存在客户，请直接在客户下跟进"
+        return "该名称已存在客户\uff0c请直接在客户下跟进"
     return None
 
 
@@ -91,7 +113,7 @@ def _ensure_lead_name_available(db: Session, lead_name: str, team_id: int) -> No
         )
 
 
-def parse_filter_conditions(filters: Optional[str]):
+def parse_filter_conditions(filters: str | None) -> list[object] | None:
     if not filters:
         return None
 
@@ -113,13 +135,13 @@ def _raise_source_error(exc: AcquisitionSourceError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _lead_source_fields(db: Session, lead, source_map: Optional[dict] = None) -> dict:
+def _lead_source_fields(db: Session, lead: Lead, source_map: dict | None = None) -> dict:
     source_row = None
     if lead.source_id:
         if source_map is not None:
@@ -133,7 +155,7 @@ def _lead_source_fields(db: Session, lead, source_map: Optional[dict] = None) ->
     }
 
 
-def _build_lead_response(db: Session, lead) -> LeadResponse:
+def _build_lead_response(db: Session, lead: Lead) -> LeadResponse:
     payload = {
         "id": lead.public_id,
         "public_id": lead.public_id,
@@ -172,7 +194,7 @@ def _build_user_info_map(db: Session, user_ids: set[str]) -> dict[str, dict]:
     }
 
 
-def _build_lead_list_responses(db: Session, leads: List) -> List[LeadListResponse]:
+def _build_lead_list_responses(db: Session, leads: list) -> list[LeadListResponse]:
     owner_ids = {lead.owner_id for lead in leads if lead.owner_id}
     users_info = _build_user_info_map(db, owner_ids)
     source_map = map_sources_by_ids(
@@ -231,7 +253,9 @@ def _lead_export_row(item: LeadListResponse) -> dict[str, object]:
     }
 
 
-def _iter_lead_export_rows(stream, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+def _iter_lead_export_rows(
+    stream: Iterable[Lead], projection_session_factory: Callable[[], Session] = SessionLocal,
+) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
         try:
@@ -264,10 +288,10 @@ def export_leads(
         request.filters,
         current_user_id=str(current_user.id),
         has_view_all=has_view_all,
-        permission_detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据",
+        permission_detail="只能查看自己负责的线索\uff0c或需要 lead:view:all 权限查看他人数据",
     )
 
-    def _resolve_lead_export_query():
+    def _resolve_lead_export_query() -> OrmQuery[Lead]:
         if request.tab == "public":
             return lead_crud.build_public_list_query(
                 db,
@@ -298,32 +322,36 @@ def export_leads(
     return list_export_file_response(generated)
 
 
-@router.post("/parse", summary="AI 解析线索信息", description="AI 解析线索信息（SSE 流式响应），解析结果回填表单，不创建线索")
+@router.post(
+    "/parse",
+    summary="AI 解析线索信息",
+    description="AI 解析线索信息\uff08SSE 流式响应\uff09\uff0c解析结果回填表单\uff0c不创建线索",
+)
 async def parse_lead_info(
     request: LeadParseRequest,
     current_user: User = Depends(get_current_active_user),
     team_id: int = Depends(get_current_user_team),
 ):
     """
-    AI 解析线索信息（SSE 流式响应）
+    AI 解析线索信息\uff08SSE 流式响应\uff09
 
-    SSE 事件类型：
+    SSE 事件类型\uff1a
     - status: 状态更新
     - content: AI 思考过程片段
-    - parsed: 解析结果（lead_info 含 source_public_id / product_public_id）
+    - parsed: 解析结果\uff08lead_info 含 source_public_id / product_public_id\uff09
     - error: 错误
     """
     parser = EntityAIParserFactory.get_parser("lead")
     if not parser:
         raise HTTPException(status_code=500, detail="Parser not found")
 
-    async def generate_sse():
+    async def generate_sse() -> AsyncIterator[str]:
         db = SessionLocal()
         try:
             async for event in parser.parse_stream(db, request.content, team_id):
                 yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'event': 'error', 'message': f'AI 解析失败：{str(e)}'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'event': 'error', 'message': f'AI 解析失败：{e!s}'}, ensure_ascii=False)}\n\n"
         finally:
             db.close()
 
@@ -334,7 +362,13 @@ async def parse_lead_info(
     )
 
 
-@router.post("/", response_model=LeadResponse, status_code=status.HTTP_201_CREATED, summary="创建线索", description="创建新的线索")
+@router.post(
+    "/",
+    response_model=LeadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建线索",
+    description="创建新的线索",
+)
 def create_lead(
     lead: LeadCreate,
     team_id: int = Depends(get_current_user_team),
@@ -354,7 +388,12 @@ def create_lead(
     return _build_lead_response(db, created)
 
 
-@router.post("/batch-import", response_model=LeadBatchImportResponse, summary="批量导入线索", description="批量导入线索（最多100条）")
+@router.post(
+    "/batch-import",
+    response_model=LeadBatchImportResponse,
+    summary="批量导入线索",
+    description="批量导入线索\uff08最多100条\uff09",
+)
 def batch_import_leads(
     request: LeadBatchImportRequest,
     team_id: int = Depends(get_current_user_team),
@@ -395,20 +434,25 @@ def batch_import_leads(
     )
 
 
-@router.get("/", response_model=PaginatedResponse[LeadListResponse], summary="查询线索列表", description="查询线索列表，支持多条件筛选和动态排序，返回负责人信息")
+@router.get(
+    "/",
+    response_model=PaginatedResponse[LeadListResponse],
+    summary="查询线索列表",
+    description="查询线索列表\uff0c支持多条件筛选和动态排序\uff0c返回负责人信息",
+)
 def get_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
-    status: Optional[LeadStatus] = Query(None, description="线索状态"),
-    source_public_id: Optional[str] = Query(None, description="获客来源对外ID，多个值用逗号分隔"),
-    city: Optional[str] = Query(None, description="所在城市"),
-    keyword: Optional[str] = Query(None, description="关键词搜索"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索线索名称、联系人或手机号"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    owner_id: Optional[str] = Query(None, description="按负责人ID筛选（支持 me/my 表示当前用户）"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
+    status: LeadStatus | None = Query(None, description="线索状态"),
+    source_public_id: str | None = Query(None, description="获客来源对外ID\uff0c多个值用逗号分隔"),
+    city: str | None = Query(None, description="所在城市"),
+    keyword: str | None = Query(None, description="关键词搜索"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索线索名称、联系人或手机号"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    owner_id: str | None = Query(None, description="按负责人ID筛选\uff08支持 me/my 表示当前用户\uff09"),
+    order_by: str | None = Query(None, description="排序字段"),
+    order_dir: str | None = Query(None, description="排序方向\uff08asc/desc\uff09"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -431,15 +475,19 @@ def get_leads(
             parsed_filters or [],
             current_user_id=str(current_user.id),
             has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据",
+            permission_detail="只能查看自己负责的线索\uff0c或需要 lead:view:all 权限查看他人数据",
         )
     else:
-        if owner_id is not None and owner_id not in ["me", "my"] and owner_id != str(current_user.id):
-            if not has_view_all:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="只能查看自己负责的线索，或需要 lead:view:all 权限查看他人数据"
-                )
+        if (
+            owner_id is not None
+            and owner_id not in ["me", "my"]
+            and owner_id != str(current_user.id)
+            and not has_view_all
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能查看自己负责的线索\uff0c或需要 lead:view:all 权限查看他人数据"
+            )
         if owner_id in ["me", "my"]:
             owner_id = str(current_user.id)
         if owner_id is None and not has_view_all:
@@ -490,7 +538,12 @@ def get_lead_statistics(
     return lead_crud.get_statistics(db, team_id, owner_id)
 
 
-@router.get("/{lead_id}", response_model=LeadDetailResponse, summary="获取线索详情", description="获取线索详情及跟进记录，返回负责人和创建人信息")
+@router.get(
+    "/{lead_id}",
+    response_model=LeadDetailResponse,
+    summary="获取线索详情",
+    description="获取线索详情及跟进记录\uff0c返回负责人和创建人信息",
+)
 def get_lead(
     lead_id: str,
     lead = Depends(check_lead_access),
@@ -712,7 +765,13 @@ def return_lead(
     return _build_lead_response(db, lead_crud.return_to_pool(db, lead.id, team_id))
 
 
-@router.post("/{lead_id}/follow-ups", response_model=LeadFollowUpResponse, status_code=status.HTTP_201_CREATED, summary="添加跟进记录", description="为线索添加跟进记录")
+@router.post(
+    "/{lead_id}/follow-ups",
+    response_model=LeadFollowUpResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="添加跟进记录",
+    description="为线索添加跟进记录",
+)
 def add_follow_up(
     lead_id: str,
     follow_up: LeadFollowUpCreate,
@@ -725,7 +784,12 @@ def add_follow_up(
     return _build_lead_follow_up_response(created, lead.public_id)
 
 
-@router.get("/{lead_id}/follow-ups", response_model=List[LeadFollowUpResponse], summary="获取跟进记录", description="获取线索的跟进记录列表")
+@router.get(
+    "/{lead_id}/follow-ups",
+    response_model=list[LeadFollowUpResponse],
+    summary="获取跟进记录",
+    description="获取线索的跟进记录列表",
+)
 def get_follow_ups(
     lead_id: str,
     skip: int = Query(0, ge=0, description="跳过记录数"),
@@ -774,8 +838,8 @@ def delete_follow_up(
     response_model_exclude_none=True,
     # Preserve the legacy endpoint's 200 response semantics while routing
     # the write through the canonical 201 command implementation.
-    summary="线索转化（兼容入口）",
-    description="兼容旧客户端的线索转化入口；实际执行统一转发至客户转化事务。",
+    summary="线索转化\uff08兼容入口\uff09",
+    description="兼容旧客户端的线索转化入口\uff1b实际执行统一转发至客户转化事务。",
     deprecated=True,
 )
 async def convert_lead(
@@ -785,9 +849,9 @@ async def convert_lead(
     lead=Depends(check_lead_owner),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
 ) -> ConvertResponse:
     # Keep one canonical conversion implementation. This prevents the old
     # endpoint from changing only the lead status without creating the customer.
@@ -812,7 +876,12 @@ async def convert_lead(
     )
 
 
-@router.post("/{lead_id}/mark-invalid", response_model=LeadResponse, summary="标记无效", description="将线索标记为无效，必须记录无效原因")
+@router.post(
+    "/{lead_id}/mark-invalid",
+    response_model=LeadResponse,
+    summary="标记无效",
+    description="将线索标记为无效\uff0c必须记录无效原因",
+)
 def mark_lead_invalid(
     lead_id: str,
     request_data: LeadMarkInvalidRequest,
@@ -833,15 +902,20 @@ def mark_lead_invalid(
     )
 
 
-@router.get("/public/list", response_model=PaginatedResponse[LeadResponse], summary="公海线索", description="获取公海中的线索列表（团队公海池）")
+@router.get(
+    "/public/list",
+    response_model=PaginatedResponse[LeadResponse],
+    summary="公海线索",
+    description="获取公海中的线索列表\uff08团队公海池\uff09",
+)
 def get_public_leads(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索线索名称、联系人或手机号"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索线索名称、联系人或手机号"),
+    order_by: str | None = Query(None, description="排序字段"),
+    order_dir: str | None = Query(None, description="排序方向\uff08asc/desc\uff09"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -875,13 +949,19 @@ def get_public_leads(
 analytics_router = APIRouter(prefix="/v1/analytics/leads", tags=["线索分析"])
 
 
-@analytics_router.get("/trend", response_model=List[LeadTrendResponse], summary="新增线索趋势", description="按时间统计新增线索数量")
+@analytics_router.get(
+    "/trend",
+    response_model=list[LeadTrendResponse],
+    summary="新增线索趋势",
+    description="按时间统计新增线索数量",
+)
 def get_lead_trend(
     days: int = Query(30, ge=1, le=365, description="统计天数"),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from sqlalchemy import func, extract
+    from sqlalchemy import func
+
     from app.models.lead import Lead
 
     start_date = business_now() - timedelta(days=days)
@@ -906,7 +986,12 @@ def get_lead_trend(
     ]
 
 
-@analytics_router.get("/conversion", response_model=List[LeadConversionResponse], summary="线索转化分析", description="统计各来源线索的转化率")
+@analytics_router.get(
+    "/conversion",
+    response_model=list[LeadConversionResponse],
+    summary="线索转化分析",
+    description="统计各来源线索的转化率",
+)
 def get_lead_conversion(
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),

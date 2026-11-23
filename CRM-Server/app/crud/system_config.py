@@ -1,17 +1,19 @@
 """
 系统配置 CRUD
 """
-from sqlalchemy.orm import Session
-from typing import Optional, List, Dict, Any
 import json
-from app.models.system_config import SystemConfig, ConfigType
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from app.models.system_config import ConfigType, SystemConfig
 from app.schemas.system_config import NotificationConfigResponse
 
 
 class SystemConfigCRUD:
     """系统配置 CRUD 操作"""
 
-    def get_config(self, db: Session, team_id: int, config_key: str) -> Optional[SystemConfig]:
+    def get_config(self, db: Session, team_id: int, config_key: str) -> SystemConfig | None:
         """
         获取单个配置
 
@@ -28,14 +30,14 @@ class SystemConfigCRUD:
             SystemConfig.config_key == config_key
         ).first()
 
-    def get_configs_by_type(self, db: Session, team_id: int, config_type: str) -> List[SystemConfig]:
+    def get_configs_by_type(self, db: Session, team_id: int, config_type: str) -> list[SystemConfig]:
         """
         按类型获取配置列表
 
         Args:
             db: 数据库会话
             team_id: 团队ID
-            config_type: 配置类型（notification/security/integration）
+            config_type: 配置类型\uff08notification/security/integration\uff09
 
         Returns:
             配置列表
@@ -45,9 +47,9 @@ class SystemConfigCRUD:
             SystemConfig.config_type == config_type
         ).all()
 
-    def get_notification_config(self, db: Session, team_id: int) -> Optional[NotificationConfigResponse]:
+    def get_notification_config(self, db: Session, team_id: int) -> NotificationConfigResponse | None:
         """
-        获取通知配置（封装为 NotificationConfigResponse）
+        获取通知配置\uff08封装为 NotificationConfigResponse\uff09
 
         Args:
             db: 数据库会话
@@ -62,17 +64,17 @@ class SystemConfigCRUD:
             return None
 
         # 将配置列表转换为字典
-        config_dict: Dict[str, Any] = {}
+        config_dict: dict[str, Any] = {}
         for config in configs:
             try:
                 # 尝试 JSON 反序列化
                 value = json.loads(config.config_value)
             except (json.JSONDecodeError, TypeError):
-                # 如果不是 JSON，直接使用原值
+                # 如果不是 JSON,直接使用原值
                 value = config.config_value
             config_dict[config.config_key] = value
 
-        # 获取第一个配置的元数据（id, team_id, created_time, updated_time）
+        # 获取第一个配置的元数据(id, team_id, created_time, updated_time)
         first_config = configs[0]
 
         return NotificationConfigResponse(
@@ -96,16 +98,16 @@ class SystemConfigCRUD:
         config_key: str,
         config_value: Any,
         config_type: str,
-        description: Optional[str] = None
+        description: str | None = None
     ) -> SystemConfig:
         """
-        设置配置（创建或更新）
+        设置配置\uff08创建或更新\uff09
 
         Args:
             db: 数据库会话
             team_id: 团队ID
             config_key: 配置键
-            config_value: 配置值（自动 JSON 序列化）
+            config_value: 配置值\uff08自动 JSON 序列化\uff09
             config_type: 配置类型
             description: 配置描述
 
@@ -146,9 +148,9 @@ class SystemConfigCRUD:
             db.refresh(new_config)
             return new_config
 
-    def set_notification_config(self, db: Session, team_id: int, config_data: Dict[str, Any]) -> List[SystemConfig]:
+    def set_notification_config(self, db: Session, team_id: int, config_data: dict[str, Any]) -> list[SystemConfig]:
         """
-        设置通知配置（批量）
+        设置通知配置\uff08批量\uff09
 
         Args:
             db: 数据库会话
@@ -160,13 +162,13 @@ class SystemConfigCRUD:
         """
         # 定义通知配置键及其默认描述
         notification_keys = {
-            "notification_method": "通知方式（webhook/api）",
+            "notification_method": "通知方式\uff08webhook/api\uff09",
             "feishu_webhook_url": "飞书Webhook地址",
             "feishu_webhook_enabled": "飞书Webhook是否启用",
             "notification_group_name": "通知群名称",
-            "feishu_app_id": "飞书应用ID（预留）",
-            "feishu_app_secret": "飞书应用密钥（预留）",
-            "feishu_api_enabled": "飞书API是否启用（预留）"
+            "feishu_app_id": "飞书应用ID\uff08预留\uff09",
+            "feishu_app_secret": "飞书应用密钥\uff08预留\uff09",
+            "feishu_api_enabled": "飞书API是否启用\uff08预留\uff09"
         }
 
         results = []

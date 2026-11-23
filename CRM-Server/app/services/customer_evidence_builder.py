@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from hashlib import sha256
 from typing import TYPE_CHECKING
 from uuid import NAMESPACE_URL, uuid5
 
-from app.models.customer_activity import CustomerActivity
 from app.models.customer_vector_document import CustomerVectorDocumentSourceType
-from app.models.deal_journey import CustomerDealJourneyEvent
-from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_activity_kinds import get_activity_kind_meta
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from app.models.customer import Customer
+    from app.models.customer_activity import CustomerActivity
+    from app.models.deal_journey import CustomerDealJourneyEvent
+    from app.models.sales_commitment import FollowUpTask, SalesCommitment
 
 JSONPrimitive = str | int | float | bool | None
 JSONValue = JSONPrimitive | list["JSONValue"] | dict[str, "JSONValue"]
@@ -317,7 +318,8 @@ class CustomerEvidenceBuilder:
         metadata: JSONObject = {
             "entity_type": "follow_up_task",
             "task_public_id": str(task.public_id),
-            "commitment_public_id": str(commitment.public_id) if commitment is not None and commitment.public_id else None,
+            "commitment_public_id": str(commitment.public_id) if commitment is not None
+                and commitment.public_id else None,
             "owner_id": task.owner_id,
             "creator_id": task.creator_id,
             "status": task.status,

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from datetime import datetime, timedelta
-from typing import TypeAlias, cast
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 from langgraph.store.base import BaseStore, GetOp, Item, ListNamespacesOp, Op, PutOp, Result, SearchItem, SearchOp
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
 
 from app.models.agent import AgentMemoryEntry
 from app.services.agent.types import coerce_json_dict
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from sqlalchemy.orm import Session
+    from sqlalchemy.sql.elements import ColumnElement
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -125,7 +129,7 @@ class MySQLAgentMemoryStore(BaseStore):
             _not_expired_filter(),
         )
         if op.filter:
-            query = query.filter(*_value_filters(cast(dict[str, object], op.filter)))
+            query = query.filter(*_value_filters(cast("dict[str, object]", op.filter)))
         entries = (
             query.order_by(AgentMemoryEntry.updated_time.desc(), AgentMemoryEntry.id.desc())
             .offset(max(op.offset, 0))
@@ -148,7 +152,8 @@ class MySQLAgentMemoryStore(BaseStore):
             namespaces = [
                 namespace
                 for namespace in namespaces
-                if all(_matches_namespace_condition(namespace, condition.match_type, tuple(condition.path)) for condition in op.match_conditions)
+                if all(_matches_namespace_condition(namespace, condition.match_type,
+                    tuple(condition.path)) for condition in op.match_conditions)
             ]
         filtered = [_apply_max_depth(namespace, op.max_depth) for namespace in namespaces]
         filtered = _dedupe_namespaces(filtered)
@@ -171,7 +176,8 @@ class CustomerMemoryStoreService:
         value: JsonObject,
     ) -> None:
         allowed = {"source_type", "source_object_id", "document_key", "score"}
-        if set(value) != allowed or not all(isinstance(value[field], str) and value[field] for field in allowed - {"score"}):
+        if set(value) != allowed or not all(isinstance(value[field], str) and value[
+            field] for field in allowed - {"score"}):
             raise ValueError("CUSTOMER_MEMORY_REFERENCE_INVALID")
         if not isinstance(value["score"], (int, float)) or isinstance(value["score"], bool):
             raise ValueError("CUSTOMER_MEMORY_REFERENCE_INVALID")
@@ -182,13 +188,13 @@ class CustomerMemoryStoreService:
             index=False,
         )
 
-    def upsert_summary(self, *args, **kwargs) -> None:
+    def upsert_summary(self, *args: object, **kwargs: object) -> None:
         raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
 
-    def upsert_preference(self, *args, **kwargs) -> None:
+    def upsert_preference(self, *args: object, **kwargs: object) -> None:
         raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
 
-    def upsert_fact_index(self, *args, **kwargs) -> None:
+    def upsert_fact_index(self, *args: object, **kwargs: object) -> None:
         raise ValueError("CUSTOMER_MEMORY_SECTION_REMOVED")
     def list_customer_memory(
         self,
@@ -254,7 +260,7 @@ def _json_value(value: object) -> JsonValue:
     if isinstance(value, list):
         return [_json_value(item) for item in value]
     if isinstance(value, dict):
-        return _json_object(cast(dict[str, object], value))
+        return _json_object(cast("dict[str, object]", value))
     return str(value)
 
 
@@ -264,11 +270,11 @@ def _expires_at(now: datetime, ttl_minutes: float | None) -> datetime | None:
     return now + timedelta(minutes=ttl_minutes)
 
 
-def _not_expired_filter():
+def _not_expired_filter() -> ColumnElement[bool]:
     return or_(AgentMemoryEntry.expires_at.is_(None), AgentMemoryEntry.expires_at > datetime.utcnow())
 
 
-def _namespace_prefix_filter(prefix: str):
+def _namespace_prefix_filter(prefix: str) -> ColumnElement[bool]:
     return or_(AgentMemoryEntry.namespace == prefix, AgentMemoryEntry.namespace.like(f"{prefix}{NAMESPACE_SEPARATOR}%"))
 
 
@@ -331,7 +337,8 @@ def _matches_namespace_condition(namespace: tuple[str, ...], match_type: str, pa
 def _matches_path(candidate: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
     if len(candidate) != len(pattern):
         return False
-    return all(pattern_part == "*" or candidate_part == pattern_part for candidate_part, pattern_part in zip(candidate, pattern, strict=True))
+    return all(pattern_part == "*" or candidate_part == pattern_part for candidate_part,
+        pattern_part in zip(candidate, pattern, strict=True))
 
 
 customer_memory_store_service = CustomerMemoryStoreService()

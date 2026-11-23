@@ -1,11 +1,13 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as AssistantApiModule from '@/api/assistant'
 
 const openConversation = vi.hoisted(() => vi.fn())
 const retryConversationEntry = vi.hoisted(() => vi.fn())
 const getConversation = vi.hoisted(() => vi.fn())
 
-vi.mock('@/api/assistant', () => ({
+vi.mock('@/api/assistant', async (importOriginal) => ({
+  ...(await importOriginal<typeof AssistantApiModule>()),
   assistantApi: {
     openConversation,
     retryConversationEntry,

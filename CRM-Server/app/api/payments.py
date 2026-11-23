@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Callable, Iterable, Iterator
 from datetime import date, datetime
-from typing import Iterator, List, Literal, Optional
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
@@ -28,7 +29,7 @@ from app.core.list_export import (
     run_list_export_or_400,
 )
 from app.core.list_query import optional_request_list_query, run_or_400
-from app.crud.approval import approval_crud, approval_flow_crud
+from app.crud.approval import approval_crud
 from app.crud.customer_member import customer_member_crud
 from app.crud.payment import (
     PaymentRecordIdempotencyConflict,
@@ -47,7 +48,6 @@ from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPl
 from app.models.user import User
 from app.schemas.command import CommandEffect, CommandResource
 from app.schemas.list_export import PaymentPlanListExportRequest, PaymentRecordListExportRequest
-from app.schemas.payment_composition import composition_payload
 from app.schemas.payment import (
     ContractPaymentSummary,
     PaginatedResponse,
@@ -64,6 +64,7 @@ from app.schemas.payment import (
     PaymentRecordUpdate,
     PaymentReminder,
 )
+from app.schemas.payment_composition import composition_payload
 from app.schemas.payment_record_chart import (
     PaymentRecordChartBucketRecords,
     PaymentRecordChartResponse,
@@ -87,8 +88,33 @@ from app.services.payment_record_chart_stats import (
     list_chart_bucket_records,
 )
 
+if TYPE_CHECKING:
+    from app.models.command_execution import CommandExecution
+    from app.models.customer import Customer
+
+
 router = APIRouter(prefix="/v1/payments", tags=["回款管理"])
 logger = logging.getLogger(__name__)
+
+_team_dependency = Depends(get_current_user_team)
+_user_dependency = Depends(get_current_active_user)
+_db_dependency = Depends(get_db)
+_create_plan_permission = Depends(require_permission("payment:plan:create"))
+_edit_plan_permission = Depends(require_permission("payment:plan:edit"))
+_delete_plan_permission = Depends(require_permission("payment:plan:delete"))
+_register_payment_permission = Depends(require_permission("payment:register"))
+_delete_record_permission = Depends(require_permission("payment:record:delete"))
+_submit_payment_permission = Depends(require_permission("payment:submit"))
+_due_date_start_query = Query(None, description="计划回款日期起始\uff08YYYY-MM-DD\uff09")
+_due_date_end_query = Query(None, description="计划回款日期结束\uff08YYYY-MM-DD\uff09")
+_chart_payment_date_start_query = Query(None)
+_chart_payment_date_end_query = Query(None)
+_chart_created_time_start_query = Query(None)
+_chart_created_time_end_query = Query(None)
+_payment_date_start_query = Query(None, description="回款日期起始\uff08YYYY-MM-DD\uff09")
+_payment_date_end_query = Query(None, description="回款日期结束\uff08YYYY-MM-DD\uff09")
+_created_time_start_query = Query(None, description="创建时间起始\uff08YYYY-MM-DD\uff09")
+_created_time_end_query = Query(None, description="创建时间结束\uff08YYYY-MM-DD\uff09")
 
 
 def _payment_record_request_data(record_data: object) -> object:
@@ -137,6 +163,7 @@ async def _trigger_payment_plan_intelligence_refresh(
     db: Session,
     change: CustomerBusinessObjectChangeRefreshInput | None,
 ) -> None:
+    del db  # Keep the two-argument refresh hook contract.
     if change is None:
         return
     customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
@@ -162,12 +189,13 @@ async def _trigger_payment_record_intelligence_refresh(
     db: Session,
     change: CustomerBusinessObjectChangeRefreshInput | None,
 ) -> None:
+    del db  # Keep the two-argument refresh hook contract.
     if change is None:
         return
     customer_business_object_intelligence_service.enqueue_change_refresh_after_commit(change)
 
 
-def _customer_public_id(customer) -> Optional[str]:
+def _customer_public_id(customer: "Customer | None") -> str | None:
     return customer.public_id if customer else None
 
 
@@ -175,7 +203,7 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
     contract = plan.contract
     customer = contract.customer if contract and getattr(contract, "customer", None) else None
     opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
-    return PaymentPlanResponse(**{
+    return PaymentPlanResponse.model_validate({
         "id": plan.id,
         "contract_id": plan.contract_id,
         "plan_number": plan.plan_number,
@@ -189,7 +217,7 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
         "paid_amount": float(getattr(plan, "paid_amount", 0) or 0),
         "remaining_amount": float(getattr(plan, "remaining_amount", plan.planned_amount) or 0),
         "payment_records": [
-            PaymentRecordInfo(**{
+            PaymentRecordInfo.model_validate({
                 "id": record.id,
                 "actual_amount": float(record.actual_amount),
                 "actual_payer_name": getattr(record, "actual_payer_name", None),
@@ -200,8 +228,16 @@ def _payment_plan_response(plan: PaymentPlan) -> PaymentPlanResponse:
                 "creator_id": record.creator_id,
                 "creator_name": record.creator_name,
                 "notes": record.notes,
-                "confirmation_status": record.confirmation_status.value if hasattr(record.confirmation_status, "value") else record.confirmation_status,
-                "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, "value") else record.approval_phase,
+                "confirmation_status": (
+                    record.confirmation_status.value
+                    if hasattr(record.confirmation_status, "value")
+                    else record.confirmation_status
+                ),
+                "approval_phase": (
+                    record.approval_phase.value
+                    if hasattr(record.approval_phase, "value")
+                    else record.approval_phase
+                ),
                 "approval_id": record.approval_id,
                 "created_time": record.created_time,
             })
@@ -276,12 +312,12 @@ def _blank_business_number(value: object) -> str | None:
 def _enum_value(value: object) -> str | None:
     if value is None:
         return None
-    return getattr(value, "value", value)
+    return cast("str | None", getattr(value, "value", value))
 
 
 def resolve_payment_scope_user_id(
     db: Session,
-    current_user,
+    current_user: User,
     team_id: int,
     *,
     me: bool,
@@ -303,7 +339,7 @@ def resolve_payment_scope_user_id(
     return None
 
 
-def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | None:
+def _payment_view_own_user_id(db: Session, current_user: User, team_id: int) -> str | None:
     return resolve_payment_scope_user_id(
         db,
         current_user,
@@ -312,6 +348,16 @@ def _payment_view_own_user_id(db: Session, current_user, team_id: int) -> str | 
         missing_detail="没有查看回款数据的权限",
     )
 
+
+class _PaymentPlanProjection(Protocol):
+    owner_name: str | None
+    contract_name: str
+    creator_id: str
+    customer_id: str | None
+    customer_name: str | None
+    opportunity_id: int | None
+    opportunity_name: str | None
+    owner_id: str | None
 
 def _attach_payment_plan_owner_names(projection_db: Session, plans: list[PaymentPlan]) -> None:
     from app.models.user import User
@@ -335,9 +381,10 @@ def _attach_payment_plan_owner_names(projection_db: Session, plans: list[Payment
         str(user.id): user.name
         for user in projection_db.query(User).filter(User.id.in_(owner_ids)).all()
     } if owner_ids else {}
+    # Owner names are a presentation-only projection, not mapped columns.
     for plan in plans:
         owner_id = owner_id_by_plan.get(plan.id)
-        plan.owner_name = owner_name_by_id.get(owner_id) if owner_id else None
+        cast("_PaymentPlanProjection", plan).owner_name = owner_name_by_id.get(owner_id) if owner_id else None
 
 
 def _payment_plan_export_row(plan: PaymentPlan) -> dict[str, object]:
@@ -351,13 +398,13 @@ def _payment_plan_export_row(plan: PaymentPlan) -> dict[str, object]:
         "contract_name": contract.contract_name if contract is not None else None,
         "plan_amount": float(plan.planned_amount),
         "due_date": plan.due_date,
-        "status": PAYMENT_PLAN_STATUS_LABELS.get(status_value, status_value),
+        "status": PAYMENT_PLAN_STATUS_LABELS.get(status_value, status_value) if status_value is not None else None,
     }
 
 
 def _iter_payment_plan_export_rows(
-    stream,
-    projection_session_factory=SessionLocal,
+    stream: Iterable[PaymentPlan],
+    projection_session_factory: Callable[[], Session] = SessionLocal,
 ) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
@@ -387,7 +434,7 @@ def _build_payment_record_list_items(
     team_id: int,
     *,
     include_approval: bool = True,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     from app.models.contract import Contract
     from app.models.customer import Customer
     from app.models.invoice import InvoiceApplication
@@ -500,8 +547,9 @@ def _build_payment_record_list_items(
 
     approval_ids = {record.approval_id for record in records if record.approval_id}
 
+    # Legacy approval models use Column descriptors without Mapped instance types.
     approvals_by_id = {
-        approval.id: approval
+        cast("int", approval.id): approval
         for approval in projection_db.query(Approval).filter(
             Approval.id.in_(approval_ids),
             Approval.team_id == team_id,
@@ -515,9 +563,10 @@ def _build_payment_record_list_items(
             ApprovalRecord.team_id == team_id,
         ).order_by(ApprovalRecord.created_time, ApprovalRecord.id).all()
         for approval_record in approval_records:
-            approval_records_by_approval.setdefault(approval_record.approval_id, []).append(approval_record)
+            approval_id = cast("int", approval_record.approval_id)
+            approval_records_by_approval.setdefault(approval_id, []).append(approval_record)
 
-    items = []
+    items: list[dict[str, object]] = []
     for record in records:
         plan = plans.get(record.payment_plan_id)
         contract = contracts.get(plan.contract_id) if plan is not None else None
@@ -528,7 +577,7 @@ def _build_payment_record_list_items(
             else None
         )
         owner_id = owner_id_by_record.get(record.id)
-        item_dict = {
+        item_dict: dict[str, object] = {
             "id": record.id,
             "payment_plan_id": record.payment_plan_id,
             "record_number": record.record_number,
@@ -577,7 +626,7 @@ def _build_payment_record_list_items(
 
 
 
-def _composition_segment(item: dict, segment: str) -> dict | None:
+def _composition_segment(item: dict[str, object], segment: str) -> dict[str, int | float] | None:
     composition = item.get("composition")
     if not isinstance(composition, dict):
         return None
@@ -585,21 +634,21 @@ def _composition_segment(item: dict, segment: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
-def _composition_export_count(item: dict, segment: str) -> str | None:
+def _composition_export_count(item: dict[str, object], segment: str) -> str | None:
     value = _composition_segment(item, segment)
     if value is None or value.get("headcount") is None:
         return None
     return str(int(value["headcount"]))
 
 
-def _composition_export_amount(item: dict, segment: str):
+def _composition_export_amount(item: dict[str, object], segment: str) -> int | float | None:
     value = _composition_segment(item, segment)
     if value is None or value.get("amount") is None:
         return None
     return value["amount"]
 
 
-def _payment_record_export_row(item: dict) -> dict[str, object]:
+def _payment_record_export_row(item: dict[str, object]) -> dict[str, object]:
     created_time = item.get("created_time")
     if isinstance(created_time, str):
         created_time = datetime.fromisoformat(created_time)
@@ -625,15 +674,18 @@ def _payment_record_export_row(item: dict) -> dict[str, object]:
         "owner_name": item.get("owner_name"),
         "commission_member_name": item.get("commission_member_name"),
         "payment_date": payment_date,
-        "confirmation_status": PAYMENT_RECORD_STATUS_LABELS.get(confirmation_status, confirmation_status),
+        "confirmation_status": (
+            PAYMENT_RECORD_STATUS_LABELS.get(confirmation_status, confirmation_status)
+            if confirmation_status is not None else None
+        ),
         "created_time": created_time,
     }
 
 
 def _iter_payment_record_export_rows(
-    stream,
+    stream: Iterable[PaymentRecord],
     team_id: int,
-    projection_session_factory=SessionLocal,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
 ) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
@@ -660,7 +712,7 @@ def _payment_record_response(
     contract = plan.contract if plan else None
     customer = contract.customer if contract and getattr(contract, "customer", None) else None
     opportunity = contract.opportunity if contract and getattr(contract, "opportunity", None) else None
-    return PaymentRecordResponse(**{
+    return PaymentRecordResponse.model_validate({
         "id": record.id,
         "payment_plan_id": record.payment_plan_id,
         "record_number": record.record_number,
@@ -672,7 +724,11 @@ def _payment_record_response(
         "composition": composition_payload(record),
         "creator_id": record.creator_id,
         "creator_name": record.creator_name,
-        "approval_phase": record.approval_phase.value if hasattr(record.approval_phase, "value") else record.approval_phase,
+        "approval_phase": (
+            record.approval_phase.value
+            if hasattr(record.approval_phase, "value")
+            else record.approval_phase
+        ),
         "created_time": record.created_time,
         "contract_id": contract.id if contract else None,
         "contract_name": contract.contract_name if contract else None,
@@ -703,18 +759,18 @@ def _payment_record_response(
     })
 
 
-def _payment_record_from_command_replay(execution) -> PaymentRecordResponse:
+def _payment_record_from_command_replay(execution: "CommandExecution") -> PaymentRecordResponse:
     """Return a previously committed payment response without replaying writes."""
     payload = command_execution_service.to_response_payload(execution)
     if execution.status == CommandExecutionStatus.SUCCEEDED:
         data = payload.get("data")
         if isinstance(data, dict):
-            return PaymentRecordResponse(**data)
+            return PaymentRecordResponse.model_validate(data)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "operation_id": execution.operation_id,
-                "message": "操作结果格式异常，请通过操作编号查询结果",
+                "message": "操作结果格式异常\uff0c请通过操作编号查询结果",
             },
         )
     if execution.status == CommandExecutionStatus.PENDING:
@@ -722,12 +778,16 @@ def _payment_record_from_command_replay(execution) -> PaymentRecordResponse:
             status_code=status.HTTP_202_ACCEPTED,
             detail={
                 "operation_id": execution.operation_id,
-                "message": "回款登记正在处理中，请稍候查询结果",
+                "message": "回款登记正在处理中\uff0c请稍候查询结果",
             },
         )
     error = payload.get("error")
     message = error.get("message") if isinstance(error, dict) else "回款登记未成功"
-    response_status = status.HTTP_409_CONFLICT if execution.status == CommandExecutionStatus.CONFLICT else status.HTTP_400_BAD_REQUEST
+    response_status = (
+        status.HTTP_409_CONFLICT
+        if execution.status == CommandExecutionStatus.CONFLICT
+        else status.HTTP_400_BAD_REQUEST
+    )
     raise HTTPException(
         status_code=response_status,
         detail={"operation_id": execution.operation_id, "message": message},
@@ -752,6 +812,7 @@ def _persist_payment_command_failure(
     command_status: str = CommandExecutionStatus.FAILED,
 ) -> None:
     """Persist a failure after the business transaction has been rolled back."""
+    del customer_id  # Command persistence is scoped by team and operation.
     try:
         execution, replay = command_execution_service.begin(
             db,
@@ -783,14 +844,14 @@ def _persist_payment_command_failure(
 def _validate_payment_commission_member(
     db: Session,
     team_id: int,
-    customer_id: Optional[int],
+    customer_id: int | None,
     current_user_id: str,
-    commission_member_id: Optional[str],
+    commission_member_id: str | None,
 ) -> None:
     if customer_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="回款计划未关联合同客户，无法选择提成成员"
+            detail="回款计划未关联合同客户\uff0c无法选择提成成员"
         )
     if not commission_member_id:
         raise HTTPException(
@@ -805,7 +866,7 @@ def _validate_payment_commission_member(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="提成协作成员不存在"
-        )
+        ) from None
 
     if normalized_member_id == current_user_id:
         return
@@ -826,25 +887,31 @@ def _validate_payment_commission_member(
     if member is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="提成协作成员必须是当前客户的团队成员，或选择你自己"
+            detail="提成协作成员必须是当前客户的团队成员\uff0c或选择你自己"
         )
 
 
-@router.post("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], status_code=status.HTTP_201_CREATED, summary="创建回款计划", description="为指定合同创建回款计划，支持批量创建多个阶段。只有已签署的合同可以创建回款计划，所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。")
+@router.post(
+    "/contracts/{contract_id}/payment-plans",
+    response_model=list[PaymentPlanResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="创建回款计划",
+    description="为指定合同创建回款计划\uff0c支持批量创建多个阶段。只有已签署的合同可以创建回款计划\uff0c所有阶段的计划金额之和不能超过合同总金额。返回创建成功的回款计划列表。",
+)
 async def create_payment_plans(
     contract_id: int,
     plans_data: PaymentPlanBatchCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:plan:create")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _create_plan_permission,
+    db: Session = _db_dependency
+) -> list[PaymentPlanResponse]:
     contract = check_contract_edit_permission(contract_id, team_id, current_user, db)
 
     from app.models.contract import ContractStatus
     if contract.status != ContractStatus.SIGNED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"只有已签署的合同可以创建回款计划，当前状态: {contract.status}"
+            detail=f"只有已签署的合同可以创建回款计划\uff0c当前状态: {contract.status}"
         )
 
     try:
@@ -864,22 +931,30 @@ async def create_payment_plans(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建回款计划失败: {str(e)}"
-        )
+            detail=f"创建回款计划失败: {e!s}"
+        ) from e
 
 
-@router.get("/contracts/{contract_id}/payment-plans", response_model=List[PaymentPlanResponse], summary="查询合同回款计划", description="获取指定合同下的所有回款计划，包括计划金额、已回款金额、待回款金额等信息。支持按回款状态筛选（PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记）。")
+@router.get(
+    "/contracts/{contract_id}/payment-plans",
+    response_model=list[PaymentPlanResponse],
+    summary="查询合同回款计划",
+    description=(
+        "获取指定合同下的所有回款计划\uff0c包括计划金额、已回款金额、待回款金额等信息。支持按回款状态筛选\uff08PENDING待回款、OVERDUE已逾期、"
+        "PARTIAL部分回款、COMPLETED已登记\uff09。"
+    ),
+)
 def get_payment_plans(
     contract_id: int,
-    status: Optional[str] = Query(None, description="回款状态筛选"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    status: str | None = Query(None, description="回款状态筛选"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[PaymentPlanResponse]:
     check_contract_view_permission(contract_id, team_id, current_user, db)
 
     plans = payment_plan_crud.get_by_contract_id(db, contract_id, status)
@@ -901,44 +976,52 @@ def get_payment_plans(
 
         for plan in plans:
             plan.contract = contract
-            plan.contract_name = contract.contract_name
-            plan.creator_id = contract.creator_id
-            plan.customer_id = customer.public_id if customer else None
-            plan.customer_name = customer.account_name if customer else None
-            plan.opportunity_id = contract.opportunity_id
-            plan.opportunity_name = opportunity.opportunity_name if opportunity else None
-            plan.owner_id = contract.owner_id
+            projection = cast("_PaymentPlanProjection", plan)
+            projection.contract_name = contract.contract_name
+            projection.creator_id = contract.creator_id
+            projection.customer_id = customer.public_id if customer else None
+            projection.customer_name = customer.account_name if customer else None
+            projection.opportunity_id = contract.opportunity_id
+            projection.opportunity_name = opportunity.opportunity_name if opportunity else None
+            projection.owner_id = contract.owner_id
 
     return [_payment_plan_response(plan) for plan in plans]
 
 
-@router.get("/payment-plans", response_model=PaginatedResponse[PaymentPlanResponse], summary="查询回款计划列表", description="支持按状态、负责人、日期范围等条件筛选并分页查询回款计划。返回计划详情及关联的客户、商机、合同信息。可用于前端表格渲染和数据筛选。")
+@router.get(
+    "/payment-plans",
+    response_model=PaginatedResponse[PaymentPlanResponse],
+    summary="查询回款计划列表",
+    description="支持按状态、负责人、日期范围等条件筛选并分页查询回款计划。返回计划详情及关联的客户、商机、合同信息。可用于前端表格渲染和数据筛选。",
+)
 def list_payment_plans(
-    plan_status: Optional[str] = Query(None, alias="status", description="回款状态筛选：PENDING, OVERDUE, PARTIAL, COMPLETED"),
-    status_exclude: Optional[str] = Query(None, description="排除的回款状态，多个值用逗号分隔"),
-    owner_id: Optional[str] = Query(None, description="负责人飞书ID（合同创建人）"),
-    keyword: Optional[str] = Query(None, description="关键词，支持客户、合同、商机、阶段名称"),
-    search: Optional[str] = Query(None, description="统一搜索词，支持计划编号、阶段、客户全称/简称/别名、合同、商机"),
+    plan_status: str | None = Query(
+        None, alias="status", description="回款状态筛选\uff1aPENDING, OVERDUE, PARTIAL, COMPLETED"
+    ),
+    status_exclude: str | None = Query(None, description="排除的回款状态\uff0c多个值用逗号分隔"),
+    owner_id: str | None = Query(None, description="负责人飞书ID\uff08合同创建人\uff09"),
+    keyword: str | None = Query(None, description="关键词\uff0c支持客户、合同、商机、阶段名称"),
+    search: str | None = Query(None, description="统一搜索词\uff0c支持计划编号、阶段、客户全称/简称/别名、合同、商机"),
     me: bool = Query(False, description="是否只查询当前用户的计划"),
-    due_date_start: Optional[date] = Query(None, description="计划回款日期起始（YYYY-MM-DD）"),
-    due_date_end: Optional[date] = Query(None, description="计划回款日期结束（YYYY-MM-DD）"),
-    sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
-    order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
-    order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
+    due_date_start: date | None = _due_date_start_query,
+    due_date_end: date | None = _due_date_end_query,
+    sort: str | None = Query(None, description="多字段排序\uff0c格式\uff1afield:asc,field2:desc"),
+    order_by: str | None = Query(None, description="兼容旧版单字段排序"),
+    order_dir: str | None = Query(None, description="兼容旧版排序方向\uff08asc/desc\uff09"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> PaginatedResponse[PaymentPlanResponse]:
     """
-    查询回款计划列表（添加权限隔离）
+    查询回款计划列表\uff08添加权限隔离\uff09
 
-    权限逻辑：
+    权限逻辑\uff1a
     - payment:view:all → 可查看所有回款计划
-    - payment:view:own → 只能查看自己创建的回款计划（通过合同创建人）
+    - payment:view:own → 只能查看自己创建的回款计划\uff08通过合同创建人\uff09
     - 都没有 → 403 Forbidden
     """
     from app.crud.permission import permission_crud
@@ -961,7 +1044,7 @@ def list_payment_plans(
     # 数据所有权隔离
     current_user_id = None
     if me or (has_view_own and not has_view_all):
-        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
+        # 如果只有 view:own 权限,或者用户明确选择只看自己的数据
         current_user_id = str(current_user.id)
 
     parsed_filters, parsed_sorts = optional_request_list_query(
@@ -1006,8 +1089,8 @@ def list_payment_plans(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"查询回款计划失败: {str(e)}"
-        )
+            detail=f"查询回款计划失败: {e!s}"
+        ) from e
 
 
 @router.post(
@@ -1018,9 +1101,9 @@ def list_payment_plans(
 )
 def export_payment_plans(
     request: PaymentPlanListExportRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> FileResponse:
     current_user_id = _payment_view_own_user_id(db, current_user, team_id)
     query = run_or_400(lambda: payment_plan_crud.build_list_query(
@@ -1044,24 +1127,32 @@ def export_payment_plans(
 
 
 
-@router.get("/payment-plans/badge-counts", summary="获取回款计划 Badge 数量", description="返回各类待处理数量：pending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交)、pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)")
+@router.get(
+    "/payment-plans/badge-counts",
+    response_model=None,
+    summary="获取回款计划 Badge 数量",
+    description=(
+        "返回各类待处理数量\uff1apending(未登记)、partial(部分回款)、overdue(逾期)、pending_submit(待提交)、"
+        "pending_approval(审批中-团队)、pending_approval_me(审批中-待我审批)"
+    ),
+)
 def get_payment_plan_badge_counts(
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> dict[str, int]:
     """
-    获取回款计划 Badge 数量（Task 8.3: 增加 pending_approval_me）
+    获取回款计划 Badge 数量\uff08Task 8.3: 增加 pending_approval_me\uff09
 
-    返回：
-    - pending: 未登记的计划数（status=PENDING 且 payment_records.length=0）
-    - partial: 部分回款的计划数（status=PARTIAL）
-    - overdue: 逾期计划数（status=OVERDUE）
-    - pending_submit: 待提交的记录数（confirmation_status=PENDING 且无关联审批）
-    - pending_approval: 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）- 团队总数
-    - pending_approval_me: 待我审批的数量（与审批中心一致）
+    返回\uff1a
+    - pending: 未登记的计划数\uff08status=PENDING 且 payment_records.length=0\uff09
+    - partial: 部分回款的计划数\uff08status=PARTIAL\uff09
+    - overdue: 逾期计划数\uff08status=OVERDUE\uff09
+    - pending_submit: 待提交的记录数\uff08confirmation_status=PENDING 且无关联审批\uff09
+    - pending_approval: 审批中的记录数\uff08confirmation_status=PENDING 且审批状态=PENDING\uff09- 团队总数
+    - pending_approval_me: 待我审批的数量\uff08与审批中心一致\uff09
     """
-    # 1. 未登记的计划数（PENDING 且没有任何回款记录）
+    # 1. 未登记的计划数(PENDING 且没有任何回款记录)
     pending_count = db.query(PaymentPlan).filter(
         PaymentPlan.team_id == team_id,
         PaymentPlan.status == PaymentPlanStatus.PENDING,
@@ -1080,7 +1171,7 @@ def get_payment_plan_badge_counts(
         PaymentPlan.status == PaymentPlanStatus.OVERDUE
     ).count()
 
-    # 4. 待提交的记录数（confirmation_status=PENDING 且没有关联审批）
+    # 4. 待提交的记录数(confirmation_status=PENDING 且没有关联审批)
     # 查找没有审批记录的回款记录
     pending_submit_count = db.query(PaymentRecord).filter(
         PaymentRecord.team_id == team_id,
@@ -1093,7 +1184,7 @@ def get_payment_plan_badge_counts(
         )
     ).count()
 
-    # 5. 审批中的记录数（confirmation_status=PENDING 且审批状态=PENDING）- 团队总数
+    # 5. 审批中的记录数(confirmation_status=PENDING 且审批状态=PENDING)- 团队总数
     pending_approval_count = db.query(PaymentRecord).join(
         Approval,
         PaymentRecord.id == Approval.business_id
@@ -1105,7 +1196,7 @@ def get_payment_plan_badge_counts(
         Approval.status == ApprovalStatus.PENDING
     ).count()
 
-    # 查询冻结参与人中的待我审批数量，避免读取已移除的节点角色字段。
+    # 查询冻结参与人中的待我审批数量,避免读取已移除的节点角色字段。
     pending_approval_me_count = query_pending_approval_me(db, team_id, current_user.id)
 
     return {
@@ -1118,13 +1209,18 @@ def get_payment_plan_badge_counts(
     }
 
 
-@router.get("/contracts/{contract_id}/payment-summary", response_model=ContractPaymentSummary, summary="查询合同回款汇总", description="获取指定合同的回款汇总信息，包括合同金额、已回款金额、回款状态、计划完成情况等")
+@router.get(
+    "/contracts/{contract_id}/payment-summary",
+    response_model=ContractPaymentSummary,
+    summary="查询合同回款汇总",
+    description="获取指定合同的回款汇总信息\uff0c包括合同金额、已回款金额、回款状态、计划完成情况等",
+)
 def get_payment_summary(
     contract_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> ContractPaymentSummary:
     from app.models.customer import Customer
     from app.models.opportunity import Opportunity
 
@@ -1171,24 +1267,29 @@ def get_payment_summary(
 
 
 
-@router.get("/payment-plans/{plan_id}", summary="查询回款计划详情", description="获取指定回款计划的详细信息，包括计划金额、已回款金额、待回款金额、回款记录列表、关联的合同和客户信息、最新审批信息。")
+@router.get(
+    "/payment-plans/{plan_id}",
+    response_model=None,
+    summary="查询回款计划详情",
+    description="获取指定回款计划的详细信息\uff0c包括计划金额、已回款金额、待回款金额、回款记录列表、关联的合同和客户信息、最新审批信息。",
+)
 def get_payment_plan_detail(
     plan_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> dict[str, object]:
     """
-    获取回款计划详情（含回款记录 + 审批信息）
+    获取回款计划详情\uff08含回款记录 + 审批信息\uff09
 
-    返回（Task 8.2）：
+    返回\uff08Task 8.2\uff09\uff1a
     - PaymentPlan 基本信息
     - PaymentRecord 列表
-    - latest_approval：最新回款记录的审批信息
+    - latest_approval\uff1a最新回款记录的审批信息
     """
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
 
-    # 从关联对象获取信息（不修改 plan 对象）
+    # 从关联对象获取信息(不修改 plan 对象)
     contract_name = None
     creator_id = None
     customer_id = None
@@ -1203,7 +1304,7 @@ def get_payment_plan_detail(
         internal_customer_id = plan.contract.customer_id
         opportunity_id = plan.contract.opportunity_id
 
-        # 手动查询 customer（Contract 没有 customer relationship）
+        # 手动查询 customer(Contract 没有 customer relationship)
         if internal_customer_id:
             from app.crud.customer import customer_crud
             customer = customer_crud.get_by_id(db, internal_customer_id)
@@ -1211,7 +1312,7 @@ def get_payment_plan_detail(
                 customer_id = customer.public_id
                 customer_name = customer.account_name
 
-        # 手动查询 opportunity（Contract 没有 opportunity relationship）
+        # 手动查询 opportunity(Contract 没有 opportunity relationship)
         if opportunity_id:
             from app.crud.opportunity import opportunity_crud
             opportunity = opportunity_crud.get_by_id(db, opportunity_id, team_id)
@@ -1241,7 +1342,7 @@ def get_payment_plan_detail(
                     created_time=approval.created_time.isoformat(),
                 )
 
-    # 构建响应（添加 approval 信息）
+    # 构建响应(添加 approval 信息)
     # Task 1.2: Compute invoice fields using model properties
     invoiced_amount = float(plan.invoiced_amount)
     invoice_count = plan.invoice_count
@@ -1269,7 +1370,11 @@ def get_payment_plan_detail(
                 "creator_id": r.creator_id,
                 "creator_name": r.creator_name,
                 "notes": r.notes,
-                "confirmation_status": r.confirmation_status.value if hasattr(r.confirmation_status, 'value') else r.confirmation_status,
+                "confirmation_status": (
+                    r.confirmation_status.value
+                    if hasattr(r.confirmation_status, 'value')
+                    else r.confirmation_status
+                ),
                 "approval_phase": r.approval_phase.value if hasattr(r.approval_phase, 'value') else r.approval_phase,
                 "approval_id": r.approval_id,
                 "created_time": r.created_time.isoformat()
@@ -1296,14 +1401,19 @@ def get_payment_plan_detail(
     return response
 
 
-@router.put("/payment-plans/{plan_id}", response_model=PaymentPlanResponse, summary="修改回款计划", description="修改指定的回款计划。已登记的计划或已有回款记录的计划不能修改金额和日期，只能修改阶段名称和备注。")
+@router.put(
+    "/payment-plans/{plan_id}",
+    response_model=PaymentPlanResponse,
+    summary="修改回款计划",
+    description="修改指定的回款计划。已登记的计划或已有回款记录的计划不能修改金额和日期\uff0c只能修改阶段名称和备注。",
+)
 async def update_payment_plan(
     plan_id: int,
     plan_data: PaymentPlanUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:plan:edit")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _edit_plan_permission,
+    db: Session = _db_dependency
+) -> PaymentPlanResponse:
     plan = check_payment_view_permission(plan_id, team_id, current_user, db)
 
     if plan.status in [PaymentPlanStatus.COMPLETED]:
@@ -1315,7 +1425,7 @@ async def update_payment_plan(
     if plan.payment_records:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="存在关联的回款记录，不能修改金额和日期"
+            detail="存在关联的回款记录\uff0c不能修改金额和日期"
         )
 
     try:
@@ -1335,16 +1445,22 @@ async def update_payment_plan(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.delete("/payment-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款计划", description="删除指定的回款计划。存在关联回款记录的计划不能删除，删除后无法恢复。")
+@router.delete(
+    "/payment-plans/{plan_id}",
+    response_model=None,
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="删除回款计划",
+    description="删除指定的回款计划。存在关联回款记录的计划不能删除\uff0c删除后无法恢复。",
+)
 async def delete_payment_plan(
     plan_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:plan:delete")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _delete_plan_permission,
+    db: Session = _db_dependency
+) -> None:
     try:
         plan = check_payment_view_permission(plan_id, team_id, current_user, db)
         change = _build_payment_plan_intelligence_change(
@@ -1367,24 +1483,30 @@ async def delete_payment_plan(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.post("/payment-plans/{plan_id}/records", response_model=PaymentRecordResponse, status_code=status.HTTP_201_CREATED, summary="登记回款", description="为指定的回款计划登记回款记录。系统会自动校验回款金额，确保累计回款不超过计划金额。登记后自动更新计划状态和合同回款状态。返回创建成功的回款记录。")
+@router.post(
+    "/payment-plans/{plan_id}/records",
+    response_model=PaymentRecordResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="登记回款",
+    description="为指定的回款计划登记回款记录。系统会自动校验回款金额\uff0c确保累计回款不超过计划金额。登记后自动更新计划状态和合同回款状态。返回创建成功的回款记录。",
+)
 async def create_payment_record(
     plan_id: int,
     record_data: PaymentRecordCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:register")),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
-    db: Session = Depends(get_db),
-):
-    """登记回款，并为结果提供可查询的操作记录。
+    team_id: int = _team_dependency,
+    current_user: User = _register_payment_permission,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
+    db: Session = _db_dependency,
+) -> PaymentRecordResponse:
+    """登记回款\uff0c并为结果提供可查询的操作记录。
 
-    回款写入属于财务事实：业务事务和命令结果在同一个事务中提交。
-    因网络超时或刷新导致结果不可见时，客户端只能查询 operation_id，不能
+    回款写入属于财务事实\uff1a业务事务和命令结果在同一个事务中提交。
+    因网络超时或刷新导致结果不可见时\uff0c客户端只能查询 operation_id\uff0c不能
     重新创建另一笔回款。
     """
     if not isinstance(idempotency_key, str):
@@ -1418,10 +1540,10 @@ async def create_payment_record(
             if existing_record.idempotency_fingerprint != payment_record_request_fingerprint(plan_id, record_data):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="幂等键已用于其他回款登记请求，请勿复用",
+                    detail="幂等键已用于其他回款登记请求\uff0c请勿复用",
                 )
-            # 兼容在统一命令记录上线前已经落库的回款记录：补写一条
-            # 已完成的 command execution，后续统一通过 operation_id 查询。
+            # 兼容在统一命令记录上线前已经落库的回款记录:补写一条
+            # 已完成的 command execution,后续统一通过 operation_id 查询。
             fingerprint = request_fingerprint({
                 "plan_id": plan_id,
                 "record": _payment_record_request_data(record_data),
@@ -1445,7 +1567,7 @@ async def create_payment_record(
                     return _payment_record_from_command_replay(execution)
                 response = _payment_record_response(
                     existing_record,
-                    operation_id=execution.operation_id,
+                    operation_id=cast("str", execution.operation_id),
                     status=CommandExecutionStatus.SUCCEEDED,
                 )
                 command_execution_service.succeed(
@@ -1462,7 +1584,7 @@ async def create_payment_record(
                 if isinstance(exc, CommandAlreadyInProgress):
                     raise HTTPException(
                         status_code=status.HTTP_202_ACCEPTED,
-                        detail={"operation_id": str(exc), "message": "回款登记正在处理中，请稍候查询结果"},
+                        detail={"operation_id": str(exc), "message": "回款登记正在处理中\uff0c请稍候查询结果"},
                     ) from exc
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -1477,7 +1599,7 @@ async def create_payment_record(
     if plan.status == PaymentPlanStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该回款计划已登记，无法继续登记回款",
+            detail="该回款计划已登记\uff0c无法继续登记回款",
         )
 
     # CommandExecution.begin flushes a command row. Take the customer fence
@@ -1510,7 +1632,7 @@ async def create_payment_record(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
-            detail={"operation_id": str(exc), "message": "回款登记正在处理中，请稍候查询结果"},
+            detail={"operation_id": str(exc), "message": "回款登记正在处理中\uff0c请稍候查询结果"},
         ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
@@ -1559,7 +1681,7 @@ async def create_payment_record(
 
         response = _payment_record_response(
             record,
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             status=CommandExecutionStatus.SUCCEEDED,
         )
         command_execution_service.succeed(
@@ -1587,7 +1709,7 @@ async def create_payment_record(
                 command_type="PAYMENT_RECORD_CREATE",
                 resource_type="PAYMENT_RECORD",
                 resource_public_id=str(exc.record.id),
-                operation_id=execution.operation_id,
+                operation_id=cast("str", execution.operation_id),
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
                 correlation_id=correlation_id,
@@ -1596,7 +1718,7 @@ async def create_payment_record(
                 return _payment_record_from_command_replay(execution)
             response = _payment_record_response(
                 exc.record,
-                operation_id=execution.operation_id,
+                operation_id=cast("str", execution.operation_id),
                 status=CommandExecutionStatus.SUCCEEDED,
             )
             command_execution_service.succeed(
@@ -1610,7 +1732,10 @@ async def create_payment_record(
             return response
         except Exception:
             db.rollback()
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果") from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="回款登记发生并发冲突\uff0c请刷新后确认结果",
+            ) from exc
     except PaymentRecordIdempotencyConflict as exc:
         db.rollback()
         _persist_payment_command_failure(
@@ -1621,7 +1746,7 @@ async def create_payment_record(
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
             resource_public_id=str(plan_id),
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
@@ -1639,15 +1764,18 @@ async def create_payment_record(
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
             resource_public_id=str(plan_id),
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
             error_code="PAYMENT_RECORD_CONFLICT",
-            error_message="回款登记发生并发冲突，请刷新后确认结果",
+            error_message="回款登记发生并发冲突\uff0c请刷新后确认结果",
         )
         logger.error("[Payment] 回款登记唯一性冲突", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="回款登记发生并发冲突，请刷新后确认结果") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="回款登记发生并发冲突\uff0c请刷新后确认结果",
+        ) from exc
     except ValueError as exc:
         db.rollback()
         _persist_payment_command_failure(
@@ -1658,7 +1786,7 @@ async def create_payment_record(
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
             resource_public_id=str(plan_id),
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
@@ -1676,12 +1804,12 @@ async def create_payment_record(
             command_type="PAYMENT_RECORD_CREATE",
             resource_type="PAYMENT_PLAN",
             resource_public_id=str(plan_id),
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
             error_code="PAYMENT_RECORD_UNKNOWN",
-            error_message="回款登记结果暂未确认，请通过操作编号查询最终状态",
+            error_message="回款登记结果暂未确认\uff0c请通过操作编号查询最终状态",
             command_status=CommandExecutionStatus.UNKNOWN,
         )
         logger.error("[Payment] 登记回款失败", exc_info=True)
@@ -1689,18 +1817,23 @@ async def create_payment_record(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "operation_id": execution.operation_id,
-                "message": "回款登记结果暂未确认，请稍后查询操作结果",
+                "message": "回款登记结果暂未确认\uff0c请稍后查询操作结果",
             },
         ) from exc
 
 
-@router.get("/payment-plans/{plan_id}/records", response_model=List[PaymentRecordResponse], summary="查询回款记录", description="获取指定回款计划下的所有回款记录，按回款日期倒序排列。包含每笔回款的详细信息，如回款金额、回款日期、登记人等。")
+@router.get(
+    "/payment-plans/{plan_id}/records",
+    response_model=list[PaymentRecordResponse],
+    summary="查询回款记录",
+    description="获取指定回款计划下的所有回款记录\uff0c按回款日期倒序排列。包含每笔回款的详细信息\uff0c如回款金额、回款日期、登记人等。",
+)
 def get_payment_records(
     plan_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[PaymentRecordResponse]:
     check_payment_view_permission(plan_id, team_id, current_user, db)
     
     return [
@@ -1716,7 +1849,7 @@ def _payment_approval_info(
     *,
     records: list[ApprovalRecord] | None = None,
     include_times: bool = False,
-) -> dict | None:
+) -> dict[str, object] | None:
     """Serialize frozen assignments separately from recorded actions."""
     if approval is None or approval.team_id != team_id:
         return None
@@ -1791,7 +1924,7 @@ def _payment_approval_info(
 def _payment_record_detail_response(
     record: PaymentRecord,
     team_id: int,
-    current_user,
+    current_user: User,
     db: Session,
     *,
     authorized: bool = False,
@@ -1803,7 +1936,7 @@ def _payment_record_detail_response(
     if plan is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="回款记录所属计划不存在，请联系管理员处理",
+            detail="回款记录所属计划不存在\uff0c请联系管理员处理",
         )
 
     approval = record.approval
@@ -1828,32 +1961,32 @@ def _payment_record_detail_response(
         else record.confirmation_status
     )
     response["updated_time"] = getattr(record, "updated_time", None)
-    response["payment_plan"] = PaymentPlanStatusSummary(
-        id=plan.id,
-        plan_number=plan.plan_number,
-        stage_name=plan.stage_name,
-        planned_amount=float(plan.planned_amount),
-        paid_amount=float(plan.paid_amount),
-        remaining_amount=float(plan.remaining_amount),
-        due_date=plan.due_date,
-        status=plan.status,
-        last_modified_time=plan.last_modified_time,
-    )
-    return PaymentRecordDetailResponse(**response)
+    response["payment_plan"] = PaymentPlanStatusSummary.model_validate({
+        "id": plan.id,
+        "plan_number": plan.plan_number,
+        "stage_name": plan.stage_name,
+        "planned_amount": float(plan.planned_amount),
+        "paid_amount": float(plan.paid_amount),
+        "remaining_amount": float(plan.remaining_amount),
+        "due_date": plan.due_date,
+        "status": plan.status,
+        "last_modified_time": plan.last_modified_time,
+    })
+    return PaymentRecordDetailResponse.model_validate(response)
 
 
 @router.get(
     "/payment-records/resolve",
     response_model=PaymentRecordDetailResponse,
     summary="按幂等键确认回款登记结果",
-    description="按系统生成的幂等键查询回款登记是否已落库，用于请求超时后的结果确认。",
+    description="按系统生成的幂等键查询回款登记是否已落库\uff0c用于请求超时后的结果确认。",
 )
 def resolve_payment_record(
     idempotency_key: str = Query(..., min_length=1, max_length=128),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> PaymentRecordDetailResponse:
     record = payment_record_crud.get_by_idempotency_key(db, team_id, idempotency_key.strip())
     if record is None or not _payment_record_visible_to_caller(record, team_id, current_user, db):
         raise HTTPException(
@@ -1863,43 +1996,81 @@ def resolve_payment_record(
     return _payment_record_detail_response(record, team_id, current_user, db, authorized=True)
 
 
+class _PaymentRecordPopulation(TypedDict):
+    contract_id: int | None
+    payment_plan_id: int | None
+    payment_date_start: date | None
+    payment_date_end: date | None
+    min_amount: float | None
+    actual_amount: float | None
+    creator_id: str | None
+    keyword: str | None
+    search: str | None
+    record_number: str | None
+    record_number_exclude: str | None
+    customer_name: str | None
+    customer_name_exclude: str | None
+    actual_payer_name: str | None
+    actual_payer_name_exclude: str | None
+    invoice_title_text: str | None
+    invoice_title_text_exclude: str | None
+    contract_name: str | None
+    contract_name_exclude: str | None
+    owner_name: str | None
+    owner_name_exclude: str | None
+    commission_member_name: str | None
+    commission_member_name_exclude: str | None
+    confirmation_status: str | None
+    confirmation_status_exclude: str | None
+    created_time_start: date | None
+    created_time_end: date | None
+    me: bool
+    approval_status: str | None
+    approval_status_exclude: str | None
+    sort: str | None
+    order_by: str | None
+    order_dir: str | None
+    filters: str | None
+    sorts: str | None
+
+
 def payment_record_population_filters(
-    contract_id: Optional[int] = Query(None),
-    payment_plan_id: Optional[int] = Query(None),
-    payment_date_start: Optional[date] = Query(None),
-    payment_date_end: Optional[date] = Query(None),
-    min_amount: Optional[float] = Query(None, ge=0),
-    actual_amount: Optional[float] = Query(None, ge=0),
-    creator_id: Optional[str] = Query(None),
-    keyword: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    record_number: Optional[str] = Query(None),
-    record_number_exclude: Optional[str] = Query(None),
-    customer_name: Optional[str] = Query(None),
-    customer_name_exclude: Optional[str] = Query(None),
-    actual_payer_name: Optional[str] = Query(None),
-    actual_payer_name_exclude: Optional[str] = Query(None),
-    invoice_title_text: Optional[str] = Query(None),
-    invoice_title_text_exclude: Optional[str] = Query(None),
-    contract_name: Optional[str] = Query(None),
-    contract_name_exclude: Optional[str] = Query(None),
-    owner_name: Optional[str] = Query(None),
-    owner_name_exclude: Optional[str] = Query(None),
-    commission_member_name: Optional[str] = Query(None),
-    commission_member_name_exclude: Optional[str] = Query(None),
-    confirmation_status: Optional[str] = Query(None),
-    confirmation_status_exclude: Optional[str] = Query(None),
-    created_time_start: Optional[date] = Query(None),
-    created_time_end: Optional[date] = Query(None),
+    contract_id: int | None = Query(None),
+    payment_plan_id: int | None = Query(None),
+    payment_date_start: date | None = _chart_payment_date_start_query,
+    payment_date_end: date | None = _chart_payment_date_end_query,
+    min_amount: float | None = Query(None, ge=0),
+    actual_amount: float | None = Query(None, ge=0),
+    creator_id: str | None = Query(None),
+    keyword: str | None = Query(None),
+    search: str | None = Query(None),
+    record_number: str | None = Query(None),
+    record_number_exclude: str | None = Query(None),
+    customer_name: str | None = Query(None),
+    customer_name_exclude: str | None = Query(None),
+    actual_payer_name: str | None = Query(None),
+    actual_payer_name_exclude: str | None = Query(None),
+    invoice_title_text: str | None = Query(None),
+    invoice_title_text_exclude: str | None = Query(None),
+    contract_name: str | None = Query(None),
+    contract_name_exclude: str | None = Query(None),
+    owner_name: str | None = Query(None),
+    owner_name_exclude: str | None = Query(None),
+    commission_member_name: str | None = Query(None),
+    commission_member_name_exclude: str | None = Query(None),
+    confirmation_status: str | None = Query(None),
+    confirmation_status_exclude: str | None = Query(None),
+    created_time_start: date | None = _chart_created_time_start_query,
+    created_time_end: date | None = _chart_created_time_end_query,
     me: bool = Query(False),
-    approval_status: Optional[str] = Query(None),
-    approval_status_exclude: Optional[str] = Query(None),
-    sort: Optional[str] = Query(None),
-    order_by: Optional[str] = Query(None),
-    order_dir: Optional[str] = Query(None),
-    filters: Optional[str] = Query(None),
-    sorts: Optional[str] = Query(None),
-) -> dict:
+    approval_status: str | None = Query(None),
+    approval_status_exclude: str | None = Query(None),
+    sort: str | None = Query(None),
+    order_by: str | None = Query(None),
+    order_dir: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
+) -> _PaymentRecordPopulation:
     """列表和图表共用的筛选参数。图表不分页。"""
     return {
         "contract_id": contract_id,
@@ -1940,7 +2111,9 @@ def payment_record_population_filters(
     }
 
 
-def _payment_record_chart_rows(db: Session, team_id: int, current_user, population: dict) -> list:
+def _payment_record_chart_rows(
+    db: Session, team_id: int, current_user: User, population: _PaymentRecordPopulation,
+) -> list[PaymentRecord]:
     current_user_id = resolve_payment_scope_user_id(
         db,
         current_user,
@@ -1993,12 +2166,15 @@ def _payment_record_chart_rows(db: Session, team_id: int, current_user, populati
     ).all())
 
 
+_population_dependency = Depends(payment_record_population_filters)
+
+
 @router.get("/payment-records/chart", response_model=PaymentRecordChartResponse, summary="查询回款图表")
 def get_payment_record_chart(
-    population: dict = Depends(payment_record_population_filters),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    population: _PaymentRecordPopulation = _population_dependency,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> PaymentRecordChartResponse:
     rows = _payment_record_chart_rows(db, team_id, current_user, population)
     return PaymentRecordChartResponse.model_validate(build_payment_record_chart(rows))
@@ -2014,31 +2190,33 @@ def get_payment_record_chart_records(
     bucket: str = Query(..., description="段键"),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
-    population: dict = Depends(payment_record_population_filters),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    population: _PaymentRecordPopulation = _population_dependency,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> PaymentRecordChartBucketRecords:
     rows = _payment_record_chart_rows(db, team_id, current_user, population)
     try:
         total, records = list_chart_bucket_records(rows, chart, bucket, skip=skip, limit=limit)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return PaymentRecordChartBucketRecords(chart=chart, bucket=bucket, total=total, records=records)
+    return PaymentRecordChartBucketRecords.model_validate(
+        {"chart": chart, "bucket": bucket, "total": total, "records": records}
+    )
 
 
 @router.get(
     "/payment-records/{record_id}",
     response_model=PaymentRecordDetailResponse,
     summary="查询回款记录详情",
-    description="查询单条回款记录及审批、所属计划汇总状态，用于详情展示和请求超时后的最终状态确认。",
+    description="查询单条回款记录及审批、所属计划汇总状态\uff0c用于详情展示和请求超时后的最终状态确认。",
 )
 def get_payment_record_detail(
     record_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> PaymentRecordDetailResponse:
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if record is None or not _payment_record_visible_to_caller(record, team_id, current_user, db):
         raise HTTPException(
@@ -2048,7 +2226,7 @@ def get_payment_record_detail(
     return _payment_record_detail_response(record, team_id, current_user, db, authorized=True)
 
 
-def _payment_record_visible_to_caller(record: PaymentRecord, team_id: int, current_user, db: Session) -> bool:
+def _payment_record_visible_to_caller(record: PaymentRecord, team_id: int, current_user: User, db: Session) -> bool:
     """Own-scope callers may read only records on contracts they created."""
     from app.models.contract import Contract
 
@@ -2072,24 +2250,29 @@ def _payment_record_visible_to_caller(record: PaymentRecord, team_id: int, curre
     return contract is not None and contract.creator_id == scope_user_id
 
 
-@router.put("/payment-records/{record_id}", response_model=PaymentRecordResponse, summary="更新回款记录", description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。")
+@router.put(
+    "/payment-records/{record_id}",
+    response_model=PaymentRecordResponse,
+    summary="更新回款记录",
+    description="更新指定的回款记录。更新后会自动重新计算相关金额、计划状态和合同回款状态。支持修改回款金额、回款日期、凭证附件和备注信息。",
+)
 async def update_payment_record(
     record_id: int,
     record_data: PaymentRecordUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> PaymentRecordResponse:
     """
-    更新回款记录（用于驳回后修正）
+    更新回款记录\uff08用于驳回后修正\uff09
 
-    仅允许更新：
-    - actual_amount（回款金额）
-    - payment_date（回款日期）
-    - proof_attachment（凭证附件）
-    - notes（备注）
+    仅允许更新\uff1a
+    - actual_amount\uff08回款金额\uff09
+    - payment_date\uff08回款日期\uff09
+    - proof_attachment\uff08凭证附件\uff09
+    - notes\uff08备注\uff09
 
-    注意：审批撤回后的草稿、审批驳回的记录可由登记人修改；具备
+    注意\uff1a审批撤回后的草稿、审批驳回的记录可由登记人修改\uff1b具备
     payment:record:edit 的用户也可修改。
     """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
@@ -2100,10 +2283,14 @@ async def update_payment_record(
         )
     check_payment_view_permission(record.payment_plan_id, team_id, current_user, db)
     if record_data.commission_member_id is not None:
+        customer_id = (
+            record.payment_plan.contract.customer_id
+            if record.payment_plan and record.payment_plan.contract else None
+        )
         _validate_payment_commission_member(
             db,
             team_id=team_id,
-            customer_id=record.payment_plan.contract.customer_id if record.payment_plan and record.payment_plan.contract else None,
+            customer_id=customer_id,
             current_user_id=str(current_user.id),
             commission_member_id=record_data.commission_member_id,
         )
@@ -2153,16 +2340,22 @@ async def update_payment_record(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.delete("/payment-records/{record_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除回款记录", description="删除指定的回款记录。审批中或审批通过后不可删除；删除后会自动重新计算相关金额、计划状态和合同回款状态。")
+@router.delete(
+    "/payment-records/{record_id}",
+    response_model=None,
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="删除回款记录",
+    description="删除指定的回款记录。审批中或审批通过后不可删除\uff1b删除后会自动重新计算相关金额、计划状态和合同回款状态。",
+)
 async def delete_payment_record(
     record_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("payment:record:delete")),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _delete_record_permission,
+    db: Session = _db_dependency
+) -> None:
     try:
         record = payment_record_crud.get_by_id(db, record_id, team_id)
         if not record:
@@ -2192,56 +2385,77 @@ async def delete_payment_record(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.get("/payment-records", response_model=PaymentRecordListResponse[PaymentRecordListItem], summary="查询回款记录列表", description="支持按合同、计划、日期范围、金额、审批状态等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息、审批信息、待我审批数量。可用于前端表格渲染和回款历史查询。")
+@router.get(
+    "/payment-records",
+    response_model=PaymentRecordListResponse[PaymentRecordListItem],
+    summary="查询回款记录列表",
+    description="支持按合同、计划、日期范围、金额、审批状态等条件筛选并分页查询回款记录。返回记录详情及关联的客户、商机、合同、回款阶段信息、审批信息、待我审批数量。可用于前端表格渲染和回款历史查询。",
+)
 def list_payment_records(
-    contract_id: Optional[int] = Query(None, description="合同ID筛选"),
-    payment_plan_id: Optional[int] = Query(None, description="回款计划ID筛选"),
-    payment_date_start: Optional[date] = Query(None, description="回款日期起始（YYYY-MM-DD）"),
-    payment_date_end: Optional[date] = Query(None, description="回款日期结束（YYYY-MM-DD）"),
-    min_amount: Optional[float] = Query(None, ge=0, description="最小回款金额"),
-    actual_amount: Optional[float] = Query(None, ge=0, description="回款金额"),
-    creator_id: Optional[str] = Query(None, description="登记人飞书ID"),
-    keyword: Optional[str] = Query(None, description="关键词，支持回款编号、客户、合同、阶段、付款方、发票抬头、负责人、团队成员"),
-    search: Optional[str] = Query(None, description="统一搜索词，支持回款编号、阶段、客户全称/简称/别名、合同、付款方、负责人、团队成员、发票抬头"),
-    record_number: Optional[str] = Query(None, description="回款编号"),
-    record_number_exclude: Optional[str] = Query(None, description="排除的回款编号关键词"),
-    customer_name: Optional[str] = Query(None, description="客户名称"),
-    customer_name_exclude: Optional[str] = Query(None, description="排除的客户名称关键词"),
-    actual_payer_name: Optional[str] = Query(None, description="实际付款方"),
-    actual_payer_name_exclude: Optional[str] = Query(None, description="排除的实际付款方关键词"),
-    invoice_title_text: Optional[str] = Query(None, description="发票抬头"),
-    invoice_title_text_exclude: Optional[str] = Query(None, description="排除的发票抬头关键词"),
-    contract_name: Optional[str] = Query(None, description="合同名称"),
-    contract_name_exclude: Optional[str] = Query(None, description="排除的合同名称关键词"),
-    owner_name: Optional[str] = Query(None, description="负责人姓名"),
-    owner_name_exclude: Optional[str] = Query(None, description="排除的负责人姓名关键词"),
-    commission_member_name: Optional[str] = Query(None, description="团队成员姓名"),
-    commission_member_name_exclude: Optional[str] = Query(None, description="排除的团队成员姓名关键词"),
-    confirmation_status: Optional[str] = Query(None, description="确认状态：PENDING, CONFIRMED, DISPUTED，多个值用逗号分隔"),
-    confirmation_status_exclude: Optional[str] = Query(None, description="排除的确认状态，多个值用逗号分隔"),
-    created_time_start: Optional[date] = Query(None, description="创建时间起始（YYYY-MM-DD）"),
-    created_time_end: Optional[date] = Query(None, description="创建时间结束（YYYY-MM-DD）"),
+    contract_id: int | None = Query(None, description="合同ID筛选"),
+    payment_plan_id: int | None = Query(None, description="回款计划ID筛选"),
+    payment_date_start: date | None = _payment_date_start_query,
+    payment_date_end: date | None = _payment_date_end_query,
+    min_amount: float | None = Query(None, ge=0, description="最小回款金额"),
+    actual_amount: float | None = Query(None, ge=0, description="回款金额"),
+    creator_id: str | None = Query(None, description="登记人飞书ID"),
+    keyword: str | None = Query(
+        None, description="关键词\uff0c支持回款编号、客户、合同、阶段、付款方、发票抬头、负责人、团队成员"
+    ),
+    search: str | None = Query(
+        None,
+        description=(
+            "统一搜索词\uff0c支持回款编号、阶段、客户全称/简称/别名、"
+            "合同、付款方、负责人、团队成员、发票抬头"
+        ),
+    ),
+    record_number: str | None = Query(None, description="回款编号"),
+    record_number_exclude: str | None = Query(None, description="排除的回款编号关键词"),
+    customer_name: str | None = Query(None, description="客户名称"),
+    customer_name_exclude: str | None = Query(None, description="排除的客户名称关键词"),
+    actual_payer_name: str | None = Query(None, description="实际付款方"),
+    actual_payer_name_exclude: str | None = Query(None, description="排除的实际付款方关键词"),
+    invoice_title_text: str | None = Query(None, description="发票抬头"),
+    invoice_title_text_exclude: str | None = Query(None, description="排除的发票抬头关键词"),
+    contract_name: str | None = Query(None, description="合同名称"),
+    contract_name_exclude: str | None = Query(None, description="排除的合同名称关键词"),
+    owner_name: str | None = Query(None, description="负责人姓名"),
+    owner_name_exclude: str | None = Query(None, description="排除的负责人姓名关键词"),
+    commission_member_name: str | None = Query(None, description="团队成员姓名"),
+    commission_member_name_exclude: str | None = Query(None, description="排除的团队成员姓名关键词"),
+    confirmation_status: str | None = Query(
+        None, description="确认状态\uff1aPENDING, CONFIRMED, DISPUTED\uff0c多个值用逗号分隔"
+    ),
+    confirmation_status_exclude: str | None = Query(None, description="排除的确认状态\uff0c多个值用逗号分隔"),
+    created_time_start: date | None = _created_time_start_query,
+    created_time_end: date | None = _created_time_end_query,
     me: bool = Query(False, description="是否只查询当前用户登记的记录"),
-    approval_status: Optional[str] = Query(None, description="审批状态筛选: pending_submit(待提交), pending_approval(审批中), rejected(已驳回), approved(已通过)，多个值用逗号分隔"),
-    approval_status_exclude: Optional[str] = Query(None, description="排除的审批状态，多个值用逗号分隔"),
-    sort: Optional[str] = Query(None, description="多字段排序，格式：field:asc,field2:desc"),
-    order_by: Optional[str] = Query(None, description="兼容旧版单字段排序"),
-    order_dir: Optional[str] = Query(None, description="兼容旧版排序方向（asc/desc）"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
+    approval_status: str | None = Query(
+        None,
+        description=(
+            "审批状态筛选: pending_submit(待提交), pending_approval(审批中), "
+            "rejected(已驳回), approved(已通过)\uff0c多个值用逗号分隔"
+        ),
+    ),
+    approval_status_exclude: str | None = Query(None, description="排除的审批状态\uff0c多个值用逗号分隔"),
+    sort: str | None = Query(None, description="多字段排序\uff0c格式\uff1afield:asc,field2:desc"),
+    order_by: str | None = Query(None, description="兼容旧版单字段排序"),
+    order_dir: str | None = Query(None, description="兼容旧版排序方向\uff08asc/desc\uff09"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页大小"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> dict[str, object]:
     """
-    查询回款记录列表（添加权限隔离）
+    查询回款记录列表\uff08添加权限隔离\uff09
 
-    权限逻辑：
+    权限逻辑\uff1a
     - payment:view:all → 可查看所有回款记录
     - payment:view:own → 只能查看自己登记的回款记录
     - 都没有 → 403 Forbidden
@@ -2266,7 +2480,7 @@ def list_payment_records(
     # 数据所有权隔离
     current_user_id = None
     if me or (has_view_own and not has_view_all):
-        # 如果只有 view:own 权限，或者用户明确选择只看自己的数据
+        # 如果只有 view:own 权限,或者用户明确选择只看自己的数据
         current_user_id = str(current_user.id)
 
     parsed_filters, parsed_sorts = optional_request_list_query(
@@ -2333,8 +2547,8 @@ def list_payment_records(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"查询回款记录失败: {str(e)}"
-        )
+            detail=f"查询回款记录失败: {e!s}"
+        ) from e
 
 
 @router.post(
@@ -2345,9 +2559,9 @@ def list_payment_records(
 )
 def export_payment_records(
     request: PaymentRecordListExportRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> FileResponse:
     current_user_id = _payment_view_own_user_id(db, current_user, team_id)
     query = run_or_400(lambda: payment_record_crud.build_list_query(
@@ -2371,12 +2585,18 @@ def export_payment_records(
 
 
 
-@router.get("/reminders/overdue", response_model=List[PaymentReminder], summary="查询逾期回款", description="获取所有逾期的回款计划，用于催收提醒")
+@router.get(
+    "/reminders/overdue",
+    response_model=list[PaymentReminder],
+    summary="查询逾期回款",
+    description="获取所有逾期的回款计划\uff0c用于催收提醒",
+)
 def get_overdue_payments(
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[PaymentReminder]:
+    del current_user  # Keep the authentication dependency for this route.
     plans = payment_plan_crud.get_overdue_payments(db, team_id)
     
     reminders = []
@@ -2409,28 +2629,29 @@ def get_overdue_payments(
 
 # ---------- B1: 回款审批提交 & 财务直确认 -----------------------------------
 #
-# 业务语义 sugar 端点（通用引擎 /v1/approvals/PAYMENT/{id}/submit 已可覆盖）。
-# 本端点叠加 payment:submit 权限码；未匹配审批流程时统一报错并提示管理员配置。
+# 业务语义 sugar 端点(通用引擎 /v1/approvals/PAYMENT/{id}/submit 已可覆盖)。
+# 本端点叠加 payment:submit 权限码;未匹配审批流程时统一报错并提示管理员配置。
 
 
 @router.post(
     "/records/{record_id}/submit-approval",
+    response_model=None,
     summary="提交回款审批",
     description=(
-        "为指定回款记录提交审批。系统按回款金额匹配审批流程，审批通过后自动确认入账。"
-        "权限码：payment:submit。"
+        "为指定回款记录提交审批。系统按回款金额匹配审批流程\uff0c审批通过后自动确认入账。"
+        "权限码\uff1apayment:submit。"
     ),
 )
 def submit_payment_approval(
     record_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(require_permission("payment:submit")),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _submit_payment_permission,
+    db: Session = _db_dependency,
+) -> dict[str, object]:
     """
-    提交回款审批（统一走审批流程）
+    提交回款审批\uff08统一走审批流程\uff09
 
-    所有回款必须走审批流程，审批通过后自动确认入账（confirmation_status=CONFIRMED）。
+    所有回款必须走审批流程\uff0c审批通过后自动确认入账\uff08confirmation_status=CONFIRMED\uff09。
     """
     record = payment_record_crud.get_by_id(db, record_id, team_id)
     if not record:
@@ -2457,15 +2678,15 @@ def submit_payment_approval(
         "message": "回款审批已提交" if error_msg is None else "回款审批已在处理中",
     }
 
-# ========== 已废弃：财务直接确认 API（统一走审批流程）==========
-# 所有回款必须走审批流程，审批通过后自动确认入账。
-# 此 API 已废弃，保留仅用于向后兼容，请勿使用。
+# ========== 已废弃:财务直接确认 API(统一走审批流程)==========
+# 所有回款必须走审批流程,审批通过后自动确认入账。
+# 此 API 已废弃,保留仅用于向后兼容,请勿使用。
 #
 # @router.post(
 #     "/records/{record_id}/confirm",
 #     response_model=PaymentRecordWithConfirmation,
 #     summary="[已废弃] 财务确认回款入账",
-#     description="已废弃：所有回款统一走审批流程，审批通过后自动确认入账。请使用审批中心进行审批操作。",
+#     description="已废弃:所有回款统一走审批流程,审批通过后自动确认入账。请使用审批中心进行审批操作。",
 #     deprecated=True,
 # )
 # def confirm_payment_record(...):

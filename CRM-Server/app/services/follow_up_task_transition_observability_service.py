@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
 
 from app.models.sales_commitment import (
     FollowUpTask,
@@ -20,6 +18,12 @@ from app.models.sales_commitment import (
     FollowUpTaskReconciliationRun,
     FollowUpTaskTransitionPolicyDecisionLog,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from datetime import datetime
+
+    from sqlalchemy.orm import Session
 
 TRANSITION_EXECUTED_REASON = "RECONCILIATION_TRANSITION_PLAN_EXECUTED"
 TRANSITION_ROLLBACK_REASON = "RECONCILIATION_TRANSITION_ROLLBACK"
@@ -316,7 +320,8 @@ class FollowUpTaskTransitionObservabilityService:
         ).all()
 
     def _event_summary(self, events: list[FollowUpTaskEvent]) -> dict[str, Any]:
-        transition_events = [event for event in events if self._payload(event).get("reason") == TRANSITION_EXECUTED_REASON]
+        transition_events = [event for event in events if self._payload(event).get(
+            "reason") == TRANSITION_EXECUTED_REASON]
         automatic_events = [
             event
             for event in transition_events
@@ -327,7 +332,8 @@ class FollowUpTaskTransitionObservabilityService:
             for event in transition_events
             if self._payload(event).get("execution_kind") == EXECUTION_KIND_MANUAL_CONFIRMATION
         ]
-        rollback_events = [event for event in events if self._payload(event).get("reason") == TRANSITION_ROLLBACK_REASON]
+        rollback_events = [event for event in events if self._payload(event).get(
+            "reason") == TRANSITION_ROLLBACK_REASON]
         return {
             "total_events": len(events),
             "transition_events": len(transition_events),
@@ -487,7 +493,7 @@ class FollowUpTaskTransitionObservabilityService:
     def _count_by_payload_value(self, events: list[FollowUpTaskEvent], key: str) -> dict[str, int]:
         return self._counter_dict(self._payload(event).get(key) for event in events)
 
-    def _counter_dict(self, values: Any) -> dict[str, int]:
+    def _counter_dict(self, values: Iterable[object]) -> dict[str, int]:
         counter = Counter(str(value or UNKNOWN_BUCKET) for value in values)
         return dict(sorted(counter.items()))
 
@@ -514,7 +520,7 @@ class FollowUpTaskTransitionObservabilityService:
     def _number_attr_summary(self, rows: list[Any], attr: str) -> dict[str, float | int | None]:
         return self._number_summary(getattr(row, attr, None) for row in rows)
 
-    def _number_summary(self, values: Any) -> dict[str, float | int | None]:
+    def _number_summary(self, values: Iterable[object]) -> dict[str, float | int | None]:
         number_values = [float(value) for value in values if isinstance(value, int | float)]
         if not number_values:
             return {"count": 0, "avg": None, "min": None, "max": None}

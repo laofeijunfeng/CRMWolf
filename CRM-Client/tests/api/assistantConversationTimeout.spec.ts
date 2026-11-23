@@ -35,7 +35,7 @@ describe('assistant conversation understanding timeout', () => {
     requestMock.post.mockResolvedValue(reply)
   })
 
-  it('keeps the understanding request open for 150 seconds', async () => {
+  it('keeps the understanding request open for 190 seconds', async () => {
     await assistantApi.conversationText({
       text: '下午和对方技术经理通了电话，说POC下周可以部署。',
       client_request_id: 'request-001',
@@ -48,16 +48,16 @@ describe('assistant conversation understanding timeout', () => {
         client_request_id: 'request-001',
         expected_version: 1,
       },
-      { timeout: 150_000 },
+      { timeout: 190_000 },
     )
   })
 
-  it('uses the same 150 seconds when resuming that understanding', async () => {
+  it('uses the same 190 seconds when resuming that understanding', async () => {
     await assistantApi.resumeConversation()
     expect(requestMock.post).toHaveBeenCalledWith(
       '/v1/assistant/conversation/resume',
       undefined,
-      { timeout: 150_000 },
+      { timeout: 190_000 },
     )
   })
 

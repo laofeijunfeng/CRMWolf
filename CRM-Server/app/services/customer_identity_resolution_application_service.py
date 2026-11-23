@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.crud.customer import customer_crud
 from app.crud.customer_member import customer_member_crud
-from app.models.customer import Customer
 from app.services.customer_identity_resolution_service import (
     CustomerIdentityResolution,
     CustomerIdentityResolutionService,
@@ -19,6 +16,13 @@ from app.services.customer_knowledge_candidate_service import (
     CustomerVisibilityPredicate,
     customer_knowledge_candidate_service,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+    from sqlalchemy.orm import Session
+
+    from app.models.customer import Customer
 
 
 class CustomerIdentityResolutionApplicationService:

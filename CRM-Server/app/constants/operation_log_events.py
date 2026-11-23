@@ -104,7 +104,7 @@ class OperationLogTemplates:
     """操作记录内容模板"""
     
     @staticmethod
-    def lead_created(lead_name: str, source: str, city: str) -> dict:
+    def lead_created(lead_name: str, source: str, city: str) -> dict[str, str]:
         return {
             "leadName": lead_name,
             "source": source,
@@ -112,7 +112,7 @@ class OperationLogTemplates:
         }
     
     @staticmethod
-    def lead_converted(original_lead_name: str, new_customer_name: str, new_customer_id: int) -> dict:
+    def lead_converted(original_lead_name: str, new_customer_name: str, new_customer_id: int) -> dict[str, str | int]:
         return {
             "originalLeadName": original_lead_name,
             "newCustomerName": new_customer_name,
@@ -120,7 +120,7 @@ class OperationLogTemplates:
         }
     
     @staticmethod
-    def manual_follow_up(content: str, method: str, next_follow_time: str = None) -> dict:
+    def manual_follow_up(content: str, method: str, next_follow_time: str | None = None) -> dict[str, str]:
         data = {
             "content": content,
             "method": method
@@ -130,7 +130,7 @@ class OperationLogTemplates:
         return data
     
     @staticmethod
-    def opportunity_created(opportunity_name: str, expected_amount: float, stage: str) -> dict:
+    def opportunity_created(opportunity_name: str, expected_amount: float, stage: str) -> dict[str, str | float]:
         return {
             "opportunityName": opportunity_name,
             "expectedAmount": expected_amount,
@@ -138,14 +138,14 @@ class OperationLogTemplates:
         }
     
     @staticmethod
-    def contract_status_changed(previous_status: str, current_status: str) -> dict:
+    def contract_status_changed(previous_status: str, current_status: str) -> dict[str, str]:
         return {
             "previousStatus": previous_status,
             "currentStatus": current_status
         }
     
     @staticmethod
-    def payment_received(amount: float, payment_method: str, payment_date: str) -> dict:
+    def payment_received(amount: float, payment_method: str, payment_date: str) -> dict[str, str | float]:
         return {
             "amount": amount,
             "paymentMethod": payment_method,

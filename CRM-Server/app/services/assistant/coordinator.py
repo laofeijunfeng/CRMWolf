@@ -5,23 +5,31 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from time import monotonic
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
-    from app.services.assistant.confirmation import ActivityWriter
-    from app.services.assistant.intake import KindStructurer
-    from app.services.assistant.quality_gate import QualityGate
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from app.models.assistant import AssistantTask, AssistantTaskStatus, AssistantWaitingType
 from app.services.assistant.action_evidence import append_source, parse_deadline, reconcile_action_evidence
-from app.services.assistant.confirmation import execute_confirmation, freeze_confirmation
+from app.services.assistant.activity_edit import (
+    ActivityEditValidationError,
+    activity_edit_time,
+    apply_activity_edits,
+    editable_activity_channel_options,
+    editable_activity_fields,
+)
+from app.services.assistant.confirmation import (
+    build_activity_confirmation,
+    command_fingerprint,
+    execute_confirmation,
+    persist_activity_confirmation,
+    restore_activity_confirmation,
+)
 from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft, TaskWaiting
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
-from app.services.assistant.events import NullProgressReporter, ProgressReporter
+from app.services.assistant.events import NullProgressReporter, ProgressReporter, stage
+from app.services.assistant.failure_contract import ACTIVITY_COMMIT_UNKNOWN_MESSAGE
 from app.services.assistant.intake_flow import (
     _budget_exhausted,
     fail_model_stage,
@@ -30,6 +38,7 @@ from app.services.assistant.intake_flow import (
     raise_quality_gate_failure,
 )
 from app.services.assistant.llm import AssistantLLMError
+from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
     TaskUpdate,
@@ -39,6 +48,16 @@ from app.services.assistant.task_state import (
     load_waiting,
 )
 from app.utils.time import resolve_follow_up_time
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.orm import Session
+
+    from app.services.assistant.confirmation import ActivityWriter
+    from app.services.assistant.intake import KindStructurer
+    from app.services.assistant.proposals import ProposalExecutor
+    from app.services.assistant.quality_gate import QualityGate
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +70,11 @@ class AssistantInput(BaseModel):
     kind: str = Field(min_length=1, max_length=32, description="text | submit_field | confirm | cancel")
     text: str | None = Field(default=None, max_length=20000, description="text or field answer payload")
     choice: str | None = Field(default=None, max_length=64, description="enum choice payload (kind, confirm)")
+    values: dict[str, JsonValue] | None = None
+    form_revision: int | None = None
+    choices: list[str] | None = None
+    suppress_week: bool = False
+    reason: str | None = None
 
 
 class CoordinatorReply(BaseModel):
@@ -94,7 +118,7 @@ class AssistantCoordinator:
         next_action_chooser: NextActionChooser,
         structurer: KindStructurer | None = None,
         writer: ActivityWriter | None = None,
-        proposal_executor: object | None = None,
+        proposal_executor: ProposalExecutor | None = None,
         quality_gate: object | None = None,
         follow_up: object | None = None,
     ) -> None:
@@ -119,6 +143,9 @@ class AssistantCoordinator:
                 f"task {task.public_id} is terminal ({task.status}); no further transitions"
             )
 
+        if activity_commit_is_unknown(task):
+            raise InvalidTaskTransitionError(ACTIVITY_COMMIT_UNKNOWN_MESSAGE)
+
         waiting = load_waiting(task)
 
         if user_input.kind == "cancel":
@@ -128,12 +155,12 @@ class AssistantCoordinator:
                 item.get("kind") == "customer_activity" for item in task.committed_json or []
             ):
                 raise InvalidTaskTransitionError("proposal continuation requires a committed activity")
-            handled = await self._open_follow_up_or_none(db, task)
+            handled = await self._open_follow_up_or_none(db, task, reporter)
             if handled is not None:
                 return handled
             from app.services.assistant.proposals import offer_next_proposal
 
-            updated, message, _ = await offer_next_proposal(db, task)
+            updated, message, _ = await offer_next_proposal(db, task, reporter=reporter)
             return CoordinatorOutcome(
                 CoordinatorReply(
                     task_public_id=updated.public_id,
@@ -175,9 +202,16 @@ class AssistantCoordinator:
                         task=task,
                     )
 
-        return await self._prepare_confirmation(db, task)
+        return await self._prepare_confirmation(db, task, reporter=reporter)
 
     def _cancel(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
+        from app.services.assistant.proposals import has_unresolved_proposal_claim
+        from app.services.assistant.turns import AssistantStateConflict, has_frozen_disposition_settlement
+
+        if has_unresolved_proposal_claim(db, task):
+            raise AssistantStateConflict("商机提交结果待核对，暂不能取消。")
+        if has_frozen_disposition_settlement(task):
+            raise AssistantStateConflict("历史任务结果待核对，暂不能取消。")
         result = apply_task_update(
             db,
             task,
@@ -216,6 +250,10 @@ class AssistantCoordinator:
 
         if waiting.type == AssistantWaitingType.CONFIRMATION:
             return await self._answer_confirmation(db, task, user_input, reporter=reporter)
+        if waiting.type == AssistantWaitingType.CONFIRMATION_EDIT:
+            return await self._answer_activity_edit(db, task, waiting, user_input, reporter=reporter)
+        if waiting.type == AssistantWaitingType.PROPOSAL_FORM:
+            return await self._answer_proposal_form(db, task, waiting, user_input)
         if waiting.type == AssistantWaitingType.ACTIVITY_KIND:
             return await self._answer_activity_kind(db, task, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.OBJECT_SELECTION:
@@ -226,25 +264,48 @@ class AssistantCoordinator:
             return await self._answer_temporal_choice(db, task, waiting, user_input, reporter=reporter)
         return await self._answer_field(db, task, waiting, user_input, reporter=reporter)
 
-    async def _prepare_confirmation(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
-        draft = load_draft(task)
+    async def _prepare_confirmation(
+        self,
+        db: Session,
+        task: AssistantTask,
+        *,
+        reporter: ProgressReporter | None = None,
+        pending_draft: TaskDraft | None = None,
+        edit_action: str | None = None,
+        edit_input: dict[str, object] | None = None,
+        context_cleared_opportunity: bool = False,
+    ) -> CoordinatorOutcome:
+        reporter = reporter or NullProgressReporter()
+        draft = pending_draft if pending_draft is not None else load_draft(task)
         from app.services.assistant.temporal_evidence import temporal_waiting
+        edited_time = activity_edit_time(draft, "next_follow_time")
 
-        if temporal_waiting(draft) is not None:
-            gated = await self._gate_temporal_evidence(db, task, draft)
+        if edited_time is None and temporal_waiting(draft) is not None:
+            gated = await self._gate_temporal_evidence(
+                db, task, draft, persist_waiting=pending_draft is None
+            )
             if isinstance(gated, CoordinatorOutcome):
                 return gated
         if draft.quality_score.status != "CANDIDATE":
-            return await self._advance(db, task)
-        if task.authority_json.get("frozen_activity_command"):
+            return await self._advance(db, task, reporter)
+        if task.authority_json.get("frozen_activity_command") and edit_action is None and pending_draft is None:
+            # An authorized edit re-signs the card in the same transition that replaces the draft.
             raise InvalidTaskTransitionError("frozen activity requires its matching waiting action")
         temporal = draft.content_json.get("temporal_evidence")
-        if isinstance(temporal, dict) and temporal.get("version") == "temporal-evidence-v1":
-            gated = await self._gate_temporal_evidence(db, task, draft)
+        next_follow_time_granularity: str
+        if edited_time is not None:
+            next_follow_time, next_follow_time_granularity = edited_time
+            if next_follow_time is not None and next_follow_time_granularity == "DATE":
+                next_follow_time = next_follow_time.replace(hour=9)
+        elif isinstance(temporal, dict) and temporal.get("version") == "temporal-evidence-v1":
+            gated = await self._gate_temporal_evidence(
+                db, task, draft, persist_waiting=pending_draft is None
+            )
             if isinstance(gated, CoordinatorOutcome):
                 return gated
             task, next_follow_time, next_follow_time_granularity = gated
-            draft = load_draft(task)
+            if pending_draft is None:
+                draft = load_draft(task)
         else:
             time_text = (draft.next_follow_time.value or "").strip()
             source = next((record for record in reversed(draft.source_records) if time_text in record.text), None)
@@ -361,18 +422,33 @@ class AssistantCoordinator:
         else:
             return self._ask_customer(db, task)
         context_card = None
+        scoped_authority: dict[str, object] | None = None
+        context_cleared_opportunity = False
         if self._follow_up is not None and (task.activity_kind or "") == "FOLLOW_UP":
-            attached = await self._attach_follow_up_context(db, task, customer)
+            attached = await self._attach_follow_up_context(
+                db, task, customer, reporter, pending_draft=pending_draft
+            )
             if isinstance(attached, CoordinatorOutcome):
                 return attached
-            task, context_card = attached
-        updated, waiting = freeze_confirmation(
-            db,
+            scoped_authority, context_card, context_cleared_opportunity = attached
+        command, waiting = build_activity_confirmation(
             task,
+            draft=draft,
             customer=customer,
             next_follow_time=next_follow_time,
             next_follow_time_granularity=next_follow_time_granularity,
             context_card=context_card,
+        )
+        updated, waiting = persist_activity_confirmation(
+            db,
+            task,
+            draft=draft,
+            command=command,
+            waiting=waiting,
+            action_name=edit_action or "freeze_activity",
+            action_input=edit_input,
+            context_authority=scoped_authority,
+            clear_opportunity=context_cleared_opportunity and edit_action is not None,
         )
         return CoordinatorOutcome(
             CoordinatorReply(
@@ -470,8 +546,8 @@ class AssistantCoordinator:
         return await self._continue_after_customer(db, result.task, reporter=reporter)
 
     async def _gate_temporal_evidence(
-        self, db: Session, task: AssistantTask, draft: TaskDraft
-    ) -> CoordinatorOutcome | tuple[AssistantTask, object, str]:
+        self, db: Session, task: AssistantTask, draft: TaskDraft, *, persist_waiting: bool = True
+    ) -> CoordinatorOutcome | tuple[AssistantTask, datetime | None, str]:
         from app.services.assistant.temporal_evidence import project_draft, resolved_sales_follow_up, temporal_waiting
 
         project_draft(draft)
@@ -494,6 +570,14 @@ class AssistantCoordinator:
                     "reason": spec["reason"],
                 },
             )
+            if not persist_waiting:
+                # The caller holds an unsaved draft and will publish this waiting state with it.
+                return CoordinatorOutcome(
+                    CoordinatorReply(
+                        task_public_id=task.public_id, status=task.status, message=waiting.prompt, waiting=waiting
+                    ),
+                    task,
+                )
             result = apply_task_update(
                 db,
                 task,
@@ -518,6 +602,8 @@ class AssistantCoordinator:
         if resolved is not None and granularity == "DATE":
             # Same unspoken-time default as the legacy path: remind at 09:00.
             resolved = resolved.replace(hour=9)
+        if not persist_waiting:
+            return task, resolved, granularity
         result = apply_task_update(
             db,
             task,
@@ -594,7 +680,7 @@ class AssistantCoordinator:
             if isinstance(scored, CoordinatorOutcome):
                 return scored
             updated = scored
-        return await self._prepare_confirmation(db, updated)
+        return await self._prepare_confirmation(db, updated, reporter=reporter)
 
     @staticmethod
     def _temporal_wait_matches(task: AssistantTask, waiting: TaskWaiting) -> bool:
@@ -690,7 +776,7 @@ class AssistantCoordinator:
                     ),
                     updated,
                 )
-            return await self._prepare_confirmation(db, updated)
+            return await self._prepare_confirmation(db, updated, reporter=reporter)
 
         draft = load_draft(task)
         append_source(db, task, draft, text)
@@ -724,15 +810,95 @@ class AssistantCoordinator:
             if isinstance(scored, CoordinatorOutcome):
                 return scored
             updated = scored
-        return await self._prepare_confirmation(db, updated)
+        return await self._prepare_confirmation(db, updated, reporter=reporter)
+
+    @staticmethod
+    def _retire_edited_confirmation(db: Session, task: AssistantTask) -> None:
+        """Retire a superseded card and its waiting state before an edit failure commits.
+
+        Dropping only the frozen command would leave a card whose action id and version
+        still match, so admission would pass and the failure would surface inside the
+        write. Clearing both makes the task restart from a fresh submission instead.
+        """
+        if not (task.authority_json or {}).get("frozen_activity_command"):
+            return
+        apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_frozen_activity_command=True,
+                clear_waiting=True,
+                action_actor="SYSTEM",
+                action_name="retire_activity_edit",
+                action_result={"reason": "edit_did_not_publish"},
+            ),
+        )
+
+    async def _rescore_edited_draft(
+        self, db: Session, task: AssistantTask, draft: TaskDraft, reporter: ProgressReporter
+    ) -> CoordinatorOutcome | TaskDraft:
+        """Score an edited draft in memory; the caller publishes the result with the card."""
+        from typing import cast
+
+        gate = cast("QualityGate", self._quality_gate)
+        reporter.stage_start(stage("quality_gate"))
+        started = monotonic()
+        try:
+            gate_outcome = await gate.evaluate(
+                db,
+                team_id=task.team_id,
+                user_text="\n".join(draft.source_segments),
+                content=draft.content.value or "",
+                next_action=draft.next_action.value or "",
+                kind=task.activity_kind or "FOLLOW_UP",
+                content_json=draft.content_json,
+            )
+        except (AssistantLLMError, TimeoutError, ValueError, TypeError) as exc:
+            self._retire_edited_confirmation(db, task)
+            raise_quality_gate_failure(db, task, exc)
+        reporter.stage_done(stage("quality_gate"), ms=int((monotonic() - started) * 1000), score=gate_outcome.score)
+        if not gate_outcome.passed:
+            gap = TaskWaiting(
+                type=AssistantWaitingType.FIELD,
+                field=gate_outcome.gap_field or "content",
+                question_id=f"q_gap_{task.public_id}_{task.version + 1}",
+                prompt=gate_outcome.question or "请补充这次沟通的关键信息。",
+            )
+            result = apply_task_update(
+                db,
+                task,
+                TaskUpdate(
+                    draft=draft,
+                    clear_frozen_activity_command=True,
+                    waiting=gap,
+                    action_actor="SYSTEM",
+                    action_name="ask_quality_gap",
+                    action_result={"passed": False, "score": gate_outcome.score},
+                ),
+            )
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=result.task.public_id,
+                    status=result.task.status,
+                    message=gap.prompt,
+                    waiting=load_waiting(result.task),
+                ),
+                result.task,
+            )
+        draft.quality_score = DraftField(status="CANDIDATE", value=str(gate_outcome.score))
+        draft.score_reason = gate_outcome.reason
+        draft.score_detail = gate_outcome.detail or {}
+        return draft
 
     async def _rescore_temporal_choice(
-        self, db: Session, task: AssistantTask, _reporter: ProgressReporter
+        self, db: Session, task: AssistantTask, reporter: ProgressReporter
     ) -> CoordinatorOutcome | AssistantTask:
         from typing import cast
 
         gate = cast("QualityGate", self._quality_gate)
         draft = load_draft(task)
+        reporter.stage_start(stage("quality_gate"))
+        started = monotonic()
         try:
             gate_outcome = await gate.evaluate(
                 db,
@@ -745,6 +911,7 @@ class AssistantCoordinator:
             )
         except (AssistantLLMError, TimeoutError, ValueError, TypeError) as exc:
             raise_quality_gate_failure(db, task, exc)
+        reporter.stage_done(stage("quality_gate"), ms=int((monotonic() - started) * 1000), score=gate_outcome.score)
         if not gate_outcome.passed:
             gap = TaskWaiting(
                 type=AssistantWaitingType.FIELD,
@@ -893,7 +1060,157 @@ class AssistantCoordinator:
                     ),
                     updated,
                 )
-        return await self._prepare_confirmation(db, updated)
+        return await self._prepare_confirmation(db, updated, reporter=reporter)
+
+    def _activity_edit_form(
+        self, db: Session, task: AssistantTask, *, error: ActivityEditValidationError | None = None
+    ) -> CoordinatorOutcome:
+        self._require_editable_activity(task)
+        draft = load_draft(task)
+        values = editable_activity_fields(draft)
+        fields: list[dict[str, object]] = []
+        contacts = values.get("participants")
+        for key, label, limit in (
+            ("communication_time", "沟通时间（日期或日期时间）", 64),
+            ("internal_participants", "我方参会人（每行一位）", 2000),
+            ("customer_participants", "客户参会人（每行一位）", 2000),
+            ("summary", "摘要", 300),
+            ("next_action", "下一步", 2000),
+            ("next_follow_time", "下次跟进时间（日期或日期时间）", 64),
+        ):
+            value = values.get(key)
+            if key.endswith("_participants") and isinstance(contacts, dict):
+                names = contacts.get(key.removesuffix("_participants"))
+                value = "\n".join(str(name) for name in names) if isinstance(names, list) else None
+            failed = error is not None and (
+                error.field == key or (error.field == "participants" and key.endswith("_participants"))
+            )
+            fields.append({
+                "key": key, "label": label, "field_type": "textarea" if limit > 64 else "text",
+                "min_length": 1 if key == "summary" else 0, "max_length": limit,
+                "required": key == "summary", "default_value": value,
+                "error_message": str(error)[:500] if failed else None,
+                "placeholder": "例如 2026-11-24 或 2026-11-24T15:00" if limit == 64 else None,
+            })
+        from app.services.customer_activity_kinds import get_activity_kind_meta
+
+        fields.insert(1, {
+            "key": "channel_kind", "label": "沟通方式", "field_type": "select",
+            "default_value": values.get("channel_kind"),
+            "options": [{"value": kind, "label": get_activity_kind_meta(kind)["label"]}
+                        for kind in editable_activity_channel_options(draft)],
+            "error_message": str(error)[:500] if error and error.field == "channel_kind" else None,
+        })
+        old = load_waiting(task)
+        revision = (old.form_revision if old else None) or 0
+        waiting = TaskWaiting(
+            type="CONFIRMATION_EDIT", field="activity_write",
+            question_id=f"q_edit_{task.public_id}_{revision + 1}",
+            prompt="修改活动内容", form_revision=revision + 1, form_fields=fields,
+            hint="请检查标记的字段；这次没有写入。" if error else "客户、评分和执行状态不能在这里修改。",
+        )
+        result = apply_task_update(db, task, TaskUpdate(
+            waiting=waiting, preserve_version=True, action_actor="USER",
+            action_name="reject_activity_edit" if error else "request_activity_edit",
+            action_result={"field": error.field} if error else {},
+        ))
+        return self._waiting_outcome(result.task, waiting.prompt)
+
+    @staticmethod
+    def _waiting_outcome(task: AssistantTask, message: str) -> CoordinatorOutcome:
+        return CoordinatorOutcome(
+            CoordinatorReply(task_public_id=task.public_id, status=task.status, message=message,
+                             waiting=load_waiting(task)), task,
+        )
+
+    @staticmethod
+    def _require_editable_activity(task: AssistantTask) -> None:
+        command = load_authority(task).frozen_activity_command
+        if (
+            task.waiting_field != "activity_write" or command is None
+            or command.get("execution_status") != "PENDING"
+            or command.get("fingerprint") != command_fingerprint(command)
+            or task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+        ):
+            raise InvalidTaskTransitionError("activity is no longer editable")
+
+    async def _answer_activity_edit(
+        self, db: Session, task: AssistantTask, waiting: TaskWaiting, user_input: AssistantInput,
+        *, reporter: ProgressReporter,
+    ) -> CoordinatorOutcome:
+        if user_input.kind != "submit_form" or user_input.form_revision != waiting.form_revision:
+            raise InvalidTaskTransitionError("activity edit is no longer current")
+        if user_input.choice == "cancel":
+            restored, frozen = restore_activity_confirmation(db, task)
+            return self._waiting_outcome(restored, frozen.prompt)
+        values = dict(user_input.values or {})
+        groups = {"internal_participants": "internal", "customer_participants": "customer"}
+        if values.keys() & groups.keys():
+            current = editable_activity_fields(load_draft(task))["participants"]
+            contacts = dict(current) if isinstance(current, dict) else {}
+            for key, group in groups.items():
+                if key not in values:
+                    continue
+                raw = values.pop(key)
+                if raw is not None and not isinstance(raw, str):
+                    return self._activity_edit_form(db, task, error=ActivityEditValidationError(
+                        "participants", "联系人必须为姓名列表。",
+                    ))
+                contacts[group] = [name.strip() for name in (raw or "").splitlines() if name.strip()]
+            values["participants"] = contacts
+        return await self._apply_activity_edit(db, task, values, reporter=reporter)
+
+    async def _apply_activity_edit(
+        self, db: Session, task: AssistantTask, values: dict[str, JsonValue], *,
+        reporter: ProgressReporter, correction: bool = False,
+    ) -> CoordinatorOutcome:
+        from app.utils.time import business_now
+        self._require_editable_activity(task)
+
+        try:
+            draft, changed = apply_activity_edits(load_draft(task), values, anchor=business_now())
+        except ActivityEditValidationError as exc:
+            if correction:
+                return self._waiting_outcome(task, "这项不能这样修改，请说明字段和正确内容；这次没有写入。")
+            return self._activity_edit_form(db, task, error=exc)
+        if not changed:
+            restored, frozen = restore_activity_confirmation(db, task, action_name="no_change_activity_edit")
+            return self._waiting_outcome(restored, frozen.prompt)
+        if self._quality_gate is None:
+            raise InvalidTaskTransitionError("activity edit requires a quality gate")
+        # One authorized edit is one authority advance: score the edited draft first, then
+        # publish draft, score, context and the re-signed card in a single compare-and-swap.
+        draft.quality_score = DraftField(status="MISSING")
+        draft.score_reason = None
+        scored = await self._rescore_edited_draft(db, task, draft, reporter)
+        if isinstance(scored, CoordinatorOutcome):
+            return scored
+        return await self._prepare_confirmation(
+            db,
+            task,
+            reporter=reporter,
+            pending_draft=scored,
+            edit_action="correct_activity_draft" if correction else "edit_activity_draft",
+            edit_input={"fields": list(values)},
+        )
+
+    async def _answer_proposal_form(
+        self, db: Session, task: AssistantTask, waiting: TaskWaiting, user_input: AssistantInput,
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.proposals import settle_proposal, validate_proposal_form_submission
+
+        if user_input.kind != "submit_form" or user_input.form_revision != waiting.form_revision:
+            raise InvalidTaskTransitionError("proposal form is no longer current")
+        accepted = user_input.choice != "cancel"
+        if accepted and user_input.values is None:
+            raise InvalidTaskTransitionError("proposal form requires values")
+        proposal, invalid = validate_proposal_form_submission(db, task, waiting, values=user_input.values)
+        if invalid is not None:
+            return self._waiting_outcome(invalid, "请检查表单；这次没有创建商机。")
+        updated, message, _ = await settle_proposal(
+            db, task, accepted=accepted, executor=self._proposal_executor, form_proposal=proposal,
+        )
+        return self._waiting_outcome(updated, message)
 
     async def _answer_confirmation(
         self,
@@ -907,17 +1224,35 @@ class AssistantCoordinator:
         choice = (user_input.choice or "").strip().lower()
 
         if (task.waiting_field or "").startswith("proposal:"):
-            from app.services.assistant.proposals import settle_proposal
+            from app.services.assistant.opportunity_form import OpportunityFormError
+            from app.services.assistant.proposals import (
+                has_proposal_claim,
+                open_opportunity_proposal_form,
+                settle_proposal,
+            )
 
-            updated, message, start_followup = await settle_proposal(
+            waiting = load_waiting(task)
+            if (
+                choice == "confirm"
+                and task.waiting_field == "proposal:opportunity_create"
+                and waiting is not None
+                and not has_proposal_claim(db, task, waiting)
+            ):
+                try:
+                    return self._waiting_outcome(open_opportunity_proposal_form(db, task, waiting), "请填写商机信息。")
+                except OpportunityFormError as exc:
+                    return self._waiting_outcome(task, str(exc))
+            updated, message, _ = await settle_proposal(
                 db, task, accepted=choice == "confirm", executor=self._proposal_executor
             )
-            return CoordinatorOutcome(
-                reply=CoordinatorReply(task_public_id=updated.public_id, status=updated.status, message=message),
-                task=updated,
-                start_followup=start_followup,
-            )
+            return self._waiting_outcome(updated, message)
 
+        if user_input.kind == "request_edit":
+            return self._activity_edit_form(db, task)
+        if user_input.kind == "correct_activity":
+            return await self._apply_activity_edit(
+                db, task, user_input.values or {}, reporter=reporter, correction=True,
+            )
         if user_input.kind == "text" and user_input.text:
             from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
 
@@ -974,7 +1309,7 @@ class AssistantCoordinator:
                 clear_frozen_activity_command=True,
                 action_actor="USER",
                 action_name="reject_confirmation",
-                action_result={"reason": choice or "unspecified"},
+                action_result={"reason": user_input.reason},
             ),
         )
         return CoordinatorOutcome(
@@ -1061,7 +1396,7 @@ class AssistantCoordinator:
             begun = await self._begin_follow_up(db, updated, updated.goal, reporter, accept_source=False)
             if isinstance(begun, CoordinatorOutcome):
                 return begun
-            return await self._prepare_confirmation(db, begun)
+            return await self._prepare_confirmation(db, begun, reporter=reporter)
         if self._structurer is not None:
             original_text = updated.goal
             updated, message, paused_waiting, failed = await intake_step(
@@ -1084,12 +1419,14 @@ class AssistantCoordinator:
                     task=updated,
                 )
 
-        return await self._prepare_confirmation(db, updated)
+        return await self._prepare_confirmation(db, updated, reporter=reporter)
 
-    async def _open_follow_up_or_none(self, db: Session, task: AssistantTask) -> CoordinatorOutcome | None:
+    async def _open_follow_up_or_none(
+        self, db: Session, task: AssistantTask, reporter: ProgressReporter
+    ) -> CoordinatorOutcome | None:
         from app.services.assistant.open_follow_up_disposition import advance_open_follow_up
 
-        outcome = await advance_open_follow_up(db, task)
+        outcome = await advance_open_follow_up(db, task, reporter=reporter)
         if outcome is None:
             return None
         return CoordinatorOutcome(
@@ -1110,9 +1447,17 @@ class AssistantCoordinator:
         task: AssistantTask,
         user_input: AssistantInput,
     ) -> CoordinatorOutcome:
-        from app.services.assistant.open_follow_up_disposition import settle_open_follow_up
+        from app.services.assistant.open_follow_up_disposition import (
+            refresh_open_follow_up_waiting,
+            settle_open_follow_up,
+        )
 
-        outcome = await settle_open_follow_up(db, task, (user_input.choice or "").strip())
+        if user_input.choices is None:
+            outcome = refresh_open_follow_up_waiting(db, task)
+        else:
+            outcome = await settle_open_follow_up(
+                db, task, choices=user_input.choices, suppress_week=user_input.suppress_week,
+            )
         return CoordinatorOutcome(
             CoordinatorReply(
                 task_public_id=outcome.task.public_id,
@@ -1125,7 +1470,7 @@ class AssistantCoordinator:
             start_followup=outcome.start_followup,
         )
 
-    async def _advance(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
+    async def _advance(self, db: Session, task: AssistantTask, reporter: ProgressReporter) -> CoordinatorOutcome:
         """No waiting: server-gated proposal flow, then chooser nomination."""
 
         draft = load_draft(task)
@@ -1134,12 +1479,12 @@ class AssistantCoordinator:
             and any(str(item.get("kind", "")) == "customer_activity" for item in task.committed_json or [])
             and task.status == AssistantTaskStatus.ACTIVE
         ):
-            handled = await self._open_follow_up_or_none(db, task)
+            handled = await self._open_follow_up_or_none(db, task, reporter)
             if handled is not None:
                 return handled
             from app.services.assistant.proposals import offer_next_proposal
 
-            proposed_task, message, offered = await offer_next_proposal(db, task)
+            proposed_task, message, offered = await offer_next_proposal(db, task, reporter=reporter)
             if offered or proposed_task.status == AssistantTaskStatus.COMPLETED:
                 return CoordinatorOutcome(
                     reply=CoordinatorReply(
@@ -1425,9 +1770,12 @@ class AssistantCoordinator:
                 )
             return updated
         if not load_authority(task).customer_public_id:
+            reporter.stage_start(stage("locate"))
+            started = monotonic()
             try:
                 customer_name = await self._follow_up.locate_customer(db, team_id=task.team_id, user_text=user_text)
             except AssistantLLMError:
+                reporter.stage_failed(stage("locate"))
                 result = apply_task_update(
                     db,
                     task,
@@ -1446,6 +1794,7 @@ class AssistantCoordinator:
                     ),
                     result.task,
                 )
+            reporter.stage_done(stage("locate"), ms=int((monotonic() - started) * 1000))
             if not str(customer_name or "").strip():
                 draft = load_draft(task)
                 if accept_source:
@@ -1569,7 +1918,7 @@ class AssistantCoordinator:
                     updated,
                 )
             task = updated
-        return await self._prepare_confirmation(db, task)
+        return await self._prepare_confirmation(db, task, reporter=reporter)
 
     async def _answer_follow_up_customer(
         self, db: Session, task: AssistantTask, customer_name: str, reporter: ProgressReporter
@@ -1679,8 +2028,15 @@ class AssistantCoordinator:
         return await self._prepare_confirmation(db, result.task)
 
     async def _attach_follow_up_context(
-        self, db: Session, task: AssistantTask, customer: object
-    ) -> CoordinatorOutcome | tuple[AssistantTask, dict[str, object]]:
+        self,
+        db: Session,
+        task: AssistantTask,
+        customer: object,
+        reporter: ProgressReporter,
+        *,
+        pending_draft: TaskDraft | None = None,
+    ) -> CoordinatorOutcome | tuple[dict[str, object], dict[str, object] | None, bool]:
+        """Read context only. The caller publishes authority together with the frozen card."""
         from app.services.assistant.follow_up_context import OPPORTUNITY_PROMPT
 
         if self._follow_up is None:
@@ -1688,7 +2044,15 @@ class AssistantCoordinator:
         authority = load_authority(task)
         draft = load_draft(task)
         user_text = "\n".join(draft.source_segments)
+        reporter.stage_start(stage("context"))
+        started = monotonic()
         pack = self._follow_up.read_evidence(db, team_id=task.team_id, user_id=task.user_id, customer=customer)
+        if all(status != "failed" for status in (
+            pack.activities_status, pack.tasks_status, pack.opportunities_status, pack.commitments_status,
+        )):
+            reporter.stage_done(stage("context"), ms=int((monotonic() - started) * 1000))
+        else:
+            reporter.stage_failed(stage("context"))
         choice = await self._follow_up.choose_opportunity(
             db,
             team_id=task.team_id,
@@ -1711,7 +2075,11 @@ class AssistantCoordinator:
                 db,
                 task,
                 TaskUpdate(
+                    draft=pending_draft,
                     clear_follow_up_opportunity=True,
+                    # An edit in flight replaces the old card; dropping it here lets the
+                    # answered clarification re-freeze the edited draft instead of stranding it.
+                    clear_frozen_activity_command=pending_draft is not None,
                     waiting=waiting,
                     action_actor="SYSTEM",
                     action_name="choose_opportunity",
@@ -1727,8 +2095,23 @@ class AssistantCoordinator:
                 ),
                 result.task,
             )
-        if choice.kind == "bound" and choice.public_id:
-            result = apply_task_update(
+        cleared = not (choice.kind == "bound" and choice.public_id)
+        context_authority: dict[str, object] | None = None
+        if cleared:
+            if pending_draft is None:
+                # Non-edit confirmation keeps its original audit transition.
+                task = apply_task_update(
+                    db,
+                    task,
+                    TaskUpdate(
+                        clear_follow_up_opportunity=True,
+                        action_actor="SYSTEM",
+                        action_name="clear_opportunity",
+                        action_result={"reason": choice.kind},
+                    ),
+                ).task
+        elif pending_draft is None:
+            task = apply_task_update(
                 db,
                 task,
                 TaskUpdate(
@@ -1741,25 +2124,19 @@ class AssistantCoordinator:
                     action_name="bind_opportunity",
                     action_result={"opportunity_public_id": choice.public_id},
                 ),
-            )
-            task = result.task
-        else:
-            result = apply_task_update(
-                db,
-                task,
-                TaskUpdate(
-                    clear_follow_up_opportunity=True,
-                    action_actor="SYSTEM",
-                    action_name="clear_opportunity",
-                    action_result={"reason": choice.kind},
-                ),
-            )
-            task = result.task
+            ).task
+        if not cleared:
+            context_authority = {
+                "opportunity_public_id": choice.public_id,
+                "opportunity_stage_name": choice.stage or "",
+            }
+        judged = pending_draft if pending_draft is not None else draft
         card = await self._follow_up.judge(
             db, team_id=task.team_id, pack=pack, choice=choice,
-            source_records=draft.source_records, content_json=draft.content_json,
+            source_records=judged.source_records, content_json=judged.content_json,
+            reporter=reporter,
         )
-        return task, card.as_command()
+        return context_authority or {}, card.as_command(), cleared
 
     def _ask_field(self, db: Session, task: AssistantTask, parameters: dict[str, object]) -> CoordinatorOutcome:
         field_name = str(parameters.get("field", ""))

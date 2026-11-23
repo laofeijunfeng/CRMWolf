@@ -229,7 +229,7 @@ const appLayoutClass = computed(() => ({
   'app-layout--fixed': isFixedWorkspaceRoute.value,
 }))
 const isContainedChatRoute = computed(() => (
-  route.name === 'SalesAssistant' || route.path.startsWith('/agent')
+  route.name === 'SalesAssistant'
 ))
 const mainViewClass = computed(() => ({
   'main-view--contained': isContainedChatRoute.value,
@@ -334,7 +334,7 @@ onMounted(async () => {
 // 层级关系：
 // z-1000: Dialog, Dropdown (Modal 层，最高)
 // z-200:  Sheet, Drawer (Drawer 层，遮挡导航)
-// z-100:  Sidebar, BottomNav (主导航)
+// z-100:  Sidebar (主导航)
 // z-90:   TopBar (固定导航栏)
 // z-50:   Toast, Notifications (临时通知)
 // z-20:   Tooltip, Popover (悬浮元素)
@@ -346,7 +346,6 @@ $z-index-topbar: 90;
 $z-index-context-tabs: 85;
 $z-index-dropdown: 1000;  // 与 Modal 同层
 $z-index-modal: 1000;     // Dialog, AlertDialog 最高层级
-$z-index-bottom-nav: 100;
 
 // ==================== App Layout ====================
 .app-layout {

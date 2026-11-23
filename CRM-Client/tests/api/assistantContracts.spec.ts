@@ -28,8 +28,8 @@ const preview = {
   next_action: null, next_follow_time: null, next_follow_time_text: ''
 }
 const candidate = {
-  kind: 'customer_fact', key: 'fact-key', evidence_quote: '使用虚构系统', payload: { fact_type: 'system', content: '使用虚构系统' },
-  activity_id: 1, customer_id: 42, source_revision: 1, prior_fact_version: null, action_id: 'fictional-action'
+  kind: 'follow_up_task_create', key: 'task-key', evidence_quote: '发送方案', payload: { action: '发送方案' },
+  activity_id: 1, customer_id: 42, source_revision: 1, action_id: 'fictional-action'
 }
 const confirmation = (field: string, confirmation_payload: unknown) => ({
   type: 'CONFIRMATION', field, question_id: 'q-current', action_id: 'action-current', expected_version: 6,
@@ -96,8 +96,8 @@ describe('current assistant confirmation commands', () => {
   it('parses the exact activity preview and preserves proposal identity without adding missing fields', () => {
     const activity = AssistantTaskViewSchema.parse({ ...task, committed: [], waiting: confirmation('activity_write', { kind: 'activity_write', preview }) })
     expect(activity.waiting?.confirmation_payload).toEqual({ kind: 'activity_write', preview })
-    const proposal = { kind: 'proposal', proposal_kind: 'customer_fact', candidate }
-    expect(AssistantTaskViewSchema.parse({ ...task, committed: [activityReceipt], waiting: confirmation('proposal:customer_fact', proposal) }).waiting?.confirmation_payload).toEqual(proposal)
+    const proposal = { kind: 'proposal', proposal_kind: 'follow_up_task_create', candidate }
+    expect(AssistantTaskViewSchema.parse({ ...task, committed: [activityReceipt], waiting: confirmation('proposal:follow_up_task_create', proposal) }).waiting?.confirmation_payload).toEqual(proposal)
   })
 
   it('accepts exact canonical CRM preview kinds and rejects task kinds or invented kinds', () => {
@@ -113,12 +113,12 @@ describe('current assistant confirmation commands', () => {
   it('fails closed per row for unknown commands, wrong fields, and mismatched proposal kinds', () => {
     const invalid = [
       confirmation('activity_write', { kind: 'execute_anything', preview }),
-      confirmation('proposal:customer_fact', { kind: 'activity_write', preview }),
-      confirmation('proposal:customer_fact', { kind: 'proposal', proposal_kind: 'customer_fact', candidate: { ...candidate, kind: 'opportunity_create' } }),
+      confirmation('proposal:follow_up_task_create', { kind: 'activity_write', preview }),
+      confirmation('proposal:follow_up_task_create', { kind: 'proposal', proposal_kind: 'follow_up_task_create', candidate: { ...candidate, kind: 'opportunity_create' } }),
       confirmation('activity_write', { kind: 'activity_write', preview: { ...preview, arbitrary_command: true } }),
       confirmation('activity_write', null)
     ].map((waiting, index) => ({ ...task, public_id: `invalid-${index}`, committed: [], waiting }))
-    const current = { ...task, committed: [activityReceipt], waiting: confirmation('proposal:customer_fact', { kind: 'proposal', proposal_kind: 'customer_fact', candidate }) }
+    const current = { ...task, committed: [activityReceipt], waiting: confirmation('proposal:follow_up_task_create', { kind: 'proposal', proposal_kind: 'follow_up_task_create', candidate }) }
     const parsed = parseAssistantTaskList([...invalid, current])
     expect(parsed.skipped).toEqual([0, 1, 2, 3, 4])
     expect(parsed.tasks.map((row) => row.public_id)).toEqual(['ast_123'])

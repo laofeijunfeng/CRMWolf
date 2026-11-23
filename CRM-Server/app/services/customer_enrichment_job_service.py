@@ -33,10 +33,21 @@ from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from typing import TypedDict
 
     from sqlalchemy.orm import Session
 
     from app.models.customer_enrichment_job import CustomerEnrichmentJob
+
+    class _EnrichmentClaimSnapshot(TypedDict):
+        customer_id: int
+        plan_version: str
+        requested_fields: tuple[str, ...]
+        attempt_count: int
+        max_attempts: int
+        run_id: str
+        thread_id: str
+        first_attempt_finished: bool
 
 
 logger = logging.getLogger(__name__)
@@ -133,7 +144,7 @@ class CustomerEnrichmentJobService:
             if claimed is None:
                 db.rollback()
                 return self._busy_result(request, customer_id=int(existing.customer_id))
-            snapshot = {
+            snapshot: _EnrichmentClaimSnapshot = {
                 "customer_id": int(claimed.customer_id),
                 "plan_version": str(claimed.plan_version),
                 "requested_fields": tuple(str(item) for item in (claimed.requested_fields_json or [])),

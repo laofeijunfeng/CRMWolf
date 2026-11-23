@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import inspect, or_
-from sqlalchemy.orm import Session
 
 from app.models.customer import Customer
 from app.models.customer_fact import CustomerFact, CustomerFactStatus
@@ -15,8 +14,11 @@ from app.models.customer_identity_term import (
     CustomerIdentityTermSource,
     CustomerIdentityTermStatus,
 )
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from sqlalchemy.orm import Session
 
     from app.services.customer_knowledge_candidate_service import CustomerVisibilityPredicate
 
@@ -332,7 +334,8 @@ class CustomerIdentityResolutionService:
             if not usable:
                 continue
             score, reason = max(usable, key=lambda item: item[0])
-            signals.append(_customer_signal(customer, score=score, source="customer_alias_fact", reason=reason, terms=terms))
+            signals.append(_customer_signal(customer, score=score, source="customer_alias_fact",
+                reason=reason, terms=terms))
         return signals
 
     def _signals_from_generated_terms(
@@ -492,7 +495,7 @@ def generated_identity_terms_for_customer_name(account_name: str) -> list[tuple[
 
 
 def _parenthetical_short_terms(name: str) -> list[str]:
-    match = re.search(r"^(?P<prefix>[^()（）]+)[(（][^()（）]+[)）](?P<suffix>.+)$", name)
+    match = re.search("^(?P<prefix>[^()\uff08\uff09]+)[(\uff08][^()\uff08\uff09]+[)\uff09](?P<suffix>.+)$", name)
     if not match:
         return []
     prefix = _normalize_text(match.group("prefix"))
@@ -567,7 +570,8 @@ def _score_identity_text(*, query: str, term: str, term_type: str, confidence: f
     subsequence_score = _ordered_overlap_score(normalized_query, normalized_term)
     if subsequence_score >= 0.96 and _has_specific_overlap(normalized_query, normalized_term):
         return 0.89, "客户名称结构匹配"
-    if subsequence_score >= 0.84 and len(normalized_query) >= 4 and _has_specific_overlap(normalized_query, normalized_term):
+    if subsequence_score >= 0.84 and len(normalized_query) >= 4 and _has_specific_overlap(
+        normalized_query, normalized_term):
         return 0.82, "客户名称结构弱匹配"
     return 0.0, ""
 
@@ -624,7 +628,7 @@ def _customer_signal(
 
 def _query_terms(value: str) -> list[str]:
     normalized = _normalize_text(value)
-    return _dedupe_non_empty([value, normalized, *re.split(r"[\s,，、/／()（）]+", value.strip())])
+    return _dedupe_non_empty([value, normalized, *re.split("[\\s,\uff0c、/\uff0f()\uff08\uff09]+", value.strip())])
 
 
 def _strip_legal_suffix(value: str) -> str:
@@ -641,7 +645,7 @@ def _strip_legal_suffix(value: str) -> str:
 
 
 def _remove_parenthetical(value: str) -> str:
-    return re.sub(r"[(（][^()（）]+[)）]", "", value)
+    return re.sub("[(\uff08][^()\uff08\uff09]+[)\uff09]", "", value)
 
 
 def _project_identity_candidate(item: dict) -> dict | None:
@@ -693,7 +697,7 @@ def _clean_text(value: object) -> str:
 
 
 def _normalize_text(value: object) -> str:
-    return re.sub(r"[\s·,，、.。/／()（）【】\\-]+", "", str(value or "").strip().lower())
+    return re.sub("[\\s·,\uff0c、.。/\uff0f()\uff08\uff09【】\\\\-]+", "", str(value or "").strip().lower())
 
 
 def _dedupe_non_empty(values: Iterable[object]) -> list[str]:

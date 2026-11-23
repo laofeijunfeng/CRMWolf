@@ -1,34 +1,31 @@
-from decimal import Decimal
-from sqlalchemy.orm import Query, Session, selectinload
-from sqlalchemy import and_, func, cast, Integer, or_
-from typing import Optional, List, Tuple
 from datetime import date, datetime
-from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus
-from app.models.customer import Customer
-from app.models.product import ProductModule
+from decimal import Decimal
+
+from sqlalchemy import Integer, and_, cast, func, or_
+from sqlalchemy.orm import Query, Session, selectinload
+
 from app.constants.business_types import BusinessType
-from app.services.business_number_generator import BusinessNumberGenerator
-from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
+    SortCondition,
     apply_search,
     build_optional_list_query,
-    SortCondition,
-    without_filter_field,
     uses_unified_list_query,
+    without_filter_field,
 )
 from app.core.list_query.catalogs import OPPORTUNITIES_LIST_QUERY_CATALOG
+from app.models.customer import Customer
+from app.models.opportunity import Opportunity, OpportunityProductModule, OpportunityStage, OpportunityStatus
+from app.models.product import ProductModule
 from app.schemas.opportunity import (
+    LicenseTypeEnum,
+    OpportunityCreate,
+    OpportunityLose,
     OpportunityStageCreate,
     OpportunityStageUpdate,
-    OpportunityCreate,
     OpportunityUpdate,
-    OpportunityStageUpdate as OpportunityStageUpdateRequest,
     OpportunityWin,
-    OpportunityLose,
-    LicenseTypeEnum,
 )
 from app.services.assistant.crm_effects import (
     AssistantCRMCommand,
@@ -36,15 +33,18 @@ from app.services.assistant.crm_effects import (
     checked_effect,
     record_effect,
 )
+from app.services.business_number_generator import BusinessNumberGenerator
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.time import business_now
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def _split_int_csv(value: Optional[str]) -> List[int]:
+def _split_int_csv(value: str | None) -> list[int]:
     values = []
     for item in _split_csv(value):
         try:
@@ -58,7 +58,7 @@ def _bump_opportunity_version(opportunity: Opportunity) -> None:
     """Advance the aggregate version after a persisted opportunity mutation."""
     opportunity.version = int(getattr(opportunity, "version", 1) or 1) + 1
 
-def _lock_opportunity(db: Session, opportunity_id: int, team_id: Optional[int] = None) -> Optional[Opportunity]:
+def _lock_opportunity(db: Session, opportunity_id: int, team_id: int | None = None) -> Opportunity | None:
     """Lock the customer before its opportunity; recheck the binding under the row lock."""
     with db.no_autoflush:
         binding = db.query(Opportunity.team_id, Opportunity.customer_id).filter(
@@ -76,16 +76,16 @@ def _lock_opportunity(db: Session, opportunity_id: int, team_id: Optional[int] =
 
 
 class OpportunityStageCRUD:
-    def get_by_id(self, db: Session, stage_id: int) -> Optional[OpportunityStage]:
+    def get_by_id(self, db: Session, stage_id: int) -> OpportunityStage | None:
         return db.query(OpportunityStage).filter(OpportunityStage.id == stage_id).first()
 
-    def get_by_code(self, db: Session, stage_code: str, team_id: Optional[int] = None) -> Optional[OpportunityStage]:
+    def get_by_code(self, db: Session, stage_code: str, team_id: int | None = None) -> OpportunityStage | None:
         query = db.query(OpportunityStage).filter(OpportunityStage.stage_code == stage_code)
         if team_id is not None:
             query = query.filter(OpportunityStage.team_id == team_id)
         return query.first()
 
-    def get_all_active(self, db: Session, team_id: Optional[int] = None) -> List[OpportunityStage]:
+    def get_all_active(self, db: Session, team_id: int | None = None) -> list[OpportunityStage]:
         query = db.query(OpportunityStage).filter(OpportunityStage.is_active == 1)
         if team_id is not None:
             query = query.filter(OpportunityStage.team_id == team_id)
@@ -94,11 +94,11 @@ class OpportunityStageCRUD:
     def get_multi(
         self,
         db: Session,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-        is_active: Optional[int] = None
-    ) -> Tuple[List[OpportunityStage], int]:
+        is_active: int | None = None
+    ) -> tuple[list[OpportunityStage], int]:
         query = db.query(OpportunityStage)
 
         if team_id is not None:
@@ -145,13 +145,13 @@ class OpportunityCRUD:
             selectinload(Opportunity.module_links).selectinload(OpportunityProductModule.module),
         )
 
-    def get_by_id(self, db: Session, opportunity_id: int, team_id: Optional[int] = None) -> Optional[Opportunity]:
+    def get_by_id(self, db: Session, opportunity_id: int, team_id: int | None = None) -> Opportunity | None:
         query = self._query(db).filter(Opportunity.id == opportunity_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
         return query.first()
 
-    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Opportunity]:
+    def get_by_public_id(self, db: Session, public_id: str, team_id: int | None = None) -> Opportunity | None:
         query = self._query(db).filter(Opportunity.public_id == public_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
@@ -161,10 +161,10 @@ class OpportunityCRUD:
         self,
         db: Session,
         customer_id: int,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 100
-    ) -> Tuple[List[Opportunity], int]:
+    ) -> tuple[list[Opportunity], int]:
         query = self._query(db).filter(Opportunity.customer_id == customer_id)
         if team_id is not None:
             query = query.filter(Opportunity.team_id == team_id)
@@ -178,7 +178,7 @@ class OpportunityCRUD:
         keyword: str,
         team_id: int,
         limit: int = 5,
-    ) -> List[Opportunity]:
+    ) -> list[Opportunity]:
         """
         按名称关键词搜索商机（Agent 专用）
 
@@ -313,10 +313,10 @@ class OpportunityCRUD:
         db: Session,
         *,
         team_id: int,
-        status: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        customer_id: Optional[int] = None,
-        search: Optional[str] = None,
+        status: str | None = None,
+        owner_id: str | None = None,
+        customer_id: int | None = None,
+        search: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Query[Opportunity]:
@@ -343,27 +343,27 @@ class OpportunityCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
-        status_exclude: Optional[str] = None,
-        stage_id: Optional[int] = None,
-        owner_id: Optional[str] = None,
-        owner_id_exclude: Optional[str] = None,
-        customer_id: Optional[int] = None,
-        keyword: Optional[str] = None,
-        customer_keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        license_type: Optional[str] = None,
-        license_type_exclude: Optional[str] = None,
-        purchase_type: Optional[str] = None,
-        purchase_type_exclude: Optional[str] = None,
-        stage_name: Optional[str] = None,
-        expected_closing_date_start: Optional[date] = None,
-        expected_closing_date_end: Optional[date] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        stage_id: int | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        customer_id: int | None = None,
+        keyword: str | None = None,
+        customer_keyword: str | None = None,
+        search: str | None = None,
+        license_type: str | None = None,
+        license_type_exclude: str | None = None,
+        purchase_type: str | None = None,
+        purchase_type_exclude: str | None = None,
+        stage_name: str | None = None,
+        expected_closing_date_start: date | None = None,
+        expected_closing_date_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[Opportunity], int]:
+    ) -> tuple[list[Opportunity], int]:
         query = self.build_population_query(
             db,
             team_id=team_id,
@@ -399,13 +399,14 @@ class OpportunityCRUD:
         self.log_created(db, db_obj, creator_id, team_id)
         return db_obj
 
-    def create_without_commit(self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int) -> Opportunity:
+    def create_without_commit(
+        self, db: Session, obj_in: OpportunityCreate, creator_id: str, team_id: int
+    ) -> Opportunity:
         from app.crud.procurement import procurement_stage_template_crud
-        from app.services.pricing import pricing_service
-        from app.services.deal_journey_service import deal_journey_service
-        from app.models.procurement import OpportunityStageSnapshot
-        
         from app.crud.product import product_crud
+        from app.models.procurement import OpportunityStageSnapshot
+        from app.services.deal_journey_service import deal_journey_service
+        from app.services.pricing import pricing_service
 
         product_crud.lock_catalog_team(db, team_id)
         customer = db.query(Customer).filter(
@@ -610,7 +611,7 @@ class OpportunityCRUD:
         *,
         team_id: int,
         product_public_id: str,
-        module_public_ids: List[str],
+        module_public_ids: list[str],
         _creating: bool = False,
     ) -> Opportunity:
         from app.crud.product import product_crud
@@ -620,7 +621,7 @@ class OpportunityCRUD:
         if opportunity is None:
             raise ValueError("商机不存在")
 
-        unique_module_ids: List[str] = []
+        unique_module_ids: list[str] = []
         seen: set[str] = set()
         for public_id in module_public_ids:
             if not public_id or public_id in seen:
@@ -629,7 +630,6 @@ class OpportunityCRUD:
             unique_module_ids.append(public_id)
         if not product_public_id:
             from app.crud.product_intent import EMPTY_CATALOG_MESSAGE
-
             from app.models.product import Product
 
             with db.no_autoflush:
@@ -646,7 +646,7 @@ class OpportunityCRUD:
         if product is None or not bool(product.is_active):
             raise ValueError("产品不存在")
 
-        modules: List[ProductModule] = []
+        modules: list[ProductModule] = []
         for public_id in unique_module_ids:
             with db.no_autoflush:
                 module = db.query(ProductModule).filter(
@@ -692,9 +692,9 @@ class OpportunityCRUD:
     ) -> Opportunity:
         """推进商机到新阶段"""
         from app.crud.procurement import procurement_stage_template_crud
+        from app.crud.user import user_crud
         from app.models.procurement import OpportunityStageSnapshot
         from app.services.operation_log_service import operation_log_service
-        from app.crud.user import user_crud
         
         opportunity = _lock_opportunity(
             db, opportunity_id, team_id=assistant_command.team_id if assistant_command is not None else None,
@@ -817,8 +817,9 @@ class OpportunityCRUD:
         operator_name = operator.name if operator else None
         
         if target_stage.win_probability == 100:
-            from app.schemas.opportunity import OpportunityWin
             from datetime import date as date_type
+
+            from app.schemas.opportunity import OpportunityWin
             
             win_data = OpportunityWin(
                 actual_amount=float(opportunity.total_amount),
@@ -865,7 +866,9 @@ class OpportunityCRUD:
                 content={
                     "opportunityName": opportunity.opportunity_name,
                     "actualAmount": float(opportunity.actual_amount),
-                    "actualClosingDate": opportunity.actual_closing_date.isoformat() if opportunity.actual_closing_date else None,
+                    "actualClosingDate": opportunity.actual_closing_date.isoformat()
+                    if opportunity.actual_closing_date
+                    else None,
                     "stageName": new_snapshot.stage_name,
                     "autoWon": True,
                     "reason": "推进到100%赢率阶段，自动标记为赢单"
@@ -900,9 +903,9 @@ class OpportunityCRUD:
     ) -> Opportunity:
         """设置商机采购方式，自动进入默认起始阶段"""
         from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
+        from app.crud.user import user_crud
         from app.models.procurement import OpportunityStageSnapshot
         from app.services.operation_log_service import operation_log_service
-        from app.crud.user import user_crud
 
         opportunity = _lock_opportunity(db, opportunity_id)
         if not opportunity:
@@ -1134,10 +1137,10 @@ class OpportunityCRUD:
     def get_sales_funnel(
         self,
         db: Session,
-        owner_id: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None
-    ) -> List[dict]:
+        owner_id: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None
+    ) -> list[dict]:
         query = db.query(
             OpportunityStage.id,
             OpportunityStage.stage_code,
@@ -1185,10 +1188,10 @@ class OpportunityCRUD:
     def get_stage_duration(
         self,
         db: Session,
-        owner_id: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None
-    ) -> List[dict]:
+        owner_id: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None
+    ) -> list[dict]:
         subquery = db.query(
             Opportunity.id,
             Opportunity.stage_id,
@@ -1249,8 +1252,8 @@ class OpportunityCRUD:
         self,
         db: Session,
         customer_id: int,
-        team_id: Optional[int] = None
-    ) -> List[Opportunity]:
+        team_id: int | None = None
+    ) -> list[Opportunity]:
         """返回新建合同下拉里要看到的商机。
 
         已赢单且审批通过、没有未删除合同的可以创建。跟进中且没有未删除合同的只展示。

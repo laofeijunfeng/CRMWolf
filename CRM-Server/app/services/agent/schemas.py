@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Literal, Optional, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -75,112 +75,112 @@ AgentNextActionStatus = Literal["CLEAR", "EXPLICITLY_NONE", "MISSING", "VAGUE"]
 
 
 class AgentCustomerEntity(BaseModel):
-    name_text: Optional[str] = Field(None, description="用户原文中的客户名称或简称")
+    name_text: str | None = Field(None, description="用户原文中的客户名称或简称")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="客户名称识别置信度")
     resolution_source: Literal["EXPLICIT", "NONE"] = Field(
-        "NONE", description="客户来源：本轮用户明示或无"
+        "NONE", description="客户来源\uff1a本轮用户明示或无"
     )
 
 
 class AgentInvoiceTitleEntity(BaseModel):
-    title_type: Optional[Literal["COMPANY", "PERSONAL"]] = Field(None, description="发票抬头类型")
-    title: Optional[str] = Field(None, description="开票抬头")
-    taxpayer_id: Optional[str] = Field(None, description="纳税人识别号")
-    bank_name: Optional[str] = Field(None, description="开户行")
-    bank_account: Optional[str] = Field(None, description="银行账号")
-    address: Optional[str] = Field(None, description="开票地址")
-    phone: Optional[str] = Field(None, description="开票电话")
+    title_type: Literal["COMPANY", "PERSONAL"] | None = Field(None, description="发票抬头类型")
+    title: str | None = Field(None, description="开票抬头")
+    taxpayer_id: str | None = Field(None, description="纳税人识别号")
+    bank_name: str | None = Field(None, description="开户行")
+    bank_account: str | None = Field(None, description="银行账号")
+    address: str | None = Field(None, description="开票地址")
+    phone: str | None = Field(None, description="开票电话")
     set_default: bool = Field(False, description="是否设为默认发票抬头")
 
 
 class AgentFollowUpEntity(BaseModel):
-    content: Optional[str] = Field(None, description="可沉淀为客户跟进记录的业务事实")
-    method: Optional[str] = Field(None, description="活动方式，例如电话、微信、拜访、邮件、线上会议、线下会议、未指定")
-    next_action: Optional[str] = Field(None, description="下一步动作")
-    next_follow_time_text: Optional[str] = Field(None, description="用户表达中的下一步动作时间")
-    next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化时间要素")
-    next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
+    content: str | None = Field(None, description="可沉淀为客户跟进记录的业务事实")
+    method: str | None = Field(None, description="活动方式\uff0c例如电话、微信、拜访、邮件、线上会议、线下会议、未指定")
+    next_action: str | None = Field(None, description="下一步动作")
+    next_follow_time_text: str | None = Field(None, description="用户表达中的下一步动作时间")
+    next_follow_time: AgentTemporalExpression | None = Field(None, description="用户表达的结构化时间要素")
+    next_follow_time_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
 
 
 class AgentPaymentEntity(BaseModel):
-    actual_amount: Optional[float] = Field(None, gt=0, description="实际回款金额")
-    actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
-    payment_date_text: Optional[str] = Field(None, description="用户原文中的实际回款日期表达")
-    payment_date: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化实际回款日期")
-    payment_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-    notes: Optional[str] = Field(None, description="回款备注")
+    actual_amount: float | None = Field(None, gt=0, description="实际回款金额")
+    actual_payer_name: str | None = Field(None, description="实际付款方名称")
+    payment_date_text: str | None = Field(None, description="用户原文中的实际回款日期表达")
+    payment_date: AgentTemporalExpression | None = Field(None, description="用户表达的结构化实际回款日期")
+    payment_date_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
+    notes: str | None = Field(None, description="回款备注")
 
 
 class AgentOpportunityEntity(BaseModel):
-    opportunity_name: Optional[str] = Field(None, description="废弃输入字段；创建时由后端 API 自动生成")
-    procurement_method_id: Optional[int] = Field(None, ge=1, description="采购方式 ID；用户通过系统交互选择时提取")
-    total_amount: Optional[float] = Field(None, gt=0, description="预计总金额（元）")
-    user_count: Optional[int] = Field(None, gt=0, description="采购用户数")
-    license_type: Optional[Literal["SUBSCRIPTION", "PERPETUAL"]] = Field(None, description="授权模式")
-    subscription_years: Optional[int] = Field(None, gt=0, description="订阅年限")
-    purchase_type: Optional[Literal["NEW", "RENEWAL", "EXPANSION"]] = Field(None, description="采购类型")
-    decision_maker_count: Optional[int] = Field(None, ge=1, description="采购决策人数")
-    expected_closing_date_text: Optional[str] = Field(None, description="用户原文中的预计成交日期表达")
-    expected_closing_date: Optional["AgentTemporalExpression"] = Field(None, description="预计成交日期结构化时间")
-    expected_closing_date_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-    product_public_id: Optional[str] = Field(None, min_length=1, description="关联产品对外ID")
-    product_module_public_ids: Optional[list[str]] = Field(None, min_length=1, description="关联产品模块对外ID列表")
+    opportunity_name: str | None = Field(None, description="废弃输入字段\uff1b创建时由后端 API 自动生成")
+    procurement_method_id: int | None = Field(None, ge=1, description="采购方式 ID\uff1b用户通过系统交互选择时提取")
+    total_amount: float | None = Field(None, gt=0, description="预计总金额\uff08元\uff09")
+    user_count: int | None = Field(None, gt=0, description="采购用户数")
+    license_type: Literal["SUBSCRIPTION", "PERPETUAL"] | None = Field(None, description="授权模式")
+    subscription_years: int | None = Field(None, gt=0, description="订阅年限")
+    purchase_type: Literal["NEW", "RENEWAL", "EXPANSION"] | None = Field(None, description="采购类型")
+    decision_maker_count: int | None = Field(None, ge=1, description="采购决策人数")
+    expected_closing_date_text: str | None = Field(None, description="用户原文中的预计成交日期表达")
+    expected_closing_date: AgentTemporalExpression | None = Field(None, description="预计成交日期结构化时间")
+    expected_closing_date_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
+    product_public_id: str | None = Field(None, min_length=1, description="关联产品对外ID")
+    product_module_public_ids: list[str] | None = Field(None, min_length=1, description="关联产品模块对外ID列表")
 
 class AgentOpportunityStageTransitionEntity(BaseModel):
-    opportunity_id: Optional[str] = Field(None, description="用户明确提到的商机对外 ID；没有则为 null")
-    opportunity_reference_text: Optional[str] = Field(None, description="用户原文中的商机名称或指代表达")
-    target_stage_name: Optional[str] = Field(None, description="用户希望推进到的采购阶段名称；未指定则为 null")
+    opportunity_id: str | None = Field(None, description="用户明确提到的商机对外 ID\uff1b没有则为 null")
+    opportunity_reference_text: str | None = Field(None, description="用户原文中的商机名称或指代表达")
+    target_stage_name: str | None = Field(None, description="用户希望推进到的采购阶段名称\uff1b未指定则为 null")
 
 
 class AgentLeadEntity(BaseModel):
-    lead_name: Optional[str] = Field(None, description="线索名称、项目名称或公司名称")
-    source: Optional[str] = Field(None, description="线索来源中文枚举值")
-    city: Optional[str] = Field(None, description="所在城市")
-    contact_name: Optional[str] = Field(None, description="联系人姓名")
-    contact_phone: Optional[str] = Field(None, description="联系人手机号")
-    company_scale: Optional[str] = Field(None, description="公司规模中文枚举值")
-    follow_up_content: Optional[str] = Field(None, description="创建线索后可沉淀的线索跟进内容")
-    follow_up_method: Optional[str] = Field(None, description="线索跟进方式")
-    next_action: Optional[str] = Field(None, description="下一步动作")
-    next_follow_time_text: Optional[str] = Field(None, description="用户表达中的线索下次跟进时间")
-    next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化线索下次跟进时间")
-    next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-    product_public_id: Optional[str] = Field(None, min_length=1, description="意向产品对外ID")
+    lead_name: str | None = Field(None, description="线索名称、项目名称或公司名称")
+    source: str | None = Field(None, description="线索来源中文枚举值")
+    city: str | None = Field(None, description="所在城市")
+    contact_name: str | None = Field(None, description="联系人姓名")
+    contact_phone: str | None = Field(None, description="联系人手机号")
+    company_scale: str | None = Field(None, description="公司规模中文枚举值")
+    follow_up_content: str | None = Field(None, description="创建线索后可沉淀的线索跟进内容")
+    follow_up_method: str | None = Field(None, description="线索跟进方式")
+    next_action: str | None = Field(None, description="下一步动作")
+    next_follow_time_text: str | None = Field(None, description="用户表达中的线索下次跟进时间")
+    next_follow_time: AgentTemporalExpression | None = Field(None, description="用户表达的结构化线索下次跟进时间")
+    next_follow_time_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
+    product_public_id: str | None = Field(None, min_length=1, description="意向产品对外ID")
 
 
 class AgentCustomerCreateEntity(BaseModel):
-    account_name: Optional[str] = Field(None, description="客户公司名称")
-    source: Optional[str] = Field(None, description="客户来源中文枚举值")
-    city: Optional[str] = Field(None, description="所在城市")
-    industry: Optional[str] = Field(None, description="所属行业")
-    company_scale: Optional[str] = Field(None, description="公司规模中文枚举值")
-    contact_name: Optional[str] = Field(None, description="主联系人姓名")
-    contact_phone: Optional[str] = Field(None, description="主联系人手机号")
-    contact_position: Optional[str] = Field(None, description="主联系人职务")
-    contact_gender: Optional[str] = Field(None, description="主联系人性别：1=男,2=女,0=未知")
-    contact_email: Optional[str] = Field(None, description="主联系人邮箱")
-    follow_up_content: Optional[str] = Field(None, description="创建客户后可沉淀的客户跟进内容")
-    follow_up_method: Optional[str] = Field(None, description="客户活动方式")
-    next_action: Optional[str] = Field(None, description="下一步动作")
-    next_follow_time_text: Optional[str] = Field(None, description="用户表达中的客户下次跟进时间")
-    next_follow_time: Optional["AgentTemporalExpression"] = Field(None, description="用户表达的结构化客户下次跟进时间")
-    next_follow_time_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-    product_public_id: Optional[str] = Field(None, min_length=1, description="意向产品对外ID")
+    account_name: str | None = Field(None, description="客户公司名称")
+    source: str | None = Field(None, description="客户来源中文枚举值")
+    city: str | None = Field(None, description="所在城市")
+    industry: str | None = Field(None, description="所属行业")
+    company_scale: str | None = Field(None, description="公司规模中文枚举值")
+    contact_name: str | None = Field(None, description="主联系人姓名")
+    contact_phone: str | None = Field(None, description="主联系人手机号")
+    contact_position: str | None = Field(None, description="主联系人职务")
+    contact_gender: str | None = Field(None, description="主联系人性别\uff1a1=男,2=女,0=未知")
+    contact_email: str | None = Field(None, description="主联系人邮箱")
+    follow_up_content: str | None = Field(None, description="创建客户后可沉淀的客户跟进内容")
+    follow_up_method: str | None = Field(None, description="客户活动方式")
+    next_action: str | None = Field(None, description="下一步动作")
+    next_follow_time_text: str | None = Field(None, description="用户表达中的客户下次跟进时间")
+    next_follow_time: AgentTemporalExpression | None = Field(None, description="用户表达的结构化客户下次跟进时间")
+    next_follow_time_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
+    product_public_id: str | None = Field(None, min_length=1, description="意向产品对外ID")
 
 
 class AgentTemporalExpression(BaseModel):
-    raw_text: Optional[str] = Field(None, description="用户原文中的时间表达")
+    raw_text: str | None = Field(None, description="用户原文中的时间表达")
     kind: AgentTemporalKind = Field("NONE", description="时间表达类型")
-    direction: Optional[AgentTemporalDirection] = Field(None, description="相对方向，例如下一个、当前、未来")
-    amount: Optional[int] = Field(None, ge=0, description="相对数量")
-    unit: Optional[AgentTemporalUnit] = Field(None, description="相对单位")
-    weekday: Optional[int] = Field(None, ge=1, le=7, description="ISO 星期：1=周一，7=周日")
-    year: Optional[int] = Field(None, ge=1970, le=2100, description="年份；用户未表达则为 null")
-    month: Optional[int] = Field(None, ge=1, le=12, description="月份；用户未表达则为 null")
-    day: Optional[int] = Field(None, ge=1, le=31, description="日期；用户未表达则为 null")
-    date_text: Optional[str] = Field(None, description="用户明确表达的日期，YYYY-MM-DD")
-    hour: Optional[int] = Field(None, ge=0, le=23, description="小时，未指定则为 null")
-    minute: Optional[int] = Field(None, ge=0, le=59, description="分钟，未指定则为 null")
+    direction: AgentTemporalDirection | None = Field(None, description="相对方向\uff0c例如下一个、当前、未来")
+    amount: int | None = Field(None, ge=0, description="相对数量")
+    unit: AgentTemporalUnit | None = Field(None, description="相对单位")
+    weekday: int | None = Field(None, ge=1, le=7, description="ISO 星期\uff1a1=周一\uff0c7=周日")
+    year: int | None = Field(None, ge=1970, le=2100, description="年份\uff1b用户未表达则为 null")
+    month: int | None = Field(None, ge=1, le=12, description="月份\uff1b用户未表达则为 null")
+    day: int | None = Field(None, ge=1, le=31, description="日期\uff1b用户未表达则为 null")
+    date_text: str | None = Field(None, description="用户明确表达的日期\uff0cYYYY-MM-DD")
+    hour: int | None = Field(None, ge=0, le=23, description="小时\uff0c未指定则为 null")
+    minute: int | None = Field(None, ge=0, le=59, description="分钟\uff0c未指定则为 null")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
 
@@ -197,41 +197,41 @@ class AgentFollowUpPrincipleScore(BaseModel):
 
 
 class AgentFollowUpQualityResult(BaseModel):
-    score: int = Field(0, ge=0, le=100, description="跟进质量总分，满分 100")
+    score: int = Field(0, ge=0, le=100, description="跟进质量总分\uff0c满分 100")
     passed: bool = Field(False, description="是否达到创建跟进记录前的最低质量要求")
     reason: str = Field("", description="一句话质量结论")
-    missing_aspects: List[str] = Field(default_factory=list, description="需要用户补充的关键信息点")
-    supplement_question: Optional[str] = Field(None, description="低于阈值时，只问一个补充问题")
-    suggested_revision: Optional[str] = Field(None, description="不编造事实前提下的建议优化版本")
+    missing_aspects: list[str] = Field(default_factory=list, description="需要用户补充的关键信息点")
+    supplement_question: str | None = Field(None, description="低于阈值时\uff0c只问一个补充问题")
+    suggested_revision: str | None = Field(None, description="不编造事实前提下的建议优化版本")
     next_action_status: AgentNextActionStatus = Field(
         "MISSING",
         description=(
-            "下一步行动门禁状态：CLEAR=明确行动；EXPLICITLY_NONE=明确暂无下一步；"
-            "MISSING=未表达；VAGUE=只有无法执行的泛化表达"
+            "下一步行动门禁状态\uff1aCLEAR=明确行动\uff1bEXPLICITLY_NONE=明确暂无下一步\uff1b"
+            "MISSING=未表达\uff1bVAGUE=只有无法执行的泛化表达"
         ),
     )
-    principle_scores: Dict[str, AgentFollowUpPrincipleScore] = Field(default_factory=dict)
+    principle_scores: dict[str, AgentFollowUpPrincipleScore] = Field(default_factory=dict)
 
 
 class AgentRequestedAction(BaseModel):
     action: str = Field(..., description="候选动作名称")
     requires_confirmation: bool = Field(True, description="执行前是否需要用户确认")
-    reason: Optional[str] = Field(None, description="动作触发原因")
+    reason: str | None = Field(None, description="动作触发原因")
 
 
 class AgentFollowUpTaskTransitionEntity(BaseModel):
-    action: Optional[Literal["complete", "cancel", "postpone", "keep_open"]] = Field(
+    action: Literal["complete", "cancel", "postpone", "keep_open"] | None = Field(
         None,
         description="用户希望对跟进任务执行的状态动作",
     )
-    task_id: Optional[str] = Field(None, description="明确提到的跟进任务对外ID，格式 fut_...；没有则为 null")
-    task_reference_text: Optional[str] = Field(
-        None, description="用户原文中的任务指代表达，例如 这个任务、河南双汇那个任务"
+    task_id: str | None = Field(None, description="明确提到的跟进任务对外ID\uff0c格式 fut_...\uff1b没有则为 null")
+    task_reference_text: str | None = Field(
+        None, description="用户原文中的任务指代表达\uff0c例如 这个任务、河南双汇那个任务"
     )
-    proposed_due_at_text: Optional[str] = Field(None, description="延期场景下用户表达的新时间")
-    proposed_due_at: Optional["AgentTemporalExpression"] = Field(None, description="延期场景下结构化时间要素")
-    proposed_due_at_iso: Optional[str] = Field(None, description="系统计算字段，AI 必须返回 null")
-    reason: Optional[str] = Field(None, description="用户表达的任务状态变更原因")
+    proposed_due_at_text: str | None = Field(None, description="延期场景下用户表达的新时间")
+    proposed_due_at: AgentTemporalExpression | None = Field(None, description="延期场景下结构化时间要素")
+    proposed_due_at_iso: str | None = Field(None, description="系统计算字段\uff0cAI 必须返回 null")
+    reason: str | None = Field(None, description="用户表达的任务状态变更原因")
 
 
 class AgentSemanticParseResult(BaseModel):
@@ -249,59 +249,59 @@ class AgentSemanticParseResult(BaseModel):
     opportunity_stage_transition: AgentOpportunityStageTransitionEntity = Field(
         default_factory=AgentOpportunityStageTransitionEntity
     )
-    contact: Dict[str, object] = Field(default_factory=dict)
+    contact: dict[str, object] = Field(default_factory=dict)
     invoice_title: AgentInvoiceTitleEntity = Field(default_factory=AgentInvoiceTitleEntity)
-    deployment_info: Dict[str, object] = Field(default_factory=dict)
-    customer_member: Dict[str, object] = Field(default_factory=dict)
-    business_signals: List[AgentBusinessSignal] = Field(default_factory=list)
-    requested_actions: List[AgentRequestedAction] = Field(default_factory=list)
-    evidence: List[str] = Field(default_factory=list, description="用于解释判断的原文依据")
+    deployment_info: dict[str, object] = Field(default_factory=dict)
+    customer_member: dict[str, object] = Field(default_factory=dict)
+    business_signals: list[AgentBusinessSignal] = Field(default_factory=list)
+    requested_actions: list[AgentRequestedAction] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list, description="用于解释判断的原文依据")
 
 
 class AgentBusinessSuggestion(BaseModel):
     action: AgentSuggestionAction = Field(..., description="建议动作")
     title: str = Field(..., description="面向用户展示的建议标题")
-    reason: str = Field(..., description="建议原因，必须基于用户输入或客户上下文")
+    reason: str = Field(..., description="建议原因\uff0c必须基于用户输入或客户上下文")
     priority: Literal["high", "medium", "low"] = Field("medium", description="建议优先级")
     requires_confirmation: bool = Field(True, description="执行前是否需要用户确认")
-    missing_fields: List[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
-    related_object_type: Optional[str] = Field(
-        None, description="依赖对象类型，例如 contract/payment_plan/deployment_info"
+    missing_fields: list[str] = Field(default_factory=list, description="执行动作前仍需补充的字段")
+    related_object_type: str | None = Field(
+        None, description="依赖对象类型\uff0c例如 contract/payment_plan/deployment_info"
     )
-    related_object_id: Optional[Union[str, int]] = Field(None, description="依赖对象标识；商机使用对外ID")
-    execution_payload: Dict[str, object] = Field(
-        default_factory=dict, description="建议执行所需的结构化参数，仍需代码校验和用户确认"
+    related_object_id: str | int | None = Field(None, description="依赖对象标识\uff1b商机使用对外ID")
+    execution_payload: dict[str, object] = Field(
+        default_factory=dict, description="建议执行所需的结构化参数\uff0c仍需代码校验和用户确认"
     )
-    risk_notes: List[str] = Field(default_factory=list, description="不确定性或风险提示")
+    risk_notes: list[str] = Field(default_factory=list, description="不确定性或风险提示")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
 
 
 class AgentSuggestionResult(BaseModel):
     summary: str = Field(..., description="对客户当前上下文和用户输入的简要判断")
-    suggestions: List[AgentBusinessSuggestion] = Field(default_factory=list, max_length=3)
+    suggestions: list[AgentBusinessSuggestion] = Field(default_factory=list, max_length=3)
     need_user_choice: bool = Field(False, description="是否需要用户选择下一步动作")
-    clarification_question: Optional[str] = Field(None, description="建议生成阶段需要追问的问题")
+    clarification_question: str | None = Field(None, description="建议生成阶段需要追问的问题")
 
 
 class AgentResourceCandidateRank(BaseModel):
     resource_id: int = Field(..., ge=1, description="候选业务资源 ID")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="该资源与用户语义和目标动作的匹配置信度")
-    evidence: List[str] = Field(default_factory=list, max_length=3, description="支持选择该资源的简短证据")
-    risk_notes: List[str] = Field(default_factory=list, max_length=3, description="仍然不确定的点")
+    evidence: list[str] = Field(default_factory=list, max_length=3, description="支持选择该资源的简短证据")
+    risk_notes: list[str] = Field(default_factory=list, max_length=3, description="仍然不确定的点")
 
 
 class AgentResourceResolutionResult(BaseModel):
-    rankings: List[AgentResourceCandidateRank] = Field(default_factory=list, max_length=5)
+    rankings: list[AgentResourceCandidateRank] = Field(default_factory=list, max_length=5)
     reason: str = Field("", description="整体判断依据")
 
 
 class CustomerContextAnswerResult(BaseModel):
-    answer: str = Field("", description="面向销售用户的客户上下文回答，不暴露内部 ID、枚举编码或工具名称")
+    answer: str = Field("", description="面向销售用户的客户上下文回答\uff0c不暴露内部 ID、枚举编码或工具名称")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="回答基于现有上下文的可靠程度")
-    used_sections: List[str] = Field(default_factory=list, max_length=8, description="回答参考的业务上下文分区")
-    missing_context: List[str] = Field(default_factory=list, max_length=5, description="回答仍缺少的上下文")
+    used_sections: list[str] = Field(default_factory=list, max_length=8, description="回答参考的业务上下文分区")
+    missing_context: list[str] = Field(default_factory=list, max_length=5, description="回答仍缺少的上下文")
     answer_mode: str = Field("fallback", description="回答模式: grounded/fallback/degraded/insufficient")
-    citations: List[Dict[str, object]] = Field(default_factory=list, max_length=8, description="回答引用的证据来源")
+    citations: list[dict[str, object]] = Field(default_factory=list, max_length=8, description="回答引用的证据来源")
 
 
 class WorkSummaryNarrativeItem(BaseModel):
@@ -309,26 +309,26 @@ class WorkSummaryNarrativeItem(BaseModel):
 
     category: Literal["completed_work", "process_record", "business_progress"] = Field(
         ...,
-        description="总结项分类，不能把过程记录写成已完成任务",
+        description="总结项分类\uff0c不能把过程记录写成已完成任务",
     )
     title: str = Field(..., min_length=1, max_length=120, description="总结项标题")
     summary: str = Field(..., min_length=1, max_length=300, description="总结项内容")
-    fact_ids: List[str] = Field(default_factory=list, min_length=1, max_length=8, description="支撑该总结项的 fact_id")
+    fact_ids: list[str] = Field(default_factory=list, min_length=1, max_length=8, description="支撑该总结项的 fact_id")
 
 
 class WorkSummaryNarrativeResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     answer: str = Field("", max_length=4000, description="面向销售用户的工作总结")
-    highlights: List[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
-    customer_summaries: List[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
+    highlights: list[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
+    customer_summaries: list[WorkSummaryNarrativeItem] = Field(default_factory=list, max_length=12)
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     narrative_mode: str = Field("fallback", description="langchain_structured_output/fallback/degraded/insufficient")
-    missing_context: List[str] = Field(default_factory=list, max_length=5)
-    citations: List[Dict[str, object]] = Field(default_factory=list, max_length=30, description="可回指的事实引用")
+    missing_context: list[str] = Field(default_factory=list, max_length=5)
+    citations: list[dict[str, object]] = Field(default_factory=list, max_length=30, description="可回指的事实引用")
 
     @model_validator(mode="after")
-    def require_fact_references(self) -> "WorkSummaryNarrativeResult":
+    def require_fact_references(self) -> WorkSummaryNarrativeResult:
         for item in [*self.highlights, *self.customer_summaries]:
             if not item.fact_ids:
                 raise ValueError("每个工作总结项必须引用至少一个 fact_id")
@@ -336,10 +336,10 @@ class WorkSummaryNarrativeResult(BaseModel):
 
 
 class AgentMemorySnapshot(BaseModel):
-    recent_messages: List[Dict[str, object]] = Field(default_factory=list)
-    pending_task: Optional[Dict[str, object]] = None
-    session_context: Dict[str, object] = Field(default_factory=dict)
-    recent_follow_up_tasks: List[Dict[str, object]] = Field(default_factory=list, max_length=20)
+    recent_messages: list[dict[str, object]] = Field(default_factory=list)
+    pending_task: dict[str, object] | None = None
+    session_context: dict[str, object] = Field(default_factory=dict)
+    recent_follow_up_tasks: list[dict[str, object]] = Field(default_factory=list, max_length=20)
 
 
 class AgentPendingInterruptionDecision(BaseModel):
@@ -348,11 +348,11 @@ class AgentPendingInterruptionDecision(BaseModel):
         description="用户本轮输入与当前挂起任务的关系",
     )
     confidence: float = Field(0.0, ge=0.0, le=1.0)
-    detected_customer_name: Optional[str] = Field(None, description="本轮明确提到的新客户名称")
-    detected_intent: Optional[AgentIntent] = Field(None, description="本轮输入的业务意图")
+    detected_customer_name: str | None = Field(None, description="本轮明确提到的新客户名称")
+    detected_intent: AgentIntent | None = Field(None, description="本轮输入的业务意图")
     is_field_supplement: bool = Field(False, description="是否明显是在补充当前挂起任务缺失字段")
     reason: str = Field("", description="简短判断依据")
-    question: Optional[str] = Field(None, description="需要用户确认时的问题")
+    question: str | None = Field(None, description="需要用户确认时的问题")
 
 
 class AgentTurnRelationDecision(BaseModel):
@@ -361,34 +361,34 @@ class AgentTurnRelationDecision(BaseModel):
         description="用户本轮输入与会话业务状态的关系",
     )
     confidence: float = Field(0.0, ge=0.0, le=1.0)
-    target_task_id: Optional[int] = Field(None, description="应继续、修改或恢复的任务 ID；无法确定则为 null")
-    detected_customer_name: Optional[str] = Field(None, description="本轮明确提到的客户名称；没有则为 null")
-    detected_intent: Optional[AgentIntent] = Field(None, description="本轮输入的业务意图；无法判断则为 null")
+    target_task_id: int | None = Field(None, description="应继续、修改或恢复的任务 ID\uff1b无法确定则为 null")
+    detected_customer_name: str | None = Field(None, description="本轮明确提到的客户名称\uff1b没有则为 null")
+    detected_intent: AgentIntent | None = Field(None, description="本轮输入的业务意图\uff1b无法判断则为 null")
     reason: str = Field("", description="一句话说明判断依据")
-    question: Optional[str] = Field(None, description="需要用户确认时的问题")
+    question: str | None = Field(None, description="需要用户确认时的问题")
 
 
 class AgentTurnIntentDecision(BaseModel):
     intent: AgentTurnIntentType = Field("START_NEW_FLOW", description="用户本轮输入对当前 Agent 状态的归一化意图")
     confidence: float = Field(0.0, ge=0.0, le=1.0)
-    target_task_id: Optional[int] = Field(None, description="本轮意图指向的 Agent task ID；无法确定则为 null")
-    normalized_action: Optional[str] = Field(
-        None, description="可映射到 interrupt resume 的动作，例如 cancel/submit_fields/approve"
+    target_task_id: int | None = Field(None, description="本轮意图指向的 Agent task ID\uff1b无法确定则为 null")
+    normalized_action: str | None = Field(
+        None, description="可映射到 interrupt resume 的动作\uff0c例如 cancel/submit_fields/approve"
     )
     reason: str = Field("", description="一句话说明判断依据")
-    question: Optional[str] = Field(None, description="低置信度时需要追问用户的问题")
+    question: str | None = Field(None, description="低置信度时需要追问用户的问题")
 
 
 class AgentHITLPolicy(BaseModel):
-    allowed_decisions: List[AgentHITLDecisionType] = Field(
+    allowed_decisions: list[AgentHITLDecisionType] = Field(
         default_factory=lambda: ["approve", "edit", "reject", "respond"],
     )
-    required_for_tools: List[str] = Field(default_factory=list)
-    confirmation_summary: Optional[str] = None
+    required_for_tools: list[str] = Field(default_factory=list)
+    confirmation_summary: str | None = None
 
 
 class AgentHITLDecision(BaseModel):
     decision: AgentHITLDecisionType
-    task_id: Optional[int] = None
-    edited_payload: Optional[Dict[str, object]] = None
-    user_message: Optional[str] = None
+    task_id: int | None = None
+    edited_payload: dict[str, object] | None = None
+    user_message: str | None = None

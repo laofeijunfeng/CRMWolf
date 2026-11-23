@@ -1,8 +1,8 @@
 """
 聊天消息 Schema
 """
+
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 class ChatMessageRequest(BaseModel):
@@ -23,4 +23,4 @@ class ChatMessageResponse(BaseModel):
     """聊天消息响应"""
     code: int = Field(default=0, description="响应码（0=成功）")
     message: str = Field(default="success", description="提示信息")
-    data: Optional[ChatReplyData] = Field(None, description="回复数据")
+    data: ChatReplyData | None = Field(None, description="回复数据")

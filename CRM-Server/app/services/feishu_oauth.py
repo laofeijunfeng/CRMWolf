@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -35,7 +35,7 @@ class FeishuOAuthService:
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                raise RuntimeError(f"飞书换取访问令牌失败：{response.text}") from exc
+                raise RuntimeError(f"飞书换取访问令牌失败\uff1a{response.text}") from exc
             data = response.json()
 
         if data.get("code") != 0:
@@ -57,7 +57,7 @@ class FeishuOAuthService:
         if data.get("code") != 0:
             raise RuntimeError(data.get("msg") or "获取飞书用户信息失败")
 
-        raw: Dict[str, Any] = data.get("data") or {}
+        raw: dict[str, Any] = data.get("data") or {}
         avatar = raw.get("avatar_url") or raw.get("avatar_thumb") or raw.get("avatar_middle") or raw.get("avatar_big")
         email = raw.get("email") or raw.get("enterprise_email")
         return FeishuUserProfile(

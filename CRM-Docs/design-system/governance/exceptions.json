@@ -48,19 +48,6 @@
       "status": "active"
     },
     {
-      "id": "GEO-002",
-      "category": "geometry-token",
-      "files": [
-        "CRM-Client/src/components/crmwolf/BottomNavItem.vue",
-        "CRM-Client/src/components/crmwolf/BottomNavOverflow.vue"
-      ],
-      "match": "font-size:\\s*20px",
-      "reason": "底部导航图标字形尺寸，与同规则的 20px 宽高一致。",
-      "owner": "frontend-platform",
-      "reviewDate": "2027-02-19",
-      "status": "active"
-    },
-    {
       "id": "GEO-003",
       "category": "geometry-token",
       "files": [

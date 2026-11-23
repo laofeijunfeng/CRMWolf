@@ -1,20 +1,12 @@
 """
 线索解析器
 
-保留原有线索解析逻辑，供 Agent 或其他内部能力复用。
+保留原有线索解析逻辑\uff0c供 Agent 或其他内部能力复用。
 """
-from typing import Dict, Any
+from typing import Any
+
 from sqlalchemy.orm import Session
 
-from app.services.ai_parser.base_parser import EntityAIParserBase
-from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
-from app.services.acquisition_source_service import (
-    default_source_name,
-    format_active_source_names,
-    resolve_source_for_ai,
-)
-from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
-from app.utils.time import business_now
 from app.crud.lead import lead_crud
 from app.crud.product_intent import (
     EMPTY_CATALOG_MESSAGE,
@@ -22,66 +14,75 @@ from app.crud.product_intent import (
     format_active_product_catalog,
     match_active_product,
 )
-from app.schemas.lead import LeadCreate
 from app.models.lead import CompanyScale, FollowUpMethod
+from app.schemas.lead import LeadCreate
+from app.services.acquisition_source_service import (
+    default_source_name,
+    format_active_source_names,
+    resolve_source_for_ai,
+)
+from app.services.ai_parser.base_parser import EntityAIParserBase
+from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
+from app.services.lead_ai_confirmed_write_service import lead_ai_confirmed_write_service
+from app.utils.time import business_now
 
-
-# 系统提示词：保留既有线索解析规则，供内部解析流程复用
-# 注意：next_follow_time 让 AI 返回原始表述，后端统一使用 AgentTemporalResolver 转换
+# 系统提示词:保留既有线索解析规则,供内部解析流程复用
+# 注意:next_follow_time 让 AI 返回原始表述,后端统一使用 AgentTemporalResolver 转换
 PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解析助手。
 
 【当前日期】
 今天是 {current_date}
 
-你的任务是从用户的自然语言描述中提取线索信息，并分离出额外信息用于跟进记录。
+你的任务是从用户的自然语言描述中提取线索信息\uff0c并分离出额外信息用于跟进记录。
 
 ## 需要提取的字段
 
-**必填字段**：
-- lead_name: 线索名称（通常是公司名称或项目名称）
+**必填字段**\uff1a
+- lead_name: 线索名称\uff08通常是公司名称或项目名称\uff09
 - source: 线索来源
 - city: 所在城市
 - contact_name: 联系人姓名
-- contact_phone: 联系电话（11位手机号）
+- contact_phone: 联系电话\uff0811位手机号\uff09
 
-**可选字段**：
+**可选字段**\uff1a
 - company_scale: 公司规模
-- product: 意向产品名称。只能输出当前团队启用产品名称之一，未明确或无法唯一匹配时返回 null，禁止猜测：
+- product: 意向产品名称。只能输出当前团队启用产品名称之一\uff0c未明确或无法唯一匹配时返回 null\uff0c禁止猜测\uff1a
 {product_enum_block}
 ## 线索来源枚举值
 
-只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
+只能输出当前团队启用的获客来源名称之一\uff0c禁止发明新来源\uff0c禁止输出“线索转化”\uff1a
 {source_enum_block}
-用户未明确来源时输出“{default_source_name}”，不要追问来源。
+用户未明确来源时输出“{default_source_name}”\uff0c不要追问来源。
 
 ## 公司规模枚举值
 
-用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等，你需要智能匹配：
+用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等\uff0c你需要智能匹配\uff1a
 - "1-50人": 人数在50人以下
 - "51-200人": 人数在51-200人之间
 - "201-500人": 人数在201-500人之间
 - "501-1000人": 人数在501-1000人之间
 - "1000人以上": 人数超过1000人
 
-**纯数字区间是人数规模**："10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间，
-是公司人数区间的常见写法，不是日期。按区间落在上述哪个枚举段就输出哪个（如 "10~29" →
-"1-50人"，"100~199" → "51-200人"）。区间跨两个枚举段时，按区间的**上限**归段，
-如 "800~1200" → "1000人以上"、"300-400" → "201-500人"，不要反复权衡。
+**纯数字区间是人数规模**\uff1a"10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间\uff0c
+是公司人数区间的常见写法\uff0c不是日期。按区间落在上述哪个枚举段就输出哪个\uff08如 "10~29" →
+"1-50人"\uff0c"100~199" → "51-200人"\uff09。区间跨两个枚举段时\uff0c按区间的**上限**归段\uff0c
+如 "800~1200" → "1000人以上"、"300-400" → "201-500人"\uff0c不要反复权衡。
 
-如果用户未提及公司规模，不要猜测，返回 null。
+如果用户未提及公司规模\uff0c不要猜测\uff0c返回 null。
 
 ## 额外信息识别
 
-用户描述中不属于上述字段的额外信息需要提取出来，分为三部分：
-- **content**: 跟进内容（业务需求、意向产品、备注等，排除"下一步计划"）
-- **next_action**: 下一步动作/计划（识别"下一步"、"接下来"、"计划"等表述）
-- **next_follow_time**: 下次跟进时间（识别时间表达，**输出原始表述**，如"下周三"、"三天后"。注意：不要硬编码年份，年份由后续解析器基于当前日期 {current_date} 自动计算）
+用户描述中不属于上述字段的额外信息需要提取出来\uff0c分为三部分\uff1a
+- **content**: 跟进内容\uff08业务需求、意向产品、备注等\uff0c排除"下一步计划"\uff09
+- **next_action**: 下一步动作/计划\uff08识别"下一步"、"接下来"、"计划"等表述\uff09
+- **next_follow_time**: 下次跟进时间\uff08识别时间表达\uff0c**输出原始表述**\uff0c如"下周三"、"三天后"。注意\uff1a不要硬编码年份\uff0c年份由后续解析器基于当前\
+日期 {current_date} 自动计算\uff09
 
-如果无法识别对应字段，返回 null。
+如果无法识别对应字段\uff0c返回 null。
 
 ## 输出格式
 
-你必须输出严格的 JSON 格式：
+你必须输出严格的 JSON 格式\uff1a
 ```json
 {{
   "lead_info": {{
@@ -95,31 +96,31 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "missing_fields": ["缺失的必填字段列表"]
   }},
   "follow_up_info": {{
-    "content": "跟进内容（除下一步计划外的信息）",
+    "content": "跟进内容\uff08除下一步计划外的信息\uff09",
     "next_action": "下一步动作",
     "next_follow_time": "下次跟进时间原始表述或null"
   }},
-  "thinking_process": "你的解析思考过程（简要描述如何识别各字段）"
+  "thinking_process": "你的解析思考过程\uff08简要描述如何识别各字段\uff09"
 }}
 ```
 
 ## 解析规则
 
 1. **公司名称识别**: 通常在"来自XX的XXX"、"XX公司"、"XXX科技"等表述中
-2. **联系人识别**: 通常在最前面的人名，或在"联系人"、"负责人"、"对接人"后面
-3. **电话识别**: 查找11位数字，通常以1开头
-4. **城市识别**: 通常在"来自XX"、"XX的"中，或明确说"在XX"
-5. **来源识别**: 根据用户的描述匹配枚举值，如"网上注册来的"→"线上注册"
-6. **规模识别**: 根据人数描述匹配范围，如"五百人左右"→"501-1000人"
-7. **缺失字段**: 必填字段缺失时，在 missing_fields 中列出字段名
+2. **联系人识别**: 通常在最前面的人名\uff0c或在"联系人"、"负责人"、"对接人"后面
+3. **电话识别**: 查找11位数字\uff0c通常以1开头
+4. **城市识别**: 通常在"来自XX"、"XX的"中\uff0c或明确说"在XX"
+5. **来源识别**: 根据用户的描述匹配枚举值\uff0c如"网上注册来的"→"线上注册"
+6. **规模识别**: 根据人数描述匹配范围\uff0c如"五百人左右"→"501-1000人"
+7. **缺失字段**: 必填字段缺失时\uff0c在 missing_fields 中列出字段名
 8. **下一步计划识别**: 识别"下一步"、"接下来"、"计划"后面的内容
-9. **时间转换**: 输出原始时间表述，由后端代码转换
+9. **时间转换**: 输出原始时间表述\uff0c由后端代码转换
 
 ## 示例
 
-用户输入："张三，13800138000，来自杭州的阿里巴巴，大概500人，网上注册来的，想做电商系统，下一步推进POC部署试用，下周三再联系"
+用户输入\uff1a"张三\uff0c13800138000\uff0c来自杭州的阿里巴巴\uff0c大概500人\uff0c网上注册来的\uff0c想做电商系统\uff0c下一步推进POC部署试用\uff0c下周三再联系"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "lead_info": {{
@@ -137,13 +138,14 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "next_action": "推进POC部署试用",
     "next_follow_time": "下周三"
   }},
-  "thinking_process": "识别联系人张三、电话、城市杭州、公司阿里巴巴、规模500人匹配501-1000人、来源网上注册匹配线上注册。额外信息中'想做电商系统'为跟进内容，'下一步推进POC部署试用'为下一步动作，'下周三'为下次跟进时间"
+  "thinking_process": "识别联系人张三、电话、城市杭州、公司阿里巴巴、规模500人匹配501-1000人、来源网上注册匹配线上注册。额外信息中'想做电商系统'为跟进内容\uff0c'下一步推进POC\
+部署试用'为下一步动作\uff0c'下周三'为下次跟进时间"
 }}
 ```
 
-用户输入："有个客户叫李四，电话不记得了，在广州"
+用户输入\uff1a"有个客户叫李四\uff0c电话不记得了\uff0c在广州"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "lead_info": {{
@@ -157,7 +159,7 @@ PARSE_LEAD_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的线索信息解�
     "missing_fields": ["lead_name", "source", "contact_phone"]
   }},
   "follow_up_info": null,
-  "thinking_process": "识别到联系人李四，城市广州，但缺少公司名称、来源和电话，无额外信息"
+  "thinking_process": "识别到联系人李四\uff0c城市广州\uff0c但缺少公司名称、来源和电话\uff0c无额外信息"
 }}
 ```"""
 
@@ -185,14 +187,14 @@ class LeadAIParser(EntityAIParserBase):
             .replace("{product_enum_block}", product_enum_block)
         )
 
-    def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
+    def get_enum_maps(self) -> dict[str, dict[str, Any]]:
         return {
             "scale": COMPANY_SCALE_ENUM_MAP
         }
 
-    def parse_ai_response(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_ai_response(self, parsed: dict[str, Any]) -> dict[str, Any]:
         """
-        解析 AI 响应，转换为结构化数据
+        解析 AI 响应\uff0c转换为结构化数据
 
         Args:
             parsed: AI 返回的 JSON
@@ -235,7 +237,7 @@ class LeadAIParser(EntityAIParserBase):
 
         return result
 
-    def attach_catalog_ids(self, result: Dict[str, Any], db: Session, team_id: int) -> None:
+    def attach_catalog_ids(self, result: dict[str, Any], db: Session, team_id: int) -> None:
         """把 AI 输出的来源/产品名称解析成表单可用的 public_id。"""
         lead_info = result.get("lead_info", {})
         raw_source = str(lead_info.get("source") or "").strip()
@@ -259,7 +261,7 @@ class LeadAIParser(EntityAIParserBase):
     async def create_entity(
         self,
         db: Session,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> Any:
@@ -268,7 +270,7 @@ class LeadAIParser(EntityAIParserBase):
 
         Args:
             db: 数据库 Session
-            parsed_data: 解析后的数据（来自前端预览确认）
+            parsed_data: 解析后的数据\uff08来自前端预览确认\uff09
             user_id: 用户 ID
             team_id: 团队 ID
 
@@ -304,18 +306,18 @@ class LeadAIParser(EntityAIParserBase):
         self,
         db: Session,
         entity: Any,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> None:
         """
-        创建线索后的额外操作：创建跟进记录
+        创建线索后的额外操作\uff1a创建跟进记录
 
         Args:
             entity: 创建的 Lead 对象
-            parsed_data: 解析后的数据（包含跟进信息）
+            parsed_data: 解析后的数据\uff08包含跟进信息\uff09
         """
-        # 如果有跟进信息，创建跟进记录
+        # 如果有跟进信息,创建跟进记录
         follow_up_content = parsed_data.get("follow_up_content")
         next_action = parsed_data.get("next_action")
         next_follow_time_str = parsed_data.get("next_follow_time")

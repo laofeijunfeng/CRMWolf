@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
+    from app.services.assistant.proposals import has_unresolved_proposal_claim
     from app.services.assistant.task_state import load_draft, load_waiting
 
     turn = None
@@ -44,6 +45,7 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
     reprocess_turn_id = (
         candidate.public_id if candidate is not None and reprocess_allowed(db, task, candidate) else None
     )
+    reconciliation_required = task.last_error_code == "UNKNOWN_COMMIT_RESULT" or has_unresolved_proposal_claim(db, task)
 
     # Validate persistence values (including closed statuses and receipt unions) at this boundary.
     return AssistantTaskView.model_validate(
@@ -54,7 +56,7 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
             "goal": task.goal,
             "activity_kind": task.activity_kind,
             "draft": load_draft(task),
-            "waiting": load_waiting(task),
+            "waiting": None if reconciliation_required else load_waiting(task),
             "committed": task.committed_json or [],
             "budget_steps": task.budget_steps,
             "budget_max_steps": task.budget_max_steps,
@@ -63,5 +65,7 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
             "processing_turn_status": turn.status if turn is not None else None,
             "reprocess_turn_id": reprocess_turn_id,
             "follow_up_disposition": public_disposition(task),
+            "proposal_outcome": (task.authority_json or {}).get("proposal_outcome"),
+            "reconciliation_required": reconciliation_required,
         }
     )

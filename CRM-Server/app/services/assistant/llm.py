@@ -15,8 +15,8 @@ from app.services.assistant.llm_contracts import (
     StructuredMeeting,
     StructureDraftResult,
 )
+from app.services.assistant.model_transport import AssistantLLMError as AssistantLLMError
 from app.services.assistant.model_transport import (
-    AssistantLLMError,
     AssistantModelTransport,
     team_model_credentials,
     team_output_mode,

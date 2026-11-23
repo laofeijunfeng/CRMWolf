@@ -33,10 +33,7 @@ CRMWolf 当前查询扩展困难的主要原因不是 LangGraph，而是只读�
 - 多个领域 subgraph；
 - 写入确认、恢复和结果投影。
 
-仓库现有规范也明确将职责分为：LangChain 负责模型调用和 tool-calling 子 Agent，LangGraph 负责可恢复编排，CRM API 负责真实业务和权限。参见：
-
-- `CRM-Docs/design-agent/foundations/architecture-boundary.md`
-- `CRM-Docs/design-agent/roadmap/current-state.md`
+当时仓库的 Agent「架构边界」和「当前实现状态」文档将职责分为：LangChain 负责模型调用和 tool-calling 子 Agent，LangGraph 负责可恢复编排，CRM API 负责真实业务和权限。
 
 因此，没有必要因为只读问答弱而推翻 Root graph 或写入工作流。
 
@@ -122,7 +119,7 @@ CRMWolf 当前查询扩展困难的主要原因不是 LangGraph，而是只读�
 - 跨 Agent 交接错误；
 - trace 和测试组合爆炸。
 
-仓库路线图其实已经给出更稳妥的方向：`CRM-Docs/design-agent/roadmap/enhancement-priority.md` 的 P2 是“为只读 tool 引入受控 LangChain tool-calling 子 Agent”，并要求管理查询的聚合、排序、过滤和分页由代码完成，模型只做摘要和解释。
+当时的 Agent 路线图「增强优先级」已给出更稳妥的方向：P2 是“为只读 tool 引入受控 LangChain tool-calling 子 Agent”，并要求管理查询的聚合、排序、过滤和分页由代码完成，模型只做摘要和解释。
 
 ## 三、市面成熟方案的共同模式
 

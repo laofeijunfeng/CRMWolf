@@ -1,6 +1,6 @@
-from datetime import timedelta
 import secrets
-from typing import Any, Dict
+from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from app.core.security import create_access_token, decode_access_token
 from app.crud.oauth import oauth_provider_config_crud, user_oauth_account_crud
 from app.crud.team import team_crud
 from app.crud.user import user_crud
+from app.models.oauth import OAuthProviderConfig
 from app.models.user import User
 from app.schemas.auth import LoginResponse
 from app.schemas.oauth import (
@@ -25,7 +26,6 @@ from app.schemas.oauth import (
 )
 from app.schemas.user import UserResponse
 from app.services.feishu_oauth import feishu_oauth_service
-
 
 router = APIRouter(tags=["第三方登录"])
 
@@ -59,7 +59,9 @@ def _build_bot_callback_url(callback_path: str, request: Request | None = None) 
     return f"{base_url}{callback_path}" if base_url else None
 
 
-def _config_response(config, team_id: int, request: Request | None = None) -> OAuthProviderConfigResponse:
+def _config_response(
+    config: OAuthProviderConfig | None, team_id: int, request: Request | None = None,
+) -> OAuthProviderConfigResponse:
     if config is None:
         callback_url = _build_bot_callback_url(FEISHU_BOT_CALLBACK_PATH, request)
         return OAuthProviderConfigResponse(
@@ -88,18 +90,18 @@ def _config_response(config, team_id: int, request: Request | None = None) -> OA
     )
 
 
-def _create_state(payload: Dict[str, Any]) -> str:
+def _create_state(payload: dict[str, Any]) -> str:
     return create_access_token(payload, expires_delta=timedelta(minutes=10))
 
 
-def _decode_state(state: str) -> Dict[str, Any]:
+def _decode_state(state: str) -> dict[str, Any]:
     payload = decode_access_token(state)
     if not payload or payload.get("provider") != "feishu":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="飞书授权状态无效或已过期")
     return payload
 
 
-def _get_enabled_feishu_config(db: Session, team_id: int):
+def _get_enabled_feishu_config(db: Session, team_id: int) -> tuple[OAuthProviderConfig, str]:
     config = oauth_provider_config_crud.get(db, team_id, "feishu")
     if not config or not config.enabled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前团队未启用飞书登录")
@@ -152,7 +154,9 @@ def update_feishu_config(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="启用飞书AI Agent机器人前请配置 App Secret")
     bot_encrypt_key = data.bot_encrypt_key
     if data.bot_enabled and not bot_encrypt_key:
-        bot_encrypt_key = existing.bot_encrypt_key if existing and existing.bot_encrypt_key else secrets.token_urlsafe(32)
+        bot_encrypt_key = (
+            existing.bot_encrypt_key if existing and existing.bot_encrypt_key else secrets.token_urlsafe(32)
+        )
 
     config = oauth_provider_config_crud.upsert_feishu(
         db,
@@ -281,7 +285,10 @@ async def handle_feishu_callback(
     if user is None:
         email = profile.email or profile.enterprise_email
         if not email:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="飞书账号未提供邮箱，无法创建 CRM 用户")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="飞书账号未提供邮箱\uff0c无法创建 CRM 用户",
+            )
         user = user_crud.get_by_email(db, email)
         if user is None:
             user = user_crud.create_from_email(

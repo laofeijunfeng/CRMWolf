@@ -1,13 +1,13 @@
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DeploymentInfoBase(BaseModel):
     """部署信息基础模型"""
     deployment_name: str = Field(..., min_length=1, max_length=100, description="部署名称（如：生产环境、测试环境）")
     server_address: str = Field(..., max_length=500, description="服务器地址（http:// 或 https:// 开头）")
-    authorized_users: Optional[int] = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
+    authorized_users: int | None = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
     is_default: bool = Field(default=False, description="是否默认部署")
 
     @field_validator('deployment_name')
@@ -40,14 +40,14 @@ class DeploymentInfoInternalCreate(DeploymentInfoBase):
 
 class DeploymentInfoUpdate(BaseModel):
     """更新部署信息请求模型"""
-    deployment_name: Optional[str] = Field(None, min_length=1, max_length=100, description="部署名称")
-    server_address: Optional[str] = Field(None, max_length=500, description="服务器地址")
-    authorized_users: Optional[int] = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
-    is_default: Optional[bool] = Field(None, description="是否默认部署")
+    deployment_name: str | None = Field(None, min_length=1, max_length=100, description="部署名称")
+    server_address: str | None = Field(None, max_length=500, description="服务器地址")
+    authorized_users: int | None = Field(None, gt=0, description="历史授权人数（新申请人数记录在 License 申请）")
+    is_default: bool | None = Field(None, description="是否默认部署")
 
     @field_validator('deployment_name')
     @classmethod
-    def deployment_name_must_not_be_empty(cls, v: Optional[str]) -> Optional[str]:
+    def deployment_name_must_not_be_empty(cls, v: str | None) -> str | None:
         if v is not None:
             if not v or not v.strip():
                 raise ValueError('部署名称不能为空')
@@ -56,7 +56,7 @@ class DeploymentInfoUpdate(BaseModel):
 
     @field_validator('server_address')
     @classmethod
-    def validate_server_address(cls, v: Optional[str]) -> Optional[str]:
+    def validate_server_address(cls, v: str | None) -> str | None:
         if v is not None:
             if not v or not v.strip():
                 raise ValueError('服务器地址不能为空')
@@ -79,7 +79,7 @@ class DeploymentInfoResponse(DeploymentInfoBase):
 
 class DeploymentInfoListResponse(BaseModel):
     """部署信息列表响应模型"""
-    data: List[DeploymentInfoResponse] = Field(..., description="部署信息列表")
+    data: list[DeploymentInfoResponse] = Field(..., description="部署信息列表")
     total: int = Field(..., description="总数")
 
     model_config = ConfigDict(from_attributes=True)
@@ -88,4 +88,4 @@ class DeploymentInfoListResponse(BaseModel):
 class DeploymentInfoMessageResponse(BaseModel):
     """部署信息消息响应模型"""
     message: str = Field(..., description="响应消息")
-    data: Optional[DeploymentInfoResponse] = Field(None, description="部署信息数据")
+    data: DeploymentInfoResponse | None = Field(None, description="部署信息数据")

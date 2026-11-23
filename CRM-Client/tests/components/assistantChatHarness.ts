@@ -1,18 +1,21 @@
 import { beforeEach, vi } from 'vitest'
 import type { AssistantTaskView, ConversationReply, ConversationView, TaskWaiting } from '@/schemas/assistant-contracts'
 import type { SubmitStreamHandlers } from '@/api/assistant'
+import type * as AssistantApiModule from '@/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), get: vi.fn(), text: vi.fn(), choice: vi.fn(), command: vi.fn(),
-  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), kind: vi.fn(), resume: vi.fn(), stream: vi.fn()
+  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), resume: vi.fn(), stream: vi.fn(), retryEntry: vi.fn()
 }))
 export { mocks }
-vi.mock('@/api/assistant', () => ({
+vi.mock('@/api/assistant', async (importOriginal) => ({
+  ...(await importOriginal<typeof AssistantApiModule>()),
   assistantApi: {
     openConversation: mocks.open, getConversation: mocks.get,
     conversationText: mocks.text, conversationChoice: mocks.choice, conversationCommand: mocks.command,
-    resumeConversation: mocks.resume, conversationKind: mocks.kind,
-    getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task, changeKind: mocks.kind
+    resumeConversation: mocks.resume,
+    retryConversationEntry: mocks.retryEntry,
+    getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task
   },
   submitInputStream: mocks.stream
 }))

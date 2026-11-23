@@ -1,29 +1,18 @@
 import logging
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import date
-from typing import Any, Iterator, List, Literal, Optional
+from typing import Any, Literal, TypedDict, TypeVar, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from sqlalchemy import text
+from sqlalchemy import Row, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Query as OrmQuery
 from sqlalchemy.orm import Session
-
-from app.core.list_export import (
-    CUSTOMERS_LIST_EXPORT_CATALOG,
-    create_list_export_file,
-    iter_batches,
-    list_export_file_response,
-    run_list_export_or_400,
-)
-from app.core.list_query.license_status import classify_license_status, license_expiry_text
-from app.core.database import SessionLocal
-from app.schemas.list_export import CustomerListExportRequest
-from app.utils.time import business_now
-
 
 from app.api.invoices import _invoice_title_response, _populate_application_info
 from app.constants.operation_log_events import EventTypes
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_customer_delete_permission,
     check_customer_edit_permission,
@@ -34,12 +23,22 @@ from app.core.deps import (
     require_permission,
 )
 from app.core.exceptions import ConflictException
+from app.core.list_export import (
+    CUSTOMERS_LIST_EXPORT_CATALOG,
+    create_list_export_file,
+    iter_batches,
+    list_export_file_response,
+    run_list_export_or_400,
+)
 from app.core.list_query import (
+    FilterCondition,
+    SortCondition,
     enforce_owner_view_scope,
     optional_request_list_query,
-    run_or_400,
     uses_unified_list_query,
 )
+from app.core.list_query.http import run_or_400 as _untyped_run_or_400
+from app.core.list_query.license_status import classify_license_status, license_expiry_text
 from app.crud.contract import contract_crud
 from app.crud.customer import contact_crud, customer_crud
 from app.crud.customer_member import customer_member_crud
@@ -55,10 +54,13 @@ from app.crud.product_intent import (
 )
 from app.crud.team import team_crud
 from app.crud.user import user_crud
+from app.models.acquisition_source import AcquisitionSource
 from app.models.command_execution import CommandExecutionStatus
-from app.models.customer import Contact, CustomerProduct, CustomerStatus
+from app.models.contract import Contract
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct, CustomerStatus
 from app.models.outbound_notification_job import OutboundNotificationEventType
-
+from app.models.user import User
+from app.schemas.acquisition_source import AcquisitionSourceInfo
 from app.schemas.command import CommandEffect, CommandNextAction, CommandResource
 from app.schemas.common import PaginatedResponse
 from app.schemas.contract import ContractListResponse, ContractStatusEnum
@@ -72,23 +74,19 @@ from app.schemas.customer import (
     CustomerAssignmentResult,
     CustomerAssignRequest,
     CustomerAssignResponse,
+    CustomerChartBucketCustomersResponse,
+    CustomerChartResponse,
     CustomerClaimRequest,
     CustomerCreate,
     CustomerDetailResponse,
     CustomerIdentityResolutionResponse,
     CustomerIndustryOption,
-    CustomerIntelligenceBatchRebuildRequest,
-    CustomerIntelligenceBatchRebuildResponse,
-    CustomerIntelligenceRegenerateRequest,
-    CustomerIntelligenceRetryDueResponse,
     CustomerIntelligenceRunDiagnosticListResponse,
     CustomerIntelligenceRunDiagnosticResponse,
     CustomerLicensePermanentError,
     CustomerLicenseSnapshotUpdate,
     CustomerLifecycleStatusUpdate,
     CustomerListResponse,
-    CustomerChartBucketCustomersResponse,
-    CustomerChartResponse,
     CustomerLoseRequest,
     CustomerMemberCandidate,
     CustomerMemberCreate,
@@ -106,6 +104,7 @@ from app.schemas.customer import (
     TrendResponse,
 )
 from app.schemas.invoice import InvoiceApplicationResponse, InvoiceTitleResponse
+from app.schemas.list_export import CustomerListExportRequest
 from app.schemas.payment import PaymentPlanResponse
 from app.services.acquisition_source_service import (
     AcquisitionSourceError,
@@ -128,36 +127,68 @@ from app.services.customer_business_object_intelligence_service import (
 )
 from app.services.customer_derived_status import (
     CUSTOMER_DERIVED_STATUS_LABELS,
+    CustomerLike,
     derive_customer_statuses_for_list,
-)
-from app.services.customer_lifecycle_post_commit_coordinator import (
-    customer_lifecycle_post_commit_coordinator,
 )
 from app.services.customer_identity_resolution_application_service import (
     customer_identity_resolution_application_service,
 )
+from app.services.customer_intelligence_event_service import JsonObject, JsonValue
 from app.services.customer_intelligence_refresh_service import (
     CustomerIntelligenceCommittedEventRequest,
-    customer_intelligence_refresh_service,
 )
 from app.services.customer_intelligence_run_service import CustomerIntelligenceRunDiagnostic
+from app.services.customer_lifecycle_post_commit_coordinator import (
+    customer_lifecycle_post_commit_coordinator,
+)
 from app.services.customer_status_transition_service import (
     CustomerStatusTransitionError,
     customer_status_transition_service,
 )
 from app.services.operation_log_service import operation_log_service
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
 logger = logging.getLogger(__name__)
+
+_team_dependency = Depends(get_current_user_team)
+_user_dependency = Depends(get_current_active_user)
+_db_dependency = Depends(get_db)
+_customer_delete_dependency = Depends(check_customer_delete_permission)
+_customer_assign_dependency = Depends(require_permission("customer:assign"))
+_customer_edit_all_dependency = Depends(require_permission("customer:edit:all"))
+_transfer_scope_query = Query(CustomerTransferScope.CUSTOMER_ONLY)
+_created_time_start_query = Query(None, description="创建时间起始")
+_created_time_end_query = Query(None, description="创建时间结束")
+
+_T = TypeVar("_T")
+run_or_400: Callable[[Callable[[], _T]], _T] = _untyped_run_or_400
+
+
+class _AssignmentPreview(TypedDict):
+    opportunity_count: int
+    contract_count: int
+    locked_contract_count: int
+    locked_contracts: list[dict[str, str]]
+
+
+class _AssignmentDetails(TypedDict):
+    customer: Customer
+    previous_owner_id: str | None
+    new_owner_id: str
+    transferred_opportunities: int
+    transferred_contracts: int
+    updated_objects: list[dict[str, str]]
+    skipped_objects: list[dict[str, str]]
 
 
 def _queue_customer_returned_notification(
     db: Session,
     *,
     team_id: int,
-    customer,
-    previous_owner,
+    customer: Customer,
+    previous_owner: str | None,
     return_reason: str,
     actor_id: str,
 ) -> None:
@@ -181,9 +212,9 @@ def _customer_name_conflict_error(
     db: Session,
     account_name: str,
     team_id: int,
-    exclude_customer_id: Optional[int] = None,
-    allowed_source_lead_id: Optional[int] = None,
-) -> Optional[str]:
+    exclude_customer_id: int | None = None,
+    allowed_source_lead_id: int | None = None,
+) -> str | None:
     existing_customer = customer_crud.get_by_name(db, account_name, team_id)
     if existing_customer and existing_customer.id != exclude_customer_id:
         return "客户名称已存在"
@@ -192,7 +223,7 @@ def _customer_name_conflict_error(
     if existing_lead and existing_lead.id != allowed_source_lead_id and not (
         excluded_customer and excluded_customer.source_lead_id == existing_lead.id
     ):
-        return "该名称已存在线索，请先处理或转化线索"
+        return "该名称已存在线索\uff0c请先处理或转化线索"
     return None
 
 
@@ -200,8 +231,8 @@ def _ensure_customer_name_available(
     db: Session,
     account_name: str,
     team_id: int,
-    exclude_customer_id: Optional[int] = None,
-    allowed_source_lead_id: Optional[int] = None,
+    exclude_customer_id: int | None = None,
+    allowed_source_lead_id: int | None = None,
 ) -> None:
     error = _customer_name_conflict_error(
         db,
@@ -249,9 +280,9 @@ def _record_failed_convert_command(
     actor_id: str,
     lead_id: str,
     operation_id: str,
-    idempotency_key: Optional[str],
+    idempotency_key: str | None,
     fingerprint: str,
-    correlation_id: Optional[str],
+    correlation_id: str | None,
     error_code: str,
     error_message: str,
     retryable: bool = False,
@@ -282,13 +313,13 @@ def _record_failed_convert_command(
         db.rollback()
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _normalize_optional_header_text(value: object) -> Optional[str]:
+def _normalize_optional_header_text(value: object) -> str | None:
     """Normalize FastAPI Header defaults for both HTTP and direct function calls."""
     if not isinstance(value, str):
         return None
@@ -296,26 +327,28 @@ def _normalize_optional_header_text(value: object) -> Optional[str]:
     return normalized or None
 
 
-def _normalize_optional_header_int(value: object) -> Optional[int]:
+def _normalize_optional_header_int(value: object) -> int | None:
     """Normalize an optional integer header without leaking FastAPI markers."""
     return value if isinstance(value, int) else None
 
 
-def _customer_source_fields(db: Session, customer, source_map: Optional[dict] = None) -> dict:
+def _customer_source_fields(
+    db: Session, customer: Customer, source_map: Mapping[int, AcquisitionSource] | None = None,
+) -> dict[str, str | AcquisitionSourceInfo | None]:
     source_row = None
     if customer.source_id:
         if source_map is not None:
             source_row = source_map.get(int(customer.source_id))
         else:
             source_row = get_by_id(db, customer.source_id, customer.team_id)
-    current_name = source_row.name if source_row else customer.source
+    current_name = cast("str", source_row.name) if source_row else customer.source
     return {
         "source": current_name,
         "source_info": build_source_info(source_row),
     }
 
 
-def _get_customer_or_404(db: Session, customer_public_id: str, team_id: int):
+def _get_customer_or_404(db: Session, customer_public_id: str, team_id: int) -> Customer:
     customer = customer_crud.get_by_public_id(db, customer_public_id, team_id)
     if not customer:
         raise HTTPException(
@@ -325,12 +358,13 @@ def _get_customer_or_404(db: Session, customer_public_id: str, team_id: int):
     return customer
 
 
-def _get_viewable_customer(db: Session, customer_public_id: str, team_id: int, current_user):
-    return check_customer_view_permission(customer_public_id, team_id, current_user, db)
+def _get_viewable_customer(db: Session, customer_public_id: str, team_id: int, current_user: User) -> Customer:
+    return cast("Customer", check_customer_view_permission(customer_public_id, team_id, current_user, db))
 
 
-def _get_editable_customer(db: Session, customer_public_id: str, team_id: int, current_user):
-    return check_customer_edit_permission(customer_public_id, team_id, current_user, db)
+def _get_editable_customer(db: Session, customer_id: str | int, team_id: int, current_user: User) -> Customer:
+    # The permission helper also accepts legacy internal IDs when called directly.
+    return cast("Customer", check_customer_edit_permission(cast("str", customer_id), team_id, current_user, db))
 
 
 def _persist_customer_business_object_refresh_after_commit(
@@ -340,7 +374,7 @@ def _persist_customer_business_object_refresh_after_commit(
     actor_id: str | None,
     change_type: CustomerBusinessObjectChangeType = "updated",
     summary: str | None = None,
-    payload: dict | None = None,
+    payload: JsonObject | None = None,
     scope: Literal["full", "partial"] = "partial",
 ) -> CustomerIntelligenceCommittedEventRequest | None:
     """Register a committed change through the shared object registry.
@@ -361,7 +395,7 @@ def _persist_customer_business_object_refresh_after_commit(
     )
 
 
-def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
+def _get_user_basic_info(db: Session, user_id: str | None) -> dict[str, str | None] | None:
     if not user_id:
         return None
 
@@ -383,7 +417,7 @@ def _get_user_basic_info(db: Session, user_id: Optional[str]) -> Optional[dict]:
     }
 
 
-def _contract_response_base(contract) -> dict:
+def _contract_response_base(contract: Contract) -> dict[str, Any]:
     if not getattr(contract, "customer", None):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -417,7 +451,7 @@ def _contract_response_base(contract) -> dict:
     }
 
 
-def _contract_status_info(status_value) -> Optional[dict]:
+def _contract_status_info(status_value: str | None) -> dict[str, str] | None:
     if not status_value:
         return None
 
@@ -451,7 +485,7 @@ def _contact_response(contact: Contact, customer_public_id: str) -> ContactRespo
     )
 
 
-def _derived_status_payload(db: Session, customer: Any) -> dict:
+def _derived_status_payload(db: Session, customer: Customer) -> dict[str, str | None]:
     derived = derive_customer_statuses_for_list(db, customer.team_id, [customer]).get(int(customer.id))
     if derived is None:
         return {}
@@ -462,7 +496,7 @@ def _derived_status_payload(db: Session, customer: Any) -> dict:
     }
 
 
-def _customer_response(db: Session, customer) -> CustomerResponse:
+def _customer_response(db: Session, customer: Customer) -> CustomerResponse:
     source_lead_public_id = None
     if customer.source_lead_id:
         source_lead = lead_crud.get_by_id(db, customer.source_lead_id, customer.team_id)
@@ -502,7 +536,7 @@ def _customer_intelligence_run_response(
     team_id: int,
     diagnostic: CustomerIntelligenceRunDiagnostic,
 ) -> CustomerIntelligenceRunDiagnosticResponse:
-    result_summary = dict(diagnostic.result)
+    result_summary: dict[str, object] = dict(diagnostic.result)
     result_summary.pop("route", None)
     customer = customer_crud.get_by_id(db, diagnostic.customer_id, team_id)
     if not customer:
@@ -522,8 +556,8 @@ def _customer_intelligence_run_response(
         max_attempts=diagnostic.max_attempts,
         route_label=_customer_intelligence_route_label(diagnostic.route),
         result=result_summary,
-        visible_trace=diagnostic.visible_trace,
-        trace_events=diagnostic.trace_events,
+        visible_trace=cast("list[dict[str, object]]", diagnostic.visible_trace),
+        trace_events=cast("list[dict[str, object]]", diagnostic.trace_events),
         error_message=diagnostic.error_message,
         created_time=diagnostic.created_time,
         started_time=diagnostic.started_time,
@@ -533,7 +567,7 @@ def _customer_intelligence_run_response(
     )
 
 
-def _customer_intelligence_route_label(route: str | None) -> Optional[str]:
+def _customer_intelligence_route_label(route: str | None) -> str | None:
     if route == "refresh_profile":
         return "刷新客户档案"
     if route == "answer_customer_question":
@@ -541,17 +575,18 @@ def _customer_intelligence_route_label(route: str | None) -> Optional[str]:
     return None
 
 
-@router.get("/industries", response_model=List[CustomerIndustryOption], summary="获取客户所属行业选项", description="""
-获取客户所属行业的下拉选项列表（用于客户创建、编辑等场景）。
+@router.get("/industries", response_model=list[CustomerIndustryOption], summary="获取客户所属行业选项", description="""
+获取客户所属行业的下拉选项列表\uff08用于客户创建、编辑等场景\uff09。
 
-**业务规则：**
+**业务规则\uff1a**
 - 返回预定义的行业枚举列表
-- 轻量级接口，无需查询数据库
+- 轻量级接口\uff0c无需查询数据库
 - 通过枚举实现数据统一管理
 """)
 def get_customer_industries(
-    current_user = Depends(get_current_active_user)
-):
+    current_user: User = _user_dependency
+) -> list[CustomerIndustryOption]:
+    del current_user
     from app.models.customer import CustomerIndustry
     
     industries = []
@@ -569,16 +604,16 @@ def get_customer_industries(
     response_model_exclude_none=True,
     status_code=status.HTTP_201_CREATED,
     summary="线索转化",
-    description="根据线索ID原子转化客户和主联系人；AI/Agent 不属于本命令边界。",
+    description="根据线索ID原子转化客户和主联系人\uff1bAI/Agent 不属于本命令边界。",
 )
 async def convert_from_lead(
     data: ConvertLeadToCustomer,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
 ) -> ConvertResponse:
     """Atomically convert a lead into a customer and expose a durable outcome.
 
@@ -608,13 +643,13 @@ async def convert_from_lead(
         try:
             _ensure_customer_name_available(
                 db,
-                data.account_name or source_lead.lead_name,
+                data.account_name or cast("str", source_lead.lead_name),
                 team_id,
-                allowed_source_lead_id=source_lead.id,
+                allowed_source_lead_id=cast("int", source_lead.id),
             )
             customer, contact = customer_crud.convert_from_lead(
                 db=db,
-                lead_id=source_lead.id,
+                lead_id=cast("int", source_lead.id),
                 account_name=data.account_name,
                 address=data.address,
                 default_procurement_method_id=data.default_procurement_method_id,
@@ -635,13 +670,16 @@ async def convert_from_lead(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="客户或联系人数据已被其他操作占用",
+            ) from exc
         try:
             lifecycle_work = customer_lifecycle_post_commit_coordinator.enqueue_after_commit(
                 customer=customer,
                 actor_id=str(current_user.id),
                 trigger_type="customer_converted_from_lead",
-                source_lead_id=source_lead.id,
+                source_lead_id=cast("int", source_lead.id),
             )
             lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
             if lifecycle_warnings:
@@ -661,11 +699,11 @@ async def convert_from_lead(
                 "contact_name": contact.name,
             },
         )
-        return ConvertResponse(
-            customer_id=customer.public_id,
-            contact_id=contact.id,
-            message="转化成功，客户智能档案正在整理",
-        )
+        return ConvertResponse.model_validate({
+            "customer_id": customer.public_id,
+            "contact_id": contact.id,
+            "message": "转化成功\uff0c客户智能档案正在整理",
+        })
 
     fingerprint = request_fingerprint({
         "lead_id": data.lead_id,
@@ -697,7 +735,7 @@ async def convert_from_lead(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
-            detail={"operation_id": str(exc), "message": "转化正在处理中，请查询操作结果"},
+            detail={"operation_id": str(exc), "message": "转化正在处理中\uff0c请查询操作结果"},
         ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
@@ -708,13 +746,13 @@ async def convert_from_lead(
         payload = command_execution_service.to_response_payload(execution)
         stored_data = payload.get("data")
         if isinstance(stored_data, dict):
-            return ConvertResponse(
+            return ConvertResponse.model_validate(dict(
                 **payload,
                 customer_id=stored_data.get("customer_id"),
                 contact_id=stored_data.get("contact_id"),
                 message=stored_data.get("message"),
-            )
-        return ConvertResponse(**payload)
+            ))
+        return ConvertResponse.model_validate(payload)
 
     # Resolve the source only after the durable command record exists. This
     # makes a terminal idempotent replay independent of the current lead row
@@ -744,13 +782,13 @@ async def convert_from_lead(
     try:
         _ensure_customer_name_available(
             db,
-            data.account_name or source_lead.lead_name,
+            data.account_name or cast("str", source_lead.lead_name),
             team_id,
-            allowed_source_lead_id=source_lead.id,
+            allowed_source_lead_id=cast("int", source_lead.id),
         )
         customer, contact = customer_crud.convert_from_lead(
             db=db,
-            lead_id=source_lead.id,
+            lead_id=cast("int", source_lead.id),
             account_name=data.account_name,
             address=data.address,
             default_procurement_method_id=data.default_procurement_method_id,
@@ -769,7 +807,7 @@ async def convert_from_lead(
             customer=customer,
             actor_id=str(current_user.id),
             trigger_type="customer_converted_from_lead",
-            source_lead_id=source_lead.id,
+            source_lead_id=cast("int", source_lead.id),
         )
 
         result_data = {
@@ -779,10 +817,13 @@ async def convert_from_lead(
             "customer_public_id": customer.public_id,
             "contact_id": contact.id,
             "contact_public_id": None,
-            "message": "转化成功，客户智能档案正在整理",
+            "message": "转化成功\uff0c客户智能档案正在整理",
             "created_customer": True,
             "created_contact": True,
-            "inherited_fields": ["lead_name", "city", "company_scale", "source", "owner_id", "contact_name", "contact_phone", "follow_ups", "operation_logs"],
+            "inherited_fields": [
+                "lead_name", "city", "company_scale", "source", "owner_id",
+                "contact_name", "contact_phone", "follow_ups", "operation_logs",
+            ],
             "source_relation": {
                 "lead_public_id": source_lead.public_id,
                 "customer_public_id": customer.public_id,
@@ -796,7 +837,7 @@ async def convert_from_lead(
             data=result_data,
             resource=CommandResource(type="CUSTOMER", public_id=customer.public_id, version=customer.version),
             effects=[
-                CommandEffect(type="LEAD", public_id=source_lead.public_id, status="SYNCED"),
+                CommandEffect(type="LEAD", public_id=cast("str", source_lead.public_id), status="SYNCED"),
                 CommandEffect(type="CUSTOMER", public_id=customer.public_id, status="SYNCED"),
                 CommandEffect(type="CONTACT", public_id=None, status="SYNCED", detail="主联系人使用兼容内部ID"),
             ],
@@ -815,7 +856,7 @@ async def convert_from_lead(
             team_id=team_id,
             actor_id=str(current_user.id),
             lead_id=data.lead_id,
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
@@ -841,7 +882,7 @@ async def convert_from_lead(
             team_id=team_id,
             actor_id=str(current_user.id),
             lead_id=data.lead_id,
-            operation_id=execution.operation_id,
+            operation_id=cast("str", execution.operation_id),
             idempotency_key=idempotency_key,
             fingerprint=fingerprint,
             correlation_id=correlation_id,
@@ -868,19 +909,35 @@ async def convert_from_lead(
                 command_type="LEAD_CONVERT_TO_CUSTOMER",
                 resource_type="LEAD",
                 resource_public_id=data.lead_id,
-                operation_id=execution.operation_id,
+                operation_id=cast("str", execution.operation_id),
                 idempotency_key=idempotency_key,
                 fingerprint=fingerprint,
                 correlation_id=correlation_id,
             )
             if not failed_replay:
-                command_execution_service.fail(db, failed_execution, error_code="LEAD_CONVERSION_CONFLICT", error_message="客户或联系人数据已被其他操作占用", retryable=True)
+                command_execution_service.fail(
+                    db,
+                    failed_execution,
+                    error_code="LEAD_CONVERSION_CONFLICT",
+                    error_message="客户或联系人数据已被其他操作占用",
+                    retryable=True,
+                )
                 db.commit()
         except Exception:
             db.rollback()
         if modern_command:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "LEAD_CONVERSION_CONFLICT", "message": "客户或联系人数据已被其他操作占用", "operation_id": execution.operation_id}) from exc
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "LEAD_CONVERSION_CONFLICT",
+                    "message": "客户或联系人数据已被其他操作占用",
+                    "operation_id": execution.operation_id,
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="客户或联系人数据已被其他操作占用",
+        ) from exc
     except Exception as exc:
         db.rollback()
         logger.exception("线索转客户提交失败", extra={"operation_id": execution.operation_id})
@@ -898,7 +955,7 @@ async def convert_from_lead(
                     command_type="LEAD_CONVERT_TO_CUSTOMER",
                     resource_type="LEAD",
                     resource_public_id=data.lead_id,
-                    operation_id=execution.operation_id,
+                    operation_id=cast("str", execution.operation_id),
                     idempotency_key=idempotency_key,
                     fingerprint=fingerprint,
                     correlation_id=correlation_id,
@@ -909,7 +966,7 @@ async def convert_from_lead(
                         unknown_execution,
                         status=CommandExecutionStatus.UNKNOWN,
                         error_code="LEAD_CONVERSION_UNKNOWN",
-                        error_message="转化结果暂未确认，请查询操作结果",
+                        error_message="转化结果暂未确认\uff0c请查询操作结果",
                         retryable=False,
                     )
                     db.commit()
@@ -919,7 +976,7 @@ async def convert_from_lead(
                 status_code=status.HTTP_202_ACCEPTED,
                 detail={
                     "code": "LEAD_CONVERSION_UNKNOWN",
-                    "message": "转化结果暂未确认，请查询操作结果",
+                    "message": "转化结果暂未确认\uff0c请查询操作结果",
                     "operation_id": execution.operation_id,
                 },
             ) from exc
@@ -954,9 +1011,9 @@ async def convert_from_lead(
         },
     )
     if queued is None:
-        warnings.append("飞书通知排队失败，可在操作记录中查看转化结果")
+        warnings.append("飞书通知排队失败\uff0c可在操作记录中查看转化结果")
 
-    warning_data: Optional[dict] = None
+    warning_data: dict[str, object] | None = None
     if warnings:
         # Keep the business fact successful; only enrich the stored display data.
         # A failure while persisting this optional metadata must not turn an
@@ -981,83 +1038,85 @@ async def convert_from_lead(
             contact_id=stored_data.get("contact_id"),
             message=stored_data.get("message"),
         )
-    return ConvertResponse(**payload)
+    return ConvertResponse.model_validate(payload)
 
 
 @router.get(
     "/{customer_id}/assignment-preview",
     response_model=CustomerAssignmentPreviewResponse,
     summary="预览客户移交影响范围",
-    description="只读计算客户移交将影响的商机、合同及不可同步的锁定合同，不修改任何业务事实。",
+    description="只读计算客户移交将影响的商机、合同及不可同步的锁定合同\uff0c不修改任何业务事实。",
 )
 def preview_customer_assignment(
     customer_id: str,
-    transfer_scope: CustomerTransferScope = Query(CustomerTransferScope.CUSTOMER_ONLY),
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    transfer_scope: CustomerTransferScope = _transfer_scope_query,
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> CustomerAssignmentPreviewResponse:
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
-    legacy_scope, _ = CustomerAssignRequest(
-        owner_id="preview", transfer_scope=transfer_scope
+    legacy_scope, _ = CustomerAssignRequest.model_validate(
+        {"owner_id": "preview", "transfer_scope": transfer_scope}
     ).normalized_transfer_scope()
-    preview = customer_crud.get_assignment_preview(
-        db, customer, team_id, legacy_scope
-    )
-    return CustomerAssignmentPreviewResponse(
-        customer_id=customer.public_id,
-        customer_version=customer.version,
-        transfer_scope=transfer_scope,
-        opportunity_count=int(preview["opportunity_count"]),
-        contract_count=int(preview["contract_count"]),
-        locked_contract_count=int(preview["locked_contract_count"]),
-        locked_contracts=preview["locked_contracts"],
-    )
+    preview = cast("_AssignmentPreview", customer_crud.get_assignment_preview(db, customer, team_id, legacy_scope))
+    return CustomerAssignmentPreviewResponse.model_validate({
+        "customer_id": customer.public_id,
+        "customer_version": customer.version,
+        "transfer_scope": transfer_scope,
+        "opportunity_count": int(preview["opportunity_count"]),
+        "contract_count": int(preview["contract_count"]),
+        "locked_contract_count": int(preview["locked_contract_count"]),
+        "locked_contracts": preview["locked_contracts"],
+    })
 
 
-@router.get("/{customer_id}/contracts", response_model=List[ContractListResponse], summary="获取客户合同列表", description="""
-获取指定客户的所有合同，支持按状态筛选和分页查询。
+@router.get(
+    "/{customer_id}/contracts",
+    response_model=list[ContractListResponse],
+    summary="获取客户合同列表",
+    description="""
+获取指定客户的所有合同\uff0c支持按状态筛选和分页查询。
 
-**功能说明：**
+**功能说明\uff1a**
 - 查询客户的所有合同
 - 支持按合同状态筛选
 - 支持分页查询
 - 返回合同详细信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看客户的合同历史
 - 了解客户的合同状态
 - 客户详情页展示合同列表
 
-**路径参数：**
+**路径参数\uff1a**
 - customer_id: 客户对外ID
 
-**查询参数：**
-- status: 合同状态筛选（可选）
-- skip: 分页跳过记录数（默认0）
-- limit: 每页记录数（默认20，最大100）
+**查询参数\uff1a**
+- status: 合同状态筛选\uff08可选\uff09
+- skip: 分页跳过记录数\uff08默认0\uff09
+- limit: 每页记录数\uff08默认20\uff0c最大100\uff09
 
-**返回字段：**
-- 合同基本信息：ID、名称、编号、金额等
-- 客户信息：客户名称
-- 商机信息：商机名称
-- 负责人信息：负责人姓名
+**返回字段\uff1a**
+- 合同基本信息\uff1aID、名称、编号、金额等
+- 客户信息\uff1a客户名称
+- 商机信息\uff1a商机名称
+- 负责人信息\uff1a负责人姓名
 """)
 def get_customer_contracts(
     customer_id: str,
-    status: Optional[str] = Query(None, description="合同状态筛选"),
+    status: str | None = Query(None, description="合同状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[ContractListResponse]:
     from app.models.contract import ContractStatus
 
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
     internal_customer_id = customer.id
 
-    contracts, total = contract_crud.get_multi(
+    contracts, _ = contract_crud.get_multi(
         db=db,
         team_id=team_id,
         skip=skip,
@@ -1100,45 +1159,49 @@ def get_customer_contracts(
     return result
 
 
-@router.get("/{customer_id}/payment-plans", response_model=List[PaymentPlanResponse], summary="获取客户回款计划列表", description="""
-获取指定客户的所有回款计划，支持按状态筛选和分页查询。
+@router.get(
+    "/{customer_id}/payment-plans",
+    response_model=list[PaymentPlanResponse],
+    summary="获取客户回款计划列表",
+    description="""
+获取指定客户的所有回款计划\uff0c支持按状态筛选和分页查询。
 
-**功能说明：**
+**功能说明\uff1a**
 - 查询客户的所有回款计划
 - 支持按回款状态筛选
 - 支持分页查询
 - 返回回款计划详细信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看客户的回款计划
 - 了解客户的回款进度
 - 客户详情页展示回款计划
 
-**路径参数：**
+**路径参数\uff1a**
 - customer_id: 客户对外ID
 
-**查询参数：**
-- status: 回款状态筛选（可选）：PENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记
-- skip: 分页跳过记录数（默认0）
-- limit: 每页记录数（默认20，最大100）
+**查询参数\uff1a**
+- status: 回款状态筛选\uff08可选\uff09\uff1aPENDING待回款、OVERDUE已逾期、PARTIAL部分回款、COMPLETED已登记
+- skip: 分页跳过记录数\uff08默认0\uff09
+- limit: 每页记录数\uff08默认20\uff0c最大100\uff09
 
-**返回字段：**
-- 回款计划基本信息：ID、阶段名称、计划金额、计划日期等
-- 已回款金额：paid_amount
-- 待回款金额：remaining_amount
-- 回款记录列表：payment_records
-- 合同信息：contract_name
-- 客户信息：customer_name、opportunity_name
+**返回字段\uff1a**
+- 回款计划基本信息\uff1aID、阶段名称、计划金额、计划日期等
+- 已回款金额\uff1apaid_amount
+- 待回款金额\uff1aremaining_amount
+- 回款记录列表\uff1apayment_records
+- 合同信息\uff1acontract_name
+- 客户信息\uff1acustomer_name、opportunity_name
 """)
 def get_customer_payment_plans(
     customer_id: str,
-    status: Optional[str] = Query(None, description="回款状态筛选"),
+    status: str | None = Query(None, description="回款状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[dict[str, Any]]:
     from app.models.payment import PaymentPlanStatus
 
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
@@ -1248,47 +1311,51 @@ def get_customer_payment_plans(
     return plans
 
 
-@router.get("/{customer_id}/invoices", response_model=List[InvoiceApplicationResponse], summary="获取客户发票列表", description="""
-获取指定客户的所有发票申请，支持按状态筛选和分页查询。
+@router.get(
+    "/{customer_id}/invoices",
+    response_model=list[InvoiceApplicationResponse],
+    summary="获取客户发票列表",
+    description="""
+获取指定客户的所有发票申请\uff0c支持按状态筛选和分页查询。
 
-**功能说明：**
+**功能说明\uff1a**
 - 查询客户的所有发票申请
 - 支持按发票状态筛选
 - 支持分页查询
 - 返回发票申请详细信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看客户的发票申请
 - 了解客户的发票进度
 - 客户详情页展示发票列表
 
-**路径参数：**
+**路径参数\uff1a**
 - customer_id: 客户对外ID
 
-**查询参数：**
-- status: 发票状态筛选（可选）
-- skip: 分页跳过记录数（默认0）
-- limit: 每页记录数（默认20，最大100）
+**查询参数\uff1a**
+- status: 发票状态筛选\uff08可选\uff09
+- skip: 分页跳过记录数\uff08默认0\uff09
+- limit: 每页记录数\uff08默认20\uff0c最大100\uff09
 
-**返回字段：**
-- 发票申请基本信息：ID、申请编号、发票类型、金额等
-- 关联合同信息：contract_name、contract_number
-- 回款计划信息：stage_name、planned_amount
-- 申请人信息：applicant_name
-- 审批状态：status、approval_status
+**返回字段\uff1a**
+- 发票申请基本信息\uff1aID、申请编号、发票类型、金额等
+- 关联合同信息\uff1acontract_name、contract_number
+- 回款计划信息\uff1astage_name、planned_amount
+- 申请人信息\uff1aapplicant_name
+- 审批状态\uff1astatus、approval_status
 """)
 def get_customer_invoices(
     customer_id: str,
-    status: Optional[str] = Query(None, description="发票状态筛选"),
+    status: str | None = Query(None, description="发票状态筛选"),
     skip: int = Query(0, ge=0, description="分页跳过记录数"),
     limit: int = Query(20, ge=1, le=100, description="每页记录数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[InvoiceApplicationResponse]:
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    invoices, total = invoice_application_crud.list_applications(
+    invoices, _ = invoice_application_crud.list_applications(
         db=db,
         team_id=team_id,
         customer_id=customer.id,
@@ -1312,48 +1379,55 @@ def get_customer_invoices(
     return populated_invoices
 
 
-@router.get("/{customer_id}/invoice-titles", response_model=List[InvoiceTitleResponse], summary="获取客户发票抬头列表", description="""
+@router.get(
+    "/{customer_id}/invoice-titles",
+    response_model=list[InvoiceTitleResponse],
+    summary="获取客户发票抬头列表",
+    description="""
 获取指定客户的所有发票抬头。
 
-**功能说明：**
+**功能说明\uff1a**
 - 查询客户的所有发票抬头
 - 默认抬头排在前面
 - 返回抬头详细信息
 
-**业务场景：**
+**业务场景\uff1a**
 - 查看客户的发票抬头
 - 创建发票时选择抬头
 - 客户详情页展示抬头列表
 
-**路径参数：**
+**路径参数\uff1a**
 - customer_id: 客户对外ID
 
-**返回字段：**
-- 抬头基本信息：ID、抬头名称、纳税人识别号
-- 抬头类型：COMPANY(单位)、PERSONAL(个人)
-- 账户信息：开户行、开户账号
-- 联系信息：地址、电话
-- 默认标识：is_default
+**返回字段\uff1a**
+- 抬头基本信息\uff1aID、抬头名称、纳税人识别号
+- 抬头类型\uff1aCOMPANY(单位)、PERSONAL(个人)
+- 账户信息\uff1a开户行、开户账号
+- 联系信息\uff1a地址、电话
+- 默认标识\uff1ais_default
 """)
 def get_customer_invoice_titles(
     customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[InvoiceTitleResponse]:
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
     invoice_titles = invoice_title_crud.get_by_customer_id(db, customer.id, team_id)
     return [_invoice_title_response(db, invoice_title, team_id) for invoice_title in invoice_titles]
 
 
-@router.post("/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED, summary="创建客户", description="手动创建客户，AI自动生成档案")
+@router.post(
+    "/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED,
+    summary="创建客户", description="手动创建客户\uff0cAI自动生成档案",
+)
 async def create_customer(
     customer: CustomerCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerResponse:
     _ensure_customer_name_available(db, customer.account_name, team_id)
 
     try:
@@ -1393,7 +1467,10 @@ async def create_customer(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="客户或联系人数据已被其他操作占用") from exc
+        raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="客户或联系人数据已被其他操作占用",
+            ) from exc
 
     try:
         lifecycle_warnings = customer_lifecycle_post_commit_coordinator.kick(lifecycle_work)
@@ -1410,7 +1487,7 @@ _CUSTOMER_PAGE_SCOPE = "owned_or_collaborated"
 _CUSTOMER_LIST_SCOPES = {None, "collaborated", "accessible", _CUSTOMER_PAGE_SCOPE}
 _CUSTOMER_SCOPE_DETAIL = "scope 仅支持 collaborated/accessible/owned_or_collaborated"
 _CUSTOMER_CHART_SCOPE_DETAIL = "scope 仅支持 collaborated/accessible/owned_or_collaborated/public"
-_CUSTOMER_OWNER_PERMISSION_DETAIL = "只能查看自己负责的客户，或需要 customer:view:all 权限查看他人数据"
+_CUSTOMER_OWNER_PERMISSION_DETAIL = "只能查看自己负责的客户\uff0c或需要 customer:view:all 权限查看他人数据"
 
 
 def _reject_unknown_customer_scope(scope: str | None, *, allow_public: bool = False) -> None:
@@ -1445,8 +1522,8 @@ def _resolve_listed_customer_owner_id(
     scope: str | None,
     has_view_all: bool,
     current_user_id: str,
-    parsed_filters,
-    parsed_sorts,
+    parsed_filters: list[FilterCondition] | None,
+    parsed_sorts: list[SortCondition] | None,
     legacy_owner_id: str | None,
 ) -> tuple[str | None, str | None, bool]:
     crud_scope, include_collaborated, default_to_self = _customer_population_flags(
@@ -1482,34 +1559,40 @@ def _resolve_listed_customer_owner_id(
     return actual_owner_id, crud_scope, include_collaborated
 
 
-@router.get("/", response_model=PaginatedResponse[CustomerListResponse], summary="查询客户列表", description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选，支持动态排序，返回负责人和创建人信息")
+@router.get(
+    "/", response_model=PaginatedResponse[CustomerListResponse],
+    summary="查询客户列表",
+    description="支持分页、按客户名称/行业/城市/状态/负责人等多条件筛选\uff0c支持动态排序\uff0c返回负责人和创建人信息",
+)
 def get_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
-    customer_status: Optional[str] = Query(None, alias="status", description="客户状态，多个值用逗号分隔"),
-    status_exclude: Optional[str] = Query(None, description="排除的客户状态，多个值用逗号分隔"),
+    customer_status: str | None = Query(None, alias="status", description="客户状态\uff0c多个值用逗号分隔"),
+    status_exclude: str | None = Query(None, description="排除的客户状态\uff0c多个值用逗号分隔"),
     industry: str = Query(None, description="所属行业"),
-    industry_exclude: Optional[str] = Query(None, description="排除的所属行业，多个值用逗号分隔"),
+    industry_exclude: str | None = Query(None, description="排除的所属行业\uff0c多个值用逗号分隔"),
     city: str = Query(None, description="所在城市"),
-    source_public_id: Optional[str] = Query(None, description="获客来源对外ID，多个值用逗号分隔"),
-    source_public_id_exclude: Optional[str] = Query(None, description="排除的获客来源对外ID，多个值用逗号分隔"),
+    source_public_id: str | None = Query(None, description="获客来源对外ID\uff0c多个值用逗号分隔"),
+    source_public_id_exclude: str | None = Query(None, description="排除的获客来源对外ID\uff0c多个值用逗号分隔"),
     company_scale: str = Query(None, description="公司规模"),
-    company_scale_exclude: Optional[str] = Query(None, description="排除的公司规模，多个值用逗号分隔"),
-    owner_id: str = Query(None, description="负责人ID（支持 'me' 表示当前用户）"),
-    owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
+    company_scale_exclude: str | None = Query(None, description="排除的公司规模\uff0c多个值用逗号分隔"),
+    owner_id: str = Query(None, description="负责人ID\uff08支持 'me' 表示当前用户\uff09"),
+    owner_id_exclude: str | None = Query(None, description="排除的负责人ID\uff0c多个值用逗号分隔"),
     keyword: str = Query(None, description="关键词搜索"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索客户名称、简称或别名"),
-    created_time_start: Optional[date] = Query(None, description="创建时间起始"),
-    created_time_end: Optional[date] = Query(None, description="创建时间结束"),
-    order_by: str = Query(None, description="排序字段（created_time/last_modified_time/account_name/city/status/industry）"),
-    order_dir: str = Query(None, description="排序方向（asc/desc）"),
-    scope: Optional[str] = Query(None, description="客户范围：collaborated/accessible/owned_or_collaborated"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索客户名称、简称或别名"),
+    created_time_start: date | None = _created_time_start_query,
+    created_time_end: date | None = _created_time_end_query,
+    order_by: str = Query(
+        None, description="排序字段\uff08created_time/last_modified_time/account_name/city/status/industry\uff09"
+    ),
+    order_dir: str = Query(None, description="排序方向\uff08asc/desc\uff09"),
+    scope: str | None = Query(None, description="客户范围\uff1acollaborated/accessible/owned_or_collaborated"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> PaginatedResponse[CustomerListResponse]:
     from app.crud.permission import permission_crud
 
     # 获取用户权限码
@@ -1584,15 +1667,15 @@ def get_customers(
     )
 
 
-def _build_customer_list_responses(db: Session, customers: List, team_id: int) -> List[CustomerListResponse]:
+def _build_customer_list_responses(db: Session, customers: list[Customer], team_id: int) -> list[CustomerListResponse]:
     """Batch-project customer ORM rows into list responses with display info."""
     result = []
-    owner_ids = set(c.owner_id for c in customers if c.owner_id)
-    creator_ids = set(c.creator_id for c in customers if c.creator_id)
+    owner_ids = {c.owner_id for c in customers if c.owner_id}
+    creator_ids = {c.creator_id for c in customers if c.creator_id}
     customer_ids = [c.id for c in customers]
     source_lead_ids = [c.source_lead_id for c in customers if c.source_lead_id]
     source_map = map_sources_by_ids(db, team_id, [c.source_id for c in customers])
-    procurement_method_ids = set(c.default_procurement_method_id for c in customers if c.default_procurement_method_id)
+    procurement_method_ids = {c.default_procurement_method_id for c in customers if c.default_procurement_method_id}
 
     users_info = {}
     if owner_ids or creator_ids:
@@ -1615,8 +1698,8 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
                     'avatar_url': row[2]
                 }
 
-    collaborator_user_ids = set()
-    collaborator_member_rows = []
+    collaborator_user_ids: set[str] = set()
+    collaborator_member_rows: Sequence[Row[Any]] = []
     if customer_ids:
         placeholders = ','.join(':customer_id_' + str(i) for i in range(len(customer_ids)))
         collaborators_query = text(f"""
@@ -1651,7 +1734,7 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
                 'avatar_url': row[2]
             }
 
-    collaborators_by_customer = {}
+    collaborators_by_customer: dict[int, list[dict[str, str | None]]] = {}
     for customer_id, user_id in collaborator_member_rows:
         user_info = collaborator_users_info.get(str(user_id))
         if user_info:
@@ -1676,7 +1759,7 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
             ProcurementMethod.id.in_(procurement_method_ids)
         ).all()
         for m in methods:
-            procurement_methods_info[m.id] = {
+            procurement_methods_info[cast("int", m.id)] = {
                 'id': m.id,
                 'code': m.code,
                 'name': m.name,
@@ -1689,18 +1772,18 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
         if customer.industry:
             industry_values.add(customer.industry)
 
-    # 批量查询所有行业信息（含父行业）
+    # 批量查询所有行业信息(含父行业)
     if industry_values:
         from app.crud.industry import industry_crud
 
         industries_map = industry_crud.get_by_codes_with_parent(db, list(industry_values))
         for industry_code, industry in industries_map.items():
-            # 构建完整路径：一级行业/二级行业
+            # 构建完整路径:一级行业/二级行业
             if industry.level == 2 and industry.parent:
                 full_name = f"{industry.parent.name}/{industry.name}"
                 parent_code = industry.parent.code
             else:
-                full_name = industry.name
+                full_name = cast("str", industry.name)
                 parent_code = None
 
             industries_info[industry_code] = {
@@ -1726,7 +1809,7 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
         ).all()
         primary_contacts = {contact.customer_id: contact for contact in primary_rows}
 
-    derived_statuses = derive_customer_statuses_for_list(db, team_id, customers)
+    derived_statuses = derive_customer_statuses_for_list(db, team_id, cast("list[CustomerLike]", customers))
 
     for customer in customers:
         derived = derived_statuses.get(int(customer.id))
@@ -1757,7 +1840,10 @@ def _build_customer_list_responses(db: Session, customers: List, team_id: int) -
             'owner_info': users_info.get(customer.owner_id) if customer.owner_id else None,
             'collaborator_infos': collaborators_by_customer.get(customer.id, []),
             'creator_info': users_info.get(customer.creator_id) if customer.creator_id else None,
-            'default_procurement_method_info': procurement_methods_info.get(customer.default_procurement_method_id) if customer.default_procurement_method_id else None,
+            'default_procurement_method_info': (
+                procurement_methods_info.get(customer.default_procurement_method_id)
+                if customer.default_procurement_method_id else None
+            ),
             **product_payloads.get(customer.id, empty_product_payload),
             'primary_contact_name': primary_contacts[customer.id].name if customer.id in primary_contacts else None,
             'primary_contact_mobile': primary_contacts[customer.id].mobile if customer.id in primary_contacts else None,
@@ -1809,7 +1895,10 @@ def _customer_export_row(item: CustomerListResponse) -> dict[str, object]:
         "license_status": customer_license_status_label(item),
         "license_authorized_users": item.license_authorized_users,
         "license_expiry_date": license_expiry_text(item.license_expiry_date, item.license_is_permanent),
-        "default_procurement_method": item.default_procurement_method_info.name if item.default_procurement_method_info else None,
+        "default_procurement_method": (
+            item.default_procurement_method_info.name
+            if item.default_procurement_method_info else None
+        ),
         "industry": item.industry_info.name if item.industry_info else None,
         "source": item.source_info.name if item.source_info else item.source,
         "product_name": item.product_name,
@@ -1825,9 +1914,9 @@ def _customer_export_file_stem(tab: str) -> str:
 def _resolve_customer_export_query(
     request: CustomerListExportRequest,
     team_id: int,
-    current_user,
+    current_user: User,
     db: Session,
-):
+) -> OrmQuery[Customer]:
     from app.crud.permission import permission_crud
 
     permission_codes = {
@@ -1877,9 +1966,9 @@ def _resolve_customer_export_query(
 
 
 def _iter_customer_export_rows(
-    stream,
+    stream: Iterable[Customer],
     team_id: int,
-    projection_session_factory=SessionLocal,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
 ) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
@@ -1898,9 +1987,9 @@ def _iter_customer_export_rows(
 )
 def export_customers(
     request: CustomerListExportRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> FileResponse:
     query = run_or_400(lambda: _resolve_customer_export_query(request, team_id, current_user, db))
     stream = query.enable_eagerloads(False).execution_options(stream_results=True).yield_per(500)
@@ -1917,13 +2006,13 @@ def export_customers(
 def _customer_chart_population(
     db: Session,
     team_id: int,
-    current_user,
+    current_user: User,
     *,
     scope: str | None,
     search: str | None,
-    filters: list | None,
-    sorts: list | None,
-) -> list:
+    filters: list[FilterCondition] | None,
+    sorts: list[SortCondition] | None,
+) -> list[Customer]:
     from app.crud.permission import permission_crud
 
     _reject_unknown_customer_scope(scope, allow_public=True)
@@ -1966,9 +2055,9 @@ def get_customer_chart(
     search: str | None = Query(None),
     filters: str | None = Query(None),
     sorts: str | None = Query(None),
-    team_id: int = Depends(get_current_user_team),
-    current_user: Any = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> CustomerChartResponse:
     from app.services.customer_chart_stats import build_customer_chart
 
@@ -1989,9 +2078,9 @@ def get_customer_chart_bucket_customers(
     search: str | None = Query(None),
     filters: str | None = Query(None),
     sorts: str | None = Query(None),
-    team_id: int = Depends(get_current_user_team),
-    current_user: Any = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
 ) -> CustomerChartBucketCustomersResponse:
     from app.services.customer_chart_stats import list_chart_bucket_customers
 
@@ -2005,7 +2094,9 @@ def get_customer_chart_bucket_customers(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知图表") from exc
-    return CustomerChartBucketCustomersResponse(chart=chart, bucket=bucket, total=total, customers=listed)
+    return CustomerChartBucketCustomersResponse.model_validate({
+        "chart": chart, "bucket": bucket, "total": total, "customers": listed,
+    })
 
 @router.get(
     "/identity-resolution",
@@ -2015,10 +2106,10 @@ def get_customer_chart_bucket_customers(
 def resolve_customer_identity(
     query: str = Query(..., min_length=1, max_length=255),
     limit: int = Query(10, ge=1, le=50),
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> dict[str, object]:
     from app.crud.permission import permission_crud
 
     permission_codes = {
@@ -2041,7 +2132,7 @@ def resolve_customer_identity(
     }
 
 
-def _can_manage_customer_members(db: Session, customer, team_id: int, current_user) -> bool:
+def _can_manage_customer_members(db: Session, customer: Customer, team_id: int, current_user: User) -> bool:
     from app.crud.permission import permission_crud
     from app.crud.role import role_crud
 
@@ -2056,7 +2147,9 @@ def _can_manage_customer_members(db: Session, customer, team_id: int, current_us
     return "TEAM_ADMIN" in role_codes
 
 
-def _build_customer_member_response(db: Session, member, customer_public_id: str, can_manage: bool) -> CustomerMemberResponse:
+def _build_customer_member_response(
+    db: Session, member: CustomerMember, customer_public_id: str, can_manage: bool,
+) -> CustomerMemberResponse:
     user_info = None
     if member.user_id:
         row = db.execute(text("""
@@ -2086,38 +2179,44 @@ def _build_customer_member_response(db: Session, member, customer_public_id: str
     )
 
 
-@router.get("/{customer_id}/members", response_model=List[CustomerMemberResponse], summary="查询客户团队成员")
+@router.get("/{customer_id}/members", response_model=list[CustomerMemberResponse], summary="查询客户团队成员")
 def get_customer_members(
     customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[CustomerMemberResponse]:
     customer = check_customer_view_permission(customer_id, team_id, current_user, db)
     can_manage = _can_manage_customer_members(db, customer, team_id, current_user)
     members = customer_member_crud.get_by_customer(db, team_id, customer.id)
     return [_build_customer_member_response(db, member, customer.public_id, can_manage) for member in members]
 
 
-@router.get("/{customer_id}/member-candidates", response_model=List[CustomerMemberCandidate], summary="查询客户团队成员候选人")
+@router.get(
+    "/{customer_id}/member-candidates", response_model=list[CustomerMemberCandidate],
+    summary="查询客户团队成员候选人",
+)
 def get_customer_member_candidates(
     customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[dict[str, object]]:
     customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     return customer_member_crud.get_candidates(db, team_id, customer.id)
 
 
-@router.post("/{customer_id}/members", response_model=CustomerMemberResponse, status_code=status.HTTP_201_CREATED, summary="添加客户团队成员")
+@router.post(
+    "/{customer_id}/members", response_model=CustomerMemberResponse,
+    status_code=status.HTTP_201_CREATED, summary="添加客户团队成员",
+)
 def add_customer_member(
     customer_id: str,
     member_in: CustomerMemberCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerMemberResponse:
     customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     if customer.owner_id == str(member_in.user_id):
         raise HTTPException(
@@ -2140,7 +2239,7 @@ def add_customer_member(
     _persist_customer_business_object_refresh_after_commit(
         business_object=member,
         source_type="customer_member",
-        summary="客户访问成员已更新，刷新客户智能档案可见性",
+        summary="客户访问成员已更新\uff0c刷新客户智能档案可见性",
         change_type="created",
         actor_id=str(current_user.id),
         payload={
@@ -2160,10 +2259,10 @@ def update_customer_member(
     customer_id: str,
     member_id: int,
     member_in: CustomerMemberUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerMemberResponse:
     customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     member = customer_member_crud.get_by_id(db, member_id, team_id)
     if not member or member.customer_id != customer.id:
@@ -2175,7 +2274,7 @@ def update_customer_member(
     _persist_customer_business_object_refresh_after_commit(
         business_object=updated,
         source_type="customer_member",
-        summary="客户访问成员权限已更新，刷新客户智能档案可见性",
+        summary="客户访问成员权限已更新\uff0c刷新客户智能档案可见性",
         actor_id=str(current_user.id),
         payload={
             "change_type": "member_updated",
@@ -2193,10 +2292,10 @@ def update_customer_member(
 def remove_customer_member(
     customer_id: str,
     member_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> MessageResponse:
     customer = check_customer_member_manage_permission(customer_id, team_id, current_user, db)
     member = customer_member_crud.get_by_id(db, member_id, team_id)
     if not member or member.customer_id != customer.id:
@@ -2208,7 +2307,7 @@ def remove_customer_member(
     _persist_customer_business_object_refresh_after_commit(
         business_object=member,
         source_type="customer_member",
-        summary="客户访问成员已移除，刷新客户智能档案可见性",
+        summary="客户访问成员已移除\uff0c刷新客户智能档案可见性",
         change_type="deleted",
         actor_id=str(current_user.id),
         payload={
@@ -2225,10 +2324,10 @@ def remove_customer_member(
 async def update_customer_lifecycle_status(
     customer_id: str,
     status_update: CustomerLifecycleStatusUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> CustomerResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
     try:
         decision = customer_status_transition_service.plan(
@@ -2268,7 +2367,7 @@ async def update_customer_lifecycle_status(
     _persist_customer_business_object_refresh_after_commit(
         business_object=updated_customer,
         source_type="customer",
-        summary="客户状态已更新，刷新客户智能档案",
+        summary="客户状态已更新\uff0c刷新客户智能档案",
         actor_id=str(current_user.id),
         payload={
             "change_type": "status_updated",
@@ -2295,10 +2394,10 @@ async def update_customer_lifecycle_status(
 async def update_customer_license_snapshot(
     customer_id: str,
     snapshot_update: CustomerLicenseSnapshotUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+) -> CustomerResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
     try:
         updated_customer, before, after = customer_crud.update_license_snapshot(
@@ -2317,7 +2416,7 @@ async def update_customer_license_snapshot(
         if before.get(field) != after.get(field)
     ]
 
-    def _audit_value(value):
+    def _audit_value(value: object) -> object:
         return value.isoformat() if hasattr(value, "isoformat") else value
 
     operation_log_service.log(
@@ -2340,23 +2439,26 @@ async def update_customer_license_snapshot(
     _persist_customer_business_object_refresh_after_commit(
         business_object=updated_customer,
         source_type="customer",
-        summary="客户授权汇总已更新，刷新客户智能档案",
+        summary="客户授权汇总已更新\uff0c刷新客户智能档案",
         actor_id=str(current_user.id),
         payload={
             "change_type": "license_snapshot_updated",
-            "changed_fields": changed_fields,
+            "changed_fields": cast("list[JsonValue]", changed_fields),
         },
     )
     return _customer_response(db, updated_customer)
 
 
-@router.get("/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情", description="返回客户信息及其所有联系人列表")
+@router.get(
+    "/{customer_id}", response_model=CustomerDetailResponse, summary="获取客户详情",
+    description="返回客户信息及其所有联系人列表",
+)
 def get_customer(
     customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerDetailResponse:
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
     contacts = contact_crud.get_by_customer_id(db, customer.id, team_id)
@@ -2399,15 +2501,15 @@ def get_customer(
     if customer.industry:
         from app.crud.industry import industry_crud
 
-        # 从 crm_industries 表获取行业信息（含父行业）
+        # 从 crm_industries 表获取行业信息(含父行业)
         industry = industry_crud.get_by_code_with_parent(db, customer.industry)
         if industry:
-            # 构建完整路径：一级行业/二级行业
+            # 构建完整路径:一级行业/二级行业
             if industry.level == 2 and industry.parent:
                 full_name = f"{industry.parent.name}/{industry.name}"
                 parent_code = industry.parent.code
             else:
-                full_name = industry.name
+                full_name = cast("str", industry.name)
                 parent_code = None
 
             industry_info = {
@@ -2423,12 +2525,16 @@ def get_customer(
         "id": customer.public_id,
         "public_id": customer.public_id,
         **_customer_source_fields(db, customer),
-        "source_lead_id": source_lead.public_id if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id)) else None,
+        "source_lead_id": (
+            source_lead.public_id
+            if (source_lead := lead_crud.get_by_id(db, customer.source_lead_id, team_id))
+            else None
+        ),
         **product_intent_payload(customer.product_links),
         **_derived_status_payload(db, customer),
     }
 
-    return CustomerDetailResponse(
+    return CustomerDetailResponse.model_validate(dict(
         **customer_payload,
         contacts=[_contact_response(contact, customer.public_id) for contact in contacts],
         owner_info=owner_info,
@@ -2436,17 +2542,17 @@ def get_customer(
         default_procurement_method_info=procurement_method_info,
         industry_info=industry_info,
         customer_intelligence_has_inputs=False,
-    )
+    ))
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse, summary="编辑客户", description="更新客户信息")
 def update_customer(
     customer_id: str,
     customer_update: CustomerUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer_update.account_name:
@@ -2465,7 +2571,7 @@ def update_customer(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    def _audit_value(value):
+    def _audit_value(value: object) -> object:
         return value.isoformat() if hasattr(value, "isoformat") else value
 
     changed_fields = list(before.keys())
@@ -2488,9 +2594,9 @@ def update_customer(
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated,
             source_type="customer",
-            summary="客户主数据已更新，刷新客户智能档案",
+            summary="客户主数据已更新\uff0c刷新客户智能档案",
             actor_id=str(current_user.id),
-            payload={"change_type": "updated", "changed_fields": changed_fields},
+            payload={"change_type": "updated", "changed_fields": cast("list[JsonValue]", changed_fields)},
             scope="partial",
         )
 
@@ -2498,14 +2604,17 @@ def update_customer(
 
 
 
-@router.patch("/{customer_id}/status", response_model=CustomerResponse, summary="更新客户状态", description="用于标记赢单、输单等关键状态变更")
+@router.patch(
+    "/{customer_id}/status", response_model=CustomerResponse, summary="更新客户状态",
+    description="用于标记赢单、输单等关键状态变更",
+)
 async def update_customer_status(
     customer_id: str,
     status_update: CustomerStatusUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     new_status = status_update.status
@@ -2514,7 +2623,7 @@ async def update_customer_status(
     _persist_customer_business_object_refresh_after_commit(
         business_object=updated_customer,
         source_type="customer",
-        summary="客户状态已更新，刷新客户智能档案",
+        summary="客户状态已更新\uff0c刷新客户智能档案",
         actor_id=str(current_user.id),
         payload={"change_type": "status_updated", "previous_status": previous_status, "new_status": new_status},
     )
@@ -2540,14 +2649,17 @@ async def update_customer_status(
     return _customer_response(db, updated_customer)
 
 
-@router.patch("/{customer_id}/lose", response_model=CustomerResponse, summary="标记输单", description="将客户标记为输单，必须记录输单原因")
+@router.patch(
+    "/{customer_id}/lose", response_model=CustomerResponse, summary="标记输单",
+    description="将客户标记为输单\uff0c必须记录输单原因",
+)
 async def mark_customer_as_lost(
     customer_id: str,
     lose_data: CustomerLoseRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> CustomerResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     if customer.status == 2:
@@ -2563,7 +2675,7 @@ async def mark_customer_as_lost(
     _persist_customer_business_object_refresh_after_commit(
         business_object=updated_customer,
         source_type="customer",
-        summary="客户已标记输单，刷新客户智能档案",
+        summary="客户已标记输单\uff0c刷新客户智能档案",
         actor_id=str(current_user.id),
         payload={
             "change_type": "lost",
@@ -2587,15 +2699,19 @@ async def mark_customer_as_lost(
     return _customer_response(db, updated_customer)
 
 
-@router.delete("/{customer_id}", response_model=MessageResponse, summary="删除客户", description="逻辑删除，需校验权限")
+@router.delete(
+    "/{customer_id}", response_model=MessageResponse, summary="删除客户",
+    description="逻辑删除\uff0c需校验权限",
+)
 def delete_customer(
     customer_id: str,
-    customer = Depends(check_customer_delete_permission),
-    db: Session = Depends(get_db)
-):
+    customer: Customer = _customer_delete_dependency,
+    db: Session = _db_dependency
+) -> MessageResponse:
+    del customer_id
     try:
-        # 客户删除会由数据库级联清理客户档案投影；这里不再发起普通
-        # Customer Intelligence refresh，避免对已不存在的客户重算。
+        # 客户删除会由数据库级联清理客户档案投影;这里不再发起普通
+        # Customer Intelligence refresh,避免对已不存在的客户重算。
         # 删除审计由 customer_crud.delete() 的操作日志负责。
         customer_crud.delete(db, customer, str(customer.owner_id) if customer.owner_id else None)
         return MessageResponse(message="删除成功")
@@ -2603,17 +2719,21 @@ def delete_customer(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.post("/{customer_id}/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED, summary="添加联系人", description="为指定客户添加新联系人")
+@router.post(
+    "/{customer_id}/contacts", response_model=ContactResponse,
+    status_code=status.HTTP_201_CREATED, summary="添加联系人",
+    description="为指定客户添加新联系人",
+)
 async def create_contact(
     customer_id: str,
     contact: ContactCreate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> ContactResponse:
     customer = _get_editable_customer(db, customer_id, team_id, current_user)
 
     created_contact = contact_crud.create(db, contact, customer.id, team_id)
@@ -2626,26 +2746,35 @@ async def create_contact(
     return _contact_response(created_contact, customer.public_id)
 
 
-@router.get("/{customer_id}/contacts", response_model=List[ContactResponse], summary="查询联系人列表", description="获取指定客户下的全部联系人")
+@router.get(
+    "/{customer_id}/contacts", response_model=list[ContactResponse],
+    summary="查询联系人列表", description="获取指定客户下的全部联系人",
+)
 def get_contacts(
     customer_id: str,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[ContactResponse]:
     customer = _get_viewable_customer(db, customer_id, team_id, current_user)
 
-    return [_contact_response(contact, customer.public_id) for contact in contact_crud.get_by_customer_id(db, customer.id, team_id)]
+    return [
+        _contact_response(contact, customer.public_id)
+        for contact in contact_crud.get_by_customer_id(db, customer.id, team_id)
+    ]
 
 
-@router.put("/contacts/{contact_id}", response_model=ContactResponse, summary="编辑联系人", description="更新联系人信息")
+@router.put(
+    "/contacts/{contact_id}", response_model=ContactResponse,
+    summary="编辑联系人", description="更新联系人信息",
+)
 async def update_contact(
     contact_id: int,
     contact_update: ContactUpdate,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> ContactResponse:
     contact = contact_crud.get_by_id(db, contact_id, team_id)
     if not contact:
         raise HTTPException(
@@ -2664,13 +2793,16 @@ async def update_contact(
     return _contact_response(updated_contact, customer.public_id)
 
 
-@router.patch("/contacts/{contact_id}/set-primary", response_model=ContactResponse, summary="设置主联系人", description="设置某联系人为主联系人")
+@router.patch(
+    "/contacts/{contact_id}/set-primary", response_model=ContactResponse,
+    summary="设置主联系人", description="设置某联系人为主联系人",
+)
 async def set_primary_contact(
     contact_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> ContactResponse:
     contact = contact_crud.get_by_id(db, contact_id, team_id)
     if not contact:
         raise HTTPException(
@@ -2692,10 +2824,10 @@ async def set_primary_contact(
 @router.delete("/contacts/{contact_id}", response_model=MessageResponse, summary="删除联系人", description="删除联系人")
 async def delete_contact(
     contact_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> MessageResponse:
     contact = contact_crud.get_by_id(db, contact_id, team_id)
     if not contact:
         raise HTTPException(
@@ -2717,27 +2849,32 @@ async def delete_contact(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
+        ) from e
 
 
-@router.get("/statistics/summary", response_model=StatisticsResponse, summary="查询统计", description="查询客户统计数据")
+@router.get(
+    "/statistics/summary", response_model=StatisticsResponse,
+    summary="查询统计", description="查询客户统计数据",
+)
 def get_statistics(
     owner_id: str = Query(None, description="负责人ID"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> StatisticsResponse:
+    del current_user
     return StatisticsResponse(**customer_crud.get_statistics(db, team_id, owner_id))
 
 
-@router.get("/statistics/trend", response_model=List[TrendResponse], summary="查询趋势", description="查询客户创建趋势")
+@router.get("/statistics/trend", response_model=list[TrendResponse], summary="查询趋势", description="查询客户创建趋势")
 def get_trend(
     days: int = Query(30, ge=1, le=365, description="查询天数"),
     owner_id: str = Query(None, description="负责人ID"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> list[TrendResponse]:
+    del current_user
     trend_data = customer_crud.get_trend(db, team_id, days, owner_id)
     return [TrendResponse(**item) for item in trend_data]
 
@@ -2746,18 +2883,18 @@ def get_trend(
     "/{customer_id}/return-to-pool",
     response_model=None,
     summary="客户退回公海",
-    description="将客户退回到公海池，解除与负责人的绑定。新客户端使用命令结果查询保证幂等和并发安全。",
+    description="将客户退回到公海池\uff0c解除与负责人的绑定。新客户端使用命令结果查询保证幂等和并发安全。",
 )
 async def return_customer_to_pool(
     customer_id: str,
     return_data: CustomerReturnRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
-    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: int | None = Header(None, alias="X-Expected-Version"),
 ) -> object:
     from app.crud.role import role_crud
 
@@ -2775,8 +2912,11 @@ async def return_customer_to_pool(
         and return_data.expected_version is not None
         and expected_version_header != return_data.expected_version
     ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
-    expected_version = return_data.expected_version if return_data.expected_version is not None else expected_version_header
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致\uff0c请刷新后重试")
+    expected_version = (
+        return_data.expected_version
+        if return_data.expected_version is not None else expected_version_header
+    )
     customer = _get_customer_or_404(db, customer_id, team_id)
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -2820,14 +2960,26 @@ async def return_customer_to_pool(
             db.refresh(updated_customer)
         except ValueError as exc:
             db.rollback()
-            code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
-            message = "客户已被其他操作更新，请刷新后重试" if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST, detail={"code": code, "message": message}) from exc
+            code = (
+                "RESOURCE_VERSION_CONFLICT"
+                if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
+            )
+            message = (
+                "客户已被其他操作更新\uff0c请刷新后重试"
+                if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+            )
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_409_CONFLICT
+                    if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST
+                ),
+                detail={"code": code, "message": message},
+            ) from exc
 
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
-            summary="客户已退回公海，刷新客户智能档案",
+            summary="客户已退回公海\uff0c刷新客户智能档案",
             actor_id=str(current_user.id),
             payload={
                 "change_type": "returned_to_pool",
@@ -2844,13 +2996,13 @@ async def return_customer_to_pool(
             return_reason=return_data.return_reason,
             actor_id=str(current_user.id),
         )
-        return CustomerReturnResponse(
-            customer_id=updated_customer.public_id,
-            previous_owner=previous_owner,
-            returned_time=updated_customer.returned_time,
-            return_reason=updated_customer.return_reason,
-            message="客户已成功退回公海",
-        )
+        return CustomerReturnResponse.model_validate({
+            "customer_id": updated_customer.public_id,
+            "previous_owner": previous_owner,
+            "returned_time": updated_customer.returned_time,
+            "return_reason": updated_customer.return_reason,
+            "message": "客户已成功退回公海",
+        })
 
     fingerprint = request_fingerprint({
         "customer_id": customer_id,
@@ -2873,19 +3025,28 @@ async def return_customer_to_pool(
         )
     except CommandIdempotencyConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)},
+        ) from exc
     except CommandAlreadyInProgress as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail={"operation_id": str(exc), "message": "退回公海正在处理中，请查询操作结果"}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "退回公海正在处理中\uff0c请查询操作结果"},
+        ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "OPERATION_CONFLICT", "message": str(exc)},
+        ) from exc
 
     if replay:
         db.rollback()
         return command_execution_service.to_response_payload(execution)
 
-    command_operation_id = execution.operation_id
+    command_operation_id = cast("str", execution.operation_id)
     try:
         previous_owner = customer.owner_id
         updated_customer = customer_crud.return_to_pool(
@@ -2936,8 +3097,14 @@ async def return_customer_to_pool(
         db.refresh(updated_customer)
     except ValueError as exc:
         db.rollback()
-        error_code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
-        error_message = "客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        error_code = (
+            "RESOURCE_VERSION_CONFLICT"
+            if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_RETURN_REJECTED"
+        )
+        error_message = (
+            "客户已被其他操作更新\uff0c请刷新后重试"
+            if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        )
         try:
             execution, _ = command_execution_service.begin(
                 db,
@@ -2963,7 +3130,10 @@ async def return_customer_to_pool(
         except Exception:
             db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST,
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST
+            ),
             detail={"code": error_code, "message": error_message, "operation_id": command_operation_id},
         ) from exc
     except Exception as exc:
@@ -2987,7 +3157,7 @@ async def return_customer_to_pool(
                 execution,
                 status=CommandExecutionStatus.UNKNOWN,
                 error_code="CUSTOMER_RETURN_UNKNOWN",
-                error_message="退回公海结果暂未确认，请查询操作结果",
+                error_message="退回公海结果暂未确认\uff0c请查询操作结果",
                 retryable=True,
             )
             db.commit()
@@ -2995,14 +3165,18 @@ async def return_customer_to_pool(
             db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "CUSTOMER_RETURN_UNKNOWN", "message": "退回公海结果暂未确认，请查询操作结果", "operation_id": command_operation_id},
+            detail={
+                "code": "CUSTOMER_RETURN_UNKNOWN",
+                "message": "退回公海结果暂未确认\uff0c请查询操作结果",
+                "operation_id": command_operation_id,
+            },
         ) from exc
 
     try:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
-            summary="客户已退回公海，刷新客户智能档案",
+            summary="客户已退回公海\uff0c刷新客户智能档案",
             actor_id=str(current_user.id),
             payload={
                 "change_type": "returned_to_pool",
@@ -3026,22 +3200,26 @@ async def return_customer_to_pool(
     return command_execution_service.to_response_payload(execution)
 
 
-@router.get("/public/list", response_model=PaginatedResponse[CustomerListResponse], summary="查询公海客户", description="获取公海池中的客户列表，支持动态排序，返回主要联系人信息")
+@router.get(
+    "/public/list", response_model=PaginatedResponse[CustomerListResponse], summary="查询公海客户",
+    description="获取公海池中的客户列表\uff0c支持动态排序\uff0c返回主要联系人信息",
+)
 def get_public_customers(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
-    status: Optional[int] = Query(None, description="客户状态"),
-    city: Optional[str] = Query(None, description="所在城市"),
-    keyword: Optional[str] = Query(None, description="关键词搜索"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索客户名称、简称或别名"),
-    order_by: Optional[str] = Query(None, description="排序字段"),
-    order_dir: Optional[str] = Query(None, description="排序方向（asc/desc）"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
+    status: int | None = Query(None, description="客户状态"),
+    city: str | None = Query(None, description="所在城市"),
+    keyword: str | None = Query(None, description="关键词搜索"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索客户名称、简称或别名"),
+    order_by: str | None = Query(None, description="排序字段"),
+    order_dir: str | None = Query(None, description="排序方向\uff08asc/desc\uff09"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency
+) -> PaginatedResponse[CustomerResponse]:
+    del current_user
     parsed_filters, parsed_sorts = optional_request_list_query(
         filters_raw=filters,
         sorts_raw=sorts,
@@ -3055,7 +3233,7 @@ def get_public_customers(
     page = skip // limit + 1
     total_pages = (total + limit - 1) // limit if total > 0 else 0
     return PaginatedResponse[CustomerResponse](
-        items=_build_customer_list_responses(db, customers, team_id),
+        items=cast("list[CustomerResponse]", _build_customer_list_responses(db, customers, team_id)),
         total=total,
         page=page,
         page_size=limit,
@@ -3072,13 +3250,13 @@ def get_public_customers(
 def claim_customer(
     customer_id: str,
     claim_data: CustomerClaimRequest,
-    team_id: int = Depends(get_current_user_team),
-    current_user=Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
-    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+    team_id: int = _team_dependency,
+    current_user: User = _user_dependency,
+    db: Session = _db_dependency,
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: int | None = Header(None, alias="X-Expected-Version"),
 ) -> object:
     operation_id = _normalize_optional_header_text(operation_id)
     idempotency_key = _normalize_optional_header_text(idempotency_key)
@@ -3102,8 +3280,11 @@ def claim_customer(
         and claim_data.expected_version is not None
         and expected_version_header != claim_data.expected_version
     ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
-    expected_version = claim_data.expected_version if claim_data.expected_version is not None else expected_version_header
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致\uff0c请刷新后重试")
+    expected_version = (
+        claim_data.expected_version
+        if claim_data.expected_version is not None else expected_version_header
+    )
     customer = _get_customer_or_404(db, customer_id, team_id)
     modern_command = operation_id is not None or idempotency_key is not None
     if not modern_command:
@@ -3136,9 +3317,21 @@ def claim_customer(
             return _customer_response(db, updated_customer)
         except ValueError as exc:
             db.rollback()
-            code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
-            message = "客户已被其他操作更新，请刷新后重试" if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST, detail={"code": code, "message": message}) from exc
+            code = (
+                "RESOURCE_VERSION_CONFLICT"
+                if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
+            )
+            message = (
+                "客户已被其他操作更新\uff0c请刷新后重试"
+                if code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+            )
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_409_CONFLICT
+                    if code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST
+                ),
+                detail={"code": code, "message": message},
+            ) from exc
 
     fingerprint = request_fingerprint({
         "customer_id": customer_id,
@@ -3160,19 +3353,28 @@ def claim_customer(
         )
     except CommandIdempotencyConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)},
+        ) from exc
     except CommandAlreadyInProgress as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail={"operation_id": str(exc), "message": "客户领取正在处理中，请查询操作结果"}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_202_ACCEPTED,
+            detail={"operation_id": str(exc), "message": "客户领取正在处理中\uff0c请查询操作结果"},
+        ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "OPERATION_CONFLICT", "message": str(exc)},
+        ) from exc
 
     if replay:
         db.rollback()
         return command_execution_service.to_response_payload(execution)
 
-    command_operation_id = execution.operation_id
+    command_operation_id = cast("str", execution.operation_id)
     try:
         updated_customer = customer_crud.claim_customer(
             db,
@@ -3216,8 +3418,14 @@ def claim_customer(
         db.refresh(updated_customer)
     except ValueError as exc:
         db.rollback()
-        error_code = "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
-        error_message = "客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        error_code = (
+            "RESOURCE_VERSION_CONFLICT"
+            if str(exc) == "RESOURCE_VERSION_CONFLICT" else "CUSTOMER_CLAIM_REJECTED"
+        )
+        error_message = (
+            "客户已被其他操作更新\uff0c请刷新后重试"
+            if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+        )
         try:
             execution, _ = command_execution_service.begin(
                 db,
@@ -3243,7 +3451,10 @@ def claim_customer(
         except Exception:
             db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST,
+            status_code=(
+                status.HTTP_409_CONFLICT
+                if error_code == "RESOURCE_VERSION_CONFLICT" else status.HTTP_400_BAD_REQUEST
+            ),
             detail={"code": error_code, "message": error_message, "operation_id": command_operation_id},
         ) from exc
     except Exception as exc:
@@ -3267,7 +3478,7 @@ def claim_customer(
                 execution,
                 status=CommandExecutionStatus.UNKNOWN,
                 error_code="CUSTOMER_CLAIM_UNKNOWN",
-                error_message="领取结果暂未确认，请查询操作结果",
+                error_message="领取结果暂未确认\uff0c请查询操作结果",
                 retryable=True,
             )
             db.commit()
@@ -3275,14 +3486,18 @@ def claim_customer(
             db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "CUSTOMER_CLAIM_UNKNOWN", "message": "领取结果暂未确认，请查询操作结果", "operation_id": command_operation_id},
+            detail={
+                "code": "CUSTOMER_CLAIM_UNKNOWN",
+                "message": "领取结果暂未确认\uff0c请查询操作结果",
+                "operation_id": command_operation_id,
+            },
         ) from exc
 
     try:
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
-            summary="客户已被领取，刷新客户智能档案",
+            summary="客户已被领取\uff0c刷新客户智能档案",
             actor_id=str(current_user.id),
             payload={
                 "change_type": "claimed",
@@ -3301,18 +3516,21 @@ def claim_customer(
     "/{customer_id}/assign",
     response_model=None,
     summary="移交客户",
-    description="有 customer:assign 权限的用户可移交客户，并可选择同步移交关联商机及其合同。新客户端使用命令结果查询保证幂等和并发安全。",
+    description=(
+        "有 customer:assign 权限的用户可移交客户\uff0c并可选择同步移交关联商机及其合同。"
+        "新客户端使用命令结果查询保证幂等和并发安全。"
+    ),
 )
 def assign_customer(
     customer_id: str,
     assign_data: CustomerAssignRequest,
-    team_id: int = Depends(get_current_user_team),
-    _current_user=Depends(require_permission("customer:assign")),
-    db: Session = Depends(get_db),
-    operation_id: Optional[str] = Header(None, alias="X-Operation-Id"),
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
-    correlation_id: Optional[str] = Header(None, alias="X-Correlation-Id"),
-    expected_version_header: Optional[int] = Header(None, alias="X-Expected-Version"),
+    team_id: int = _team_dependency,
+    _current_user: User = _customer_assign_dependency,
+    db: Session = _db_dependency,
+    operation_id: str | None = Header(None, alias="X-Operation-Id"),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    correlation_id: str | None = Header(None, alias="X-Correlation-Id"),
+    expected_version_header: int | None = Header(None, alias="X-Expected-Version"),
 ) -> object:
     """Transfer a customer as one durable, auditable command.
 
@@ -3336,8 +3554,11 @@ def assign_customer(
         and assign_data.expected_version is not None
         and expected_version_header != assign_data.expected_version
     ):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致，请刷新后重试")
-    expected_version = assign_data.expected_version if assign_data.expected_version is not None else expected_version_header
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户版本号不一致\uff0c请刷新后重试")
+    expected_version = (
+        assign_data.expected_version
+        if assign_data.expected_version is not None else expected_version_header
+    )
     legacy_scope, normalized_scope = assign_data.normalized_transfer_scope()
     modern_command = operation_id is not None or idempotency_key is not None
 
@@ -3357,12 +3578,9 @@ def assign_customer(
     if not modern_command:
         try:
             previous_owner = customer.owner_id
-            updated_customer, transferred_opportunities, transferred_contracts = customer_crud.assign_customer(
-                db,
-                customer,
-                assign_data.owner_id,
-                team_id,
-                legacy_scope,
+            updated_customer, transferred_opportunities, transferred_contracts = cast(
+                "tuple[Customer, int, int]",
+                customer_crud.assign_customer(db, customer, assign_data.owner_id, team_id, legacy_scope),
             )
             operation_log_service.log(
                 db=db,
@@ -3385,7 +3603,7 @@ def assign_customer(
             _persist_customer_business_object_refresh_after_commit(
                 business_object=updated_customer,
                 source_type="customer",
-                summary="客户负责人已变更，刷新客户智能档案",
+                summary="客户负责人已变更\uff0c刷新客户智能档案",
                 actor_id=str(_current_user.id),
                 payload={
                     "change_type": "assigned",
@@ -3427,22 +3645,28 @@ def assign_customer(
         )
     except CommandIdempotencyConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "IDEMPOTENCY_CONFLICT", "message": str(exc)},
+        ) from exc
     except CommandAlreadyInProgress as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
-            detail={"operation_id": str(exc), "message": "移交正在处理中，请查询操作结果"},
+            detail={"operation_id": str(exc), "message": "移交正在处理中\uff0c请查询操作结果"},
         ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "OPERATION_CONFLICT", "message": str(exc)}) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "OPERATION_CONFLICT", "message": str(exc)},
+        ) from exc
 
     if replay:
         db.rollback()
         return command_execution_service.to_response_payload(execution)
 
-    command_operation_id = execution.operation_id
+    command_operation_id = cast("str", execution.operation_id)
     try:
         details = customer_crud.assign_customer(
             db,
@@ -3457,20 +3681,21 @@ def assign_customer(
         )
         if not isinstance(details, dict):
             raise RuntimeError("客户移交结果格式异常")
-        updated_customer = details["customer"]
+        assignment = cast("_AssignmentDetails", details)
+        updated_customer = assignment["customer"]
         if not hasattr(updated_customer, "public_id"):
             raise RuntimeError("客户移交结果缺少客户")
-        assignment_result = CustomerAssignmentResult(
-            customer=_customer_response(db, updated_customer),
-            previous_owner_id=details["previous_owner_id"],
-            new_owner_id=details["new_owner_id"],
-            transfer_scope=normalized_scope,
-            transferred_opportunities=details["transferred_opportunities"],
-            transferred_contracts=details["transferred_contracts"],
-            updated_objects=details["updated_objects"],
-            skipped_objects=details["skipped_objects"],
-            message="客户已移交，部分锁定合同未同步" if details["skipped_objects"] else "客户已移交",
-        )
+        assignment_result = CustomerAssignmentResult.model_validate({
+            "customer": _customer_response(db, updated_customer),
+            "previous_owner_id": assignment["previous_owner_id"],
+            "new_owner_id": assignment["new_owner_id"],
+            "transfer_scope": normalized_scope,
+            "transferred_opportunities": assignment["transferred_opportunities"],
+            "transferred_contracts": assignment["transferred_contracts"],
+            "updated_objects": assignment["updated_objects"],
+            "skipped_objects": assignment["skipped_objects"],
+            "message": "客户已移交\uff0c部分锁定合同未同步" if assignment["skipped_objects"] else "客户已移交",
+        })
         effects = [
             CommandEffect(
                 type=str(item["object_type"]),
@@ -3478,7 +3703,7 @@ def assign_customer(
                 status=str(item["status"]),
                 detail=item.get("detail"),
             )
-            for item in [*details["updated_objects"], *details["skipped_objects"]]
+            for item in [*assignment["updated_objects"], *assignment["skipped_objects"]]
         ]
         operation_log_service.log(
             db=db,
@@ -3492,13 +3717,13 @@ def assign_customer(
             commit=False,
             remark=assign_data.normalized_reason(),
             content={
-                "previous_owner_id": details["previous_owner_id"],
-                "new_owner_id": details["new_owner_id"],
+                "previous_owner_id": assignment["previous_owner_id"],
+                "new_owner_id": assignment["new_owner_id"],
                 "transfer_scope": normalized_scope.value,
-                "transferred_opportunities": details["transferred_opportunities"],
-                "transferred_contracts": details["transferred_contracts"],
-                "updated_objects": details["updated_objects"],
-                "skipped_objects": details["skipped_objects"],
+                "transferred_opportunities": assignment["transferred_opportunities"],
+                "transferred_contracts": assignment["transferred_contracts"],
+                "updated_objects": assignment["updated_objects"],
+                "skipped_objects": cast("list[JsonValue]", assignment["skipped_objects"]),
             },
         )
         command_execution_service.succeed(
@@ -3541,7 +3766,10 @@ def assign_customer(
                 execution,
                 status=CommandExecutionStatus.CONFLICT,
                 error_code=error_code,
-                error_message="客户已被其他操作更新，请刷新后重试" if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc),
+                error_message=(
+                    "客户已被其他操作更新\uff0c请刷新后重试"
+                    if error_code == "RESOURCE_VERSION_CONFLICT" else str(exc)
+                ),
                 retryable=True,
             )
             db.commit()
@@ -3551,7 +3779,10 @@ def assign_customer(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "RESOURCE_VERSION_CONFLICT" if str(exc) == "RESOURCE_VERSION_CONFLICT" else "OWNER_CHANGED",
-                "message": "客户已被其他操作更新，请刷新后重试" if str(exc) == "RESOURCE_VERSION_CONFLICT" else str(exc),
+                "message": (
+                    "客户已被其他操作更新\uff0c请刷新后重试"
+                    if str(exc) == "RESOURCE_VERSION_CONFLICT" else str(exc)
+                ),
                 "operation_id": command_operation_id,
             },
         ) from exc
@@ -3576,7 +3807,7 @@ def assign_customer(
                 execution,
                 status=CommandExecutionStatus.UNKNOWN,
                 error_code="CUSTOMER_ASSIGN_UNKNOWN",
-                error_message="移交结果暂未确认，请查询操作结果",
+                error_message="移交结果暂未确认\uff0c请查询操作结果",
                 retryable=True,
             )
             db.commit()
@@ -3586,7 +3817,7 @@ def assign_customer(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "CUSTOMER_ASSIGN_UNKNOWN",
-                "message": "移交结果暂未确认，请查询操作结果",
+                "message": "移交结果暂未确认\uff0c请查询操作结果",
                 "operation_id": command_operation_id,
             },
         ) from exc
@@ -3595,16 +3826,16 @@ def assign_customer(
         _persist_customer_business_object_refresh_after_commit(
             business_object=updated_customer,
             source_type="customer",
-            summary="客户负责人已变更，刷新客户智能档案",
+            summary="客户负责人已变更\uff0c刷新客户智能档案",
             actor_id=str(_current_user.id),
             payload={
                 "change_type": "assigned",
-                "previous_owner_id": details["previous_owner_id"],
-                "new_owner_id": details["new_owner_id"],
+                "previous_owner_id": assignment["previous_owner_id"],
+                "new_owner_id": assignment["new_owner_id"],
                 "transfer_scope": normalized_scope.value,
-                "transferred_opportunities": details["transferred_opportunities"],
-                "transferred_contracts": details["transferred_contracts"],
-                "skipped_objects": details["skipped_objects"],
+                "transferred_opportunities": assignment["transferred_opportunities"],
+                "transferred_contracts": assignment["transferred_contracts"],
+                "skipped_objects": cast("list[JsonValue]", assignment["skipped_objects"]),
             },
         )
     except Exception:
@@ -3622,14 +3853,15 @@ def assign_customer(
     description="查询客户智能 LangGraph 运行审计和用户可见执行轨迹",
 )
 def list_customer_intelligence_runs(
-    customer_id: Optional[str] = Query(None, description="客户对外ID"),
-    request_id: Optional[str] = Query(None, min_length=1, max_length=120, description="请求ID"),
-    run_status: Optional[str] = Query(None, alias="status", min_length=1, max_length=30, description="运行状态"),
+    customer_id: str | None = Query(None, description="客户对外ID"),
+    request_id: str | None = Query(None, min_length=1, max_length=120, description="请求ID"),
+    run_status: str | None = Query(None, alias="status", min_length=1, max_length=30, description="运行状态"),
     limit: int = Query(20, ge=1, le=100, description="返回记录数"),
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("customer:edit:all")),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _customer_edit_all_dependency,
+    db: Session = _db_dependency,
+) -> CustomerIntelligenceRunDiagnosticListResponse:
+    del current_user
     from app.services.customer_intelligence_run_service import customer_intelligence_run_service
 
     customer = _get_customer_or_404(db, customer_id, team_id) if customer_id else None
@@ -3656,10 +3888,11 @@ def list_customer_intelligence_runs(
 )
 def get_customer_intelligence_run(
     run_id: int,
-    team_id: int = Depends(get_current_user_team),
-    current_user = Depends(require_permission("customer:edit:all")),
-    db: Session = Depends(get_db),
-):
+    team_id: int = _team_dependency,
+    current_user: User = _customer_edit_all_dependency,
+    db: Session = _db_dependency,
+) -> CustomerIntelligenceRunDiagnosticResponse:
+    del current_user
     from app.services.customer_intelligence_run_service import customer_intelligence_run_service
 
     diagnostic = customer_intelligence_run_service.get_diagnostic(

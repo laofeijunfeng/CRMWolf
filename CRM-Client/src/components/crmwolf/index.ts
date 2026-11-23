@@ -17,9 +17,6 @@ export { default as SearchableSelectField } from './SearchableSelectField.vue'
 export { default as IndustryHierarchySelectField } from './IndustryHierarchySelectField.vue'
 
 // Navigation components (§9 HIGH Priority)
-export { default as BottomNav } from './BottomNav.vue'
-export { default as BottomNavItem } from './BottomNavItem.vue'
-export { default as BottomNavOverflow } from './BottomNavOverflow.vue'
 export { default as ContextTabs } from './ContextTabs.vue'
 export { default as DetailContextHeader } from './DetailContextHeader.vue'
 export { default as DetailContextHost } from './DetailContextHost.vue'

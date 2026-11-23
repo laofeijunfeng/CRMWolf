@@ -1,7 +1,7 @@
 """Shared LangChain runtime helpers for CRM AI Agent."""
 from __future__ import annotations
 
-from typing import Literal, Optional, TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -51,10 +51,10 @@ class AgentLangChainRuntime:
         user_prompt: str,
         response_model: type[StructuredResultT],
         structured_output_strategy: StructuredOutputStrategy = "auto",
-        middleware: Optional[list[object]] = None,
-        tools: Optional[list[object]] = None,
+        middleware: list[object] | None = None,
+        tools: list[object] | None = None,
         error_prefix: str,
-    ) -> Optional[StructuredResultT]:
+    ) -> StructuredResultT | None:
         if self.agent_factory is None or self.chat_model_factory is None:
             return None
 
@@ -84,7 +84,7 @@ class AgentLangChainRuntime:
                 response = await agent.ainvoke({"messages": [{"role": "user", "content": user_prompt}]})
         except Exception as exc:
             raise RuntimeError(
-                f"{error_prefix} 调用失败：{exc.__class__.__name__}: {_safe_error_message(exc)}"
+                f"{error_prefix} 调用失败\uff1a{exc.__class__.__name__}: {_safe_error_message(exc)}"
             ) from exc
 
         structured_response = response.get("structured_response") if isinstance(response, dict) else None
@@ -94,7 +94,7 @@ class AgentLangChainRuntime:
             try:
                 return response_model.model_validate(structured_response)
             except ValidationError as exc:
-                raise AgentLangChainStructuredOutputError(f"{error_prefix} 结果无效：{str(exc)}") from exc
+                raise AgentLangChainStructuredOutputError(f"{error_prefix} 结果无效\uff1a{exc!s}") from exc
         raise AgentLangChainStructuredOutputError(f"{error_prefix} 未返回结构化结果。")
 
     @staticmethod

@@ -1,6 +1,6 @@
 # 侧栏
 
-- **用途：**提供桌面与宽视口的一级导航。
+- **用途：**提供一级导航。
 - **适用范围：**components 领域。
 - **权威性：**本主题是侧栏导航层级与响应式行为的唯一事实来源。
 - **相关规范：**[组件索引](README.md) · [颜色令牌](../foundations/color-tokens.md) · [间距与布局](../foundations/spacing-layout.md) · [动效与性能](../foundations/motion-performance.md) · [无障碍](../foundations/accessibility.md) · [响应式与移动端](../foundations/responsive-mobile.md)
@@ -13,7 +13,7 @@
 
 ## 响应式行为
 
-`$bp-sm`（`sm:`）是可折叠侧栏断点：达到或超过该宽度时，侧栏可在展开与折叠形式之间切换，并保留一级目的地的可发现性；低于该宽度时，侧栏退出常驻导航，由[底部导航](bottom-navigation.md)承担移动端一级目的地。
+`$bp-sm`（`sm:`）是可折叠侧栏断点：达到或超过该宽度时，侧栏可在展开与折叠形式之间切换，并保留一级目的地的可发现性；低于该宽度时，侧栏收为左侧抽屉，由[顶部栏](topbar.md)的侧栏按钮打开。
 
 断点、安全区域和页面滚动边界遵循[响应式与移动端](../foundations/responsive-mobile.md)。展开、收起和活动态反馈遵循[动效与性能](../foundations/motion-performance.md)，并尊重减少动效偏好。
 

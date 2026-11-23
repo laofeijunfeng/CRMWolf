@@ -1,47 +1,44 @@
 """
 AI 解析采购方式配置服务
 
-用于 AI 辅助创建采购方式功能，从自然语言中提取结构化配置
+用于 AI 辅助创建采购方式功能\uff0c从自然语言中提取结构化配置
 """
 import json
-from typing import AsyncGenerator, Dict, Any
-from sqlalchemy.orm import Session
+from collections.abc import AsyncGenerator
+from typing import Any
+
 import httpx
+from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
-from app.schemas.procurement_ai import (
-    ProcurementAIParsedMethod,
-    ProcurementAIParsedStage,
-    ProcurementAIParseResponse
-)
+from app.schemas.procurement_ai import ProcurementAIParsedMethod, ProcurementAIParsedStage, ProcurementAIParseResponse
 
-
-# 系统提示词：用于解析采购方式配置
+# 系统提示词:用于解析采购方式配置
 PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置专家。
 
 你的任务是根据用户描述生成采购方式及其阶段配置。
 
 ## 需要生成的内容
 
-**采购方式信息**：
-- name: 采购方式名称（如：公开招标、竞争性谈判、单一来源采购）
-- code: 编码（英文大写+下划线，如：PUBLIC_BIDDING）
+**采购方式信息**\uff1a
+- name: 采购方式名称\uff08如\uff1a公开招标、竞争性谈判、单一来源采购\uff09
+- code: 编码\uff08英文大写+下划线\uff0c如\uff1aPUBLIC_BIDDING\uff09
 - description: 一句话描述
 
-**阶段配置列表**（每个阶段包含）：
+**阶段配置列表**\uff08每个阶段包含\uff09\uff1a
 - stage_name: 阶段名称
-- template_code: 阶段编码（英文大写+下划线）
-- win_probability: 赢率（10-100，最后阶段为100）
-- sort_order: 顺序号（从1开始递增）
-- is_default_start: 是否默认起始阶段（只有第一个为true）
-- can_skip: 是否可跳过（默认false）
-- description: 阶段描述（可选）
+- template_code: 阶段编码\uff08英文大写+下划线\uff09
+- win_probability: 赢率\uff0810-100\uff0c最后阶段为100\uff09
+- sort_order: 顺序号\uff08从1开始递增\uff09
+- is_default_start: 是否默认起始阶段\uff08只有第一个为true\uff09
+- can_skip: 是否可跳过\uff08默认false\uff09
+- description: 阶段描述\uff08可选\uff09
 
 ## 行业参考模板
 
-以下是常见采购方式的标准流程，供参考：
+以下是常见采购方式的标准流程\uff0c供参考\uff1a
 
-**公开招标**：
+**公开招标**\uff1a
 1. 发布公告 (ANNOUNCEMENT, 10%) - 发布招标公告
 2. 报名登记 (REGISTRATION, 20%) - 供应商报名
 3. 资格审查 (QUALIFICATION, 30%) - 审核供应商资质
@@ -50,19 +47,19 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
 6. 定标 (AWARD, 90%) - 确定中标方
 7. 签约 (CONTRACT, 100%) - 签订合同
 
-**竞争性谈判**：
+**竞争性谈判**\uff1a
 1. 需求确认 (NEED_CONFIRM, 20%) - 明确采购需求
 2. 谈判准备 (PREPARE, 30%) - 准备谈判方案
 3. 谈判实施 (NEGOTIATION, 50%) - 多轮谈判
 4. 确定供应商 (SUPPLIER_SELECT, 80%) - 选择最优方案
 5. 签约 (CONTRACT, 100%) - 签订合同
 
-**单一来源采购**：
+**单一来源采购**\uff1a
 1. 申请审批 (APPLICATION, 30%) - 提交单一来源申请
 2. 审批通过 (APPROVAL, 60%) - 审批流程
 3. 签约 (CONTRACT, 100%) - 签订合同
 
-**询价比价**：
+**询价比价**\uff1a
 1. 需求确认 (NEED_CONFIRM, 20%) - 明确采购需求
 2. 询价 (INQUIRY, 40%) - 发出询价单
 3. 比价分析 (COMPARISON, 60%) - 比较报价
@@ -71,7 +68,7 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
 
 ## 编码命名规范
 
-编码使用英文缩写，常见词汇：
+编码使用英文缩写\uff0c常见词汇\uff1a
 - 发布/公告: ANNOUNCEMENT, ANNOUNCE, PUBLISH
 - 报名/登记: REGISTRATION, REGISTER, SIGN_UP
 - 资格/审查: QUALIFICATION, REVIEW, AUDIT
@@ -89,15 +86,15 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
 
 ## 赢率分配原则
 
-1. 赢率从低到高递增，体现销售成功概率的增长
-2. 最后阶段（签约）赢率为 100%
+1. 赢率从低到高递增\uff0c体现销售成功概率的增长
+2. 最后阶段\uff08签约\uff09赢率为 100%
 3. 赢率差值建议在 10-20% 之间
 4. 起始阶段通常为 10-30%
-5. 关键节点阶段赢率跳跃可稍大（如评标到定标）
+5. 关键节点阶段赢率跳跃可稍大\uff08如评标到定标\uff09
 
 ## 输出格式
 
-你必须输出严格的 JSON 格式：
+你必须输出严格的 JSON 格式\uff1a
 ```json
 {
   "method": {
@@ -112,7 +109,7 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
         "sort_order": 顺序号,
         "is_default_start": true/false,
         "can_skip": true/false,
-        "description": "阶段描述（可选）"
+        "description": "阶段描述\uff08可选\uff09"
       }
     ]
   },
@@ -122,9 +119,9 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
 
 ## 示例
 
-用户输入："创建一个公开招标采购方式，包含发布公告、报名、开标、评标、定标五个阶段"
+用户输入\uff1a"创建一个公开招标采购方式\uff0c包含发布公告、报名、开标、评标、定标五个阶段"
 
-正确输出：
+正确输出\uff1a
 ```json
 {
   "method": {
@@ -179,13 +176,13 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
       }
     ]
   },
-  "thinking_process": "识别为公开招标流程，5个阶段按标准招标流程排列，赢率从10%递增至100%，起始阶段为发布公告"
+  "thinking_process": "识别为公开招标流程\uff0c5个阶段按标准招标流程排列\uff0c赢率从10%递增至100%\uff0c起始阶段为发布公告"
 }
 ```
 
-用户输入："我想创建一个简单的竞争性谈判流程，三步：需求确认、谈判、签约"
+用户输入\uff1a"我想创建一个简单的竞争性谈判流程\uff0c三步\uff1a需求确认、谈判、签约"
 
-正确输出：
+正确输出\uff1a
 ```json
 {
   "method": {
@@ -222,7 +219,7 @@ PARSE_PROCUREMENT_SYSTEM_PROMPT = """你是 CRMWolf 系统的采购流程配置�
       }
     ]
   },
-  "thinking_process": "识别为简化的竞争性谈判，3个阶段，起始赢率30%（因为需求确认阶段成功概率较高），签约阶段100%"
+  "thinking_process": "识别为简化的竞争性谈判\uff0c3个阶段\uff0c起始赢率30%\uff08因为需求确认阶段成功概率较高\uff09\uff0c签约阶段100%"
 }
 ```"""
 
@@ -235,9 +232,9 @@ class ProcurementAIParserService:
         db: Session,
         user_message: str,
         team_id: int = 1
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
-        流式解析采购方式配置，生成 SSE 事件
+        流式解析采购方式配置\uff0c生成 SSE 事件
 
         Args:
             db: 数据库 session
@@ -250,12 +247,12 @@ class ProcurementAIParserService:
         # 获取 AI 配置
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            yield {"event": "error", "message": "AI 配置未设置，请联系管理员先配置 AI 服务"}
+            yield {"event": "error", "message": "AI 配置未设置\uff0c请联系管理员先配置 AI 服务"}
             return
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            yield {"event": "error", "message": "AI 配置异常，无法获取 API Key"}
+            yield {"event": "error", "message": "AI 配置异常\uff0c无法获取 API Key"}
             return
 
         # 发送状态事件
@@ -268,7 +265,7 @@ class ProcurementAIParserService:
                 {"role": "system", "content": PARSE_PROCUREMENT_SYSTEM_PROMPT},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.1,  # 低温度，保证输出稳定
+            "temperature": 0.1,  # 低温度,保证输出稳定
             "max_tokens": 2048,
             "stream": True,
             "response_format": {"type": "json_object"}
@@ -277,86 +274,85 @@ class ProcurementAIParserService:
         full_content = ""
 
         try:
-            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
-                async with client.stream(
-                    "POST",
-                    f"{config.api_host}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "Accept-Encoding": "identity"
-                    },
-                    json=request_body
-                ) as response:
-                    response.raise_for_status()
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client, client.stream(
+                "POST",
+                f"{config.api_host}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "identity"
+                },
+                json=request_body
+            ) as response:
+                response.raise_for_status()
 
-                    buffer = ""
-                    async for text_chunk in response.aiter_text():
-                        buffer += text_chunk
-                        lines = buffer.split('\n')
-                        buffer = lines[-1] if lines else ""
+                buffer = ""
+                async for text_chunk in response.aiter_text():
+                    buffer += text_chunk
+                    lines = buffer.split('\n')
+                    buffer = lines[-1] if lines else ""
 
-                        for line in lines[:-1]:
-                            if not line:
+                    for line in lines[:-1]:
+                        if not line:
+                            continue
+
+                        if line.startswith("data: "):
+                            data_str = line[6:]
+
+                            if data_str == "[DONE]":
+                                break
+
+                            try:
+                                chunk = json.loads(data_str)
+                                choices = chunk.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content_piece = delta.get("content", "")
+                                    if content_piece:
+                                        full_content += content_piece
+                                        yield {"event": "content", "content": content_piece}
+                            except json.JSONDecodeError:
                                 continue
 
-                            if line.startswith("data: "):
-                                data_str = line[6:]
+                # 解析完整响应
+                clean_content = self._clean_json_response(full_content)
 
-                                if data_str == "[DONE]":
-                                    break
+                try:
+                    parsed = json.loads(clean_content)
+                    method_data = parsed.get("method", {})
 
-                                try:
-                                    chunk = json.loads(data_str)
-                                    choices = chunk.get("choices", [])
-                                    if choices:
-                                        delta = choices[0].get("delta", {})
-                                        content_piece = delta.get("content", "")
-                                        if content_piece:
-                                            full_content += content_piece
-                                            yield {"event": "content", "content": content_piece}
-                                except json.JSONDecodeError:
-                                    continue
+                    # 解析阶段列表
+                    stages = []
+                    for stage_data in method_data.get("stages", []):
+                        stages.append(ProcurementAIParsedStage(
+                            stage_name=stage_data.get("stage_name"),
+                            template_code=stage_data.get("template_code"),
+                            win_probability=stage_data.get("win_probability"),
+                            sort_order=stage_data.get("sort_order"),
+                            is_default_start=stage_data.get("is_default_start", False),
+                            can_skip=stage_data.get("can_skip", False),
+                            description=stage_data.get("description")
+                        ))
 
-                    # 解析完整响应
-                    clean_content = self._clean_json_response(full_content)
+                    method = ProcurementAIParsedMethod(
+                        name=method_data.get("name"),
+                        code=method_data.get("code"),
+                        description=method_data.get("description"),
+                        stages=stages
+                    )
 
-                    try:
-                        parsed = json.loads(clean_content)
-                        method_data = parsed.get("method", {})
-
-                        # 解析阶段列表
-                        stages = []
-                        for stage_data in method_data.get("stages", []):
-                            stages.append(ProcurementAIParsedStage(
-                                stage_name=stage_data.get("stage_name"),
-                                template_code=stage_data.get("template_code"),
-                                win_probability=stage_data.get("win_probability"),
-                                sort_order=stage_data.get("sort_order"),
-                                is_default_start=stage_data.get("is_default_start", False),
-                                can_skip=stage_data.get("can_skip", False),
-                                description=stage_data.get("description")
-                            ))
-
-                        method = ProcurementAIParsedMethod(
-                            name=method_data.get("name"),
-                            code=method_data.get("code"),
-                            description=method_data.get("description"),
-                            stages=stages
-                        )
-
-                        yield {
-                            "event": "parsed",
-                            "method": method.model_dump(),
-                            "thinking_process": parsed.get("thinking_process")
-                        }
-                    except json.JSONDecodeError:
-                        yield {"event": "error", "message": f"AI 返回格式异常: {clean_content[:200]}"}
+                    yield {
+                        "event": "parsed",
+                        "method": method.model_dump(),
+                        "thinking_process": parsed.get("thinking_process")
+                    }
+                except json.JSONDecodeError:
+                    yield {"event": "error", "message": f"AI 返回格式异常: {clean_content[:200]}"}
 
         except httpx.HTTPStatusError as e:
-            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
+            yield {"event": "error", "message": f"AI 服务请求失败\uff1a{e.response.status_code}"}
         except Exception as e:
-            yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
+            yield {"event": "error", "message": f"AI 服务异常\uff1a{e!s}"}
 
     async def parse_procurement_method(
         self,
@@ -365,7 +361,7 @@ class ProcurementAIParserService:
         team_id: int = 1
     ) -> ProcurementAIParseResponse:
         """
-        解析采购方式配置（收集完整响应）
+        解析采购方式配置\uff08收集完整响应\uff09
 
         Args:
             db: 数据库 session
@@ -390,7 +386,7 @@ class ProcurementAIParserService:
                 thinking_process="无法获取 API Key"
             )
 
-        # 构建请求（非流式）
+        # 构建请求(非流式)
         request_body = {
             "model": config.model_name,
             "messages": [
@@ -450,7 +446,7 @@ class ProcurementAIParserService:
         except Exception as e:
             return ProcurementAIParseResponse(
                 method=ProcurementAIParsedMethod(name="", code="", stages=[]),
-                thinking_process=f"解析异常：{str(e)}"
+                thinking_process=f"解析异常\uff1a{e!s}"
             )
 
     def _clean_json_response(self, content: str) -> str:

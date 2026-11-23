@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-# 初始化日志系统（开发环境开启 DEBUG）
+# 初始化日志系统(开发环境开启 DEBUG)
 from app.core.logging import get_logger, setup_logging
 
 debug_mode = os.getenv("CRM_DEBUG", "true").lower() == "true"
@@ -14,10 +14,8 @@ setup_logging(debug=debug_mode)
 logger = get_logger(__name__)
 
 from app.api import (
-    operations,
     acquisition_sources,
     approval_ai,
-    products,
     approvals,
     auth,
     business_journeys,
@@ -35,6 +33,7 @@ from app.api import (
     leads,
     oauth,
     operation_logs,
+    operations,
     opportunities,
     opportunity_stages,
     payments,
@@ -43,6 +42,7 @@ from app.api import (
     procurement_ai,
     procurement_methods,
     procurement_stage_templates,
+    products,
     roles,
     sales_dashboard,
     system_configs,
@@ -51,9 +51,9 @@ from app.api import (
     view_preferences,
 )
 from app.api.agent import router as agent_router
-from app.api.assistant import router as assistant_router
 from app.api.agent_query import router as agent_query_router
 from app.api.ai_config import router as ai_config_router
+from app.api.assistant import router as assistant_router
 from app.api.customer_ai import router as customer_ai_router
 from app.api.customer_profiles import router as customer_profiles_router
 from app.api.deployment import router as deployment_router  # 新增
@@ -62,8 +62,8 @@ from app.api.deployment import router as deployment_router  # 新增
 from app.api.frontend_logs import router as frontend_logs_router
 from app.api.im_bots import router as im_bots_router
 from app.api.license_application import router as license_application_router  # 新增
-from app.api.workflows import router as workflows_router
 from app.api.reminder_rules import router as reminder_rules_router
+from app.api.workflows import router as workflows_router
 from app.core.database import SessionLocal
 from app.core.exceptions import (
     AppException,
@@ -101,20 +101,20 @@ app.add_exception_handler(SQLAlchemyError, sqlalchemy_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 
 # ========================================
-# 路由注册（统一 /api 前缀）
+# 路由注册(统一 /api 前缀)
 # ========================================
 from fastapi import APIRouter
 
 # 创建主 API 路由
 api_router = APIRouter()
 
-# === 认证相关（模块内部无 /v1，main.py 添加 /v1）===
+# === 认证相关(模块内部无 /v1,main.py 添加 /v1)===
 api_router.include_router(auth.router, prefix="/v1")
 api_router.include_router(users.router, prefix="/v1")
 api_router.include_router(roles.router, prefix="/v1")
 api_router.include_router(permissions.router, prefix="/v1")
 
-# === 业务路由（模块内部已有 /v1）===
+# === 业务路由(模块内部已有 /v1)===
 api_router.include_router(leads.router)
 api_router.include_router(leads.analytics_router)
 api_router.include_router(procurement_ai.router)
@@ -154,9 +154,9 @@ api_router.include_router(opportunity_stages.router)
 api_router.include_router(procurement_admin.router)
 api_router.include_router(teams.router)
 api_router.include_router(oauth.router)
-api_router.include_router(deployment_router)  # 新增：部署信息管理
+api_router.include_router(deployment_router)  # 新增:部署信息管理
 api_router.include_router(products.router)
-api_router.include_router(license_application_router)  # 新增：License申请管理
+api_router.include_router(license_application_router)  # 新增:License申请管理
 
 # === AI 相关路由 ===
 api_router.include_router(ai_config_router)
@@ -166,7 +166,7 @@ api_router.include_router(assistant_router)
 api_router.include_router(im_bots_router)
 api_router.include_router(frontend_logs_router)
 
-# 注册主 API 路由到 app（添加统一的 /api 前缀）
+# 注册主 API 路由到 app(添加统一的 /api 前缀)
 app.include_router(api_router, prefix="/api")
 
 
@@ -250,11 +250,14 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时停止后台调度任务"""
+    from app.tasks.assistant_follow_up_projection_recovery import (
+        stop_assistant_follow_up_projection_recovery_scheduler,
+    )
     from app.tasks.customer_activity_ai_job_recovery import (
         stop_customer_activity_ai_job_recovery_scheduler,
     )
-    from app.tasks.customer_enrichment_recovery import (
-        stop_customer_enrichment_recovery_scheduler,
+    from app.tasks.customer_activity_post_commit_recovery import (
+        stop_customer_activity_post_commit_recovery_scheduler,
     )
     from app.tasks.customer_enrichment_backfill import (
         stop_customer_enrichment_backfill_scheduler,
@@ -262,24 +265,21 @@ async def shutdown_event():
     from app.tasks.customer_enrichment_reconciliation import (
         stop_customer_enrichment_reconciliation_scheduler,
     )
-    from app.tasks.customer_activity_post_commit_recovery import (
-        stop_customer_activity_post_commit_recovery_scheduler,
-    )
-    from app.tasks.assistant_follow_up_projection_recovery import (
-        stop_assistant_follow_up_projection_recovery_scheduler,
+    from app.tasks.customer_enrichment_recovery import (
+        stop_customer_enrichment_recovery_scheduler,
     )
     stop_assistant_follow_up_projection_recovery_scheduler()
+    from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
+    from app.tasks.customer_opportunity_suggestion_recovery import (
+        stop_customer_opportunity_suggestion_recovery_scheduler,
+    )
+    from app.tasks.follow_up_confirmation_delivery_recovery import (
+        stop_follow_up_confirmation_delivery_recovery_scheduler,
+    )
     from app.tasks.outbound_notification_recovery import (
         stop_outbound_notification_recovery_scheduler,
     )
     from app.tasks.reminder_rule_scheduler import stop_reminder_rule_scheduler
-    from app.tasks.customer_opportunity_suggestion_recovery import (
-        stop_customer_opportunity_suggestion_recovery_scheduler,
-    )
-    from app.tasks.customer_evidence_sync import stop_customer_evidence_sync_scheduler
-    from app.tasks.follow_up_confirmation_delivery_recovery import (
-        stop_follow_up_confirmation_delivery_recovery_scheduler,
-    )
 
     stop_customer_activity_ai_job_recovery_scheduler()
     stop_reminder_rule_scheduler()

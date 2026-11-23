@@ -54,9 +54,11 @@ class TaskUpdate:
     waiting: TaskWaiting | None = None
     # Sentinel-free removal: clear_waiting=True sets waiting to None.
     clear_waiting: bool = False
+    preserve_version: bool = False
     authority: TaskAuthority | None = None
     clear_frozen_activity_command: bool = False
     clear_follow_up_opportunity: bool = False
+    clear_proposal_form: bool = False
     append_committed: list[dict[str, object]] | None = None
     error_code: str | None = None
     # Required audit trail entry for this transition.
@@ -116,6 +118,18 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
     actor, action_name = _require_action(update)
     if update.waiting is not None and update.clear_waiting:
         raise InvalidTaskTransitionError("cannot set and clear waiting in one transition")
+    if update.preserve_version and (
+        update.waiting is None or task.waiting_type is None or update.status is not None
+        or update.draft is not None or update.activity_kind is not None or update.append_committed
+        or update.clear_frozen_activity_command or update.clear_follow_up_opportunity
+        or update.clear_proposal_form or update.authority is not None or update.error_code is not None
+        or action_name == "chooser_nomination"
+        or (
+            update.waiting.action_id is not None
+            and update.waiting.action_id == (task.waiting_json or {}).get("action_id")
+        )
+    ):
+        raise InvalidTaskTransitionError("same-version updates only replace a waiting action")
     if task.status in _TERMINAL_STATUSES:
         raise InvalidTaskTransitionError(
             f"task {task.public_id} is terminal ({task.status}); no further transitions"
@@ -135,7 +149,7 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
 
     now: datetime = business_now()
     values: dict[str, object] = {
-        "version": task.version + 1,
+        "version": task.version if update.preserve_version else task.version + 1,
         "last_modified_time": now,
     }
     if update.status is not None:
@@ -155,7 +169,8 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
                 "action_id": update.waiting.action_id or generate_public_id("awa"),
             },
         )
-    if update.authority is not None or update.clear_frozen_activity_command or update.clear_follow_up_opportunity:
+    if (update.authority is not None or update.clear_frozen_activity_command
+            or update.clear_follow_up_opportunity or update.clear_proposal_form):
         merged = dict(task.authority_json or {})
         if update.authority is not None:
             merged.update(update.authority.model_dump(mode="json", exclude_none=True))
@@ -164,6 +179,8 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
         if update.clear_follow_up_opportunity:
             merged.pop("opportunity_public_id", None)
             merged.pop("opportunity_stage_name", None)
+        if update.clear_proposal_form:
+            merged.pop("proposal_form", None)
         values["authority_json"] = merged
     if update.append_committed:
         values["committed_json"] = [*(task.committed_json or []), *update.append_committed]
@@ -183,6 +200,10 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
         AssistantTask.version == task.version,
         AssistantTask.status == AssistantTaskStatus.ACTIVE,
     )
+    if task.waiting_type is not None:
+        statement = statement.where(
+            AssistantTask.waiting_json["action_id"].as_string() == (task.waiting_json or {}).get("action_id")
+        )
     if update.require_no_active_turn:
         statement = statement.where(AssistantTask.active_turn_id.is_(None))
     changed = db.execute(statement.values(**values).execution_options(synchronize_session=False))

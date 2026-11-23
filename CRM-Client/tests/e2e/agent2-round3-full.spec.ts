@@ -88,7 +88,7 @@ function flushReport(): void {
     '- 环境：本地 dev，前端 http://localhost:5173 ，后端 http://localhost:8000（Alembic 已升级到 145_assistant_turns）',
     '- 账号：eddie@apifox.com（验证码登录）',
     '- 设计稿：`outputs/agent2-ui-design.html`；页面 `/assistant`',
-    '- 优化清单：`CRM-Docs/design-agent/roadmap/agent-2-optimization-trd.md`',
+    '- 优化清单：`CRM-Docs/design-agent/runtime/assistant-command-contract.md`',
     '- 判定：pass = 主交互符合设计稿/优化验收；gap = 跑到了但有可见差异；blocked = 未能把 UI 推到该状态。',
     '',
     '| # | 场景 | 结论 |',

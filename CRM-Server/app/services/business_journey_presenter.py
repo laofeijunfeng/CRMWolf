@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session, selectinload
 
@@ -19,7 +20,6 @@ from app.schemas.deal_journey import (
     CustomerDealJourneyOpportunitySummary,
     CustomerDealJourneyResponse,
 )
-from app.services.business_journey_query_service import BusinessJourneyQueryRow
 from app.services.deal_journey_progress import load_cumulative_progress_percentages
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
@@ -34,6 +34,11 @@ from app.services.deal_journey_stage import (
     load_payment_summaries,
 )
 from app.services.opportunity_presenter import opportunity_detail_response
+
+if TYPE_CHECKING:
+    from typing import SupportsFloat
+
+    from app.services.business_journey_query_service import BusinessJourneyQueryRow
 
 _EMPTY_CONTRACT = BusinessJourneyContractSummary(count=0, signed_count=0, amount=0)
 _EMPTY_PAYMENT = BusinessJourneyPaymentSummary(
@@ -51,7 +56,7 @@ _EMPTY_INVOICE = BusinessJourneyInvoiceSummary(
 )
 
 
-def scalar_number(value) -> float:
+def scalar_number(value: SupportsFloat | str | None) -> float:
     if value is None:
         return 0.0
     if isinstance(value, Decimal):

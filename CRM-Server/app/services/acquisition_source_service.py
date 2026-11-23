@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import logging
 from secrets import token_hex
-from collections.abc import Callable
-from typing import Iterable, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
-
-from app.core.config import get_settings
 
 from app.constants.acquisition_sources import (
     AI_SOURCE_ALIASES,
@@ -20,6 +16,7 @@ from app.constants.acquisition_sources import (
     map_legacy_source_code,
     normalize_source_name,
 )
+from app.core.config import get_settings
 from app.models.acquisition_source import AcquisitionSource
 from app.models.customer import Customer
 from app.models.lead import Lead
@@ -27,9 +24,14 @@ from app.schemas.acquisition_source import AcquisitionSourceInfo
 from app.utils.public_id import generate_public_id, is_acquisition_source_public_id
 from app.utils.time import business_now
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from sqlalchemy.orm import Session
+
 
 class AcquisitionSourceError(Exception):
-    def __init__(self, detail: str, status_code: int = 400):
+    def __init__(self, detail: str, status_code: int = 400) -> None:
         super().__init__(detail)
         self.detail = detail
         self.status_code = status_code
@@ -344,7 +346,7 @@ def resolve_for_import(db: Session, team_id: int, name: str) -> AcquisitionSourc
     if row is None:
         available = "、".join(item.name for item in list_options(db, team_id))
         raise AcquisitionSourceError(
-            f"获客来源不存在，可选：{available}" if available else "获客来源不存在",
+            f"获客来源不存在\uff0c可选\uff1a{available}" if available else "获客来源不存在",
             status_code=400,
         )
     return row

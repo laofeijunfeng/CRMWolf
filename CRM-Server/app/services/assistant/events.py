@@ -11,15 +11,29 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, get_args
 
 from app.utils.sse_encoder import SSEJsonEncoder
 
 logger = logging.getLogger(__name__)
 
-StageName = Literal["classify", "structure", "quality_gate", "write"]
+StageName = Literal[
+    "route",
+    "locate",
+    "context",
+    "judge",
+    "propose",
+    "classify",
+    "structure",
+    "quality_gate",
+    "write",
+]
 
-_STAGE_NAMES: frozenset[str] = frozenset({"classify", "structure", "quality_gate", "write"})
+_STAGE_NAMES: frozenset[str] = frozenset(get_args(StageName))
+
+
+def is_stage_name(name: str) -> bool:
+    return name in _STAGE_NAMES
 
 
 @dataclass(frozen=True)
@@ -28,7 +42,7 @@ class TurnStage:
 
 
 def stage(name: str) -> TurnStage:
-    if name not in _STAGE_NAMES:
+    if not is_stage_name(name):
         raise ValueError(f"unknown stage name: {name!r}")
     return TurnStage(name=name)  # type: ignore[arg-type]
 
@@ -45,6 +59,8 @@ class ProgressReporter(Protocol):
 
     def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None: ...
 
+    def stage_failed(self, stage: TurnStage) -> None: ...
+
 
 class NullProgressReporter:
     """Drop events; default for unit tests and in-process callers."""
@@ -54,6 +70,9 @@ class NullProgressReporter:
 
     def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None:
         _ = stage, ms, score
+
+    def stage_failed(self, stage: TurnStage) -> None:
+        _ = stage
 
 
 class SSEProgressReporter:
@@ -87,6 +106,13 @@ class SSEProgressReporter:
             self._queue.put_nowait(("stage", payload))
         except Exception:
             logger.exception("stage_done reporting failed for %s", stage.name)
+
+    def stage_failed(self, stage: TurnStage) -> None:
+        try:
+            self._started_at.pop(stage.name, None)
+            self._queue.put_nowait(("stage", {"stage": stage.name, "phase": "failed"}))
+        except Exception:
+            logger.exception("stage_failed reporting failed for %s", stage.name)
 
     def mark_done(self) -> None:
         """Signal the business flow finished; unblocks the drain loop."""

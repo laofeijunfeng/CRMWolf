@@ -226,7 +226,7 @@ class CustomerActivityWriteService:
                     or existing.submission_fingerprint != submission_fingerprint
                 ):
                     raise CustomerActivitySubmissionConflictError(
-                        "submission_id 已被其他请求使用，不能复用。"
+                        "submission_id 已被其他请求使用\uff0c不能复用。"
                     )
                 ai_job = self.ai_job_crud.get_by_identity(
                     db,
@@ -236,7 +236,7 @@ class CustomerActivityWriteService:
                 )
                 if ai_job is None:
                     raise CustomerActivitySubmissionConflictError(
-                        "submission_id 对应的客户活动缺少原始 AIJob，不能安全重放。"
+                        "submission_id 对应的客户活动缺少原始 AIJob\uff0c不能安全重放。"
                     )
                 return CustomerActivityWriteResult(
                     activity=existing,
@@ -310,7 +310,7 @@ class CustomerActivityWriteService:
         """Write an Agent-finalized activity once, without creating an AI job."""
 
         if finalization.effectiveness_score < 60 or not finalization.effectiveness_is_valid:
-            raise ValueError("Agent 最终评分未通过，不能写入客户活动")
+            raise ValueError("Agent 最终评分未通过\uff0c不能写入客户活动")
 
         def mutate() -> CustomerActivity:
             activity = self.activity_crud.create(
@@ -370,7 +370,7 @@ class CustomerActivityWriteService:
         ):
             raise CustomerActivitySubmissionConflictError("Assistant 2.0 提交缺少有效请求指纹")
         if finalization.effectiveness_score < 60 or not finalization.effectiveness_is_valid:
-            raise ValueError("Assistant 2.0 最终评分未通过，不能写入客户活动")
+            raise ValueError("Assistant 2.0 最终评分未通过\uff0c不能写入客户活动")
         existing = self.activity_crud.get_by_submission_id(
             db, team_id=team_id, submission_id=submission_id
         )

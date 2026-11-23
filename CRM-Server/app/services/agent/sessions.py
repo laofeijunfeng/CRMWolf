@@ -13,6 +13,7 @@ from app.schemas.agent import AgentSessionCreate
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
+    from app.models.agent import AgentSession
     from app.schemas.agent import AgentCreateSessionRequest
 
 
@@ -42,7 +43,7 @@ def require_owned_session(
     user_id: int,
     session_id: int | None = None,
     session_key: str | None = None,
-):
+) -> AgentSession:
     if session_id is not None:
         session = agent_session_crud.get_by_id(
             db,

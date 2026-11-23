@@ -206,4 +206,18 @@ describe('CRM Agent frozen contracts', () => {
       items: [{ entity_ref: { ...entityRef, result_set_id: null } }]
     }).success).toBe(true)
   })
+
+  it('parses server-issued opportunity navigation attributes in a receipt', () => {
+    const receipt = {
+      id: 'created', type: 'action_result', action_id: 'create', status: 'SUCCESS',
+      title: '已创建商机', message: '已创建。',
+      entity_ref: {
+        ref_id: 'eref_opp_1', resource: 'opportunity', public_id: 'opp_1', display_name: '示例商机',
+        attributes: { customer_public_id: 'cus_1' },
+      },
+    }
+    const parsed = AgentUIBlockSchema.parse(receipt)
+    expect(parsed.type === 'action_result' && parsed.entity_ref?.attributes?.['customer_public_id']).toBe('cus_1')
+    expect(AgentUIBlockSchema.safeParse({ ...receipt, entity_ref: { ...receipt.entity_ref, attributes: 'cus_1' } }).success).toBe(false)
+  })
 })

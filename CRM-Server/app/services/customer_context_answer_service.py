@@ -264,7 +264,7 @@ class CustomerContextAnswerService:
         parts: list[str] = [
             f"### {customer_name}客户现状"
             if not question_text
-            else f"### {customer_name}客户现状\n围绕“{question_text}”，当前可确认的信息如下："
+            else f"### {customer_name}客户现状\n围绕“{question_text}”\uff0c当前可确认的信息如下\uff1a"
         ]
         used_sections: list[str] = ["customer"]
 
@@ -275,29 +275,29 @@ class CustomerContextAnswerService:
         ]
         profile_line = ", ".join(item for item in profile_parts if item)
         if profile_line:
-            parts.append(f"- **基础信息**：{profile_line}。")
+            parts.append(f"- **基础信息**\uff1a{profile_line}。")
 
 
         opportunities = _object_list(strong_context.get("opportunities"))
         if opportunities:
             used_sections.append("opportunities")
             opportunity_lines = "; ".join(_opportunity_line(item) for item in opportunities[:3])
-            parts.append(f"- **推进中的商机**：{opportunity_lines}。")
+            parts.append(f"- **推进中的商机**\uff1a{opportunity_lines}。")
 
         contracts = _object_list(strong_context.get("contracts"))
         if contracts:
             used_sections.append("contracts")
-            parts.append("- **相关合同**：" + "; ".join(_contract_line(item) for item in contracts[:3]) + "。")
+            parts.append("- **相关合同**\uff1a" + "; ".join(_contract_line(item) for item in contracts[:3]) + "。")
 
         payments = _object_list(strong_context.get("payment_plans"))
         if payments:
             used_sections.append("payments")
-            parts.append("- **回款计划**：" + "; ".join(_payment_plan_line(item) for item in payments[:3]) + "。")
+            parts.append("- **回款计划**\uff1a" + "; ".join(_payment_plan_line(item) for item in payments[:3]) + "。")
 
         activities = _object_list(strong_context.get("recent_activities"))
         if activities:
             used_sections.append("activities")
-            parts.append("- **近期动态**：" + "; ".join(_activity_line(item) for item in activities[:3]) + "。")
+            parts.append("- **近期动态**\uff1a" + "; ".join(_activity_line(item) for item in activities[:3]) + "。")
 
 
         evidence_items = _object_list(customer_context.get("semantic_evidence"))
@@ -306,7 +306,7 @@ class CustomerContextAnswerService:
             used_sections.append("evidence")
             evidence_text = _text(evidence_items[0].get("text"))
             if evidence_text:
-                parts.append(f"- **相关证据**：{evidence_text}。")
+                parts.append(f"- **相关证据**\uff1a{evidence_text}。")
 
         if len(parts) == 1:
             parts.append("- 目前系统里还没有足够的客户业务资料。")

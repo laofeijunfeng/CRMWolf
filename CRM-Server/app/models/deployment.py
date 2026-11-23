@@ -1,5 +1,6 @@
-from sqlalchemy import Column, BigInteger, String, Integer, DateTime, Boolean, ForeignKey, Index
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import relationship
+
 from app.core.database import Base
 from app.utils.time import business_now
 
@@ -10,15 +11,19 @@ class DeploymentInfo(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    customer_id = Column(BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID")
+    customer_id = Column(
+        BigInteger, ForeignKey('crm_customers.id', ondelete='CASCADE'), nullable=False, comment="关联客户ID"
+    )
 
-    deployment_name = Column(String(100), nullable=False, comment="部署名称（如：生产环境、测试环境）")
-    server_address = Column(String(500), nullable=False, comment="服务器地址（http:// 或 https:// 开头）")
-    authorized_users = Column(Integer, nullable=True, comment="历史授权人数（新申请人数记录在 License 申请）")
+    deployment_name = Column(String(100), nullable=False, comment="部署名称\uff08如\uff1a生产环境、测试环境\uff09")
+    server_address = Column(String(500), nullable=False, comment="服务器地址\uff08http:// 或 https:// 开头\uff09")
+    authorized_users = Column(Integer, nullable=True, comment="历史授权人数\uff08新申请人数记录在 License 申请\uff09")
     is_default = Column(Boolean, nullable=False, default=False, comment="是否默认部署")
 
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
-    last_modified_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间")
+    last_modified_time = Column(
+        DateTime, nullable=False, default=business_now, onupdate=business_now, comment="最后修改时间"
+    )
 
     customer = relationship("Customer", back_populates="deployment_infos")
     license_applications = relationship("LicenseApplication", back_populates="deployment_info")

@@ -29,7 +29,6 @@ from app.models.contract import Contract, ContractStatus
 from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceType
 from app.crud.approval import approval_crud, approval_flow_crud
 from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 
 
 # SQLite 把 BigInteger 编译为 INTEGER，确保 BigInteger 主键在 SQLite 上能自增
@@ -51,7 +50,6 @@ def db_session():
         Role.__table__,
         UserRole.__table__,
         Customer.__table__,
-        CustomerLegacySourceProgress.__table__,
         Contract.__table__,
         InvoiceApplication.__table__,
         ApprovalFlow.__table__,
@@ -395,7 +393,7 @@ def test_cancel_writes_contract_draft_via_adapter(
         approval_id=ap.id, kind=ApprovalParticipantKind.APPROVER,
     ).count() == 0
 
-def test_approval_transitions_advance_customer_revision_only_on_source_change(
+def test_approval_hands_off_participants_before_final_contract_signing(
     db_session, seed_contract_draft, seed_flow_with_one_node
 ):
     from app.schemas.approval import ApprovalActionRequest
@@ -428,19 +426,6 @@ def test_approval_transitions_advance_customer_revision_only_on_source_change(
     ).count() == 0
     assert approval.status == ApprovalStatus.APPROVED
 
-
-def test_cancel_approval_advances_customer_revision(
-    db_session, seed_contract_draft, seed_flow_with_one_node
-):
-    flow, _ = seed_flow_with_one_node
-    approval = approval_crud.create_approval(db_session, seed_contract_draft, flow, "1", "提交人")
-    approval_crud.cancel(db_session, approval, "1")
-    progress = db_session.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
-    assert seed_contract_draft.status == ContractStatus.DRAFT
-    assert progress.eligible_revision == 2
-    assert db_session.query(ApprovalParticipant).filter_by(
-        approval_id=approval.id, kind=ApprovalParticipantKind.APPROVER,
-    ).count() == 0
 
 def test_flow_update_rejects_unknown_node_id(db_session, seed_flow_with_one_node):
     from app.schemas.approval import ApprovalFlowUpdate

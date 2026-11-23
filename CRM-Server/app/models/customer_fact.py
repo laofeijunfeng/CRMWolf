@@ -23,7 +23,7 @@ class CustomerFact(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     fact_key = Column(String(64), nullable=False, unique=True, index=True, comment="客户事实幂等键")
-    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID，当前与团队ID一致")
+    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID\uff0c当前与团队ID一致")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(
         BigInteger,

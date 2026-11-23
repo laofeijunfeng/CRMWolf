@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from typing import Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
@@ -18,6 +18,9 @@ from app.crud.ai_config import ai_config_crud
 from app.services.agent.langchain_runtime import AgentLangChainRuntime, AgentLangChainStructuredOutputError
 from app.services.ai_service import ai_service
 from app.services.customer_fact_service import CustomerFactType
+
+if TYPE_CHECKING:
+    from app.services.ai_service import AIService
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
@@ -32,15 +35,15 @@ class CustomerFactExtractionError(Exception):
 
 class ExtractedCustomerFact(BaseModel):
     fact_type: CustomerFactType = Field(..., description="客户事实类型")
-    subject: str | None = Field(None, max_length=120, description="事实主体，例如 POC、预算、审批、竞品、关键人")
+    subject: str | None = Field(None, max_length=120, description="事实主体\uff0c例如 POC、预算、审批、竞品、关键人")
     content: str = Field(..., min_length=1, max_length=800, description="可沉淀的客户事实")
     confidence: float = Field(0.0, ge=0.0, le=1.0, description="事实可靠度")
-    action: FactExtractionAction = Field("upsert", description="upsert=进入自动沉淀评估，ignore=不沉淀")
+    action: FactExtractionAction = Field("upsert", description="upsert=进入自动沉淀评估\uff0cignore=不沉淀")
     evidence_quote: str | None = Field(None, max_length=300, description="来自触发事件或证据的短引用")
     evidence_keys: list[str] = Field(
         default_factory=list,
         max_length=8,
-        description="支持该事实的上下文证据键，只能使用输入上下文中存在的键",
+        description="支持该事实的上下文证据键\uff0c只能使用输入上下文中存在的键",
     )
     reason: str = Field("", max_length=300, description="为什么提炼该事实")
 
@@ -83,7 +86,7 @@ class CustomerFactExtractionService:
         self,
         *,
         runtime: AgentLangChainRuntime | None = None,
-        ai_client=ai_service,
+        ai_client: AIService = ai_service,
     ) -> None:
         self.runtime = runtime or AgentLangChainRuntime()
         self.ai_client = ai_client
@@ -100,10 +103,10 @@ class CustomerFactExtractionService:
     ) -> CustomerFactExtractionResult:
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            raise CustomerFactExtractionError("AI 配置未设置，无法提炼客户事实。")
+            raise CustomerFactExtractionError("AI 配置未设置\uff0c无法提炼客户事实。")
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            raise CustomerFactExtractionError("AI API Key 未设置，无法提炼客户事实。")
+            raise CustomerFactExtractionError("AI API Key 未设置\uff0c无法提炼客户事实。")
 
         prompt_date = current_date or date.today()
         user_prompt = _build_user_prompt(
@@ -145,31 +148,31 @@ class CustomerFactExtractionService:
         try:
             return CustomerFactExtractionResult.model_validate(json.loads(_clean_json(raw)))
         except (json.JSONDecodeError, ValidationError) as exc:
-            raise CustomerFactExtractionError(f"客户事实提炼结果无效：{str(exc)}") from exc
+            raise CustomerFactExtractionError(f"客户事实提炼结果无效\uff1a{exc!s}") from exc
 
 
 def _system_prompt(current_date: date) -> str:
     return (
         f"""你是 CRM 客户智能档案的事实提炼 Agent。
 
-当前日期：{current_date.isoformat()}
+当前日期\uff1a{current_date.isoformat()}
 
-任务：从本次触发事件、强业务上下文、语义证据和客户长期记忆中提炼可复用的客户事实。
+任务\uff1a从本次触发事件、强业务上下文、语义证据和客户长期记忆中提炼可复用的客户事实。
 
-原则：
-- 只能提炼有明确依据的事实，不要编造。
-- MySQL strong_context 是强事实；semantic_evidence 只是辅助证据。
-- 不要把合同、商机、回款等系统字段改写成强事实；只沉淀客户别名、客户需求、
+原则\uff1a
+- 只能提炼有明确依据的事实\uff0c不要编造。
+- MySQL strong_context 是强事实\uff1bsemantic_evidence 只是辅助证据。
+- 不要把合同、商机、回款等系统字段改写成强事实\uff1b只沉淀客户别名、客户需求、
   风险、预算、阶段状态、关键人态度、竞品、下一步、偏好、摘要。
-- 如果证据明确表达客户的简称、别称、集团简称、机构简称或常用内部叫法，
-  输出 fact_type=alias；subject 和 content 均使用该称呼本身，不要包含系统 ID 或代码。
+- 如果证据明确表达客户的简称、别称、集团简称、机构简称或常用内部叫法\uff0c
+  输出 fact_type=alias\uff1bsubject 和 content 均使用该称呼本身\uff0c不要包含系统 ID 或代码。
 - 同一个 subject 下只输出当前最有价值的一条事实。
-- 每条事实必须填写 evidence_keys，且只能引用输入上下文中已经出现的
-  evidence_key、evidence_id、source_key 或结构化记录键（如 activity:123、
-  journey_event:456、task:789）。不得编造证据键。
-- 只有证据清楚且置信度足够的候选才输出 action=upsert；证据不足、存在冲突或
-  置信度不足时 action=ignore，不要输出 review。
-- 输出必须符合结构化 schema，不要输出 Markdown 或解释文字。"""
+- 每条事实必须填写 evidence_keys\uff0c且只能引用输入上下文中已经出现的
+  evidence_key、evidence_id、source_key 或结构化记录键\uff08如 activity:123、
+  journey_event:456、task:789\uff09。不得编造证据键。
+- 只有证据清楚且置信度足够的候选才输出 action=upsert\uff1b证据不足、存在冲突或
+  置信度不足时 action=ignore\uff0c不要输出 review。
+- 输出必须符合结构化 schema\uff0c不要输出 Markdown 或解释文字。"""
     )
 
 

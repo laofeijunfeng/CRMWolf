@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
 class PermissionBase(BaseModel):
@@ -8,8 +8,8 @@ class PermissionBase(BaseModel):
     code: str = Field(..., min_length=1, max_length=100, description="权限代码")
     resource: str = Field(..., min_length=1, max_length=50, description="资源类型")
     action: str = Field(..., min_length=1, max_length=50, description="操作类型")
-    scope: Optional[str] = Field(None, max_length=50, description="权限范围")
-    description: Optional[str] = Field(None, description="权限描述")
+    scope: str | None = Field(None, max_length=50, description="权限范围")
+    description: str | None = Field(None, description="权限描述")
 
 
 class PermissionCreate(PermissionBase):
@@ -17,8 +17,8 @@ class PermissionCreate(PermissionBase):
 
 
 class PermissionUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="权限名称")
-    description: Optional[str] = Field(None, description="权限描述")
+    name: str | None = Field(None, min_length=1, max_length=100, description="权限名称")
+    description: str | None = Field(None, description="权限描述")
 
 
 class PermissionResponse(PermissionBase):
@@ -52,14 +52,14 @@ class UserPermissionResponse(BaseModel):
     name: str = Field(..., description="权限名称")
     resource: str = Field(..., description="资源类型")
     action: str = Field(..., description="操作类型")
-    scope: Optional[str] = Field(None, description="权限范围")
-    description: Optional[str] = Field(None, description="权限描述")
+    scope: str | None = Field(None, description="权限范围")
+    description: str | None = Field(None, description="权限描述")
 
     class Config:
         from_attributes = True
 
 
 class UserPermissionsListResponse(BaseModel):
-    permissions: List[UserPermissionResponse] = Field(..., description="权限列表")
+    permissions: list[UserPermissionResponse] = Field(..., description="权限列表")
     total: int = Field(..., description="权限总数")
     cached: bool = Field(False, description="是否来自缓存")

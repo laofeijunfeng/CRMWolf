@@ -1,6 +1,7 @@
 """Typed customer intelligence event boundary.
 
-Business modules emit different objects: customer activities, profile projections, and deal journey events. The customer intelligence
+Business modules emit different objects: customer activities, profile projections, and deal journey events. \
+The customer intelligence
 graph should not depend on those ORM shapes directly, so this service normalizes
 them into one event contract.
 """
@@ -845,7 +846,7 @@ def _positive_int(value: object) -> int | None:
     if isinstance(value, bool):
         return None
     try:
-        parsed = int(value)  # type: ignore[arg-type]
+        parsed = int(value)
     except (TypeError, ValueError):
         return None
     return parsed if parsed > 0 else None

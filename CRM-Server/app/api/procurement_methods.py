@@ -1,34 +1,38 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
-from sqlalchemy.orm import Session
-from typing import Optional
 import logging
 
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
 from app.models.user import User
 from app.schemas.procurement import (
-    ProcurementMethodCreate, ProcurementMethodUpdate, ProcurementMethodResponse,
-    ProcurementMethodWithStagesResponse, ProcurementStageTemplateResponse,
-    ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
-    BatchUpdateStagesRequest, ProcurementMethodWithStagesUpdate,
-    ProcurementMethodOption
+    BatchUpdateStagesRequest,
+    ProcurementMethodCreate,
+    ProcurementMethodOption,
+    ProcurementMethodResponse,
+    ProcurementMethodUpdate,
+    ProcurementMethodWithStagesResponse,
+    ProcurementMethodWithStagesUpdate,
+    ProcurementStageTemplateCreate,
+    ProcurementStageTemplateResponse,
+    ProcurementStageTemplateUpdate,
 )
-from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/procurement-methods", tags=["采购方式管理"])
 
 
 @router.get("/options", response_model=list[ProcurementMethodOption], summary="获取采购方式选项", description="""
-获取采购方式的下拉选项列表（用于客户创建、商机创建等场景）。
+获取采购方式的下拉选项列表\uff08用于客户创建、商机创建等场景\uff09。
 
-**业务规则：**
-- 只返回启用状态的采购方式（is_active=1）
+**业务规则\uff1a**
+- 只返回启用状态的采购方式\uff08is_active=1\uff09
 - 按照sort_order排序
-- 只返回必要的字段：id、code、name
-- 轻量级接口，适合前端下拉选择
+- 只返回必要的字段\uff1aid、code、name
+- 轻量级接口\uff0c适合前端下拉选择
 """)
 def get_procurement_method_options(
     team_id: int = Depends(get_current_user_team),
@@ -44,38 +48,43 @@ def get_procurement_method_options(
 @router.get("/", response_model=list[ProcurementMethodResponse], summary="获取采购方式列表", description="""
 获取系统中的所有采购方式。
 
-**查询参数：**
-- is_active: 可选，筛选启用状态的采购方式（1:启用, 0:停用）
-- page: 页码，从1开始
+**查询参数\uff1a**
+- is_active: 可选\uff0c筛选启用状态的采购方式\uff081:启用, 0:停用\uff09
+- page: 页码\uff0c从1开始
 - page_size: 每页数量
 
-**业务规则：**
+**业务规则\uff1a**
 - 按照sort_order排序返回
 - 支持分页查询
 """)
 def get_procurement_methods(
-    is_active: Optional[int] = Query(None, ge=0, le=1, description="启用状态筛选：1=启用, 0=停用（可选）"),
-    page: int = Query(1, ge=1, description="页码，从1开始（默认1）"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量，最大100（默认20）"),
+    is_active: int | None = Query(None, ge=0, le=1, description="启用状态筛选\uff1a1=启用, 0=停用\uff08可选\uff09"),
+    page: int = Query(1, ge=1, description="页码\uff0c从1开始\uff08默认1\uff09"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量\uff0c最大100\uff08默认20\uff09"),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     skip = (page - 1) * page_size
-    methods, total = procurement_method_crud.get_multi(
+    methods, _total = procurement_method_crud.get_multi(
         db, team_id=team_id, skip=skip, limit=page_size, is_active=is_active
     )
     return methods
 
 
-@router.get("/{method_id}", response_model=ProcurementMethodWithStagesResponse, summary="获取采购方式详情", description="""
-根据ID获取采购方式的详细信息，包括其关联的阶段模板列表。
+@router.get(
+    "/{method_id}",
+    response_model=ProcurementMethodWithStagesResponse,
+    summary="获取采购方式详情",
+    description="""
+根据ID获取采购方式的详细信息\uff0c包括其关联的阶段模板列表。
 
-**业务规则：**
+**业务规则\uff1a**
 - 返回采购方式的基本信息
 - 包含该采购方式下的所有阶段模板
 - 阶段模板按sort_order排序
-""")
+""",
+)
 def get_procurement_method(
     method_id: int,
     team_id: int = Depends(get_current_user_team),
@@ -101,17 +110,23 @@ def get_procurement_method(
     return ProcurementMethodWithStagesResponse(**response_dict)
 
 
-@router.post("/", response_model=ProcurementMethodResponse, status_code=status.HTTP_201_CREATED, summary="创建采购方式", description="""
+@router.post(
+    "/",
+    response_model=ProcurementMethodResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建采购方式",
+    description="""
 创建新的采购方式。
 
-**业务规则：**
+**业务规则\uff1a**
 - 采购方式编码必须唯一
 - 编码必须是大写字母和下划线
 - 只能由管理员创建
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购方式创建权限
-""")
+""",
+)
 def create_procurement_method(
     method_in: ProcurementMethodCreate,
     team_id: int = Depends(get_current_user_team),
@@ -133,12 +148,12 @@ def create_procurement_method(
 @router.put("/{method_id}", response_model=ProcurementMethodResponse, summary="更新采购方式", description="""
 更新采购方式的基本信息。
 
-**业务规则：**
+**业务规则\uff1a**
 - 不能修改code字段
-- 停用采购方式前，需要检查是否有活跃商机使用该方式
+- 停用采购方式前\uff0c需要检查是否有活跃商机使用该方式
 - 使用乐观锁机制防止并发修改冲突
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购方式更新权限
 """)
 def update_procurement_method(
@@ -169,12 +184,12 @@ def update_procurement_method(
 @router.delete("/{method_id}", status_code=status.HTTP_204_NO_CONTENT, summary="删除采购方式", description="""
 删除指定的采购方式。
 
-**业务规则：**
+**业务规则\uff1a**
 - 删除前会检查是否有活跃商机使用该方式
-- 如果有活跃商机，不允许删除
+- 如果有活跃商机\uff0c不允许删除
 - 删除是物理删除
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购方式删除权限
 """)
 def delete_procurement_method(
@@ -196,23 +211,28 @@ def delete_procurement_method(
         )
 
 
-@router.put("/{method_id}/stages", response_model=list[ProcurementStageTemplateResponse], summary="批量更新阶段模板", description="""
+@router.put(
+    "/{method_id}/stages",
+    response_model=list[ProcurementStageTemplateResponse],
+    summary="批量更新阶段模板",
+    description="""
 批量更新指定采购方式的阶段模板列表。
 
-**业务规则：**
+**业务规则\uff1a**
 - 根据stage中是否有ID来判断是新增还是更新
 - stage.mark_delete=true表示删除该阶段
 - 使用事务保证操作的原子性
 - 自动检查并处理默认起始阶段
 - 支持完全替换某采购方式的所有阶段
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要阶段模板更新权限
 
-**前端使用场景：**
-- 编辑采购方式时，同时编辑阶段列表
+**前端使用场景\uff1a**
+- 编辑采购方式时\uff0c同时编辑阶段列表
 - 点击保存时调用此接口一次提交所有阶段变更
-""")
+""",
+)
 def batch_update_stages(
     method_id: int,
     stages_in: BatchUpdateStagesRequest,
@@ -220,7 +240,6 @@ def batch_update_stages(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement_stage:update"))
 ):
-    from app.schemas.procurement import StageTemplateBatchUpdate, ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate
     
     # 验证采购方式是否存在
     method = procurement_method_crud.get(db, method_id)
@@ -240,7 +259,7 @@ def batch_update_stages(
                     procurement_stage_template_crud.delete(db, stage_in.id)
             # 处理更新
             elif stage_in.id:
-                # 从数据库获取当前阶段数据，用于获取 version_lock
+                # 从数据库获取当前阶段数据,用于获取 version_lock
                 existing_stage = procurement_stage_template_crud.get(db, stage_in.id)
                 if not existing_stage:
                     raise HTTPException(
@@ -294,32 +313,37 @@ def batch_update_stages(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"批量更新失败: {str(e)}"
+            detail=f"批量更新失败: {e!s}"
         )
 
 
-@router.put("/{method_id}/full", response_model=ProcurementMethodWithStagesResponse, summary="完整更新采购方式及阶段", description="""
+@router.put(
+    "/{method_id}/full",
+    response_model=ProcurementMethodWithStagesResponse,
+    summary="完整更新采购方式及阶段",
+    description="""
 同时更新采购方式信息和阶段模板列表。
 
-**业务规则：**
-- 使用事务保证操作的原子性（要么全部成功，要么全部回滚）
-- method为空则只更新阶段，stages为空则只更新采购方式
+**业务规则\uff1a**
+- 使用事务保证操作的原子性\uff08要么全部成功\uff0c要么全部回滚\uff09
+- method为空则只更新阶段\uff0cstages为空则只更新采购方式
 - 阶段模板支持新增、更新、删除操作
 - 自动进行影响评估和冲突检查
 - 支持乐观锁机制防止并发修改冲突
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购方式更新权限和阶段模板更新权限
 
-**前端使用场景：**
-- 编辑采购方式页面，同时修改采购方式和阶段信息
-- 点击保存按钮时调用此接口，一次完成所有操作
-- 保证数据一致性，避免部分成功的情况
+**前端使用场景\uff1a**
+- 编辑采购方式页面\uff0c同时修改采购方式和阶段信息
+- 点击保存按钮时调用此接口\uff0c一次完成所有操作
+- 保证数据一致性\uff0c避免部分成功的情况
 
-**参数说明：**
-- method: 采购方式更新数据（可选）
-- stages: 阶段模板列表（每个阶段包含id字段，有ID=更新，无ID=新增，mark_delete=true=删除）
-""")
+**参数说明\uff1a**
+- method: 采购方式更新数据\uff08可选\uff09
+- stages: 阶段模板列表\uff08每个阶段包含id字段\uff0c有ID=更新\uff0c无ID=新增\uff0cmark_delete=true=删除\uff09
+""",
+)
 def full_update_procurement_method(
     method_id: int,
     update_in: ProcurementMethodWithStagesUpdate,
@@ -327,7 +351,6 @@ def full_update_procurement_method(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    from app.schemas.procurement import StageTemplateBatchUpdate, ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate
     
     # 验证采购方式是否存在
     method = procurement_method_crud.get(db, method_id)
@@ -354,7 +377,7 @@ def full_update_procurement_method(
                         procurement_stage_template_crud.delete(db, stage_in.id)
                 # Handle update
                 elif stage_in.id:
-                    # 从数据库获取当前阶段数据，用于获取 version_lock
+                    # 从数据库获取当前阶段数据,用于获取 version_lock
                     existing_stage = procurement_stage_template_crud.get(db, stage_in.id)
                     if not existing_stage:
                         raise HTTPException(
@@ -400,7 +423,7 @@ def full_update_procurement_method(
         stage_templates = procurement_stage_template_crud.get_by_method(db, method_id, team_id)
         
         # 构造阶段模板响应列表 - 添加异常处理以便调试
-        logger.info(f"开始序列化阶段模板，共 {len(stage_templates)} 个阶段")
+        logger.info(f"开始序列化阶段模板\uff0c共 {len(stage_templates)} 个阶段")
         stage_template_responses = []
         for idx, s in enumerate(stage_templates):
             try:
@@ -425,14 +448,14 @@ def full_update_procurement_method(
                 stage_template_responses.append(stage_resp)
                 logger.debug(f"阶段 {idx} 序列化成功")
             except Exception as e:
-                logger.error(f"序列化阶段 {idx} 失败: {str(e)}", exc_info=True)
+                logger.error(f"序列化阶段 {idx} 失败: {e!s}", exc_info=True)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"序列化阶段 {idx} 失败: {str(e)} - type: {type(s).__name__}, object: {repr(s)}"
+                    detail=f"序列化阶段 {idx} 失败: {e!s} - type: {type(s).__name__}, object: {s!r}"
                 )
         
         # 构造最终响应
-        logger.info(f"开始序列化采购方式对象")
+        logger.info("开始序列化采购方式对象")
         try:
             return ProcurementMethodWithStagesResponse(
                     id=method.id,
@@ -448,23 +471,23 @@ def full_update_procurement_method(
                     stage_templates=stage_template_responses
                 )
         except Exception as e:
-            logger.error(f"序列化采购方式失败: {str(e)}", exc_info=True)
+            logger.error(f"序列化采购方式失败: {e!s}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"序列化采购方式失败: {str(e)} - type: {type(method).__name__}, object: {repr(method)}"
+                detail=f"序列化采购方式失败: {e!s} - type: {type(method).__name__}, object: {method!r}"
             )
         
     except ValueError as e:
         db.rollback()
-        logger.error(f"业务逻辑错误: {str(e)}", exc_info=True)
+        logger.error(f"业务逻辑错误: {e!s}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
         db.rollback()
-        logger.error(f"更新失败: {str(e)}", exc_info=True)
+        logger.error(f"更新失败: {e!s}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新失败: {str(e)}"
+            detail=f"更新失败: {e!s}"
         )

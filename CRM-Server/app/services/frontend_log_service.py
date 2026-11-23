@@ -3,12 +3,12 @@ Frontend Log Service
 
 负责前端日志的文件存储、轮转、清理
 """
-import json
 import asyncio
+import json
 import time
-from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional
+from pathlib import Path
+
 from app.core.logging import get_logger
 from app.schemas.frontend_log import FrontendLogEntry
 from app.utils.time import business_now
@@ -26,7 +26,7 @@ LOG_RETENTION_DAYS = 30
 class FrontendLogService:
     """前端日志服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._last_cleanup_time = 0.0
         self._cleanup_interval = 3600  # 1 hour
@@ -35,9 +35,9 @@ class FrontendLogService:
         self,
         logs: list[FrontendLogEntry],
         session_id: str,
-        user_agent: Optional[str] = None,
-        url: Optional[str] = None
-    ):
+        user_agent: str | None = None,
+        url: str | None = None
+    ) -> None:
         """
         异步写入日志
 
@@ -89,9 +89,9 @@ class FrontendLogService:
         self,
         logs: list[FrontendLogEntry],
         session_id: str
-    ):
+    ) -> None:
         """
-        直接写入日志（不经过队列，用于 beacon）
+        直接写入日志\uff08不经过队列\uff0c用于 beacon\uff09
 
         Args:
             logs: 日志条目列表
@@ -123,8 +123,8 @@ class FrontendLogService:
             except Exception as e:
                 logger.error(f"Failed to write direct logs: {e}")
 
-    def _write_log_entries(self, file_path: Path, entries: list[str]):
-        """同步写入日志条目（在线程中执行）"""
+    def _write_log_entries(self, file_path: Path, entries: list[str]) -> None:
+        """同步写入日志条目\uff08在线程中执行\uff09"""
         with open(file_path, "a", encoding="utf-8") as f:
             for entry in entries:
                 f.write(entry)
@@ -134,7 +134,7 @@ class FrontendLogService:
         today = business_now().strftime("%Y-%m-%d")
         return LOG_DIR / f"frontend-{today}.log"
 
-    async def _cleanup_old_logs(self):
+    async def _cleanup_old_logs(self) -> None:
         """清理超过保留天数的日志"""
         now = time.time()
         if now - self._last_cleanup_time < self._cleanup_interval:

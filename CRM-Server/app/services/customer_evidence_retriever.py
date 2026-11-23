@@ -3,14 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
 from dataclasses import dataclass
-
-from sqlalchemy import select
-
-from app.models.deal_journey import CustomerDealJourneyEvent
-from app.services.customer_activity_source_isolation import eligible_activity_source
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.services.customer_embedding_service import (
     CustomerEmbeddingService,
@@ -23,6 +17,11 @@ from app.services.customer_qdrant_index_service import (
     SourceType,
     customer_qdrant_index_service,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 

@@ -48,7 +48,8 @@ def resolve_customer_candidates_for_assistant(
         return CustomerResolution("NOT_FOUND", None, [])
 
     try:
-        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(db, user_id, team_id)}
+        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(
+            db, user_id, team_id)}
         exact = db.query(Customer).filter(Customer.team_id == team_id, Customer.account_name == name).limit(2).all()
         if exact:
             identities = [customer.public_id for customer in exact]

@@ -14,7 +14,7 @@ from app.utils.time import business_now
 
 
 class AcquisitionSource(Base):
-    """团队级获客来源配置。线索和客户共用，不提供删除。"""
+    """团队级获客来源配置。线索和客户共用\uff0c不提供删除。"""
 
     __tablename__ = "crm_acquisition_sources"
 
@@ -26,7 +26,7 @@ class AcquisitionSource(Base):
         comment="对外获客来源ID",
     )
     team_id = Column(BigInteger, nullable=False, comment="团队ID")
-    code = Column(String(50), nullable=False, comment="来源编码，系统项固定，自定义项服务端生成")
+    code = Column(String(50), nullable=False, comment="来源编码\uff0c系统项固定\uff0c自定义项服务端生成")
     name = Column(String(50), nullable=False, comment="展示名称")
     is_system = Column(Integer, nullable=False, default=0, comment="是否系统默认项: 1是, 0否")
     is_active = Column(Integer, nullable=False, default=1, comment="是否启用: 1启用, 0停用")

@@ -1,18 +1,18 @@
-"""文件存储服务：本地存储发票文件，支持团队隔离和路径安全校验。"""
+"""文件存储服务\uff1a本地存储发票文件\uff0c支持团队隔离和路径安全校验。"""
 
 import os
 import uuid
-from typing import Optional
 
 from app.core.config import get_settings
 from app.utils.time import business_now
+
 
 class FileStorageError(Exception):
     """文件存储错误"""
     pass
 
 
-# 允许的文件扩展名（发票常见格式）
+# 允许的文件扩展名(发票常见格式)
 INVOICE_ALLOWED_EXTENSIONS = {
     ".pdf",   # PDF 发票
     ".jpg",   # 图片发票
@@ -26,37 +26,37 @@ CONTRACT_ALLOWED_EXTENSIONS = {
 }
 ALLOWED_EXTENSIONS = INVOICE_ALLOWED_EXTENSIONS
 
-# 最大文件大小（10MB）
+# 最大文件大小(10MB)
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
 class FileStorageService:
     """发票文件本地存储服务"""
 
-    def __init__(self, base_dir: Optional[str] = None):
+    def __init__(self, base_dir: str | None = None) -> None:
         """
         Args:
-            base_dir: 上传文件基础目录（容器内路径）
+            base_dir: 上传文件基础目录\uff08容器内路径\uff09
         """
         self.base_dir = base_dir or get_settings().UPLOAD_DIR
 
-    def _validate_filename(self, filename: str, allowed_extensions: Optional[set[str]] = None) -> str:
+    def _validate_filename(self, filename: str, allowed_extensions: set[str] | None = None) -> str:
         """校验文件名安全性
 
-        1. 禁止路径穿越（../）
+        1. 禁止路径穿越\uff08../\uff09
         2. 只允许白名单扩展名
         3. 返回安全的文件名
         """
         # 检查路径穿越
         if ".." in filename or "/" in filename or "\\" in filename:
-            raise FileStorageError(f"非法文件名：{filename}")
+            raise FileStorageError(f"非法文件名\uff1a{filename}")
 
         # 检查扩展名
         ext = os.path.splitext(filename)[1].lower()
         extensions = allowed_extensions or ALLOWED_EXTENSIONS
         if ext not in extensions:
             raise FileStorageError(
-                f"不允许的文件类型：{ext}。允许类型：{', '.join(sorted(extensions))}"
+                f"不允许的文件类型\uff1a{ext}。允许类型\uff1a{', '.join(sorted(extensions))}"
             )
 
         return filename
@@ -77,13 +77,13 @@ class FileStorageService:
         """保存发票文件
 
         Args:
-            team_id: 团队 ID（用于目录隔离）
+            team_id: 团队 ID\uff08用于目录隔离\uff09
             invoice_id: 发票申请 ID
             filename: 原始文件名
-            content: 文件内容（bytes）
+            content: 文件内容\uff08bytes\uff09
 
         Returns:
-            文件相对路径（相对于 base_dir），用于存储到数据库
+            文件相对路径\uff08相对于 base_dir\uff09\uff0c用于存储到数据库
 
         Raises:
             FileStorageError: 文件名非法或存储失败
@@ -91,18 +91,18 @@ class FileStorageService:
         # 校验文件大小
         if len(content) > MAX_FILE_SIZE:
             raise FileStorageError(
-                f"文件过大：{len(content)} 字节，最大允许 {MAX_FILE_SIZE} 字节"
+                f"文件过大\uff1a{len(content)} 字节\uff0c最大允许 {MAX_FILE_SIZE} 字节"
             )
 
         # 校验文件名
         safe_filename = self._validate_filename(filename, INVOICE_ALLOWED_EXTENSIONS)
         storage_filename = self._generate_safe_filename(safe_filename, invoice_id)
 
-        # 构建目录路径：{base_dir}/invoices/{team_id}/{invoice_id}/
+        # 构建目录路径:{base_dir}/invoices/{team_id}/{invoice_id}/
         dir_path = os.path.join(self.base_dir, "invoices", str(team_id), str(invoice_id))
 
         try:
-            # 创建目录（如果不存在）
+            # 创建目录(如果不存在)
             os.makedirs(dir_path, exist_ok=True)
 
             # 写文件
@@ -110,7 +110,7 @@ class FileStorageService:
             with open(full_path, "wb") as f:
                 f.write(content)
         except OSError as e:
-            raise FileStorageError(f"文件保存失败：{e}") from e
+            raise FileStorageError(f"文件保存失败\uff1a{e}") from e
 
         # 返回相对路径
         relative_path = os.path.join("invoices", str(team_id), str(invoice_id), storage_filename)
@@ -123,7 +123,7 @@ class FileStorageService:
         filename: str,
         content: bytes,
     ) -> str:
-        """保存合同附件，仅允许 PDF 和 DOCX。"""
+        """保存合同附件\uff0c仅允许 PDF 和 DOCX。"""
         return self._save_contract_document("contracts", team_id, contract_id, filename, content)
 
     def save_contract_change_file(
@@ -133,7 +133,7 @@ class FileStorageService:
         filename: str,
         content: bytes,
     ) -> str:
-        """保存合同变更附件，仅允许 PDF 和 DOCX。"""
+        """保存合同变更附件\uff0c仅允许 PDF 和 DOCX。"""
         return self._save_contract_document("contract_changes", team_id, contract_id, filename, content)
 
     def _save_contract_document(
@@ -146,7 +146,7 @@ class FileStorageService:
     ) -> str:
         if len(content) > MAX_FILE_SIZE:
             raise FileStorageError(
-                f"文件过大：{len(content)} 字节，最大允许 {MAX_FILE_SIZE} 字节"
+                f"文件过大\uff1a{len(content)} 字节\uff0c最大允许 {MAX_FILE_SIZE} 字节"
             )
 
         safe_filename = self._validate_filename(filename, CONTRACT_ALLOWED_EXTENSIONS)
@@ -159,7 +159,7 @@ class FileStorageService:
             with open(full_path, "wb") as f:
                 f.write(content)
         except OSError as e:
-            raise FileStorageError(f"文件保存失败：{e}") from e
+            raise FileStorageError(f"文件保存失败\uff1a{e}") from e
 
         return os.path.join(root, str(team_id), str(contract_id), storage_filename)
 
@@ -172,14 +172,14 @@ class FileStorageService:
         Returns:
             完整文件路径
         """
-        # 安全校验：确保路径在 base_dir 内
+        # 安全校验:确保路径在 base_dir 内
         full_path = os.path.join(self.base_dir, relative_path)
-        # 规范化路径，防止路径穿越
+        # 规范化路径,防止路径穿越
         real_path = os.path.realpath(full_path)
         real_base = os.path.realpath(self.base_dir)
 
         if not real_path.startswith(real_base):
-            raise FileStorageError("非法路径：路径超出上传目录范围")
+            raise FileStorageError("非法路径\uff1a路径超出上传目录范围")
 
         return full_path
 
@@ -195,7 +195,7 @@ class FileStorageService:
         """删除文件
 
         Returns:
-            True 如果删除成功，False 如果文件不存在
+            True 如果删除成功\uff0cFalse 如果文件不存在
         """
         try:
             full_path = self.get_full_path(relative_path)

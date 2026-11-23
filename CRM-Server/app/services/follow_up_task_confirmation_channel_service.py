@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -49,6 +48,8 @@ from app.services.follow_up_task_confirmation_service import (
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from sqlalchemy.orm import Session
 
 
@@ -77,7 +78,7 @@ class _ProjectionDeliveryContext:
         *,
         turn_scope: dict[str, Any] | None,
         owner_id: str,
-    ) -> "_ProjectionDeliveryContext":
+    ) -> _ProjectionDeliveryContext:
         scope = turn_scope or {}
         raw_channel = str(scope.get("channel") or "web").strip().lower()
         channel = "im" if raw_channel == "im" else "web"

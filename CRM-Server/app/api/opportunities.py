@@ -1,18 +1,14 @@
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from datetime import date
-from typing import List, Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
-from app.core.database import get_db
-from app.core.list_query import (
-    enforce_owner_view_scope,
-    optional_request_list_query,
-    run_or_400,
-    uses_unified_list_query,
-)
+from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_customer_edit_permission,
     check_customer_view_permission,
@@ -23,10 +19,6 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
-from app.crud.customer import customer_crud
-from app.crud.deal_journey import deal_journey_crud
-from app.crud.opportunity import opportunity_crud
-from app.models.approval import ApprovalStatus
 from app.core.list_export import (
     OPPORTUNITIES_LIST_EXPORT_CATALOG,
     create_list_export_file,
@@ -34,11 +26,20 @@ from app.core.list_export import (
     list_export_file_response,
     run_list_export_or_400,
 )
-from app.core.database import SessionLocal
-from app.schemas.list_export import OpportunityListExportRequest
-from fastapi.responses import FileResponse
-from typing import Iterator
+from app.core.list_query import (
+    enforce_owner_view_scope,
+    optional_request_list_query,
+    run_or_400,
+    uses_unified_list_query,
+)
+from app.crud.customer import customer_crud
+from app.crud.deal_journey import deal_journey_crud
+from app.crud.opportunity import opportunity_crud
+from app.models.opportunity import Opportunity
+from app.models.outbound_notification_job import OutboundNotificationEventType
+from app.models.user import User
 from app.schemas.common import PaginatedResponse
+from app.schemas.list_export import OpportunityListExportRequest
 from app.schemas.opportunity import (
     MessageResponse,
     OpportunityChartBucketOpportunities,
@@ -56,26 +57,38 @@ from app.schemas.opportunity import (
     SalesFunnelResponse,
     StageDurationResponse,
 )
+from app.services import opportunity_chart_stats
 from app.services.approval_transaction_manager import approval_transaction_manager
 from app.services.assistant.crm_effects import AssistantCRMCommand
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
-from app.models.outbound_notification_job import OutboundNotificationEventType
-from app.services.outbound_notification_job_service import outbound_notification_job_service
-from app.services import opportunity_chart_stats
 from app.services.opportunity_presenter import (
-    customer_info_dict as _customer_info_dict,
     customer_public_id as _customer_public_id,
+)
+from app.services.opportunity_presenter import (
     deal_journey_public_id as _deal_journey_public_id,
+)
+from app.services.opportunity_presenter import (
     deal_journey_public_id_map as _deal_journey_public_id_map,
+)
+from app.services.opportunity_presenter import (
     opportunity_detail_response,
+)
+from app.services.opportunity_presenter import (
     opportunity_product_payload as _opportunity_product_payload,
+)
+from app.services.opportunity_presenter import (
     opportunity_product_payloads as _opportunity_product_payloads,
+)
+from app.services.opportunity_presenter import (
     opportunity_response_dict as _opportunity_response_dict,
+)
+from app.services.opportunity_presenter import (
     resolve_opportunity_approval_phase as _resolve_opportunity_approval_phase,
 )
+from app.services.outbound_notification_job_service import outbound_notification_job_service
 from app.utils.public_id import is_deal_journey_public_id
 
 router = APIRouter(prefix="/v1/opportunities", tags=["商机管理"])
@@ -98,8 +111,8 @@ APPROVAL_PHASE_LABELS = {
 CONTRACT_NOT_READY_REASON = "需要先推进到 100%"
 
 
-def _contract_unavailable_reason(db: Session, opportunity, team_id: int | None) -> str | None:
-    from app.models.opportunity import Opportunity, OpportunityStatus
+def _contract_unavailable_reason(db: Session, opportunity: Opportunity, team_id: int | None) -> str | None:
+    from app.models.opportunity import OpportunityStatus
 
     if (
         opportunity.status == OpportunityStatus.WON.value
@@ -109,15 +122,15 @@ def _contract_unavailable_reason(db: Session, opportunity, team_id: int | None) 
     return CONTRACT_NOT_READY_REASON
 
 
-def _ensure_opportunity_not_pending(db: Session, opportunity, team_id: Optional[int]) -> None:
+def _ensure_opportunity_not_pending(db: Session, opportunity: Opportunity, team_id: int | None) -> None:
     if _resolve_opportunity_approval_phase(db, opportunity, team_id) == ApprovalPhase.PENDING_REVIEW.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="商机审批中，暂不能进行该操作"
+            detail="商机审批中\uff0c暂不能进行该操作"
         )
 
 
-def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int]) -> None:
+def _ensure_opportunity_approved(db: Session, opportunity: Opportunity, team_id: int | None) -> None:
     if _resolve_opportunity_approval_phase(db, opportunity, team_id) != ApprovalPhase.APPROVED.value:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -128,7 +141,7 @@ def _ensure_opportunity_approved(db: Session, opportunity, team_id: Optional[int
 
 
 def _build_opportunity_intelligence_change(
-    opportunity,
+    opportunity: Opportunity,
     *,
     change_type: Literal["created", "updated", "deleted"],
     actor_id: str | None,
@@ -171,7 +184,7 @@ async def create_opportunity(
     submitter = user_crud.get_by_id(db, int(current_user.id))
     submitter_name = submitter.name if submitter else None
 
-    entity, approval, error_msg = approval_transaction_manager.create_with_approval(
+    entity, _approval, error_msg = approval_transaction_manager.create_with_approval(
         db=db,
         business_type=BusinessType.OPPORTUNITY,
         entity_create_func=lambda: opportunity_crud.create_without_commit(
@@ -208,7 +221,13 @@ async def create_opportunity(
     )
     return OpportunityResponse(**_opportunity_response_dict(db, entity, team_id))
 
-@router.post("/", response_model=OpportunityResponse, status_code=status.HTTP_201_CREATED, summary="创建商机", description="为指定客户创建商机")
+@router.post(
+    "/",
+    response_model=OpportunityResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建商机",
+    description="为指定客户创建商机",
+)
 async def create_opportunity_http(
     opportunity: OpportunityCreate,
     team_id: int = Depends(get_current_user_team),
@@ -218,30 +237,37 @@ async def create_opportunity_http(
     return await create_opportunity(opportunity, team_id, current_user, db)
 
 
-@router.get("/", response_model=PaginatedResponse[OpportunityListResponse], summary="查询商机列表", description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序，返回客户名称、采购阶段、负责人信息")
+@router.get(
+    "/",
+    response_model=PaginatedResponse[OpportunityListResponse],
+    summary="查询商机列表",
+    description="支持分页、按状态/阶段/负责人等多条件筛选和动态排序\uff0c返回客户名称、采购阶段、负责人信息",
+)
 def get_opportunities(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="每页记录数"),
-    opportunity_status: Optional[str] = Query(None, alias="status", description="商机状态：0:跟进中, 1:已赢单, 2:已输单，多个值用逗号分隔"),
-    status_exclude: Optional[str] = Query(None, description="排除的商机状态，多个值用逗号分隔"),
-    stage_id: int = Query(None, description="采购阶段ID（已废弃，保留用于兼容）"),
+    opportunity_status: str | None = Query(
+        None, alias="status", description="商机状态\uff1a0:跟进中, 1:已赢单, 2:已输单\uff0c多个值用逗号分隔",
+    ),
+    status_exclude: str | None = Query(None, description="排除的商机状态\uff0c多个值用逗号分隔"),
+    stage_id: int = Query(None, description="采购阶段ID\uff08已废弃\uff0c保留用于兼容\uff09"),
     owner_id: str = Query(None, description="负责人ID"),
-    owner_id_exclude: Optional[str] = Query(None, description="排除的负责人ID，多个值用逗号分隔"),
-    customer_id: Optional[str] = Query(None, description="客户对外ID"),
+    owner_id_exclude: str | None = Query(None, description="排除的负责人ID\uff0c多个值用逗号分隔"),
+    customer_id: str | None = Query(None, description="客户对外ID"),
     keyword: str = Query(None, description="关键词搜索"),
-    search: Optional[str] = Query(None, description="统一搜索，可搜索商机名称、客户或阶段"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索商机名称、客户或阶段"),
     customer_keyword: str = Query(None, description="客户名称关键词"),
     license_type: str = Query(None, description="授权模式"),
-    license_type_exclude: Optional[str] = Query(None, description="排除的授权模式，多个值用逗号分隔"),
+    license_type_exclude: str | None = Query(None, description="排除的授权模式\uff0c多个值用逗号分隔"),
     purchase_type: str = Query(None, description="采购类型"),
-    purchase_type_exclude: Optional[str] = Query(None, description="排除的采购类型，多个值用逗号分隔"),
+    purchase_type_exclude: str | None = Query(None, description="排除的采购类型\uff0c多个值用逗号分隔"),
     stage_name: str = Query(None, description="销售阶段名称"),
     expected_closing_date_start: date = Query(None, description="预计成交日期起始"),
     expected_closing_date_end: date = Query(None, description="预计成交日期结束"),
     order_by: str = Query(None, description="排序字段"),
-    order_dir: str = Query(None, description="排序方向（asc/desc）"),
-    filters: Optional[str] = Query(None, description="通用筛选条件 JSON"),
-    sorts: Optional[str] = Query(None, description="通用排序条件 JSON"),
+    order_dir: str = Query(None, description="排序方向\uff08asc/desc\uff09"),
+    filters: str | None = Query(None, description="通用筛选条件 JSON"),
+    sorts: str | None = Query(None, description="通用排序条件 JSON"),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -271,16 +297,22 @@ def get_opportunities(
             parsed_filters or [],
             current_user_id=str(current_user.id),
             has_view_all=has_view_all,
-            permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+            permission_detail="只能查看自己负责的商机\uff0c或需要 opportunity:view:all 权限查看他人数据",
             default_to_self=customer_id is None,
         )
     else:
         actual_owner_id = owner_id
-        requested_owner_ids = [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
-        if requested_owner_ids and any(item != str(current_user.id) for item in requested_owner_ids) and not has_view_all:
+        requested_owner_ids = (
+            [item.strip() for item in actual_owner_id.split(",") if item.strip()] if actual_owner_id else []
+        )
+        if (
+            requested_owner_ids
+            and any(item != str(current_user.id) for item in requested_owner_ids)
+            and not has_view_all
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据"
+                detail="只能查看自己负责的商机\uff0c或需要 opportunity:view:all 权限查看他人数据"
             )
         if customer_id is not None:
             actual_owner_id = None
@@ -408,7 +440,9 @@ def get_opportunities(
     )
 
 
-def _build_opportunity_list_responses(projection_db, opportunities, team_id: int) -> List[OpportunityListResponse]:
+def _build_opportunity_list_responses(
+    projection_db: Session, opportunities: Sequence[Opportunity], team_id: int,
+) -> list[OpportunityListResponse]:
     """Batch-project opportunity ORM rows into list responses with display info."""
     from sqlalchemy import text
 
@@ -529,12 +563,20 @@ def _opportunity_export_row(item: OpportunityListResponse) -> dict[str, object]:
         "stage": item.stage.stage_name if item.stage else None,
         "win_probability": item.win_probability,
         "status": OPPORTUNITY_STATUS_LABELS.get(item.status, str(item.status)),
-        "approval_phase": APPROVAL_PHASE_LABELS.get(item.approval_phase, item.approval_phase) if item.approval_phase else None,
+        "approval_phase": (
+            APPROVAL_PHASE_LABELS.get(item.approval_phase, item.approval_phase)
+            if item.approval_phase
+            else None
+        ),
         "created_time": item.created_time,
     }
 
 
-def _iter_opportunity_export_rows(stream, team_id: int, projection_session_factory=SessionLocal) -> Iterator[dict[str, object]]:
+def _iter_opportunity_export_rows(
+    stream: Iterable[Opportunity],
+    team_id: int,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
+) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
         try:
@@ -567,7 +609,7 @@ def export_opportunities(
         request.filters,
         current_user_id=str(current_user.id),
         has_view_all=has_view_all,
-        permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+        permission_detail="只能查看自己负责的商机\uff0c或需要 opportunity:view:all 权限查看他人数据",
     )
 
     status_value = {"active": "0", "won": "1", "lost": "2"}.get(request.tab)
@@ -586,7 +628,11 @@ def export_opportunities(
         catalog=OPPORTUNITIES_LIST_EXPORT_CATALOG,
         selected_keys=request.fields,
         rows=rows,
-        file_stem="商机列表-全部商机" if request.tab == "all" else f"商机列表-{OPPORTUNITY_STATUS_LABELS[int(status_value)]}",
+        file_stem=(
+            "商机列表-全部商机"
+            if request.tab == "all"
+            else f"商机列表-{OPPORTUNITY_STATUS_LABELS[int(status_value)]}"
+        ),
     ))
     return list_export_file_response(generated)
 
@@ -686,14 +732,14 @@ def get_available_opportunities_for_contract(
 
 def _chart_population(
     *,
-    opportunity_status: Optional[str],
-    search: Optional[str],
-    filters: Optional[str],
-    sorts: Optional[str],
+    opportunity_status: str | None,
+    search: str | None,
+    filters: str | None,
+    sorts: str | None,
     team_id: int,
-    current_user,
+    current_user: User,
     db: Session,
-):
+) -> list[Opportunity]:
     from app.crud.permission import permission_crud
 
     user_permissions = permission_crud.get_user_permissions(db, current_user.id, team_id)
@@ -707,7 +753,7 @@ def _chart_population(
         parsed_filters or [],
         current_user_id=str(current_user.id),
         has_view_all=has_view_all,
-        permission_detail="只能查看自己负责的商机，或需要 opportunity:view:all 权限查看他人数据",
+        permission_detail="只能查看自己负责的商机\uff0c或需要 opportunity:view:all 权限查看他人数据",
         default_to_self=True,
     )
     return run_or_400(
@@ -725,10 +771,10 @@ def _chart_population(
 
 @router.get("/chart", response_model=OpportunityChartResponse, summary="获取商机图表统计")
 def get_opportunity_chart(
-    opportunity_status: Optional[str] = Query(None, alias="status"),
-    search: Optional[str] = Query(None),
-    filters: Optional[str] = Query(None),
-    sorts: Optional[str] = Query(None),
+    opportunity_status: str | None = Query(None, alias="status"),
+    search: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -759,10 +805,10 @@ def get_opportunity_chart_bucket_opportunities(
     bucket: str = Query(...),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
-    opportunity_status: Optional[str] = Query(None, alias="status"),
-    search: Optional[str] = Query(None),
-    filters: Optional[str] = Query(None),
-    sorts: Optional[str] = Query(None),
+    opportunity_status: str | None = Query(None, alias="status"),
+    search: str | None = Query(None),
+    filters: str | None = Query(None),
+    sorts: str | None = Query(None),
     team_id: int = Depends(get_current_user_team),
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -791,7 +837,12 @@ def get_opportunity_chart_bucket_opportunities(
 
 
 
-@router.get("/{opportunity_id}", response_model=OpportunityDetailResponse, summary="获取商机详情", description="返回商机完整信息及关联的客户、负责人、创建人等信息")
+@router.get(
+    "/{opportunity_id}",
+    response_model=OpportunityDetailResponse,
+    summary="获取商机详情",
+    description="返回商机完整信息及关联的客户、负责人、创建人等信息",
+)
 def get_opportunity(
     opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
@@ -804,7 +855,12 @@ def get_opportunity(
 
 
 
-@router.get("/{opportunity_id}/procurement-stages", response_model=List[OpportunityProcurementStageInfo], summary="获取商机采购阶段", description="获取商机对应的采购方式的所有阶段，标注当前商机的阶段")
+@router.get(
+    "/{opportunity_id}/procurement-stages",
+    response_model=list[OpportunityProcurementStageInfo],
+    summary="获取商机采购阶段",
+    description="获取商机对应的采购方式的所有阶段\uff0c标注当前商机的阶段",
+)
 def get_opportunity_procurement_stages(
     opportunity_id: str,
     team_id: int = Depends(get_current_user_team),
@@ -876,7 +932,7 @@ async def update_opportunity(
     "/{opportunity_id}/deal-journey",
     response_model=OpportunityResponse,
     summary="调整商机业务旅程关联",
-    description="显式关联、迁移或解除商机的业务旅程；不会改写既有合同、回款、跟进和承诺的历史归属。",
+    description="显式关联、迁移或解除商机的业务旅程\uff1b不会改写既有合同、回款、跟进和承诺的历史归属。",
 )
 async def update_opportunity_deal_journey(
     opportunity_id: str,
@@ -1067,7 +1123,12 @@ async def move_opportunity_stage(
     
     return result
 
-@router.post("/{opportunity_id}/move-stage", response_model=OpportunityDetailResponse, summary="推进商机阶段", description="推进商机到下一阶段，使用新的采购阶段模板系统，创建阶段快照")
+@router.post(
+    "/{opportunity_id}/move-stage",
+    response_model=OpportunityDetailResponse,
+    summary="推进商机阶段",
+    description="推进商机到下一阶段\uff0c使用新的采购阶段模板系统\uff0c创建阶段快照",
+)
 async def move_opportunity_stage_http(
     opportunity_id: str,
     stage_move: OpportunityMoveToStage,
@@ -1078,7 +1139,12 @@ async def move_opportunity_stage_http(
     return await move_opportunity_stage(opportunity_id, stage_move, db_opportunity, current_user, db)
 
 
-@router.patch("/{opportunity_id}/win", response_model=OpportunityResponse, summary="标记赢单", description="状态改为已赢单，记录实际成交金额")
+@router.patch(
+    "/{opportunity_id}/win",
+    response_model=OpportunityResponse,
+    summary="标记赢单",
+    description="状态改为已赢单\uff0c记录实际成交金额",
+)
 async def mark_opportunity_as_won(
     opportunity_id: str,
     win_data: OpportunityWin,
@@ -1117,7 +1183,12 @@ async def mark_opportunity_as_won(
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 
 
-@router.patch("/{opportunity_id}/lose", response_model=OpportunityResponse, summary="标记输单", description="状态改为已输单，必须记录输单原因")
+@router.patch(
+    "/{opportunity_id}/lose",
+    response_model=OpportunityResponse,
+    summary="标记输单",
+    description="状态改为已输单\uff0c必须记录输单原因",
+)
 async def mark_opportunity_as_lost(
     opportunity_id: str,
     lose_data: OpportunityLose,
@@ -1185,7 +1256,12 @@ async def delete_opportunity(
 analytics_router = APIRouter(prefix="/v1/analytics", tags=["商机分析"])
 
 
-@analytics_router.get("/sales-funnel", response_model=List[SalesFunnelResponse], summary="获取销售漏斗", description="返回各阶段的商机数量、金额汇总、平均赢率，用于可视化漏斗图")
+@analytics_router.get(
+    "/sales-funnel",
+    response_model=list[SalesFunnelResponse],
+    summary="获取销售漏斗",
+    description="返回各阶段的商机数量、金额汇总、平均赢率\uff0c用于可视化漏斗图",
+)
 def get_sales_funnel(
     owner_id: str = Query(None, description="负责人ID"),
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),
@@ -1208,7 +1284,12 @@ def get_sales_funnel(
     )
 
 
-@analytics_router.get("/stage-duration", response_model=List[StageDurationResponse], summary="商机阶段耗时分析", description="分析商机在各阶段平均停留时长，帮助识别瓶颈")
+@analytics_router.get(
+    "/stage-duration",
+    response_model=list[StageDurationResponse],
+    summary="商机阶段耗时分析",
+    description="分析商机在各阶段平均停留时长\uff0c帮助识别瓶颈",
+)
 def get_stage_duration(
     owner_id: str = Query(None, description="负责人ID"),
     start_date: str = Query(None, description="开始日期 YYYY-MM-DD"),

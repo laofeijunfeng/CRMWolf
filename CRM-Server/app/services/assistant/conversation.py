@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
@@ -26,17 +28,23 @@ from app.schemas.assistant_conversation import (
     ConversationView,
     PreparedSubmission,
 )
-from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraft
-from app.services.assistant.conversation_router import ROOT_MODEL_LEASE_SECONDS, ConversationRootClassifier
+from app.services.assistant.contracts import AcceptedProposalReceipt, DraftField, TaskAuthority, TaskDraft
+from app.services.assistant.conversation_router import ConversationRootClassifier
 from app.services.assistant.failure_contract import (
+    ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+    ATTEMPT_DEADLINE_SECONDS,
     AssistantFailureCode,
+    attempt_budget_remaining,
+    bind_absolute_attempt_deadline,
     is_root_failure_code,
+    reset_attempt_deadline,
     root_failure_code,
     root_failure_presentation,
     root_failure_retryable,
 )
 from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.presentation import task_view
+from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority, load_draft, load_waiting
 from app.services.assistant.turns import (
     AssistantRequestConflict,
@@ -180,6 +188,11 @@ class ConversationService:
                         and row.command_json.get("waiting_field") == "activity_write"
                         and any(r.kind == "customer_activity" for r in snapshot.committed)
                         and turn.input_json.get("kind") == "confirm"
+                        and turn.input_json.get("choice") == "confirm"
+                    )
+                    proposal_receipt = (
+                        AcceptedProposalReceipt.model_validate(data["proposal_receipt"])
+                        if "proposal_receipt" in data else None
                     )
                     result.append(
                         ConversationMessage(
@@ -194,12 +207,16 @@ class ConversationService:
                             if is_activity
                             else "follow_up_disposition"
                             if card == "follow_up_disposition"
+                            else "proposal_unavailable"
+                            if snapshot and snapshot.proposal_outcome is not None and snapshot.waiting is None
                             else "task_completed"
                             if snapshot and snapshot.status == "COMPLETED" and snapshot.waiting is None
+                            and proposal_receipt is None
                             else None,
                             error_code=error_code if isinstance(error_code, str) else None,
                             retryable=retryable if isinstance(retryable, bool) else None,
                             projection=self._structured_projection(snapshot, card=card, is_activity=is_activity),
+                            proposal_receipt=proposal_receipt,
                         )
                     )
                     followup = data.get("next_turn_id")
@@ -329,7 +346,9 @@ class ConversationService:
             if turn:
                 payload = SubmitInputRequest.model_validate(
                     {
-                        **{key: value for key, value in turn.input_json.items() if key in {"kind", "text", "choice"}},
+                        **{key: value for key, value in turn.input_json.items() if key in {
+                            "kind", "text", "choice", "values", "form_revision", "choices", "suppress_week", "reason"
+                        }},
                         "client_request_id": f"conv-turn-{entry.public_id}",
                         "action_id": entry.command_json.get("action_id"),
                         "expected_version": entry.command_json.get("task_version"),
@@ -400,7 +419,35 @@ class ConversationService:
         *,
         lease_version: int,
     ) -> ConversationReply:
+        stored = entry.command_json.get("root_deadline")
+        deadline = (
+            datetime.fromisoformat(stored) if isinstance(stored, str)
+            else entry.created_time + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)
+        )
+        if not isinstance(stored, str):
+            entry.command_json = {**entry.command_json, "root_deadline": deadline.isoformat()}
+        token = bind_absolute_attempt_deadline(deadline)
+        try:
+            return await self._process_root_attempt(db, conversation, entry, lease_version=lease_version)
+        finally:
+            reset_attempt_deadline(token)
+
+    async def _process_root_attempt(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        lease_version: int,
+    ) -> ConversationReply:
         if entry.state == "ROUTING":
+            remaining = attempt_budget_remaining()
+            if remaining is not None and remaining <= 0:
+                return self._finish_root_failure(
+                    db, conversation, entry,
+                    AssistantLLMError("模型服务响应超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT),
+                    lease_version=lease_version,
+                )
             tasks = crud.candidates(db, conversation)
             recent = self.read(db, team_id=conversation.team_id, user_id=conversation.user_id).messages[-12:]
             recent_messages = [{"role": message.role, "text": message.text[:2000]} for message in recent]
@@ -469,9 +516,17 @@ class ConversationService:
         tasks: list[AssistantTask],
         recent_messages: list[dict[str, str]],
     ) -> ConversationDecision:
-        crud.renew_model_lease(db, conversation, entry, lease_version=lease_version, seconds=ROOT_MODEL_LEASE_SECONDS)
+        remaining = attempt_budget_remaining()
+        if remaining is not None and remaining <= 0:
+            raise AssistantLLMError("模型服务响应超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
+        stored_events = entry.command_json.get("root_stages")
+        events = list(stored_events) if isinstance(stored_events, list) else []
+        events.append({"stage": "route", "phase": "start"})
+        entry.command_json = {**entry.command_json, "root_stages": events}
+        crud.save(db, conversation, entry, lease_version=lease_version)
+        started = monotonic()
         try:
-            return await self.classifier.classify(
+            decision = await self.classifier.classify(
                 db,
                 team_id=conversation.team_id,
                 text=text,
@@ -479,6 +534,13 @@ class ConversationService:
                 focused_task_public_id=conversation.focused_task_public_id,
                 recent_messages=recent_messages,
             )
+            remaining = attempt_budget_remaining()
+            if remaining is not None and remaining <= 0:
+                raise AssistantLLMError("模型服务响应超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
+            done = {"stage": "route", "phase": "done", "ms": int((monotonic() - started) * 1000)}
+            entry.command_json = {**entry.command_json, "root_stages": [*events, done]}
+            crud.save(db, conversation, entry, lease_version=lease_version)
+            return decision
         except crud.ConversationConflict:
             raise
         except AssistantLLMError:
@@ -555,13 +617,13 @@ class ConversationService:
                 db,
                 conversation,
                 entry,
-                "销售助手目前只记录客户沟通，请到 AI Agent 查询；这次没有写入。",
+                "销售助手目前只记录客户沟通，查询请到客户管理或客户追踪页面；这次没有写入。",
                 lease_version=lease_version,
             )
         if (
             plan.business_object != "CUSTOMER_ACTIVITY"
             or plan.operation != "CREATE"
-            or plan.speech_act not in {"ASSERT_EVENT", "REQUEST_ACTION", "PROVIDE_SUPPLEMENT"}
+            or plan.speech_act not in {"ASSERT_EVENT", "REQUEST_ACTION", "PROVIDE_SUPPLEMENT", "CORRECT"}
         ):
             return self._finish_message(
                 db,
@@ -572,6 +634,33 @@ class ConversationService:
             )
         target = crud.owned_task(db, conversation, decision.target_task_public_id)
         supplied_ids = entry.command_json.get("route_candidate_ids")
+        if plan.speech_act == "CORRECT":
+            from app.services.assistant.activity_edit import editable_activity_fields
+
+            correction = decision.correction
+            if target is not None and activity_commit_is_unknown(target):
+                return self._finish_message(
+                    db, conversation, entry, ACTIVITY_COMMIT_UNKNOWN_MESSAGE, target, lease_version=lease_version,
+                )
+            waiting = load_waiting(target) if target else None
+            if (
+                target is None or target.status != "ACTIVE" or target.active_turn_id is not None
+                or not isinstance(supplied_ids, list) or target.public_id not in supplied_ids
+                or decision.boundary != "CONTINUE" or decision.task_relation != "CONTINUE_TASK"
+                or decision.route != "WORKFLOW" or correction is None or not correction.quote.strip()
+                or correction.quote not in entry.user_text
+                or correction.field not in editable_activity_fields(load_draft(target))
+                or waiting is None or waiting.type != "CONFIRMATION" or waiting.field != "activity_write"
+                or any(r.get("kind") == "customer_activity" for r in target.committed_json or [])
+            ):
+                return self._finish_message(
+                    db, conversation, entry, "这项不能在这里修改；这次没有写入。", lease_version=lease_version,
+                )
+            entry.command_json = {**entry.command_json, "correction": correction.model_dump(mode="json")}
+            return self._accept(db, conversation, entry, target, SubmitInputRequest(
+                kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}",
+                action_id=waiting.action_id, expected_version=waiting.expected_version,
+            ), lease_version=lease_version)
         if decision.boundary != "NEW" and (
             target is None or not isinstance(supplied_ids, list) or decision.target_task_public_id not in supplied_ids
         ):
@@ -690,6 +779,10 @@ class ConversationService:
                 prepared_task,
                 SubmitInputRequest.model_validate(entry.command_json["prepared_input"]),
                 lease_version=lease_version,
+            )
+        if target is not None and activity_commit_is_unknown(target):
+            return self._finish_message(
+                db, conversation, entry, ACTIVITY_COMMIT_UNKNOWN_MESSAGE, target, lease_version=lease_version,
             )
         if (
             target is None
@@ -823,9 +916,14 @@ class ConversationService:
                 db,
                 task=task,
                 key=payload.client_request_id,
-                input_data={"kind": payload.kind, "text": payload.text, "choice": payload.choice},
+                input_data=payload.turn_input(),
                 action_id=payload.action_id,
                 expected_version=payload.expected_version,
+                prepared_metadata={
+                    key: entry.command_json[key]
+                    for key in ("correction", "root_deadline", "root_stages")
+                    if key in entry.command_json
+                },
             )
         except (AssistantRequestConflict, AssistantStateConflict):
             db.refresh(task)
@@ -853,7 +951,10 @@ class ConversationService:
         normalized = {
             "operation": "command",
             "task_public_id": request.task_public_id,
-            **payload.model_dump(mode="json"),
+            **payload.model_dump(
+                mode="json", exclude={"values", "form_revision", "choices", "suppress_week", "reason"},
+            ),
+            **{key: value for key, value in payload.turn_input().items() if key not in {"kind", "text", "choice"}},
         }
         if previous is None and request.task_public_id != conversation.focused_task_public_id:
             raise crud.ConversationConflict("这张卡片不是当前沟通，请先接回对应沟通。")

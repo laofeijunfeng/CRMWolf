@@ -1,7 +1,9 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, Text, JSON, Index, Boolean, Integer
+import enum
+
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Index, Integer, String
+
 from app.core.database import Base
 from app.utils.time import business_now
-import enum
 
 
 class EventAction(str, enum.Enum):
@@ -51,20 +53,20 @@ class OperationLog(Base):
     content = Column(JSON, nullable=False, comment="事件内容")
     remark = Column(String(500), nullable=True, comment="备注")
 
-    # ==================== 撤销支持字段（新增） ====================
+    # ==================== 撤销支持字段(新增) ====================
     undoable = Column(Boolean, default=False, comment="是否可撤销")
-    undo_ttl = Column(Integer, default=10, comment="撤销窗口（秒）")
+    undo_ttl = Column(Integer, default=10, comment="撤销窗口\uff08秒\uff09")
     undo_deadline = Column(DateTime, nullable=True, comment="撤销截止时间")
     undone = Column(Boolean, default=False, comment="是否已撤销")
     undo_by = Column(String(100), nullable=True, comment="撤销操作人ID")
     undo_at = Column(DateTime, nullable=True, comment="撤销时间")
 
-    # ==================== Workflow 关联字段（新增） ====================
+    # ==================== Workflow 关联字段(新增) ====================
     workflow_session_id = Column(String(64), nullable=True, index=True, comment="Workflow Session ID")
     step_id = Column(String(32), nullable=True, comment="Workflow 步骤ID")
-    parent_operation_id = Column(BigInteger, nullable=True, comment="父操作ID（用于级联撤销）")
+    parent_operation_id = Column(BigInteger, nullable=True, comment="父操作ID\uff08用于级联撤销\uff09")
 
-    # ==================== 快照字段（新增） ====================
+    # ==================== 快照字段(新增) ====================
     before_snapshot = Column(JSON, nullable=True, comment="操作前状态快照")
     after_snapshot = Column(JSON, nullable=True, comment="操作后状态快照")
 
@@ -80,5 +82,8 @@ class OperationLog(Base):
         {'comment': '操作记录表'}
     )
 
-    def __repr__(self):
-        return f"<OperationLog(id={self.id}, event_type={self.event_type}, primary_resource_id={self.primary_resource_id})>"
+    def __repr__(self) -> str:
+        return (
+            f"<OperationLog(id={self.id}, event_type={self.event_type}, "
+            f"primary_resource_id={self.primary_resource_id})>"
+        )

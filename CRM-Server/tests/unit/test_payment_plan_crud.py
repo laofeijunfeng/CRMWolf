@@ -115,13 +115,6 @@ class _FakeDealJourneyService:
         self.refreshed.append(deal_journey_id)
 
 
-@pytest.fixture(autouse=True)
-def _stub_source_progress_for_fake_db(monkeypatch):
-    # These arithmetic tests use a fake session; source progress has DB-specific locking.
-    monkeypatch.setattr("app.crud.payment.lock_source_customer", lambda db, **kwargs: db.customer)
-    monkeypatch.setattr("app.crud.payment.advance_eligible_progress", lambda db, **kwargs: None)
-
-
 def test_batch_create_passes_team_id_to_operation_log(monkeypatch):
     contract = SimpleNamespace(
         id=39,

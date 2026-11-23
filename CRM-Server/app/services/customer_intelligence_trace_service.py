@@ -16,7 +16,7 @@ def customer_intelligence_step_event(step: CustomerIntelligenceTraceStep) -> JSO
         "event": "agent_step",
         "step": "customer_intelligence",
         "status": "completed",
-        "content": f"{step['title']}：{step['content']}",
+        "content": f"{step['title']}\uff1a{step['content']}",
     }
 
 

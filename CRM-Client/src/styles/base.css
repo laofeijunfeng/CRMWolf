@@ -137,7 +137,6 @@
   --sidebar-width: 220px;
   --topbar-height: 56px;
   --context-tabs-height: 36px;
-  --bottom-nav-height: 56px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --assistant-column: 720px;

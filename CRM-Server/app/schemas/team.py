@@ -1,7 +1,6 @@
-from __future__ import annotations
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class RoleSimpleResponse(BaseModel):
@@ -13,7 +12,7 @@ class RoleSimpleResponse(BaseModel):
 
 class AssignRolesRequest(BaseModel):
     """分配角色请求"""
-    role_ids: List[int] = Field(..., description="角色ID列表")
+    role_ids: list[int] = Field(..., description="角色ID列表")
 
 
 class TeamBase(BaseModel):
@@ -25,7 +24,7 @@ class TeamCreate(TeamBase):
 
 
 class TeamUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="团队名称")
+    name: str | None = Field(None, min_length=1, max_length=100, description="团队名称")
 
 
 class TeamResponse(TeamBase):
@@ -70,19 +69,19 @@ class TeamMemberResponse(BaseModel):
     id: int = Field(..., description="用户ID")
     name: str = Field(..., description="用户姓名")
     email: str = Field(..., description="用户邮箱")
-    avatar_url: Optional[str] = Field(None, description="用户头像")
+    avatar_url: str | None = Field(None, description="用户头像")
     current_team: bool = Field(..., description="是否为当前活跃团队")
     joined_at: datetime = Field(..., description="加入时间")
-    roles: List[RoleSimpleResponse] = Field(default=[], description="用户角色列表")
+    roles: list[RoleSimpleResponse] = Field(default=[], description="用户角色列表")
 
 
 class TeamWithMembersResponse(TeamResponse):
-    members: List[TeamMemberResponse] = []
+    members: list[TeamMemberResponse] = []
 
 
 class UserTeamsListResponse(BaseModel):
-    teams: List[TeamResponse]
-    current_team_id: Optional[int] = Field(None, description="当前活跃团队ID")
+    teams: list[TeamResponse]
+    current_team_id: int | None = Field(None, description="当前活跃团队ID")
 
 
 class ResetPasswordRequest(BaseModel):
@@ -101,7 +100,7 @@ class UpdateMemberNameRequest(BaseModel):
 
     @field_validator('name')
     @classmethod
-    def name_must_not_be_empty(cls, v):
+    def name_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('用户名不能为空')
         return v.strip()

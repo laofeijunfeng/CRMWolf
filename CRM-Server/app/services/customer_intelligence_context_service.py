@@ -24,7 +24,6 @@ from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.customer_activity_deletion import CustomerActivityDeletionTombstone
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.deal_journey import CustomerDealJourney, CustomerDealJourneyEvent, DealJourneyEventType
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
@@ -476,7 +475,8 @@ class CustomerIntelligenceContextService:
             CustomerActivity.customer_id == customer.id, CustomerActivity.team_id == team_id,
             CustomerActivity.submission_source.in_(LEGACY_ACTIVITY_SOURCES),
         ).all()
-        activities = sorted(all_activities, key=lambda item: (item.occurred_at or datetime.min, int(item.id)), reverse=True)[:50]
+        activities = sorted(all_activities, key=lambda item: (item.occurred_at
+            or datetime.min, int(item.id)), reverse=True)[:50]
         all_deletions = db.query(CustomerActivityDeletionTombstone).filter(
             CustomerActivityDeletionTombstone.team_id == team_id,
             CustomerActivityDeletionTombstone.customer_id == customer.id,
@@ -514,8 +514,10 @@ class CustomerIntelligenceContextService:
         journey_ids = {int(item.id) for item in deal_journeys}
         journey_events = sorted((event for event in eligible_events if int(event.deal_journey_id) in journey_ids),
                                 key=lambda item: (item.event_time, int(item.id)), reverse=True)[:200]
-        commitments = sorted(eligible_commitments, key=lambda item: (item.updated_time or datetime.min, int(item.id)), reverse=True)[:100]
-        tasks = sorted(eligible_tasks, key=lambda item: (item.updated_time or datetime.min, int(item.id)), reverse=True)[:100]
+        commitments = sorted(eligible_commitments, key=lambda item: (item.updated_time
+            or datetime.min, int(item.id)), reverse=True)[:100]
+        tasks = sorted(eligible_tasks, key=lambda item: (item.updated_time or datetime.min,
+            int(item.id)), reverse=True)[:100]
         eligible_task_ids = {int(item.id) for item in eligible_tasks}
         eligible_task_by_id = {int(item.id): item for item in eligible_tasks}
         all_task_events = db.query(FollowUpTaskEvent).filter(

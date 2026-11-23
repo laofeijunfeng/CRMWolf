@@ -3,12 +3,14 @@ AI 实体解析基类
 
 提供通用的 AI 解析逻辑,子类继承后只需实现定制化部分
 """
-from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Dict, Any, Optional
-from sqlalchemy.orm import Session
-import httpx
 import json
 import logging
+from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
+from typing import Any
+
+import httpx
+from sqlalchemy.orm import Session
 
 from app.crud.ai_config import ai_config_crud
 
@@ -19,17 +21,17 @@ class EntityAIParserBase(ABC):
     """实体 AI 解析基类"""
 
     # 子类必须定义的属性
-    entity_type: str = ""  # 实体类型：lead, customer, opportunity, contract
+    entity_type: str = ""  # 实体类型:lead, customer, opportunity, contract
 
-    # ==================== 抽象方法（子类必须实现） ====================
+    # ==================== 抽象方法(子类必须实现) ====================
 
     @abstractmethod
     def get_system_prompt(self, db: Session | None = None, team_id: int | None = None) -> str:
-        """获取系统提示词（各实体定义自己的提示词）"""
+        """获取系统提示词\uff08各实体定义自己的提示词\uff09"""
         pass
 
     @abstractmethod
-    def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
+    def get_enum_maps(self) -> dict[str, dict[str, Any]]:
         """
         获取枚举映射配置
 
@@ -39,15 +41,15 @@ class EntityAIParserBase(ABC):
         pass
 
     @abstractmethod
-    def parse_ai_response(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_ai_response(self, parsed: dict[str, Any]) -> dict[str, Any]:
         """
-        解析 AI 响应，转换为结构化数据
+        解析 AI 响应\uff0c转换为结构化数据
 
         Args:
             parsed: AI 返回的 JSON 数据
 
         Returns:
-            结构化的解析结果（各实体定义自己的结构）
+            结构化的解析结果\uff08各实体定义自己的结构\uff09
         """
         pass
 
@@ -55,12 +57,12 @@ class EntityAIParserBase(ABC):
     async def create_entity(
         self,
         db: Session,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> Any:
         """
-        创建实体（各实体定义自己的创建逻辑）
+        创建实体\uff08各实体定义自己的创建逻辑\uff09
 
         Args:
             db: 数据库 Session
@@ -78,20 +80,20 @@ class EntityAIParserBase(ABC):
         self,
         db: Session,
         entity: Any,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> None:
         """
-        创建后的额外操作（可选）
+        创建后的额外操作\uff08可选\uff09
 
-        例如：
-        - 线索：创建跟进记录
-        - 客户：触发档案生成
+        例如\uff1a
+        - 线索\uff1a创建跟进记录
+        - 客户\uff1a触发档案生成
         """
         pass
 
-    # ==================== 通用方法（基类提供） ====================
+    # ==================== 通用方法(基类提供) ====================
 
     def _clean_json_response(self, content: str) -> str:
         """清理 JSON 响应中的 markdown 代码块标记"""
@@ -108,16 +110,16 @@ class EntityAIParserBase(ABC):
         self,
         enum_map_name: str,
         user_value: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """
-        转换枚举值（通用方法）
+        转换枚举值\uff08通用方法\uff09
 
         Args:
-            enum_map_name: 枚举映射名称（如 "source", "scale"）
-            user_value: 用户输入值（如 "线上注册", "20人"）
+            enum_map_name: 枚举映射名称\uff08如 "source", "scale"\uff09
+            user_value: 用户输入值\uff08如 "线上注册", "20人"\uff09
 
         Returns:
-            枚举值（如 "ONLINE_REGISTER", "1-50人"）
+            枚举值\uff08如 "ONLINE_REGISTER", "1-50人"\uff09
         """
         enum_maps = self.get_enum_maps()
         enum_map = enum_maps.get(enum_map_name)
@@ -132,9 +134,9 @@ class EntityAIParserBase(ABC):
         db: Session,
         user_message: str,
         team_id: int
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
-        流式解析（通用 SSE 流式响应逻辑）
+        流式解析\uff08通用 SSE 流式响应逻辑\uff09
 
         Args:
             db: 数据库 Session
@@ -174,74 +176,73 @@ class EntityAIParserBase(ABC):
             full_content = ""
 
             # 流式调用 AI API
-            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
-                async with client.stream(
-                    "POST",
-                    f"{config.api_host}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                        "Accept-Encoding": "identity"
-                    },
-                    json=request_body
-                ) as response:
-                    response.raise_for_status()
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client, client.stream(
+                "POST",
+                f"{config.api_host}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept-Encoding": "identity"
+                },
+                json=request_body
+            ) as response:
+                response.raise_for_status()
 
-                    buffer = ""
-                    async for text_chunk in response.aiter_text():
-                        buffer += text_chunk
-                        lines = buffer.split('\n')
-                        buffer = lines[-1] if lines else ""
+                buffer = ""
+                async for text_chunk in response.aiter_text():
+                    buffer += text_chunk
+                    lines = buffer.split('\n')
+                    buffer = lines[-1] if lines else ""
 
-                        for line in lines[:-1]:
-                            if not line or not line.startswith("data: "):
-                                continue
+                    for line in lines[:-1]:
+                        if not line or not line.startswith("data: "):
+                            continue
 
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                break
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
 
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content_piece = delta.get("content", "")
-                                    if content_piece:
-                                        full_content += content_piece
-                                        yield {"event": "content", "content": content_piece}
-                            except json.JSONDecodeError:
-                                continue
+                        try:
+                            chunk = json.loads(data_str)
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content_piece = delta.get("content", "")
+                                if content_piece:
+                                    full_content += content_piece
+                                    yield {"event": "content", "content": content_piece}
+                        except json.JSONDecodeError:
+                            continue
 
-                    # 解析完整响应。reasoning 模型可能把 token 预算耗在思考上，
-                    # content 为空或被截断时给出可读错误，而不是裸 JSONDecodeError。
-                    if not full_content.strip():
-                        yield {"event": "error", "message": "AI 输出为空（思考过程可能耗尽了输出额度），请重试"}
-                        return
-                    clean_content = self._clean_json_response(full_content)
-                    try:
-                        parsed = json.loads(clean_content)
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            "%s AI parse got malformed JSON (len=%d): %.200s",
-                            self.entity_type, len(clean_content), clean_content,
-                        )
-                        yield {"event": "error", "message": "AI 输出被截断或格式异常，请重试"}
-                        return
+                # 解析完整响应。reasoning 模型可能把 token 预算耗在思考上,
+                # content 为空或被截断时给出可读错误,而不是裸 JSONDecodeError。
+                if not full_content.strip():
+                    yield {"event": "error", "message": "AI 输出为空\uff08思考过程可能耗尽了输出额度\uff09\uff0c请重试"}
+                    return
+                clean_content = self._clean_json_response(full_content)
+                try:
+                    parsed = json.loads(clean_content)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "%s AI parse got malformed JSON (len=%d): %.200s",
+                        self.entity_type, len(clean_content), clean_content,
+                    )
+                    yield {"event": "error", "message": "AI 输出被截断或格式异常\uff0c请重试"}
+                    return
 
-                    # 调用子类的解析方法，并把名称解析成表单可用的 public_id
-                    result = self.parse_ai_response(parsed)
-                    if hasattr(self, "attach_catalog_ids"):
-                        self.attach_catalog_ids(result, db, team_id)
+                # 调用子类的解析方法,并把名称解析成表单可用的 public_id
+                result = self.parse_ai_response(parsed)
+                if hasattr(self, "attach_catalog_ids"):
+                    self.attach_catalog_ids(result, db, team_id)
 
-                    yield {
-                        "event": "parsed",
-                        **result  # 展开子类返回的结构化数据
-                    }
+                yield {
+                    "event": "parsed",
+                    **result  # 展开子类返回的结构化数据
+                }
 
         except httpx.HTTPStatusError as e:
             logger.exception("%s AI parse request failed", self.entity_type)
-            yield {"event": "error", "message": f"AI 服务请求失败：{e.response.status_code}"}
+            yield {"event": "error", "message": f"AI 服务请求失败\uff1a{e.response.status_code}"}
         except Exception as e:
             logger.exception("%s AI parse failed", self.entity_type)
-            yield {"event": "error", "message": f"AI 服务异常：{str(e)}"}
+            yield {"event": "error", "message": f"AI 服务异常\uff1a{e!s}"}

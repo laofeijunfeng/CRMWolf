@@ -1,17 +1,11 @@
-# 实施路线
+# 领域实施规格
 
-本领域记录 Agent 能力落地状态和后续优先级。这里描述目标和顺序，不替代需求文档。
+本目录保留现行客户活动与助手写入的实施合同。
 
 | 主题 | 使用场景 |
 | --- | --- |
-| [当前状态](current-state.md) | 判断已实现能力和仍缺失的底层能力。 |
-| [增强优先级](enhancement-priority.md) | 决定下一步先补哪些生产级能力。 |
-| [旧流程 Parity Matrix](legacy-workflow-parity-matrix.md) | 保留旧 Agent 与新 Workflow 的差异证据。 |
-| [Parity 确认过程](workflow-parity-open-questions.md) | 保留逐项分析和已冻结的产品确认记录。 |
 | [客户活动 Workflow 实施规格](customer-activity-workflow-parity-spec.md) | 本轮客户活动、评分、后台任务和商机流程的权威实施合同。 |
-| [Agent 2.0 优化 TRD（审阅草案）](agent-2-optimization-trd.md) | 追踪销售助手无框架链、逐笔确认、来源隔离、实施阶段与验收矩阵；待审阅，不覆盖已冻结的客户活动合同。 |
-| [客户活动 Workflow 验收矩阵](customer-activity-workflow-acceptance-matrix.md) | 实施、迁移和发布必须通过的测试与验收基线。 |
-| [客户活动 Workflow 实施状态](customer-activity-workflow-implementation-status.md) | 跟踪每个 Ticket 已进入代码、迁移和测试的真实状态。 |
-| [客户活动 Workflow Cutover Runbook](customer-activity-workflow-cutover-runbook.md) | migration 122 的执行、重跑、对账和发布门禁。 |
+| [Agent UI 平台边界](../runtime/agent-ui-platform.md) | 用户确认、投影、回执和历史回放。 |
+| [销售助手命令契约](../runtime/assistant-command-contract.md) | `/v1/assistant` 命令账本、对账权限及恢复。 |
 
 [返回 Agent 根入口](../README.md)

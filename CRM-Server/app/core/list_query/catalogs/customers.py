@@ -51,7 +51,9 @@ CUSTOMERS_LIST_QUERY_CATALOG = ListQueryCatalog(
     fields=[
         ListQueryField(key="account_name", type="text", expression=Customer.account_name),
         ListQueryField(key="primary_contact_name", type="text", expression=_primary_contact_expression(Contact.name)),
-        ListQueryField(key="primary_contact_mobile", type="text", expression=_primary_contact_expression(Contact.mobile)),
+        ListQueryField(
+            key="primary_contact_mobile", type="text", expression=_primary_contact_expression(Contact.mobile)
+        ),
         person_field("owner_id", Customer.owner_id),
         ListQueryField(
             key="collaborators",

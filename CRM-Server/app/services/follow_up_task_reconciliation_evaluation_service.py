@@ -294,7 +294,8 @@ class FollowUpTaskReconciliationEvaluationService:
                 case, "COMPLETE"
             ):
                 false_close_cases.append(case.name)
-            if any(item.decision == "POSTPONE" for item in decisions) and not self._decision_is_expected(case, "POSTPONE"):
+            if any(item.decision == "POSTPONE" for item in decisions) and not self._decision_is_expected(
+                case, "POSTPONE"):
                 false_postpone_cases.append(case.name)
             needs_confirmation = any(item.needs_confirmation for item in decisions)
             asks_confirmation = any(item.decision == "ASK_CONFIRMATION" for item in decisions)

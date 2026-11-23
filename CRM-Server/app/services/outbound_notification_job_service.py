@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+_RecipientIdT = TypeVar("_RecipientIdT", bound=int | str | None)
 
 _PENDING_OR_REMINDER = frozenset(
     {
@@ -139,7 +140,7 @@ class OutboundNotificationJobService:
         event_type: str,
         business_type: str,
         business_id: int,
-        recipient_user_ids: list[int] | int | str | None,
+        recipient_user_ids: list[_RecipientIdT] | int | str | None,
         actor_id: str | None = None,
         payload_json: dict[str, object] | None = None,
         idempotency_key: str | None = None,
@@ -173,7 +174,7 @@ class OutboundNotificationJobService:
         event_type: str,
         business_type: str,
         business_id: int,
-        recipient_user_ids: list[int] | int | str | None,
+        recipient_user_ids: list[_RecipientIdT] | int | str | None,
         actor_id: str | None = None,
         payload_json: dict[str, object] | None = None,
         idempotency_key: str | None = None,
@@ -214,7 +215,8 @@ class OutboundNotificationJobService:
         recipient_user_ids: list[int] | None = None,
     ) -> OutboundNotificationJobRequest | None:
         node_id = int(approval.current_node_id) if approval.current_node_id is not None else None
-        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, approval, team_id)
+        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(
+            db, approval, team_id)
         if node_id is None:
             return None
         return self.enqueue_in_transaction(
@@ -239,7 +241,7 @@ class OutboundNotificationJobService:
         cc_entries: list[dict[str, Any]],
         actor_id: str | None = None,
     ) -> list[OutboundNotificationJobRequest]:
-        """流转经过的抄送节点：每个节点一张卡片，打开只读详情。"""
+        """流转经过的抄送节点\uff1a每个节点一张卡片\uff0c打开只读详情。"""
         requests: list[OutboundNotificationJobRequest] = []
         for entry in cc_entries:
             recipients = [int(uid) for uid in entry.get("user_ids") or []]
@@ -380,7 +382,8 @@ class OutboundNotificationJobService:
         recipient_user_ids: list[int] | None = None,
     ) -> OutboundNotificationJobRequest | None:
         node_id = int(approval.current_node_id) if approval.current_node_id is not None else None
-        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(db, approval, team_id)
+        recipients = recipient_user_ids if recipient_user_ids is not None else self._notification_user_ids(
+            db, approval, team_id)
         if node_id is None:
             return None
         return self.enqueue_in_transaction(
@@ -855,7 +858,8 @@ class OutboundNotificationJobService:
                 current_node = getattr(approval, "current_node", None)
                 node_name = current_node.node_name if current_node is not None else ""
         payload = _payload_dict(job_data.get("payload_json"))
-        entity_name = adapter.get_name(entity) or _optional_str(payload.get("entity_name")) or f"{business_type}#{business_id}"
+        entity_name = adapter.get_name(entity) or _optional_str(payload.get(
+            "entity_name")) or f"{business_type}#{business_id}"
         return {
             "entity_type": business_type,
             "entity_name": entity_name,
@@ -868,15 +872,15 @@ class OutboundNotificationJobService:
             "detail_fields": get_approval_card_fields(db, business_type, entity),
         }
 
-    def _notification_user_ids(self, db: Session, approval: Any, team_id: int) -> list[int]:
-        """当前节点的冻结审批人（提交/流转时写入 participants）。"""
+    def _notification_user_ids(self, db: Session, approval: Approval, team_id: int) -> list[int]:
+        """当前节点的冻结审批人\uff08提交/流转时写入 participants\uff09。"""
         if approval is None:
             return []
         from app.services.approval_routing import current_approver_ids
 
         user_ids = current_approver_ids(db, approval)
         if not user_ids:
-            logger.warning("审批通知跳过：当前节点无审批人（approval_id=%s, team_id=%s）", approval.id, team_id)
+            logger.warning("审批通知跳过\uff1a当前节点无审批人\uff08approval_id=%s, team_id=%s\uff09", approval.id, team_id)
         return user_ids
 
     @staticmethod

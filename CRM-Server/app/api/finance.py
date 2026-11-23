@@ -1,37 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from typing import Optional, List
-from datetime import date, datetime, timedelta
+from datetime import date
 from decimal import Decimal
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team
-from app.crud.permission import permission_crud
-from app.models.user import User
-from app.models.payment import PaymentPlan, PaymentRecord, PaymentPlanStatus, PaymentConfirmationStatus
+from app.core.deps import get_current_user_team, require_permission
+from app.crud.payment import sum_approved_payment_amount
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.opportunity import Opportunity
-from app.models.invoice import InvoiceApplication
-from app.schemas.payment import (
-    PaymentRecordConfirm,
-    PaymentRecordWithConfirmation,
-    PaymentPlanResponse
-)
-from app.crud.payment import payment_record_crud, payment_plan_crud, sum_approved_payment_amount
+from app.models.payment import PaymentConfirmationStatus, PaymentPlan, PaymentPlanStatus, PaymentRecord
+from app.models.user import User
 
 router = APIRouter(prefix="/finance", tags=["财务管理"])
 
 
-# ========== 已废弃：财务直接确认 API（统一走审批流程）==========
-# 所有回款必须走审批流程，审批通过后自动确认入账。
-# 此 API 已废弃，保留仅用于向后兼容，请勿使用。
+# ========== 已废弃:财务直接确认 API(统一走审批流程)==========
+# 所有回款必须走审批流程,审批通过后自动确认入账。
+# 此 API 已废弃,保留仅用于向后兼容,请勿使用。
 #
 # @router.post(
 #     "/payment-records/{record_id}/confirm",
 #     response_model=PaymentRecordWithConfirmation,
 #     summary="[已废弃] 确认回款入账",
-#     description="已废弃：所有回款统一走审批流程，审批通过后自动确认入账。请使用审批中心进行审批操作。",
+#     description="已废弃:所有回款统一走审批流程,审批通过后自动确认入账。请使用审批中心进行审批操作。",
 #     deprecated=True,
 # )
 # def confirm_payment_record(...):
@@ -91,11 +84,11 @@ def _populate_record_info(db: Session, record: PaymentRecord) -> dict:
 @router.get(
     "/receivables/aging-analysis",
     summary="应收账款账龄分析",
-    description="按时间区间统计逾期应收账款金额，帮助评估坏账风险"
+    description="按时间区间统计逾期应收账款金额\uff0c帮助评估坏账风险"
 )
 def get_receivables_aging_analysis(
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(require_permission("finance:receivables_view")),
     db: Session = Depends(get_db)
@@ -137,7 +130,7 @@ def get_receivables_aging_analysis(
         
         total_overdue_amount += remaining_amount
         
-        for bucket_name, bucket in aging_buckets.items():
+        for bucket in aging_buckets.values():
             if bucket["days_start"] <= days_overdue <= bucket["days_end"]:
                 bucket["amount"] += remaining_amount
                 bucket["count"] += 1
@@ -184,12 +177,12 @@ def get_receivables_aging_analysis(
 @router.get(
     "/receivables/overdue-alerts",
     summary="逾期回款预警列表",
-    description="获取所有逾期回款计划列表，用于催收管理"
+    description="获取所有逾期回款计划列表\uff0c用于催收管理"
 )
 def get_overdue_alerts(
-    days_overdue_min: Optional[int] = Query(None, description="最小逾期天数"),
-    days_overdue_max: Optional[int] = Query(None, description="最大逾期天数"),
-    min_amount: Optional[float] = Query(None, description="最小欠款金额"),
+    days_overdue_min: int | None = Query(None, description="最小逾期天数"),
+    days_overdue_max: int | None = Query(None, description="最大逾期天数"),
+    min_amount: float | None = Query(None, description="最小欠款金额"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的记录数"),
     team_id: int = Depends(get_current_user_team),
@@ -273,8 +266,8 @@ def get_overdue_alerts(
     description="按时间、产品、客户维度统计合同收入、实收金额、欠款金额等"
 )
 def get_contract_revenue_report(
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
     group_by: str = Query("month", description="分组方式: day(按天), week(按周), month(按月), customer(按客户)"),
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(require_permission("finance:reports_view")),
@@ -299,7 +292,7 @@ def get_contract_revenue_report(
         return _group_by_time(contracts, group_by, db)
 
 
-def _group_by_time(contracts: List[Contract], group_by: str, db: Session) -> dict:
+def _group_by_time(contracts: list[Contract], group_by: str, db: Session) -> dict:
     groups = {}
     
     for contract in contracts:
@@ -322,7 +315,9 @@ def _group_by_time(contracts: List[Contract], group_by: str, db: Session) -> dic
         groups[key]["contract_count"] += 1
         groups[key]["total_amount"] += Decimal(str(contract.total_amount or 0))
         groups[key]["total_paid"] += Decimal(str(contract.total_paid_amount or 0))
-        groups[key]["total_pending"] += Decimal(str(contract.total_amount or 0)) - Decimal(str(contract.total_paid_amount or 0))
+        groups[key]["total_pending"] += (
+            Decimal(str(contract.total_amount or 0)) - Decimal(str(contract.total_paid_amount or 0))
+        )
     
     result = sorted(groups.values(), key=lambda x: x["period"])
     
@@ -340,7 +335,7 @@ def _group_by_time(contracts: List[Contract], group_by: str, db: Session) -> dic
     }
 
 
-def _group_by_customer(contracts: List[Contract], db: Session) -> dict:
+def _group_by_customer(contracts: list[Contract], db: Session) -> dict:
     groups = {}
     
     for contract in contracts:
@@ -363,7 +358,9 @@ def _group_by_customer(contracts: List[Contract], db: Session) -> dict:
         groups[key]["contract_count"] += 1
         groups[key]["total_amount"] += Decimal(str(contract.total_amount or 0))
         groups[key]["total_paid"] += Decimal(str(contract.total_paid_amount or 0))
-        groups[key]["total_pending"] += Decimal(str(contract.total_amount or 0)) - Decimal(str(contract.total_paid_amount or 0))
+        groups[key]["total_pending"] += (
+            Decimal(str(contract.total_amount or 0)) - Decimal(str(contract.total_paid_amount or 0))
+        )
     
     result = sorted(groups.values(), key=lambda x: x["total_amount"], reverse=True)
     
