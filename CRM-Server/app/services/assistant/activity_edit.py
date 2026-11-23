@@ -38,8 +38,8 @@ class ActivityEditValidationError(ValueError):
         super().__init__(f"{field}: {message}")
 
 
-def _bundle(draft: TaskDraft) -> dict[str, object] | None:
-    value = draft.content_json.get("temporal_evidence")
+def _bundle(content_json: Mapping[str, object]) -> dict[str, object] | None:
+    value = content_json.get("temporal_evidence")
     return value if isinstance(value, dict) and value.get("version") == "temporal-evidence-v1" else None
 
 
@@ -60,9 +60,9 @@ def edited_activity_summary(content_json: Mapping[str, object]) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def activity_edit_time(draft: TaskDraft, field: str) -> EditTime | None:
+def activity_edit_time(content_json: Mapping[str, object], field: str) -> EditTime | None:
     """Return an explicit date/datetime, an explicit clear, or no user override."""
-    times = draft.content_json.get(_TIME_KEY)
+    times = content_json.get(_TIME_KEY)
     value = times.get(field) if isinstance(times, dict) else None
     if not isinstance(value, dict) or value.get("source") != "USER":
         return None
@@ -88,16 +88,11 @@ def _resolved_time(at: datetime | None, granularity: str) -> EditTime | None:
     return None
 
 
-def _evidence_time(draft: TaskDraft, field: str) -> EditTime | None:
-    override = activity_edit_time(draft, field)
-    if override is not None:
-        return override
-    bundle = _bundle(draft)
+def communication_time_evidence(content_json: Mapping[str, object]) -> EditTime | None:
+    """Return the active temporal evidence without applying a user override."""
+    bundle = _bundle(content_json)
     if bundle is None:
         return None
-    if field == "next_follow_time":
-        resolved, granularity = resolved_sales_follow_up(draft)
-        return _resolved_time(resolved, granularity)
     mentions = bundle.get("mentions")
     if isinstance(mentions, list):
         for raw in mentions:
@@ -108,6 +103,35 @@ def _evidence_time(draft: TaskDraft, field: str) -> EditTime | None:
                 and (resolved_mention := _resolved_time(mention.resolved_at, mention.granularity)) is not None
             ):
                 return resolved_mention
+    return None
+
+
+def resolved_communication_time(content_json: Mapping[str, object]) -> EditTime | None:
+    """Return the user override or the active communication-time evidence."""
+    override = activity_edit_time(content_json, "communication_time")
+    return override if override is not None else communication_time_evidence(content_json)
+
+
+def persisted_communication_time(content_json: Mapping[str, object]) -> EditTime | None:
+    """Return the occurrence time, restoring evidence after an explicit clear."""
+    override = activity_edit_time(content_json, "communication_time")
+    if override is not None and override[0] is not None:
+        return override
+    return communication_time_evidence(content_json)
+
+
+def _evidence_time(draft: TaskDraft, field: str) -> EditTime | None:
+    if field == "communication_time":
+        return resolved_communication_time(draft.content_json)
+    override = activity_edit_time(draft.content_json, field)
+    if override is not None:
+        return override
+    bundle = _bundle(draft.content_json)
+    if bundle is None:
+        return None
+    if field == "next_follow_time":
+        resolved, granularity = resolved_sales_follow_up(draft)
+        return _resolved_time(resolved, granularity)
     return None
 
 

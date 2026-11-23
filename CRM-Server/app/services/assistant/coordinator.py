@@ -278,7 +278,7 @@ class AssistantCoordinator:
         reporter = reporter or NullProgressReporter()
         draft = pending_draft if pending_draft is not None else load_draft(task)
         from app.services.assistant.temporal_evidence import temporal_waiting
-        edited_time = activity_edit_time(draft, "next_follow_time")
+        edited_time = activity_edit_time(draft.content_json, "next_follow_time")
 
         if edited_time is None and temporal_waiting(draft) is not None:
             gated = await self._gate_temporal_evidence(

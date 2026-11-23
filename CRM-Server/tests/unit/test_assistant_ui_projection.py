@@ -963,6 +963,145 @@ def test_communication_time_is_read_only_fact_without_followup_prompt() -> None:
     assert interaction.interaction_type == "confirmation"
 
 
+def test_user_edited_communication_time_overrides_temporal_evidence() -> None:
+    content_json = {
+        "activity_edit_times": {
+            "communication_time": {
+                "value": "2026-11-20T14:00",
+                "resolved_at": "2026-11-20T14:00:00",
+                "granularity": "DATETIME",
+                "source": "USER",
+            }
+        },
+        "temporal_evidence": {
+            "version": "temporal-evidence-v1",
+            "mentions": [
+                {
+                    "mention_id": "tm_old",
+                    "raw_text": "上周",
+                    "source_segment_id": "seg_old",
+                    "quote_start": 0,
+                    "quote_end": 3,
+                    "kind": "RELATIVE_DAY",
+                    "role": "OTHER",
+                    "granularity": "DATE",
+                    "anchor_at": "2026-11-20T10:00:00",
+                    "resolution_status": "RESOLVED",
+                    "resolved_at": "2026-11-13T00:00:00",
+                    "communication_time": True,
+                }
+            ],
+            "actions": [],
+        },
+    }
+    waiting = _confirmation(_preview(content_json=content_json, next_action=None))
+    envelope = project_assistant_message(
+        _message("edited_meeting_time", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    interaction = envelope.blocks[0]
+    fact = next(fact for fact in interaction.facts if fact.key == "communication_time")
+    assert fact.value == "2026年11月20日（周五）14:00"
+    assert fact.value != "2026年11月13日（周五）"
+    assert fact.source is None
+
+
+def test_user_edited_communication_date_shows_date_without_midnight_time() -> None:
+    waiting = _confirmation(
+        _preview(
+            content_json={
+                "activity_edit_times": {
+                    "communication_time": {
+                        "value": "2026-11-20",
+                        "resolved_at": "2026-11-20T00:00:00",
+                        "granularity": "DATE",
+                        "source": "USER",
+                    }
+                }
+            },
+            next_action=None,
+        )
+    )
+    envelope = project_assistant_message(
+        _message("edited_meeting_date", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    interaction = envelope.blocks[0]
+    fact = next(fact for fact in interaction.facts if fact.key == "communication_time")
+    assert fact.value == "2026年11月20日（周五）"
+
+
+def test_cleared_communication_time_suppresses_temporal_evidence() -> None:
+    waiting = _confirmation(
+        _preview(
+            content_json={
+                "activity_edit_times": {
+                    "communication_time": {
+                        "value": None,
+                        "resolved_at": None,
+                        "granularity": "UNKNOWN",
+                        "source": "USER",
+                    }
+                },
+                "temporal_evidence": {
+                    "version": "temporal-evidence-v1",
+                    "mentions": [
+                        {
+                            "mention_id": "tm_old",
+                            "raw_text": "上周",
+                            "source_segment_id": "seg_old",
+                            "quote_start": 0,
+                            "quote_end": 3,
+                            "kind": "RELATIVE_DAY",
+                            "role": "OTHER",
+                            "granularity": "DATE",
+                            "anchor_at": "2026-11-20T10:00:00",
+                            "resolution_status": "RESOLVED",
+                            "resolved_at": "2026-11-13T00:00:00",
+                            "communication_time": True,
+                        }
+                    ],
+                    "actions": [],
+                },
+            },
+            next_action=None,
+        )
+    )
+    envelope = project_assistant_message(
+        _message("cleared_meeting_time", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    interaction = envelope.blocks[0]
+    assert all(fact.key != "communication_time" for fact in interaction.facts)
+
+
+def test_cleared_communication_time_without_evidence_has_no_fact() -> None:
+    waiting = _confirmation(
+        _preview(
+            content_json={
+                "activity_edit_times": {
+                    "communication_time": {
+                        "value": None,
+                        "resolved_at": None,
+                        "granularity": "UNKNOWN",
+                        "source": "USER",
+                    }
+                }
+            },
+            next_action=None,
+        )
+    )
+    envelope = project_assistant_message(
+        _message("cleared_meeting_time_without_evidence", waiting.prompt, _task(waiting=waiting)),
+        active_waiting=True,
+        active_boundary=False,
+    )
+    interaction = envelope.blocks[0]
+    assert all(fact.key != "communication_time" for fact in interaction.facts)
+
 def test_follow_time_shows_the_frozen_year_and_default_reminder_hour() -> None:
     fact = _follow_time_fact(
         next_follow_time="2027-01-15T09:00:00",
@@ -1478,11 +1617,25 @@ def test_settling_disposition_never_exposes_actions_even_if_a_wait_is_present() 
 def test_settled_disposition_retains_each_result_and_suppression_status() -> None:
     task = _round_task(done=True, state="complete")
     task.follow_up_disposition.update(total=3, suppression_status="applied")
-    task.follow_up_disposition["items"].extend([
-        {"item_id": "i2", "title": "核对附件", "state": "failed", "result_title": "已被处理",
-         "result_message": "任务已不是未完成状态", "evidence_reason": "客户提到同一附件", "failure_code": "ALREADY_HANDLED"},
-        {"item_id": "i3", "title": "核对报价", "state": "unknown", "result_title": "结果待核对"},
-    ])
+    task.follow_up_disposition["items"].extend(
+        [
+            {
+                "item_id": "i2",
+                "title": "核对附件",
+                "state": "failed",
+                "result_title": "已被处理",
+                "result_message": "任务已不是未完成状态",
+                "evidence_reason": "客户提到同一附件",
+                "failure_code": "ALREADY_HANDLED",
+            },
+            {
+                "item_id": "i3",
+                "title": "核对报价",
+                "state": "unknown",
+                "result_title": "结果待核对",
+            },
+        ]
+    )
     message = _message("done", "历史跟进任务", task, outcome="follow_up_disposition")
     finalize_assistant_ui([message], focused_task=None, pending_choice=None)
     block = message.ui.blocks[0]
@@ -1500,7 +1653,12 @@ def test_overflow_is_a_warning_and_missing_batch_does_not_invent_a_card() -> Non
     envelope = project_assistant_message(message, active_waiting=False, active_boundary=False)
     assert [block.type for block in envelope.blocks] == ["notice"] and envelope.blocks[0].tone == "warning"
     no_batch = _message("absent", "没有新任务", _task())
-    assert [block.type for block in project_assistant_message(no_batch, active_waiting=False, active_boundary=False).blocks] == ["text"]
+    no_batch_blocks = project_assistant_message(
+        no_batch,
+        active_waiting=False,
+        active_boundary=False,
+    ).blocks
+    assert [block.type for block in no_batch_blocks] == ["text"]
 
 
 _CUSTOMER_ID = "cus_" + "a" * 32

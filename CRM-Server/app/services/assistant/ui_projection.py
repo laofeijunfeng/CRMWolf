@@ -40,6 +40,7 @@ from app.services.agent.ui.schemas import (
     TextBlock,
 )
 from app.services.assistant.activity_channel import CANONICAL_KINDS, kind_choice_candidates
+from app.services.assistant.activity_edit import activity_edit_time
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
     QUALITY_GATE_FAILURE_MESSAGE,
@@ -985,6 +986,21 @@ def _format_temporal_date(at: datetime, *, include_time: bool) -> str:
 
 
 def _add_communication_time_fact(facts: list[InteractionConfirmationFact], content_json: dict[str, object]) -> None:
+    override = activity_edit_time(content_json, "communication_time")
+    if override is not None:
+        at, granularity = override
+        if at is None:
+            return
+        _add_fact(
+            facts,
+            "communication_time",
+            "沟通时间",
+            _format_temporal_date(at, include_time=granularity == "DATETIME"),
+            group="write",
+            source=None,
+        )
+        return
+
     bundle = content_json.get("temporal_evidence")
     if not isinstance(bundle, dict) or bundle.get("version") != "temporal-evidence-v1":
         return

@@ -795,6 +795,145 @@ async def test_confirmation_freezes_parseable_user_time_and_writes_it(db):
         assert activity.next_follow_time == datetime(2026, 10, 9, 10, 30)
         assert activity.next_follow_time_source == "USER"
 
+@pytest.mark.asyncio
+async def test_confirmation_persists_user_edited_communication_time(db):
+    from app.services.assistant.activity_edit import apply_activity_edits
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    session, factory, _ = db
+    task, customer, draft = prepared(db)
+    edited, changed = apply_activity_edits(draft, {"communication_time": "2026-11-20T14:00"})
+    assert changed
+    task = apply_task_update(
+        session,
+        task,
+        TaskUpdate(draft=edited, action_actor="USER", action_name="edit_activity_draft"),
+    ).task
+    frozen_outcome = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, task, AssistantInput(kind="text")
+    )
+    frozen = frozen_outcome.task.authority_json["frozen_activity_command"]
+    edited_time = frozen["content_json"]["activity_edit_times"]["communication_time"]
+    assert edited_time["resolved_at"] == "2026-11-20T14:00:00"
+    assert frozen_outcome.reply.waiting.confirmation_payload.preview.content_json == frozen["content_json"]
+    session.commit()
+
+    await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, frozen_outcome.task, AssistantInput(kind="confirm", choice="confirm")
+    )
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).filter_by(customer_id=customer.id).one()
+        assert activity.occurred_at == datetime(2026, 11, 20, 14)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_persists_date_granularity_for_communication_time(db):
+    from app.services.assistant.activity_edit import apply_activity_edits
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    session, factory, _ = db
+    task, customer, draft = prepared(db)
+    edited, changed = apply_activity_edits(draft, {"communication_time": "2026-11-20"})
+    assert changed
+    task = apply_task_update(
+        session,
+        task,
+        TaskUpdate(draft=edited, action_actor="USER", action_name="edit_activity_draft"),
+    ).task
+    frozen_outcome = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, task, AssistantInput(kind="text")
+    )
+    session.commit()
+    await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, frozen_outcome.task, AssistantInput(kind="confirm", choice="confirm")
+    )
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).filter_by(customer_id=customer.id).one()
+        assert activity.occurred_at == datetime(2026, 11, 20)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_clear_communication_time_restores_temporal_evidence(db):
+    from app.services.assistant.activity_edit import apply_activity_edits
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    session, factory, _ = db
+    task, customer, draft = prepared(db)
+    draft.content_json["temporal_evidence"] = {
+        "version": "temporal-evidence-v1",
+        "mentions": [
+            {
+                "mention_id": "tm_original",
+                "raw_text": "上周",
+                "source_segment_id": "seg_original",
+                "quote_start": 0,
+                "quote_end": 3,
+                "kind": "RELATIVE_DAY",
+                "role": "OTHER",
+                "granularity": "DATE",
+                "anchor_at": "2026-11-20T10:00:00",
+                "resolution_status": "RESOLVED",
+                "resolved_at": "2026-11-13T00:00:00",
+                "communication_time": True,
+            }
+        ],
+        "actions": [],
+    }
+    edited, changed = apply_activity_edits(draft, {"communication_time": "2026-11-20T14:00"})
+    assert changed
+    cleared, changed = apply_activity_edits(edited, {"communication_time": " "})
+    assert changed
+    task = apply_task_update(
+        session,
+        task,
+        TaskUpdate(draft=cleared, action_actor="USER", action_name="clear_activity_draft_time"),
+    ).task
+    frozen_outcome = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, task, AssistantInput(kind="text")
+    )
+    session.commit()
+    await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, frozen_outcome.task, AssistantInput(kind="confirm", choice="confirm")
+    )
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).filter_by(customer_id=customer.id).one()
+        assert activity.occurred_at == datetime(2026, 11, 13)
+
+
+@pytest.mark.asyncio
+async def test_confirmation_clear_communication_time_without_evidence_uses_business_now(db, monkeypatch):
+    from app.crud import customer_activity as customer_activity_module
+    from app.services.assistant.activity_edit import apply_activity_edits
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    fixed_now = datetime(2026, 11, 23, 18, 30)
+    monkeypatch.setattr(customer_activity_module, "business_now", lambda: fixed_now)
+    session, factory, _ = db
+    task, customer, draft = prepared(db)
+    edited, changed = apply_activity_edits(draft, {"communication_time": "2026-11-20T14:00"})
+    assert changed
+    cleared, changed = apply_activity_edits(edited, {"communication_time": " "})
+    assert changed
+    task = apply_task_update(
+        session,
+        task,
+        TaskUpdate(draft=cleared, action_actor="USER", action_name="clear_activity_draft_time"),
+    ).task
+    frozen_outcome = await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, task, AssistantInput(kind="text")
+    )
+    session.commit()
+    await AssistantCoordinator(NoChooser(), writer=RealActivityWriter()).handle_task(
+        session, frozen_outcome.task, AssistantInput(kind="confirm", choice="confirm")
+    )
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).filter_by(customer_id=customer.id).one()
+        assert activity.occurred_at == fixed_now
+
 
 @pytest.mark.asyncio
 async def test_unparseable_time_asks_only_for_time_before_freezing(db):
@@ -1512,8 +1651,8 @@ def test_activity_edit_changes_only_typed_business_fields(db):
     assert edited.quality_score == draft.quality_score
     assert edited.channel_source == "user"
     assert edited.content.status == edited.next_action.status == edited.next_follow_time.status == "ACCEPTED"
-    assert activity_edit_time(edited, "communication_time") == (datetime(2026, 11, 20, 14), "DATETIME")
-    assert activity_edit_time(edited, "next_follow_time") == (datetime(2026, 12, 1), "DATE")
+    assert activity_edit_time(edited.content_json, "communication_time") == (datetime(2026, 11, 20, 14), "DATETIME")
+    assert activity_edit_time(edited.content_json, "next_follow_time") == (datetime(2026, 12, 1), "DATE")
     fields = editable_activity_fields(edited)
     assert fields["participants"] == contacts
     assert fields["summary"] == "客户已确认通过验收"
@@ -1566,12 +1705,14 @@ def test_activity_edit_clears_an_existing_date_without_rewriting_evidence(db):
 
     _, _, draft = prepared(db)
     edited, changed = apply_activity_edits(draft, {"next_follow_time": "2026-11-23T00:00"})
-    assert changed and activity_edit_time(edited, "next_follow_time") == (datetime(2026, 11, 23), "DATETIME")
+    assert changed and activity_edit_time(edited.content_json, "next_follow_time") == (
+        datetime(2026, 11, 23), "DATETIME"
+    )
     same, changed = apply_activity_edits(edited, {"next_follow_time": "2026-11-23T00:00:00"})
     assert not changed and same is edited
     cleared, changed = apply_activity_edits(edited, {"next_follow_time": " "})
     assert changed
-    assert activity_edit_time(cleared, "next_follow_time") == (None, "UNKNOWN")
+    assert activity_edit_time(cleared.content_json, "next_follow_time") == (None, "UNKNOWN")
     assert editable_activity_fields(cleared)["next_follow_time"] is None
     assert cleared.next_follow_time.status == "EXPLICITLY_NONE"
     assert cleared.source_segments == draft.source_segments

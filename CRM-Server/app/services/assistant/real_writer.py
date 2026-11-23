@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_crud
 from app.schemas.customer_activity import CustomerActivityCreate
+from app.services.assistant.activity_edit import persisted_communication_time
 from app.services.assistant.confirmation import (
     FollowUpProjectionReceipt,
     WriteActivityResult,
@@ -68,11 +69,17 @@ class RealActivityWriter:
         next_action = command.get("next_action")
         content_json = command["content_json"]
         score = int(command["score"])
+        communication_time = (
+            persisted_communication_time(content_json)
+            if isinstance(content_json, dict)
+            else None
+        )
         obj_in = CustomerActivityCreate(
             activity_kind=str(command["activity_kind"]),
             title=str(command["title"]), summary=str(command["summary"]),
             source_content=str(command["source_content"]),
             content_json=content_json,
+            occurred_at=communication_time[0] if communication_time is not None else None,
             next_action=str(next_action) if next_action else None,
             next_action_source="USER" if next_action else None,
             submission_source="ASSISTANT_2", submission_id=str(command["submission_id"]),
