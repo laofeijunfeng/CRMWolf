@@ -904,6 +904,36 @@ async def test_confirmation_clear_communication_time_restores_temporal_evidence(
 
 
 @pytest.mark.asyncio
+async def test_confirmation_clear_communication_time_with_malformed_evidence_uses_business_now(db, monkeypatch):
+    from app.crud import customer_activity as customer_activity_module
+    from app.services.assistant.confirmation import command_fingerprint
+
+    fixed_now = datetime(2026, 11, 23, 18, 30)
+    monkeypatch.setattr(customer_activity_module, "business_now", lambda: fixed_now)
+    session, factory, _ = db
+    frozen_outcome, customer, _ = await freeze(db)
+    command = json.loads(json.dumps(frozen_outcome.task.authority_json["frozen_activity_command"]))
+    content_json = command["content_json"]
+    assert isinstance(content_json, dict)
+    content_json["temporal_evidence"] = {
+        "version": "temporal-evidence-v1",
+        "mentions": [{"legacy": "payload"}],
+        "actions": [],
+    }
+    content_json["activity_edit_times"] = {
+        "communication_time": {"source": "USER", "resolved_at": None, "granularity": "UNKNOWN"},
+    }
+    command["content_json"] = content_json
+    command.pop("fingerprint")
+    command["fingerprint"] = command_fingerprint(command)
+    result = await RealActivityWriter().write_activity(session, task=frozen_outcome.task, command=command)
+    assert result.success
+    session.commit()
+    with factory() as independent:
+        activity = independent.query(CustomerActivity).filter_by(customer_id=customer.id).one()
+        assert activity.occurred_at == fixed_now
+
+@pytest.mark.asyncio
 async def test_confirmation_clear_communication_time_without_evidence_uses_business_now(db, monkeypatch):
     from app.crud import customer_activity as customer_activity_module
     from app.services.assistant.activity_edit import apply_activity_edits

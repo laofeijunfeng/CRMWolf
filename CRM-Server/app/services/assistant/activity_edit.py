@@ -7,6 +7,8 @@ import re
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import ValidationError
+
 from app.services.assistant.action_evidence import parse_deadline
 from app.services.assistant.activity_channel import FOLLOW_UP_KINDS, MEETING_KINDS, kind_label
 from app.services.assistant.contracts import DraftField, TaskDraft
@@ -96,7 +98,10 @@ def communication_time_evidence(content_json: Mapping[str, object]) -> EditTime 
     mentions = bundle.get("mentions")
     if isinstance(mentions, list):
         for raw in mentions:
-            mention = StoredMention.model_validate(raw)
+            try:
+                mention = StoredMention.model_validate(raw)
+            except ValidationError:
+                continue
             if (
                 mention.communication_time
                 and mention.state == "ACTIVE"
