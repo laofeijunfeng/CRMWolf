@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Final, Iterable, NamedTuple
+from collections.abc import Iterable
+from typing import Final, NamedTuple
 
 FORBIDDEN_SOURCE_NAME: Final = "线索转化"
 
@@ -39,7 +40,7 @@ _LEGACY_SOURCE_ALIASES: Final[dict[str, str]] = {
     "线索转化": "OTHER",
 }
 
-# 仅系统项允许别名，避免自定义项被模糊匹配误伤。
+# 仅系统项允许别名,避免自定义项被模糊匹配误伤。
 AI_SOURCE_ALIASES: Final[dict[str, str]] = {
     **_LEGACY_SOURCE_ALIASES,
     "朋友介绍": "REFERRAL",

@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 
 from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Query, Session, selectinload
+
 from app.core.exceptions import ConflictException
 from app.core.list_query import (
     FilterCondition,
@@ -16,6 +18,7 @@ from app.core.list_query import (
 from app.core.list_query.catalogs import CUSTOMERS_LIST_QUERY_CATALOG
 from app.crud.industry import industry_crud
 from app.crud.operation_log import operation_log_crud
+from app.crud.product import product_crud
 from app.crud.product_intent import (
     EMPTY_CATALOG_MESSAGE,
     INACTIVE_PRODUCT_MESSAGE,
@@ -25,10 +28,8 @@ from app.crud.product_intent import (
     match_catalog_product,
     replace_product_links,
 )
-from app.crud.product import product_crud
 from app.models.contract import Contract
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
-from app.utils.name_normalizer import build_customer_name_dedupe_key
 from app.models.lead import Lead, LeadProduct, LeadStatus
 from app.models.opportunity import Opportunity
 from app.models.product import Product
@@ -37,11 +38,11 @@ from app.schemas.customer import (
     ContactUpdate,
     CustomerCreate,
     CustomerLicenseSnapshotUpdate,
-    CustomerStatusEnum,
     CustomerUpdate,
     normalize_customer_license_pair,
 )
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
+from app.utils.name_normalizer import build_customer_name_dedupe_key
 from app.utils.time import business_now
 
 
@@ -52,13 +53,13 @@ def _locked_source_customer(db: Session, *, team_id: int, customer_id: int) -> C
         ).populate_existing().with_for_update().one()
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if value is None:
         return []
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
-def _split_int_csv(value: Optional[str]) -> List[int]:
+def _split_int_csv(value: str | None) -> list[int]:
     values = []
     for item in _split_csv(value):
         try:
@@ -68,7 +69,7 @@ def _split_int_csv(value: Optional[str]) -> List[int]:
     return values
 
 
-def _resolve_create_industry_code(db: Session, industry: Optional[str]) -> Optional[str]:
+def _resolve_create_industry_code(db: Session, industry: str | None) -> str | None:
     if industry is None:
         return None
     industry_value = industry.strip()
@@ -90,7 +91,7 @@ def _resolve_create_industry_code(db: Session, industry: Optional[str]) -> Optio
 
 
 class CustomerCRUD:
-    def get_by_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
+    def get_by_id(self, db: Session, customer_id: int, team_id: int | None = None) -> Customer | None:
         query = db.query(Customer).options(
             selectinload(Customer.product_links).selectinload(CustomerProduct.product)
         ).filter(Customer.id == customer_id)
@@ -98,7 +99,7 @@ class CustomerCRUD:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
 
-    def get_by_public_id(self, db: Session, public_id: str, team_id: Optional[int] = None) -> Optional[Customer]:
+    def get_by_public_id(self, db: Session, public_id: str, team_id: int | None = None) -> Customer | None:
         query = db.query(Customer).options(
             selectinload(Customer.product_links).selectinload(CustomerProduct.product)
         ).filter(Customer.public_id == public_id)
@@ -106,7 +107,7 @@ class CustomerCRUD:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
 
-    def get_by_name(self, db: Session, account_name: str, team_id: Optional[int] = None) -> Optional[Customer]:
+    def get_by_name(self, db: Session, account_name: str, team_id: int | None = None) -> Customer | None:
         dedupe_key = build_customer_name_dedupe_key(account_name)
         if dedupe_key is None:
             return None
@@ -117,7 +118,7 @@ class CustomerCRUD:
             query = query.filter(Customer.team_id == team_id)
         return query.first()
 
-    def get_by_source_lead_id(self, db: Session, lead_id: int, team_id: Optional[int] = None) -> Optional[Customer]:
+    def get_by_source_lead_id(self, db: Session, lead_id: int, team_id: int | None = None) -> Customer | None:
         query = db.query(Customer).filter(Customer.source_lead_id == lead_id)
         if team_id is not None:
             query = query.filter(Customer.team_id == team_id)
@@ -306,29 +307,29 @@ class CustomerCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
-        status_exclude: Optional[str] = None,
-        industry: Optional[str] = None,
-        industry_exclude: Optional[str] = None,
-        city: Optional[str] = None,
-        source_ids: Optional[List[int]] = None,
-        source_ids_exclude: Optional[List[int]] = None,
-        company_scale: Optional[str] = None,
-        company_scale_exclude: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        owner_id_exclude: Optional[str] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        created_time_start: Optional[date] = None,
-        created_time_end: Optional[date] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
-        scope: Optional[str] = None,
-        current_user_id: Optional[str] = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        industry: str | None = None,
+        industry_exclude: str | None = None,
+        city: str | None = None,
+        source_ids: list[int] | None = None,
+        source_ids_exclude: list[int] | None = None,
+        company_scale: str | None = None,
+        company_scale_exclude: str | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        created_time_start: date | None = None,
+        created_time_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+        scope: str | None = None,
+        current_user_id: str | None = None,
         include_collaborated: bool = False,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[Customer], int]:
+    ) -> tuple[list[Customer], int]:
         query = self.build_population_query(
             db,
             team_id=team_id,
@@ -365,7 +366,7 @@ class CustomerCRUD:
         obj_in: CustomerCreate,
         creator_id: str,
         team_id: int,
-        operator_name: Optional[str] = None,
+        operator_name: str | None = None,
         *,
         commit: bool = True,
     ) -> Customer:
@@ -375,7 +376,9 @@ class CustomerCRUD:
         # customer must enter that same order before it chooses a product.
         product_crud.lock_catalog_team(db, team_id)
         product = self._resolve_product_for_write(db, team_id, obj_in.product_public_id)
-        customer_data = obj_in.model_dump(exclude={"primary_contact", "source_public_id", "source", "product_public_id"})
+        customer_data = obj_in.model_dump(
+            exclude={"primary_contact", "source_public_id", "source", "product_public_id"}
+        )
         source_row = resolve_source_for_entity_write(
             db,
             team_id,
@@ -424,7 +427,7 @@ class CustomerCRUD:
                 "source": db_obj.source,
                 "fromLead": False,
             },
-            team_id=team_id,  # ✅ 必须传递 team_id（团队隔离）
+            team_id=team_id,  # ✅ 必须传递 team_id(团队隔离)
             commit=commit,
         )
 
@@ -435,7 +438,7 @@ class CustomerCRUD:
         db: Session,
         db_obj: Customer,
         obj_in: CustomerUpdate,
-    ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
+    ) -> tuple[Customer, dict[str, Any], dict[str, Any]]:
         if "product_public_id" in obj_in.model_fields_set:
             product_crud.lock_catalog_team(db, int(db_obj.team_id))
         with db.no_autoflush:
@@ -448,9 +451,9 @@ class CustomerCRUD:
                 .first()
             )
         if locked_customer is None:
-            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+            raise ConflictException("客户已不存在\uff0c请刷新后确认最新状态")
         if obj_in.expected_version is not None and locked_customer.version != obj_in.expected_version:
-            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+            raise ConflictException("客户已发生变化\uff0c请刷新后确认最新状态")
 
         fields_set = obj_in.model_fields_set
         proposed: dict[str, Any] = {}
@@ -478,7 +481,9 @@ class CustomerCRUD:
         if any(field in fields_set for field in license_fields):
             license_type = obj_in.license_type if "license_type" in fields_set else locked_customer.license_type
             license_expiry_date = (
-                obj_in.license_expiry_date if "license_expiry_date" in fields_set else locked_customer.license_expiry_date
+                obj_in.license_expiry_date
+                if "license_expiry_date" in fields_set
+                else locked_customer.license_expiry_date
             )
             if "license_is_permanent" in fields_set:
                 license_is_permanent = bool(obj_in.license_is_permanent)
@@ -613,7 +618,7 @@ class CustomerCRUD:
         db: Session,
         db_obj: Customer,
         obj_in: CustomerLicenseSnapshotUpdate,
-    ) -> Tuple[Customer, dict[str, Any], dict[str, Any]]:
+    ) -> tuple[Customer, dict[str, Any], dict[str, Any]]:
         with db.no_autoflush:
             locked_customer = (
                 db.query(Customer)
@@ -623,9 +628,9 @@ class CustomerCRUD:
                 .first()
             )
         if locked_customer is None:
-            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+            raise ConflictException("客户已不存在\uff0c请刷新后确认最新状态")
         if locked_customer.version != obj_in.expected_version:
-            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+            raise ConflictException("客户已发生变化\uff0c请刷新后确认最新状态")
 
         before = {
             "license_type": locked_customer.license_type,
@@ -685,9 +690,9 @@ class CustomerCRUD:
                 .first()
             )
         if locked_customer is None:
-            raise ConflictException("客户已不存在，请刷新后确认最新状态")
+            raise ConflictException("客户已不存在\uff0c请刷新后确认最新状态")
         if locked_customer.version != expected_version:
-            raise ConflictException("客户已发生变化，请刷新后确认最新状态")
+            raise ConflictException("客户已发生变化\uff0c请刷新后确认最新状态")
         if locked_customer.status == status:
             locked_customer.version += 1
             db.commit()
@@ -720,11 +725,11 @@ class CustomerCRUD:
         return customer
 
     def delete(
-        self, db: Session, db_obj: Customer, operator_id: Optional[str] = None, team_id: Optional[int] = None
+        self, db: Session, db_obj: Customer, operator_id: str | None = None, team_id: int | None = None
     ) -> Customer:
-        """删除客户，如果客户来源于线索，则恢复线索状态为 FOLLOWING
+        """删除客户\uff0c如果客户来源于线索\uff0c则恢复线索状态为 FOLLOWING
 
-        注意：删除前会检查是否存在关联合同，如有则抛出异常
+        注意\uff1a删除前会检查是否存在关联合同\uff0c如有则抛出异常
         """
         from app.services.operation_log_service import operation_log_service
 
@@ -736,9 +741,13 @@ class CustomerCRUD:
         db_obj = _locked_source_customer(db, team_id=team_id, customer_id=db_obj.id)
 
         # 检查是否存在关联合同
-        contracts = db.query(Contract).filter(Contract.customer_id == db_obj.id, Contract.team_id == team_id, Contract.deleted_at.is_(None)).count()
+        contracts = db.query(Contract).filter(
+            Contract.customer_id == db_obj.id,
+            Contract.team_id == team_id,
+            Contract.deleted_at.is_(None),
+        ).count()
         if contracts > 0:
-            raise ValueError(f"该客户存在 {contracts} 个关联合同，无法删除。请先删除相关合同。")
+            raise ValueError(f"该客户存在 {contracts} 个关联合同\uff0c无法删除。请先删除相关合同。")
 
         source_lead_id = db_obj.source_lead_id
 
@@ -758,7 +767,7 @@ class CustomerCRUD:
                     team_id=team_id,
                     content={
                         "leadName": lead.lead_name,
-                        "reason": "客户被删除，恢复线索状态",
+                        "reason": "客户被删除\uff0c恢复线索状态",
                         "oldStatus": "CONVERTED",
                         "newStatus": "FOLLOWING",
                         "deletedCustomerId": db_obj.id,
@@ -794,19 +803,19 @@ class CustomerCRUD:
         self,
         db: Session,
         lead_id: int,
-        account_name: Optional[str],
-        address: Optional[str],
+        account_name: str | None,
+        address: str | None,
         creator_id: str,
         team_id: int,
-        default_procurement_method_id: Optional[int] = None,
-        operator_name: Optional[str] = None,
-        contact_name: Optional[str] = None,
-        contact_phone: Optional[str] = None,
-        industry: Optional[str] = None,
-        product_public_id: Optional[str] = None,
+        default_procurement_method_id: int | None = None,
+        operator_name: str | None = None,
+        contact_name: str | None = None,
+        contact_phone: str | None = None,
+        industry: str | None = None,
+        product_public_id: str | None = None,
         *,
         commit: bool = True,
-    ) -> Tuple[Customer, Contact]:
+    ) -> tuple[Customer, Contact]:
         from app.crud.customer_activity import customer_activity_crud
         from app.services.operation_log_service import operation_log_service
 
@@ -830,10 +839,10 @@ class CustomerCRUD:
             raise ValueError("该线索已被转化")
 
         if not lead.source_id:
-            raise ValueError("线索获客来源缺失，无法转化")
+            raise ValueError("线索获客来源缺失\uff0c无法转化")
         source_row = get_by_id(db, lead.source_id, team_id)
         if source_row is None:
-            raise ValueError("线索获客来源不存在，无法转化")
+            raise ValueError("线索获客来源不存在\uff0c无法转化")
 
         customer = Customer(
             account_name=account_name or lead.lead_name,
@@ -909,7 +918,7 @@ class CustomerCRUD:
 
         return customer, contact
 
-    def get_statistics(self, db: Session, team_id: int, owner_id: Optional[str] = None) -> dict:
+    def get_statistics(self, db: Session, team_id: int, owner_id: str | None = None) -> dict:
         query = db.query(Customer).filter(Customer.team_id == team_id)
 
         if owner_id:
@@ -925,7 +934,7 @@ class CustomerCRUD:
             "inactive": len([c for c in customers if c.status == 3]),
         }
 
-    def get_trend(self, db: Session, team_id: int, days: int = 30, owner_id: Optional[str] = None) -> List[dict]:
+    def get_trend(self, db: Session, team_id: int, days: int = 30, owner_id: str | None = None) -> list[dict]:
         now = business_now()
         start_date = now - timedelta(days=days)
 
@@ -954,9 +963,9 @@ class CustomerCRUD:
         customer: Customer,
         return_reason: str,
         team_id: int,
-        detailed_reason: Optional[str] = None,
+        detailed_reason: str | None = None,
         *,
-        expected_version: Optional[int] = None,
+        expected_version: int | None = None,
         commit: bool = True,
     ) -> Customer:
         locked_customer = _locked_source_customer(db, team_id=team_id, customer_id=customer.id)
@@ -1006,15 +1015,15 @@ class CustomerCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[int] = None,
-        city: Optional[str] = None,
-        keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
+        status: int | None = None,
+        city: str | None = None,
+        keyword: str | None = None,
+        search: str | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[Customer], int]:
+    ) -> tuple[list[Customer], int]:
         query = db.query(Customer).options(
             selectinload(Customer.product_links).selectinload(CustomerProduct.product)
         ).filter(Customer.team_id == team_id, Customer.owner_id.is_(None))
@@ -1079,12 +1088,12 @@ class CustomerCRUD:
         owner_id: str,
         team_id: int,
         *,
-        expected_version: Optional[int] = None,
+        expected_version: int | None = None,
         commit: bool = True,
     ) -> Customer:
         locked_customer = _locked_source_customer(db, team_id=team_id, customer_id=customer.id)
         if locked_customer.owner_id is not None:
-            raise ValueError("该客户已有负责人，无法领取")
+            raise ValueError("该客户已有负责人\uff0c无法领取")
         if expected_version is not None and locked_customer.version != expected_version:
             raise ValueError("RESOURCE_VERSION_CONFLICT")
 
@@ -1130,7 +1139,7 @@ class CustomerCRUD:
                             "public_id": str(contract.contract_number),
                             "object_type": "contract",
                             "status": "SKIPPED_LOCKED",
-                            "detail": "合同处于审批中或已签署状态，提交后不会同步负责人",
+                            "detail": "合同处于审批中或已签署状态\uff0c提交后不会同步负责人",
                         })
                     else:
                         contract_count += 1
@@ -1151,8 +1160,8 @@ class CustomerCRUD:
         team_id: int,
         opportunity_transfer_scope: str = "none",
         *,
-        expected_version: Optional[int] = None,
-        reason: Optional[str] = None,
+        expected_version: int | None = None,
+        reason: str | None = None,
         commit: bool = True,
         return_details: bool = False,
     ) -> tuple[Customer, int, int] | dict[str, object]:
@@ -1168,7 +1177,7 @@ class CustomerCRUD:
 
         previous_owner_id = locked_customer.owner_id
         if previous_owner_id == new_owner_id:
-            raise ValueError("目标负责人已是当前负责人，无需重复移交")
+            raise ValueError("目标负责人已是当前负责人\uff0c无需重复移交")
 
         locked_customer.owner_id = new_owner_id
         if locked_customer.status == 3:
@@ -1216,7 +1225,7 @@ class CustomerCRUD:
                             "public_id": str(contract.contract_number),
                             "object_type": "contract",
                             "status": "SKIPPED_LOCKED",
-                            "detail": "合同处于审批中或已签署状态，未同步负责人",
+                            "detail": "合同处于审批中或已签署状态\uff0c未同步负责人",
                         })
                         continue
                     contract.owner_id = new_owner_id
@@ -1248,10 +1257,10 @@ class CustomerCRUD:
         db: Session,
         customer: Customer,
         loss_reason: str,
-        operator_id: Optional[str] = None,
-        operator_name: Optional[str] = None,
+        operator_id: str | None = None,
+        operator_name: str | None = None,
     ) -> Customer:
-        """标记客户为输单，记录输单原因"""
+        """标记客户为输单\uff0c记录输单原因"""
         from app.services.operation_log_service import operation_log_service
         customer = _locked_source_customer(db, team_id=customer.team_id, customer_id=customer.id)
 
@@ -1304,7 +1313,7 @@ class CustomerCRUD:
         db: Session,
         team_id: int,
         lead: Lead,
-        product_public_id: Optional[str],
+        product_public_id: str | None,
     ):
         requested = str(product_public_id).strip() if product_public_id is not None else ""
         if requested:
@@ -1329,13 +1338,13 @@ class ContactCRUD:
             raise ValueError("联系人不存在")
         return current
 
-    def get_by_id(self, db: Session, contact_id: int, team_id: Optional[int] = None) -> Optional[Contact]:
+    def get_by_id(self, db: Session, contact_id: int, team_id: int | None = None) -> Contact | None:
         """获取联系人详情
 
         Args:
             db: 数据库 session
             contact_id: 联系人 ID
-            team_id: 团队 ID（可选，用于团队隔离）
+            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
 
         Returns:
             联系人对象或 None
@@ -1345,13 +1354,13 @@ class ContactCRUD:
             query = query.filter(Contact.team_id == team_id)
         return query.first()
 
-    def get_by_customer_id(self, db: Session, customer_id: int, team_id: Optional[int] = None) -> List[Contact]:
+    def get_by_customer_id(self, db: Session, customer_id: int, team_id: int | None = None) -> list[Contact]:
         """获取客户下的联系人列表
 
         Args:
             db: 数据库 session
             customer_id: 客户 ID
-            team_id: 团队 ID（可选，用于团队隔离）
+            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
 
         Returns:
             联系人列表
@@ -1362,14 +1371,14 @@ class ContactCRUD:
         return query.all()
 
     def get_primary_by_customer_id(
-        self, db: Session, customer_id: int, team_id: Optional[int] = None
-    ) -> Optional[Contact]:
+        self, db: Session, customer_id: int, team_id: int | None = None
+    ) -> Contact | None:
         """获取客户的主联系人
 
         Args:
             db: 数据库 session
             customer_id: 客户 ID
-            team_id: 团队 ID（可选，用于团队隔离）
+            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
 
         Returns:
             主联系人对象或 None
@@ -1379,13 +1388,13 @@ class ContactCRUD:
             query = query.filter(Contact.team_id == team_id)
         return query.first()
 
-    def get_by_mobile(self, db: Session, mobile: str, team_id: Optional[int] = None) -> Optional[Contact]:
+    def get_by_mobile(self, db: Session, mobile: str, team_id: int | None = None) -> Contact | None:
         """根据手机号获取联系人
 
         Args:
             db: 数据库 session
             mobile: 手机号
-            team_id: 团队 ID（可选，用于团队隔离）
+            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
 
         Returns:
             联系人对象或 None
@@ -1456,13 +1465,13 @@ class ContactCRUD:
         db.refresh(db_obj)
         return db_obj
 
-    def set_primary(self, db: Session, contact: Contact, team_id: Optional[int] = None) -> Contact:
+    def set_primary(self, db: Session, contact: Contact, team_id: int | None = None) -> Contact:
         """设置联系人为主联系人
 
         Args:
             db: 数据库 session
             contact: 联系人对象
-            team_id: 团队 ID（可选，用于团队隔离）
+            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
 
         Returns:
             更新后的联系人对象

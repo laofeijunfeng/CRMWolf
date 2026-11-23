@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    from sqlalchemy.orm import Query, Session
 
     from app.schemas.opportunity import OpportunityCreate
 
 
 OpportunityTargetStatus = Literal["DISTINCT", "DUPLICATE", "AMBIGUOUS"]
+_QueryRow = TypeVar("_QueryRow")
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,7 @@ def match_opportunity_target(
     team_id: int,
     customer_id: int,
     data: OpportunityCreate,
+    current_read: bool = False,
 ) -> OpportunityTargetMatch:
     """Classify a validated create proposal against this customer's current targets.
 
@@ -40,15 +42,22 @@ def match_opportunity_target(
     predicate: a compatible or unresolved target is ambiguous, and no possible
     target is distinct. Multiple possible targets are always ambiguous.
 
-    This only reads persisted state (including suppressing autoflush). DISTINCT
-    is not write authorization; callers must retain source/permission validation
-    and recheck before execution. DUPLICATE is not proof any command succeeded.
+    This only reads persisted state (including suppressing autoflush). Set
+    current_read for the final execution check while holding the team catalog
+    fence: MySQL locking reads see writes committed after this transaction's
+    repeatable-read snapshot. DISTINCT is not write authorization and DUPLICATE
+    is not proof any command succeeded.
     """
     from sqlalchemy import and_
 
     from app.models.opportunity import Opportunity, OpportunityProductModule
     from app.models.product import Product, ProductModule
     from app.schemas.opportunity import LicenseTypeEnum, PurchaseTypeEnum
+
+    locking_read = current_read and db.get_bind().dialect.name in {"mysql", "mariadb"}
+
+    def read_query(query: Query[_QueryRow]) -> Query[_QueryRow]:
+        return query.with_for_update() if locking_read else query
 
     name = (data.opportunity_name or "").strip()
     module_public_ids = set(data.product_module_public_ids)
@@ -60,18 +69,17 @@ def match_opportunity_target(
         return OpportunityTargetMatch("AMBIGUOUS")
 
     with db.no_autoflush:
-        product = (
+        product = read_query(
             db.query(Product.id)
             .filter(
                 Product.public_id == data.product_public_id,
                 Product.team_id == team_id,
                 Product.is_active.is_(True),
             )
-            .one_or_none()
-        )
+        ).one_or_none()
         if product is None:
             return OpportunityTargetMatch("AMBIGUOUS")
-        modules = (
+        modules = read_query(
             db.query(ProductModule.id, ProductModule.public_id)
             .filter(
                 ProductModule.public_id.in_(module_public_ids),
@@ -79,11 +87,10 @@ def match_opportunity_target(
                 ProductModule.product_id == product.id,
                 ProductModule.is_active.is_(True),
             )
-            .all()
-        )
+        ).all()
         if {module.public_id for module in modules} != module_public_ids:
             return OpportunityTargetMatch("AMBIGUOUS")
-        candidate_modules = frozenset(module.id for module in modules)
+        candidate_modules: set[int] = {module.id for module in modules}
 
         targets_query = db.query(
             Opportunity.id,
@@ -97,7 +104,7 @@ def match_opportunity_target(
             Opportunity.team_id == team_id,
             Opportunity.customer_id == customer_id,
         )
-        targets = targets_query.order_by(Opportunity.id).all()
+        targets = read_query(targets_query.order_by(Opportunity.id)).all()
         # Python strip defines exact name identity, including legacy whitespace;
         # SQL equality or TRIM would exclude names before that normalization.
         if name:
@@ -107,19 +114,15 @@ def match_opportunity_target(
 
         target_ids = [target.id for target in targets]
         product_ids = {target.product_id for target in targets if target.product_id is not None}
-        resolved_products = {
-            identifier
-            for (identifier,) in db.query(Product.id)
-            .filter(
-                Product.team_id == team_id,
-                Product.id.in_(product_ids),
-            )
-            .all()
-        }
+        products_query = db.query(Product.id).filter(
+            Product.team_id == team_id,
+            Product.id.in_(product_ids),
+        )
+        resolved_products = {identifier for (identifier,) in read_query(products_query).all()}
         module_sets: dict[int, set[int]] = {}
         unresolved_module_targets: set[int] = set()
         target_products = {target.id: target.product_id for target in targets}
-        links = (
+        links = read_query(
             db.query(
                 OpportunityProductModule.opportunity_id,
                 OpportunityProductModule.product_module_id,
@@ -140,8 +143,7 @@ def match_opportunity_target(
                 Opportunity.customer_id == customer_id,
                 OpportunityProductModule.opportunity_id.in_(target_ids),
             )
-            .all()
-        )
+        ).all()
         for target_id, module_id, link_team_id, resolved_id, product_id in links:
             if link_team_id != team_id or resolved_id is None or product_id != target_products[target_id]:
                 unresolved_module_targets.add(target_id)

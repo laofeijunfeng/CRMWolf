@@ -2,7 +2,9 @@
 # ruff: noqa: RUF001 -- Tests use the exact Chinese UI copy.
 
 import asyncio
+from datetime import datetime, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.ext.compiler import compiles
@@ -17,12 +19,10 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.schemas.assistant_conversation import ConversationChoiceRequest, ConversationDecision, ConversationTextRequest
 from app.services.assistant import conversation as module
 from app.services.assistant import conversation_router as router_module
+from app.services.assistant import failure_contract, model_transport
 from app.services.assistant.contracts import TaskDraft
 from app.services.assistant.conversation import ConversationService
-from app.services.assistant.conversation_router import (
-    ROOT_UNDERSTANDING_TIMEOUT_SECONDS,
-    ConversationRootClassifier,
-)
+from app.services.assistant.conversation_router import ConversationRootClassifier
 
 
 @compiles(BigInteger, "sqlite")
@@ -166,6 +166,14 @@ async def test_query_and_unsupported_writes_never_create_activity_task(db, speec
     response = await service.submit_text(db, team_id=1, user_id=2, request=text(initial.version))
     assert response.submission is None
     assert db.query(AssistantTask).count() == db.query(AssistantTurn).count() == 0
+    reply = response.conversation.messages[-1]
+    assert "AI Agent" not in reply.text
+    assert reply.ui is not None
+    assert [block.type for block in reply.ui.blocks] == ["text"]
+    assert reply.ui.suggested_actions == []
+    if operation == "READ":
+        assert "客户管理或客户追踪页面" in reply.text
+        assert "这次没有写入" in reply.text
 
 
 async def test_root_cannot_route_to_another_team_task(db):
@@ -638,6 +646,27 @@ async def test_general_supplement_is_not_forced_into_a_waiting_field(db, wait_ty
     assert old.waiting_type is None
     assert old.draft_json["next_action"]["status"] == "MISSING"
 
+async def test_root_supplement_preserves_an_unknown_activity_wait_and_allows_new_focus(db):
+    old = task(
+        db, version=3, waiting_type="FIELD", waiting_field="next_action", last_error_code="UNKNOWN_COMMIT_RESULT",
+        waiting_json={"action_id": "old-question", "payload": {"question_id": "q_old", "prompt": "原问题"}},
+    )
+    classifier = Classifier(decision("CONTINUE", old.public_id, "PROVIDE_SUPPLEMENT"))
+    service = ConversationService(classifier=classifier)
+    state = service.open(db, team_id=1, user_id=2)
+    response = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    assert response.submission is None
+    assert response.conversation.focused_task.reconciliation_required
+    db.refresh(old)
+    assert old.version == 3 and old.waiting_json["action_id"] == "old-question"
+    assert db.query(AssistantTurn).count() == 0
+
+    classifier.value = decision()
+    new = await service.submit_text(db, team_id=1, user_id=2,
+                                    request=text(response.conversation.version, key="independent-request"))
+    assert new.submission.task_public_id != old.public_id
+
+
 
 def test_bootstrapped_live_frozen_card_is_not_rendered_twice(db):
     preview = {
@@ -690,7 +719,7 @@ def test_proposal_confirmation_does_not_forge_another_activity_written_receipt(d
     service = ConversationService(classifier=Classifier(decision()))
     service.open(db, team_id=1, user_id=2)
     conv = crud.owned_conversation(db, team_id=1, user_id=2)
-    for i, field_name in enumerate(["activity_write", "proposal:customer_fact"]):
+    for i, field_name in enumerate(["activity_write", "proposal:follow_up_task_create"]):
         request = AssistantRequest(
             team_id=1, user_id=2, client_request_id=f"event-req-{i}", input_fingerprint="x", task_id=old.id
         )
@@ -701,7 +730,7 @@ def test_proposal_confirmation_does_not_forge_another_activity_written_receipt(d
             user_id=2,
             task_id=old.id,
             request_id=request.id,
-            input_json={"kind": "confirm"},
+            input_json={"kind": "confirm", "choice": "confirm"},
             status="SUCCEEDED",
         )
         db.add(turn)
@@ -731,6 +760,58 @@ def test_proposal_confirmation_does_not_forge_another_activity_written_receipt(d
     messages = service.read(db, team_id=1, user_id=2).messages
     assert next(m for m in messages if m.text == "结果0").outcome == "activity_written"
     assert next(m for m in messages if m.text == "结果1").outcome is None
+
+
+def test_post_write_proposal_warning_is_not_normal_completion(db):
+    from app.crud import assistant_conversation as crud
+    from app.services.assistant.presentation import task_view
+
+    receipt = {"kind": "customer_activity", "public_id": "1"}
+    row = task(db, committed_json=[receipt])
+    service = ConversationService(classifier=Classifier(decision()))
+    service.open(db, team_id=1, user_id=2)
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    snapshot = task_view(row, db).model_dump(mode="json")
+    previous = None
+    for i, (kind, event_snapshot, message) in enumerate([
+        ("confirm", snapshot, "活动已记录"),
+        ("continue_proposals", {**snapshot, "status": "COMPLETED", "proposal_outcome": "proposal_failed"},
+         "活动已记录。本次没能生成后续建议，可在客户页手动处理。"),
+    ]):
+        request = AssistantRequest(
+            team_id=1, user_id=2, client_request_id=f"proposal-req-{i}", input_fingerprint="x", task_id=row.id
+        )
+        db.add(request)
+        db.flush()
+        turn = AssistantTurn(
+            team_id=1, user_id=2, task_id=row.id, request_id=request.id,
+            input_json={"kind": kind, "choice": "confirm" if kind == "confirm" else None}, status="SUCCEEDED",
+        )
+        db.add(turn)
+        db.flush()
+        if previous is None:
+            db.add(AssistantConversationEntry(
+                conversation_id=conv.id, team_id=1, user_id=2, client_request_id="proposal-entry",
+                input_fingerprint="x", user_text="确认", state="READY", command_json={"waiting_field": "activity_write"},
+                task_public_id=row.public_id, turn_public_id=turn.public_id,
+            ))
+        else:
+            previous.data_json = {**previous.data_json, "next_turn_id": turn.public_id}
+        previous = AssistantTurnEvent(
+            turn_id=turn.id, seq=1, event="waiting", data_json={"task": event_snapshot, "message": message},
+        )
+        db.add(previous)
+    db.commit()
+
+    messages = service.read(db, team_id=1, user_id=2).messages
+    assert any(m.outcome == "activity_written" for m in messages)
+    assert not any(m.outcome in {"task_completed", "failure"} for m in messages)
+    warning = next(m for m in messages if m.outcome == "proposal_unavailable")
+    assert warning.task.committed[0].public_id == "1"
+    assert warning.ui is not None and warning.ui.state == "final"
+    assert len(warning.ui.blocks) == 1
+    notice = warning.ui.blocks[0]
+    assert notice.type == "notice" and notice.tone == "warning" and notice.code == "PROPOSAL_UNAVAILABLE"
 
 
 def test_structured_disposition_event_preserves_batch_projection_and_activity_receipt(db):
@@ -764,7 +845,7 @@ def test_structured_disposition_event_preserves_batch_projection_and_activity_re
     db.flush()
     turn = AssistantTurn(
         team_id=1, user_id=2, task_id=old.id, request_id=request.id,
-        input_json={"kind": "confirm"}, status="SUCCEEDED",
+        input_json={"kind": "confirm", "choice": "confirm"}, status="SUCCEEDED",
     )
     db.add(turn)
     db.flush()
@@ -806,13 +887,22 @@ async def test_reclaimed_lease_fences_the_original_root_worker_before_task_dispa
     from app.utils.time import business_now
 
     old = task(db)
+    deadlines = []
+    reclaimed_leases = []
+
+    class ReclaimedRoot(Classifier):
+        async def classify(self, session, **kwargs):
+            deadlines.append(failure_contract.capture_attempt_deadline())
+            reclaimed_leases.append(crud.owned_conversation(session, team_id=1, user_id=2).lease_expires_at)
+            return await super().classify(session, **kwargs)
 
     class InterruptedRoot:
         async def classify(self, session, **kwargs):
             conv = crud.owned_conversation(session, team_id=1, user_id=2)
+            deadlines.append(failure_contract.capture_attempt_deadline())
             conv.lease_expires_at = business_now() - timedelta(seconds=1)
             session.commit()
-            restarted = ConversationService(classifier=Classifier(decision()))
+            restarted = ConversationService(classifier=ReclaimedRoot(decision()))
             await restarted.resume(session, team_id=1, user_id=2)
             return decision("CONTINUE", old.public_id, "PROVIDE_SUPPLEMENT")
 
@@ -823,6 +913,42 @@ async def test_reclaimed_lease_fences_the_original_root_worker_before_task_dispa
     assert db.query(AssistantTask).count() == 2
     assert db.query(AssistantTurn).count() == 1
     assert not service.read(db, team_id=1, user_id=2).has_pending_request
+    original, reclaimed = deadlines
+    assert original is not None and original == reclaimed
+    assert reclaimed_leases == [original + timedelta(seconds=5)]
+
+
+async def test_expired_root_reclaim_does_not_restart_the_model(db):
+    from app.crud import assistant_conversation as crud
+    from app.utils.time import business_now
+
+    class InterruptedRoot:
+        async def classify(self, *_args, **_kwargs):
+            raise asyncio.CancelledError
+
+    service = ConversationService(classifier=InterruptedRoot())
+    state = service.open(db, team_id=1, user_id=2)
+    with pytest.raises(asyncio.CancelledError):
+        await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    entry = db.query(AssistantConversationEntry).one()
+    stages = entry.command_json["root_stages"]
+    expired = (business_now() - timedelta(seconds=6)).isoformat()
+    entry.command_json = {**entry.command_json, "root_deadline": expired}
+    conv.lease_expires_at = business_now() - timedelta(seconds=1)
+    db.commit()
+
+    classifier = Classifier(decision())
+    result = await ConversationService(classifier=classifier).resume(db, team_id=1, user_id=2)
+    assert classifier.calls == []
+    assert result.submission is None
+    assert result.conversation.messages[-1].error_code == "UPSTREAM_TIMEOUT"
+    db.refresh(entry)
+    assert entry.command_json["root_deadline"] == expired
+    assert entry.command_json["root_stages"] == stages
+    assert not result.conversation.has_pending_request
+    assert db.query(AssistantTask).count() == 0
 
 
 class ReferencedDraftClassifier:
@@ -1010,13 +1136,17 @@ def test_first_open_does_not_import_another_windows_accepted_input_twice(db, mon
     assert old.status == "ACTIVE"
 
 
-def test_root_understanding_waits_150_seconds(monkeypatch):
-    seen: dict[str, float] = {}
+def test_root_understanding_uses_remaining_budget_for_both_calls(monkeypatch):
+    started_at = datetime(2026, 1, 1, 9)
+    elapsed = 5
+    timeouts = []
+    original_client = httpx.AsyncClient
 
-    class Transport:
-        async def ainvoke_structured(self, **kwargs):
-            seen["timeout_seconds"] = kwargs["timeout_seconds"]
-            return decision(boundary="AMBIGUOUS", target="ast_written")
+    def respond(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"choices": [{"message": {
+            "content": decision(boundary="AMBIGUOUS", target="ast_written").model_dump_json(),
+        }}]})
 
     monkeypatch.setattr(
         router_module,
@@ -1024,20 +1154,29 @@ def test_root_understanding_waits_150_seconds(monkeypatch):
         lambda db, team_id: ("https://model.example", "not-a-real-key", "test-model"),
     )
     monkeypatch.setattr(router_module, "team_output_mode", lambda db, team_id: "json_object")
-    classifier = ConversationRootClassifier()
-    classifier.transport = Transport()
-    result = asyncio.run(
-        classifier.classify(
-            None,
-            team_id=1,
-            text="下午和对方技术经理通了电话，说POC下周可以部署。",
-            tasks=[],
-            focused_task_public_id=None,
-            recent_messages=[],
-        )
+    monkeypatch.setattr(
+        model_transport.httpx, "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
     )
-    assert seen["timeout_seconds"] == ROOT_UNDERSTANDING_TIMEOUT_SECONDS == 150
-    assert result.boundary == "AMBIGUOUS"
+    monkeypatch.setattr(failure_contract, "business_now", lambda: started_at + timedelta(seconds=elapsed))
+    monkeypatch.setattr(model_transport, "monotonic", lambda: float(elapsed))
+    classifier = ConversationRootClassifier()
+
+    async def classify_twice():
+        nonlocal elapsed
+        token = failure_contract.bind_attempt_deadline(started_at)
+        try:
+            kwargs = dict(team_id=1, text="下午和对方技术经理通了电话，说POC下周可以部署。", tasks=[],
+                          focused_task_public_id=None, recent_messages=[])
+            first = await classifier.classify(None, **kwargs)
+            elapsed = 160
+            second = await classifier.classify(None, **kwargs)
+            assert first.boundary == second.boundary == "AMBIGUOUS"
+        finally:
+            failure_contract.reset_attempt_deadline(token)
+
+    asyncio.run(classify_twice())
+    assert timeouts == [175, 20]
 
 
 def test_single_broken_history_projection_keeps_other_entries_readable(db, monkeypatch):
@@ -1530,6 +1669,7 @@ async def test_root_retry_reuses_the_same_entry_and_rejects_a_second_claim(db):
         def __init__(self):
             self.calls = 0
             self.leases = []
+            self.deadlines = []
 
         async def classify(self, db, **kwargs):
             from app.crud import assistant_conversation as crud
@@ -1537,6 +1677,7 @@ async def test_root_retry_reuses_the_same_entry_and_rejects_a_second_claim(db):
             self.calls += 1
             conversation = crud.owned_conversation(db, team_id=1, user_id=2)
             self.leases.append(conversation.lease_expires_at)
+            self.deadlines.append(failure_contract.capture_attempt_deadline())
             if self.calls == 1:
                 raise AssistantLLMError("down", code=AssistantFailureCode.UPSTREAM_UNAVAILABLE)
             return decision()
@@ -1565,8 +1706,13 @@ async def test_root_retry_reuses_the_same_entry_and_rejects_a_second_claim(db):
     assert entry.error_code is None
     assert retried.submission is not None
     assert classifier.calls == 2
-    assert all(item - business_now() <= timedelta(seconds=180) for item in classifier.leases)
-    assert all(item - business_now() >= timedelta(seconds=120) for item in classifier.leases)
+    first, retry = classifier.deadlines
+    assert first is not None and retry is not None and retry > first
+    assert classifier.leases == [deadline + timedelta(seconds=5) for deadline in (first, retry)]
+    assert entry.command_json["root_stages"] == [
+        {"stage": "route", "phase": "start"},
+        {"stage": "route", "phase": "done", "ms": entry.command_json["root_stages"][-1]["ms"]},
+    ]
     with pytest.raises(ConversationConflict):
         await service.retry_entry(
             db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=retried.conversation.version
@@ -1611,15 +1757,15 @@ async def test_lost_root_lease_is_not_stored_as_model_failure(db):
     state = service.open(db, team_id=1, user_id=2)
     conversation = crud.owned_conversation(db, team_id=1, user_id=2)
 
-    real_renew = crud.renew_model_lease
+    real_save = crud.save
 
-    def expire(db, conversation, entry, *, lease_version, seconds):
+    def expire(db, conversation, entry, **kwargs):
         conversation.lease_expires_at = business_now() - timedelta(seconds=1)
         db.commit()
-        return real_renew(db, conversation, entry, lease_version=lease_version, seconds=seconds)
+        return real_save(db, conversation, entry, **kwargs)
 
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(crud, "renew_model_lease", expire)
+    monkeypatch.setattr(crud, "save", expire)
     try:
         with pytest.raises(crud.ConversationConflict):
             await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))

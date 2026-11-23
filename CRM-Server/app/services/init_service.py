@@ -1,27 +1,28 @@
 """
 角色权限初始化服务
 
-在应用启动时自动检查并初始化角色权限，确保部署后系统可用
+在应用启动时自动检查并初始化角色权限\uff0c确保部署后系统可用
 """
 from sqlalchemy.orm import Session
+
+from app.constants.permissions import ALL_PERMISSIONS, OPT_IN_PERMISSION_CODES, ROLE_PERMISSIONS_MAPPING, ROLES_DATA
 from app.core.database import SessionLocal
-from app.models.role import Role
-from app.models.permission import Permission
-from app.models.role_permission import RolePermission
 from app.core.logging import get_logger
-from app.constants.permissions import ALL_PERMISSIONS, ROLES_DATA, ROLE_PERMISSIONS_MAPPING, OPT_IN_PERMISSION_CODES
+from app.models.permission import Permission
+from app.models.role import Role
+from app.models.role_permission import RolePermission
 
 logger = get_logger(__name__)
 
 
 def ensure_permissions_exist(db: Session) -> dict:
-    """确保所有权限存在，返回权限字典 {code: permission}"""
+    """确保所有权限存在\uff0c返回权限字典 {code: permission}"""
     permissions = {}
     for perm_data in ALL_PERMISSIONS:
-        # 先按 code 查找（更可靠）
+        # 先按 code 查找(更可靠)
         perm = db.query(Permission).filter(Permission.code == perm_data["code"]).first()
         if not perm:
-            # 按 code 查不到才创建，避免名称冲突
+            # 按 code 查不到才创建,避免名称冲突
             try:
                 perm = Permission(**perm_data)
                 db.add(perm)
@@ -29,16 +30,16 @@ def ensure_permissions_exist(db: Session) -> dict:
                 db.refresh(perm)
                 logger.info(f"创建权限: {perm.code} - {perm.name}")
             except Exception as e:
-                # 如果创建失败（名称冲突），跳过
+                # 如果创建失败(名称冲突),跳过
                 db.rollback()
-                logger.warning(f"权限 {perm_data['code']} 创建失败，跳过: {e}")
+                logger.warning(f"权限 {perm_data['code']} 创建失败\uff0c跳过: {e}")
                 continue
         permissions[perm.code] = perm
     return permissions
 
 
 def ensure_roles_exist(db: Session) -> dict:
-    """确保角色存在并更新名称，返回角色字典 {code: role}"""
+    """确保角色存在并更新名称\uff0c返回角色字典 {code: role}"""
     roles = {}
     for role_data in ROLES_DATA:
         role = db.query(Role).filter(Role.code == role_data["code"]).first()
@@ -96,8 +97,8 @@ def ensure_role_permissions(db: Session, roles: dict, permissions: dict) -> None
             logger.info(f"角色 {role_code} 新增 {added_count} 个权限")
 
 
-def init_roles_permissions():
-    """初始化角色和权限（幂等操作）"""
+def init_roles_permissions() -> None:
+    """初始化角色和权限\uff08幂等操作\uff09"""
     db = SessionLocal()
     try:
         logger.info("开始初始化角色权限...")

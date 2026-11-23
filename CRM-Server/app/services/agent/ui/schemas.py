@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self, TypeAlias
+from typing import Annotated, ClassVar, Literal, Self, TypeAlias
 from uuid import UUID  # noqa: TC003
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import ConfigDict, Field, JsonValue, field_validator, model_validator
 
-from app.services.agent.query.schemas import CRMResource, EntityRef, JsonDict  # noqa: TC001
+from app.services.agent.query.schemas import CRMResource, EntityRef, JsonDict, LegacyCompatibleModel
 from app.services.agent.ui.markdown import RAW_HTML_PATTERN, contains_raw_html, validate_agent_markdown
 
 AgentUIMessageDisplay: TypeAlias = Literal["MESSAGE", "STATE_UPDATE"]
@@ -48,7 +48,7 @@ AgentErrorCode: TypeAlias = Literal[
 ]
 
 
-class AgentUIContractModel(BaseModel):
+class AgentUIContractModel(LegacyCompatibleModel):
     """Forbid undeclared protocol fields at every nested boundary."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -271,10 +271,13 @@ class MetricGroupBlock(AgentUIBlockBase):
 
 
 class NoticeBlock(AgentUIBlockBase):
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {"code": None}
+
     type: Literal["notice"]
     tone: Literal["info", "success", "warning"]
     title: str | None = Field(default=None, max_length=200)
     text: str = Field(min_length=1, max_length=10000)
+    code: Literal["PROPOSAL_UNAVAILABLE"] | None = None
 
 
 class ErrorBlock(AgentUIBlockBase):
@@ -287,14 +290,23 @@ class ErrorBlock(AgentUIBlockBase):
 
 
 class InteractionOption(AgentUIContractModel):
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {"depends_on_value": None}
+
     value: str = Field(min_length=1, max_length=500)
     label: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=1000)
     group: str | None = Field(default=None, max_length=40)
     disabled: bool = False
+    depends_on_value: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 class InteractionField(AgentUIContractModel):
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {
+        "source_label": None,
+        "depends_on_key": None,
+        "error_message": None,
+    }
+
     key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1, max_length=200)
     field_type: Literal["text", "textarea", "number", "date", "datetime", "select", "multi_select", "boolean"]
@@ -306,6 +318,10 @@ class InteractionField(AgentUIContractModel):
     minimum: float | None = None
     maximum: float | None = None
     options: list[InteractionOption] = Field(default_factory=list, max_length=50)
+    # Provenance tag for a prefilled value, e.g. "来自原文"; display-only.
+    source_label: str | None = Field(default=None, max_length=40)
+    depends_on_key: str | None = Field(default=None, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    error_message: str | None = Field(default=None, min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def validate_field_constraints(self) -> Self:
@@ -317,6 +333,10 @@ class InteractionField(AgentUIContractModel):
             raise ValueError("select fields require options")
         if self.field_type not in {"select", "multi_select"} and self.options:
             raise ValueError("options are only valid for select fields")
+        if self.depends_on_key is not None and self.field_type not in {"select", "multi_select"}:
+            raise ValueError("depends_on_key is only valid for select fields")
+        if self.depends_on_key is None and any(option.depends_on_value is not None for option in self.options):
+            raise ValueError("dependent options require depends_on_key")
         if len({option.value for option in self.options}) != len(self.options):
             raise ValueError("interaction field option values must be unique")
         if self.field_type in {"text", "textarea"} and (self.min_length is None or self.max_length is None):
@@ -348,7 +368,20 @@ class OpenFollowUpDispositionCardItem(AgentUIContractModel):
     result_message: str | None = Field(default=None, max_length=500)
 
 
+# Secondary commands are closed: one per surface, never a second primary action.
+_CONFIRMATION_SECONDARY_ACTION = "request_edit"
+_DISPOSITION_SECONDARY_ACTION = "suppress_week"
+_CANCEL_REASON_VALUES = frozenset({"wrong_customer", "wrong_content", "should_not_record", "other"})
+_CANCELLABLE_FORM_ACTIONS = frozenset({"create_opportunity_proposal", "edit_confirmation"})
+
+
 class InteractionBlock(AgentUIBlockBase):
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {
+        "secondary_action": None,
+        "cancel_reasons": [],
+        "disposition_link": False,
+    }
+
     type: Literal["interaction"]
     interaction_id: str = Field(min_length=1, max_length=128)
     interaction_type: Literal["choice", "form", "confirmation", "text_input"]
@@ -361,15 +394,18 @@ class InteractionBlock(AgentUIBlockBase):
     hint: str | None = Field(default=None, max_length=400)
     fields: list[InteractionField] = Field(default_factory=list, max_length=20)
     facts: list[InteractionConfirmationFact] = Field(default_factory=list, max_length=20)
-    options: list[InteractionOption] = Field(default_factory=list, max_length=50)
+    options: list[InteractionOption] = Field(default_factory=list, max_length=100)
     selection_mode: Literal["single", "multiple"] | None = None
-    min_selections: int | None = Field(default=None, ge=0, le=50)
-    max_selections: int | None = Field(default=None, ge=1, le=50)
+    min_selections: int | None = Field(default=None, ge=0, le=100)
+    max_selections: int | None = Field(default=None, ge=1, le=100)
     allow_blank: bool | None = None
     submit_on_select: bool = False
     submit_label: str = Field(default="提交", min_length=1, max_length=200)
     submit_action_id: str | None = Field(min_length=1, max_length=128)
     submitted_values: dict[str, JsonValue] | None = None
+    secondary_action: InteractionOption | None = None
+    cancel_reasons: list[InteractionOption] = Field(default_factory=list, max_length=4)
+    disposition_link: bool = False
 
     @model_validator(mode="after")
     def validate_interaction_shape(self) -> Self:
@@ -377,11 +413,11 @@ class InteractionBlock(AgentUIBlockBase):
             raise ValueError("active interaction requires submit_action_id")
         if self.state != "ACTIVE" and self.submit_action_id is not None:
             raise ValueError("non-active interaction cannot expose submit_action_id")
-        if self.allow_cancel and (
-            self.business_action != "provide_follow_up_content"
-            or self.interaction_type not in {"text_input", "form"}
+        if self.allow_cancel and not (
+            (self.business_action == "provide_follow_up_content" and self.interaction_type in {"text_input", "form"})
+            or (self.business_action in _CANCELLABLE_FORM_ACTIONS and self.interaction_type == "form")
         ):
-            raise ValueError("cancellation is only available for follow-up content input")
+            raise ValueError("cancellation is only available for follow-up content input and assistant forms")
         if len({option.value for option in self.options}) != len(self.options):
             raise ValueError("interaction option values must be unique")
         if (
@@ -401,23 +437,32 @@ class InteractionBlock(AgentUIBlockBase):
         ):
             raise ValueError("compact task completion requires one submit-on-select choice")
         if self.presentation == "OPEN_FOLLOW_UP_DISPOSITION":
-            active_shape = (
-                self.state == "ACTIVE"
-                and self.submit_on_select
-                and len(self.options) == 3
+            # Previously persisted cards may still describe the old three-way
+            # decision, but may never expose it as an active interaction.
+            archived_legacy = (
+                self.state != "ACTIVE"
+                and self.selection_mode == "single"
+                and self.min_selections == self.max_selections == 1
+                and len(self.options) <= 50
             )
-            readonly_shape = self.state != "ACTIVE" and not self.submit_on_select
+            batch = (
+                self.selection_mode == "multiple"
+                and self.min_selections == 0
+                and self.max_selections == len(self.options)
+                and [option.value for option in self.options] == [item.item_id for item in self.disposition_items]
+            )
             if (
                 self.interaction_type != "choice"
-                or self.selection_mode != "single"
-                or self.min_selections != 1
-                or self.max_selections != 1
+                or not (batch or archived_legacy)
+                or self.submit_on_select
                 or not self.disposition_items
-                or not (active_shape or readonly_shape)
             ):
-                raise ValueError("open follow-up disposition requires the frozen task list and one current choice")
-        elif self.disposition_items:
-            raise ValueError("disposition items require the open follow-up presentation")
+                raise ValueError("open follow-up disposition requires one optional checkbox per frozen task")
+        else:
+            if self.disposition_items or self.disposition_link:
+                raise ValueError("disposition items and link require the open follow-up presentation")
+            if len(self.options) > 50 or (self.max_selections is not None and self.max_selections > 50):
+                raise ValueError("generic interactions support at most 50 options")
 
         if self.interaction_type == "choice":
             if (
@@ -489,6 +534,25 @@ class InteractionBlock(AgentUIBlockBase):
                 raise ValueError("submit_on_select requires an exact single-choice interaction")
         if self.facts and self.interaction_type != "confirmation":
             raise ValueError("facts are only valid for confirmation interactions")
+        if self.secondary_action is not None:
+            expected = (
+                _CONFIRMATION_SECONDARY_ACTION
+                if self.interaction_type == "confirmation"
+                else _DISPOSITION_SECONDARY_ACTION
+                if self.presentation == "OPEN_FOLLOW_UP_DISPOSITION"
+                else None
+            )
+            if self.state != "ACTIVE" or self.secondary_action.value != expected:
+                raise ValueError("secondary_action is limited to confirmation edit and disposition weekly suppression")
+        if self.cancel_reasons:
+            values = [reason.value for reason in self.cancel_reasons]
+            if (
+                self.interaction_type != "confirmation"
+                or self.state != "ACTIVE"
+                or len(set(values)) != len(values)
+                or not set(values) <= _CANCEL_REASON_VALUES
+            ):
+                raise ValueError("cancel_reasons are unique closed reasons on an active confirmation")
         return self
 
 

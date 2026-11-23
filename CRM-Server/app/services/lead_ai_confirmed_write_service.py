@@ -5,9 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any
 
 from app.crud.agent import agent_idempotency_key_crud
 from app.crud.lead import lead_follow_up_crud
@@ -17,6 +15,9 @@ from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpda
 from app.schemas.lead import LeadFollowUpCreate
 from app.services.agent.temporal import agent_temporal_resolver
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)

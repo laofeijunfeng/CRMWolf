@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import suppress
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, TypeGuard, cast
 
 from pydantic import ValidationError
 
@@ -20,6 +21,7 @@ from app.schemas.assistant_conversation import (
     ConversationMessage,
     ConversationProjection,
 )
+from app.services.agent.query.schemas import EntityRef
 from app.services.agent.ui.markdown import contains_raw_html, project_agent_markdown_to_plain_text
 from app.services.agent.ui.schemas import (
     ActionResultBlock,
@@ -48,13 +50,15 @@ from app.services.assistant.failure_contract import (
     root_failure_presentation,
 )
 from app.services.customer_activity_kinds import ACTIVITY_KIND_META
+from app.utils.public_id import is_opportunity_public_id
 
 if TYPE_CHECKING:
     from app.schemas.assistant import AssistantTaskView
-    from app.services.assistant.contracts import ActivityPreview, TaskDraft, TaskWaiting
+    from app.services.assistant.contracts import ActivityPreview, ProposalCandidate, TaskDraft, TaskWaiting
 
 _RAW_HTML_RE = re.compile(r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>")
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_CUSTOMER_PUBLIC_ID_RE = re.compile(r"cus_[0-9a-f]{32}")
 _UNAVAILABLE = "这条结果暂时无法显示"
 _UNKNOWN_TEXT = "客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。"
 
@@ -107,12 +111,21 @@ _TEMPORAL_LABELS: dict[str, str] = {
     "STATUS": "完成状态",
     "PRIMARY": "主跟进行动",
 }
-_PROPOSAL_LABELS: dict[str, str] = {
-    "opportunity_create": "创建商机",
+_PROPOSAL_LABELS = {
     "opportunity_stage": "推进商机",
-    "follow_up_task": "更新跟进任务",
+    "opportunity_create": "创建商机",
     "follow_up_task_create": "创建跟进任务",
-    "customer_fact": "写入客户事实",
+}
+_FORM_FIELDS = {
+    "create_opportunity_proposal": frozenset({
+        "opportunity_name", "total_amount", "user_count", "license_type", "subscription_years",
+        "purchase_type", "decision_maker_count", "expected_closing_date", "procurement_method_id",
+        "stage_id", "owner_id", "product_public_id", "product_module_public_ids",
+    }),
+    "edit_confirmation": frozenset({
+        "communication_time", "channel_kind", "internal_participants", "customer_participants",
+        "summary", "next_action", "next_follow_time",
+    }),
 }
 
 
@@ -162,14 +175,21 @@ def _is_task_completion(message: ConversationMessage) -> bool:
         and message.task.status == "COMPLETED"
         and message.task.waiting is None
         and message.boundary is None
-        and message.outcome in {"task_completed", "activity_written", "follow_up_disposition"}
+        and (
+            message.outcome in {"task_completed", "activity_written", "follow_up_disposition"}
+            or message.proposal_receipt is not None
+        )
         and message.outcome != "failure"
         and message.error_code is None
     )
 
 
 def _is_completion_only(message: ConversationMessage) -> bool:
-    return _is_task_completion(message) and message.outcome not in {"activity_written", "follow_up_disposition"}
+    return (
+        _is_task_completion(message)
+        and message.outcome not in {"activity_written", "follow_up_disposition"}
+        and message.proposal_receipt is None
+    )
 
 
 def _normalize_task_completions(messages: list[ConversationMessage]) -> None:
@@ -187,7 +207,10 @@ def _normalize_task_completions(messages: list[ConversationMessage]) -> None:
             task is not None
             and task.public_id in last_completed
             and message.role == "assistant"
-            and message.outcome in {"activity_written", "follow_up_disposition"}
+            and (
+                message.outcome in {"activity_written", "follow_up_disposition"} or message.proposal_receipt is not None
+            )
+            and message.error_code is None
         ):
             last_completed[task.public_id] = max(last_completed[task.public_id], index)
     normalized: list[ConversationMessage] = []
@@ -250,6 +273,7 @@ def _split_activity_disposition(messages: list[ConversationMessage]) -> None:
         if identifier not in known:
             expanded.append(message.model_copy(update={
                 "id": identifier, "outcome": "follow_up_disposition", "projection": None, "ui": None,
+                "proposal_receipt": None,
                 "text": "历史跟进任务",
             }))
             known.add(identifier)
@@ -328,9 +352,11 @@ def _project_coverage(messages: list[ConversationMessage], live_id: str | None) 
         batch_id = payload.get("batch_id")
         if not isinstance(batch_id, str) or not batch_id.strip() or len(items) > 100:
             continue
-        role: Literal["NONE", "CURRENT", "FINAL"] = (
-            "FINAL" if payload.get("status") == "DONE" else "CURRENT" if message.id == live_id else "NONE"
-        )
+        role: Literal["NONE", "CURRENT", "FINAL"] = "NONE"
+        if payload.get("status") == "DONE":
+            role = "FINAL"
+        elif message.id == live_id or (payload.get("settling") is True and message.outcome == "follow_up_disposition"):
+            role = "CURRENT"
         message.projection = ConversationProjection(
             visibility="FALLBACK_RECEIPT" if role == "NONE" else "VISIBLE",
             disposition=ConversationDispositionProjection(
@@ -344,7 +370,12 @@ def _project_coverage(messages: list[ConversationMessage], live_id: str | None) 
     for group in activities.values():
         carrier = max(group, key=_carrier_rank)
         for message in group:
-            if message is not carrier and message.projection:
+            if (
+                message is not carrier
+                and message.projection
+                and message.proposal_receipt is None
+                and message.id != live_id
+            ):
                 message.projection.visibility = "COVERED"
                 message.projection.covered_by = carrier.id
     for group in rounds.values():
@@ -354,7 +385,13 @@ def _project_coverage(messages: list[ConversationMessage], live_id: str | None) 
             continue
         carrier = max(full, key=_carrier_rank)
         for message in group:
-            if message is not carrier and message.projection and _covers_disposition(carrier, message):
+            if (
+                message is not carrier
+                and message.projection
+                and message.proposal_receipt is None
+                and message.id != live_id
+                and _covers_disposition(carrier, message)
+            ):
                 message.projection.visibility = "COVERED"
                 message.projection.covered_by = carrier.id
 
@@ -412,32 +449,54 @@ def project_assistant_message(
 ) -> AgentUIEnvelope | None:
     """Build Web-visible blocks, or leave a normal completion to the host."""
 
-    if message.outcome == "failure":
+    if message.outcome == "failure" or message.error_code is not None:
         return _project_failure(message)
     if _is_completion_only(message):
         return None
+    result = _result_block(message)
+    try:
+        return _project_message_blocks(
+            message, result=result, active_waiting=active_waiting, active_boundary=active_boundary,
+            submitted_kind=submitted_kind,
+        )
+    except (ValidationError, ValueError):
+        return _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE, result=result)
+
+
+def _project_message_blocks(
+    message: ConversationMessage,
+    *,
+    result: ActionResultBlock | None,
+    active_waiting: bool,
+    active_boundary: bool,
+    submitted_kind: str | None,
+) -> AgentUIEnvelope:
+    prefix = (result,) if result is not None else ()
+    if message.outcome == "proposal_unavailable":
+        blocks = (*prefix, NoticeBlock(id="b_notice_1", type="notice", tone="warning", code="PROPOSAL_UNAVAILABLE",
+                                       text=_plain(message.text) or _UNAVAILABLE))
+        return _envelope(message, blocks, route="WORKFLOW")
     if (
         message.projection is not None
         and message.projection.disposition is not None
         and message.projection.disposition.card_role == "NONE"
         and _disposition_items(message) is not None
     ):
-        return _project_disposition_receipt(message)
-    if message.outcome == "activity_written":
-        return _envelope(message, (_result_block(message),), route="WORKFLOW")
-    disposition = _project_disposition(message, active_waiting=active_waiting)
-    if disposition is not None:
-        return disposition
-    if message.boundary is not None:
-        return _envelope(
-            message,
-            (_boundary_block(message, active=active_boundary),),
-            route="CLARIFY",
-        )
+        return _envelope(message, (*prefix, *_disposition_receipt_blocks(message)), route="WORKFLOW")
     waiting = message.task.waiting if message.task is not None else None
+    if message.outcome == "activity_written" and waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION":
+        return _envelope(message, prefix, route="WORKFLOW")
+    disposition = _disposition_blocks(message, active_waiting=active_waiting)
+    if disposition is not None:
+        return _envelope(message, (*prefix, *disposition), route="WORKFLOW")
+    if message.boundary is not None:
+        return _envelope(message, (*prefix, _boundary_block(message, active=active_boundary)), route="CLARIFY")
     if waiting is not None:
-        blocks = _waiting_blocks(message, waiting, active=active_waiting, submitted_kind=submitted_kind)
-        return _envelope(message, blocks, route="WORKFLOW")
+        blocks = _waiting_blocks(message, waiting, active=active_waiting, submitted_kind=submitted_kind,
+                                 include_prose=result is None)
+        return _envelope(message, (*prefix, *blocks), route="WORKFLOW")
+    if prefix:
+        return _envelope(message, prefix, route="WORKFLOW")
     text = _plain(message.text) or _UNAVAILABLE
     return _envelope(message, (_text_block(text),), route="WORKFLOW" if message.task else "CHITCHAT")
 
@@ -509,7 +568,7 @@ def _reply_entry_id(message_id: str) -> str | None:
     return entry_id
 
 
-def _project_disposition_receipt(message: ConversationMessage) -> AgentUIEnvelope:
+def _disposition_receipt_blocks(message: ConversationMessage) -> tuple[NoticeBlock, ...]:
     """Keep server-rendered, non-interactive facts available outside the carrier's page."""
     details = [_plain(message.text) or "历史跟进任务"]
     for item in _disposition_items(message) or []:
@@ -524,74 +583,89 @@ def _project_disposition_receipt(message: ConversationMessage) -> AgentUIEnvelop
     text = "\n".join(details)
     # The existing batch allows 100 items. Preserve their facts without exceeding
     # the per-notice 10k contract (the envelope supports 30 blocks).
-    notices = tuple(
+    return tuple(
         NoticeBlock(
             id=f"b_notice_disposition_receipt_{index // 10000}",
             type="notice", tone="info", title="历史跟进任务", text=text[index:index + 10000],
         )
         for index in range(0, len(text), 10000)
     )
-    return _envelope(message, notices, route="WORKFLOW")
 
 
-def _project_disposition(message: ConversationMessage, *, active_waiting: bool) -> AgentUIEnvelope | None:
+def _is_disposition_state(
+    state: str | None,
+) -> TypeGuard[Literal["current", "waiting", "complete", "hold", "skip", "failed", "unknown"]]:
+    return state in {"current", "waiting", *_SETTLED_LABELS}
+
+
+def _disposition_blocks(
+    message: ConversationMessage, *, active_waiting: bool,
+) -> tuple[NoticeBlock | InteractionBlock, ...] | None:
     task = message.task
     if task is None or not isinstance(task.follow_up_disposition, dict):
         return None
+    payload = task.follow_up_disposition
     waiting = task.waiting
     showing = message.outcome == "follow_up_disposition" or (
         waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION"
     )
     if not showing:
         return None
-    payload = task.follow_up_disposition
     items = payload.get("items")
-    if not isinstance(items, list) or not items:
+    status = _string(payload.get("status"))
+    if not isinstance(items, list):
+        return None
+    if status in {"OVERFLOW", "QUERY_FAILED"} or not items:
+        tone: Literal["warning", "info"] = "warning" if status in {"OVERFLOW", "QUERY_FAILED"} else "info"
         notice = NoticeBlock(
             id="b_notice_disposition",
             type="notice",
-            tone="warning" if payload.get("status") in {"OVERFLOW", "QUERY_FAILED"} else "info",
+            tone=tone,
             title="历史跟进任务",
-            text=_plain(message.text) or _UNAVAILABLE,
+            text=_clip(_plain(message.text) or _UNAVAILABLE, 10000),
         )
-        return _envelope(message, (notice,), route="WORKFLOW")
-    active = active_waiting and waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION"
-    current = next((item for item in items if isinstance(item, dict) and item.get("state") == "current"), None)
-    active = active and current is not None
-    item_id = str(current.get("item_id") or "") if active and current is not None else ""
+        return (notice,)
+    rows: list[OpenFollowUpDispositionCardItem] = []
+    handled = 0
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise ValueError("malformed disposition item")
+        item_id = raw.get("item_id")
+        title = raw.get("title")
+        if not isinstance(item_id, str) or not item_id.strip() or not isinstance(title, str) or not title.strip():
+            raise ValueError("malformed disposition identity")
+        state = _string(raw.get("state"))
+        if not _is_disposition_state(state):
+            raise ValueError("malformed disposition state")
+        if state == "failed" and raw.get("failure_code") == "ALREADY_HANDLED":
+            handled += 1
+        rows.append(OpenFollowUpDispositionCardItem(
+            item_id=item_id,
+            title=_clip(title, 255),
+            owner_line=_clip(_owner_line(raw.get("owner_line")) or "", 300) or None,
+            related=bool(raw.get("related")),
+            evidence_quote=_clip(raw["evidence_quote"], 255) if isinstance(raw.get("evidence_quote"), str) else None,
+            evidence_reason=_clip(raw["evidence_reason"], 500) if isinstance(raw.get("evidence_reason"), str) else None,
+            state=state,
+            result_title=_clip(raw["result_title"], 80) if isinstance(raw.get("result_title"), str) else None,
+            result_message=_clip(raw["result_message"], 500) if isinstance(raw.get("result_message"), str) else None,
+        ))
+    active = (
+        active_waiting
+        and waiting is not None
+        and waiting.type == "FOLLOW_UP_DISPOSITION"
+        and status == "ACTIVE"
+        and payload.get("settling") is not True
+    )
     options = [
-        InteractionOption(value=f"{item_id}:{value}" if active else value, label=label, disabled=not active)
-        for value, label in (("complete", "已完成"), ("hold", "先放着"), ("skip", "不管了"))
+        InteractionOption(value=row.item_id, label=_clip(row.title, 200),
+                          disabled=not active or row.state not in {"current", "waiting"})
+        for row in rows
     ]
-    cards = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        cards.append(
-            OpenFollowUpDispositionCardItem(
-                item_id=str(item.get("item_id") or ""),
-                title=str(item.get("title") or "跟进任务"),
-                owner_line=_owner_line(item.get("owner_line")),
-                related=bool(item.get("related")),
-                evidence_quote=item.get("evidence_quote") if isinstance(item.get("evidence_quote"), str) else None,
-                evidence_reason=None,
-                state=item.get("state")
-                if item.get("state")
-                in {
-                    "current",
-                    "waiting",
-                    "complete",
-                    "hold",
-                    "skip",
-                    "failed",
-                    "unknown",
-                }
-                else "waiting",
-                result_title=item.get("result_title") if isinstance(item.get("result_title"), str) else None,
-                result_message=item.get("result_message") if isinstance(item.get("result_message"), str) else None,
-            )
-        )
-    summary = _plain(message.text) if not active and payload.get("status") == "DONE" else ""
+    prompt = _plain(waiting.prompt) if waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION" else ""
+    summary = _disposition_summary(rows, handled, payload.get("suppression_status")) if status == "DONE" else (
+        "历史跟进任务结果待核对" if payload.get("settling") is True else ""
+    )
     interaction = InteractionBlock(
         id="b_interaction_1",
         type="interaction",
@@ -600,17 +674,37 @@ def _project_disposition(message: ConversationMessage, *, active_waiting: bool) 
         business_action="settle_follow_up_disposition",
         presentation="OPEN_FOLLOW_UP_DISPOSITION",
         state="ACTIVE" if active else "READ_ONLY",
-        prompt="历史跟进任务",
-        hint=summary[:400] or None,
+        prompt=prompt or "历史跟进任务",
+        hint=_clip(summary, 400) or None,
         options=options,
-        disposition_items=cards,
-        selection_mode="single",
-        min_selections=1,
-        max_selections=1,
-        submit_on_select=active,
+        disposition_items=rows,
+        selection_mode="multiple",
+        min_selections=0,
+        max_selections=len(rows),
+        submit_on_select=False,
         submit_action_id=_action_id(waiting) if active and waiting is not None else None,
+        secondary_action=InteractionOption(value="suppress_week", label="本周不再提示") if active else None,
+        disposition_link=True,
     )
-    return _envelope(message, (interaction,), route="WORKFLOW")
+    return (interaction,)
+
+
+def _disposition_summary(
+    rows: list[OpenFollowUpDispositionCardItem], handled: int, suppression: object,
+) -> str:
+    labels = (("complete", "完成"), ("hold", "保持"), ("skip", "不管了"),
+              ("unknown", "结果待核对"))
+    parts = [f"{count} 条{label}" for state, label in labels if (count := sum(row.state == state for row in rows))]
+    failed = sum(row.state == "failed" for row in rows) - handled
+    if handled:
+        parts.append(f"{handled} 条已被处理")
+    if failed:
+        parts.append(f"{failed} 条未能处理")
+    if suppression == "applied":
+        parts.append("本周不再提示此客户的历史任务")
+    elif suppression == "stale":
+        parts.append("客户关联已失效，未设置本周免提示")
+    return "，".join(parts)
 
 
 def _owner_line(raw: object) -> str | None:
@@ -630,12 +724,13 @@ def _waiting_blocks(
     *,
     active: bool,
     submitted_kind: str | None = None,
+    include_prose: bool = True,
 ) -> tuple[TextBlock | NoticeBlock | InteractionBlock, ...]:
     prompt = _plain(waiting.prompt) or _plain(message.text) or _UNAVAILABLE
     interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind)
     blocks: list[TextBlock | NoticeBlock | InteractionBlock] = []
     prose = _plain(message.text)
-    if prose and prose != prompt:
+    if include_prose and prose and prose != prompt:
         blocks.append(_text_block(prose))
     if message.task is not None and waiting.type == "FIELD":
         notice = _accepted_notice(message.task.draft)
@@ -643,6 +738,46 @@ def _waiting_blocks(
             blocks.append(notice)
     blocks.append(interaction)
     return tuple(blocks)
+
+
+def _form_interaction(
+    message: ConversationMessage,
+    waiting: TaskWaiting,
+    *,
+    prompt: str,
+    active: bool,
+    action_id: str,
+) -> InteractionBlock:
+    proposal = waiting.type == "PROPOSAL_FORM"
+    business_action = "create_opportunity_proposal" if proposal else "edit_confirmation"
+    expected_field = "proposal:opportunity_create" if proposal else "activity_write"
+    if waiting.field != expected_field or waiting.form_revision is None or not waiting.form_fields:
+        raise ValueError("missing frozen form")
+    fields = [InteractionField.model_validate(raw) for raw in waiting.form_fields]
+    by_key = {field.key: field for field in fields}
+    if len(by_key) != len(fields) or not by_key.keys() <= _FORM_FIELDS[business_action]:
+        raise ValueError("duplicate or unsupported form field")
+    for field in fields:
+        if field.depends_on_key is not None:
+            parent = by_key.get(field.depends_on_key)
+            if parent is None or parent.field_type != "select" or parent.depends_on_key is not None:
+                raise ValueError("invalid form dependency")
+            values = {option.value for option in parent.options}
+            if any(option.depends_on_value not in values for option in field.options):
+                raise ValueError("unknown dependent option")
+    return InteractionBlock(
+        id="b_interaction_1",
+        type="interaction",
+        interaction_id=_interaction_id(message),
+        interaction_type="form",
+        business_action=business_action,
+        state="ACTIVE" if active else "READ_ONLY",
+        prompt=prompt,
+        fields=fields,
+        hint=_clip(_plain(waiting.hint), 400) or None,
+        allow_cancel=active,
+        submit_action_id=action_id if active else None,
+    )
 
 
 def _waiting_interaction(
@@ -654,6 +789,10 @@ def _waiting_interaction(
     submitted_kind: str | None = None,
 ) -> InteractionBlock:
     action_id = _action_id(waiting)
+    if waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}:
+        return _form_interaction(message, waiting, prompt=prompt, active=active, action_id=action_id)
+    if waiting.type == "FOLLOW_UP_DISPOSITION":
+        raise ValueError("missing frozen disposition batch")
     if waiting.type == "CONFIRMATION" and waiting.confirmation_payload is not None:
         return _confirmation(message, waiting, prompt=prompt, active=active, action_id=action_id)
     if waiting.type == "ACTIVITY_KIND":
@@ -706,8 +845,9 @@ def _confirmation(
         confirm_disabled = payload.preview.channel_status == "required"
     else:
         business_action = "confirm_proposal"
-        facts = _proposal_facts(payload.proposal_kind, payload.candidate.evidence_quote)
+        facts = _proposal_facts(payload.candidate, message)
         confirm_label = "确认"
+    edit_enabled = active and payload.kind == "activity_write"
     return InteractionBlock(
         id="b_interaction_1",
         type="interaction",
@@ -721,14 +861,21 @@ def _confirmation(
             InteractionOption(
                 value="confirm",
                 label=confirm_label,
-                disabled=confirm_disabled,
+                disabled=not active or confirm_disabled,
                 description="先选择活动类型" if confirm_disabled else None,
             ),
-            InteractionOption(value="cancel", label="取消"),
+            InteractionOption(value="cancel", label="取消", disabled=not active),
         ],
         selection_mode="single",
-        submit_on_select=True,
+        submit_on_select=active,
         submit_action_id=action_id if active else None,
+        secondary_action=InteractionOption(value="request_edit", label="修改内容") if edit_enabled else None,
+        cancel_reasons=[
+            InteractionOption(value="wrong_customer", label="客户不对"),
+            InteractionOption(value="wrong_content", label="内容不对"),
+            InteractionOption(value="should_not_record", label="不该记录"),
+            InteractionOption(value="other", label="其他"),
+        ] if edit_enabled else [],
     )
 
 
@@ -919,11 +1066,36 @@ def _add_follow_time_fact(facts: list[InteractionConfirmationFact], preview: Act
     return True
 
 
-def _proposal_facts(kind: str, evidence: str) -> list[InteractionConfirmationFact]:
+def _proposal_facts(candidate: ProposalCandidate, message: ConversationMessage) -> list[InteractionConfirmationFact]:
     facts: list[InteractionConfirmationFact] = []
-    _add_fact(facts, "proposal", "建议", _PROPOSAL_LABELS.get(kind, kind))
-    _add_fact(facts, "evidence", "证据", evidence)
+    _add_fact(facts, "proposal", "建议", _PROPOSAL_LABELS[candidate.kind])
+    payload = candidate.payload
+    if candidate.kind == "opportunity_stage":
+        _add_fact(facts, "opportunity_name", "商机", _string(payload.get("opportunity_name")))
+        destination = _string(payload.get("stage_name"))
+        current = _string(payload.get("current_stage_name"))
+        if "current_stage_name" in payload and payload["current_stage_name"] is None:
+            current = "未开始"
+        if destination and current:
+            _add_fact(facts, "stage_transition", "阶段", f"{current} → {destination}")
+    elif candidate.kind == "follow_up_task_create":
+        _add_fact(facts, "action", "任务标题", _string(payload.get("action")))
+        due = _string(payload.get("due_date"))
+        if due and candidate.due_date_granularity in {"DATE", "DATETIME"}:
+            with suppress(ValueError):
+                due = _format_temporal_date(
+                    datetime.fromisoformat(due), include_time=candidate.due_date_granularity == "DATETIME",
+                )
+        _add_fact(facts, "due_date", "到期日", due)
+        _add_fact(facts, "owner", "负责人", _string(payload.get("owner")))
+    elif candidate.kind == "opportunity_create" and message.task is not None:
+        _add_fact(facts, "customer", "客户", _accepted_value(message.task.draft.customer))
+    _add_fact(facts, "evidence", "证据", candidate.evidence_quote, group="context")
     return facts
+
+
+def _string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _participants(content_json: dict[str, object]) -> str | None:
@@ -1078,14 +1250,67 @@ def _accepted_notice(draft: TaskDraft) -> NoticeBlock | None:
     return NoticeBlock(id="b_notice_1", type="notice", tone="info", title="已确认", text="、".join(parts))
 
 
-def _result_block(message: ConversationMessage) -> ActionResultBlock:
+def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
+    """Use the event-local proposal result, never a cumulative committed proposal."""
+    if message.outcome == "failure" or message.error_code is not None:
+        return None
+    proposal = message.proposal_receipt
+    customer_name = _accepted_value(message.task.draft.customer) if message.task is not None else ""
+    if proposal is not None and proposal.kind in _PROPOSAL_LABELS:
+        title, fallback = {
+            "opportunity_stage": ("商机阶段已推进", "商机阶段"),
+            "opportunity_create": ("商机已创建", "商机"),
+            "follow_up_task_create": ("跟进任务已创建", "跟进任务"),
+        }[proposal.kind]
+        if (
+            proposal.kind == "opportunity_create"
+            and proposal.approval_phase == "pending_review"
+            and proposal.approval_id is not None
+            and proposal.approval_id > 0
+        ):
+            title = "商机已创建，待审批"
+        detail = _plain(proposal.detail) or (f"客户：{customer_name}" if customer_name else fallback)
+        entity = _receipt_entity(
+            proposal.customer_public_id,
+            customer_name=customer_name,
+            opportunity_id=proposal.public_id if proposal.kind.startswith("opportunity_") else None,
+        )
+    elif message.outcome == "activity_written":
+        title, detail = "活动已写入", _result_message(message)
+        activity_id = message.projection.activity_public_id if message.projection else None
+        activity = next((
+            receipt for receipt in message.task.committed
+            if receipt.kind == "customer_activity" and (activity_id is None or receipt.public_id == activity_id)
+        ), None) if message.task else None
+        entity = _receipt_entity(activity.customer_public_id, customer_name=customer_name) if activity else None
+    else:
+        return None
     return ActionResultBlock(
         id="b_result_1",
         type="action_result",
         action_id=_clip(message.id, 128),
         status="SUCCESS",
-        title="活动已写入",
-        message=_result_message(message),
+        title=title,
+        message=_clip(detail, 10000),
+        entity_ref=entity,
+    )
+
+
+def _receipt_entity(
+    customer_id: str | None, *, customer_name: str, opportunity_id: str | None = None,
+) -> EntityRef | None:
+    if customer_id is None or not _CUSTOMER_PUBLIC_ID_RE.fullmatch(customer_id):
+        return None
+    if opportunity_id is not None:
+        if not is_opportunity_public_id(opportunity_id):
+            return None
+        return EntityRef(
+            ref_id=f"opportunity:{opportunity_id}", resource="opportunity", public_id=opportunity_id,
+            display_name="商机", attributes={"customer_public_id": customer_id},
+        )
+    return EntityRef(
+        ref_id=f"customer:{customer_id}", resource="customer", public_id=customer_id,
+        display_name=_clip(customer_name, 200) or "客户",
     )
 
 
@@ -1126,6 +1351,7 @@ def _failure_envelope(
     code: AgentErrorCode,
     retryable: bool,
     text: str,
+    result: ActionResultBlock | None = None,
 ) -> AgentUIEnvelope:
     error = ErrorBlock(
         id="b_error_1",
@@ -1135,7 +1361,7 @@ def _failure_envelope(
         message=text,
         retryable=retryable,
     )
-    return _envelope(message, (error,), route="WORKFLOW", state="failed")
+    return _envelope(message, (result, error) if result is not None else (error,), route="WORKFLOW", state="failed")
 
 
 def _envelope(
@@ -1228,6 +1454,8 @@ def _live_waiting_message_id(
     current = focused_task.waiting
     live_id: str | None = None
     for message in messages:
+        if message.role != "assistant" or message.outcome == "failure" or message.error_code or message.boundary:
+            continue
         task = message.task
         waiting = task.waiting if task is not None else None
         if task is None or waiting is None or task.public_id != focused_task.public_id:
@@ -1235,6 +1463,9 @@ def _live_waiting_message_id(
         if (
             waiting.action_id == current.action_id
             and waiting.expected_version == current.expected_version
+            and waiting.form_revision == current.form_revision
+            and waiting.type == current.type
+            and waiting.field == current.field
             and waiting.question_id == current.question_id
         ):
             live_id = message.id

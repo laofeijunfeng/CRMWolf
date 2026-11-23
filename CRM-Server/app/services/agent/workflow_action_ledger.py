@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
 from app.crud.agent import agent_workflow_action_crud
 from app.models.agent import AgentWorkflowAction, AgentWorkflowActionStatus
@@ -14,6 +13,11 @@ from app.schemas.agent import AgentWorkflowActionCreate, AgentWorkflowActionUpda
 from app.services.agent import action_workflow
 from app.services.agent.types import coerce_json_dict
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from sqlalchemy.orm import Session
 
 SOURCE_POST_COMMIT_PROJECTION = "post_commit_projection"
 SOURCE_POST_COMMIT_RECONCILIATION = "post_commit_reconciliation"

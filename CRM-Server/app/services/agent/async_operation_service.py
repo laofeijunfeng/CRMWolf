@@ -280,6 +280,7 @@ class AgentAsyncOperationService:
             "attempt_count": 0,
             "next_event_sequence": 1,
         }
+        operation: AgentAsyncOperation | None
         if db.get_bind().dialect.name == "mysql":
             operation = self._ensure_scheduled_mysql(
                 db,

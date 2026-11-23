@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services.assistant.failure_contract import attempt_budget_remaining
 from app.services.assistant.model_transport import (
     AssistantLLMError,
     AssistantModelTransport,
@@ -132,6 +133,8 @@ class QualityGate:
                 ),
                 response_model=AssistantQualityResponse,
                 error_prefix="客户活动评分",
+                timeout_seconds=attempt_budget_remaining(),
+                stage="quality_gate",
                 stream=True,
                 retry_timeouts=True,
             )

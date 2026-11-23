@@ -20,7 +20,7 @@ ROLE_DISPLAY_NAMES = {
     "SALES_MEMBER": "销售成员",
 }
 
-# 用户描述 → 角色编码映射（用于 System Prompt 示例）
+# 用户描述 → 角色编码映射(用于 System Prompt 示例)
 ROLE_MAPPING_EXAMPLES = {
     "总经理审批": "TEAM_ADMIN",
     "老板审批": "TEAM_ADMIN",

@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
+import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { InteractionBlockSchema } from '@/schemas/agent-contracts'
 
 import AgentUIInteractionBlock from '../AgentUIInteractionBlock.vue'
@@ -262,18 +263,10 @@ it('cancels a signed follow-up prompt with required text empty and locks both ac
   expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { cancel: true }]])
 })
 
-it('does not offer follow-up cancellation without both the signed permission and matching action', () => {
-  for (const changes of [
-    { allow_cancel: undefined, business_action: 'provide_follow_up_content' },
-    { allow_cancel: false, business_action: 'provide_follow_up_content' },
-    { allow_cancel: true, business_action: undefined },
-    { allow_cancel: true, business_action: 'supplement_follow_up_quality' },
-    { allow_cancel: true, business_action: 'provide_lead_fields' },
-  ]) {
-    const block = InteractionBlockSchema.parse({ ...followUpContentBlock, ...changes })
-    const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
-    expect(wrapper.findAll('button').map(button => button.text())).toEqual(['继续'])
-  }
+it('does not offer follow-up cancellation without the signed permission', () => {
+  const block = InteractionBlockSchema.parse({ ...followUpContentBlock, allow_cancel: false })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['继续'])
 })
 
 it('permits cancellation of a signed follow-up form without validating required fields', async () => {
@@ -302,15 +295,16 @@ it('still validates required follow-up text for normal submission', async () => 
   expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { text: '与客户确定下周会议时间' }]])
 })
 
-it('does not offer cancellation for another action form even when the block says it is allowed', () => {
-  const block = InteractionBlockSchema.parse({
-    ...followUpContentBlock,
-    interaction_type: 'form',
-    business_action: 'provide_lead_fields',
-    allow_blank: undefined,
-  })
-  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
-  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['继续'])
+it('rejects cancellation permission for an unrelated form or text input', () => {
+  for (const interactionType of ['form', 'text_input']) {
+    const result = InteractionBlockSchema.safeParse({
+      ...followUpContentBlock,
+      interaction_type: interactionType,
+      business_action: 'provide_lead_fields',
+      allow_blank: interactionType === 'form' ? undefined : false,
+    })
+    expect(result.success ? [] : result.error.issues.map(issue => issue.path)).toContainEqual(['allow_cancel'])
+  }
 })
 
 it('keeps the follow-up prompt retryable after a failed cancellation and consumes it after success', async () => {
@@ -357,59 +351,45 @@ it('does not reopen a submitted confirmation when its parent releases a transien
   expect(wrapper.emitted('submit')).toEqual([['act_confirmation_retry', { choice: 'confirm' }]])
 })
 
-it('shows every open follow-up and submits only the current three-way choice', async () => {
-  const block = InteractionBlockSchema.parse({
+const dispositionBlock = {
     id: 'b_open_follow_up',
     type: 'interaction',
     interaction_id: 'int_open_follow_up',
     interaction_type: 'choice',
     business_action: 'settle_follow_up_disposition',
     presentation: 'OPEN_FOLLOW_UP_DISPOSITION',
-    selection_mode: 'single',
-    min_selections: 1,
-    max_selections: 1,
-    submit_on_select: true,
+    selection_mode: 'multiple',
+    min_selections: 0,
+    max_selections: 12,
     state: 'ACTIVE',
-    prompt: '还发现 2 条未完成的历史任务，请逐条处理。',
-    fields: [],
-    options: [
-      { value: 'i1:complete', label: '已完成', description: '标记此任务完成', disabled: false },
-      { value: 'i1:hold', label: '先放着', description: '保持未完成', disabled: false },
-      { value: 'i1:skip', label: '不管了', description: '仅跳过本次', disabled: false },
-    ],
-    disposition_items: [
-      {
-        item_id: 'i1',
-        title: '联系客户确认采购安排',
-        owner_line: '负责人：我 · 计划 10 月 28 日',
-        related: true,
-        evidence_quote: '已和林女士核对采购安排',
-        evidence_reason: '本次跟进与任务均明确提到“确认采购安排”，且属于同一客户。',
-        state: 'current',
-        result_title: null,
-        result_message: null,
-      },
-      {
-        item_id: 'i2',
-        title: '补充安全测评报告',
-        owner_line: '负责人：我 · 计划 11 月 2 日',
-        related: false,
-        evidence_quote: null,
-        evidence_reason: null,
-        state: 'waiting',
-        result_title: null,
-        result_message: null,
-      },
-    ],
+    prompt: '历史跟进任务',
+    secondary_action: { value: 'suppress_week', label: '本周不再提示' },
+    options: Array.from({ length: 12 }, (_, index) => ({
+      value: `task_${index + 1}`,
+      label: '标记完成',
+      disabled: index === 1,
+    })),
+    disposition_items: Array.from({ length: 12 }, (_, index) => ({
+      item_id: `task_${index + 1}`,
+      title: `跟进任务 ${index + 1}`,
+      related: index === 0,
+      evidence_quote: index === 0 ? '已和林女士核对采购安排' : null,
+      state: 'waiting',
+    })),
     submit_label: '提交',
     submit_action_id: 'act_follow_up_1',
-  })
-  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+}
 
-  expect(wrapper.text()).toContain('联系客户确认采购安排')
-  expect(wrapper.text()).toContain('补充安全测评报告')
-  expect(wrapper.text()).not.toContain('标记此任务完成')
-  expect(wrapper.text()).not.toContain('本次跟进与任务均明确提到')
+it('discloses the remaining disposition rows and submits selected IDs in server order with weekly suppression', async () => {
+  const block = InteractionBlockSchema.parse(dispositionBlock)
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const collapsed = wrapper.get('details')
+  expect(collapsed.attributes('open')).toBeUndefined()
+  expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(12)
+  expect(collapsed.findAll('input[type="checkbox"]')).toHaveLength(2)
+  const checkboxes = wrapper.findAll<HTMLInputElement>('input[type="checkbox"]')
+  expect(checkboxes[1]?.element.disabled).toBe(true)
+  expect(wrapper.get('details').text()).toContain('跟进任务 12')
   const toggles = wrapper.findAll('[data-agent-ui-related-toggle]')
   expect(toggles).toHaveLength(1)
   expect(wrapper.find('[data-agent-ui-related-line]').exists()).toBe(false)
@@ -417,11 +397,102 @@ it('shows every open follow-up and submits only the current three-way choice', a
   expect(toggles[0]?.attributes('aria-expanded')).toBe('true')
   expect(wrapper.findAll('[data-agent-ui-related-line]')).toHaveLength(1)
   expect(wrapper.get('[data-agent-ui-related-line]').text()).toContain('已和林女士核对采购安排')
-  const complete = wrapper.findAll('button').find(button => button.text().includes('已完成'))
-  await complete?.trigger('click')
+  await checkboxes[11]?.setValue(true)
+  await checkboxes[0]?.setValue(true)
+  expect(wrapper.emitted('submit')).toBeUndefined()
+  await wrapper.findAll('button').find(button => button.text() === '本周不再提示')?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([
-    ['act_follow_up_1', { choice: 'i1:complete' }],
+    ['act_follow_up_1', { choices: ['task_1', 'task_12'], suppress_week: true }],
   ])
+})
+
+it('accepts empty normal disposition submissions and leaves archived results non-actionable', async () => {
+  const draft = dispositionBlock
+  const block = InteractionBlockSchema.parse(draft)
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  await wrapper.findAll('button').find(button => button.text() === '提交')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_1', { choices: [], suppress_week: false }]])
+
+  await wrapper.setProps({ block: InteractionBlockSchema.parse({
+    ...draft,
+    state: 'READ_ONLY',
+    submit_action_id: null,
+    secondary_action: null,
+    disposition_items: draft.disposition_items.map((item, index) => index === 0
+      ? { ...item, state: 'unknown', result_title: '结果待核对', result_message: '暂未确认是否写入' }
+      : item),
+  }) })
+  expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('本周不再提示')
+  expect(wrapper.text()).toContain('结果待核对')
+  expect(wrapper.text()).toContain('暂未确认是否写入')
+})
+
+it.each([
+  ['修改内容', null, { choice: 'request_edit' }],
+  ['取消', '客户不对', { choice: 'cancel', reason: 'wrong_customer' }],
+  ['取消', '跳过原因', { choice: 'cancel' }],
+])('submits only the chosen confirmation command (%s, %s)', async (command, reason, expected) => {
+  const block = InteractionBlockSchema.parse({
+    id: 'confirm', type: 'interaction', interaction_id: 'confirm',
+    interaction_type: 'confirmation', state: 'ACTIVE', prompt: '确认写入？',
+    options: [{ value: 'confirm', label: '确认' }, { value: 'cancel', label: '取消' }],
+    selection_mode: 'single', submit_action_id: 'act_confirm',
+    secondary_action: { value: 'request_edit', label: '修改内容' },
+    cancel_reasons: [{ value: 'wrong_customer', label: '客户不对' }],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  await wrapper.findAll('button').find(button => button.text() === command)?.trigger('click')
+  if (reason !== null) {
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    await wrapper.findAll('button').find(button => button.text() === reason)?.trigger('click')
+  }
+  expect(wrapper.emitted('submit')).toEqual([['act_confirm', expected]])
+})
+
+it('filters dependent form options and clears a prior value on parent change', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'opportunity', type: 'interaction', interaction_id: 'opportunity',
+    interaction_type: 'form', business_action: 'create_opportunity_proposal',
+    allow_cancel: true, state: 'ACTIVE', prompt: '补充商机', submit_action_id: 'act_opp',
+    fields: [
+      { key: 'product', label: '产品', field_type: 'select', default_value: 'a', source_label: '来自原文',
+        options: [{ value: 'a', label: '产品 A' }, { value: 'b', label: '产品 B' }] },
+      { key: 'module', label: '模块', field_type: 'select', default_value: 'm1', depends_on_key: 'product',
+        error_message: '请核对模块',
+        options: [{ value: 'm1', label: '模块 A', depends_on_value: 'a' }, { value: 'm2', label: '模块 B', depends_on_value: 'b' }] },
+    ],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, {
+    props: { block },
+    global: { stubs: { SelectContent: { template: '<div><slot /></div>' }, SelectItem: true } },
+  })
+  expect(wrapper.text()).toContain('来自原文')
+  expect(wrapper.get('[role="alert"]').text()).toBe('请核对模块')
+  const controls = wrapper.findAllComponents(Select)
+  const [productSelector, moduleSelector] = controls
+  if (productSelector === undefined || moduleSelector === undefined) throw new Error('Expected both form selects')
+  const moduleOptions = (): unknown[] => moduleSelector.getComponent(SelectContent).findAllComponents(SelectItem).map(option => option.props('value') as unknown)
+  expect(moduleOptions()).toEqual(['m1'])
+  const productEmit = productSelector.vm as unknown as { $emit: (event: 'update:modelValue', value: string) => void }
+  productEmit.$emit('update:modelValue', 'b')
+  await wrapper.vm.$nextTick()
+  expect(moduleOptions()).toEqual(['m2'])
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  await wrapper.findAll('button').find(button => button.text() === '提交')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_opp', { product: 'b', module: null }]])
+})
+
+it('cancels a structured edit form using a choice rather than field values', async () => {
+  const block = InteractionBlockSchema.parse({
+    ...followUpContentBlock,
+    interaction_type: 'form',
+    business_action: 'edit_confirmation',
+    allow_blank: undefined,
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  await wrapper.findAll('button').find(button => button.text() === '取消')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_follow_up_content', { choice: 'cancel' }]])
 })
 
 it('splits a customer month segment from a dated sales follow-up', () => {

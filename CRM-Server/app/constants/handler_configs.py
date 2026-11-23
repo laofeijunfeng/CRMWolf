@@ -16,62 +16,62 @@ Handler 配置 - 硬编码版
     enum_class = enum_config["enum_class"]  # LeadStatus
     values = enum_config["values"]  # {"新建": 0, ...}
 """
-from typing import Dict, Any, Optional, List
+from typing import Any
+
+# ============================================================================
+# 枚举类导入
+# ============================================================================
+from app.constants.acquisition_sources import SYSTEM_DEFAULT_SOURCES
+from app.crud.contract import contract_crud
+from app.crud.customer import customer_crud
+from app.crud.customer_activity import customer_activity_crud
+from app.crud.invoice import invoice_application_crud, invoice_title_crud
 
 # ============================================================================
 # CRUD 实例导入
 # ============================================================================
 from app.crud.lead import lead_crud, lead_follow_up_crud
-from app.crud.customer import customer_crud
-from app.crud.customer_activity import customer_activity_crud
 from app.crud.opportunity import opportunity_crud
-from app.crud.contract import contract_crud
 from app.crud.payment import payment_plan_crud, payment_record_crud
-from app.crud.invoice import invoice_application_crud, invoice_title_crud
-from app.crud.user import user_crud
 from app.crud.permission import permission_crud
 from app.crud.role import role_crud
+from app.crud.user import user_crud
+from app.models.contract import Contract
+from app.models.customer import Customer, CustomerStatus
+from app.models.customer_activity import CustomerActivity
+from app.models.invoice import InvoiceApplication, InvoiceTitle, InvoiceType
 
 # ============================================================================
 # Model 类导入
 # ============================================================================
-from app.models.lead import Lead, LeadFollowUp
-from app.models.customer import Customer
-from app.models.customer_activity import CustomerActivity
-from app.models.opportunity import Opportunity
-from app.models.contract import Contract
+from app.models.lead import CompanyScale, FollowUpMethod, Lead, LeadFollowUp, LeadStatus
+from app.models.opportunity import LicenseType, Opportunity, OpportunityStatus, PurchaseType
 from app.models.payment import PaymentPlan, PaymentRecord
-from app.models.invoice import InvoiceApplication, InvoiceTitle
-from app.models.user import User
 from app.models.permission import Permission
 from app.models.role import Role
+from app.models.user import User
+from app.schemas.contract import ContractCreate, ContractUpdate
+from app.schemas.customer import CustomerCreate, CustomerUpdate
+from app.schemas.customer_activity import CustomerActivityCreate
+from app.schemas.invoice import (
+    InvoiceApplicationCreate,
+    InvoiceApplicationUpdate,
+    InvoiceTitleCreate,
+    InvoiceTitleUpdate,
+)
 
 # ============================================================================
 # Schema 类导入
 # ============================================================================
 from app.schemas.lead import LeadCreate, LeadUpdate
 from app.schemas.lead_follow_up import LeadFollowUpCreate
-from app.schemas.customer import CustomerCreate, CustomerUpdate
-from app.schemas.customer_activity import CustomerActivityCreate
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate
-from app.schemas.contract import ContractCreate, ContractUpdate
 from app.schemas.payment import PaymentPlanCreate, PaymentPlanUpdate, PaymentRecordCreate
-from app.schemas.invoice import InvoiceApplicationCreate, InvoiceApplicationUpdate, InvoiceTitleCreate, InvoiceTitleUpdate
-
-# ============================================================================
-# 枚举类导入
-# ============================================================================
-from app.constants.acquisition_sources import SYSTEM_DEFAULT_SOURCES
-from app.models.lead import LeadStatus, CompanyScale, FollowUpMethod
-from app.models.customer import CustomerStatus
-from app.models.opportunity import OpportunityStatus, PurchaseType, LicenseType
-from app.models.invoice import InvoiceType
-
 
 # ============================================================================
 # CRUD 映射配置
 # ============================================================================
-CRUD_MAPPINGS: Dict[str, Dict[str, Any]] = {
+CRUD_MAPPINGS: dict[str, dict[str, Any]] = {
     # Lead 相关
     "lead": {
         "crud": lead_crud,
@@ -210,7 +210,7 @@ CRUD_MAPPINGS: Dict[str, Dict[str, Any]] = {
 # ============================================================================
 # 枚举映射配置
 # ============================================================================
-ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
+ENUM_MAPPINGS: dict[str, dict[str, Any]] = {
     # 线索相关
     "lead_source": {
         "display_name": "获客来源",
@@ -222,14 +222,14 @@ ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
     "lead_status": {
         "enum_class": LeadStatus,
         "display_name": "线索状态",
-        # 中文 -> 枚举值（LeadStatus 是 int enum）
+        # 中文 -> 枚举值(LeadStatus 是 int enum)
         "values": {
             "新建": 0,
             "跟进中": 1,
             "已转化": 2,
             "无效": 3,
         },
-        # 枚举成员名 -> 中文（反向映射）
+        # 枚举成员名 -> 中文(反向映射)
         "reverse_values": {
             "NEW": "新建",
             "FOLLOWING": "跟进中",
@@ -328,17 +328,17 @@ ENUM_MAPPINGS: Dict[str, Dict[str, Any]] = {
 # ============================================================================
 # 辅助函数
 # ============================================================================
-def get_crud_config(mapping_name: str) -> Optional[Dict[str, Any]]:
+def get_crud_config(mapping_name: str) -> dict[str, Any] | None:
     """获取 CRUD 映射配置"""
     return CRUD_MAPPINGS.get(mapping_name)
 
 
-def get_enum_config(enum_name: str) -> Optional[Dict[str, Any]]:
+def get_enum_config(enum_name: str) -> dict[str, Any] | None:
     """获取枚举映射配置"""
     return ENUM_MAPPINGS.get(enum_name)
 
 
-def get_enum_value(enum_class: Any, chinese_name: str, enum_config: Dict[str, Any]) -> Any:
+def get_enum_value(enum_class: Any, chinese_name: str, enum_config: dict[str, Any]) -> Any:
     """
     从中文名称获取枚举值
 
@@ -357,7 +357,7 @@ def get_enum_value(enum_class: Any, chinese_name: str, enum_config: Dict[str, An
     return None
 
 
-def get_status_display_name(enum_config: Dict[str, Any], status_value: Any) -> str:
+def get_status_display_name(enum_config: dict[str, Any], status_value: Any) -> str:
     """
     从状态值获取中文显示名称
 
@@ -375,7 +375,7 @@ def get_status_display_name(enum_config: Dict[str, Any], status_value: Any) -> s
     return str(status_value)
 
 
-def get_status_enum_values(enum_class: Any, status_keys: List[str]) -> List[Any]:
+def get_status_enum_values(enum_class: Any, status_keys: list[str]) -> list[Any]:
     """
     从枚举成员名列表获取枚举值列表
 

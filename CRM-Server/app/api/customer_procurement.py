@@ -3,15 +3,14 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import (
-    get_current_active_user,
-    get_current_user_team,
     check_customer_edit_permission,
     check_customer_view_permission,
+    get_current_active_user,
+    get_current_user_team,
 )
+from app.crud.procurement import procurement_method_crud
 from app.models.user import User
 from app.schemas.procurement import MessageResponse
-from app.crud.procurement import procurement_method_crud
-
 
 router = APIRouter(
     prefix="/v1/customers",
@@ -19,7 +18,11 @@ router = APIRouter(
 )
 
 
-@router.post("/{customer_id}/set-default-procurement-method", response_model=MessageResponse, summary="设置客户默认采购方式", description="""
+@router.post(
+    "/{customer_id}/set-default-procurement-method",
+    response_model=MessageResponse,
+    summary="设置客户默认采购方式",
+    description="""
 为客户设置默认的采购方式。
 
 **业务规则：**
@@ -29,7 +32,8 @@ router = APIRouter(
 
 **权限要求：**
 - 只有客户负责人或管理员可以设置
-""")
+""",
+)
 def set_customer_default_procurement_method(
     customer_id: str,
     procurement_method_id: int,
@@ -59,7 +63,7 @@ def set_customer_default_procurement_method(
     db.commit()
     
     return MessageResponse(
-        message=f"客户默认采购方式设置成功"
+        message="客户默认采购方式设置成功"
     )
 
 

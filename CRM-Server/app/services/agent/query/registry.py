@@ -265,8 +265,8 @@ class CRMReadToolRegistry:
             tools["get_follow_up_task_detail"] = CRMReadToolSpec(
                 name="get_follow_up_task_detail",
                 description=(
-                    "读取一个已由服务端确认的跟进任务详情，包括当前状态、完成时间和取消时间。"
-                    "只能使用 query_follow_up_tasks 返回或 Root 传入的 task_ref；这是只读查询，不会改变任务状态。"
+                    "读取一个已由服务端确认的跟进任务详情\uff0c包括当前状态、完成时间和取消时间。"
+                    "只能使用 query_follow_up_tasks 返回或 Root 传入的 task_ref\uff1b这是只读查询\uff0c不会改变任务状态。"
                 ),
                 input_model=FollowUpTaskDetailRequest,
                 is_write=False,

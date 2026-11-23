@@ -1,6 +1,6 @@
 """IM channel models for Agent conversations."""
 
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Column, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 
 from app.core.database import Base
 from app.utils.time import business_now

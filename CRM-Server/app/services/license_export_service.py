@@ -1,16 +1,15 @@
 """License 文档导出服务
 
-导出 License 申请为 Word 文档，格式参照样例。
+导出 License 申请为 Word 文档\uff0c格式参照样例。
 """
+import tempfile
+
 from docx import Document
 from docx.oxml.ns import qn
-from docx.shared import Pt
-import tempfile
 
 from app.core.list_query.license_status import license_expiry_text
 from app.models.license_application import LicenseApplication, LicenseType
 from app.utils.time import business_now
-
 
 LICENSE_DOCUMENT_FONT = "黑体"
 
@@ -37,7 +36,7 @@ def _set_document_font(doc: Document, font_name: str = LICENSE_DOCUMENT_FONT) ->
 
 def export_license_document(application: LicenseApplication) -> str:
     """
-    导出 License 文档（参照样例格式）
+    导出 License 文档\uff08参照样例格式\uff09
 
     Args:
         application: License 申请记录
@@ -45,12 +44,12 @@ def export_license_document(application: LicenseApplication) -> str:
     Returns:
         str: 导出文件的临时路径
 
-    文件名格式：私有化部署License-{客户名称}_{当前日期}.docx
+    文件名格式\uff1a私有化部署License-{客户名称}_{当前日期}.docx
     """
     doc = Document()
     _set_document_font(doc)
 
-    # 标题：使用申请时的产品名称快照；无产品时使用通用标题
+    # 标题:使用申请时的产品名称快照;无产品时使用通用标题
     product_name = (application.product_name or "").strip()
     doc.add_heading(f"{product_name}私有化授权文件" if product_name else "私有化授权文件", 0)
 
@@ -59,7 +58,7 @@ def export_license_document(application: LicenseApplication) -> str:
     expiry_text = license_expiry_text(application.expiry_date, application.is_permanent)
     doc.add_paragraph(f"到期时间: {expiry_text or '未填写'}")
 
-    # 授权人数来自本次 License 申请，服务器地址来自部署信息。
+    # 授权人数来自本次 License 申请,服务器地址来自部署信息。
     doc.add_paragraph(f"授权人数: {application.authorized_users}")
     if application.deployment_info:
         doc.add_paragraph(f"服务器: {application.deployment_info.server_address}")
@@ -72,7 +71,7 @@ def export_license_document(application: LicenseApplication) -> str:
     license_type_text = '试用' if application.license_type == LicenseType.TRIAL else '正式'
     authorized_users = application.authorized_users
     doc.add_paragraph()
-    doc.add_paragraph(f"{license_type_text} License（{authorized_users}人）")
+    doc.add_paragraph(f"{license_type_text} License\uff08{authorized_users}人\uff09")
 
     # 服务端 License
     doc.add_paragraph()
@@ -94,7 +93,7 @@ def export_license_document(application: LicenseApplication) -> str:
     else:
         doc.add_paragraph("未填写")
 
-    # 文件名：私有化部署License-{客户名称}_{当前日期}.docx
+    # 文件名:私有化部署License-{客户名称}_{当前日期}.docx
     current_date = business_now().strftime('%Y%m%d')
     safe_customer_name = application.customer.account_name.translate(str.maketrans('', '', '\\/:*?"<>|\r\n'))
     file_name = f"私有化部署License-{safe_customer_name}_{current_date}.docx"

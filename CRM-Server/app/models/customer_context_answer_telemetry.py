@@ -10,7 +10,7 @@ class CustomerContextAnswerTelemetry(Base):
     __tablename__ = "crm_customer_context_answer_telemetry"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
-    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID，当前与团队ID一致")
+    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID\uff0c当前与团队ID一致")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(BigInteger, nullable=True, index=True, comment="客户ID")
     question_text = Column(Text, nullable=True, comment="用户问题")

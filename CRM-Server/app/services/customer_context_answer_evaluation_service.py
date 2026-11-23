@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from app.services.agent.schemas import CustomerContextAnswerResult
+if TYPE_CHECKING:
+    from app.services.agent.schemas import CustomerContextAnswerResult
 
 DEFAULT_FORBIDDEN_TOKENS = (
     "source_type",

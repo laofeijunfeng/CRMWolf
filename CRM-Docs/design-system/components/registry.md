@@ -29,9 +29,6 @@
 
 | 组件 | 层 | 状态 | 用途 | 替代 | 契约 |
 | --- | --- | --- | --- | --- | --- |
-| BottomNav | crmwolf | candidate | 移动端一级导航 | — | [底部导航](bottom-navigation.md) |
-| BottomNavItem | crmwolf | candidate | 底部导航项 | — | [底部导航](bottom-navigation.md) |
-| BottomNavOverflow | crmwolf | candidate | 底部导航溢出 | — | [底部导航](bottom-navigation.md) |
 | ContextTabs | crmwolf | candidate | 上下文标签页 | — | [标签页](tabs.md) |
 | DetailContextHeader | crmwolf | candidate | 详情上下文头部 | — | 待补 |
 | DetailContextHost | crmwolf | candidate | 详情上下文容器 | — | 待补 |

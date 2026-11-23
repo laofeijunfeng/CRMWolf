@@ -1,6 +1,5 @@
 """Non-browser adapter over the single Agent UI application protocol."""
 from datetime import timedelta
-from typing import Dict, List, Optional
 from uuid import UUID
 
 from app.core.security import create_access_token
@@ -27,18 +26,18 @@ class AgentIMConversationService:
         channel_context: AgentChannelContext,
         team_id: int,
         user_id: int,
-        session_id: Optional[int] = None,
-        session_key: Optional[str] = None,
-    ) -> Dict[str, object]:
+        session_id: int | None = None,
+        session_key: str | None = None,
+    ) -> dict[str, object]:
         token = create_access_token(
             {"sub": str(user_id), "team_id": team_id},
             expires_delta=timedelta(minutes=10),
         )
         authorization = f"Bearer {token}"
 
-        events: List[Dict[str, object]] = []
+        events: list[dict[str, object]] = []
         final_event: AgentUIFinalStreamEvent | None = None
-        session_payload: Dict[str, object] | None = None
+        session_payload: dict[str, object] | None = None
 
         async for event in agent_application_service.stream_chat_events(
             request_input=request_input,

@@ -1,12 +1,10 @@
-from __future__ import annotations
-
+from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Column,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -15,7 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.utils.public_id import generate_public_id
@@ -33,19 +31,23 @@ _SQLITE_BIGINT = BigInteger().with_variant(Integer, "sqlite")
 class Product(Base):
     __tablename__ = "crm_products"
 
-    id = Column(_SQLITE_BIGINT, primary_key=True, autoincrement=True, comment="主键")
-    public_id = Column(String(64), nullable=False, default=lambda: generate_public_id("prd"), comment="产品对外ID")
-    team_id = Column(_SQLITE_BIGINT, nullable=False, comment="团队ID")
-    code = Column(String(50), nullable=False, comment="团队内产品编码")
-    name = Column(String(100), nullable=False, comment="产品名称")
-    description = Column(Text, nullable=True, comment="产品描述")
-    is_active = Column(Boolean, nullable=False, default=True, comment="是否启用")
-    created_by = Column(String(100), nullable=False, comment="创建人")
-    updated_by = Column(String(100), nullable=True, comment="最后更新人")
-    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
+    id: Mapped[int] = mapped_column(_SQLITE_BIGINT, primary_key=True, autoincrement=True, comment="主键")
+    public_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=lambda: generate_public_id("prd"), comment="产品对外ID",
+    )
+    team_id: Mapped[int] = mapped_column(_SQLITE_BIGINT, nullable=False, comment="团队ID")
+    code: Mapped[str] = mapped_column(String(50), nullable=False, comment="团队内产品编码")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="产品名称")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="产品描述")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="是否启用")
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False, comment="创建人")
+    updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="最后更新人")
+    created_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间",
+    )
 
-    modules = relationship(
+    modules: Mapped[list["ProductModule"]] = relationship(
         "ProductModule",
         back_populates="product",
         cascade="all, delete-orphan",
@@ -66,23 +68,31 @@ class Product(Base):
 class ProductModule(Base):
     __tablename__ = "crm_product_modules"
 
-    id = Column(_SQLITE_BIGINT, primary_key=True, autoincrement=True, comment="主键")
-    public_id = Column(String(64), nullable=False, default=lambda: generate_public_id("prm"), comment="模块对外ID")
-    team_id = Column(_SQLITE_BIGINT, nullable=False, comment="团队ID")
-    product_id = Column(_SQLITE_BIGINT, nullable=False, comment="所属产品ID")
-    code = Column(String(50), nullable=False, comment="产品内模块编码")
-    name = Column(String(100), nullable=False, comment="模块名称")
-    description = Column(Text, nullable=True, comment="模块描述")
-    module_role = Column(String(20), nullable=False, default=ProductModuleRole.ADD_ON.value, comment="模块角色")
-    base_key = Column(String(10), nullable=True, comment="基础模块唯一键；增强模块为空")  # noqa: RUF001
-    is_active = Column(Boolean, nullable=False, default=True, comment="是否启用")
-    sort_order = Column(Integer, nullable=False, default=0, comment="展示顺序")
-    created_by = Column(String(100), nullable=False, comment="创建人")
-    updated_by = Column(String(100), nullable=True, comment="最后更新人")
-    created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
-    updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
+    id: Mapped[int] = mapped_column(_SQLITE_BIGINT, primary_key=True, autoincrement=True, comment="主键")
+    public_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=lambda: generate_public_id("prm"), comment="模块对外ID",
+    )
+    team_id: Mapped[int] = mapped_column(_SQLITE_BIGINT, nullable=False, comment="团队ID")
+    product_id: Mapped[int] = mapped_column(_SQLITE_BIGINT, nullable=False, comment="所属产品ID")
+    code: Mapped[str] = mapped_column(String(50), nullable=False, comment="产品内模块编码")
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="模块名称")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="模块描述")
+    module_role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=ProductModuleRole.ADD_ON.value, comment="模块角色",
+    )
+    base_key: Mapped[str | None] = mapped_column(
+        String(10), nullable=True, comment="基础模块唯一键；增强模块为空",  # noqa: RUF001
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, comment="是否启用")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="展示顺序")
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False, comment="创建人")
+    updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="最后更新人")
+    created_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=business_now, comment="创建时间")
+    updated_time: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间",
+    )
 
-    product = relationship("Product", back_populates="modules")
+    product: Mapped[Product] = relationship("Product", back_populates="modules")
 
     __table_args__ = (
         ForeignKeyConstraint(

@@ -1,7 +1,8 @@
 # app/schemas/file_upload.py
 
+
 from pydantic import BaseModel, Field
-from typing import Optional
+
 
 class FileUploadResponse(BaseModel):
     """文件上传响应"""

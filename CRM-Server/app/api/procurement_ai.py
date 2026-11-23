@@ -4,20 +4,20 @@ AI 解析采购方式配置接口
 用于 AI 辅助创建采购方式功能
 """
 import json
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.core.deps import get_current_active_user, get_current_user_team, get_db
-from app.models.user import User
+from app.crud.procurement import procurement_method_crud
 from app.models.procurement import ProcurementMethod, ProcurementStageTemplate
-from app.schemas.procurement_ai import ProcurementAIParseRequest, ProcurementAICreateRequest
-from app.schemas.procurement import ProcurementMethodCreate, ProcurementStageTemplateCreate
+from app.models.user import User
+from app.schemas.procurement_ai import ProcurementAICreateRequest, ProcurementAIParseRequest
 from app.services.procurement_ai_parser import procurement_ai_parser_service
-from app.crud.procurement import procurement_method_crud, procurement_stage_template_crud
-
 
 router = APIRouter(prefix="/v1/procurement-ai", tags=["AI 采购方式解析"])
 
@@ -37,7 +37,7 @@ async def parse_procurement_method(
     - parsed: 解析完成，返回结构化配置
     - error: 错误信息
     """
-    async def generate_sse():
+    async def generate_sse() -> AsyncIterator[str]:
         db = SessionLocal()
         try:
             async for event in procurement_ai_parser_service.parse_procurement_method_stream(
@@ -105,7 +105,7 @@ async def create_procurement_method_from_ai(
     # 检查是否有且只有一个默认起始阶段
     default_start_count = sum(1 for s in request.stages if s.is_default_start)
     if default_start_count == 0:
-        # 如果没有设置，默认第一个阶段为起始阶段
+        # 如果没有设置,默认第一个阶段为起始阶段
         request.stages[0].is_default_start = True
     elif default_start_count > 1:
         raise HTTPException(
@@ -198,11 +198,11 @@ async def create_procurement_method_from_ai(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"数据库约束错误：{str(e)}"
+            detail=f"数据库约束错误：{e!s}"
         )
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建失败：{str(e)}"
+            detail=f"创建失败：{e!s}"
         )

@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
-from typing import Optional
-from jose import JWTError, jwt
+
 import bcrypt
+from jose import JWTError, jwt
+
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -15,7 +16,7 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
 
     if expires_delta:
@@ -29,7 +30,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload

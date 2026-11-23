@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from app.services.agent.schemas import WorkSummaryNarrativeResult
 from app.services.work_summary_evaluation_service import (
@@ -80,7 +79,7 @@ def _build_correction(raw_correction: JsonObject) -> WorkSummaryHumanCorrection:
     )
 
 
-def _json_object(value: Any) -> JsonObject:
+def _json_object(value: object) -> JsonObject:
     if isinstance(value, dict):
         return dict(value)
     if value is None:

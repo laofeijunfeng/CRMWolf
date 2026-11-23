@@ -1,8 +1,7 @@
-from abc import ABC, abstractmethod
 import smtplib
-from email.mime.text import MIMEText
+from abc import ABC, abstractmethod
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
+from email.mime.text import MIMEText
 
 from app.core.config import get_settings
 
@@ -19,11 +18,11 @@ class EmailProvider(ABC):
 
 
 class ConsoleEmailProvider(EmailProvider):
-    """开发环境：打印日志，不发送真实邮件"""
+    """开发环境\uff1a打印日志\uff0c不发送真实邮件"""
 
     async def send_email(self, to: str, subject: str, body: str) -> bool:
         print(f"\n{'='*60}")
-        print(f"[EMAIL] 发送邮件")
+        print("[EMAIL] 发送邮件")
         print(f"  收件人: {to}")
         print(f"  主题: {subject}")
         print(f"  内容: {body}")
@@ -32,7 +31,7 @@ class ConsoleEmailProvider(EmailProvider):
 
 
 class SMTPEmailProvider(EmailProvider):
-    """通用 SMTP（腾讯企业邮箱、自建邮件服务器）"""
+    """通用 SMTP\uff08腾讯企业邮箱、自建邮件服务器\uff09"""
 
     async def send_email(self, to: str, subject: str, body: str) -> bool:
         try:
@@ -63,10 +62,11 @@ class AliyunEmailProvider(EmailProvider):
     """阿里云邮件推送 API"""
 
     async def send_email(self, to: str, subject: str, body: str) -> bool:
-        import hashlib
         import base64
+        import hashlib
         import hmac
         import time
+
         import httpx
 
         try:
@@ -119,7 +119,7 @@ class AliyunEmailProvider(EmailProvider):
             return False
 
     def _quote(self, s: str) -> str:
-        """URL 编码（阿里云签名要求）"""
+        """URL 编码\uff08阿里云签名要求\uff09"""
         import urllib.parse
         return urllib.parse.quote(s, safe='').replace('+', '%20').replace('*', '%2A').replace('%7E', '~')
 
@@ -127,7 +127,7 @@ class AliyunEmailProvider(EmailProvider):
 class EmailService:
     """邮件服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         provider = settings.SMTP_PROVIDER
         if provider == "console":
             self._provider = ConsoleEmailProvider()
@@ -147,13 +147,13 @@ class EmailService:
 
         subject = f"CRMWolf {purpose_text}验证码"
         body = f"""
-您好！
+您好\uff01
 
-您正在进行{purpose_text}操作，验证码为：{code}
+您正在进行{purpose_text}操作\uff0c验证码为\uff1a{code}
 
-验证码将在10分钟内有效，请尽快完成操作。
+验证码将在10分钟内有效\uff0c请尽快完成操作。
 
-如果这不是您本人的操作，请忽略此邮件。
+如果这不是您本人的操作\uff0c请忽略此邮件。
 
 CRMWolf 智能客户关系管理系统
 """
@@ -163,18 +163,18 @@ CRMWolf 智能客户关系管理系统
         """发送团队邀请邮件"""
         subject = f"邀请您加入团队 {team_name}"
         body = f"""
-您好！
+您好\uff01
 
 {inviter_name} 邀请您加入团队 {team_name}。
 
-加入团队后，您可以：
+加入团队后\uff0c您可以\uff1a
 - 与团队成员共享客户数据
 - 协作跟进商机和合同
 - 使用团队公海池功能
 
-请使用以下邀请码加入团队：{invite_code}
+请使用以下邀请码加入团队\uff1a{invite_code}
 
-您可以在注册或登录后，通过"加入团队"功能输入邀请码完成加入。
+您可以在注册或登录后\uff0c通过"加入团队"功能输入邀请码完成加入。
 
 CRMWolf 智能客户关系管理系统
 """

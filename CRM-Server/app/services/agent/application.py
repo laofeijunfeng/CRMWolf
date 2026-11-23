@@ -8,22 +8,22 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from uuid import UUID
 from datetime import timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Literal, TypeAlias, cast
+from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
-from app.core.security import create_access_token
-from app.crud.team import user_team_crud
 from app.core.database import SessionLocal
+from app.core.security import create_access_token
 from app.crud.agent import agent_session_crud
 from app.crud.ai_config import ai_config_crud
 from app.crud.permission import permission_crud
+from app.crud.team import user_team_crud
 from app.models.agent import AgentMessage, AgentMessageRole, AgentSession
 from app.models.agent_persistence import AgentUIActionStatus
 from app.models.agent_turn_execution import AgentTurnExecution, AgentTurnExecutionStatus
@@ -45,10 +45,10 @@ from app.schemas.agent_persistence import (
     AgentUIActionRegistration,
     AgentUIMessageBody,
 )
-from app.services.agent.input import AgentChannelContext
 from app.services.agent import agent_copy
 from app.services.agent.durable_work import AgentDurableWorkBinder, agent_durable_work_binder
 from app.services.agent.durable_work_contracts import AgentAsyncOperationBinding
+from app.services.agent.input import AgentChannelContext
 from app.services.agent.langchain_runtime import agent_model_enable_thinking
 from app.services.agent.orchestrator import (
     AgentExecutionError,
@@ -99,20 +99,16 @@ from app.services.agent.ui.schemas import (
     TextBlock,
     UpsertBlockOperation,
 )
-from app.services.agent.workflow.contracts import WorkflowCommittedResource
-
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
-
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
-    from uuid import UUID
 
     from sqlalchemy.orm import Session
 
-    from app.services.agent.input import AgentChannelContext
     from app.services.agent.workflow import WorkflowProgress
+    from app.services.agent.workflow.contracts import WorkflowCommittedResource
 
 
 logger = logging.getLogger(__name__)
@@ -245,7 +241,7 @@ class AgentApplicationService:
                 return
         yield self._transport_error(
             code="TURN_IN_PROGRESS",
-            message="请求已受理，连接结束后仍会继续执行。",
+            message="请求已受理\uff0c连接结束后仍会继续执行。",
             retryable=True,
             session_id=accepted.session_id,
         )
@@ -667,7 +663,8 @@ class AgentApplicationService:
                         db,
                         AgentUIActionRegistration(
                             public_id=draft.public_id, team_id=current.team_id, user_id=current.user_id,
-                            session_id=current.session_id, message_id=completed.message.id, action_type=draft.action_type,
+                            session_id=current.session_id, message_id=completed.message.id,
+                                action_type=draft.action_type,
                             root_context_role=draft.root_context_role,
                             target=TypeAdapter(dict[str, JsonValue]).dump_python(draft.target, mode="json"),
                             consumption_mode=draft.consumption_mode,
@@ -675,10 +672,12 @@ class AgentApplicationService:
                     )
                 self._settle_action_claim(
                     db, prepared=prepared, dispatch=dispatch, team_id=current.team_id, user_id=current.user_id,
-                    session_id=current.session_id, client_request_id=current.client_request_id, result_message_id=completed.message.id,
+                    session_id=current.session_id, client_request_id=current.client_request_id,
+                        result_message_id=completed.message.id,
                 )
                 self._finish_execution(
-                    current, status=self._execution_status(dispatch), result_message_id=completed.message.id, dispatch=dispatch,
+                    current, status=self._execution_status(dispatch),
+                        result_message_id=completed.message.id, dispatch=dispatch,
                 )
             db.commit()
         except Exception:
@@ -687,7 +686,8 @@ class AgentApplicationService:
         if completed is not None:
             self._late_bind_durable_work(
                 dispatch, team_id=current.team_id, user_id=current.user_id, session_id=current.session_id,
-                source_user_message_id=self._user_message_id(db, current), source_assistant_message_id=completed.message.id,
+                source_user_message_id=self._user_message_id(db, current),
+                    source_assistant_message_id=completed.message.id,
             )
 
     def _settle_unknown_failure(self, execution_id: int, owner: str, exc: Exception) -> None:
@@ -698,12 +698,14 @@ class AgentApplicationService:
             if current is None or current.lease_owner != owner:
                 db.rollback()
                 return
-            if isinstance(exc, (ActionAlreadyConsumedError, ActionExpiredError, ActionUnavailableError, ActionNotFoundError, ActionOwnershipError)):
+            if isinstance(exc, (ActionAlreadyConsumedError, ActionExpiredError,
+                ActionUnavailableError, ActionNotFoundError, ActionOwnershipError)):
                 code, message = self._action_error(exc)
                 failure = FailureDispatchResult(error=AgentExecutionError(code=code, message=message, retryable=False))
             else:
                 failure = FailureDispatchResult(
-                    error=AgentExecutionError(code="INTERNAL_ERROR", message=agent_copy.service_error(str(exc)), retryable=True)
+                    error=AgentExecutionError(code="INTERNAL_ERROR",
+                        message=agent_copy.service_error(str(exc)), retryable=True)
                 )
             prepared = self._prepared_from_execution(current)
             composition = self.ui_composer.compose(failure)
@@ -722,7 +724,8 @@ class AgentApplicationService:
                 session_id=current.session_id, client_request_id=current.client_request_id,
             )
             self._finish_execution(
-                current, status=AgentTurnExecutionStatus.FAILED, result_message_id=completed.message.id, dispatch=failure,
+                current, status=AgentTurnExecutionStatus.FAILED, result_message_id=completed.message.id,
+                    dispatch=failure,
             )
             db.commit()
         except Exception:
@@ -731,7 +734,8 @@ class AgentApplicationService:
         finally:
             db.close()
     @staticmethod
-    def _immediate(session, turn_id: str, user_message_id: int, *events: AgentSSEEventEnvelope) -> _AcceptedExecution:
+    def _immediate(session: AgentSession, turn_id: str, user_message_id: int,
+        *events: AgentSSEEventEnvelope) -> _AcceptedExecution:
         return _AcceptedExecution(
             0, int(session.id), str(session.session_key), turn_id, user_message_id,
             (*events, AgentApplicationService._done_event(session_id=int(session.id))),
@@ -753,14 +757,17 @@ class AgentApplicationService:
             turn_id=str(values["turn_id"]), client_request_id=str(values["client_request_id"]),
             input_fingerprint=str(values["fingerprint"]), request_input_json=request_input.model_dump(mode="json"),
             root_input_json=prepared.root_input.model_dump(mode="json"), permission_codes_json=sorted(permissions),
-            channel_context_json=AgentApplicationService._channel_payload(channel_context if isinstance(channel_context, AgentChannelContext) or channel_context is None else None),
-            selected_entity_ref_json=prepared.selected_entity_ref.model_dump(mode="json") if prepared.selected_entity_ref else None,
+            channel_context_json=AgentApplicationService._channel_payload(channel_context
+                if isinstance(channel_context, AgentChannelContext) or channel_context is None else None),
+            selected_entity_ref_json=prepared.selected_entity_ref.model_dump(mode="json")
+                if prepared.selected_entity_ref else None,
             message_display=prepared.message_display, entity_action_claim_id=prepared.entity_action_claim_id,
             status=AgentTurnExecutionStatus.ACCEPTED, lease_version=0, committed_resources_json=[],
             completed_command_ids_json=[], created_time=now, last_modified_time=now,
         )
 
-    def _claim_execution(self, db: Session, execution_id: int, *, expected_version: int, owner: str) -> AgentTurnExecution | None:
+    def _claim_execution(self, db: Session, execution_id: int, *, expected_version: int,
+        owner: str) -> AgentTurnExecution | None:
         row = self._locked_execution(db, execution_id)
         if row is None or int(row.lease_version) != expected_version:
             return None
@@ -776,7 +783,8 @@ class AgentApplicationService:
         return row
 
     @staticmethod
-    def _finish_execution(execution: AgentTurnExecution, *, status: str, result_message_id: int, dispatch: RootDispatchResult) -> None:
+    def _finish_execution(execution: AgentTurnExecution, *, status: str, result_message_id: int,
+        dispatch: RootDispatchResult) -> None:
         resources, commands, failed_command = AgentApplicationService._business_facts(dispatch)
         execution.status = status
         execution.result_message_id = result_message_id
@@ -787,11 +795,16 @@ class AgentApplicationService:
         execution.lease_expires_at = None
         execution.last_modified_time = business_now()
 
-    def _owned_or_new_session(self, db: Session, *, team_id: int, user_id: int, request_input: AgentChatInput, session_id: int | None, session_key: str | None):
+    def _owned_or_new_session(self, db: Session, *, team_id: int, user_id: int,
+        request_input: AgentChatInput, session_id: int | None, session_key: str | None) -> AgentSession:
         if session_id or session_key:
-            return require_owned_session(db, team_id=team_id, user_id=user_id, session_id=session_id, session_key=session_key)
+            return require_owned_session(db, team_id=team_id, user_id=user_id,
+                session_id=session_id, session_key=session_key)
         title = request_input.text if isinstance(request_input, TextAgentInput) else "Agent 会话"
-        return agent_session_crud.create(db, AgentSessionCreate(session_key=new_session_key(), team_id=team_id, user_id=user_id, title=title[:50]))
+        return agent_session_crud.create(db, AgentSessionCreate(
+                session_key=new_session_key(), team_id=team_id, user_id=user_id, title=title[:50]
+            ),
+        )
 
     @staticmethod
     def _current_permission_codes(db: Session, *, team_id: int, user_id: int) -> frozenset[str]:
@@ -817,10 +830,12 @@ class AgentApplicationService:
             InteractionTurnInput.model_validate(payload) if payload.get("type") == "interaction"
             else TextTurnInput.model_validate(payload)
         )
-        selected = EntityRef.model_validate(execution.selected_entity_ref_json) if execution.selected_entity_ref_json else None
+        selected = EntityRef.model_validate(
+            execution.selected_entity_ref_json) if execution.selected_entity_ref_json else None
         text = execution.request_input_json.get("text")
         return _PreparedTurnInput(
-            text if isinstance(text, str) else "已提交", root_input, execution.message_display, selected, execution.entity_action_claim_id,
+            text if isinstance(text, str) else "已提交", root_input, execution.message_display,
+                selected, execution.entity_action_claim_id,
         )
 
     @staticmethod
@@ -872,18 +887,26 @@ class AgentApplicationService:
         execution.last_modified_time = business_now()
 
     @staticmethod
-    def _owned_execution(db: Session, *, team_id: int, user_id: int, session_id: int, client_request_id: str) -> AgentTurnExecution | None:
+    def _owned_execution(db: Session, *, team_id: int, user_id: int, session_id: int,
+        client_request_id: str) -> AgentTurnExecution | None:
         return db.query(AgentTurnExecution).filter_by(
             team_id=team_id, user_id=user_id, session_id=session_id, client_request_id=client_request_id
         ).one_or_none()
 
     @staticmethod
     def _locked_execution(db: Session, execution_id: int) -> AgentTurnExecution | None:
-        return db.query(AgentTurnExecution).filter_by(id=execution_id).populate_existing().with_for_update().one_or_none()
+        return (
+            db.query(AgentTurnExecution)
+            .filter_by(id=execution_id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
 
     @staticmethod
     def _user_message_id(db: Session, execution: AgentTurnExecution) -> int:
-        return int(db.query(AgentMessage).filter_by(session_id=execution.session_id, turn_id=execution.turn_id, role=AgentMessageRole.USER).one().id)
+        return int(db.query(AgentMessage).filter_by(session_id=execution.session_id,
+            turn_id=execution.turn_id, role=AgentMessageRole.USER).one().id)
 
     @staticmethod
     def _public_status(status: str) -> RequestStatusName:

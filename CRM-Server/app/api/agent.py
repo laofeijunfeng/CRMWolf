@@ -1,6 +1,7 @@
 """CRM AI Agent API."""
 import json
 import logging
+from collections.abc import Sequence
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -15,7 +16,7 @@ from app.crud.permission import permission_crud
 from app.crud.sales_commitment import follow_up_task_confirmation_case_crud
 from app.crud.team import team_crud
 from app.crud.user import user_crud
-from app.models.agent import AgentSession
+from app.models.agent import AgentSession, AgentWorkflowAction
 from app.models.user import User
 from app.schemas.agent import (
     AgentAsyncOperationResponse,
@@ -938,7 +939,7 @@ async def get_agent_request_status(
     }
 
 
-def _action_status_counts(actions: list[object]) -> dict[str, int]:
+def _action_status_counts(actions: Sequence[object]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for action in actions:
         status = getattr(action, "status", None)
@@ -947,7 +948,7 @@ def _action_status_counts(actions: list[object]) -> dict[str, int]:
     return counts
 
 
-def _workflow_detail_response(workflow_id: str, actions: list[object]) -> AgentWorkflowDetailResponse:
+def _workflow_detail_response(workflow_id: str, actions: Sequence[AgentWorkflowAction]) -> AgentWorkflowDetailResponse:
     action_counts = _action_status_counts(actions)
     return AgentWorkflowDetailResponse(
         workflow_id=workflow_id,
@@ -998,7 +999,7 @@ def _workflow_session_id(actions: list[object]) -> int | None:
     return None
 
 
-def _derive_workflow_status(actions: list[object]) -> str:
+def _derive_workflow_status(actions: Sequence[object]) -> str:
     if any(getattr(action, "status", None) == "BLOCKED" for action in actions):
         return "BLOCKED"
     if any(getattr(action, "status", None) == "FAILED" and getattr(action, "blocking", False) for action in actions):
@@ -1014,7 +1015,7 @@ def _derive_workflow_status(actions: list[object]) -> str:
     return "UNKNOWN"
 
 
-def _derive_workflow_status_reason(actions: list[object]) -> str | None:
+def _derive_workflow_status_reason(actions: Sequence[object]) -> str | None:
     for workflow_status in ("BLOCKED", "FAILED", "WAITING_USER"):
         matching = [
             action
@@ -1027,7 +1028,7 @@ def _derive_workflow_status_reason(actions: list[object]) -> str | None:
     return None
 
 
-def _workflow_nodes(actions: list[object]) -> list[AgentWorkflowGraphNodeResponse]:
+def _workflow_nodes(actions: Sequence[AgentWorkflowAction]) -> list[AgentWorkflowGraphNodeResponse]:
     return [
         AgentWorkflowGraphNodeResponse(
             action_id=str(action.action_id),
@@ -1045,7 +1046,7 @@ def _workflow_nodes(actions: list[object]) -> list[AgentWorkflowGraphNodeRespons
     ]
 
 
-def _workflow_edges(actions: list[object]) -> list[AgentWorkflowGraphEdgeResponse]:
+def _workflow_edges(actions: Sequence[AgentWorkflowAction]) -> list[AgentWorkflowGraphEdgeResponse]:
     known_action_ids = {str(action.action_id) for action in actions}
     edges: list[AgentWorkflowGraphEdgeResponse] = []
     seen: set[tuple[str, str, str]] = set()

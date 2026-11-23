@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -35,13 +34,13 @@ class AcquisitionSourceResponse(AcquisitionSourceOption):
 
 class AcquisitionSourceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="获客来源名称")
-    sort_order: Optional[int] = Field(None, ge=0, description="排序号")
+    sort_order: int | None = Field(None, ge=0, description="排序号")
 
 
 class AcquisitionSourceUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=50, description="获客来源名称")
-    is_active: Optional[int] = Field(None, ge=0, le=1, description="是否启用：1启用, 0停用")
-    sort_order: Optional[int] = Field(None, ge=0, description="排序号")
+    name: str | None = Field(None, min_length=1, max_length=50, description="获客来源名称")
+    is_active: int | None = Field(None, ge=0, le=1, description="是否启用：1启用, 0停用")
+    sort_order: int | None = Field(None, ge=0, description="排序号")
 
 
 class AcquisitionSourceReorderItem(BaseModel):

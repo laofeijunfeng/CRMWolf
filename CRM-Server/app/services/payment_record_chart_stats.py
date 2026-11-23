@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -201,7 +202,7 @@ def _segments(chart_key: str, months: list[str]) -> list[tuple[str, str]]:
     return [(key, _month_label(key)) for key in months]
 
 
-def _grouped(rows: list[object], chart_key: str, months: list[str]) -> dict[str, list[object]]:
+def _grouped(rows: Sequence[object], chart_key: str, months: list[str]) -> dict[str, list[object]]:
     month_keys = set(months)
     grouped: dict[str, list[object]] = {key: [] for key, _label in _segments(chart_key, months)}
     for row in rows:
@@ -244,7 +245,7 @@ def _arr_ratio(annualized: Decimal, buyout: Decimal) -> int | None:
     return _percent(annualized, total)
 
 
-def _arr_month_rows(rows: list[object], months: list[str]) -> dict[str, list[object]]:
+def _arr_month_rows(rows: Sequence[object], months: list[str]) -> dict[str, list[object]]:
     month_keys = set(months)
     grouped: dict[str, list[object]] = {key: [] for key in months}
     for row in rows:
@@ -299,7 +300,7 @@ def _arr_bucket(key: str, rows: list[object]) -> dict[str, Any]:
     }
 
 
-def build_payment_record_chart(rows: list[object], today: date | None = None) -> dict[str, Any]:
+def build_payment_record_chart(rows: Sequence[object], today: date | None = None) -> dict[str, Any]:
     current_day = today or business_now().date()
     months = _recent_months(current_day, 12)
     total_amount = sum((_amount(row) for row in rows), Decimal(0))
@@ -347,7 +348,7 @@ def _dialog_order(row: object) -> tuple[int, int, str, int]:
 
 
 def list_chart_bucket_records(
-    rows: list[object],
+    rows: Sequence[object],
     chart_key: str,
     bucket_key: str,
     today: date | None = None,

@@ -83,15 +83,15 @@ QUERY_AGENT_SYSTEM_PROMPT = """你是 CRM Query Agent, 只负责本轮只读查�
     SUCCESS、PARTIAL 或 EMPTY 后立即回答。不要同时调用 get_customer_context、
     query_follow_up_tasks 或 query_completed_work。只有用户明确询问待办/跟进任务时才调用
     query_follow_up_tasks。
-17. 当前请求若提供 query_goal=search/get_detail/get_status 且有 task_text，先用
-    query_follow_up_tasks 按描述寻找任务；结果唯一且包含真实 EntityRef 时，再调用
+17. 当前请求若提供 query_goal=search/get_detail/get_status 且有 task_text\uff0c先用
+    query_follow_up_tasks 按描述寻找任务\uff1b结果唯一且包含真实 EntityRef 时\uff0c再调用
     get_follow_up_task_detail 获取完整状态。不得自行填写 task_ref。多个候选时返回
-    CLARIFICATION_REQUIRED，让用户选择或补充描述；不要随机挑选。
-18. get_follow_up_task_detail 只接受服务端提供的 task_ref，返回的 status、completed_at、
+    CLARIFICATION_REQUIRED\uff0c让用户选择或补充描述\uff1b不要随机挑选。
+18. get_follow_up_task_detail 只接受服务端提供的 task_ref\uff0c返回的 status、completed_at、
     cancelled_at 是判断任务状态的唯一依据。查询指定任务状态不等于修改状态。
-19. “我有哪些待办”表示当前未完成待办列表；“我本周做了什么”表示已完成工作汇总。
-    未给时间的当前待办由服务端使用全部 open 任务；未给时间的已完成工作由服务端使用
-    本周默认范围。回答必须说明采用的范围，不要因缺少时间再次追问。
+19. “我有哪些待办”表示当前未完成待办列表\uff1b“我本周做了什么”表示已完成工作汇总。
+    未给时间的当前待办由服务端使用全部 open 任务\uff1b未给时间的已完成工作由服务端使用
+    本周默认范围。回答必须说明采用的范围\uff0c不要因缺少时间再次追问。
 """
 
 

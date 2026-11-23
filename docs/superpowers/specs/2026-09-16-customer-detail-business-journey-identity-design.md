@@ -4,7 +4,7 @@
 - 状态：已确认；独立业务旅程页面范围由 `2026-09-20-business-journey-page-navigation-view-config-design.md` 扩展
 - 范围：客户详情「项目旅程」改挂业务旅程；商机详情瘦身为商机对象页；客户列表名称 hover 改成旅程预览；`CustomerDealJourney.public_id` 与客户下旅程薄读接口
 - 上游决定：客户详情列表一行 = 一条业务旅程；独立商机详情只做商机自己的活；合同 / 回款 / 发票 / License 只在业务旅程详情里操作；旅程页商机行提供编辑 / 赢单 / 输单 icon，独立商机页脚仍保留这三项；旅程页仍可推进采购阶段；创建入口仍是「新建商机」；产品面默认 1:1，不做共享 / 解绑 UI；对外一律 `public_id`；客户列表 hover 预览业务旅程，进度条按看板阶段，不显示赢率。后续已确认新增独立业务旅程页面和 Sheet，复用本设计的旅程身份与详情内容契约
-- 相关规范：`CRM-Docs/design-agent/runtime/customer-intelligence-profile.md` §8、`CRM-Docs/design-system/patterns/kanban-page.md`、`docs/ux/p1-packages/04-object-context-hierarchy.md`、`docs/superpowers/specs/2026-09-14-business-journey-board-opportunity-date-filters-design.md`、`docs/superpowers/specs/2026-09-20-business-journey-page-navigation-view-config-design.md`
+- 相关规范：当时的「客户智能档案」设计 §8、`CRM-Docs/design-system/patterns/kanban-page.md`、`docs/ux/p1-packages/04-object-context-hierarchy.md`、`docs/superpowers/specs/2026-09-14-business-journey-board-opportunity-date-filters-design.md`、`docs/superpowers/specs/2026-09-20-business-journey-page-navigation-view-config-design.md`
 - 相关实现：`CRM-Client/src/views/CustomerDetailSheet.vue`、`CRM-Client/src/components/panels/OpportunityDetailContent.vue`、`CRM-Client/src/components/panels/DealJourneyDetailContent.vue`、`CRM-Client/src/components/customer/CustomerDealJourneyHoverCard.vue`、`CRM-Client/src/views/Customers.vue`、`CRM-Server/app/models/deal_journey.py`、`CRM-Server/app/services/deal_journey_service.py`、`CRM-Server/app/api/business_journey_board.py`
 
 ## 1. 背景与目标

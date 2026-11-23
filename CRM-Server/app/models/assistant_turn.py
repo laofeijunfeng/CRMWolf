@@ -33,11 +33,15 @@ class AssistantTurn(Base):
     __tablename__ = "crm_assistant_turns"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    public_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, default=lambda: generate_public_id("atn"))
+    public_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, default=lambda: generate_public_id("atn")
+    )
     team_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     task_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("crm_assistant_tasks.id"), nullable=False)
-    request_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("crm_assistant_requests.id"), nullable=False, unique=True)
+    request_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("crm_assistant_requests.id"), nullable=False, unique=True
+    )
     input_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING")
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)

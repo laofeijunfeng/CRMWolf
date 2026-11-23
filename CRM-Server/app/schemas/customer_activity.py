@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -12,7 +12,7 @@ CUSTOMER_ACTIVITY_FIELD_SOURCES = {"UI_DEFAULT", "USER", "AI_EXTRACTED", "AGENT"
 class OwnerInfo(BaseModel):
     id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
-    avatar_url: Optional[str] = Field(None, description="用户头像URL")
+    avatar_url: str | None = Field(None, description="用户头像URL")
 
     class Config:
         from_attributes = True
@@ -20,7 +20,7 @@ class OwnerInfo(BaseModel):
 
 class CustomerBasicInfo(BaseModel):
     id: str = Field(..., description="客户对外ID")
-    public_id: Optional[str] = Field(None, description="客户对外ID")
+    public_id: str | None = Field(None, description="客户对外ID")
     account_name: str = Field(..., description="客户公司名称")
 
     class Config:
@@ -37,21 +37,24 @@ class CustomerActivityKindInfo(BaseModel):
 
 class CustomerActivityBase(BaseModel):
     activity_kind: str = Field(..., min_length=1, max_length=50, description="活动分类")
-    title: Optional[str] = Field(None, max_length=255, description="活动标题")
+    title: str | None = Field(None, max_length=255, description="活动标题")
     source_content: str = Field(..., min_length=1, description="原始输入内容")
     submission_source: str = Field(
         default=CustomerActivitySubmissionSource.FORM.value,
         description="活动提交来源：AGENT/ASSISTANT_2/FORM/CUTOVER_MIGRATION",
     )
-    submission_id: Optional[str] = Field(None, max_length=120, description="页面提交幂等ID")
-    submission_fingerprint: Optional[str] = Field(None, min_length=64, max_length=64, description="Assistant 2.0 冻结命令请求指纹")
-    content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
-    summary: Optional[str] = Field(None, description="列表摘要")
-    next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
-    next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
-    next_action: Optional[str] = Field(None, description="下一步动作内容")
-    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
-    occurred_at: Optional[datetime] = Field(None, description="活动发生时间")
+    submission_id: str | None = Field(None, max_length=120, description="页面提交幂等ID")
+    submission_fingerprint: str | None = Field(
+        None, min_length=64, max_length=64,
+        description="Assistant 2.0 冻结命令请求指纹",
+    )
+    content_json: dict[str, Any] | None = Field(None, description="结构化活动内容")
+    summary: str | None = Field(None, description="列表摘要")
+    next_follow_time: datetime | None = Field(None, description="计划下次跟进时间")
+    next_follow_time_source: str | None = Field(None, description="下次跟进时间来源")
+    next_action: str | None = Field(None, description="下一步动作内容")
+    next_action_source: str | None = Field(None, description="下一步动作来源")
+    occurred_at: datetime | None = Field(None, description="活动发生时间")
 
     @field_validator("submission_source")
     @classmethod
@@ -77,7 +80,7 @@ class CustomerActivityBase(BaseModel):
 
     @field_validator("next_follow_time_source", "next_action_source")
     @classmethod
-    def next_step_source_must_be_known(cls, value: Optional[str]) -> Optional[str]:
+    def next_step_source_must_be_known(cls, value: str | None) -> str | None:
         if value is not None and value not in CUSTOMER_ACTIVITY_FIELD_SOURCES:
             raise ValueError("未知下一步字段来源")
         return value
@@ -93,7 +96,7 @@ class CustomerActivityAgentFinalizedCreate(CustomerActivityCreate):
     effectiveness_score: int = Field(..., ge=0, le=100, description="Agent 最终质量评分")
     effectiveness_is_valid: bool = Field(..., description="Agent 最终评分是否通过")
     effectiveness_reason: str = Field(..., min_length=1, max_length=500, description="Agent 最终评分理由")
-    effectiveness_detail_json: Dict[str, Any] = Field(default_factory=dict, description="Agent 最终评分明细")
+    effectiveness_detail_json: dict[str, Any] = Field(default_factory=dict, description="Agent 最终评分明细")
 
     @model_validator(mode="after")
     def require_passing_final_evaluation(self) -> "CustomerActivityAgentFinalizedCreate":
@@ -171,7 +174,7 @@ class CustomerActivityDurableIntelligenceEvent(BaseModel):
     occurred_at: datetime | None = Field(None, description="业务发生时间")
     source: CustomerActivityDurableEventSource
     summary: str | None = Field(None, description="事件摘要")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="事件载荷")
+    payload: dict[str, Any] = Field(default_factory=dict, description="事件载荷")
     actor_id: str | None = Field(None, description="触发人ID")
 
 
@@ -194,41 +197,41 @@ class CustomerActivityDurableWork(BaseModel):
 
 class CustomerActivityResponse(BaseModel):
     id: int = Field(..., description="活动ID")
-    customer_id: Optional[str] = Field(None, description="客户对外ID")
-    original_lead_id: Optional[str] = Field(None, description="原始线索对外ID")
-    deal_journey_id: Optional[int] = Field(None, description="成交旅程ID")
+    customer_id: str | None = Field(None, description="客户对外ID")
+    original_lead_id: str | None = Field(None, description="原始线索对外ID")
+    deal_journey_id: int | None = Field(None, description="成交旅程ID")
     activity_kind: str = Field(..., description="活动分类")
     activity_category: str = Field(..., description="活动大类")
     activity_label: str = Field(..., description="活动展示名称")
-    title: Optional[str] = Field(None, description="活动标题")
+    title: str | None = Field(None, description="活动标题")
     source_content: str = Field(..., description="原始输入内容")
     submission_source: str = Field(..., description="活动提交来源")
-    submission_id: Optional[str] = Field(None, description="页面提交幂等ID")
-    content_json: Optional[Dict[str, Any]] = Field(None, description="结构化活动内容")
-    summary: Optional[str] = Field(None, description="列表摘要")
+    submission_id: str | None = Field(None, description="页面提交幂等ID")
+    content_json: dict[str, Any] | None = Field(None, description="结构化活动内容")
+    summary: str | None = Field(None, description="列表摘要")
     processing_status: str = Field(..., description="整理状态")
-    processing_error: Optional[str] = Field(None, description="整理失败原因")
-    processed_at: Optional[datetime] = Field(None, description="整理完成时间")
-    next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
-    next_follow_time_source: Optional[str] = Field(None, description="下次跟进时间来源")
-    next_action: Optional[str] = Field(None, description="下一步动作内容")
-    next_action_source: Optional[str] = Field(None, description="下一步动作来源")
+    processing_error: str | None = Field(None, description="整理失败原因")
+    processed_at: datetime | None = Field(None, description="整理完成时间")
+    next_follow_time: datetime | None = Field(None, description="计划下次跟进时间")
+    next_follow_time_source: str | None = Field(None, description="下次跟进时间来源")
+    next_action: str | None = Field(None, description="下一步动作内容")
+    next_action_source: str | None = Field(None, description="下一步动作来源")
     occurred_at: datetime = Field(..., description="活动发生时间")
     creator_id: str = Field(..., description="创建人系统用户ID")
     owner_id: str = Field(..., description="跟进归属人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     updated_time: datetime = Field(..., description="更新时间")
-    creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
-    owner_info: Optional[OwnerInfo] = Field(None, description="跟进归属人信息")
-    customer_info: Optional[CustomerBasicInfo] = Field(None, description="客户基本信息")
-    effectiveness_score: Optional[int] = Field(None, description="AI评估活动有效性得分，满分100")
-    effectiveness_is_valid: Optional[bool] = Field(None, description="AI评估是否有效")
-    effectiveness_reason: Optional[str] = Field(None, description="AI评估原因摘要")
-    effectiveness_detail_json: Optional[str] = Field(None, description="AI评估分项明细JSON")
-    effectiveness_status: Optional[str] = Field(None, description="AI评估状态")
-    effectiveness_evaluated_time: Optional[datetime] = Field(None, description="AI评估完成时间")
-    effectiveness_error_message: Optional[str] = Field(None, description="AI评估失败原因")
-    post_commit: Optional[CustomerActivityPostCommitOutcome] = Field(
+    creator_info: OwnerInfo | None = Field(None, description="创建人信息")
+    owner_info: OwnerInfo | None = Field(None, description="跟进归属人信息")
+    customer_info: CustomerBasicInfo | None = Field(None, description="客户基本信息")
+    effectiveness_score: int | None = Field(None, description="AI评估活动有效性得分，满分100")
+    effectiveness_is_valid: bool | None = Field(None, description="AI评估是否有效")
+    effectiveness_reason: str | None = Field(None, description="AI评估原因摘要")
+    effectiveness_detail_json: str | None = Field(None, description="AI评估分项明细JSON")
+    effectiveness_status: str | None = Field(None, description="AI评估状态")
+    effectiveness_evaluated_time: datetime | None = Field(None, description="AI评估完成时间")
+    effectiveness_error_message: str | None = Field(None, description="AI评估失败原因")
+    post_commit: CustomerActivityPostCommitOutcome | None = Field(
         None,
         description="活动提交后的任务投影与确认结果",
     )

@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import { confirmation, field, makeTask, message, mocks, show, view } from './assistantChatHarness'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { confirmation, drive, field, makeTask, message, mocks, prepared, reply, show, view } from './assistantChatHarness'
 import SalesAssistantChat from '@/components/sales-assistant/SalesAssistantChat.vue'
+import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import { AgentUIEnvelopeSchema, InteractionFieldSchema } from '@/schemas/agent-contracts'
+import type { JsonObject } from '@/schemas/agent-contracts'
+import type { ConversationView, TaskWaiting } from '@/schemas/assistant-contracts'
 
 describe('owned historical conversation projection', () => {
   it('shows original text and human prompts, not internal action names', async () => {
@@ -43,7 +48,7 @@ describe('owned historical conversation projection', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     expect(wrapper.findAll('button').filter((b) => /确认写入|改为线下/.test(b.text()) && b.attributes('disabled') === undefined)).toHaveLength(0)
-    expect(mocks.kind).not.toHaveBeenCalled()
+    expect(mocks.command).not.toHaveBeenCalled()
   })
 
   it('restores one live authoritative wait while older matching cards stay archived', async () => {
@@ -144,4 +149,146 @@ describe('conversation snapshot fences', () => {
     expect(wrapper.findAll('button').find((b) => b.text() === '查看更早对话')).toBeUndefined()
   })
 
+})
+
+const interactionMessage = (
+  id: string, task: NonNullable<ConversationView['focused_task']>, overrides: Record<string, unknown>
+): ConversationView['messages'][number] => {
+  const waiting = task.waiting
+  if (waiting == null) throw new Error('Interaction fixtures require a wait')
+  return {
+    ...message(id, waiting.prompt, task),
+    ui: AgentUIEnvelopeSchema.parse({
+      schema_version: 'crm.agent.ui.v1', message_id: 1, turn_id: id, role: 'assistant', state: 'final',
+      metadata: { display: 'MESSAGE', route: 'WORKFLOW' },
+      blocks: [{
+        id: `block:${id}`, type: 'interaction', interaction_id: `ix:${id}`, prompt: waiting.prompt,
+        state: 'ACTIVE', submit_action_id: waiting.action_id, ...overrides
+      }]
+    })
+  }
+}
+
+const formMessage = (id: string, waiting: TaskWaiting): ConversationView['messages'][number] =>
+  interactionMessage(id, makeTask({ waiting }), {
+    interaction_type: 'form', fields: waiting.form_fields, allow_cancel: true,
+    business_action: waiting.type === 'PROPOSAL_FORM' ? 'create_opportunity_proposal' : 'edit_confirmation'
+  })
+
+const formField = (key: string) => InteractionFieldSchema.parse({
+  key, label: key, field_type: 'textarea', min_length: 0, max_length: 200
+})
+
+const loadInteractions = async (entries: ConversationView['messages']) => {
+  const state = view({ version: 9, focused_task: entries[entries.length - 1]?.task ?? null, messages: entries })
+  show(state)
+  mocks.command.mockResolvedValue(reply(state))
+  const page = { render: () => null }
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/assistant', component: page },
+    { path: '/customer-tracking', name: 'CustomerTracking', component: page }
+  ] })
+  await router.push('/assistant')
+  const wrapper = mount(SalesAssistantChat, { global: { plugins: [router] } })
+  await flushPromises()
+  const interaction = (id: string) => wrapper.findAllComponents(AgentUIMessage)
+    .find((card) => card.props('message').turn_id === id)
+  const submit = async (id: string, action: string, values: JsonObject): Promise<void> => {
+    const card = interaction(id)
+    expect(card).toBeDefined()
+    card?.vm.$emit('interaction', action, values)
+    await flushPromises()
+  }
+  return { wrapper, state, interaction, submit }
+}
+
+describe('revision-bound sales assistant interactions', () => {
+  it('archives an older form revision and cancels the live revision without submitting form values', async () => {
+    const waiting = field({ type: 'PROPOSAL_FORM', field: 'proposal:opportunity_create',
+      form_revision: 0, form_fields: [formField('opportunity_name')] })
+    const { wrapper, interaction, submit } = await loadInteractions([
+      formMessage('old', waiting), formMessage('live', { ...waiting, form_revision: 1 })
+    ])
+    expect(interaction('old')?.props('message').blocks[0]).toMatchObject({ state: 'READ_ONLY', submit_action_id: null })
+    await submit('old', 'action1', { opportunity_name: '过期值' })
+    expect(mocks.command).not.toHaveBeenCalled()
+    await submit('live', 'action1', { choice: 'cancel' })
+    expect(mocks.command.mock.calls[0]?.[0]).toEqual({ task_public_id: 'ast_one', expected_version: 9,
+      input: { kind: 'submit_form', form_revision: 1, choice: 'cancel', action_id: 'action1',
+        expected_version: 1, client_request_id: expect.any(String) } })
+    wrapper.unmount()
+  })
+
+  it('sends normalized participant text and uses the server-prepared revision after recovering admission', async () => {
+    const waiting = field({ type: 'CONFIRMATION_EDIT', field: 'activity_write', form_revision: 0,
+      form_fields: [formField('internal_participants'), formField('customer_participants')] })
+    const { wrapper, state, submit } = await loadInteractions([formMessage('edit', waiting)])
+    const task = state.focused_task
+    if (task === null) throw new Error('Expected a focused edit task')
+    const submission = { ...prepared(task), input: { kind: 'submit_form' as const,
+      client_request_id: 'server-prepared-key', action_id: 'server-prepared-action', expected_version: 1,
+      form_revision: 0, values: { internal_participants: '小林\n小陈' } } }
+    mocks.command.mockRejectedValueOnce(new Error('网络中断')).mockResolvedValueOnce(reply(state, submission))
+    drive((handlers) => handlers.onWaiting({ task, message: '已修改' }))
+    await submit('edit', 'action1', { internal_participants: ' 小林 \r\n\r\n 小陈 ' })
+    const request = mocks.command.mock.calls[0]?.[0]
+    expect(request?.input).toEqual({ kind: 'submit_form', form_revision: 0, values: { internal_participants: '小林\n小陈' },
+      action_id: 'action1', expected_version: 1, client_request_id: expect.any(String) })
+    await submit('edit', 'action1', { internal_participants: '不得覆盖' })
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    const retry = wrapper.findAll('button').find((button) => button.text() === '重试同步')
+    expect(retry).toBeDefined()
+    await retry?.trigger('click')
+    await flushPromises()
+    expect(mocks.command.mock.calls[1]?.[0]).toEqual(request)
+    expect(mocks.stream.mock.calls[0]?.slice(0, 2)).toEqual(['ast_one', submission.input])
+    wrapper.unmount()
+  })
+
+  it('keeps confirmation edit and reasoned rejection distinct', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const card = interactionMessage('confirm', current, {
+      interaction_type: 'confirmation', selection_mode: 'single',
+      options: [{ value: 'confirm', label: '确认' }, { value: 'cancel', label: '取消' }],
+      secondary_action: { value: 'request_edit', label: '修改内容' },
+      cancel_reasons: [{ value: 'wrong_content', label: '内容不对' }]
+    })
+    const { wrapper, submit } = await loadInteractions([card])
+    await submit('confirm', 'action1', { choice: 'request_edit' })
+    await submit('confirm', 'action1', { choice: 'cancel', reason: 'wrong_content' })
+    expect(mocks.command.mock.calls.map(([request]) => request.input)).toEqual([
+      { kind: 'request_edit', action_id: 'action1', expected_version: 1, client_request_id: expect.any(String) },
+      { kind: 'confirm', choice: 'reject', reason: 'wrong_content', action_id: 'action1', expected_version: 1,
+        client_request_id: expect.any(String) }
+    ])
+    wrapper.unmount()
+  })
+
+  it('allows an explicit empty batch selection but blocks a settling batch', async () => {
+    const item = { item_id: 'item_one', title: '核对采购时间', state: 'current' as const, related: true }
+    const disposition = { batch_id: 'batch_one', status: 'ACTIVE' as const, customer_name: '客户', activity_kind_label: '跟进',
+      total: 1, current_index: null, items: [item] }
+    const current = makeTask({ waiting: field({ type: 'FOLLOW_UP_DISPOSITION', field: 'follow_up_disposition' }),
+      follow_up_disposition: disposition })
+    const block = { interaction_type: 'choice', business_action: 'settle_follow_up_disposition',
+      presentation: 'OPEN_FOLLOW_UP_DISPOSITION', disposition_link: true, disposition_items: [item],
+      selection_mode: 'multiple', min_selections: 0, max_selections: 1,
+      options: [{ label: item.title, value: item.item_id }], secondary_action: { label: '本周不再提示', value: 'suppress_week' } }
+    const active = interactionMessage('active', current, block)
+    const first = await loadInteractions([active])
+    await first.submit('active', 'action1', { choices: [], suppress_week: true })
+    expect(mocks.command.mock.calls[0]?.[0]?.input).toEqual({ kind: 'submit_field', choices: [], suppress_week: true,
+      action_id: 'action1', expected_version: 1, client_request_id: expect.any(String) })
+    first.wrapper.unmount()
+    mocks.command.mockClear()
+    const settled = interactionMessage('settling', { ...current, follow_up_disposition: { ...disposition, settling: true } }, block)
+    const second = await loadInteractions([settled])
+    expect(second.interaction('settling')?.props('message').blocks[0]).toMatchObject({
+      state: 'READ_ONLY', submit_action_id: null, secondary_action: null, disposition_link: true
+    })
+    expect(second.wrapper.get('a[href="/customer-tracking"]').text()).toBe('在客户追踪页处理')
+    await second.submit('settling', 'action1', { choices: [item.item_id], suppress_week: false })
+    expect(mocks.command).not.toHaveBeenCalled()
+    second.wrapper.unmount()
+  })
 })

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from app.services.agent.schemas import CustomerContextAnswerResult
 from app.services.customer_context_answer_evaluation_service import (
@@ -70,7 +69,7 @@ def _build_case(raw_case: JsonObject) -> CustomerContextAnswerEvaluationCase:
     )
 
 
-def _json_object(value: Any) -> JsonObject:
+def _json_object(value: object) -> JsonObject:
     if isinstance(value, dict):
         return dict(value)
     if value is None:

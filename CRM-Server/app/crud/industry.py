@@ -1,44 +1,44 @@
 """
 行业 CRUD 操作
 """
-from typing import List, Optional
 from sqlalchemy.orm import Session
+
 from app.models.industry import Industry
 
 
 class IndustryCRUD:
     """行业 CRUD 操作"""
 
-    def get_all_primary(self, db: Session) -> List[Industry]:
+    def get_all_primary(self, db: Session) -> list[Industry]:
         """获取所有一级行业"""
         return db.query(Industry).filter(
             Industry.level == 1,
             Industry.is_active == 1
         ).order_by(Industry.sort_order).all()
 
-    def get_all_secondary(self, db: Session) -> List[Industry]:
+    def get_all_secondary(self, db: Session) -> list[Industry]:
         """获取所有二级行业"""
         return db.query(Industry).filter(
             Industry.level == 2,
             Industry.is_active == 1
         ).order_by(Industry.sort_order).all()
 
-    def get_by_code(self, db: Session, code: str) -> Optional[Industry]:
+    def get_by_code(self, db: Session, code: str) -> Industry | None:
         """根据 code 获取行业"""
         return db.query(Industry).filter(Industry.code == code).first()
 
-    def get_by_code_with_parent(self, db: Session, code: str) -> Optional[Industry]:
+    def get_by_code_with_parent(self, db: Session, code: str) -> Industry | None:
         """根据 code 获取行业（含父行业）"""
         from sqlalchemy.orm import joinedload
         return db.query(Industry).options(
             joinedload(Industry.parent)
         ).filter(Industry.code == code).first()
 
-    def get_by_id(self, db: Session, id: int) -> Optional[Industry]:
+    def get_by_id(self, db: Session, id: int) -> Industry | None:
         """根据 ID 获取行业"""
         return db.query(Industry).filter(Industry.id == id).first()
 
-    def get_secondary_by_parent(self, db: Session, parent_code: str) -> List[Industry]:
+    def get_secondary_by_parent(self, db: Session, parent_code: str) -> list[Industry]:
         """根据父行业 code 获取所有二级行业"""
         parent = self.get_by_code(db, parent_code)
         if not parent:
@@ -49,7 +49,7 @@ class IndustryCRUD:
             Industry.is_active == 1
         ).order_by(Industry.sort_order).all()
 
-    def get_all_active(self, db: Session) -> List[Industry]:
+    def get_all_active(self, db: Session) -> list[Industry]:
         """获取所有启用的行业"""
         return db.query(Industry).filter(
             Industry.is_active == 1
@@ -77,7 +77,7 @@ class IndustryCRUD:
 
         return hierarchy
 
-    def get_by_codes_with_parent(self, db: Session, codes: List[str]) -> dict:
+    def get_by_codes_with_parent(self, db: Session, codes: list[str]) -> dict:
         """
         批量根据 codes 获取行业（包含父行业信息）
         用于客户列表等批量查询场景
@@ -100,7 +100,7 @@ class IndustryCRUD:
         exclude_customer_id: int,
         team_id: int,
         limit: int = 50
-    ) -> List[str]:
+    ) -> list[str]:
         """
         获取同行业的有效客户名称列表
         用于 AI 同行业客户匹配
@@ -108,7 +108,7 @@ class IndustryCRUD:
         """
         from app.models.customer import Customer
 
-        # 先按二级行业精确匹配，只检索当前团队的有效客户
+        # 先按二级行业精确匹配,只检索当前团队的有效客户
         customers = db.query(Customer.account_name).filter(
             Customer.industry == industry_code,
             Customer.id != exclude_customer_id,
@@ -119,7 +119,7 @@ class IndustryCRUD:
         if len(customers) >= 5:
             return [c[0] for c in customers]
 
-        # 如果二级行业客户不足，尝试一级行业匹配
+        # 如果二级行业客户不足,尝试一级行业匹配
         industry = self.get_by_code(db, industry_code)
         if industry and industry.level == 2:
             parent_id = industry.parent_id

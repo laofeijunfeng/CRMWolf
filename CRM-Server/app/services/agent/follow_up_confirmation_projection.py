@@ -15,9 +15,9 @@ from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,
     FollowUpTaskConfirmationDeliveryPurpose,
-    FollowUpTaskStatus,
     FollowUpTaskConfirmationPromptDelivery,
     FollowUpTaskConfirmationStatus,
+    FollowUpTaskStatus,
 )
 from app.schemas.agent_persistence import (
     AgentAssistantProjectionCreate,

@@ -1,15 +1,16 @@
+
 from sqlalchemy.orm import Session
-from typing import Optional, List
+
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.schemas.permission import PermissionCreate, PermissionUpdate
 
 
 class PermissionCRUD:
-    def get_by_id(self, db: Session, permission_id: int) -> Optional[Permission]:
+    def get_by_id(self, db: Session, permission_id: int) -> Permission | None:
         return db.query(Permission).filter(Permission.id == permission_id).first()
 
-    def get_by_code(self, db: Session, code: str) -> Optional[Permission]:
+    def get_by_code(self, db: Session, code: str) -> Permission | None:
         return db.query(Permission).filter(Permission.code == code).first()
 
     def get_multi(
@@ -17,10 +18,10 @@ class PermissionCRUD:
         db: Session,
         skip: int = 0,
         limit: int = 100,
-        resource: Optional[str] = None,
-        action: Optional[str] = None,
+        resource: str | None = None,
+        action: str | None = None,
         include_inactive: bool = False
-    ) -> List[Permission]:
+    ) -> list[Permission]:
         query = db.query(Permission)
         
         if resource:
@@ -75,12 +76,12 @@ class PermissionCRUD:
             return True
         return False
 
-    def get_role_permissions(self, db: Session, role_id: int) -> List[Permission]:
+    def get_role_permissions(self, db: Session, role_id: int) -> list[Permission]:
         return db.query(Permission).join(RolePermission, Permission.id == RolePermission.permission_id).filter(
             RolePermission.role_id == role_id
         ).all()
 
-    def get_user_permissions(self, db: Session, user_id: int, team_id: Optional[int] = None) -> List[Permission]:
+    def get_user_permissions(self, db: Session, user_id: int, team_id: int | None = None) -> list[Permission]:
         """获取用户权限，并在 Agent worker 请求中限制为原授权范围。"""
 
         from app.core.request_scope import agent_worker_permissions

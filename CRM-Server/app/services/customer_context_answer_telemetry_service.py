@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
-from app.services.agent.schemas import CustomerContextAnswerResult
 from app.services.agent.types import coerce_json_dict
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.services.agent.schemas import CustomerContextAnswerResult
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]

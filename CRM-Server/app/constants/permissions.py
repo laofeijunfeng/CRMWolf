@@ -6,9 +6,9 @@
 
 # 历史 API 权限。
 #
-# 这些权限曾用于一套独立的开放 API 授权模型，但当前系统没有对应的
-# API Key/开放平台功能。保留编码清单用于数据迁移和兼容读取，禁止重新
-# 加入 ALL_PERMISSIONS，避免权限同步脚本再次创建。
+# 这些权限曾用于一套独立的开放 API 授权模型,但当前系统没有对应的
+# API Key/开放平台功能。保留编码清单用于数据迁移和兼容读取,禁止重新
+# 加入 ALL_PERMISSIONS,避免权限同步脚本再次创建。
 DEPRECATED_PERMISSION_CODES = frozenset({
     "apikey:manage",
     "lead:api:list",
@@ -39,7 +39,13 @@ ALL_PERMISSIONS = [
     {"name": "创建客户", "code": "customer:create", "resource": "customer", "action": "create"},
     {"name": "编辑自己的客户", "code": "customer:edit:own", "resource": "customer", "action": "edit", "scope": "own"},
     {"name": "编辑所有客户", "code": "customer:edit:all", "resource": "customer", "action": "edit", "scope": "all"},
-    {"name": "删除自己的客户", "code": "customer:delete:own", "resource": "customer", "action": "delete", "scope": "own"},
+    {
+        "name": "删除自己的客户",
+        "code": "customer:delete:own",
+        "resource": "customer",
+        "action": "delete",
+        "scope": "own",
+    },
     {"name": "退回客户到公海", "code": "customer:return", "resource": "customer", "action": "return"},
     {"name": "领取客户", "code": "customer:claim", "resource": "customer", "action": "claim"},
     {"name": "分配客户", "code": "customer:assign", "resource": "customer", "action": "assign"},
@@ -52,8 +58,18 @@ ALL_PERMISSIONS = [
 
     {"name": "查看客户档案", "code": "customer_profile:view", "resource": "customer_profile", "action": "view"},
     {"name": "刷新客户档案", "code": "customer_profile:refresh", "resource": "customer_profile", "action": "refresh"},
-    {"name": "查看客户档案历史", "code": "customer_profile:history", "resource": "customer_profile", "action": "history"},
-    {"name": "纠正客户档案事实", "code": "customer_profile:correct", "resource": "customer_profile", "action": "correct"},
+    {
+        "name": "查看客户档案历史",
+        "code": "customer_profile:history",
+        "resource": "customer_profile",
+        "action": "history",
+    },
+    {
+        "name": "纠正客户档案事实",
+        "code": "customer_profile:correct",
+        "resource": "customer_profile",
+        "action": "correct",
+    },
     {"name": "重建客户档案", "code": "customer_profile:rebuild", "resource": "customer_profile", "action": "rebuild"},
 
     # 线索相关权限
@@ -71,12 +87,42 @@ ALL_PERMISSIONS = [
     {"name": "导入线索", "code": "lead:import", "resource": "lead", "action": "import"},
 
     # 商机相关权限
-    {"name": "查看所有商机", "code": "opportunity:view:all", "resource": "opportunity", "action": "view", "scope": "all"},
-    {"name": "查看自己的商机", "code": "opportunity:view:own", "resource": "opportunity", "action": "view", "scope": "own"},
+    {
+        "name": "查看所有商机",
+        "code": "opportunity:view:all",
+        "resource": "opportunity",
+        "action": "view",
+        "scope": "all",
+    },
+    {
+        "name": "查看自己的商机",
+        "code": "opportunity:view:own",
+        "resource": "opportunity",
+        "action": "view",
+        "scope": "own",
+    },
     {"name": "创建商机", "code": "opportunity:create", "resource": "opportunity", "action": "create"},
-    {"name": "编辑自己的商机", "code": "opportunity:edit:own", "resource": "opportunity", "action": "edit", "scope": "own"},
-    {"name": "编辑所有商机", "code": "opportunity:edit:all", "resource": "opportunity", "action": "edit", "scope": "all"},
-    {"name": "删除自己的商机", "code": "opportunity:delete:own", "resource": "opportunity", "action": "delete", "scope": "own"},
+    {
+        "name": "编辑自己的商机",
+        "code": "opportunity:edit:own",
+        "resource": "opportunity",
+        "action": "edit",
+        "scope": "own",
+    },
+    {
+        "name": "编辑所有商机",
+        "code": "opportunity:edit:all",
+        "resource": "opportunity",
+        "action": "edit",
+        "scope": "all",
+    },
+    {
+        "name": "删除自己的商机",
+        "code": "opportunity:delete:own",
+        "resource": "opportunity",
+        "action": "delete",
+        "scope": "own",
+    },
     {"name": "推进商机阶段", "code": "opportunity:stage", "resource": "opportunity", "action": "stage"},
     {"name": "标记商机赢单", "code": "opportunity:win", "resource": "opportunity", "action": "win"},
     {"name": "标记商机输单", "code": "opportunity:lose", "resource": "opportunity", "action": "lose"},
@@ -93,7 +139,13 @@ ALL_PERMISSIONS = [
     {"name": "创建合同", "code": "contract:create", "resource": "contract", "action": "create"},
     {"name": "编辑自己的合同", "code": "contract:edit:own", "resource": "contract", "action": "edit", "scope": "own"},
     {"name": "编辑所有合同", "code": "contract:edit:all", "resource": "contract", "action": "edit", "scope": "all"},
-    {"name": "删除自己的合同", "code": "contract:delete:own", "resource": "contract", "action": "delete", "scope": "own"},
+    {
+        "name": "删除自己的合同",
+        "code": "contract:delete:own",
+        "resource": "contract",
+        "action": "delete",
+        "scope": "own",
+    },
     {"name": "提交合同审批", "code": "contract:submit", "resource": "contract", "action": "submit"},
     {"name": "撤回合同审批", "code": "contract:cancel", "resource": "contract", "action": "cancel"},
 
@@ -109,7 +161,13 @@ ALL_PERMISSIONS = [
     {"name": "创建回款计划", "code": "payment:plan:create", "resource": "payment_plan", "action": "create"},
     {"name": "编辑回款计划", "code": "payment:plan:edit", "resource": "payment_plan", "action": "edit"},
     {"name": "删除回款计划", "code": "payment:plan:delete", "resource": "payment_plan", "action": "delete"},
-    {"name": "查看所有回款计划", "code": "payment:plan:view:all", "resource": "payment_plan", "action": "view", "scope": "all"},
+    {
+        "name": "查看所有回款计划",
+        "code": "payment:plan:view:all",
+        "resource": "payment_plan",
+        "action": "view",
+        "scope": "all",
+    },
 
     # 审批流程权限
     {"name": "创建审批流程", "code": "approval:flow:create", "resource": "approval_flow", "action": "create"},
@@ -143,17 +201,47 @@ ALL_PERMISSIONS = [
 
     # AI 相关权限
     {"name": "AI 配置管理", "code": "ai:manage", "resource": "ai", "action": "manage"},
-    {"name": "核对团队助手命令", "code": "assistant:commands:reconcile:team", "resource": "assistant_command", "action": "reconcile", "scope": "team"},
-    {"name": "管理团队助手提案", "code": "assistant:proposals:manage:team", "resource": "assistant_proposal", "action": "manage", "scope": "team"},
+    {
+        "name": "核对团队助手命令",
+        "code": "assistant:commands:reconcile:team",
+        "resource": "assistant_command",
+        "action": "reconcile",
+        "scope": "team",
+    },
+    {
+        "name": "管理团队助手提案",
+        "code": "assistant:proposals:manage:team",
+        "resource": "assistant_proposal",
+        "action": "manage",
+        "scope": "team",
+    },
     {"name": "AI 配置查看", "code": "ai:view", "resource": "ai", "action": "view"},
 
     # 统计和报表权限
     {"name": "查看统计数据", "code": "statistics:view", "resource": "statistics", "action": "view"},
     {"name": "查看报表", "code": "report:view:own", "resource": "report", "action": "view", "scope": "own"},
     {"name": "查看团队报表", "code": "report:view:team", "resource": "report", "action": "view", "scope": "team"},
-    {"name": "查看自己的销售看板", "code": "sales_dashboard:view:own", "resource": "sales_dashboard", "action": "view", "scope": "own"},
-    {"name": "查看团队销售看板", "code": "sales_dashboard:view:team", "resource": "sales_dashboard", "action": "view", "scope": "team"},
-    {"name": "查看全部销售看板", "code": "sales_dashboard:view:all", "resource": "sales_dashboard", "action": "view", "scope": "all"},
+    {
+        "name": "查看自己的销售看板",
+        "code": "sales_dashboard:view:own",
+        "resource": "sales_dashboard",
+        "action": "view",
+        "scope": "own",
+    },
+    {
+        "name": "查看团队销售看板",
+        "code": "sales_dashboard:view:team",
+        "resource": "sales_dashboard",
+        "action": "view",
+        "scope": "team",
+    },
+    {
+        "name": "查看全部销售看板",
+        "code": "sales_dashboard:view:all",
+        "resource": "sales_dashboard",
+        "action": "view",
+        "scope": "all",
+    },
 
     # ===== 补充缺失的权限定义 =====
 
@@ -164,19 +252,55 @@ ALL_PERMISSIONS = [
     {"name": "删除所有线索", "code": "lead:delete:all", "resource": "lead", "action": "delete", "scope": "all"},
 
     # 商机 - 补充 delete:all
-    {"name": "删除所有商机", "code": "opportunity:delete:all", "resource": "opportunity", "action": "delete", "scope": "all"},
+    {
+        "name": "删除所有商机",
+        "code": "opportunity:delete:all",
+        "resource": "opportunity",
+        "action": "delete",
+        "scope": "all",
+    },
     {"name": "审批商机", "code": "opportunity:approve", "resource": "opportunity", "action": "approve"},
-    {"name": "审批自己的商机", "code": "opportunity:approve:own", "resource": "opportunity", "action": "approve", "scope": "own"},
-    {"name": "审批所有商机", "code": "opportunity:approve:all", "resource": "opportunity", "action": "approve", "scope": "all"},
+    {
+        "name": "审批自己的商机",
+        "code": "opportunity:approve:own",
+        "resource": "opportunity",
+        "action": "approve",
+        "scope": "own",
+    },
+    {
+        "name": "审批所有商机",
+        "code": "opportunity:approve:all",
+        "resource": "opportunity",
+        "action": "approve",
+        "scope": "all",
+    },
 
     # 合同 - 补充 delete:all 和审批权限
     {"name": "删除所有合同", "code": "contract:delete:all", "resource": "contract", "action": "delete", "scope": "all"},
-    {"name": "审批所有合同", "code": "contract:approve:all", "resource": "contract", "action": "approve", "scope": "all"},
-    {"name": "审批自己的合同", "code": "contract:approve:own", "resource": "contract", "action": "approve", "scope": "own"},
+    {
+        "name": "审批所有合同",
+        "code": "contract:approve:all",
+        "resource": "contract",
+        "action": "approve",
+        "scope": "all",
+    },
+    {
+        "name": "审批自己的合同",
+        "code": "contract:approve:own",
+        "resource": "contract",
+        "action": "approve",
+        "scope": "own",
+    },
 
     # 发票 - 补充完整权限集
     {"name": "审批发票申请", "code": "invoice:approve", "resource": "invoice", "action": "approve"},
-    {"name": "审批自己的发票", "code": "invoice:approve:own", "resource": "invoice", "action": "approve", "scope": "own"},
+    {
+        "name": "审批自己的发票",
+        "code": "invoice:approve:own",
+        "resource": "invoice",
+        "action": "approve",
+        "scope": "own",
+    },
     {"name": "审批所有发票", "code": "invoice:approve:all", "resource": "invoice", "action": "approve", "scope": "all"},
     {"name": "标记已开票", "code": "invoice:mark_issued", "resource": "invoice", "action": "mark_issued"},
     {"name": "编辑发票申请", "code": "invoice:edit:own", "resource": "invoice", "action": "edit", "scope": "own"},
@@ -189,20 +313,55 @@ ALL_PERMISSIONS = [
     {"name": "撤回发票申请", "code": "invoice:withdraw", "resource": "invoice", "action": "withdraw"},
 
     # 发票重开申请 - 独立审批业务类型权限集
-    {"name": "查看所有发票重开申请", "code": "invoice_reissue:view:all", "resource": "invoice_reissue", "action": "view", "scope": "all"},
-    {"name": "查看自己的发票重开申请", "code": "invoice_reissue:view:own", "resource": "invoice_reissue", "action": "view", "scope": "own"},
+    {
+        "name": "查看所有发票重开申请",
+        "code": "invoice_reissue:view:all",
+        "resource": "invoice_reissue",
+        "action": "view",
+        "scope": "all",
+    },
+    {
+        "name": "查看自己的发票重开申请",
+        "code": "invoice_reissue:view:own",
+        "resource": "invoice_reissue",
+        "action": "view",
+        "scope": "own",
+    },
     {"name": "创建发票重开申请", "code": "invoice_reissue:create", "resource": "invoice_reissue", "action": "create"},
     {"name": "提交发票重开申请", "code": "invoice_reissue:submit", "resource": "invoice_reissue", "action": "submit"},
-    {"name": "撤回发票重开申请", "code": "invoice_reissue:withdraw", "resource": "invoice_reissue", "action": "withdraw"},
+    {
+        "name": "撤回发票重开申请",
+        "code": "invoice_reissue:withdraw",
+        "resource": "invoice_reissue",
+        "action": "withdraw",
+    },
     {"name": "审批发票重开申请", "code": "invoice_reissue:approve", "resource": "invoice_reissue", "action": "approve"},
-    {"name": "审批自己的发票重开申请", "code": "invoice_reissue:approve:own", "resource": "invoice_reissue", "action": "approve", "scope": "own"},
-    {"name": "审批所有发票重开申请", "code": "invoice_reissue:approve:all", "resource": "invoice_reissue", "action": "approve", "scope": "all"},
+    {
+        "name": "审批自己的发票重开申请",
+        "code": "invoice_reissue:approve:own",
+        "resource": "invoice_reissue",
+        "action": "approve",
+        "scope": "own",
+    },
+    {
+        "name": "审批所有发票重开申请",
+        "code": "invoice_reissue:approve:all",
+        "resource": "invoice_reissue",
+        "action": "approve",
+        "scope": "all",
+    },
 
     # 回款 - 补充完整权限集
     {"name": "提交回款审批", "code": "payment:submit", "resource": "payment", "action": "submit"},
     {"name": "撤回回款审批", "code": "payment:withdraw", "resource": "payment", "action": "withdraw"},
     {"name": "审批回款", "code": "payment:approve", "resource": "payment", "action": "approve"},
-    {"name": "审批自己的回款", "code": "payment:approve:own", "resource": "payment", "action": "approve", "scope": "own"},
+    {
+        "name": "审批自己的回款",
+        "code": "payment:approve:own",
+        "resource": "payment",
+        "action": "approve",
+        "scope": "own",
+    },
     {"name": "审批所有回款", "code": "payment:approve:all", "resource": "payment", "action": "approve", "scope": "all"},
     {"name": "编辑回款记录", "code": "payment:record:edit", "resource": "payment_record", "action": "edit"},
     {"name": "删除回款记录", "code": "payment:record:delete", "resource": "payment_record", "action": "delete"},
@@ -210,16 +369,46 @@ ALL_PERMISSIONS = [
 
     # License - 补充审批权限集
     {"name": "审批License申请", "code": "license:approve", "resource": "license", "action": "approve"},
-    {"name": "审批自己的License申请", "code": "license:approve:own", "resource": "license", "action": "approve", "scope": "own"},
-    {"name": "审批所有License申请", "code": "license:approve:all", "resource": "license", "action": "approve", "scope": "all"},
+    {
+        "name": "审批自己的License申请",
+        "code": "license:approve:own",
+        "resource": "license",
+        "action": "approve",
+        "scope": "own",
+    },
+    {
+        "name": "审批所有License申请",
+        "code": "license:approve:all",
+        "resource": "license",
+        "action": "approve",
+        "scope": "all",
+    },
     {"name": "发放License", "code": "license:issue", "resource": "license", "action": "issue"},
 
     # 财务权限
-    {"name": "查看财务审计日志", "code": "finance:audit:view", "resource": "finance", "action": "audit", "scope": "view"},
-    {"name": "查看应收账款", "code": "finance:receivables:view", "resource": "finance", "action": "receivables", "scope": "view"},
-    {"name": "查看财务报表", "code": "finance:reports:view", "resource": "finance", "action": "reports", "scope": "view"},
+    {
+        "name": "查看财务审计日志",
+        "code": "finance:audit:view",
+        "resource": "finance",
+        "action": "audit",
+        "scope": "view",
+    },
+    {
+        "name": "查看应收账款",
+        "code": "finance:receivables:view",
+        "resource": "finance",
+        "action": "receivables",
+        "scope": "view",
+    },
+    {
+        "name": "查看财务报表",
+        "code": "finance:reports:view",
+        "resource": "finance",
+        "action": "reports",
+        "scope": "view",
+    },
 
-    # DataTable 导出权限（独立权限，默认仅 TEAM_ADMIN 拥有）
+    # DataTable 导出权限(独立权限,默认仅 TEAM_ADMIN 拥有)
     {"name": "导出客户", "code": "customer:export", "resource": "customer", "action": "export"},
     {"name": "导出客户追踪", "code": "follow_up_task:export", "resource": "follow_up_task", "action": "export"},
     {"name": "导出线索", "code": "lead:export", "resource": "lead", "action": "export"},

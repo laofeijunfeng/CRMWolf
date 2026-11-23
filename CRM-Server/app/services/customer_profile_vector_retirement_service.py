@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.models.customer_vector_document import CustomerVectorDocument, CustomerVectorDocumentSyncStatus
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass(frozen=True)

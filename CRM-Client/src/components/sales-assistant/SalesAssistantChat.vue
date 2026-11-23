@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onUnmounted, ref, shallowReactive, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ArrowUp, X } from 'lucide-vue-next'
-import { assistantApi, submitInputStream, type AssistantTurn, type StageName } from '@/api/assistant'
-import type { SubmitAssistantInput } from '@/api/assistant'
+import { assistantApi, StageNameSchema, StagePhaseSchema, submitInputStream } from '@/api/assistant'
+import type { AssistantTurn, StageEvent, StageName, SubmitAssistantInput } from '@/api/assistant'
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,9 +12,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { ZodError } from 'zod'
 import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
 import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
-import type { JsonObject } from '@/schemas/agent-contracts/common'
+import type { EntityRef, JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
-import { type AssistantTaskView, type TaskWaiting, type ConversationView, type ConversationReply, type ConversationBoundary, type ConversationProjection } from '@/schemas/assistant-contracts'
+import { AssistantRejectReasonSchema } from '@/schemas/assistant-contracts'
+import type { AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection } from '@/schemas/assistant-contracts'
+import { assistantEntityDetailRoute } from '@/components/agent/agentEntityNavigation'
 
 interface ChatEntry {
   id: number
@@ -31,7 +34,9 @@ interface ChatEntry {
   projection?: ConversationProjection | null | undefined
 }
 
-const task = ref<AssistantTaskView | null>(null)
+const router = useRouter()
+
+const task = shallowRef<AssistantTaskView | null>(null)
 let disposed = false
 let navigationVersion = 0
 let viewRequestSequence = 0
@@ -43,7 +48,8 @@ const emit = defineEmits<{
   (e: 'task-updated', task: AssistantTaskView, replyMessage: string): void
   (e: 'task-created', task: AssistantTaskView): void
 }>()
-const entries = ref<ChatEntry[]>([])
+// Wire snapshots are replaced, not deeply mutated. React only to list and entry changes.
+const entries = shallowRef<ChatEntry[]>(shallowReactive([]))
 const inputText = ref('')
 const submitting = ref(false)
 const heldActionIds = ref<ReadonlySet<string>>(new Set())
@@ -115,7 +121,7 @@ const conversationLoadErrorMessage = (error: unknown): string => {
   return `对话加载失败，请重试${noNewRecord}`
 }
 
-const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
+const waiting = computed(() => task.value?.waiting ?? null)
 const isWaiting = computed(() => waiting.value !== null)
 const isTerminal = computed(() => task.value != null && task.value.status !== 'ACTIVE')
 
@@ -139,7 +145,9 @@ const pushEntry = (
   replayed = false
 ): void => {
   seq.value += 1
-  entries.value.push({ id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value })
+  entries.value.push(shallowReactive<ChatEntry>({
+    id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value
+  }))
   scrollToBottom()
 }
 
@@ -170,6 +178,11 @@ interface LiveStage {
 }
 
 const STAGE_LABELS: Record<StageName, string> = {
+  route: '正在理解输入',
+  locate: '正在定位客户',
+  context: '正在读取客户记录',
+  judge: '正在比对未完成任务',
+  propose: '正在生成后续建议',
   classify: '正在判断活动类型',
   structure: '正在整理活动内容',
   quality_gate: '正在评估记录质量',
@@ -216,23 +229,18 @@ const noteEpisodeFailure = (code: string | undefined): void => {
 const elapsedSeconds = ref(0)
 let elapsedTimer: number | null = null
 
-const presetStages = (input: SubmitAssistantInput, hasWaiting: boolean): StageName[] => {
-  if (input.kind === 'text' && !hasWaiting) return ['classify', 'structure', 'quality_gate']
-  if (input.kind === 'submit_field') return ['quality_gate']
-  if (input.kind === 'confirm' && input.choice === 'confirm') return ['write']
-  return []
-}
 
-const beginProcessing = (input: SubmitAssistantInput, hasWaiting: boolean): void => {
+const beginProcessing = (): void => {
   startEpisode()
   processing.value.active = true
-  processing.value.stages = presetStages(input, hasWaiting).map((name) => ({ name, status: 'pending' }))
+  processing.value.stages = []
   processing.value.startedAt = Date.now()
   elapsedSeconds.value = 0
   if (elapsedTimer !== null) clearInterval(elapsedTimer)
   elapsedTimer = window.setInterval(() => { elapsedSeconds.value += 1 }, 1000)
 }
-const applyStageEvent = (event: { stage: StageName; phase: 'start' | 'done'; ms?: number | undefined; score?: number | undefined }): void => {
+const applyStageEvent = (event: StageEvent): void => {
+  if (event.phase !== 'start' && event.phase !== 'done' && event.phase !== 'failed') return
   const stages = processing.value.stages
   let target = stages.find((item) => item.name === event.stage)
   if (target === undefined) {
@@ -241,6 +249,10 @@ const applyStageEvent = (event: { stage: StageName; phase: 'start' | 'done'; ms?
   }
   if (event.phase === 'start') {
     target.status = 'running'
+    target.ms = undefined
+    target.score = undefined
+  } else if (event.phase === 'failed') {
+    target.status = 'failed'
   } else {
     target.status = 'done'
     target.ms = event.ms
@@ -277,9 +289,56 @@ const processingHint = computed(() => {
 const pendingRequest = shallowRef<{ input: SubmitAssistantInput; targetId: string; displayText: string; turnId: string; cursor: number } | null>(null)
 const processingRecovery = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
 const reprocessTarget = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
+const unknownResult = shallowRef<{ targetId: string; turnId: string; cursor: number; version: number; waiting: TaskWaiting | null } | null>(null)
+// The bare conversation pending bit cannot identify or replace a fenced turn.
+const suppressConversationResume = ref(false)
+const canResumeConversation = computed(() => !suppressConversationResume.value && conversation.value?.has_pending_request === true)
+const reconciliationRequired = computed(() => task.value?.status === 'ACTIVE'
+  && (task.value.reconciliation_required === true || unknownResult.value !== null))
 const recoveryNotice = ref('')
 const autoRecovering = ref(false)
 const reprocessAllowed = ref(false)
+
+const captureUnknownResult = (targetId: string, turnId: string, cursor: number, snapshot = task.value): void => {
+  if (task.value?.public_id !== targetId || task.value.status !== 'ACTIVE' || snapshot?.public_id !== targetId) return
+  const previous = unknownResult.value
+  if (previous?.targetId !== targetId) {
+    unknownResult.value = { targetId, turnId, cursor, version: snapshot.version, waiting: task.value.waiting ?? snapshot.waiting ?? null }
+  } else if (previous.turnId === '' && turnId !== '') {
+    previous.turnId = turnId
+    previous.cursor = cursor
+    previous.version = Math.max(previous.version, snapshot.version)
+  } else if (previous.turnId === turnId) {
+    previous.version = Math.max(previous.version, snapshot.version)
+    previous.cursor = Math.max(previous.cursor, cursor)
+  }
+  suppressConversationResume.value = true
+  pendingConversation.value = null
+  reprocessAllowed.value = false
+  reprocessTarget.value = null
+}
+
+const reconcileUnknownResult = (updated: AssistantTaskView | null): void => {
+  const unresolved = unknownResult.value
+  if (unresolved !== null && (updated?.public_id !== unresolved.targetId || updated.status !== 'ACTIVE')) {
+    unknownResult.value = null
+  }
+  if (updated?.status !== 'ACTIVE') return
+  if (updated.reconciliation_required === true) {
+    if (unknownResult.value === null) captureUnknownResult(updated.public_id, updated.processing_turn_id ?? '', 0, updated)
+    else unknownResult.value.version = Math.max(unknownResult.value.version, updated.version)
+    return
+  }
+  if (unresolved === null || updated.public_id !== unresolved.targetId) return
+  const wait = updated.waiting
+  if (updated.version > unresolved.version && updated.reconciliation_required === false
+    && typeof wait?.action_id === 'string' && wait.action_id.trim() !== '' && wait.expected_version === updated.version
+    && unresolved.waiting?.action_id !== wait.action_id) {
+    if (pendingRequest.value?.targetId === updated.public_id) pendingRequest.value = null
+    if (processingRecovery.value === null) resultPending.value = false
+    unknownResult.value = null
+  }
+}
 const processingInFlight = computed(() => processing.value.active || autoRecovering.value || processingRecovery.value !== null)
 const showProcessCard = computed(() => processing.value.stages.length > 0
   && !(processing.value.authoritativeWrite && !processingInFlight.value))
@@ -318,7 +377,7 @@ const adoptProcessingTurn = (updated: AssistantTaskView): void => {
       processingRecovery.value = {
         targetId: updated.public_id,
         turnId: updated.processing_turn_id,
-        cursor: recovery?.cursor ?? 0
+        cursor: 0
       }
     }
     resultPending.value = true
@@ -326,7 +385,8 @@ const adoptProcessingTurn = (updated: AssistantTaskView): void => {
     processingRecovery.value = null
     resultPending.value = false
   }
-  if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '' && processing.value.settlement !== 'unknown') {
+  if (updated.reconciliation_required === true) pendingConversation.value = null
+  if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '' && !reconciliationRequired.value) {
     reprocessAllowed.value = true
     const current = reprocessTarget.value
     reprocessTarget.value = {
@@ -350,18 +410,17 @@ const rememberEvent = (turnId: string, seq: number | undefined): boolean => {
   return true
 }
 
-const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): string | undefined => {
+const applyTurnEvents = (turnId: string, events: AssistantTurn['events'], snapshot: AssistantTaskView): string | undefined => {
   let reply: string | undefined
   for (const event of events) {
     if (!rememberEvent(turnId, event.seq)) continue
     if (event.event === 'stage') {
-      const stage = event.data['stage']
-      const phase = event.data['phase']
-      if ((stage === 'classify' || stage === 'structure' || stage === 'quality_gate' || stage === 'write')
-        && (phase === 'start' || phase === 'done')) {
+      const stage = StageNameSchema.safeParse(event.data['stage'])
+      const phase = StagePhaseSchema.safeParse(event.data['phase'])
+      if (stage.success && phase.success) {
         applyStageEvent({
-          stage,
-          phase,
+          stage: stage.data,
+          phase: phase.data,
           ms: typeof event.data['ms'] === 'number' ? event.data['ms'] : undefined,
           score: typeof event.data['score'] === 'number' ? event.data['score'] : undefined
         })
@@ -369,12 +428,14 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): strin
     } else if (event.event === 'waiting' && typeof event.data['message'] === 'string') {
       reply = event.data['message']
     } else if (event.event === 'error') {
-      const stage = event.data['stage']
-      markStageFailed(stage === 'classify' || stage === 'structure' || stage === 'quality_gate' || stage === 'write' ? stage : undefined)
+      const stage = StageNameSchema.safeParse(event.data['stage'])
+      markStageFailed(stage.success ? stage.data : undefined)
       pushEntry('assistant', typeof event.data['message'] === 'string' ? event.data['message'] : '处理失败')
       const entry = entries.value[entries.value.length - 1]
       if (entry !== undefined) entry.outcome = 'failure'
-      noteEpisodeFailure(typeof event.data['code'] === 'string' ? event.data['code'] : undefined)
+      const code = typeof event.data['code'] === 'string' ? event.data['code'] : undefined
+      noteEpisodeFailure(code)
+      if (code === 'UNKNOWN_COMMIT_RESULT') captureUnknownResult(snapshot.public_id, turnId, event.seq, snapshot)
       processing.value.active = false
     }
   }
@@ -382,16 +443,26 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events']): strin
 }
 
 const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor: number }): Promise<boolean> => {
-  if (processing.value.episode === 0) startEpisode()
+  const navigation = navigationVersion
+  const token = recoveryToken
+  const previouslyFocused = task.value
   const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
+  if (disposed || navigation !== navigationVersion || token !== recoveryToken || task.value?.public_id !== pending.targetId
+    || turn.turn_id !== pending.turnId || turn.task.public_id !== pending.targetId) return true
+  const focused = task.value
+  if (focused === null || turn.task.version < focused.version || (focused !== previouslyFocused && turn.task.version === focused.version)) {
+    return processingRecovery.value?.turnId !== pending.turnId
+  }
+  if (focused.processing_turn_id != null && focused.processing_turn_id !== pending.turnId) return true
+  if (processing.value.episode === 0) startEpisode()
   const seqs = turn.events.map((event) => event.seq)
   if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
-  const reply = applyTurnEvents(pending.turnId, turn.events)
+  const reply = applyTurnEvents(pending.turnId, turn.events, turn.task)
   publishTask(turn.task, reply, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
-  if (turn.reprocess_allowed && processing.value.settlement !== 'unknown') {
+  if (turn.reprocess_allowed && !reconciliationRequired.value && turn.task.reprocess_turn_id === pending.turnId) {
     reprocessAllowed.value = true
     reprocessTarget.value = { targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }
-  } else if (processing.value.settlement === 'unknown') {
+  } else if (reconciliationRequired.value) {
     reprocessAllowed.value = false
     reprocessTarget.value = null
   }
@@ -404,7 +475,7 @@ const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor
       resultPending.value = false
       recoveryNotice.value = ''
       stopAutoRecovery()
-      if (pendingRequest.value?.targetId === pending.targetId) pendingRequest.value = null
+      if (pendingRequest.value?.targetId === pending.targetId && pendingRequest.value.turnId === pending.turnId) pendingRequest.value = null
     }
     logRecovery(turn.status === 'SUCCEEDED' ? 'recovery_success' : 'recovery_terminal', {
       task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: turn.status
@@ -424,13 +495,17 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
       try {
         const done = await readKnownTurn(pending)
         if (token === recoveryToken) await refreshConversation()
-        if (done || disposed || token !== recoveryToken) {
-          const successor = processingRecovery.value
-          if (done && successor !== null && successor.turnId !== pending.turnId && token === recoveryToken) {
-            await startAutoRecovery(successor, '已受理，正在确认处理结果')
-          }
+        if (disposed || token !== recoveryToken) return
+        const successor = processingRecovery.value
+        if (successor === null) {
+          stopAutoRecovery()
           return
         }
+        if (successor.turnId !== pending.turnId) {
+          await startAutoRecovery(successor, '已受理，正在确认处理结果')
+          return
+        }
+        if (done) return
         if (pollsLeft <= 1) {
           stopAutoRecovery()
           recoveryNotice.value = '处理结果待确认，请刷新状态。'
@@ -477,7 +552,7 @@ const startAutoRecovery = async (
     await refreshConversation()
     if (token !== recoveryToken || disposed) return
     const successor = processingRecovery.value
-    if (done && successor !== null && successor.turnId !== pending.turnId) {
+    if (successor !== null && successor.turnId !== pending.turnId) {
       await startAutoRecovery(successor, notice)
       return
     }
@@ -510,13 +585,19 @@ const publishTask = (updated: AssistantTaskView, message?: string, allowCompleti
   const activityWritten = !hadActivity && updated.committed.some((receipt) => receipt.kind === 'customer_activity')
   const dispositionChanged = updated.status === 'COMPLETED' && updated.follow_up_disposition != null
     && JSON.stringify(updated.follow_up_disposition) !== JSON.stringify(previous?.follow_up_disposition)
+  const proposalUnavailable = updated.proposal_outcome != null
   const completed = allowCompletion && updated.status === 'COMPLETED' && updated.waiting == null
+    && !proposalUnavailable
     && updated.processing_turn_status !== 'FAILED' && conversation.value?.pending_choice == null
   task.value = updated
+  reconcileUnknownResult(updated)
   adoptProcessingTurn(updated)
   const prompt = updated.waiting?.prompt ?? ''
   const reply = message ?? prompt
-  if (reply !== '' && (!completed || activityWritten || dispositionChanged)) {
+  if (proposalUnavailable) {
+    // The conversation read model owns the warning envelope, including on recovery.
+    void refreshConversation()
+  } else if (reply !== '' && (!completed || activityWritten || dispositionChanged)) {
     pushEntry('assistant', reply, updated.waiting ?? null)
     const entry = entries.value[entries.value.length - 1]
     if (entry !== undefined && entry.waiting === null) {
@@ -533,14 +614,22 @@ const publishTask = (updated: AssistantTaskView, message?: string, allowCompleti
     }
   }
   emit('task-updated', updated, reply)
+  recomputeProjectionCoverage()
 }
 const runPrepared = async (prepared: NonNullable<ConversationReply['submission']>, displayText: string): Promise<void> => {
   const navigation = navigationVersion
   const targetId = prepared.task_public_id
+  if (disposed || reconciliationRequired.value || task.value?.public_id !== targetId || task.value.status !== 'ACTIVE'
+    || (task.value.processing_turn_id != null && task.value.processing_turn_id !== prepared.turn_id)) return
   const request: SubmitAssistantInput = {
     kind: prepared.input.kind, text: prepared.input.text ?? undefined, choice: prepared.input.choice ?? undefined,
     client_request_id: prepared.input.client_request_id, action_id: prepared.input.action_id ?? undefined,
-    expected_version: prepared.input.expected_version ?? undefined
+    expected_version: prepared.input.expected_version ?? undefined,
+    ...(prepared.input.values != null ? { values: prepared.input.values } : {}),
+    ...(prepared.input.form_revision != null ? { form_revision: prepared.input.form_revision } : {}),
+    ...(prepared.input.choices != null ? { choices: prepared.input.choices } : {}),
+    ...(prepared.input.suppress_week != null ? { suppress_week: prepared.input.suppress_week } : {}),
+    ...(prepared.input.reason != null ? { reason: prepared.input.reason } : {})
   }
   submitting.value = true
   processingRecovery.value = null
@@ -549,8 +638,10 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     resultPending.value = false
     const pending = { input: request, targetId, displayText, turnId: prepared.turn_id, cursor: 0 }
     pendingRequest.value = pending
-    beginProcessing(request, task.value?.waiting != null)
+    beginProcessing()
     const active = (): boolean => !disposed && navigation === navigationVersion && pendingRequest.value === pending
+    const acceptsStreamEvent = (): boolean => active() && task.value?.public_id === targetId && task.value.status === 'ACTIVE'
+      && (task.value.processing_turn_id == null || task.value.processing_turn_id === prepared.turn_id)
     let turnId = prepared.turn_id
     let cursor = 0
     let delivered = false
@@ -559,27 +650,27 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     let terminalInvalid = false
     await submitInputStream(targetId, request, {
       onAccepted: (id, seq) => {
-        if (!active()) return
+        if (!acceptsStreamEvent() || id !== prepared.turn_id) return
         turnId = id
         cursor = Math.max(cursor, seq ?? 0)
         rememberEvent(id, seq)
         if (pendingRequest.value !== null) { pendingRequest.value.turnId = id; pendingRequest.value.cursor = cursor }
       },
       onStage: (event) => {
-        if (!active()) return
+        if (!acceptsStreamEvent()) return
         cursor = Math.max(cursor, event.seq ?? 0)
         rememberEvent(turnId, event.seq)
         if (pendingRequest.value !== null) pendingRequest.value.cursor = cursor
         applyStageEvent(event)
       },
       onWaiting: (data) => {
-        if (!active()) return
+        if (!acceptsStreamEvent()) return
         delivered = true
         cursor = Math.max(cursor, data.seq ?? 0)
         publishTask(data.task, data.message, !failed)
       },
       onError: (event) => {
-        if (!active()) return
+        if (!acceptsStreamEvent()) return
         delivered = true
         failed = true
         cursor = Math.max(cursor, event.seq ?? 0)
@@ -589,6 +680,10 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (entry !== undefined) entry.outcome = 'failure'
         noteEpisodeFailure(event.code)
         processing.value.active = false
+        if (event.code === 'UNKNOWN_COMMIT_RESULT') {
+          rememberEvent(turnId, event.seq)
+          captureUnknownResult(targetId, turnId, cursor)
+        }
       },
       onNetworkLost: () => { if (active()) disconnected = true },
       onTerminalInvalid: () => { if (active()) terminalInvalid = true }
@@ -596,31 +691,39 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     if (!active()) return
     if (!delivered && !disconnected && turnId !== '') {
       try {
+        const previouslyFocused = task.value
         const turn = await assistantApi.getTurn(targetId, turnId, cursor)
         if (!active()) return
-        applyTurnEvents(turnId, turn.events)
-        if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
-          publishTask(turn.task, undefined, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
-          delivered = true
-          disconnected = false
+        const focused = task.value
+        if (focused !== null && turn.turn_id === turnId && turn.task.public_id === targetId
+          && (focused.processing_turn_id == null || focused.processing_turn_id === turnId)
+          && (turn.task.version > focused.version || (focused === previouslyFocused && turn.task.version === focused.version))) {
+          cursor = Math.max(cursor, ...turn.events.map((event) => event.seq))
+          applyTurnEvents(turnId, turn.events, turn.task)
+          if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
+            publishTask(turn.task, undefined, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
+            delivered = true
+          }
         }
       } catch {
-        // Fall through to the existing durable recovery path.
+        // Fall through to durable GET recovery.
       }
     }
+    if (!active()) return
     if ((disconnected || !delivered) && turnId !== '') {
       pending.cursor = cursor
       const notice = terminalInvalid ? '处理结果暂时无法显示，正在重新读取。' : '已受理，正在确认处理结果'
-      await startAutoRecovery({ targetId, turnId, cursor }, notice)
+      await startAutoRecovery(processingRecovery.value ?? pending, notice)
     } else if (disconnected || !delivered) {
       resultPending.value = true
       try {
         const latest = await assistantApi.getTask(targetId)
         if (!active()) return
+        if (latest.public_id !== targetId) return
         publishTask(latest)
         if (processingRecovery.value !== null) await startAutoRecovery(processingRecovery.value, '已受理，正在确认处理结果')
       } catch {
-        resultPending.value = true
+        if (active()) resultPending.value = true
       }
     }
     if (!active()) return
@@ -641,7 +744,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
 
 const submitText = async (): Promise<void> => {
   const text = inputText.value.trim()
-  if (!text || loadingConversation.value || resultPending.value || submitting.value || conversation.value === null || conversation.value.pending_choice !== null) return
+  if (!text || loadingConversation.value || busy.value || conversation.value === null || conversation.value.pending_choice !== null) return
   if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
     explicitNone.value = false
     await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
@@ -668,14 +771,19 @@ const cardNoticeKey = (source: TaskWaiting | null): string | null => (
   source?.type === 'ACTIVITY_KIND' && typeof source.action_id === 'string' ? source.action_id : null
 )
 
+const isSameWait = (source: TaskWaiting, current?: TaskWaiting | null): boolean =>
+  current != null && source.type === current.type && source.question_id === current.question_id
+  && source.action_id === current.action_id && source.expected_version === current.expected_version
+  && source.field === current.field && source.form_revision === current.form_revision
+
 const submit = async (
   input: SubmitAssistantInput,
   displayText: string,
   source: TaskWaiting | null = null,
   reuseClientRequestId: string | null = null
 ): Promise<boolean> => {
-  if (submitting.value || resultPending.value || task.value === null || conversation.value === null) return false
-  if (source !== null && (task.value.waiting?.action_id !== source.action_id || task.value.waiting?.expected_version !== source.expected_version)) return false
+  if (busy.value || task.value === null || conversation.value === null) return false
+  if (source !== null && !isSameWait(source, task.value.waiting)) return false
   const clientRequestId = reuseClientRequestId ?? crypto.randomUUID()
   const choice = typeof input.choice === 'string' ? input.choice : null
   const noticeKey = choice === null ? null : cardNoticeKey(source)
@@ -706,36 +814,39 @@ const submit = async (
 }
 
 const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<void> => {
-  if (submitting.value || resultPending.value || conversation.value === null) return
+  if (submitting.value || resultPending.value || reconciliationRequired.value || conversation.value === null) return
   if (entry.role !== 'assistant' || entry.serverId === undefined || !entry.serverId.endsWith(':reply')) return
   const entryId = entry.serverId.slice(0, -':reply'.length)
   if (actionId !== `retry:${entryId}`) return
-  const action = entry.ui?.suggested_actions.find((item) => item.action_id === actionId)
+  const message = conversation.value.messages.find((item) => item.id === entry.serverId)
+  const action = message?.ui?.suggested_actions.find((item) => item.action_id === actionId)
   if (action === undefined || action.type !== 'retry') return
+  const navigation = navigationVersion
   const requestOrder = ++viewRequestSequence
   submitting.value = true
   routing.value = true
   try {
     const response = await assistantApi.retryConversationEntry(entryId, conversation.value.version)
-    if (disposed) return
-    applyConversation(response.conversation, false, requestOrder)
+    if (disposed || navigation !== navigationVersion || !applyConversation(response.conversation, false, requestOrder)) return
     routing.value = false
     if (response.submission !== null) await runPrepared(response.submission, '')
     else resultPending.value = false
   } catch (error) {
-    if (disposed) return
+    if (disposed || navigation !== navigationVersion) return
     if (isAxiosError(error) && error.response?.status === 409) {
       resultPending.value = false
       await refreshConversation()
+      if (disposed || navigation !== navigationVersion) return
       if (historyError.value === '') {
         historyError.value = SESSION_UPDATED_MESSAGE
       }
       return
     }
     await refreshConversation()
-    resultPending.value = conversation.value?.has_pending_request === true
+    if (disposed || navigation !== navigationVersion) return
+    resultPending.value = canResumeConversation.value && !reconciliationRequired.value
   } finally {
-    if (!disposed) { routing.value = false; submitting.value = false }
+    if (!disposed && navigation === navigationVersion) { routing.value = false; submitting.value = false }
   }
 }
 
@@ -746,29 +857,33 @@ const restoreUnacceptedText = (): void => {
 }
 
 const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<CommandDispatch> => {
-  if (disposed) return { outcome: 'explicit', detail: '' }
+  if (disposed || submitting.value || reconciliationRequired.value) return { outcome: 'explicit', detail: '' }
+  const navigation = navigationVersion
   const requestOrder = ++viewRequestSequence
   submitting.value = true
   routing.value = true
   pendingConversation.value = send
   try {
     const response = await send()
-    if (disposed) return { outcome: 'accepted', detail: '' }
+    if (disposed || navigation !== navigationVersion) return { outcome: 'accepted', detail: '' }
     pendingConversation.value = null
     unacceptedText.value = ''
-    applyConversation(response.conversation, false, requestOrder)
+    if (!applyConversation(response.conversation, false, requestOrder)) return { outcome: 'explicit', detail: '' }
     routing.value = false
-    if (response.submission !== null) await runPrepared(response.submission, displayText)
-    else resultPending.value = false
+    if (response.submission !== null) {
+      if (reconciliationRequired.value) return { outcome: 'accepted', detail: '' }
+      await runPrepared(response.submission, displayText)
+    } else if (processingRecovery.value === null) resultPending.value = false
     return { outcome: resultPending.value ? 'unknown' : 'accepted', detail: '' }
   } catch (error) {
-    if (disposed) return { outcome: 'explicit', detail: '' }
+    if (disposed || navigation !== navigationVersion || reconciliationRequired.value) return { outcome: 'explicit', detail: '' }
     const failure = explicitCommandFailure(error)
     if (failure !== null) {
       // A rejected command must not stay replayable or look still in progress.
       resultPending.value = false
       if (failure === 'conflict') {
         await refreshConversation()
+        if (disposed || navigation !== navigationVersion) return { outcome: 'conflict', detail: conflictDetail(error) }
         if (conversation.value?.has_pending_request !== true) restoreUnacceptedText()
         historyError.value = SESSION_UPDATED_MESSAGE
       } else {
@@ -781,13 +896,13 @@ const dispatchConversation = async (send: () => Promise<ConversationReply>, disp
     historyError.value = `${PENDING_RESULT_PREFIX}${error instanceof Error ? error.message : '网络请求失败'}`
     return { outcome: 'unknown', detail: '' }
   } finally {
-    if (!disposed) { routing.value = false; submitting.value = false }
+    if (!disposed && navigation === navigationVersion) { routing.value = false; submitting.value = false }
   }
 }
 
 const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Promise<void> => {
   const boundary = entry.boundary
-  if (!boundary || conversation.value?.pending_choice?.entry_id !== boundary.entry_id || submitting.value || resultPending.value) return
+  if (!boundary || conversation.value?.pending_choice?.entry_id !== boundary.entry_id || busy.value) return
   const request = { entry_id: boundary.entry_id, choice, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
   await dispatchConversation(() => assistantApi.conversationChoice(request), choice === 'CONTINUE' ? '接着刚才' : '另记一件')
 }
@@ -803,9 +918,14 @@ const pickKind = (choice: string, source: TaskWaiting | null, reuseClientRequest
 
 const confirmWrite = (source: TaskWaiting | null): Promise<boolean> =>
   submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
-const rejectWrite = (source: TaskWaiting | null): Promise<boolean> =>
-  submit({ kind: 'confirm', choice: 'reject' }, '取消', source)
+
+const rejectWrite = (source: TaskWaiting | null, reason?: SubmitAssistantInput['reason']): Promise<boolean> =>
+  submit({ kind: 'confirm', choice: 'reject', ...(reason === undefined ? {} : { reason }) }, '取消', source)
+
+const requestEdit = (source: TaskWaiting | null): Promise<boolean> =>
+  submit({ kind: 'request_edit' }, '修改活动内容', source)
 const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<void> => {
+  if (busy.value) return
   const pending = conversation.value?.pending_choice
   if (pending && conversation.value) {
     const request = { entry_id: pending.entry_id, choice: 'CANCEL' as const, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
@@ -815,77 +935,106 @@ const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<v
   await submit({ kind: 'cancel' }, '算了，不记了', source)
 }
 
-const showConversationRetry = computed(() => resultPending.value && !autoRecovering.value && processingRecovery.value === null
-  && (pendingConversation.value !== null || conversation.value?.has_pending_request === true))
+const showConversationRetry = computed(() => !reconciliationRequired.value && resultPending.value && !autoRecovering.value && processingRecovery.value === null
+  && (pendingConversation.value !== null || canResumeConversation.value))
 const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showConversationRetry.value
   && (processingRecovery.value !== null || (pendingRequest.value?.turnId ?? '') !== ''))
-const showReprocess = computed(() => reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
+const showReprocess = computed(() => !reconciliationRequired.value && reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
 const showRefreshStatus = computed(() => {
   if (autoRecovering.value) return false
-  if (showSyncResult.value || showReprocess.value) return true
+  if (reconciliationRequired.value || showSyncResult.value || showReprocess.value) return true
   const current = task.value
   if (current == null || current.status !== 'ACTIVE' || current.waiting != null) return false
   return entries.value.some((entry) => entry.outcome === 'failure')
 })
 
 const syncResult = async (): Promise<void> => {
-  const activeRecovery = processingRecovery.value
-  const request = pendingRequest.value
-  const pending = activeRecovery ?? (request !== null && request.turnId !== ''
-    ? { targetId: request.targetId, turnId: request.turnId, cursor: request.cursor }
-    : null)
-  if (pending === null || submitting.value) return
+  const unresolved = unknownResult.value
+  const pending = (unresolved !== null && unresolved.turnId !== '' ? unresolved : null) ?? processingRecovery.value ?? pendingRequest.value
+  if (submitting.value || (pending === null && !reconciliationRequired.value)) return
+  const navigation = navigationVersion
   submitting.value = true
   recoveryToken += 1
   stopAutoRecovery()
   try {
-    await readKnownTurn(pending)
+    if (pending !== null) await readKnownTurn(pending)
+    if (disposed || navigation !== navigationVersion) return
     await refreshConversation()
+    const successor = processingRecovery.value
+    if (navigation === navigationVersion && successor !== null) await recoverProcessingTurn()
   } catch {
+    if (disposed || navigation !== navigationVersion) return
     resultPending.value = true
     pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
+    if (reconciliationRequired.value) await refreshConversation()
   } finally {
-    submitting.value = false
+    if (!disposed && navigation === navigationVersion) submitting.value = false
   }
 }
 
 const reprocessTurn = async (): Promise<void> => {
   const pending = reprocessTarget.value
-  if (pending === null || !reprocessAllowed.value || submitting.value) return
+  if (reconciliationRequired.value || pending === null || !reprocessAllowed.value || submitting.value) return
+  const navigation = navigationVersion
   submitting.value = true
   recoveryToken += 1
+  const token = recoveryToken
   stopAutoRecovery()
   try {
+    const previouslyFocused = task.value
     const current = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
-    const reply = applyTurnEvents(pending.turnId, current.events)
+    if (disposed || navigation !== navigationVersion || token !== recoveryToken || task.value?.public_id !== pending.targetId
+      || current.turn_id !== pending.turnId || current.task.public_id !== pending.targetId) return
+    const focused = task.value
+    if (focused === null || current.task.version < focused.version) return
+    const priorCursor = Math.max(pending.cursor, ...current.events.map((event) => event.seq))
+    if (focused !== previouslyFocused && current.task.version === focused.version) return
+    const currentAuthority = focused.status === 'ACTIVE' && focused.reprocess_turn_id === pending.turnId
+    const reportedUnknown = current.events.some((event) => event.event === 'error' && event.data['code'] === 'UNKNOWN_COMMIT_RESULT')
+    const reply = applyTurnEvents(pending.turnId, current.events, current.task)
     publishTask(current.task, reply, current.status === 'SUCCEEDED' && !current.events.some((event) => event.event === 'error'))
-    if (current.reprocess_allowed !== true) {
+    if (reportedUnknown || reconciliationRequired.value || current.reprocess_allowed !== true || current.task.reprocess_turn_id !== pending.turnId) {
       reprocessAllowed.value = false
+      reprocessTarget.value = null
       return
     }
-    const restarted = await assistantApi.retryTurn(pending.targetId, pending.turnId, current.lease_version, pending.cursor)
-    const priorCursor = pending.cursor
+    if (!currentAuthority || disposed || navigation !== navigationVersion || token !== recoveryToken || reconciliationRequired.value
+      || task.value?.public_id !== pending.targetId || task.value.reprocess_turn_id !== pending.turnId) return
+    const preRetryTask = task.value
+    const restarted = await assistantApi.retryTurn(pending.targetId, pending.turnId, current.lease_version, priorCursor)
+    if (disposed || navigation !== navigationVersion || token !== recoveryToken || task.value?.public_id !== pending.targetId
+      || restarted.turn_id !== pending.turnId || restarted.task.public_id !== pending.targetId) return
+    const restartedFocus = task.value
+    if (restartedFocus === null || restarted.task.version < restartedFocus.version
+      || (restartedFocus !== preRetryTask && restarted.task.version === restartedFocus.version)) return
     resetProcessingEpisode()
-    beginProcessing(pendingRequest.value?.input ?? { kind: 'text' }, task.value?.waiting != null)
-    reprocessAllowed.value = restarted.reprocess_allowed === true
-    const seqs = restarted.events.map((event) => event.seq)
-    if (seqs.length > 0) pending.cursor = Math.max(pending.cursor, ...seqs)
-    applyTurnEvents(pending.turnId, restarted.events.filter((event) => event.seq > priorCursor))
+    beginProcessing()
+    const retry = { ...pending, cursor: Math.max(priorCursor, ...restarted.events.map((event) => event.seq)) }
+    applyTurnEvents(pending.turnId, restarted.events.filter((event) => event.seq > priorCursor), restarted.task)
     publishTask(restarted.task, undefined, restarted.status === 'SUCCEEDED' && !restarted.events.some((event) => event.event === 'error'))
     if (restarted.status === 'PENDING' || restarted.status === 'RUNNING') {
-      await startAutoRecovery(pending, '已受理，正在确认处理结果')
+      await startAutoRecovery(retry, '已受理，正在确认处理结果')
     }
   } catch {
+    if (disposed || navigation !== navigationVersion) return
     resultPending.value = true
     pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
   } finally {
-    submitting.value = false
+    if (!disposed && navigation === navigationVersion) submitting.value = false
   }
 }
 
 const retryPending = async (): Promise<void> => {
+  if (unknownResult.value !== null) {
+    await syncResult()
+    return
+  }
+  if (reconciliationRequired.value) {
+    await refreshConversation()
+    return
+  }
   if (submitting.value) return
-  if (conversation.value?.has_pending_request === true && pendingConversation.value === null) {
+  if (canResumeConversation.value && pendingConversation.value === null && processingRecovery.value === null) {
     await dispatchConversation(() => assistantApi.resumeConversation(), '')
     return
   }
@@ -897,69 +1046,7 @@ const retryPending = async (): Promise<void> => {
     await dispatchConversation(pendingConversation.value, '')
     return
   }
-  const navigation = navigationVersion
-  const pending = pendingRequest.value
-  if (pending === null || submitting.value) return
-  submitting.value = true
-  try {
-    if (pending.turnId !== '') {
-      const turn = await assistantApi.getTurn(pending.targetId, pending.turnId, pending.cursor)
-      if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
-      pending.cursor = Math.max(pending.cursor, ...turn.events.map((event) => event.seq))
-      applyTurnEvents(pending.turnId, turn.events)
-      publishTask(turn.task, undefined, turn.status === 'SUCCEEDED' && !turn.events.some((event) => event.event === 'error'))
-      if (processingRecovery.value !== null || turn.status === 'PENDING' || turn.status === 'RUNNING') {
-        await startAutoRecovery({ targetId: pending.targetId, turnId: pending.turnId, cursor: pending.cursor }, '已受理，正在确认处理结果')
-        return
-      }
-      if (turn.status === 'SUCCEEDED' || turn.status === 'FAILED') {
-        resultPending.value = false
-        pendingRequest.value = null
-        return
-      }
-    } else {
-      const latest = await assistantApi.getTask(pending.targetId)
-      if (disposed || navigation !== navigationVersion || task.value?.public_id !== pending.targetId || pendingRequest.value !== pending) return
-      publishTask(latest)
-      if (processingRecovery.value !== null) {
-        await startAutoRecovery(processingRecovery.value, '已受理，正在确认处理结果')
-        return
-      }
-    }
-    await submitInputStream(pending.targetId, pending.input, {
-      onAccepted: (id, seq) => {
-        if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
-        pending.turnId = id
-        pending.cursor = Math.max(pending.cursor, seq ?? 0)
-      },
-      onStage: (event) => {
-        if (!disposed && navigation === navigationVersion && pendingRequest.value === pending) {
-          pending.cursor = Math.max(pending.cursor, event.seq ?? 0)
-          applyStageEvent(event)
-        }
-      },
-      onWaiting: (data) => {
-        if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
-        publishTask(data.task, data.message)
-        pendingRequest.value = null
-        resultPending.value = processingRecovery.value !== null
-      },
-      onError: (event) => {
-        if (disposed || navigation !== navigationVersion || pendingRequest.value !== pending) return
-        markStageFailed(event.stage)
-        pushEntry('assistant', event.message)
-        const entry = entries.value[entries.value.length - 1]
-        if (entry !== undefined) entry.outcome = 'failure'
-        pendingRequest.value = null
-        resultPending.value = false
-      },
-      onNetworkLost: () => { if (!disposed && navigation === navigationVersion && pendingRequest.value === pending) resultPending.value = true }
-    })
-  } catch {
-    if (!disposed && navigation === navigationVersion && task.value?.public_id === pending.targetId) resultPending.value = true
-  } finally {
-    if (!disposed && navigation === navigationVersion && task.value?.public_id === pending.targetId) submitting.value = false
-  }
+  await syncResult()
 }
 
 const explicitNone = ref(false)
@@ -969,7 +1056,7 @@ const gapNone = (entry: ChatEntry): Promise<void> => {
   return Promise.resolve()
 }
 
-const busy = computed(() => submitting.value || resultPending.value)
+const busy = computed(() => submitting.value || resultPending.value || reconciliationRequired.value)
 
 const ACTIVITY_BADGES: Record<string, string> = {
   PHONE_FOLLOW_UP: '电话跟进',
@@ -995,21 +1082,44 @@ const activityBadge = computed((): string => {
 const interactionBlock = (entry: ChatEntry): Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> | undefined =>
   entry.ui?.blocks.find((block): block is Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> => block.type === 'interaction')
 
-const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
+const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: JsonObject): void => {
   const block = interactionBlock(entry)
-  if (block === undefined || block.type !== 'interaction') return
+  if (block?.state !== 'ACTIVE' || block.submit_action_id !== actionId || busy.value) return
   const choice = typeof values['choice'] === 'string' ? values['choice'] : ''
   if (block.business_action === 'assistant_boundary') {
     if (choice === 'CONTINUE' || choice === 'NEW') void chooseBoundary(entry, choice)
     return
   }
+  const source = entry.waiting
+  if (entry.replayed || source === null || task.value?.public_id !== entry.ownTask?.public_id
+    || !isSameWait(source, task.value?.waiting)) return
+  if (block.business_action === 'settle_follow_up_disposition') {
+    const disposition = task.value?.follow_up_disposition
+    if (source.type !== 'FOLLOW_UP_DISPOSITION' || disposition?.status !== 'ACTIVE' || disposition.settling === true) return
+    const choices = values['choices']
+    if (!Array.isArray(choices) || !choices.every((item): item is string => typeof item === 'string')) return
+    const suppressWeek = values['suppress_week']
+    if (suppressWeek !== undefined && typeof suppressWeek !== 'boolean') return
+    void submit({ kind: 'submit_field', choices, ...(suppressWeek !== undefined ? { suppress_week: suppressWeek } : {}) },
+      '提交跟进处理', source)
+    return
+  }
+  if (block.secondary_action?.value === 'request_edit' && choice === 'request_edit') {
+    void requestEdit(entry.waiting)
+    return
+  }
+  if (choice === 'request_edit') return
   if (typeof values['revise_activity_kind'] === 'string') {
     void submit({ kind: 'revise_activity_kind', choice: values['revise_activity_kind'] }, '修改活动类型', entry.waiting)
     return
   }
   if (block.interaction_type === 'confirmation') {
-    if (choice === 'confirm') void confirmWrite(entry.waiting)
-    else void rejectWrite(entry.waiting)
+    if (choice === 'confirm') {
+      void confirmWrite(entry.waiting)
+    } else if (choice === 'cancel') {
+      const reason = AssistantRejectReasonSchema.safeParse(values['reason'])
+      void rejectWrite(source, reason.success ? reason.data : undefined)
+    }
     return
   }
   if (block.interaction_type === 'choice') {
@@ -1026,11 +1136,37 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
   if (block.interaction_type === 'text_input') {
     const answer = typeof values['text'] === 'string' ? values['text'].trim() : ''
     if (answer === '') return
-    const actionId = block.submit_action_id
     holdAction(actionId)
     void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting).then((started) => {
       if (!started) releaseAction(actionId)
     })
+    return
+  }
+  if (block.business_action === 'provide_follow_up_content' && values['cancel'] === true) {
+    void submit({ kind: 'cancel' }, '取消', entry.waiting)
+    return
+  }
+  if (source.type === 'PROPOSAL_FORM' || source.type === 'CONFIRMATION_EDIT') {
+    const formRevision = source.form_revision
+    if (formRevision == null) return
+    const canceled = choice === 'cancel' && Object.keys(values).length === 1
+    const input: SubmitAssistantInput = { kind: 'submit_form', form_revision: formRevision }
+    if (canceled) {
+      input.choice = 'cancel'
+    } else if (source.type === 'CONFIRMATION_EDIT') {
+      const editValues = { ...values }
+      // The coordinator accepts newline text and converts it to canonical participant lists.
+      for (const key of ['internal_participants', 'customer_participants']) {
+        const raw = editValues[key]
+        if (typeof raw === 'string') {
+          editValues[key] = raw.split(/\r\n?|\n/).map((line) => line.trim()).filter(Boolean).join('\n')
+        }
+      }
+      input.values = editValues
+    } else {
+      input.values = values
+    }
+    void submit(input, canceled ? '取消修改' : '提交表单', source)
     return
   }
   const fieldKey = block.fields[0]?.key
@@ -1038,6 +1174,11 @@ const onAssistantInteraction = (entry: ChatEntry, values: JsonObject): void => {
   const answer = typeof raw === 'string' ? raw.trim() : ''
   if (answer === '') return
   void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting)
+}
+
+const openAssistantEntity = (entity: EntityRef): void => {
+  const target = assistantEntityDetailRoute(entity)
+  if (target !== null) void router?.push(target)
 }
 
 const showExplicitNone = (entry: ChatEntry): boolean => {
@@ -1139,6 +1280,23 @@ const recomputeProjectionCoverage = (): void => {
 
     }
     if (entry.role !== 'assistant') continue
+    const block = interactionBlock(entry)
+    if (block?.state === 'ACTIVE' && entry.ui != null) {
+      const current = task.value
+      const isCurrent = block.business_action === 'assistant_boundary'
+        ? entry.boundary != null && entry.boundary.entry_id === conversation.value?.pending_choice?.entry_id
+        : !entry.replayed && current?.status === 'ACTIVE' && current.public_id === entry.ownTask?.public_id
+          && entry.waiting != null && isSameWait(entry.waiting, current.waiting)
+      const disposition = current?.follow_up_disposition
+      const isDisposition = block.business_action === 'settle_follow_up_disposition'
+      if (!isCurrent || (isDisposition && (disposition?.status !== 'ACTIVE' || disposition.settling === true))) {
+        entry.replayed = true
+        entry.ui = { ...entry.ui, blocks: entry.ui.blocks.map((candidate) => candidate === block ? {
+          ...block, state: 'READ_ONLY', submit_action_id: null, submit_on_select: false, allow_cancel: false,
+          secondary_action: null, cancel_reasons: [], options: block.options.map((option) => ({ ...option, disabled: true }))
+        } : candidate) }
+      }
+    }
     const activityId = activityProjectionId(entry)
     if (activityId != null && isAuthoritativeWrite(entry)) {
       entry.projection = { ...(entry.projection ?? {}), visibility: 'VISIBLE', activity_public_id: activityId, covered_by: null }
@@ -1148,19 +1306,6 @@ const recomputeProjectionCoverage = (): void => {
     }
     const disposition = dispositionProjection(entry)
     if (disposition != null) {
-      const current = task.value
-      const isCurrentWait = !entry.replayed && current?.status === 'ACTIVE'
-        && current.public_id === entry.ownTask?.public_id && current.waiting?.type === 'FOLLOW_UP_DISPOSITION'
-        && current.waiting.action_id === entry.waiting?.action_id
-        && current.waiting.expected_version === entry.waiting?.expected_version
-      if (!isCurrentWait && entry.ui != null) {
-        entry.ui = { ...entry.ui, blocks: entry.ui.blocks.map((block) =>
-          block.type === 'interaction' && block.business_action === 'settle_follow_up_disposition'
-            && block.state === 'ACTIVE'
-            ? { ...block, state: 'READ_ONLY', submit_action_id: null, submit_on_select: false, allow_cancel: false,
-                options: block.options.map((option) => ({ ...option, disabled: true })) }
-            : block) }
-      }
       entry.projection = { ...(entry.projection ?? {}), visibility: 'VISIBLE', disposition, covered_by: null }
       const key = `${disposition.task_public_id}:${disposition.batch_id}`
       const group = dispositionGroups.get(key) ?? []
@@ -1172,16 +1317,14 @@ const recomputeProjectionCoverage = (): void => {
     const carrier = [...group].sort((left, right) => (right.at?.getTime() ?? 0) - (left.at?.getTime() ?? 0) || right.id - left.id)[0]
     if (carrier === undefined) continue
     for (const entry of group) if (entry !== carrier && entry.projection != null) {
-      entry.projection.visibility = 'COVERED'
-      entry.projection.covered_by = carrier.serverId ?? String(carrier.id)
+      entry.projection = { ...entry.projection, visibility: 'COVERED', covered_by: carrier.serverId ?? String(carrier.id) }
     }
   }
   for (const group of dispositionGroups.values()) {
     const carrier = [...group].sort((left, right) => compareCardEntries(right, left)).find((entry) => dispositionProjection(entry)?.card_role !== 'NONE')
     if (carrier === undefined) continue
     for (const entry of group) if (entry !== carrier && entry.projection != null && dispositionCovers(carrier, entry)) {
-      entry.projection.visibility = 'COVERED'
-      entry.projection.covered_by = carrier.serverId ?? String(carrier.id)
+      entry.projection = { ...entry.projection, visibility: 'COVERED', covered_by: carrier.serverId ?? String(carrier.id) }
     }
   }
 }
@@ -1204,19 +1347,28 @@ const noteEpisodeMessages = (): void => {
   else if (sawFailure) processing.value.settlement = 'failed'
 }
 
-const applyConversation = (view: ConversationView, older = false, requestOrder = ++viewRequestSequence): void => {
-  if (disposed) return
+const applyConversation = (view: ConversationView, older = false, requestOrder = ++viewRequestSequence): boolean => {
+  if (disposed) return false
   if (!older && conversation.value !== null && (view.version < conversation.value.version
     || (view.version === conversation.value.version && requestOrder < appliedViewRequest)
-    || (view.version === conversation.value.version && task.value?.public_id === view.focused_task?.public_id
-      && (view.focused_task?.version ?? 0) < (task.value?.version ?? 0)))) return
+    || (task.value?.public_id === view.focused_task?.public_id
+      && (view.focused_task?.version ?? 0) < (task.value?.version ?? 0)))) return false
   historyError.value = ''
   if (!older) {
     appliedViewRequest = requestOrder
     if (task.value?.public_id !== view.focused_task?.public_id) {
+      suppressConversationResume.value = false
       navigationVersion += 1
+      recoveryToken += 1
+      stopAutoRecovery()
+      recoveryNotice.value = ''
+      pendingConversation.value = null
+      unacceptedText.value = ''
+      routing.value = false
       pendingRequest.value = null
       processingRecovery.value = null
+      reprocessAllowed.value = false
+      reprocessTarget.value = null
       resultPending.value = false
       submitting.value = false
       endProcessing()
@@ -1224,10 +1376,11 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     }
     conversation.value = view
     task.value = view.focused_task
+    reconcileUnknownResult(view.focused_task)
   }
   if (older || !historyExtended) olderCursor.value = view.older_cursor
   const preserved = entries.value.filter((entry) => entry.serverId !== undefined && !entry.serverId.startsWith('current:'))
-  const mapped = view.messages.map((message): ChatEntry => ({
+  const mapped = view.messages.map((message) => shallowReactive<ChatEntry>({
     id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
     waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
     at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
@@ -1249,16 +1402,18 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   for (const entry of merged) {
     if (entry.outcome === 'task_completed') completionIds.set(entry.ownTask?.public_id ?? entry.serverId, entry.id)
   }
-  entries.value = merged.filter((entry) => entry.outcome !== 'task_completed'
-    || completionIds.get(entry.ownTask?.public_id ?? entry.serverId) === entry.id)
+  entries.value = shallowReactive(merged.filter((entry) => entry.outcome !== 'task_completed'
+    || completionIds.get(entry.ownTask?.public_id ?? entry.serverId) === entry.id))
   const current = task.value
-  if (current?.status === 'ACTIVE' && current.waiting != null) {
-    const candidate = [...entries.value].reverse().find((entry) => entry.ownTask?.public_id === current.public_id
-      && entry.waiting?.action_id === current.waiting?.action_id && entry.waiting?.expected_version === current.waiting?.expected_version)
+  if (current?.status === 'ACTIVE' && current.waiting != null && !reconciliationRequired.value) {
+    const matching = entries.value.filter((entry) => entry.role === 'assistant' && entry.boundary == null
+      && entry.outcome !== 'failure' && entry.ownTask?.public_id === current.public_id
+      && entry.waiting != null && isSameWait(entry.waiting, current.waiting))
+    const candidate = matching.reverse().find((entry) => interactionBlock(entry)?.state === 'ACTIVE')
     if (candidate !== undefined) {
       candidate.ownTask = current
       candidate.replayed = false
-    } else {
+    } else if (!matching.some((entry) => interactionBlock(entry) !== undefined)) {
       pushEntry('assistant', current.waiting.prompt, current.waiting)
       const added = entries.value[entries.value.length - 1]
       if (added !== undefined) added.serverId = `current:${current.public_id}:${current.version}`
@@ -1266,15 +1421,23 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   }
   recomputeProjectionCoverage()
   if (!older && current !== null) adoptProcessingTurn(current)
-  if (!older && view.has_pending_request) resultPending.value = true
+  if (!older && canResumeConversation.value && !reconciliationRequired.value) resultPending.value = true
   if (!older) noteEpisodeMessages()
   if (!older) scrollToBottom(true)
+  return true
 }
 
 const refreshConversation = async (): Promise<void> => {
   const order = ++viewRequestSequence
-  try { applyConversation(await assistantApi.getConversation(), false, order) }
-  catch { if (!disposed) historyError.value = '对话同步失败，已留下的内容仍保留，请重试同步。' }
+  const navigation = navigationVersion
+  try {
+    const view = await assistantApi.getConversation()
+    if (navigation === navigationVersion) applyConversation(view, false, order)
+  } catch {
+    if (!disposed && navigation === navigationVersion && order >= appliedViewRequest) {
+      historyError.value = '对话同步失败，已留下的内容仍保留，请重试同步。'
+    }
+  }
 }
 
 const loadOlder = async (): Promise<void> => {
@@ -1314,7 +1477,7 @@ void loadConversation()
     <div class="flex h-full min-h-0 flex-col">
     <div v-if="historyError" role="alert" class="mb-2 text-sm text-destructive">
       {{ historyError }}
-      <Button variant="outline" size="sm" :disabled="submitting" @click="pendingConversation ? retryPending() : loadConversation()">重试同步</Button>
+      <Button variant="outline" size="sm" :disabled="submitting" @click="reconciliationRequired || pendingConversation ? retryPending() : conversation ? refreshConversation() : loadConversation()">重试同步</Button>
     </div>
     <div v-if="loadingConversation" role="status" class="mb-2 text-sm text-muted-foreground">正在恢复对话…</div>
     <div ref="scrollId" class="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -1343,8 +1506,9 @@ void loadConversation()
                 :disabled="busy"
                 :locked-action-ids="heldActionIds"
                 :notices="interactionNotices"
-                @interaction="(_actionId, values) => onAssistantInteraction(entry, values)"
+                @interaction="(actionId, values) => onAssistantInteraction(entry, actionId, values)"
                 @action="(actionId) => { void retryRootFailure(entry, actionId) }"
+                @open-entity="openAssistantEntity"
               />
               <div v-else class="rounded-lg border bg-card px-3.5 py-2 text-sm text-foreground">这条结果暂时无法显示</div>
               <Button
@@ -1388,7 +1552,7 @@ void loadConversation()
         aria-label="客户沟通内容"
         v-model="inputText"
         :rows="2"
-        :disabled="loadingConversation || submitting || resultPending || conversation?.pending_choice != null"
+        :disabled="loadingConversation || busy || conversation?.pending_choice != null"
         :placeholder="inputPlaceholder"
         class="resize-none border-0 p-0 focus-visible:ring-0"
         @keydown.enter.exact.prevent="submitText"
@@ -1399,7 +1563,7 @@ void loadConversation()
           <span class="text-xs text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex items-center gap-2">
-          <Button v-if="showRefreshStatus" size="sm" variant="outline" :disabled="submitting" @click="showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
+          <Button v-if="showRefreshStatus" size="sm" variant="outline" :disabled="submitting" @click="unknownResult !== null || showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
           <p v-if="showReprocess" class="mb-0 text-xs text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
           <Button v-if="showReprocess" size="sm" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
           <Button v-if="showConversationRetry" size="sm" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>

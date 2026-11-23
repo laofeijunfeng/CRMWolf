@@ -1,12 +1,7 @@
-# 客户活动 Agent Workflow Parity 实施规格
+# 客户活动实施规格
 
 - **确认日期：**2026-09-02
-- **状态：**产品规则已冻结，实施中（T11-T18 代码与专项回归已完成；T19 代码闭环已接入，真实联调待完成；T20 migration 122 与 SQLite 行为测试已完成，真实数据库 dry-run 待完成；T21 待完成）
-- **权威性：**本文是本轮“旧 Agent 跟进流程迁移到新 Workflow”工作的实施权威文档。后续实现、评审和验收以本文为准，不再重复询问已经冻结的产品规则。
-- **差异来源：**[旧流程到新 Workflow Parity Matrix](./legacy-workflow-parity-matrix.md)
-- **确认过程：**[Parity 待确认事项分析](./workflow-parity-open-questions.md)
-- **验收用例：**[客户活动 Workflow 验收矩阵](./customer-activity-workflow-acceptance-matrix.md)
-- **代码状态：**以[实施状态页](./customer-activity-workflow-implementation-status.md)为准；本文只定义目标合同和发布阻断条件。
+- **权威性：**本文定义客户活动、页面表单、AIJob 和删除语义；销售助手写命令的幂等与恢复见[销售助手命令契约](../runtime/assistant-command-contract.md)，领域决策见 [ADR 0001](../../../docs/adr/0001-customer-activity-workflow-parity.md)。旧 Agent 已按 [ADR 0003](../../../docs/adr/0003-legacy-agent-entry-retirement.md) 停止接收新输入。
 
 ## 1. 目标
 
@@ -46,7 +41,6 @@
 - 用户明确要求时的商机阶段推进；
 - 页面表单活动的异步整理、评分和现有后台任务；
 - 客户创建与首次活动的部分成功和独立重试；
-- 旧活动执行链路向 durable job 的一次性切换。
 
 ### 2.2 不纳入范围
 
@@ -133,7 +127,7 @@ Agent 评分低于 60 时：
 只问一个最关键补充问题
 ```
 
-用户补充后必须合并完整用户语义，重新执行：
+旧 Agent 补充后重新解析完整用户语义；销售助手按 ADR 0001 §7 局部合并补充或修订，再对完整最终稿重新整理、评分和判断下一步。旧路径顺序如下：
 
 ```text
 语义解析
@@ -144,7 +138,7 @@ Agent 评分低于 60 时：
 
 不得只评分用户最后一句补充。
 
-### 3.6.1 缺失跟进内容时取消
+### 3.6.1 旧 Agent 已受理任务：缺失跟进内容时取消
 
 仅 `provide_follow_up_content` 的补充内容交互可在“继续”旁提供“取消”；取消不受必填正文校验限制。服务端签发的 Action 同时授权取消，提交值固定为 `{"cancel": true}`；不允许客户端自行加入或扩展取消许可。确认卡片、历史待办和商机建议保留原有语义。
 
@@ -152,7 +146,7 @@ Agent 评分低于 60 时：
 
 取消成功后，在 Action 与结果消息同一事务中清除本任务的 Root 工作记忆（客户绑定、正文、下一步、问题及任务级纠正），并在会话上下文记录取消结果消息 ID 作为近期消息的持久下界；Root 只读取该 ID 之后的近期消息，普通历史消息仍可展示，Action 按保留策略清理也不得解除下界。用户需在聊天输入框发送完整的新请求：从 Root 重新分类、解析和校验客户，不恢复被取消的 checkpoint，也不复用其客户和内容；新请求缺少必要信息时正常澄清。失败回滚不得写入下界或清除记忆。未取消的有效补充仍按原续接合同处理。
 
-### 3.7 历史待办确认与延期操作边界
+### 3.7 历史待办确认与延期操作边界（旧 Case）
 
 历史待办确认是一个轻量的“完成状态确认”交互，只回答这项待办是否已经完成：
 
@@ -163,7 +157,7 @@ Agent 评分低于 60 时：
 - 已存在的旧 Case、投影消息和投递快照不做破坏性数据清洗，在读取边界统一转换旧的“需要延期吗?”/“不需要继续跟进了吗?”文案；
 - 旧数据原始字段仍保留，避免历史数据迁移影响 dev 环境和审计证据。
 
-## 4. 客户解析、记忆和创建
+## 4. 客户解析、任务内绑定和创建
 
 ### 4.1 客户解析顺序
 
@@ -173,15 +167,15 @@ Agent 评分低于 60 时：
 语义解析
 → Customer Resolver
 → 服务端权限/存在性校验
-→ customer_id 写入 Workflow checkpoint
+→ customer_id 绑定到当前任务
 ```
 
-以下规则仅适用于尚未取消的有效 Workflow 续接；取消后的完整新请求不得沿用旧 checkpoint：
+以下规则仅适用于尚未取消的有效任务；取消后新请求不得沿用旧任务的客户绑定：
 
 补充轮次：
 
 ```text
-复用 checkpoint.customer_id
+复用任务已绑定的 customer_id
 → 重新做权限和存在性校验
 → 不重新搜索客户
 → 不重复询问客户
@@ -233,18 +227,18 @@ Agent 评分低于 60 时：
 }
 ```
 
-重试时只执行尚未成功的活动 command。
+只在服务端确认可安全重试时处理尚未成功的活动 command；不得重放已成功的客户创建，也不得重试结果未知的写入。
 
-## 5. 目标架构
+## 5. 现行路径
 
 ```text
-Agent Workflow
+销售助手 /assistant → /v1/assistant
     ├── Customer Resolver
     ├── Canonical Activity Structurer
     ├── Canonical Activity Evaluator
     ├── Next Action Gate
-    ├── Workflow checkpoint / interaction
-    └── create_final_from_agent()
+    ├── 持久任务、等待及冻结确认
+    └── create_final_from_assistant2()
 
 页面活动 API
     └── create_pending_from_form()
@@ -252,16 +246,8 @@ Agent Workflow
                     └── structure + evaluate
                             └── finalize_pending_from_ai()
 
-活动最终化
-    ├── CustomerActivityPostCommitJob
-    ├── CustomerIntelligenceRefresh
-    └── Agent 来源时的 CustomerOpportunitySuggestionJob
-
-用户确认新商机
-    └── 独立 CreateOpportunity Workflow
-
-用户明确推进商机
-    └── 独立 MoveOpportunityStage Workflow
+页面表单活动最终化 → CustomerActivityPostCommitJob
+销售助手活动最终化 → 独立跟进任务投影；商机建议与后续写命令另行处理
 ```
 
 这些流程共享领域合同，但不共享业务事务。
@@ -291,7 +277,7 @@ OpportunitySuggestionJob
 
 提交后可以 kick worker，但正确性依赖 recovery scheduler，不依赖进程内 task。
 
-### 6.2 `create_final_from_agent()`
+### 6.2 `create_final_from_assistant2()`
 
 事务内一次性：
 
@@ -302,21 +288,20 @@ OpportunitySuggestionJob
 写最终评分、原因和分项
 写 processing_status=COMPLETED
 写 effectiveness_status=COMPLETED
-创建 PostCommitJob
-创建/登记客户智能刷新工作
-写 Agent command 幂等结果
+登记销售助手跟进任务投影
+由调用方在同一事务写冻结命令执行回执并结算任务
 提交
 ```
 
 不得：
 
 ```text
-创建 CustomerActivityAIJob
+创建 CustomerActivityAIJob 或旧 Agent PostCommitJob
 调用 trigger_processing()
 调用 trigger_evaluation()
 ```
 
-Agent 来源且符合商机建议条件时，商机建议任务必须独立登记；其调度失败不能回滚活动。
+符合商机建议条件时，在活动提交之后独立处理；后续失败不能回滚活动。
 
 ### 6.3 `finalize_pending_from_ai()`
 
@@ -330,7 +315,6 @@ AI Workflow 只返回计算结果，由本入口在一个事务中：
 两个活动状态置 COMPLETED
 增加最终化 revision
 创建 PostCommitJob
-登记客户智能刷新
 标记 AIJob COMPLETED
 提交
 ```
@@ -339,7 +323,7 @@ AI Workflow 只返回计算结果，由本入口在一个事务中：
 
 ## 7. 两条活动路径
 
-### 7.1 Agent 路径
+### 7.1 销售助手路径
 
 ```text
 用户输入
@@ -350,7 +334,8 @@ AI Workflow 只返回计算结果，由本入口在一个事务中：
 → score < 60：单问题补充，不写入
 → score >= 60：下一步行动门禁
 → 门禁不通过：补充，不写入
-→ 门禁通过：create_final_from_agent()
+→ 门禁通过：展示冻结确认
+→ 用户确认：/v1/assistant → create_final_from_assistant2()
 → 返回活动成功
 → 独立生成商机建议
 ```
@@ -471,7 +456,7 @@ CUTOVER_MIGRATION
 
 ### 8.4 商机建议任务
 
-独立于 PostCommitJob 和客户智能任务。其失败、重试或耗尽不修改活动状态。
+旧 Agent 建议任务独立于 PostCommitJob。其失败、重试或耗尽不修改活动状态；销售助手后续建议不依赖旧任务。
 
 ## 9. 幂等与并发
 
@@ -485,15 +470,9 @@ team_id + activity_id + activity_revision + job_type
 
 不能仅使用“先查再插”的应用层判断。
 
-### 9.2 Agent command 幂等
+### 9.2 销售助手命令幂等
 
-Agent 最终写入使用：
-
-```text
-workflow_run_id + command_id
-```
-
-相同 command 重放时返回原 `activity_id` 和原结果，不重新创建活动、评分或下游任务。
+活动使用团队范围内稳定的 `submission_id` 与冻结指纹；重放必须匹配原客户和冻结载荷，不重新创建活动、评分或下游任务。商机命令使用各自的 `command_id` 和目标效果，详见[销售助手命令契约](../runtime/assistant-command-contract.md)。
 
 ### 9.3 页面提交幂等
 
@@ -522,14 +501,8 @@ AIJob → SKIPPED
 
 最终活动事实成功后，下游关系为：
 
-```text
-CustomerActivity finalized
-├── CustomerActivityPostCommitJob
-├── CustomerIntelligenceRefresh
-└── CustomerOpportunitySuggestionJob（仅 Agent 合格活动）
-```
-
-三者独立执行，不互相等待，不共同回滚。
+- 页面表单最终化时登记 PostCommitJob；销售助手活动不创建旧 Agent PostCommitJob，登记独立的跟进任务投影。活动事实与登记同事务，任务在提交后执行。
+- 销售助手的商机建议与跟进任务投影独立于活动写入结果；失败不回滚活动。
 
 所谓后台任务必须立即返回；如果请求需要等待任务完成，就不属于本方案中的后台任务。
 
@@ -537,12 +510,12 @@ CustomerActivity finalized
 
 ### 11.1 建议生成
 
-Agent 活动成功后独立生成商机建议。建议任务不直接创建商机。
+销售助手活动成功后独立生成商机建议。建议本身不创建商机。
 
 触发条件：
 
 ```text
-Agent 来源
+销售助手来源
 活动成功最终化
 score >= 60
 下一步行动门禁通过
@@ -568,19 +541,16 @@ LLM 和业务数据高置信度匹配已有商机时：
 
 ```text
 跟进先保存
-→ Agent 输出“是否帮你创建商机？”
-→ Agent UI 是/否组件
-→ 点击“是”
-→ Agent 页面内嵌表单
-→ 提交或取消
-→ 独立 CreateOpportunity Workflow
+→ /assistant 投影服务端签发的商机交互
+→ 用户确认并按当前等待提交或取消
+→ 独立商机创建命令，校验权限及审批
 ```
 
 弃用旧重型弹窗。
 
 ### 11.4 商机推进
 
-仅当用户明确要求推进时启动独立 `MoveOpportunityStage` Workflow。描述“已进入某阶段”不等于授权系统修改阶段。
+仅当用户明确要求并授权推进时，启动独立商机阶段命令。描述“已进入某阶段”不等于授权系统修改阶段。
 
 提交时状态已变化：
 
@@ -618,89 +588,6 @@ SOURCE_ACTIVITY_DELETED
 - 继续创建商机；
 - 依赖数据库级联把任务证据直接删除。
 
-## 13. 旧入口清理
-
-同一目标版本内删除生产路径：
-
-```text
-PUT /v1/customer-activities/{activity_id}
-PATCH /v1/customer-activities/{activity_id}/next-time
-POST /v1/customer-activities/{activity_id}/process
-POST /v1/customer-activities/{activity_id}/evaluate
-post_commit_mode=sync
-trigger_processing()
-trigger_evaluation()
-```
-
-不得用 forwarding wrapper 将旧入口悄悄转发到新流程。旧客户端命中已删除接口时返回 404/405；页面创建接口只代表 `create_pending_from_form()`，Agent 不再调用普通页面活动 API 后触发异步评分。
-
-## 14. 上线切换
-
-采用一次性硬切换，不做新旧 Workflow 并行执行。
-
-### 14.1 切换顺序
-
-```text
-1. 构建并验证目标制品
-2. 静态检查旧入口为零
-3. 停止 Web/IM Agent、API、worker 和相关 scheduler
-4. 记录 cutover watermark
-5. 完成数据库备份及恢复演练
-6. 执行 Alembic 结构迁移
-7. 执行一次性未完成活动/任务迁移
-8. 验证迁移计数和唯一性
-9. 启动新服务和 durable recovery scheduler
-10. 执行真实 HTTP/Workflow/Worker 验收
-11. 验收通过后开放流量
-12. 观察窗口后删除一次性迁移设施
-```
-
-### 14.2 历史活动处理
-
-已完成历史活动：
-
-```text
-不重新整理
-不重新评分
-不补 AIJob
-```
-
-切换时真正未完成的活动：
-
-```text
-PENDING / PROCESSING / GENERATING
-→ 创建一条 CUTOVER_MIGRATION AIJob
-→ 由新流程接管
-```
-
-旧 `PROCESSING/GENERATING` 不恢复进程内 task，也不恢复旧 AI graph checkpoint。
-
-### 14.3 旧 PostCommitJob
-
-- 活动已最终化：保留未完成任务，由新 executor 按 lease 和幂等恢复；
-- 活动尚未最终化但已提前创建：标记 `SKIPPED/REPLACED_BY_ACTIVITY_AI_JOB`；
-- 新 AI 最终化时增加 revision，并为最终 revision 创建 canonical PostCommitJob；
-- 活动已删除：标记 `SKIPPED/SOURCE_ACTIVITY_DELETED`。
-
-### 14.4 回滚边界
-
-正式放流前验收失败：
-
-```text
-停止新服务
-恢复数据库备份
-恢复上一完整应用版本
-```
-
-正式放流且产生新格式业务写入后：
-
-```text
-不允许直接启动旧 Runtime
-默认只做前向修复
-```
-
-如必须回退，需停流并使用完整备份/PITR，明确接受恢复点之后的数据影响。
-
 ## 15. 运行一致性与可观测性
 
 至少监控：
@@ -709,10 +596,10 @@ PENDING / PROCESSING / GENERATING
 AIJob queued/running/retry_pending/exhausted 数量
 最老 queued 任务年龄
 AIJob 执行耗时和跳过原因
-Agent 活动却存在 AIJob
+销售助手活动却存在 AIJob
 页面 PENDING 活动却没有 AIJob
 AIJob COMPLETED 但活动未完成
-活动最终化但没有 PostCommitJob
+页面表单活动最终化但没有 PostCommitJob
 同一 revision 多任务
 活动删除后任务仍在重试
 ```
@@ -720,7 +607,7 @@ AIJob COMPLETED 但活动未完成
 对账服务可幂等修复：
 
 - 页面 PENDING 活动缺 AIJob；
-- 已最终化活动缺 PostCommitJob；
+- 已最终化页面表单活动缺 PostCommitJob；
 - 删除活动仍有可执行任务。
 
 如果 AIJob 已 `COMPLETED` 但活动没有最终结果，应作为事务不变量破坏告警，不能静默重新评分。
@@ -730,214 +617,24 @@ AIJob COMPLETED 但活动未完成
 - 活动列表和详情继续使用现有展示方式；
 - 用户不看到 lease、attempt_count、Job ID 等内部信息；
 - 低质量交互一次只展示一个补充问题；
-- 商机建议使用现有 Agent UI 是/否组件；
-- 点击“是”后展示 Agent 页面内嵌表单，支持提交和取消；
-- 刷新页面后恢复客户选择、质量补充、商机确认或商机表单状态；
-- 所有确认、提交、取消操作均防止重复点击和重复 resume。
+- 销售助手商机、补充和确认交互使用服务端签发的当前等待，回执及表单投影规则见 [Agent UI 平台边界](../runtime/agent-ui-platform.md)；
+- 刷新恢复最新任务投影，历史卡片只读；确认、提交、取消按版本及幂等门禁防重。
 
 ## 17. 关键系统不变量
 
-1. Agent 最终活动永远不创建 CustomerActivityAIJob。
+1. 销售助手最终活动不创建 CustomerActivityAIJob。
 2. 页面活动永远通过 CustomerActivityAIJob 整理和评分。
 3. 一条活动只保存一个最终评分。
 4. AI 中间整理或评分结果不分步写入活动。
-5. PostCommitJob 只在活动最终化后创建。
+5. 页面表单的 PostCommitJob 只在活动最终化时登记。
 6. 页面低分不是技术失败，活动保留且 PostCommit 继续。
 7. 商机建议、创建或推进失败不影响活动。
 8. 活动删除后所有相关后台任务静默 `SKIPPED`。
 9. Worker 重试不重复创建活动、评分或业务副作用。
-10. Workflow resume 不重复执行已完成 command。
-11. 客户只在首次解析或明确切换时搜索；resume 仍重新校验权限和存在性。
+10. 恢复不得重复执行已完成命令或重试提交结果未知的写入。
+11. 客户只在首次解析或明确切换时搜索；恢复仍重新校验权限和存在性。
 12. 不创建线索，不把回款、合同等范围外动作带入本期。
-
-## 18. 实施 Tickets
-
-### T11：统一活动数据契约和状态定义
-
-- 明确原文、最终整理稿、评分和 provenance；
-- 定义页面/Agent submission source；
-- 定义 AIJob、PostCommitJob 和 suggestion job 状态；
-- 添加唯一键、revision 和幂等合同。
-
-完成定义：schema、migration、contract tests 通过。
-
-### T12：深化 CustomerActivityWriteService
-
-新增：
-
-```text
-create_pending_from_form()
-create_final_from_agent()
-finalize_pending_from_ai()
-```
-
-完成定义：三入口事务测试通过，旧通用写法不再被活动创建路径调用。
-
-### T13：新增 CustomerActivityAIJob durable 任务
-
-建议新增：
-
-```text
-app/models/customer_activity_ai_job.py
-app/crud/customer_activity_ai_job.py
-app/services/customer_activity_ai_job_service.py
-app/tasks/customer_activity_ai_job_recovery.py
-migrations/versions/119_customer_activity_ai_jobs.py
-```
-
-完成定义：enqueue、claim、lease、retry、restart、skip、exhausted 全部可验证。
-
-### T14：AI Workflow 计算与写入分离
-
-删除图中的分步持久化节点，只返回最终计算结果；由写入服务一次性最终化。
-
-完成定义：不存在“内容已提交但评分未提交”的状态。
-
-### T15：Agent Workflow 接入质量和行动门禁
-
-- canonical structurer/evaluator；
-- 60 分门禁；
-- 单问题补充；
-- 下一步行动门禁；
-- customer_id checkpoint 复用；
-- Agent 最终写入。
-
-完成定义：Agent 路径无 AIJob、无重复评分、可 resume。
-
-### T16：页面表单接入 AIJob
-
-跟进记录和会议纪要页面统一接入 `create_pending_from_form()`。
-
-完成定义：请求立即返回、任务 durable、低分保留、失败重试。
-
-### T17：收拢 PostCommit、删除和跳过逻辑
-
-- PostCommit 延后到最终化；
-- 移除活动外键级联；
-- 三类后台任务统一删除检查；
-- revision 和幂等恢复。
-
-### T18：清理旧入口和双轨
-
-删除活动修改、手工 process/evaluate、同步模式、`trigger_processing()`、`trigger_evaluation()` 及不再使用的服务和测试。
-
-### T19：商机建议与商机 Workflow
-
-- 独立 suggestion job；
-- 高置信度已有商机静默忽略；
-- 是/否组件；
-- Agent 内嵌表单；
-- 独立创建/推进 Workflow；
-- 状态变化静默跳过。
-
-### T20：一次性数据迁移
-
-迁移文件：`CRM-Server/migrations/versions/122_customer_activity_cutover.py`。T20 不是重新处理全部历史活动，而是把切换时仍未完成的事实安全交给 canonical durable pipeline。
-
-- 第一次运行生成固定 `cutover_watermark`，后续重跑使用同一 watermark；
-- 只接管 watermark 之前处理状态为 `PENDING`/`PROCESSING`，或评分状态为 `PENDING`/`GENERATING` 的活动；
-- 已完成历史活动的原始内容、整理稿和最终评分保持不变，不重新评分、不创建 AIJob；
-- 未完成活动按 `team_id + activity_id + activity_revision + job_type` 至多创建一条 `CUTOVER_MIGRATION` AIJob；
-- 未完成的历史 Agent 活动在切换边界重分类为 `CUTOVER_MIGRATION`，由 canonical finalization gate 接管，避免旧 Agent 路径和新 AIJob 双重评分；
-- 未完成活动对应的旧 PostCommitJob 标记为 `SKIPPED/REPLACED_BY_ACTIVITY_AI_JOB`；已最终化活动的旧 PostCommitJob 保留并由新 executor 恢复；
-- 活动已经删除但任务行仍存在时，任务标记为 `SKIPPED/SOURCE_ACTIVITY_DELETED`，保留结果和错误证据；
-- 不恢复旧进程内 task 或旧 Agent graph/checkpoint；
-- 证据写入 `crm_customer_activity_cutover_runs`，至少包括运行键、watermark、状态、接管/跳过/替代/保留计数；
-- 固定运行键已完成后再次执行是 no-op，只返回既有证据，不重复扫描和计数；中断后若证据仍为 `RUNNING`，可按自然唯一键继续。
-
-旧 `method` 不作为客户活动运行时字段迁移保留。线索历史转换只在 `CustomerActivityCRUD.migrate_from_lead()` 的边界适配器完成；真实发布后客户活动主链路不得重新引入旧映射读取。
-
-### T21：全链路验收和上线切换
-
-执行验收矩阵、真实模型 golden cases、Worker 重启、迁移重跑、备份恢复和放流门禁。
-
-### 依赖顺序
-
-```text
-T11
-→ T12
-→ T13 + T14
-→ T15 + T16
-→ T17 + T18
-→ T19
-→ T20
-→ T21
-```
-
-## 19. 主要代码落点
-
-Workflow：
-
-```text
-CRM-Server/app/services/agent/workflow/planning.py
-CRM-Server/app/services/agent/workflow/contracts.py
-CRM-Server/app/services/agent/workflow/execution.py
-CRM-Server/app/services/agent/tools/service.py
-CRM-Server/app/services/agent/tool_registry.py
-```
-
-活动：
-
-```text
-CRM-Server/app/services/customer_activity_write_service.py
-CRM-Server/app/services/customer_activity_ai/workflow.py
-CRM-Server/app/services/customer_activity_ai/evaluation_agent.py
-CRM-Server/app/services/agent/quality.py
-CRM-Server/app/services/customer_activity_processing_service.py
-CRM-Server/app/api/customer_activities.py
-CRM-Server/app/crud/customer_activity.py
-CRM-Server/app/schemas/customer_activity.py
-```
-
-后台任务：
-
-```text
-CRM-Server/app/models/customer_activity_post_commit_job.py
-CRM-Server/app/crud/customer_activity_post_commit_job.py
-CRM-Server/app/services/customer_activity_post_commit_job_service.py
-CRM-Server/app/services/customer_activity_post_commit_workflow.py
-```
-
-部署与迁移：
-
-```text
-CRM-Docs/deployment/README.md
-CRM-Docs/deployment/deploy.sh
-CRM-Server/migrations/versions/
-CRM-Server/scripts/
-```
-
-## 20. 当前代码已知差距
-
-截至 2026-09-02，T11-T18 的代码与专项回归已完成；T19 的代码闭环已接入但真实联调待完成；T20 migration 122、证据模型和 SQLite 行为测试已完成，但真实数据库升级与发布演练仍未完成；以下仍是待实施或待验收事实：
-
-- T15 仍需真实模型 Golden Cases 和完整部署环境下的 resume/多轮重解析验收；
-- T19 仍需真实 CRM API、Worker、Agent UI 联调，以及 MOVE stale、重复点击和安全 replay 的全链路验收；
-- T20 仍需真实 `alembic upgrade head`、生产 dry-run、备份恢复、worker 重启和中断重跑演练；本地 Alembic 当前数据库停留在 revision 117，不能把 `alembic check` 通过误认为真实升级已完成；
-- T21 全链路验收、真实模型 Golden Cases、部署 readiness 和最终 code review 尚未完成。
-
-T17 删除任务证据已经落地：migration 120 移除 PostCommitJob 级联外键；删除活动时未完成 AIJob/PostCommitJob 在同一事务内标记为 `SKIPPED`，原因统一为 `SOURCE_ACTIVITY_DELETED`，并保留任务结果和删除前错误证据。相关定向测试已通过。
-
-## 21. 发布阻断条件
-
-以下任一存在即不得上线：
-
-- Agent 活动写入后仍创建 AIJob 或调用旧处理入口；
-- 低于 60 或缺下一步行动仍能写入；
-- 页面保存时提前创建 PostCommitJob；
-- AI 仍分两次持久化内容和评分；
-- 相同 command、submission 或 job 可以产生重复记录；
-- 删除活动后任务仍重试或被级联删除；
-- 商机失败会回滚跟进；
-- 旧活动修改、process/evaluate 或 sync 入口仍可用；
-- Worker 重启或迁移重跑产生重复副作用；
-- 需要恢复旧 Runtime 才能完成新流程。
 
 ## 22. 文档维护规则
 
-- 已确认产品规则只在本文修改，不在实现过程中口头漂移；
-- parity matrix 保留作为差异证据，不作为最终合同；
-- open questions 保留确认过程，但已冻结项不得重新询问；
-- 测试用例统一维护在 acceptance matrix；
-- 代码实现改变本文不变量时，必须先更新本文并说明决策原因；
-- 本文定义目标合同；各 Ticket 的完成状态以[实施状态页](./customer-activity-workflow-implementation-status.md)、测试和真实上线证据为准。
+变更活动表单、AIJob、最终化或删除不变量时，同步更新本文并记录决策依据；历史迁移计划和验收报告可从 Git 历史查阅。

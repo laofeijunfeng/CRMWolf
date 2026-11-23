@@ -1,8 +1,10 @@
 """
 会话日志 CRUD
 """
+from typing import Any
+
 from sqlalchemy.orm import Session
-from typing import Optional, List, Dict, Any
+
 from app.models.conversation_log import ConversationLog
 
 
@@ -12,20 +14,20 @@ class ConversationLogCRUD:
     def create_log(
         self,
         db: Session,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         channel_user_id: str = None,
         channel_type: str = "feishu",
         request_text: str = None,
-        ai_skill: Optional[str] = None,
-        ai_action: Optional[str] = None,
-        ai_params: Optional[Dict[str, Any]] = None,
-        ai_reply_text: Optional[str] = None,
-        execution_result: Optional[str] = None,
+        ai_skill: str | None = None,
+        ai_action: str | None = None,
+        ai_params: dict[str, Any] | None = None,
+        ai_reply_text: str | None = None,
+        execution_result: str | None = None,
         status: str = "PENDING",
-        error_message: Optional[str] = None,
-        session_id: Optional[str] = None,
-        context_data: Optional[Dict[str, Any]] = None,
-        team_id: Optional[int] = None
+        error_message: str | None = None,
+        session_id: str | None = None,
+        context_data: dict[str, Any] | None = None,
+        team_id: int | None = None
     ) -> ConversationLog:
         """创建会话日志"""
         db_obj = ConversationLog(
@@ -53,11 +55,11 @@ class ConversationLogCRUD:
         self,
         db: Session,
         log_id: int,
-        execution_result: Optional[str] = None,
+        execution_result: str | None = None,
         status: str = None,
-        error_message: Optional[str] = None,
-        ai_skill: Optional[str] = None
-    ) -> Optional[ConversationLog]:
+        error_message: str | None = None,
+        ai_skill: str | None = None
+    ) -> ConversationLog | None:
         """更新执行结果"""
         db_obj = db.query(ConversationLog).filter(ConversationLog.id == log_id).first()
         if db_obj:
@@ -73,7 +75,7 @@ class ConversationLogCRUD:
             db.refresh(db_obj)
         return db_obj
 
-    def get_logs_by_user(self, db: Session, user_id: int, limit: int = 50) -> List[ConversationLog]:
+    def get_logs_by_user(self, db: Session, user_id: int, limit: int = 50) -> list[ConversationLog]:
         """获取用户的会话日志"""
         return db.query(ConversationLog)\
             .filter(ConversationLog.user_id == user_id)\
@@ -81,7 +83,7 @@ class ConversationLogCRUD:
             .limit(limit)\
             .all()
 
-    def get_logs_by_channel_user_id(self, db: Session, channel_user_id: str, limit: int = 50) -> List[ConversationLog]:
+    def get_logs_by_channel_user_id(self, db: Session, channel_user_id: str, limit: int = 50) -> list[ConversationLog]:
         """根据渠道用户标识获取会话日志"""
         return db.query(ConversationLog)\
             .filter(ConversationLog.channel_user_id == channel_user_id)\
@@ -89,11 +91,11 @@ class ConversationLogCRUD:
             .limit(limit)\
             .all()
 
-    def get_by_id(self, db: Session, log_id: int) -> Optional[ConversationLog]:
+    def get_by_id(self, db: Session, log_id: int) -> ConversationLog | None:
         """获取单条日志"""
         return db.query(ConversationLog).filter(ConversationLog.id == log_id).first()
 
-    def get_by_session(self, db: Session, session_id: str, limit: int = 10) -> List[ConversationLog]:
+    def get_by_session(self, db: Session, session_id: str, limit: int = 10) -> list[ConversationLog]:
         """根据会话 ID 获取历史日志（多轮对话）"""
         return db.query(ConversationLog)\
             .filter(ConversationLog.session_id == session_id)\

@@ -4,11 +4,13 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import date, datetime, time, timedelta
-from typing import Optional
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from app.services.agent.schemas import AgentTemporalExpression
 
+if TYPE_CHECKING:
+    from typing import Literal
 
 DEFAULT_AGENT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_FOLLOW_UP_HOUR = 9
@@ -58,10 +60,10 @@ class AgentTemporalResolver:
 
     def resolve_follow_up_time(
         self,
-        expression: Optional[AgentTemporalExpression],
+        expression: AgentTemporalExpression | None,
         *,
-        base_datetime: Optional[datetime] = None,
-    ) -> Optional[str]:
+        base_datetime: datetime | None = None,
+    ) -> str | None:
         if not expression or expression.kind in {"NONE", "UNKNOWN"}:
             return None
         if expression.confidence < 0.7:
@@ -82,19 +84,19 @@ class AgentTemporalResolver:
 
     def resolve_follow_up_time_text(
         self,
-        raw_text: Optional[str],
+        raw_text: str | None,
         *,
-        base_datetime: Optional[datetime] = None,
-    ) -> Optional[str]:
+        base_datetime: datetime | None = None,
+    ) -> str | None:
         expression = self.expression_from_text(raw_text)
         return self.resolve_follow_up_time(expression, base_datetime=base_datetime)
 
     def resolve_date(
         self,
-        expression: Optional[AgentTemporalExpression],
+        expression: AgentTemporalExpression | None,
         *,
-        base_datetime: Optional[datetime] = None,
-    ) -> Optional[str]:
+        base_datetime: datetime | None = None,
+    ) -> str | None:
         if not expression or expression.kind in {"NONE", "UNKNOWN"}:
             return None
         if expression.confidence < 0.7:
@@ -106,7 +108,7 @@ class AgentTemporalResolver:
             return None
         return resolved_date.isoformat() if resolved_date else None
 
-    def expression_from_text(self, raw_text: Optional[str]) -> Optional[AgentTemporalExpression]:
+    def expression_from_text(self, raw_text: str | None) -> AgentTemporalExpression | None:
         text = _normalize_temporal_text(raw_text)
         if not text:
             return None
@@ -226,7 +228,7 @@ class AgentTemporalResolver:
             )
         return None
 
-    def _resolve_date(self, expression: AgentTemporalExpression, base_date: date) -> Optional[date]:
+    def _resolve_date(self, expression: AgentTemporalExpression, base_date: date) -> date | None:
         if not self._is_kind_unit_consistent(expression):
             return None
 
@@ -328,7 +330,7 @@ class AgentTemporalResolver:
                 return monday + timedelta(days=week_offset * 7 + expression.weekday - 1)
             if expression.direction in {"current", "future", None}:
                 delta = expression.weekday - base_date.isoweekday()
-                if delta < 0 or expression.direction == "future" and delta == 0:
+                if delta < 0 or (expression.direction == "future" and delta == 0):
                     delta += 7
                 return base_date + timedelta(days=delta)
 
@@ -336,9 +338,9 @@ class AgentTemporalResolver:
 
     def _weekday_expression_from_text(
         self,
-        raw_text: Optional[str],
+        raw_text: str | None,
         text: str,
-    ) -> Optional[AgentTemporalExpression]:
+    ) -> AgentTemporalExpression | None:
         match = re.fullmatch(r"(?:(本|这|下|下下)?(?:周|星期|礼拜))([一二三四五六日天1-7])", text)
         if not match:
             return None
@@ -346,7 +348,7 @@ class AgentTemporalResolver:
         weekday = _WEEKDAY_BY_TEXT.get(weekday_text)
         if weekday is None:
             return None
-        direction = "next" if prefix in {"下", "下下"} else "current"
+        direction: Literal["next", "current"] = "next" if prefix in {"下", "下下"} else "current"
         if prefix == "下下":
             return AgentTemporalExpression(
                 raw_text=raw_text,
@@ -367,9 +369,9 @@ class AgentTemporalResolver:
 
     def _relative_expression_from_text(
         self,
-        raw_text: Optional[str],
+        raw_text: str | None,
         text: str,
-    ) -> Optional[AgentTemporalExpression]:
+    ) -> AgentTemporalExpression | None:
         match = re.fullmatch(r"([0-9一二两三四五六七八九十]+)(天|日|周|星期|礼拜|个月|月|年)(?:后|以后|之后)", text)
         if not match:
             return None
@@ -377,7 +379,13 @@ class AgentTemporalResolver:
         if amount is None:
             return None
         unit_text = match.group(2)
-        kind_by_unit = {
+        kind_by_unit: dict[
+            str,
+            tuple[
+                Literal["RELATIVE_DAY", "RELATIVE_WEEK", "RELATIVE_MONTH", "RELATIVE_YEAR"],
+                Literal["day", "week", "month", "year"],
+            ],
+        ] = {
             "天": ("RELATIVE_DAY", "day"),
             "日": ("RELATIVE_DAY", "day"),
             "周": ("RELATIVE_WEEK", "week"),
@@ -399,9 +407,9 @@ class AgentTemporalResolver:
 
     def _month_day_expression_from_text(
         self,
-        raw_text: Optional[str],
+        raw_text: str | None,
         text: str,
-    ) -> Optional[AgentTemporalExpression]:
+    ) -> AgentTemporalExpression | None:
         match = re.fullmatch(r"(?:(20[0-9]{2})年)?([0-9]{1,2})月([0-9]{1,2})(?:日|号)?", text)
         if not match:
             return None
@@ -455,13 +463,13 @@ class AgentTemporalResolver:
         return False
 
 
-def _normalize_temporal_text(raw_text: Optional[str]) -> str:
+def _normalize_temporal_text(raw_text: str | None) -> str:
     if not isinstance(raw_text, str):
         return ""
     return re.sub(r"\s+", "", raw_text.strip())
 
 
-def _parse_small_positive_int(value: str) -> Optional[int]:
+def _parse_small_positive_int(value: str) -> int | None:
     if value.isdigit():
         parsed = int(value)
         return parsed if parsed >= 0 else None

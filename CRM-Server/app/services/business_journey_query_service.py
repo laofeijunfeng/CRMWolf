@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal
 
-from sqlalchemy import and_, case, exists, false, func, or_
+from sqlalchemy import Row, and_, case, exists, false, func, or_
 from sqlalchemy.orm import Query, Session
 
 from app.constants.approval_phase import ApprovalPhase
@@ -45,6 +45,10 @@ from app.services.deal_journey_stage import (
 )
 
 JourneyScopeTab = Literal["all", "active", "completed", "lost", "approval_rejected"]
+# SQLAlchemy infers the selected entity types before the joins. The outer join
+# can still produce a missing opportunity; hydration preserves that None.
+_JourneyRow = Row[tuple[CustomerDealJourney, Customer, Opportunity]]
+_JourneyQuery = Query[_JourneyRow]
 _STAGE_FILTER_OPS = frozenset({"eq", "neq", "in", "not_in"})
 _VIEW_ACCESS_LEVELS = tuple(
     level for level, rank in ACCESS_LEVEL_RANK.items() if rank >= ACCESS_LEVEL_RANK["VIEW"]
@@ -81,8 +85,8 @@ class BusinessJourneyQueryService:
         db: Session,
         *,
         request: BusinessJourneyQueryRequest,
-    ) -> Query:
-        query = (
+    ) -> _JourneyQuery:
+        query: _JourneyQuery = (
             db.query(CustomerDealJourney, Customer, Opportunity)
             .join(
                 Customer,
@@ -425,7 +429,7 @@ class BusinessJourneyQueryService:
         return _card(
             "amount_band",
             "金额档",
-            "看是很多小单，还是几笔大单。",
+            "看是很多小单\uff0c还是几笔大单。",
             "horizontal_bar",
             [_segment(key, label, grouped[key]) for key, label, _, _ in _AMOUNT_BANDS],
         )
@@ -449,7 +453,7 @@ class BusinessJourneyQueryService:
         return _card(
             "product",
             "产品",
-            "数量最多的 8 个，其余并进其他。",
+            "数量最多的 8 个\uff0c其余并进其他。",
             "horizontal_bar",
             segments,
         )
@@ -467,7 +471,7 @@ class BusinessJourneyQueryService:
         return _card(
             "recent_activity",
             "最近动态",
-            "只看多久没动静，不提示该联系谁。",
+            "只看多久没动静\uff0c不提示该联系谁。",
             "horizontal_bar",
             [_segment(key, label, grouped[key]) for key, label in _ACTIVITY_BANDS],
         )
@@ -491,7 +495,7 @@ class BusinessJourneyQueryService:
         return _card(
             "expected_closing",
             "预计成交",
-            "本月起 6 个月。没填预计成交日的单独是未排期，不并进本月。",
+            "本月起 6 个月。没填预计成交日的单独是未排期\uff0c不并进本月。",
             "vertical_bar",
             [_segment(month.strftime("%Y-%m"), f"{month.month}月", grouped[month]) for month in months]
             + [_segment("unscheduled", "未排期", unscheduled)],
@@ -537,7 +541,7 @@ class BusinessJourneyQueryService:
             OwnerOption(
                 id=owner_id,
                 name=(
-                    f"{names.get(owner_id, owner_id)}（我）"
+                    f"{names.get(owner_id, owner_id)}\uff08我\uff09"
                     if owner_id == current_user_id
                     else names.get(owner_id, owner_id)
                 ),
@@ -548,7 +552,7 @@ class BusinessJourneyQueryService:
         return sorted(options, key=lambda option: (not option.is_me, option.name, option.id))
 
     @staticmethod
-    def _apply_visibility(query: Query, *, request: BusinessJourneyQueryRequest) -> Query:
+    def _apply_visibility(query: _JourneyQuery, *, request: BusinessJourneyQueryRequest) -> _JourneyQuery:
         permissions = request.permission_codes
         if "customer:view:all" in permissions or "opportunity:view:all" in permissions:
             return query
@@ -571,7 +575,7 @@ class BusinessJourneyQueryService:
         return query.filter(or_(*clauses))
 
     @staticmethod
-    def _apply_tab(query: Query, *, tab: JourneyScopeTab) -> Query:
+    def _apply_tab(query: _JourneyQuery, *, tab: JourneyScopeTab) -> _JourneyQuery:
         if tab == "active":
             return query.filter(
                 CustomerDealJourney.status.in_([DealJourneyStatus.ACTIVE, DealJourneyStatus.WON]),
@@ -614,10 +618,10 @@ class BusinessJourneyQueryService:
         self,
         db: Session,
         *,
-        query: Query,
+        query: _JourneyQuery,
         request: BusinessJourneyQueryRequest,
         filters: list[FilterCondition],
-    ) -> Query:
+    ) -> _JourneyQuery:
         candidate_ids = [
             int(journey_id)
             for (journey_id,) in query.order_by(None)
@@ -674,11 +678,11 @@ class BusinessJourneyQueryService:
 
     @staticmethod
     def _apply_order(
-        query: Query,
+        query: _JourneyQuery,
         *,
         db: Session,
         request: BusinessJourneyQueryRequest,
-    ) -> Query:
+    ) -> _JourneyQuery:
         if request.sorts:
             context = ListQueryContext(
                 db=db,
@@ -705,7 +709,7 @@ class BusinessJourneyQueryService:
         self,
         db: Session,
         team_id: int,
-        raw_rows: list[tuple[CustomerDealJourney, Customer, Opportunity | None]],
+        raw_rows: list[_JourneyRow],
     ) -> list[BusinessJourneyQueryRow]:
         journey_ids = [int(journey.id) for journey, _, _ in raw_rows]
         contract_map = load_contract_summaries(db, team_id, journey_ids)
@@ -720,6 +724,7 @@ class BusinessJourneyQueryService:
             },
         )
         rows: list[BusinessJourneyQueryRow] = []
+        opportunity: Opportunity | None
         for journey, customer, opportunity in raw_rows:
             journey_id = int(journey.id)
             contract_summary = contract_map.get(journey_id, self._empty_contract())
@@ -778,14 +783,14 @@ _PREVIEW_LIMIT = 8
 _TEN_THOUSAND = 100_000.0
 _AMOUNT_BANDS = (
     ("under_100k", "10 万以下", 0.0, _TEN_THOUSAND),
-    ("100k_500k", "10–50 万", _TEN_THOUSAND, _TEN_THOUSAND * 5),
-    ("500k_1m", "50–100 万", _TEN_THOUSAND * 5, _TEN_THOUSAND * 10),
+    ("100k_500k", "10\u201350 万", _TEN_THOUSAND, _TEN_THOUSAND * 5),
+    ("500k_1m", "50\u2013100 万", _TEN_THOUSAND * 5, _TEN_THOUSAND * 10),
     ("over_1m", "100 万以上", _TEN_THOUSAND * 10, None),
 )
 _PURCHASE_TYPES = (("NEW", "新购"), ("RENEWAL", "续购"), ("EXPANSION", "增购"))
 _ACTIVITY_BANDS = (
     ("within_7", "7 天内"),
-    ("8_to_30", "8–30 天"),
+    ("8_to_30", "8\u201330 天"),
     ("over_30", "30 天以上"),
     ("none", "没有动态"),
 )

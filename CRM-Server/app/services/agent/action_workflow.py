@@ -298,7 +298,8 @@ def workflow_from_task_state(state: Mapping[str, object] | None) -> JSONDict:
     return workflow_from_mapping(payload.get(WORKFLOW_KEY))
 
 
-def ensure_event_workflow(event: Mapping[str, object], *, default_source: str = SOURCE_EXPLICIT_USER_REQUEST) -> JSONDict:
+def ensure_event_workflow(event: Mapping[str, object], *,
+    default_source: str = SOURCE_EXPLICIT_USER_REQUEST) -> JSONDict:
     workflow = workflow_from_event(event)
     if workflow:
         return workflow

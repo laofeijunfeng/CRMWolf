@@ -2,18 +2,17 @@
 
 提供 License 申请的数据库操作。
 """
-from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
+from app.crud.product_intent import resolve_writable_product
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.deployment import DeploymentInfo
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.opportunity import Opportunity
 from app.models.product import Product
-from app.crud.product_intent import resolve_writable_product
 from app.schemas.license_application import (
     LicenseApplicationApprove,
     LicenseApplicationApproveFull,
@@ -26,11 +25,11 @@ from app.utils.approval_delete_guard import assert_deletable_approval_resource
 from app.utils.time import business_now
 
 
-def parse_license_info(license_text: str) -> Dict[str, str]:
+def parse_license_info(license_text: str) -> dict[str, str]:
     """
     解析审批人回填的 License 信息文本
 
-    格式示例：
+    格式示例\uff1a
     企业编号: 15739
     企业名称: {客户名称}
     客户端过期时间: {到期时间}
@@ -49,14 +48,14 @@ def parse_license_info(license_text: str) -> Dict[str, str]:
         license_text: 审批人粘贴的完整 License 信息文本
 
     Returns:
-        Dict[str, str]: 解析后的字段字典，包含:
+        Dict[str, str]: 解析后的字段字典\uff0c包含:
             - enterprise_id: 企业编号
             - supported_modules: 支持模块
             - server_license_code: 服务端 License
             - client_license_code: 客户端 License
     """
     lines = license_text.strip().split('\n')
-    data: Dict[str, str] = {}
+    data: dict[str, str] = {}
 
     for i, line in enumerate(lines):
         if ':' in line:
@@ -69,7 +68,7 @@ def parse_license_info(license_text: str) -> Dict[str, str]:
             elif key == '支持模块':
                 data['supported_modules'] = value
             elif key in ('服务器端 License', '服务端 License'):
-                # 服务器端 License 可能是多行，收集后续所有行直到遇到"客户端 License"
+                # 服务器端 License 可能是多行,收集后续所有行直到遇到"客户端 License"
                 server_license_lines = [value] if value else []
                 for j in range(i + 1, len(lines)):
                     next_line = lines[j].strip()
@@ -79,7 +78,7 @@ def parse_license_info(license_text: str) -> Dict[str, str]:
                         server_license_lines.append(next_line)
                 data['server_license_code'] = '\n'.join(server_license_lines)
             elif key in ('客户端 License',):
-                # 客户端 License 可能是多行，收集后续所有行
+                # 客户端 License 可能是多行,收集后续所有行
                 client_license_lines = [value] if value else []
                 for j in range(i + 1, len(lines)):
                     next_line = lines[j].strip()
@@ -97,7 +96,7 @@ class LicenseApplicationCRUD:
 
     def generate_application_number(self, db: Session) -> str:
         """
-        生成申请单号：LICYYYYMMDDXXXX
+        生成申请单号\uff1aLICYYYYMMDDXXXX
 
         Args:
             db: 数据库会话
@@ -137,7 +136,7 @@ class LicenseApplicationCRUD:
         if not customer:
             raise ValueError("客户不存在")
 
-        # 验证部署信息存在（如果提供）
+        # 验证部署信息存在(如果提供)
         if obj_in.deployment_info_id:
             deployment = db.query(DeploymentInfo).filter(
                 DeploymentInfo.id == obj_in.deployment_info_id,
@@ -147,8 +146,8 @@ class LicenseApplicationCRUD:
             if not deployment:
                 raise ValueError("部署信息不存在或不属于该客户")
 
-        # 验证合同存在（如果提供）
-        contract: Optional[Contract] = None
+        # 验证合同存在(如果提供)
+        contract: Contract | None = None
         if obj_in.contract_id:
             contract = db.query(Contract).filter(
                 Contract.id == obj_in.contract_id,
@@ -176,7 +175,7 @@ class LicenseApplicationCRUD:
             is_permanent=obj_in.is_permanent,
             license_type=obj_in.license_type.value,
             authorized_users=obj_in.authorized_users,
-            remark=obj_in.remark,  # 补充需求：备注字段
+            remark=obj_in.remark,  # 补充需求:备注字段
             applicant_id=applicant_id,
             status=LicenseApplicationStatus.DRAFT
         )
@@ -190,9 +189,9 @@ class LicenseApplicationCRUD:
         db: Session,
         team_id: int,
         obj_in: LicenseApplicationInternalCreate,
-        contract: Optional[Contract],
+        contract: Contract | None,
     ) -> Product:
-        """正式版跟随合同对应商机的产品（历史成交事实，不校验启用状态）；否则按申请人选择解析。"""
+        """正式版跟随合同对应商机的产品\uff08历史成交事实\uff0c不校验启用状态\uff09\uff1b否则按申请人选择解析。"""
         if obj_in.license_type == LicenseType.OFFICIAL and contract is not None:
             derived = (
                 db.query(Product)
@@ -213,7 +212,7 @@ class LicenseApplicationCRUD:
         db: Session,
         team_id: int,
         application_id: int
-    ) -> Optional[LicenseApplication]:
+    ) -> LicenseApplication | None:
         """
         获取单个 License 申请
 
@@ -223,7 +222,7 @@ class LicenseApplicationCRUD:
             application_id: 申请ID
 
         Returns:
-            Optional[LicenseApplication]: 申请，不存在则返回 None
+            Optional[LicenseApplication]: 申请\uff0c不存在则返回 None
         """
         return db.query(LicenseApplication).filter(
             LicenseApplication.id == application_id,
@@ -235,7 +234,7 @@ class LicenseApplicationCRUD:
         db: Session,
         team_id: int,
         application_number: str
-    ) -> Optional[LicenseApplication]:
+    ) -> LicenseApplication | None:
         """
         根据申请单号获取申请
 
@@ -245,7 +244,7 @@ class LicenseApplicationCRUD:
             application_number: 申请单号
 
         Returns:
-            Optional[LicenseApplication]: 申请，不存在则返回 None
+            Optional[LicenseApplication]: 申请\uff0c不存在则返回 None
         """
         return db.query(LicenseApplication).filter(
             LicenseApplication.application_number == application_number,
@@ -259,7 +258,7 @@ class LicenseApplicationCRUD:
         customer_id: int,
         skip: int = 0,
         limit: int = 100
-    ) -> Tuple[List[LicenseApplication], int]:
+    ) -> tuple[list[LicenseApplication], int]:
         """
         获取客户的 License 申请列表
 
@@ -291,10 +290,10 @@ class LicenseApplicationCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        customer_id: Optional[int] = None,
-        status: Optional[str] = None,
-        applicant_id: Optional[str] = None
-    ) -> Tuple[List[LicenseApplication], int]:
+        customer_id: int | None = None,
+        status: str | None = None,
+        applicant_id: str | None = None
+    ) -> tuple[list[LicenseApplication], int]:
         """
         获取 License 申请列表
 
@@ -303,9 +302,9 @@ class LicenseApplicationCRUD:
             team_id: 团队ID
             skip: 跳过记录数
             limit: 返回记录数上限
-            customer_id: 客户ID（可选）
-            status: 申请状态（可选）
-            applicant_id: 申请人ID（可选）
+            customer_id: 客户ID\uff08可选\uff09
+            status: 申请状态\uff08可选\uff09
+            applicant_id: 申请人ID\uff08可选\uff09
 
         Returns:
             Tuple[List[LicenseApplication], int]: 申请列表和总数
@@ -336,9 +335,9 @@ class LicenseApplicationCRUD:
         team_id: int,
         application_id: int,
         obj_in: LicenseApplicationUpdate
-    ) -> Optional[LicenseApplication]:
+    ) -> LicenseApplication | None:
         """
-        更新 License 申请（仅 DRAFT 状态）
+        更新 License 申请\uff08仅 DRAFT 状态\uff09
 
         Args:
             db: 数据库会话
@@ -347,7 +346,7 @@ class LicenseApplicationCRUD:
             obj_in: 更新请求数据
 
         Returns:
-            Optional[LicenseApplication]: 更新后的申请，不存在或状态不对则返回 None
+            Optional[LicenseApplication]: 更新后的申请\uff0c不存在或状态不对则返回 None
 
         Raises:
             ValueError: 申请状态不是 DRAFT 或部署信息/合同不存在
@@ -362,7 +361,7 @@ class LicenseApplicationCRUD:
 
         update_data = obj_in.model_dump(exclude_unset=True)
 
-        # 期限跨字段校验：以已存储的 license_type 为准（License 类型不可编辑）
+        # 期限跨字段校验:以已存储的 license_type 为准(License 类型不可编辑)
         if 'is_permanent' in update_data or 'expiry_date' in update_data:
             is_permanent = update_data.get('is_permanent')
             if is_permanent is None:
@@ -373,8 +372,8 @@ class LicenseApplicationCRUD:
                 application.license_type, is_permanent, expiry_date
             )
 
-        # 验证部署信息存在（如果提供）
-        if 'deployment_info_id' in update_data and update_data['deployment_info_id']:
+        # 验证部署信息存在(如果提供)
+        if update_data.get('deployment_info_id'):
             deployment = db.query(DeploymentInfo).filter(
                 DeploymentInfo.id == update_data['deployment_info_id'],
                 DeploymentInfo.team_id == team_id,
@@ -383,8 +382,8 @@ class LicenseApplicationCRUD:
             if not deployment:
                 raise ValueError("部署信息不存在或不属于该客户")
 
-        # 验证合同存在（如果提供）
-        if 'contract_id' in update_data and update_data['contract_id']:
+        # 验证合同存在(如果提供)
+        if update_data.get('contract_id'):
             contract = db.query(Contract).filter(
                 Contract.id == update_data['contract_id'],
                 Contract.team_id == team_id,
@@ -407,7 +406,7 @@ class LicenseApplicationCRUD:
         application_id: int
     ) -> bool:
         """
-        删除 License 申请（仅 DRAFT 状态）
+        删除 License 申请\uff08仅 DRAFT 状态\uff09
 
         Args:
             db: 数据库会话
@@ -453,14 +452,14 @@ class LicenseApplicationCRUD:
         application_id: int,
         submitter_id: str,
         submitter_name: str | None = None
-    ) -> Optional[LicenseApplication]:
+    ) -> LicenseApplication | None:
         """
-        提交 License 申请（接入审批引擎）
+        提交 License 申请\uff08接入审批引擎\uff09
 
-        流程：
+        流程\uff1a
         1. 验证申请存在且状态为 DRAFT
-        2. 匹配审批流程（按 license_type）
-        3. 创建审批实例（Approval + ApprovalRecord）
+        2. 匹配审批流程\uff08按 license_type\uff09
+        3. 创建审批实例\uff08Approval + ApprovalRecord\uff09
         4. 更新申请状态为 PENDING
 
         Args:
@@ -468,7 +467,7 @@ class LicenseApplicationCRUD:
             team_id: 团队ID
             application_id: 申请ID
             submitter_id: 提交人系统用户ID
-            submitter_name: 提交人姓名（可选）
+            submitter_name: 提交人姓名\uff08可选\uff09
 
         Returns:
             Optional[LicenseApplication]: 更新后的申请
@@ -500,12 +499,12 @@ class LicenseApplicationCRUD:
         )
 
         if flow is None:
-            # 未匹配审批流程：保留草稿并提示管理员配置审批流程
+            # 未匹配审批流程:保留草稿并提示管理员配置审批流程
             raise ValueError(err or "请先配置审批流程")
 
         # 使用 ApprovalTransactionManager 统一管理事务边界
         from app.services.approval_transaction_manager import approval_transaction_manager
-        approval, error_msg = approval_transaction_manager.submit_for_approval(
+        _approval, error_msg = approval_transaction_manager.submit_for_approval(
             db,
             BusinessType.LICENSE,
             application_id,
@@ -520,7 +519,7 @@ class LicenseApplicationCRUD:
         db.refresh(application)
         return application
 
-    def _lock_issue_customer(self, db: Session, team_id: int, application_id: int) -> Optional[int]:
+    def _lock_issue_customer(self, db: Session, team_id: int, application_id: int) -> int | None:
         with db.no_autoflush:
             customer_id = db.query(LicenseApplication.customer_id).filter_by(
                 id=application_id, team_id=team_id,
@@ -532,8 +531,8 @@ class LicenseApplicationCRUD:
         db: Session,
         team_id: int,
         application_id: int,
-        customer_id: Optional[int],
-    ) -> Optional[LicenseApplication]:
+        customer_id: int | None,
+    ) -> LicenseApplication | None:
         """Check the current approval and application while holding the customer lock."""
         from app.models.approval import Approval, ApprovalStatus
 
@@ -547,13 +546,13 @@ class LicenseApplicationCRUD:
                 business_type=BusinessType.LICENSE, business_id=application_id, team_id=team_id,
             ).order_by(Approval.id.desc()).populate_existing().with_for_update().first()
         if not approval or approval.status != ApprovalStatus.APPROVED:
-            raise ValueError("License申请未通过审批，不可发放")
+            raise ValueError("License申请未通过审批\uff0c不可发放")
         with db.no_autoflush:
             application = db.query(LicenseApplication).filter_by(
                 id=application_id, team_id=team_id,
             ).populate_existing().with_for_update().one_or_none()
         if application is None or int(application.customer_id) != customer_id:
-            raise ValueError("License申请所属客户已变更，请重试")
+            raise ValueError("License申请所属客户已变更\uff0c请重试")
 
         if application.status == LicenseApplicationStatus.ISSUED:
             raise ValueError("License申请已发放")
@@ -567,8 +566,8 @@ class LicenseApplicationCRUD:
         application_id: int,
         issue_data: LicenseApplicationApprove,
         issuer_id: str
-    ) -> Optional[LicenseApplication]:
-        """发放已审批通过的 License 申请（简化版本）。"""
+    ) -> LicenseApplication | None:
+        """发放已审批通过的 License 申请\uff08简化版本\uff09。"""
         customer_id = self._lock_issue_customer(db, team_id, application_id)
         application = self._ensure_approved_for_issue(db, team_id, application_id, customer_id)
         if not application:
@@ -592,8 +591,8 @@ class LicenseApplicationCRUD:
         application_id: int,
         issue_data: LicenseApplicationApproveFull,
         issuer_id: str
-    ) -> Optional[LicenseApplication]:
-        """发放已审批通过的 License 申请（完整版本，解析 License 信息）。"""
+    ) -> LicenseApplication | None:
+        """发放已审批通过的 License 申请\uff08完整版本\uff0c解析 License 信息\uff09。"""
         customer_id = self._lock_issue_customer(db, team_id, application_id)
         application = self._ensure_approved_for_issue(db, team_id, application_id, customer_id)
         if not application:
@@ -622,8 +621,8 @@ class LicenseApplicationCRUD:
         application_id: int,
         approve_data: LicenseApplicationApprove,
         approver_id: str
-    ) -> Optional[LicenseApplication]:
-        raise ValueError("License审批请使用通用审批接口，审批通过后调用发放接口")
+    ) -> LicenseApplication | None:
+        raise ValueError("License审批请使用通用审批接口\uff0c审批通过后调用发放接口")
 
     def approve_full(
         self,
@@ -632,8 +631,8 @@ class LicenseApplicationCRUD:
         application_id: int,
         approve_data: LicenseApplicationApproveFull,
         approver_id: str
-    ) -> Optional[LicenseApplication]:
-        raise ValueError("License审批请使用通用审批接口，审批通过后调用发放接口")
+    ) -> LicenseApplication | None:
+        raise ValueError("License审批请使用通用审批接口\uff0c审批通过后调用发放接口")
 
     def reject(
         self,
@@ -641,7 +640,7 @@ class LicenseApplicationCRUD:
         team_id: int,
         application_id: int,
         reason: str
-    ) -> Optional[LicenseApplication]:
+    ) -> LicenseApplication | None:
         raise ValueError("License驳回请使用通用审批接口")
 
     def update_customer_license_info(
@@ -717,7 +716,7 @@ license_application_crud = LicenseApplicationCRUD()
 
 
 # ============================================
-# 便捷函数（供 API 直接导入使用）
+# 便捷函数(供 API 直接导入使用)
 # ============================================
 
 def create_license_application(
@@ -734,7 +733,7 @@ def get_license_application(
     db: Session,
     team_id: int,
     application_id: int
-) -> Optional[LicenseApplication]:
+) -> LicenseApplication | None:
     """获取单个 License 申请"""
     return license_application_crud.get(db, team_id, application_id)
 
@@ -745,7 +744,7 @@ def get_license_applications_by_customer(
     customer_id: int,
     skip: int = 0,
     limit: int = 100
-) -> Tuple[List[LicenseApplication], int]:
+) -> tuple[list[LicenseApplication], int]:
     """获取客户的 License 申请列表"""
     return license_application_crud.get_by_customer(db, team_id, customer_id, skip, limit)
 
@@ -755,10 +754,10 @@ def get_license_applications(
     team_id: int,
     skip: int = 0,
     limit: int = 100,
-    customer_id: Optional[int] = None,
-    status: Optional[str] = None,
-    applicant_id: Optional[str] = None
-) -> Tuple[List[LicenseApplication], int]:
+    customer_id: int | None = None,
+    status: str | None = None,
+    applicant_id: str | None = None
+) -> tuple[list[LicenseApplication], int]:
     """获取 License 申请列表"""
     return license_application_crud.list_applications(db, team_id, skip, limit, customer_id, status, applicant_id)
 
@@ -768,7 +767,7 @@ def update_license_application(
     team_id: int,
     application_id: int,
     obj_in: LicenseApplicationUpdate
-) -> Optional[LicenseApplication]:
+) -> LicenseApplication | None:
     """更新 License 申请"""
     return license_application_crud.update(db, team_id, application_id, obj_in)
 
@@ -788,8 +787,8 @@ def submit_license_application(
     application_id: int,
     submitter_id: str,
     submitter_name: str | None = None
-) -> Optional[LicenseApplication]:
-    """提交 License 申请（接入审批引擎）"""
+) -> LicenseApplication | None:
+    """提交 License 申请\uff08接入审批引擎\uff09"""
     return license_application_crud.submit(db, team_id, application_id, submitter_id, submitter_name)
 
 
@@ -799,8 +798,8 @@ def approve_license_application(
     application_id: int,
     approve_data: LicenseApplicationApprove,
     approver_id: str
-) -> Optional[LicenseApplication]:
-    """已废弃：License 审批请使用通用审批接口。"""
+) -> LicenseApplication | None:
+    """已废弃\uff1aLicense 审批请使用通用审批接口。"""
     return license_application_crud.approve(db, team_id, application_id, approve_data, approver_id)
 
 
@@ -810,8 +809,8 @@ def approve_license_application_full(
     application_id: int,
     approve_data: LicenseApplicationApproveFull,
     approver_id: str
-) -> Optional[LicenseApplication]:
-    """已废弃：License 审批请使用通用审批接口。"""
+) -> LicenseApplication | None:
+    """已废弃\uff1aLicense 审批请使用通用审批接口。"""
     return license_application_crud.approve_full(db, team_id, application_id, approve_data, approver_id)
 
 
@@ -820,8 +819,8 @@ def reject_license_application(
     team_id: int,
     application_id: int,
     reason: str
-) -> Optional[LicenseApplication]:
-    """已废弃：License 驳回请使用通用审批接口。"""
+) -> LicenseApplication | None:
+    """已废弃\uff1aLicense 驳回请使用通用审批接口。"""
     return license_application_crud.reject(db, team_id, application_id, reason)
 
 
@@ -831,8 +830,8 @@ def issue_license_application(
     application_id: int,
     issue_data: LicenseApplicationApprove,
     issuer_id: str
-) -> Optional[LicenseApplication]:
-    """发放已审批通过的 License 申请（简化版本）。"""
+) -> LicenseApplication | None:
+    """发放已审批通过的 License 申请\uff08简化版本\uff09。"""
     return license_application_crud.issue(db, team_id, application_id, issue_data, issuer_id)
 
 
@@ -842,6 +841,6 @@ def issue_license_application_full(
     application_id: int,
     issue_data: LicenseApplicationApproveFull,
     issuer_id: str
-) -> Optional[LicenseApplication]:
-    """发放已审批通过的 License 申请（完整版本，解析 License 信息）。"""
+) -> LicenseApplication | None:
+    """发放已审批通过的 License 申请\uff08完整版本\uff0c解析 License 信息\uff09。"""
     return license_application_crud.issue_full(db, team_id, application_id, issue_data, issuer_id)

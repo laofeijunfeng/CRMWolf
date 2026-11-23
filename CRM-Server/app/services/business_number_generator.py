@@ -1,25 +1,27 @@
 """通用业务编号生成器"""
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 import threading
+from typing import ClassVar
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.utils.time import business_now
 
 
 class BusinessNumberGenerator:
     """
-    通用业务编号生成器（线程安全）
+    通用业务编号生成器\uff08线程安全\uff09
 
-    支持可配置前缀，每日重置序号。
+    支持可配置前缀\uff0c每日重置序号。
 
-    格式：{PREFIX}{YYYYMMDD}{四位序号}
-    例如：CT202602060001, PAY202607130001
+    格式\uff1a{PREFIX}{YYYYMMDD}{四位序号}
+    例如\uff1aCT202602060001, PAY202607130001
     """
 
     _lock = threading.Lock()
 
-    # 表名映射：前缀 -> (表名, 编号字段名)
-    TABLE_MAPPING = {
+    # 表名映射:前缀 -> (表名, 编号字段名)
+    TABLE_MAPPING: ClassVar[dict[str, tuple[str, str]]] = {
         'CT': ('crm_contracts', 'contract_number'),
         'PAY': ('crm_payment_records', 'record_number'),
         'PP': ('crm_contract_payment_plans', 'plan_number'),
@@ -35,7 +37,7 @@ class BusinessNumberGenerator:
         生成业务编号
 
         Args:
-            prefix: 业务前缀（CT/PAY/PP/INV/LIC/OPP 等）
+            prefix: 业务前缀\uff08CT/PAY/PP/INV/LIC/OPP 等\uff09
             db: 数据库会话
 
         Returns:

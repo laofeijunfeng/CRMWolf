@@ -1,9 +1,7 @@
 """Workflow schemas: Pydantic boundary for /v1/workflows."""
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,13 +20,13 @@ class WorkflowDslSchema(BaseModel):
 
 class WorkflowCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="工作流名称")
-    description: Optional[str] = Field(None, description="描述")
+    description: str | None = Field(None, description="描述")
     dsl: WorkflowDslSchema
 
 
 class WorkflowUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="工作流名称")
-    description: Optional[str] = Field(None, description="描述")
+    description: str | None = Field(None, description="描述")
     dsl: WorkflowDslSchema
     expected_last_modified_time: datetime = Field(
         ..., description="乐观锁：客户端读取时的 last_modified_time"
@@ -42,7 +40,7 @@ class WorkflowStatusUpdate(BaseModel):
 class WorkflowSummary(BaseModel):
     id: int
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     status: WorkflowStatusLiteral
     node_count: int
     created_time: datetime
@@ -51,4 +49,4 @@ class WorkflowSummary(BaseModel):
 
 class WorkflowDetail(WorkflowSummary):
     dsl: WorkflowDslSchema
-    created_by: Optional[int] = None
+    created_by: int | None = None

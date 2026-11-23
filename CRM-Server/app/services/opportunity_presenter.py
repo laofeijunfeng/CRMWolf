@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from app.schemas.customer import ProcurementMethodInfo
 from app.schemas.opportunity import CurrentStageSnapshotInfo, OpportunityDetailResponse
 
 
-def _normalize_approval_value(value) -> Optional[str]:
+def _normalize_approval_value(value) -> str | None:
     if value is None:
         return None
     normalized = str(getattr(value, "value", value)).strip()
@@ -24,7 +24,7 @@ def _normalize_approval_value(value) -> Optional[str]:
     return normalized.lower()
 
 
-def _approval_phase_value(opportunity) -> Optional[str]:
+def _approval_phase_value(opportunity) -> str | None:
     phase = _normalize_approval_value(getattr(opportunity, "approval_phase", None))
     if phase in {
         ApprovalPhase.DRAFT.value,
@@ -36,7 +36,7 @@ def _approval_phase_value(opportunity) -> Optional[str]:
     return phase
 
 
-def resolve_opportunity_approval_phase(db: Session, opportunity, team_id: Optional[int]) -> str:
+def resolve_opportunity_approval_phase(db: Session, opportunity, team_id: int | None) -> str:
     phase = _approval_phase_value(opportunity)
     if phase in {
         ApprovalPhase.PENDING_REVIEW.value,
@@ -59,7 +59,7 @@ def resolve_opportunity_approval_phase(db: Session, opportunity, team_id: Option
     return phase or ApprovalPhase.DRAFT.value
 
 
-def customer_public_id(db: Session, customer_id: Optional[int], team_id: Optional[int]) -> Optional[str]:
+def customer_public_id(db: Session, customer_id: int | None, team_id: int | None) -> str | None:
     if customer_id is None:
         return None
     customer = customer_crud.get_by_id(db, customer_id, team_id)
@@ -68,11 +68,11 @@ def customer_public_id(db: Session, customer_id: Optional[int], team_id: Optiona
 
 def deal_journey_public_id(
     db: Session,
-    journey_id: Optional[int],
-    team_id: Optional[int],
+    journey_id: int | None,
+    team_id: int | None,
     *,
-    journey_public_id: Optional[str] = None,
-) -> Optional[str]:
+    journey_public_id: str | None = None,
+) -> str | None:
     if journey_public_id is not None:
         return journey_public_id
     if journey_id is None or team_id is None:
@@ -94,7 +94,7 @@ def deal_journey_public_id_map(
     return {int(journey.id): journey.public_id for journey in journeys}
 
 
-def customer_info_dict(customer) -> Optional[dict]:
+def customer_info_dict(customer) -> dict | None:
     if not customer:
         return None
     return {
@@ -193,9 +193,9 @@ def opportunity_product_payloads(db: Session, opportunities: Sequence[Any]) -> d
 def opportunity_response_dict(
     db: Session,
     opportunity,
-    team_id: Optional[int],
+    team_id: int | None,
     *,
-    journey_public_id: Optional[str] = None,
+    journey_public_id: str | None = None,
     customer_public_id_override: str | None = None,
 ) -> dict:
     payload = {

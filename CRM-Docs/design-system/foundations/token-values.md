@@ -90,7 +90,7 @@
 | `$space-1/2/3/4/6/8`（Tailwind `*-space-N` 档，如 `p-space-1`） | `4` / `8` / `12` / `16` / `24` / `32px` | 间距尺度。根字号 14px 下 Tailwind rem 档（`p-1`、`gap-2`）会缩放为 3.5 / 7px，新代码不得使用。 |
 | `--page-padding` | `24px`（<768px 为 `16px`） | 页面内边距，含列表页顶部。 |
 | `--sidebar-width` | `220px` | 桌面侧栏宽度。 |
-| `--topbar-height` / `--bottom-nav-height` / `--context-tabs-height` | `56px` / `56px` / `36px` | 顶栏 / 移动端底部导航 / 上下文标签栏。 |
+| `--topbar-height` / `--context-tabs-height` | `56px` / `36px` | 顶栏 / 上下文标签栏。 |
 | 卡片内边距 / 卡片间距 / 模块间距 | `$space-4` / `$space-4` / `$space-6`（移动端 `$space-3` / `$space-4` / `$space-4`） | 容器节奏。 |
 | 表格行 / 表头最小高度 | `44px` | 数据表格。 |
 | 列表 / 菜单行高 | `36px`（单行）/ `52px`（双行） | 菜单项、紧凑列表行；双行含主次两行文字。 |

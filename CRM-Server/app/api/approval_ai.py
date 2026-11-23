@@ -5,22 +5,24 @@ AI 解析审批流程配置接口
 """
 import json
 import logging
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import tuple_
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
 from app.core.deps import get_current_active_user, get_current_user_team, require_permission
-from app.models.user import User
-from app.models.role import Role
-from app.models.user_role import UserRole
+from app.crud.approval import approval_flow_crud
 from app.models.approval import ApprovalFlow, ApprovalNode
-from app.schemas.approval_ai import ApprovalAIParseRequest, ApprovalAICreateRequest
+from app.models.role import Role
+from app.models.user import User
+from app.models.user_role import UserRole
+from app.schemas.approval_ai import ApprovalAICreateRequest, ApprovalAIParseRequest
 from app.services.approval_ai_parser import approval_ai_parser_service
 from app.utils.sse_encoder import SSEJsonEncoder
-from app.crud.approval import approval_flow_crud
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +36,22 @@ async def parse_approval_flow(
     team_id: int = Depends(get_current_user_team)
 ):
     """
-    AI 解析审批流程配置（SSE 流式响应）
+    AI 解析审批流程配置\uff08SSE 流式响应\uff09
 
-    SSE 事件类型：
+    SSE 事件类型\uff1a
     - status: 状态更新
     - content: AI 思考过程内容片段
-    - parsed: 解析完成，返回结构化配置
-    - error: 错误信息（含 recovery 提示）
-    - done: 流结束标记（必须发送，含 success 布尔）
+    - parsed: 解析完成\uff0c返回结构化配置
+    - error: 错误信息\uff08含 recovery 提示\uff09
+    - done: 流结束标记\uff08必须发送\uff0c含 success 布尔\uff09
 
-    稳定性保证：
+    稳定性保证\uff1a
     - 所有异常都会 yield error 事件
     - 所有流都会 yield done 事件
     - 使用 SSEJsonEncoder 确保 JSON 序列化成功
     """
-    async def generate_sse():
-        """生成 SSE 流（三层错误处理 + 显式 done 事件）"""
+    async def generate_sse() -> AsyncIterator[str]:
+        """生成 SSE 流\uff08三层错误处理 + 显式 done 事件\uff09"""
         success = False
         try:
             db = SessionLocal()
@@ -65,13 +67,23 @@ async def parse_approval_flow(
                             success = True
                     except Exception as serialize_error:
                         logger.error(f"SSE 序列化失败: {serialize_error}")
-                        yield f"data: {json.dumps({'event': 'error', 'message': '响应序列化失败', 'recovery': '请稍后重试'}, ensure_ascii=False)}\n\n"
+                        yield f"""data: {json.dumps(
+                            {'event': 'error', 'message': '响应序列化失败', 'recovery': '请稍后重试'},
+                            ensure_ascii=False,
+                        )}\n\n"""
                         break
             finally:
                 db.close()
         except Exception as outer_error:
             logger.error(f"SSE 流异常: {outer_error}")
-            yield f"data: {json.dumps({'event': 'error', 'message': f'服务异常: {type(outer_error).__name__}', 'recovery': '请联系管理员检查日志'}, ensure_ascii=False)}\n\n"
+            yield f"""data: {json.dumps(
+                {
+                    'event': 'error',
+                    'message': f'服务异常: {type(outer_error).__name__}',
+                    'recovery': '请联系管理员检查日志',
+                },
+                ensure_ascii=False,
+            )}\n\n"""
         finally:
             yield f"data: {json.dumps({'event': 'done', 'success': success}, ensure_ascii=False)}\n\n"
 
@@ -94,21 +106,21 @@ async def create_approval_flow_from_ai(
     db: Session = Depends(get_db)
 ):
     """
-    从 AI 解析结果创建审批流程（用户确认后提交）
+    从 AI 解析结果创建审批流程\uff08用户确认后提交\uff09
 
-    创建审批流程及其所有节点配置（事务保护）
+    创建审批流程及其所有节点配置\uff08事务保护\uff09
 
-    校验规则：
+    校验规则\uff1a
     1. flow_code 不能重复
     2. nodes 至少包含 1 个节点
-    3. 审批角色必须是预定义角色，首个节点必须是审批节点
+    3. 审批角色必须是预定义角色\uff0c首个节点必须是审批节点
     4. node_order 自动修正为连续
     """
     # 检查 team_id 是否有效
     if team_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无法获取用户团队信息，请重新登录"
+            detail="无法获取用户团队信息\uff0c请重新登录"
         )
 
     # 检查编码是否已存在
@@ -116,7 +128,7 @@ async def create_approval_flow_from_ai(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"审批流程编码「{request.flow_code}」已存在，请修改编码"
+            detail=f"审批流程编码「{request.flow_code}」已存在\uff0c请修改编码"
         )
 
     # 验证节点配置
@@ -222,7 +234,7 @@ async def create_approval_flow_from_ai(
 
         return {
             "success": True,
-            "message": f"审批流程「{flow.flow_name}」创建成功，包含 {len(created_nodes)} 个审批节点",
+            "message": f"审批流程「{flow.flow_name}」创建成功\uff0c包含 {len(created_nodes)} 个审批节点",
             "data": {
                 "flow": {
                     "id": flow.id,
@@ -253,11 +265,11 @@ async def create_approval_flow_from_ai(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"数据库约束错误：{str(e)}"
+            detail=f"数据库约束错误\uff1a{e!s}"
         )
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建失败：{str(e)}"
+            detail=f"创建失败\uff1a{e!s}"
         )

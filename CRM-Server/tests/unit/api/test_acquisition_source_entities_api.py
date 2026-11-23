@@ -21,14 +21,18 @@ from app.api.leads import analytics_router as leads_analytics_router
 from app.api.leads import router as leads_router
 from app.core import database, deps
 from app.core.database import Base
+from app.crud.product import product_crud
 from app.models.acquisition_source import AcquisitionSource
-from app.models.customer import Contact, Customer, CustomerMember
+from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
-from app.models.lead import Lead, LeadFollowUp, LeadStatus
+from app.models.deal_journey import CustomerDealJourney
+from app.models.lead import Lead, LeadFollowUp, LeadProduct, LeadStatus
+from app.models.product import Product, ProductModule
 from app.models.role import Role
 from app.models.team import Team, UserTeam
 from app.models.user import User, UserStatus
 from app.models.user_role import UserRole
+from app.schemas.product import ProductCreate
 
 
 @compiles(BigInteger, "sqlite")
@@ -36,10 +40,11 @@ def _bigint_to_sqlite_int(element, compiler, **kw):  # noqa: ARG001
     return "INTEGER"
 
 
-def _lead_payload(name: str, source_public_id: str, phone: str = "13800138001") -> dict[str, str]:
+def _lead_payload(api_env, name: str, source_public_id: str, phone: str = "13800138001") -> dict[str, str]:
     return {
         "lead_name": name,
         "source_public_id": source_public_id,
+        "product_public_id": api_env.product_public_id,
         "city": "上海",
         "contact_name": "张三",
         "contact_phone": phone,
@@ -60,10 +65,15 @@ def api_env(monkeypatch):
         Role.__table__,
         UserRole.__table__,
         AcquisitionSource.__table__,
+        Product.__table__,
+        ProductModule.__table__,
         Lead.__table__,
         LeadFollowUp.__table__,
+        LeadProduct.__table__,
         Customer.__table__,
+        CustomerDealJourney.__table__,
         CustomerLegacySourceProgress.__table__,
+        CustomerProduct.__table__,
         Contact.__table__,
         CustomerMember.__table__,
     ]
@@ -192,6 +202,8 @@ def _create_team(api_env, name: str = "测试团队") -> int:
     assert response.status_code == 200, response.text
     team_id = response.json()["id"]
     api_env.team_state["id"] = team_id
+    product = product_crud.create(api_env.db, team_id, ProductCreate(name="CRM"), str(api_env.current_user.id))
+    api_env.product_public_id = product.public_id
     return team_id
 
 
@@ -204,13 +216,16 @@ def test_rename_follows_on_lead_and_customer_read_paths(api_env):
     _create_team(api_env)
     exhibition = _option_by_code(api_env, "EXHIBITION")
 
-    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload("展会线索", exhibition["public_id"]))
+    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload(api_env, "展会线索", exhibition["public_id"]))
     assert lead_resp.status_code == 201, lead_resp.text
     lead_id = lead_resp.json()["public_id"]
 
     customer_resp = api_env.client.post(
         "/v1/customers/",
-        json={"account_name": "展会客户", "city": "上海", "source_public_id": exhibition["public_id"]},
+        json={
+            "account_name": "展会客户", "city": "上海", "source_public_id": exhibition["public_id"],
+            "product_public_id": api_env.product_public_id,
+        },
     )
     assert customer_resp.status_code == 201, customer_resp.text
     customer_id = customer_resp.json()["public_id"]
@@ -248,7 +263,7 @@ def test_convert_from_lead_inherits_source_and_rejects_missing_source(api_env):
     team_id = _create_team(api_env)
     exhibition = _option_by_code(api_env, "EXHIBITION")
 
-    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload("待转化线索", exhibition["public_id"]))
+    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload(api_env, "待转化线索", exhibition["public_id"]))
     assert lead_resp.status_code == 201, lead_resp.text
     lead_public_id = lead_resp.json()["public_id"]
     lead = api_env.db.query(Lead).filter(Lead.public_id == lead_public_id).one()
@@ -311,6 +326,7 @@ def test_import_unknown_or_forbidden_source_fails_that_row(api_env):
                 {
                     "lead_name": "可导入线索",
                     "source": "网站咨询",
+                    "product_public_id": api_env.product_public_id,
                     "city": "上海",
                     "contact_name": "王五",
                     "contact_phone": "13800138011",
@@ -318,6 +334,7 @@ def test_import_unknown_or_forbidden_source_fails_that_row(api_env):
                 {
                     "lead_name": "未知来源线索",
                     "source": "地推",
+                    "product_public_id": api_env.product_public_id,
                     "city": "上海",
                     "contact_name": "赵六",
                     "contact_phone": "13800138012",
@@ -325,6 +342,7 @@ def test_import_unknown_or_forbidden_source_fails_that_row(api_env):
                 {
                     "lead_name": "线索转化导入",
                     "source": "线索转化",
+                    "product_public_id": api_env.product_public_id,
                     "city": "上海",
                     "contact_name": "钱七",
                     "contact_phone": "13800138013",
@@ -356,22 +374,28 @@ def test_inactive_source_still_filters_historical_records(api_env):
     exhibition = _option_by_code(api_env, "EXHIBITION")
     website = _option_by_code(api_env, "WEBSITE_INQUIRY")
 
-    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload("历史展会线索", exhibition["public_id"]))
+    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload(api_env, "历史展会线索", exhibition["public_id"]))
     assert lead_resp.status_code == 201, lead_resp.text
     other_lead = api_env.client.post(
         "/v1/leads/",
-        json=_lead_payload("网站线索", website["public_id"], phone="13800138021"),
+        json=_lead_payload(api_env, "网站线索", website["public_id"], phone="13800138021"),
     )
     assert other_lead.status_code == 201, other_lead.text
 
     customer_resp = api_env.client.post(
         "/v1/customers/",
-        json={"account_name": "历史展会客户", "city": "上海", "source_public_id": exhibition["public_id"]},
+        json={
+            "account_name": "历史展会客户", "city": "上海", "source_public_id": exhibition["public_id"],
+            "product_public_id": api_env.product_public_id,
+        },
     )
     assert customer_resp.status_code == 201, customer_resp.text
     other_customer = api_env.client.post(
         "/v1/customers/",
-        json={"account_name": "网站客户", "city": "上海", "source_public_id": website["public_id"]},
+        json={
+            "account_name": "网站客户", "city": "上海", "source_public_id": website["public_id"],
+            "product_public_id": api_env.product_public_id,
+        },
     )
     assert other_customer.status_code == 201, other_customer.text
 
@@ -411,7 +435,7 @@ def test_conversion_analytics_keeps_same_public_id_after_rename(api_env):
     _create_team(api_env)
     exhibition = _option_by_code(api_env, "EXHIBITION")
 
-    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload("分析线索", exhibition["public_id"]))
+    lead_resp = api_env.client.post("/v1/leads/", json=_lead_payload(api_env, "分析线索", exhibition["public_id"]))
     assert lead_resp.status_code == 201, lead_resp.text
     convert = api_env.client.post(
         "/v1/customers/convert-from-lead",

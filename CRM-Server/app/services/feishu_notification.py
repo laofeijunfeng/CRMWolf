@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import json
 import logging
-from typing import Any, Dict, Iterable, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
@@ -9,6 +12,9 @@ from sqlalchemy.orm import Session
 from app.constants.business_types import BUSINESS_TYPE_DISPLAY_NAMES, BusinessType
 from app.core.config import get_settings
 from app.crud.oauth import oauth_provider_config_crud, user_oauth_account_crud
+
+if TYPE_CHECKING:
+    from app.models.oauth import OAuthProviderConfig
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +48,7 @@ class FeishuNotificationService:
             raise RuntimeError("飞书未返回 tenant_access_token")
         return token
 
-    def _get_enabled_config(self, db: Session, team_id: int):
+    def _get_enabled_config(self, db: Session, team_id: int) -> tuple[OAuthProviderConfig | None, str | None]:
         config = oauth_provider_config_crud.get(db, team_id, "feishu")
         if not config or not config.enabled or not config.app_id:
             return None, None
@@ -57,16 +63,16 @@ class FeishuNotificationService:
         team_id: int,
         user_id: int,
         msg_type: str,
-        content: Dict[str, Any],
+        content: dict[str, Any],
     ) -> bool:
         config, secret = self._get_enabled_config(db, team_id)
         if not config or not secret:
-            logger.info("飞书通知未启用，跳过发送（team_id=%s, user_id=%s）", team_id, user_id)
+            logger.info("飞书通知未启用\uff0c跳过发送\uff08team_id=%s, user_id=%s\uff09", team_id, user_id)
             return False
 
         account = user_oauth_account_crud.get_by_user(db, team_id, "feishu", user_id)
         if not account or not account.open_id:
-            logger.info("用户未绑定飞书，跳过发送（team_id=%s, user_id=%s）", team_id, user_id)
+            logger.info("用户未绑定飞书\uff0c跳过发送\uff08team_id=%s, user_id=%s\uff09", team_id, user_id)
             return False
 
         token = await self._get_tenant_access_token(config.app_id, secret)
@@ -97,8 +103,8 @@ class FeishuNotificationService:
         team_id: int,
         user_ids: Iterable[int],
         msg_type: str,
-        content: Dict[str, Any],
-    ) -> Dict[str, int]:
+        content: dict[str, Any],
+    ) -> dict[str, int]:
         result = {"success": 0, "failed": 0, "skipped": 0}
         seen_user_ids = []
         for user_id in user_ids:
@@ -111,7 +117,7 @@ class FeishuNotificationService:
                 result["success" if sent else "skipped"] += 1
             except Exception as exc:
                 result["failed"] += 1
-                logger.error("飞书通知发送失败（team_id=%s, user_id=%s）: %s", team_id, user_id, exc)
+                logger.error("飞书通知发送失败\uff08team_id=%s, user_id=%s\uff09: %s", team_id, user_id, exc)
         return result
 
     async def notify_approval_pending(
@@ -123,12 +129,12 @@ class FeishuNotificationService:
         entity_name: str,
         flow_name: str,
         node_name: str,
-        business_id: Optional[int] = None,
-        submitter_name: Optional[str] = None,
-        approval_type_name: Optional[str] = None,
-        customer_name: Optional[str] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, int]:
+        business_id: int | None = None,
+        submitter_name: str | None = None,
+        approval_type_name: str | None = None,
+        customer_name: str | None = None,
+        detail_fields: dict[str, str] | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         fields = detail_fields or self._fallback_approval_fields(
@@ -153,11 +159,11 @@ class FeishuNotificationService:
         user_id: int,
         entity_type: str,
         entity_name: str,
-        business_id: Optional[int] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-        approval_type_name: Optional[str] = None,
-        button_path: Optional[str] = None,
-    ) -> Dict[str, int]:
+        business_id: int | None = None,
+        detail_fields: dict[str, str] | None = None,
+        approval_type_name: str | None = None,
+        button_path: str | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         content = self._approval_card(
@@ -181,11 +187,11 @@ class FeishuNotificationService:
         entity_type: str,
         entity_name: str,
         reject_reason: str,
-        business_id: Optional[int] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-        approval_type_name: Optional[str] = None,
-        button_path: Optional[str] = None,
-    ) -> Dict[str, int]:
+        business_id: int | None = None,
+        detail_fields: dict[str, str] | None = None,
+        approval_type_name: str | None = None,
+        button_path: str | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         content = self._approval_card(
@@ -208,10 +214,10 @@ class FeishuNotificationService:
         user_ids: Iterable[int],
         entity_type: str,
         entity_name: str,
-        submitter_name: Optional[str] = None,
-        approval_type_name: Optional[str] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, int]:
+        submitter_name: str | None = None,
+        approval_type_name: str | None = None,
+        detail_fields: dict[str, str] | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         content = self._approval_card(
@@ -232,10 +238,10 @@ class FeishuNotificationService:
         user_id: int,
         entity_type: str,
         entity_name: str,
-        detail_fields: Optional[Dict[str, str]] = None,
-        approval_type_name: Optional[str] = None,
-        button_path: Optional[str] = None,
-    ) -> Dict[str, int]:
+        detail_fields: dict[str, str] | None = None,
+        approval_type_name: str | None = None,
+        button_path: str | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         content = self._approval_card(
@@ -260,11 +266,11 @@ class FeishuNotificationService:
         entity_name: str,
         approval_id: int,
         cc_node_name: str,
-        submitter_name: Optional[str] = None,
-        approval_type_name: Optional[str] = None,
-        customer_name: Optional[str] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, int]:
+        submitter_name: str | None = None,
+        approval_type_name: str | None = None,
+        customer_name: str | None = None,
+        detail_fields: dict[str, str] | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         fields = detail_fields or self._fallback_approval_fields(
@@ -292,11 +298,11 @@ class FeishuNotificationService:
         entity_type: str,
         entity_name: str,
         node_name: str,
-        business_id: Optional[int] = None,
-        submitter_name: Optional[str] = None,
-        approval_type_name: Optional[str] = None,
-        detail_fields: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, int]:
+        business_id: int | None = None,
+        submitter_name: str | None = None,
+        approval_type_name: str | None = None,
+        detail_fields: dict[str, str] | None = None,
+    ) -> dict[str, int]:
         approval_type_name = approval_type_name or self._entity_type_label(entity_type)
         sep = self._title_separator(entity_type)
         fields = detail_fields or self._fallback_approval_fields(
@@ -325,7 +331,7 @@ class FeishuNotificationService:
         title: str,
         markdown: str,
         template: str = "blue",
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         content = {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -346,15 +352,15 @@ class FeishuNotificationService:
         *,
         account_name: str,
         contact_name: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
             user_ids,
             title="🎉 新客户创建成功",
             markdown=(
-                f"客户创建成功！\n\n**客户名称**: {account_name}\n"
-                f"**主联系人**: {contact_name}\n\n请及时跟进客户！"
+                f"客户创建成功\uff01\n\n**客户名称**: {account_name}\n"
+                f"**主联系人**: {contact_name}\n\n请及时跟进客户\uff01"
             ),
         )
 
@@ -365,13 +371,13 @@ class FeishuNotificationService:
         user_ids: Iterable[int],
         *,
         account_name: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
             user_ids,
             title="🎊 恭喜赢单",
-            markdown=f"恭喜您成功赢单！\n\n**客户名称**: {account_name}\n\n太棒了，继续保持！",
+            markdown=f"恭喜您成功赢单\uff01\n\n**客户名称**: {account_name}\n\n太棒了\uff0c继续保持\uff01",
             template="green",
         )
 
@@ -382,13 +388,13 @@ class FeishuNotificationService:
         user_ids: Iterable[int],
         *,
         account_name: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
             user_ids,
             title="😔 客户已输单",
-            markdown=f"客户已输单\n\n**客户名称**: {account_name}\n\n请总结经验，继续加油！",
+            markdown=f"客户已输单\n\n**客户名称**: {account_name}\n\n请总结经验\uff0c继续加油\uff01",
             template="red",
         )
 
@@ -401,7 +407,7 @@ class FeishuNotificationService:
         account_name: str,
         return_reason: str,
         previous_owner: str | None = None,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         previous = previous_owner or "-"
         return await self.notify_markdown_card(
             db,
@@ -423,13 +429,13 @@ class FeishuNotificationService:
         user_ids: Iterable[int],
         *,
         lead_name: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
             user_ids,
             title="✅ 线索领取成功",
-            markdown=f"您已成功领取线索：**{lead_name}**\n\n请尽快跟进，祝您成交！",
+            markdown=f"您已成功领取线索\uff1a**{lead_name}**\n\n请尽快跟进\uff0c祝您成交\uff01",
             template="green",
         )
 
@@ -442,7 +448,7 @@ class FeishuNotificationService:
         lead_name: str,
         contact_name: str,
         contact_phone: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
@@ -451,7 +457,7 @@ class FeishuNotificationService:
             markdown=(
                 f"**线索信息**\n\n**线索名称**: {lead_name}\n"
                 f"**联系人**: {contact_name}\n**联系电话**: {contact_phone}\n\n"
-                "请及时跟进该线索！"
+                "请及时跟进该线索\uff01"
             ),
         )
 
@@ -464,16 +470,16 @@ class FeishuNotificationService:
         opportunity_name: str,
         customer_name: str,
         actual_amount: object = 0,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
             user_ids,
             title="🎊 恭喜赢单",
             markdown=(
-                f"恭喜您成功赢单！\n\n**商机名称**: {opportunity_name}\n"
+                f"恭喜您成功赢单\uff01\n\n**商机名称**: {opportunity_name}\n"
                 f"**客户名称**: {customer_name}\n**实际金额**: ¥{_format_amount(actual_amount)}\n\n"
-                "太棒了，继续保持！"
+                "太棒了\uff0c继续保持\uff01"
             ),
             template="green",
         )
@@ -487,7 +493,7 @@ class FeishuNotificationService:
         opportunity_name: str,
         customer_name: str,
         loss_reason: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         return await self.notify_markdown_card(
             db,
             team_id,
@@ -496,14 +502,14 @@ class FeishuNotificationService:
             markdown=(
                 f"商机已输单\n\n**商机名称**: {opportunity_name}\n"
                 f"**客户名称**: {customer_name}\n**输单原因**: {loss_reason}\n\n"
-                "请总结经验，继续加油！"
+                "请总结经验\uff0c继续加油\uff01"
             ),
             template="red",
         )
 
     @staticmethod
     def _title_separator(entity_type: str) -> str:
-        # License 卡片标题按产品要求在中英文之间加空格，其他单据保持原写法
+        # License 卡片标题按产品要求在中英文之间加空格,其他单据保持原写法
         return " " if entity_type == BusinessType.LICENSE else ""
 
     def _approval_card(
@@ -511,14 +517,14 @@ class FeishuNotificationService:
         entity_type: str,
         title: str,
         template: str,
-        fields: Dict[str, str],
-        button_text: Optional[str] = None,
-        button_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        fields: dict[str, str],
+        button_text: str | None = None,
+        button_url: str | None = None,
+    ) -> dict[str, Any]:
         elements = []
         for label, value in fields.items():
             display_value = value if value not in (None, "") else "-"
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{label}**：{display_value}"}})
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{label}**\uff1a{display_value}"}})
 
         if button_text and button_url:
             elements.append(
@@ -548,18 +554,18 @@ class FeishuNotificationService:
         self,
         approval_type_name: str,
         entity_name: str,
-        customer_name: Optional[str] = None,
-    ) -> Dict[str, str]:
+        customer_name: str | None = None,
+    ) -> dict[str, str]:
         fields = {}
         if customer_name is not None:
             fields["客户名称"] = customer_name or "-"
         fields[f"{approval_type_name}名称"] = entity_name or "-"
         return fields
 
-    def _entity_type_label(self, entity_type: Optional[str]) -> str:
+    def _entity_type_label(self, entity_type: str | None) -> str:
         return BUSINESS_TYPE_DISPLAY_NAMES.get(entity_type or "", "审批")
 
-    def _frontend_base_url(self, db: Session, team_id: int) -> Optional[str]:
+    def _frontend_base_url(self, db: Session, team_id: int) -> str | None:
         frontend_url = (settings.FRONTEND_URL or "").rstrip("/")
         if not frontend_url:
             config = oauth_provider_config_crud.get(db, team_id, "feishu")
@@ -568,7 +574,7 @@ class FeishuNotificationService:
                 frontend_url = f"{parsed.scheme}://{parsed.netloc}"
         return frontend_url or None
 
-    def _absolute_frontend_url(self, db: Session, team_id: int, path: Optional[str]) -> Optional[str]:
+    def _absolute_frontend_url(self, db: Session, team_id: int, path: str | None) -> str | None:
         if not path:
             return None
         if path.startswith("http://") or path.startswith("https://"):

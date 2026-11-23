@@ -3,8 +3,9 @@ Frontend Log Schema
 
 用于接收前端日志的 Pydantic schema
 """
+from typing import Any
+
 from pydantic import BaseModel
-from typing import Optional, Any
 
 
 class FrontendLogEntry(BaseModel):
@@ -12,19 +13,19 @@ class FrontendLogEntry(BaseModel):
     level: str  # debug, info, warn, error
     context: str  # 如 "[AIAssistant]"
     action: str  # 如 "restore"
-    data: Optional[Any] = None
+    data: Any | None = None
     timestamp: int  # Unix timestamp (ms)
-    traceId: Optional[str] = None
-    userId: Optional[int] = None
-    teamId: Optional[int] = None
+    traceId: str | None = None
+    userId: int | None = None
+    teamId: int | None = None
 
 
 class FrontendLogBatchRequest(BaseModel):
     """批量日志请求"""
     logs: list[FrontendLogEntry]
     sessionId: str
-    userAgent: Optional[str] = None
-    url: Optional[str] = None
+    userAgent: str | None = None
+    url: str | None = None
 
 
 class FrontendLogBeaconRequest(BaseModel):

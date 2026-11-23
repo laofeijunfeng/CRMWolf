@@ -1,22 +1,28 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+
 from app.core.database import get_db
 from app.core.deps import require_permission
 from app.crud.permission import permission_crud
-from app.schemas.permission import PermissionCreate, PermissionUpdate, PermissionResponse, RolePermissionCreate
+from app.schemas.permission import PermissionCreate, PermissionResponse, PermissionUpdate, RolePermissionCreate
 from app.services.permission_service import permission_service
 
 router = APIRouter(prefix="/permissions", tags=["权限管理"])
 
 
-@router.get("", response_model=List[PermissionResponse], summary="获取权限列表", description="获取系统中的所有权限列表，支持按资源和操作类型筛选")
+@router.get(
+    "",
+    response_model=list[PermissionResponse],
+    summary="获取权限列表",
+    description="获取系统中的所有权限列表\uff0c支持按资源和操作类型筛选",
+)
 def get_permissions(
     skip: int = Query(0, ge=0, description="跳过记录数"),
     limit: int = Query(100, ge=1, le=100, description="返回记录数"),
-    resource: Optional[str] = Query(None, description="资源类型"),
-    action: Optional[str] = Query(None, description="操作类型"),
-    include_inactive: bool = Query(False, description="是否包含已停用权限，仅用于审计"),
+    resource: str | None = Query(None, description="资源类型"),
+    action: str | None = Query(None, description="操作类型"),
+    include_inactive: bool = Query(False, description="是否包含已停用权限\uff0c仅用于审计"),
     current_user = Depends(require_permission("permission:manage")),
     db: Session = Depends(get_db)
 ):
@@ -31,7 +37,12 @@ def get_permissions(
     return permissions
 
 
-@router.get("/{permission_id}", response_model=PermissionResponse, summary="获取权限详情", description="根据权限ID获取权限的详细信息")
+@router.get(
+    "/{permission_id}",
+    response_model=PermissionResponse,
+    summary="获取权限详情",
+    description="根据权限ID获取权限的详细信息",
+)
 def get_permission(
     permission_id: int,
     current_user = Depends(require_permission("permission:manage")),
@@ -46,7 +57,13 @@ def get_permission(
     return permission
 
 
-@router.post("", response_model=PermissionResponse, status_code=status.HTTP_201_CREATED, summary="创建权限", description="创建新的权限，需要提供权限名称、代码、资源和操作类型")
+@router.post(
+    "",
+    response_model=PermissionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建权限",
+    description="创建新的权限\uff0c需要提供权限名称、代码、资源和操作类型",
+)
 def create_permission(
     permission: PermissionCreate,
     current_user = Depends(require_permission("permission:manage")),
@@ -94,7 +111,12 @@ def delete_permission(
     return permission
 
 
-@router.post("/{permission_id}/roles", status_code=status.HTTP_201_CREATED, summary="为角色分配权限", description="为指定角色分配权限，并清除相关用户权限缓存")
+@router.post(
+    "/{permission_id}/roles",
+    status_code=status.HTTP_201_CREATED,
+    summary="为角色分配权限",
+    description="为指定角色分配权限\uff0c并清除相关用户权限缓存",
+)
 def assign_permission_to_role(
     permission_id: int,
     role_permission: RolePermissionCreate,
@@ -121,7 +143,11 @@ def assign_permission_to_role(
     return result
 
 
-@router.delete("/{permission_id}/roles/{role_id}", summary="移除角色权限", description="移除指定角色的权限，并清除相关用户权限缓存")
+@router.delete(
+    "/{permission_id}/roles/{role_id}",
+    summary="移除角色权限",
+    description="移除指定角色的权限\uff0c并清除相关用户权限缓存",
+)
 def remove_permission_from_role(
     permission_id: int,
     role_id: int,

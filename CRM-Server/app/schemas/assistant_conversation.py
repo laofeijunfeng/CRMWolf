@@ -9,10 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest  # noqa: TC001 -- Pydantic runtime models.
 from app.services.agent.semantic_plan import AgentSemanticPlan  # noqa: TC001 -- Pydantic runtime model.
 from app.services.agent.ui.schemas import AgentUIEnvelope  # noqa: TC001 -- Pydantic runtime model.
+from app.services.assistant.contracts import AcceptedProposalReceipt  # noqa: TC001 -- Pydantic runtime model.
 
 
 class ConversationModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class CorrectedParticipants(ConversationModel):
+    internal: list[str]
+    customer: list[str]
+
+
+class ActivityCorrection(ConversationModel):
+    field: Literal["communication_time", "channel_kind", "participants", "summary", "next_action", "next_follow_time"]
+    new_value: str | CorrectedParticipants | None
+    quote: str = Field(min_length=1, max_length=2000)
 
 
 class ConversationDecision(ConversationModel):
@@ -24,6 +36,7 @@ class ConversationDecision(ConversationModel):
     resume_only: bool = False
     field_answer: bool = False
     confidence: float = Field(ge=0, le=1)
+    correction: ActivityCorrection | None = None
 
 
 class ConversationTextRequest(ConversationModel):
@@ -84,9 +97,12 @@ class ConversationMessage(ConversationModel):
     at: str
     task: AssistantTaskView | None = None
     boundary: ConversationBoundary | None = None
-    outcome: Literal["activity_written", "failure", "follow_up_disposition", "task_completed"] | None = None
+    outcome: Literal[
+        "activity_written", "failure", "follow_up_disposition", "task_completed", "proposal_unavailable"
+    ] | None = None
     ui: AgentUIEnvelope | None = None
     projection: ConversationProjection | None = None
+    proposal_receipt: AcceptedProposalReceipt | None = Field(default=None, exclude=True)
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.
     error_code: str | None = Field(default=None, exclude=True)
     retryable: bool | None = Field(default=None, exclude=True)

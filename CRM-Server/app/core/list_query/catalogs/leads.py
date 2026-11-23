@@ -8,6 +8,7 @@ from app.core.list_query.types import SortCondition
 from app.models.lead import CompanyScale, Lead, LeadProduct, LeadStatus
 from app.models.product import Product
 
+
 def _lead_product_name_expression():
     return (
         select(Product.name)

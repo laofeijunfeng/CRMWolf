@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any
 
 from app.models.sales_commitment import FollowUpTask, SalesCommitment
 from app.services.customer_embedding_service import (
@@ -18,6 +16,9 @@ from app.services.customer_qdrant_index_service import (
     SourceType,
     customer_qdrant_index_service,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 

@@ -3,12 +3,13 @@
 
 提供结构化日志输出、文件轮转、级别分离
 """
+
 import logging
 import sys
-from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
-from datetime import datetime
-
+from pathlib import Path
+from types import TracebackType
+from typing import TextIO
 
 # 日志目录
 LOG_DIR = Path(__file__).parent.parent.parent / "logs"
@@ -21,7 +22,7 @@ STANDARD_FORMAT = logging.Formatter(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
-# 错误日志格式（带堆栈）
+# 包含异常堆栈的日志格式
 ERROR_FORMAT = logging.Formatter(
     fmt="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s | %(message)s\n%(exc_text)s",
     datefmt="%Y-%m-%d %H:%M:%S"
@@ -53,7 +54,10 @@ class ExcTextFilter(logging.Filter):
             record.exc_text = ""
         return True
 
-    def format_exception(self, exc_info) -> str:
+    def format_exception(
+        self,
+        exc_info: tuple[type[BaseException], BaseException, TracebackType | None] | tuple[None, None, None],
+    ) -> str:
         import traceback
         return "".join(traceback.format_exception(*exc_info))
 
@@ -62,9 +66,9 @@ def get_file_handler(
     filename: str,
     level: int,
     backup_days: int = 30,
-    formatter: logging.Formatter = None
+    formatter: logging.Formatter | None = None
 ) -> TimedRotatingFileHandler:
-    """创建文件日志处理器（按天轮转）"""
+    """创建按天轮转的文件日志处理器。"""
     handler = TimedRotatingFileHandler(
         filename=str(LOG_DIR / filename),
         when="midnight",
@@ -77,7 +81,7 @@ def get_file_handler(
     return handler
 
 
-def get_console_handler(level: int, formatter: logging.Formatter = None) -> logging.StreamHandler:
+def get_console_handler(level: int, formatter: logging.Formatter | None = None) -> logging.StreamHandler[TextIO]:
     """创建控制台日志处理器"""
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(level)
@@ -91,7 +95,7 @@ def setup_logging(debug: bool = False) -> None:
     初始化日志配置
 
     Args:
-        debug: 是否开启 DEBUG 级别（开发环境）
+        debug: 是否开启开发环境的 DEBUG 日志
     """
     # 根日志级别
     root_level = logging.DEBUG if debug else logging.INFO
@@ -101,17 +105,17 @@ def setup_logging(debug: bool = False) -> None:
     root_logger.handlers.clear()
     root_logger.setLevel(root_level)
 
-    # 控制台处理器（开发环境）
+    # 开发环境的控制台处理器
     if debug:
         root_logger.addHandler(get_console_handler(logging.DEBUG))
 
-    # 应用日志文件（INFO 及以上）
+    # 应用日志文件记录 INFO 及以上级别
     root_logger.addHandler(get_file_handler("app.log", logging.INFO, backup_days=30))
 
-    # 错误日志文件（ERROR 及以上）
+    # 错误日志文件记录 ERROR 及以上级别
     root_logger.addHandler(get_file_handler("error.log", logging.ERROR, backup_days=90))
 
-    # 调试日志文件（仅开发环境）
+    # 调试日志文件仅用于开发环境
     if debug:
         root_logger.addHandler(get_file_handler("debug.log", logging.DEBUG, backup_days=7))
 
@@ -127,12 +131,12 @@ def setup_logging(debug: bool = False) -> None:
     )
 
 
-def get_logger(name: str = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     获取 Logger 实例
 
     Args:
-        name: 模块名，通常使用 __name__
+        name: 模块名通常使用 __name__
 
     Returns:
         配置好的 Logger 实例
@@ -140,7 +144,6 @@ def get_logger(name: str = None) -> logging.Logger:
     return logging.getLogger(name)
 
 
-# 便捷方法：记录带结构化字段的日志
-def log_with_fields(logger: logging.Logger, level: int, message: str, **fields):
+def log_with_fields(logger: logging.Logger, level: int, message: str, **fields: object) -> None:
     """记录带额外字段的日志"""
     logger.log(level, message, extra={"extra_fields": fields})

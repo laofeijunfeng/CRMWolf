@@ -1,28 +1,26 @@
 """
 AI 解析审批流程配置服务
 
-用于 AI 辅助创建审批流程功能，从自然语言中提取结构化配置
+用于 AI 辅助创建审批流程功能\uff0c从自然语言中提取结构化配置
 """
 import json
 import logging
-from typing import AsyncGenerator, Dict, Any, List
-from sqlalchemy.orm import Session
-import httpx
+from collections.abc import AsyncGenerator
+from typing import Any
 
-from app.crud.ai_config import ai_config_crud
-from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES, ROLE_DISPLAY_NAMES, ROLE_MAPPING_EXAMPLES
+import httpx
+from sqlalchemy.orm import Session
+
+from app.constants.approval_roles import ALLOWED_APPROVAL_ROLES
 from app.constants.business_types import BusinessType
-from app.schemas.approval_ai import (
-    ApprovalAIParsedFlow,
-    ApprovalAIParsedNode,
-    ApprovalAIParseResponse
-)
+from app.crud.ai_config import ai_config_crud
+from app.schemas.approval_ai import ApprovalAIParsedFlow, ApprovalAIParsedNode, ApprovalAIParseResponse
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
 
-# System Prompt 模板（动态注入当前日期）
+# System Prompt 模板(动态注入当前日期)
 PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程配置专家。
 
 【当前日期】
@@ -32,43 +30,44 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 
 ## 需要生成的内容
 
-**审批流程信息**：
-- flow_name: 流程名称（如：标准合同审批、大额合同审批）
-- flow_code: 流程编码（英文大写+下划线，如：STANDARD、LARGE_AMOUNT）
-- description: 流程描述（一句话说明适用场景）
-- min_amount: 最小金额（元，可选，用于金额范围匹配）
-- max_amount: 最大金额（元，可选，用于金额范围匹配）
-- license_type: 授权类型（可选，如：STANDARD、PROFESSIONAL、ENTERPRISE）
-- business_type: 流程适用的单据类型（CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY，默认 CONTRACT，识别规则见下）
+**审批流程信息**\uff1a
+- flow_name: 流程名称\uff08如\uff1a标准合同审批、大额合同审批\uff09
+- flow_code: 流程编码\uff08英文大写+下划线\uff0c如\uff1aSTANDARD、LARGE_AMOUNT\uff09
+- description: 流程描述\uff08一句话说明适用场景\uff09
+- min_amount: 最小金额\uff08元\uff0c可选\uff0c用于金额范围匹配\uff09
+- max_amount: 最大金额\uff08元\uff0c可选\uff0c用于金额范围匹配\uff09
+- license_type: 授权类型\uff08可选\uff0c如\uff1aSTANDARD、PROFESSIONAL、ENTERPRISE\uff09
+- business_type: 流程适用的单据类型\uff08CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY\uff0c默认 CONTRACT\
+\uff0c识别规则见下\uff09
 
-**审批节点列表**（每个节点包含）：
-- node_name: 节点名称（如：销售总监审批）
-- node_code: 节点编码（英文大写+下划线）
-- node_order: 节点顺序（从1开始递增）
-- approver_roles: 审批角色编码列表（必须是系统预定义角色）
-- description: 节点描述（可选）
+**审批节点列表**\uff08每个节点包含\uff09\uff1a
+- node_name: 节点名称\uff08如\uff1a销售总监审批\uff09
+- node_code: 节点编码\uff08英文大写+下划线\uff09
+- node_order: 节点顺序\uff08从1开始递增\uff09
+- approver_roles: 审批角色编码列表\uff08必须是系统预定义角色\uff09
+- description: 节点描述\uff08可选\uff09
 
-## 审批角色编码（系统预定义，必须使用以下编码）
+## 审批角色编码\uff08系统预定义\uff0c必须使用以下编码\uff09
 
 | 编码 | 角色名称 | 适用场景 |
 |------|----------|----------|
-| TEAM_ADMIN | 团队所有者 | 最高权限审批，适合总经理、老板审批 |
-| SALES_DIRECTOR | 销售总监 | 销售相关审批，适合部门经理、销售负责人审批 |
-| FINANCE | 财务人员 | 财务相关审批，适合财务审核、发票审批 |
-| SALES_MEMBER | 销售成员 | 一般审批，适合基础流程 |
+| TEAM_ADMIN | 团队所有者 | 最高权限审批\uff0c适合总经理、老板审批 |
+| SALES_DIRECTOR | 销售总监 | 销售相关审批\uff0c适合部门经理、销售负责人审批 |
+| FINANCE | 财务人员 | 财务相关审批\uff0c适合财务审核、发票审批 |
+| SALES_MEMBER | 销售成员 | 一般审批\uff0c适合基础流程 |
 
-重要规则：
+重要规则\uff1a
 1. approver_roles 中的角色只能使用上述 4 个编码之一
-2. 如果用户描述的角色不在列表中，选择语义最接近的角色：
+2. 如果用户描述的角色不在列表中\uff0c选择语义最接近的角色\uff1a
    - "总经理审批" → TEAM_ADMIN
    - "部门经理审批" → SALES_DIRECTOR
    - "财务审批" → FINANCE
    - "销售审批" → SALES_DIRECTOR
 3. 不允许生成自定义角色编码
 
-## 单据类型识别规则（business_type）
+## 单据类型识别规则\uff08business_type\uff09
 
-根据用户描述识别审批流程适用的单据类型，输出 business_type 字段：
+根据用户描述识别审批流程适用的单据类型\uff0c输出 business_type 字段\uff1a
 
 | 用户描述关键词 | business_type | 说明 |
 |----------------|---------------|------|
@@ -77,38 +76,38 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 | 发票重开 / 重开发票 / 红冲重开 / 冲红重开 | INVOICE_REISSUE | 发票重开申请审批流程 |
 | License / 授权申请 / 试用授权 / 正式授权 | LICENSE | License申请审批流程 |
 | 商机 / 机会 / 销售机会 / 商机创建 | OPPORTUNITY | 商机类审批流程 |
-| 合同 / 签约 / 合同审批 / 协议 / 未明确说明 | CONTRACT | 合同类审批流程（默认） |
+| 合同 / 签约 / 合同审批 / 协议 / 未明确说明 | CONTRACT | 合同类审批流程\uff08默认\uff09 |
 
-重要规则：
-1. 必须根据用户描述的**单据类型**（而非审批角色）判断 business_type
-2. "财务审批"是审批角色，不是单据类型——若用户只说"财务审批流程"未说明单据类型，默认 CONTRACT
-3. 若用户同时提及多种单据（如"回款和发票"），按主语优先（描述中第一个出现的单据类型），并在 thinking_process 注明
-4. business_type 必须是 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY 之一，不允许其他值
+重要规则\uff1a
+1. 必须根据用户描述的**单据类型**\uff08而非审批角色\uff09判断 business_type
+2. "财务审批"是审批角色\uff0c不是单据类型——若用户只说"财务审批流程"未说明单据类型\uff0c默认 CONTRACT
+3. 若用户同时提及多种单据\uff08如"回款和发票"\uff09\uff0c按主语优先\uff08描述中第一个出现的单据类型\uff09\uff0c并在 thinking_process 注明
+4. business_type 必须是 CONTRACT/PAYMENT/INVOICE/INVOICE_REISSUE/LICENSE/OPPORTUNITY 之一\uff0c不允许其他值
 
 ## 金额匹配规则
 
 1. min_amount 和 max_amount 定义合同金额范围
-2. 合同提交审批时，系统根据金额自动匹配对应流程
-3. 示例：
+2. 合同提交审批时\uff0c系统根据金额自动匹配对应流程
+3. 示例\uff1a
    - min_amount: null, max_amount: 100000 → 适用于10万以下合同
    - min_amount: 100000, max_amount: null → 适用于10万以上合同
    - min_amount: 100000, max_amount: 500000 → 适用于10万-50万合同
-4. 不设置金额范围（null）表示适用于所有金额
+4. 不设置金额范围\uff08null\uff09表示适用于所有金额
 
 ## 授权类型枚举
 
-可选值：
+可选值\uff1a
 - STANDARD: 标准版
 - PROFESSIONAL: 专业版
 - ENTERPRISE: 企业版
 
 ## 编码命名规范
 
-流程编码和节点编码使用英文大写+下划线：
-- 流程编码示例：STANDARD、LARGE_AMOUNT、FINANCE_APPROVAL
-- 节点编码示例：SALES_REVIEW、FINANCE_CHECK、FINAL_APPROVAL
+流程编码和节点编码使用英文大写+下划线\uff1a
+- 流程编码示例\uff1aSTANDARD、LARGE_AMOUNT、FINANCE_APPROVAL
+- 节点编码示例\uff1aSALES_REVIEW、FINANCE_CHECK、FINAL_APPROVAL
 
-常见词汇：
+常见词汇\uff1a
 - 标准/普通: STANDARD, NORMAL, DEFAULT
 - 大额/高额: LARGE_AMOUNT, HIGH_VALUE
 - 销售: SALES, SALE
@@ -119,26 +118,26 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 
 ## 常见审批流程模板
 
-**标准合同审批**（适用于普通合同）：
+**标准合同审批**\uff08适用于普通合同\uff09\uff1a
 1. 销售总监审批 (SALES_DIRECTOR)
 2. 财务审批 (FINANCE)
 
-**大额合同审批**（金额 > 50万）：
+**大额合同审批**\uff08金额 > 50万\uff09\uff1a
 1. 销售总监审批 (SALES_DIRECTOR)
 2. 财务审批 (FINANCE)
 3. 团队所有者审批 (TEAM_ADMIN)
 
-**快速审批**（适用于小额合同）：
+**快速审批**\uff08适用于小额合同\uff09\uff1a
 1. 销售总监审批 (SALES_DIRECTOR)
 
-**企业版合同审批**（授权类型 = ENTERPRISE）：
+**企业版合同审批**\uff08授权类型 = ENTERPRISE\uff09\uff1a
 1. 销售总监审批 (SALES_DIRECTOR)
 2. 财务审批 (FINANCE)
 3. 团队所有者审批 (TEAM_ADMIN)
 
 ## 输出格式
 
-你必须输出严格的 JSON 格式：
+你必须输出严格的 JSON 格式\uff1a
 ```json
 {{
   "flow": {{
@@ -155,7 +154,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
         "node_code": "节点编码",
         "node_order": 顺序号,
         "approver_roles": ["审批角色编码"],
-        "description": "节点描述（可选）"
+        "description": "节点描述\uff08可选\uff09"
       }}
     ]
   }},
@@ -165,9 +164,9 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
 
 ## 示例
 
-用户输入："创建一个标准合同审批流程，销售总监审批然后财务审批"
+用户输入\uff1a"创建一个标准合同审批流程\uff0c销售总监审批然后财务审批"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -195,13 +194,13 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "识别为标准合同审批流程，2个节点。销售总监对应SALES_DIRECTOR，财务对应FINANCE，均使用系统预定义角色。无金额限制，适用于所有合同。"
+  "thinking_process": "识别为标准合同审批流程\uff0c2个节点。销售总监对应SALES_DIRECTOR\uff0c财务对应FINANCE\uff0c均使用系统预定义角色。无金额限制\uff0c适用于所有合同。"
 }}
 ```
 
-用户输入："创建一个大额合同审批流程，超过50万的合同需要总经理审批"
+用户输入\uff1a"创建一个大额合同审批流程\uff0c超过50万的合同需要总经理审批"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -236,13 +235,13 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "识别为大额合同审批，金额门槛50万（min_amount=500000）。总经理审批对应TEAM_ADMIN角色。3节点流程：销售总监→财务→总经理。"
+  "thinking_process": "识别为大额合同审批\uff0c金额门槛50万\uff08min_amount=500000\uff09。总经理审批对应TEAM_ADMIN角色。3节点流程\uff1a销售总监→财务→总经理。"
 }}
 ```
 
-用户输入："创建一个企业版合同审批流程，需要三步审批"
+用户输入\uff1a"创建一个企业版合同审批流程\uff0c需要三步审批"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -277,13 +276,13 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "识别为企业版合同审批，license_type设为ENTERPRISE。用户要求三步审批，配置销售总监→财务→总经理流程。总经理对应TEAM_ADMIN角色。"
+  "thinking_process": "识别为企业版合同审批\uff0clicense_type设为ENTERPRISE。用户要求三步审批\uff0c配置销售总监→财务→总经理流程。总经理对应TEAM_ADMIN角色。"
 }}
 ```
 
-用户输入："金额超5万的回款需财务审批"
+用户输入\uff1a"金额超5万的回款需财务审批"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -304,13 +303,13 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "用户提及「回款」→ business_type=PAYMENT。金额门槛5万（min_amount=50000）。财务审批对应FINANCE角色。1节点流程。"
+  "thinking_process": "用户提及「回款」→ business_type=PAYMENT。金额门槛5万\uff08min_amount=50000\uff09。财务审批对应FINANCE角色。1节点流程。"
 }}
 ```
 
-用户输入："发票审批 10 万以上总监审"
+用户输入\uff1a"发票审批 10 万以上总监审"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -331,13 +330,14 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "用户提及「发票」→ business_type=INVOICE。金额门槛10万（min_amount=100000）。总监审批对应SALES_DIRECTOR角色。1节点流程。"
+  "thinking_process": "用户提及「发票」→ business_type=INVOICE。金额门槛10万\uff08min_amount=100000\uff09。总监审批对应\
+SALES_DIRECTOR角色。1节点流程。"
 }}
 ```
 
-用户输入："创建商机审批流程，销售总监审批"
+用户输入\uff1a"创建商机审批流程\uff0c销售总监审批"
 
-正确输出：
+正确输出\uff1a
 ```json
 {{
   "flow": {{
@@ -358,7 +358,7 @@ PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的审批流程�
       }}
     ]
   }},
-  "thinking_process": "用户提及「商机」→ business_type=OPPORTUNITY。未设置金额限制，销售总监审批对应SALES_DIRECTOR角色。1节点流程。"
+  "thinking_process": "用户提及「商机」→ business_type=OPPORTUNITY。未设置金额限制\uff0c销售总监审批对应SALES_DIRECTOR角色。1节点流程。"
 }}
 ```"""
 
@@ -372,25 +372,25 @@ class ApprovalAIParserService:
         Returns:
             格式化后的系统提示词
 
-        注意：模板中使用双花括号 {{ }} 转义 JSON 示例中的花括号，
+        注意\uff1a模板中使用双花括号 {{ }} 转义 JSON 示例中的花括号\uff0c
               只有 {current_date} 是真正的占位符
         """
         current_date = business_now().strftime("%Y-%m-%d")
         return PARSE_APPROVAL_SYSTEM_PROMPT_TEMPLATE.format(current_date=current_date)
 
-    def _validate_roles(self, nodes: List[ApprovalAIParsedNode]) -> List[str]:
-        invalid_roles: List[str] = []
+    def _validate_roles(self, nodes: list[ApprovalAIParsedNode]) -> list[str]:
+        invalid_roles: list[str] = []
         for node in nodes:
             roles = (node.approver_roles or []) + [user.role for user in node.approver_users or []]
             invalid_roles.extend(role for role in roles if role not in ALLOWED_APPROVAL_ROLES)
         return invalid_roles
 
-    def _auto_correct_nodes(self, nodes: List[ApprovalAIParsedNode]) -> List[ApprovalAIParsedNode]:
+    def _auto_correct_nodes(self, nodes: list[ApprovalAIParsedNode]) -> list[ApprovalAIParsedNode]:
         """自动修正节点配置
 
-        修正规则：
-        1. node_order 连续性：调整为从 1 开始连续
-        2. node_codes 重复：自动添加序号区分
+        修正规则\uff1a
+        1. node_order 连续性\uff1a调整为从 1 开始连续
+        2. node_codes 重复\uff1a自动添加序号区分
 
         Args:
             nodes: 原始节点列表
@@ -406,7 +406,7 @@ class ApprovalAIParserService:
         seen_codes = {}
         for node in nodes:
             if node.node_code in seen_codes:
-                # 重复编码，添加序号区分
+                # 重复编码,添加序号区分
                 node.node_code = f"{node.node_code}_{node.node_order}"
             seen_codes[node.node_code] = True
 
@@ -417,9 +417,9 @@ class ApprovalAIParserService:
         db: Session,
         user_message: str,
         team_id: int = 1
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
-        流式解析审批流程配置，生成 SSE 事件
+        流式解析审批流程配置\uff0c生成 SSE 事件
 
         Args:
             db: 数据库 session
@@ -427,7 +427,7 @@ class ApprovalAIParserService:
             team_id: 团队 ID
 
         Yields:
-            SSE 事件字典：
+            SSE 事件字典\uff1a
             - {"event": "status", "message": "..."} - 状态更新
             - {"event": "content", "content": "..."} - AI 思考过程片段
             - {"event": "parsed", "flow": {...}} - 解析完成
@@ -436,12 +436,12 @@ class ApprovalAIParserService:
         # 获取 AI 配置
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            yield {"event": "error", "message": "AI 配置未设置，请联系管理员先配置 AI 服务"}
+            yield {"event": "error", "message": "AI 配置未设置\uff0c请联系管理员先配置 AI 服务"}
             return
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            yield {"event": "error", "message": "AI 配置异常，无法获取 API Key"}
+            yield {"event": "error", "message": "AI 配置异常\uff0c无法获取 API Key"}
             return
 
         # 发送状态事件
@@ -450,17 +450,17 @@ class ApprovalAIParserService:
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
 
-        # 构建请求（不使用 response_format，依赖提示词引导 JSON 输出）
+        # 构建请求(不使用 response_format,依赖提示词引导 JSON 输出)
         request_body = {
             "model": config.model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            "temperature": 0.1,  # 低温度，保证输出稳定
+            "temperature": 0.1,  # 低温度,保证输出稳定
             "max_tokens": 2048,
             "stream": True
-            # 注意：移除 response_format 参数，因为部分 AI 模型不支持此参数
+            # 注意:移除 response_format 参数,因为部分 AI 模型不支持此参数
             # JSON 格式输出由系统提示词中的示例和格式说明保证
         }
 
@@ -525,7 +525,8 @@ class ApprovalAIParserService:
                         if invalid_roles:
                             yield {
                                 "event": "error",
-                                "message": f"解析的角色编码无效：{', '.join(invalid_roles)}。请使用预定义角色：{', '.join(ALLOWED_APPROVAL_ROLES)}"
+                                "message": f"解析的角色编码无效\uff1a{', '.join(invalid_roles)}"
+                    f"。请使用预定义角色\uff1a{', '.join(ALLOWED_APPROVAL_ROLES)}"
                             }
                             return
 
@@ -539,7 +540,7 @@ class ApprovalAIParserService:
                             min_amount=flow_data.get("min_amount"),
                             max_amount=flow_data.get("max_amount"),
                             license_type=flow_data.get("license_type"),
-                            # B3：提取单据类型，schema 校验器对缺失/非法值回退 CONTRACT
+                            # B3:提取单据类型,schema 校验器对缺失/非法值回退 CONTRACT
                             business_type=flow_data.get("business_type") or BusinessType.CONTRACT,
                             nodes=nodes
                         )
@@ -555,7 +556,7 @@ class ApprovalAIParserService:
                             "event": "error",
                             "message": "AI 返回格式异常",
                             "detail": f"解析失败位置: 第 {e.pos} 字符",
-                            "recovery": "请尝试更明确的描述，例如：'创建一个销售总监审批的流程'"
+                            "recovery": "请尝试更明确的描述\uff0c例如\uff1a'创建一个销售总监审批的流程'"
                         }
 
         except httpx.HTTPStatusError as e:
@@ -563,12 +564,12 @@ class ApprovalAIParserService:
             logger.error(f"AI 服务 HTTP 错误: {e.response.status_code}, 详情: {error_detail}")
             yield {
                 "event": "error",
-                "message": f"AI 服务请求失败（{e.response.status_code}）",
+                "message": f"AI 服务请求失败\uff08{e.response.status_code}\uff09",
                 "detail": error_detail,
-                "recovery": "请稍后重试，或简化您的描述"
+                "recovery": "请稍后重试\uff0c或简化您的描述"
             }
         except Exception as e:
-            logger.error(f"AI 服务异常: {type(e).__name__}: {str(e)}")
+            logger.error(f"AI 服务异常: {type(e).__name__}: {e!s}")
             yield {
                 "event": "error",
                 "message": f"AI 服务异常: {type(e).__name__}",
@@ -583,7 +584,7 @@ class ApprovalAIParserService:
         team_id: int = 1
     ) -> ApprovalAIParseResponse:
         """
-        解析审批流程配置（收集完整响应）
+        解析审批流程配置\uff08收集完整响应\uff09
 
         Args:
             db: 数据库 session
@@ -611,7 +612,7 @@ class ApprovalAIParserService:
         # 构建带动态日期的系统提示词
         system_prompt = self._build_system_prompt()
 
-        # 构建请求（非流式，不使用 response_format）
+        # 构建请求(非流式,不使用 response_format)
         request_body = {
             "model": config.model_name,
             "messages": [
@@ -621,7 +622,7 @@ class ApprovalAIParserService:
             "temperature": 0.1,
             "max_tokens": 2048,
             "stream": False
-            # 注意：移除 response_format 参数，因为部分 AI 模型不支持此参数
+            # 注意:移除 response_format 参数,因为部分 AI 模型不支持此参数
         }
 
         try:
@@ -651,7 +652,7 @@ class ApprovalAIParserService:
                 # 验证并修正
                 invalid_roles = self._validate_roles(nodes)
                 if invalid_roles:
-                    raise ValueError(f"解析的角色编码无效：{', '.join(invalid_roles)}")
+                    raise ValueError(f"解析的角色编码无效\uff1a{', '.join(invalid_roles)}")
                 nodes = self._auto_correct_nodes(nodes)
 
                 flow = ApprovalAIParsedFlow(
@@ -661,7 +662,7 @@ class ApprovalAIParserService:
                     min_amount=flow_data.get("min_amount"),
                     max_amount=flow_data.get("max_amount"),
                     license_type=flow_data.get("license_type"),
-                    # B3：提取单据类型，schema 校验器对缺失/非法值回退 CONTRACT
+                    # B3:提取单据类型,schema 校验器对缺失/非法值回退 CONTRACT
                     business_type=flow_data.get("business_type") or BusinessType.CONTRACT,
                     nodes=nodes
                 )
@@ -674,7 +675,7 @@ class ApprovalAIParserService:
         except Exception as e:
             return ApprovalAIParseResponse(
                 flow=ApprovalAIParsedFlow(flow_name="", flow_code="", nodes=[]),
-                thinking_process=f"解析异常：{str(e)}"
+                thinking_process=f"解析异常\uff1a{e!s}"
             )
 
     def _clean_json_response(self, content: str) -> str:

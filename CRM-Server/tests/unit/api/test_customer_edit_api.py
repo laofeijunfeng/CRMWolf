@@ -62,8 +62,6 @@ def _patch_route_dependencies(monkeypatch, customer):
     real_update_status = customers_api.customer_crud.update_status_with_version
     crud_db = MagicMock()
     crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
-    from app.crud import customer as customer_module
-    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
 
     def update_status_with_version(db, db_customer, *, status, expected_version):
         calls.updates.append({"customer": db_customer, "status": status, "expected_version": expected_version})
@@ -193,8 +191,6 @@ def _patch_snapshot_route_dependencies(monkeypatch, customer):
     real_update_snapshot = customers_api.customer_crud.update_license_snapshot
     crud_db = MagicMock()
     crud_db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value.first.return_value = customer
-    from app.crud import customer as customer_module
-    monkeypatch.setattr(customer_module, "advance_eligible_progress", lambda *args, **kwargs: None)
 
     def update_license_snapshot(db, db_customer, payload):
         calls.updates.append(payload)
@@ -215,6 +211,7 @@ def _license_customer(*, version: int = 4):
     customer = _customer(status=0, version=version)
     customer.license_type = "TRIAL"
     customer.license_expiry_date = date(2026, 1, 1)
+    customer.license_is_permanent = False
     return customer
 
 
@@ -244,8 +241,8 @@ async def test_license_snapshot_updates_audit_and_refreshes(monkeypatch):
     assert "previous_version" not in calls.logs[0]["content"]
     assert "new_version" not in calls.logs[0]["content"]
     assert calls.logs[0]["content"] == {
-        "before": {"license_type": "TRIAL", "license_expiry_date": "2026-01-01"},
-        "after": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
+        "before": {"license_type": "TRIAL", "license_expiry_date": "2026-01-01", "license_is_permanent": False},
+        "after": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01", "license_is_permanent": False},
         "changed_fields": ["license_type", "license_expiry_date"],
         "actor_id": "9",
         "team_id": customer.team_id,
@@ -284,8 +281,8 @@ async def test_license_snapshot_accepts_valid_trial_pair(monkeypatch):
     assert "previous_version" not in calls.logs[0]["content"]
     assert "new_version" not in calls.logs[0]["content"]
     assert calls.logs[0]["content"] == {
-        "before": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01"},
-        "after": {"license_type": "TRIAL", "license_expiry_date": "2026-06-01"},
+        "before": {"license_type": "OFFICIAL", "license_expiry_date": "2027-01-01", "license_is_permanent": False},
+        "after": {"license_type": "TRIAL", "license_expiry_date": "2026-06-01", "license_is_permanent": False},
         "changed_fields": ["license_type", "license_expiry_date"],
         "actor_id": "9",
         "team_id": customer.team_id,
@@ -1045,7 +1042,6 @@ def _patch_create_dependencies(monkeypatch, *, industry=None, industries=None, l
         lambda db, team_id, product_public_id: SimpleNamespace(id=1, team_id=team_id, public_id=product_public_id),
     )
     monkeypatch.setattr("app.crud.customer.replace_product_links", lambda *args, **kwargs: None)
-    monkeypatch.setattr("app.crud.customer.advance_eligible_progress", lambda *args, **kwargs: None)
 
 
 def test_create_persists_status_license_and_industry_code(monkeypatch):
@@ -1168,8 +1164,6 @@ def test_contact_create_flushes_without_commit_or_refresh_when_commit_false(monk
     added = []
     db.add.side_effect = lambda obj: added.append(obj)
     monkeypatch.setattr(contact_crud, "get_primary_by_customer_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr("app.crud.customer.lock_source_customer", lambda *args, **kwargs: None)
-    monkeypatch.setattr("app.crud.customer.advance_eligible_progress", lambda *args, **kwargs: None)
 
     created = contact_crud.create(
         db,

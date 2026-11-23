@@ -40,7 +40,6 @@ from app.models.sales_commitment import (
 )
 from app.schemas.system_recovery import FollowUpConfirmationDeliveryRecoveryCandidate
 from app.services.legacy_profile_source import (
-    activity_origin,
     follow_up_origin,
 )
 from app.utils.time import (
@@ -637,7 +636,11 @@ class FollowUpTaskCRUD:
 
     def complete(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
         eligible = _lock_profile_source(db, db_obj)
-        changed = db_obj.status != FollowUpTaskStatus.COMPLETED or db_obj.completed_at is None or db_obj.cancelled_at is not None
+        changed = (
+            db_obj.status != FollowUpTaskStatus.COMPLETED
+            or db_obj.completed_at is None
+            or db_obj.cancelled_at is not None
+        )
         db_obj.status = FollowUpTaskStatus.COMPLETED
         if changed:
             db_obj.completed_at = business_now()
@@ -646,7 +649,11 @@ class FollowUpTaskCRUD:
 
     def cancel(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
         eligible = _lock_profile_source(db, db_obj)
-        changed = db_obj.status != FollowUpTaskStatus.CANCELLED or db_obj.cancelled_at is None or db_obj.completed_at is not None
+        changed = (
+            db_obj.status != FollowUpTaskStatus.CANCELLED
+            or db_obj.cancelled_at is None
+            or db_obj.completed_at is not None
+        )
         db_obj.status = FollowUpTaskStatus.CANCELLED
         if changed:
             db_obj.cancelled_at = business_now()
@@ -655,7 +662,11 @@ class FollowUpTaskCRUD:
 
     def reopen(self, db: Session, db_obj: FollowUpTask, *, commit: bool = True) -> FollowUpTask:
         eligible = _lock_profile_source(db, db_obj)
-        changed = db_obj.status != FollowUpTaskStatus.OPEN or db_obj.completed_at is not None or db_obj.cancelled_at is not None
+        changed = (
+            db_obj.status != FollowUpTaskStatus.OPEN
+            or db_obj.completed_at is not None
+            or db_obj.cancelled_at is not None
+        )
         db_obj.status = FollowUpTaskStatus.OPEN
         db_obj.completed_at = None
         db_obj.cancelled_at = None

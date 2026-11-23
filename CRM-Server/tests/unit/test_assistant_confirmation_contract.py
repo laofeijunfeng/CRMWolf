@@ -182,7 +182,12 @@ async def test_confirmation_freezes_exact_canonical_payload_then_writes_one_comm
         assert activity.source_content == draft.source_segments[0]
         assert (activity.effectiveness_score, activity.effectiveness_reason) == (85, draft.score_reason)
         assert confirmed.task.committed_json == [
-            {"kind": "customer_activity", "public_id": str(activity.id), "customer_id": customer.id}
+            {
+                "kind": "customer_activity",
+                "public_id": str(activity.id),
+                "customer_id": customer.id,
+                "customer_public_id": customer.public_id,
+            }
         ]
 
 
@@ -247,7 +252,12 @@ async def test_confirmation_receipt_preserves_activity_and_distinguishes_project
     confirmed, message = await execute_confirmation(session, outcome.task, writer=Writer())
     assert message == expected_message
     assert confirmed.committed_json == [
-        {"kind": "customer_activity", "public_id": "act_confirmed", "customer_id": customer.id}
+        {
+            "kind": "customer_activity",
+            "public_id": "act_confirmed",
+            "customer_id": customer.id,
+            "customer_public_id": customer.public_id,
+        }
     ]
     actions = session.query(AssistantAction).filter(AssistantAction.event_type.in_(["user_choice", "receipt"])).all()
     assert len(actions) == 2
@@ -964,10 +974,16 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
     from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor
     from app.services.assistant.intake_flow import intake_step
     from app.services.assistant.llm_contracts import StructureDraftResult
-    from app.services.assistant.proposals import offer_next_proposal, settle_proposal
+    from app.services.assistant.opportunity_nominator import OpportunityNominator
+    from app.services.assistant.proposals import offer_next_proposal
     from app.services.assistant.turns import accept_submit
 
     session, factory, permissions = db
+
+    async def no_opportunity_signals(self, db, task, activity):
+        return []
+
+    monkeypatch.setattr(OpportunityNominator, "nominate", no_opportunity_signals)
     permissions.append(SimpleNamespace(code="customer:edit:own"))
     session.add_all(
         [
@@ -1032,7 +1048,9 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
     assert not failed
     second.status, task.active_turn_id = "SUCCEEDED", None
     session.commit()
-    coordinator = AssistantCoordinator(NoChooser(), writer=RealActivityWriter())
+    coordinator = AssistantCoordinator(
+        NoChooser(), writer=RealActivityWriter(), proposal_executor=RealCRMProposalExecutor()
+    )
     frozen = await coordinator.handle_task(session, task, AssistantInput(kind="text"))
     command = frozen.task.authority_json["frozen_activity_command"]
     assert command["source_segments"] == [original, supplement]
@@ -1046,15 +1064,15 @@ async def test_follow_up_accepted_date_survives_cross_night_supplement_and_real_
     assert active and offered.waiting_field == "proposal:follow_up_task_create"
     proposal = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
     assert proposal["due_date_granularity"] == granularity
-    settled, _, _ = await settle_proposal(session, offered, accepted=True, executor=RealCRMProposalExecutor())
+    settled = await coordinator.handle_task(session, offered, AssistantInput(kind="confirm", choice="confirm"))
     session.commit()
-    finished, _, active = await offer_next_proposal(session, settled)
-    session.commit()
-    assert not active and finished.status == "COMPLETED"
+    assert settled.task.status == AssistantTaskStatus.COMPLETED and settled.task.waiting_type is None
+    receipt = next(item for item in settled.task.committed_json if item["kind"] == "follow_up_task_create")
     assert len(gate.calls) == 2
     with factory() as independent:
         activity = independent.query(CustomerActivity).one()
         task_row = independent.query(FollowUpTask).one()
+        assert receipt["public_id"] == task_row.public_id
         assert independent.query(FollowUpTaskEvent).one().task_id == task_row.id
         assert task_row.title == "发方案" and task_row.due_at == datetime.fromisoformat(expected)
         assert (task_row.due_at_text, task_row.due_at_granularity, task_row.due_at_timezone) == (
@@ -1462,3 +1480,178 @@ async def test_signed_confirmation_date_correction_replays_once_and_retires_old_
         assert activity.source_content == original + "\n" + correction
         assert activity.submission_fingerprint == command["fingerprint"]
         assert activity.effectiveness_score == 78
+
+
+def test_activity_edit_changes_only_typed_business_fields(db):
+    from app.services.assistant.activity_edit import (
+        activity_edit_time,
+        apply_activity_edits,
+        editable_activity_fields,
+    )
+
+    _, _, draft = prepared(db)
+    original = draft.model_dump(mode="json")
+    contacts = {"internal": ["李经理"], "customer": ["王总"]}
+    edited, changed = apply_activity_edits(
+        draft,
+        {
+            "communication_time": "2026-11-20T14:00",
+            "channel_kind": "WECHAT_FOLLOW_UP",
+            "participants": contacts,
+            "summary": "客户已确认通过验收",
+            "next_action": "发送验收报告",
+            "next_follow_time": "2026-12-01",
+        },
+    )
+    assert changed
+    assert draft.model_dump(mode="json") == original
+    assert edited.customer == draft.customer
+    assert edited.source_segments == draft.source_segments
+    assert edited.source_records == draft.source_records
+    assert edited.content_json["customer_feedback"] == draft.content_json["customer_feedback"]
+    assert edited.quality_score == draft.quality_score
+    assert edited.channel_source == "user"
+    assert edited.content.status == edited.next_action.status == edited.next_follow_time.status == "ACCEPTED"
+    assert activity_edit_time(edited, "communication_time") == (datetime(2026, 11, 20, 14), "DATETIME")
+    assert activity_edit_time(edited, "next_follow_time") == (datetime(2026, 12, 1), "DATE")
+    fields = editable_activity_fields(edited)
+    assert fields["participants"] == contacts
+    assert fields["summary"] == "客户已确认通过验收"
+    assert fields["communication_time"] == "2026-11-20T14:00:00"
+    contacts["customer"].append("另一个名字")
+    assert editable_activity_fields(edited)["participants"]["customer"] == ["王总"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("customer", "其他客户"),
+        ("quality_score", 100),
+        ("execution_status", "COMMITTED"),
+        ("next_follow_time", "2026-02-30"),
+        ("communication_time", 20261120),
+        ("participants", {"customer": [True]}),
+        ("channel_kind", "ONLINE_MEETING"),
+        ("summary", "x" * 301),
+    ],
+)
+def test_activity_edit_rejects_invalid_or_frozen_fields_atomically(db, field, value):
+    from app.services.assistant.activity_edit import ActivityEditValidationError, apply_activity_edits
+
+    _, _, draft = prepared(db)
+    original = draft.model_dump(mode="json")
+    with pytest.raises(ActivityEditValidationError) as caught:
+        apply_activity_edits(draft, {"summary": "其他摘要", field: value})
+    assert caught.value.field == field
+    assert draft.model_dump(mode="json") == original
+
+
+def test_activity_edit_ignores_unchanged_fields_in_a_material_submission(db):
+    from app.services.assistant.activity_edit import apply_activity_edits, editable_activity_fields
+
+    _, _, draft = prepared(db)
+    values = {key: value for key, value in editable_activity_fields(draft).items() if value is not None}
+    no_op, changed = apply_activity_edits(draft, values)
+    assert not changed and no_op is draft
+
+    edited, changed = apply_activity_edits(draft, {**values, "next_action": "发送更正的验收报告"})
+    assert changed and edited.next_action.status == "ACCEPTED"
+    assert edited.content == draft.content
+    assert edited.next_follow_time == draft.next_follow_time
+    assert edited.channel_status == draft.channel_status
+
+
+def test_activity_edit_clears_an_existing_date_without_rewriting_evidence(db):
+    from app.services.assistant.activity_edit import activity_edit_time, apply_activity_edits, editable_activity_fields
+
+    _, _, draft = prepared(db)
+    edited, changed = apply_activity_edits(draft, {"next_follow_time": "2026-11-23T00:00"})
+    assert changed and activity_edit_time(edited, "next_follow_time") == (datetime(2026, 11, 23), "DATETIME")
+    same, changed = apply_activity_edits(edited, {"next_follow_time": "2026-11-23T00:00:00"})
+    assert not changed and same is edited
+    cleared, changed = apply_activity_edits(edited, {"next_follow_time": " "})
+    assert changed
+    assert activity_edit_time(cleared, "next_follow_time") == (None, "UNKNOWN")
+    assert editable_activity_fields(cleared)["next_follow_time"] is None
+    assert cleared.next_follow_time.status == "EXPLICITLY_NONE"
+    assert cleared.source_segments == draft.source_segments
+
+
+def test_activity_edit_meeting_summary_and_next_step_preserve_structured_minutes(db):
+    from app.services.assistant.activity_edit import apply_activity_edits, editable_activity_fields
+
+    _, _, draft = prepared(db)
+    draft.channel_kind = "ONLINE_MEETING"
+    draft.content_json = {
+        "meeting_subject": "项目周会",
+        "key_minutes": ["已完成验收", "预算仍待审批"],
+        "next_step_summary": "发报告",
+        "action_items": [{"owner": "销售", "action": "发报告"}],
+    }
+    edited, changed = apply_activity_edits(draft, {"summary": "验收完成，等待预算审批", "next_action": None})
+    assert changed
+    assert editable_activity_fields(edited)["summary"] == "验收完成，等待预算审批"
+    assert editable_activity_fields(edited)["next_action"] is None
+    assert edited.content_json["key_minutes"] == draft.content_json["key_minutes"]
+    assert edited.content_json["action_items"] == draft.content_json["action_items"]
+
+
+@pytest.mark.asyncio
+async def test_restoring_frozen_activity_replaces_only_the_action_id(db):
+    from app.models.assistant import AssistantWaitingType
+    from app.services.assistant.confirmation import restore_activity_confirmation
+    from app.services.assistant.task_state import TaskUpdate, apply_task_update
+
+    session, _, _ = db
+    outcome, _, _ = await freeze(db)
+    task = outcome.task
+    original = outcome.reply.waiting
+    original_draft = json.loads(json.dumps(task.draft_json))
+    original_authority = json.loads(json.dumps(task.authority_json))
+    original_version = task.version
+    seen_actions = {original.action_id}
+    waiting = original
+    for action_name in ("cancel_activity_edit", "no_change_activity_edit"):
+        edit = apply_task_update(
+            session,
+            task,
+            TaskUpdate(
+                waiting=waiting.model_copy(update={
+                    "type": AssistantWaitingType.CONFIRMATION_EDIT,
+                    "confirmation_payload": None,
+                    "action_id": None,
+                    "fingerprint": None,
+                    "form_revision": 1,
+                }),
+                preserve_version=True,
+                action_actor="USER",
+                action_name="request_activity_edit",
+            ),
+        ).task
+        seen_actions.add(edit.waiting_json["action_id"])
+        task, waiting = restore_activity_confirmation(session, edit, action_name=action_name)
+
+        assert task.version == waiting.expected_version == original_version
+        assert task.draft_json == original_draft
+        assert task.authority_json == original_authority
+        assert waiting.action_id not in seen_actions
+        seen_actions.add(waiting.action_id)
+        assert waiting.fingerprint == original.fingerprint
+        assert waiting.confirmation_payload == original.confirmation_payload
+    assert session.query(CustomerActivity).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_unbound_direct_confirmation(db):
+    from app.services.assistant.confirmation import restore_activity_confirmation
+
+    session, _, _ = db
+    outcome, _, _ = await freeze(db)
+    task = outcome.task
+    original_waiting = task.waiting_json
+    task.waiting_json = {
+        **original_waiting,
+        "payload": {key: value for key, value in original_waiting["payload"].items() if key != "fingerprint"},
+    }
+    with pytest.raises(ValueError, match="confirmation does not match the frozen activity"):
+        restore_activity_confirmation(session, task, action_name="no_change_activity_edit")

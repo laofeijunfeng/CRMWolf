@@ -1,10 +1,8 @@
 """SQLAlchemy-backed LangGraph checkpointer for CRMWolf workflows."""
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -17,6 +15,11 @@ from langgraph.checkpoint.base import (
 from sqlalchemy import Engine, text
 
 from app.core.database import engine
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Iterator, Sequence
+
+    from langchain_core.runnables import RunnableConfig
 
 WRITES_IDX_MAP = {"__error__": -1, "__scheduled__": -2, "__interrupt__": -3, "__resume__": -4}
 
@@ -88,7 +91,7 @@ class SQLAlchemyCheckpointSaver(BaseCheckpointSaver[str]):
         super().__init__()
         self.engine = db_engine or engine
 
-    def _dump(self, value: Any) -> tuple[str, bytes]:
+    def _dump(self, value: object) -> tuple[str, bytes]:
         return self.serde.dumps_typed(value)
 
     def _load(self, serde_type: str, blob: bytes) -> Any:
@@ -318,9 +321,12 @@ class SQLAlchemyCheckpointSaver(BaseCheckpointSaver[str]):
 
     def delete_thread(self, thread_id: str) -> None:
         with self.engine.begin() as conn:
-            conn.execute(text("DELETE FROM crm_langgraph_checkpoint_writes WHERE thread_id = :thread_id"), {"thread_id": thread_id})
-            conn.execute(text("DELETE FROM crm_langgraph_checkpoint_blobs WHERE thread_id = :thread_id"), {"thread_id": thread_id})
-            conn.execute(text("DELETE FROM crm_langgraph_checkpoints WHERE thread_id = :thread_id"), {"thread_id": thread_id})
+            conn.execute(text("DELETE FROM crm_langgraph_checkpoint_writes WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id})
+            conn.execute(text("DELETE FROM crm_langgraph_checkpoint_blobs WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id})
+            conn.execute(text("DELETE FROM crm_langgraph_checkpoints WHERE thread_id = :thread_id"),
+                {"thread_id": thread_id})
 
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         return self.get_tuple(config)

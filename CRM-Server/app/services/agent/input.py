@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +18,7 @@ class AgentChannelContext:
     """Trusted channel metadata applied after typed input validation."""
 
     source: str = "web"
-    provider: Optional[str] = None
+    provider: str | None = None
     input_kind: AgentInputKind = AgentInputKind.TEXT
     metadata: dict[str, object] = field(default_factory=dict)
 
@@ -28,7 +27,7 @@ class AgentTurnInput(BaseModel):
     kind: AgentInputKind = AgentInputKind.TEXT
     content: str = ""
     source: str = "web"
-    provider: Optional[str] = None
+    provider: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
 
     @classmethod
@@ -37,9 +36,9 @@ class AgentTurnInput(BaseModel):
         content: str,
         *,
         source: str = "web",
-        provider: Optional[str] = None,
-        metadata: Optional[dict[str, object]] = None,
-    ) -> "AgentTurnInput":
+        provider: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> AgentTurnInput:
         return cls(
             kind=AgentInputKind.TEXT,
             content=content,
@@ -53,9 +52,9 @@ class AgentTurnInput(BaseModel):
         cls,
         *,
         source: str = "system",
-        provider: Optional[str] = None,
-        metadata: Optional[dict[str, object]] = None,
-    ) -> "AgentTurnInput":
+        provider: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> AgentTurnInput:
         return cls(
             kind=AgentInputKind.CONFIRM,
             content="确认",
@@ -69,9 +68,9 @@ class AgentTurnInput(BaseModel):
         cls,
         *,
         source: str = "system",
-        provider: Optional[str] = None,
-        metadata: Optional[dict[str, object]] = None,
-    ) -> "AgentTurnInput":
+        provider: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> AgentTurnInput:
         return cls(
             kind=AgentInputKind.REJECT,
             content="取消",

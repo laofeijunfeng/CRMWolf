@@ -1,45 +1,46 @@
 """
 权限服务模块
-处理权限相关的业务逻辑，包括缓存管理
+处理权限相关的业务逻辑\uff0c包括缓存管理
 """
-from typing import List, Optional
+import json
+
 from sqlalchemy.orm import Session
+
 from app.core.redis import get_redis_client
 from app.models.permission import Permission
-from app.models.user_role import UserRole
 from app.models.role_permission import RolePermission
-import json
+from app.models.user_role import UserRole
 
 
 class PermissionService:
     """权限服务类"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cache_prefix = "user_permissions"
         self.cache_ttl = 3600  # 1小时
 
-    def get_cache_key(self, user_id: int, team_id: Optional[int] = None) -> str:
+    def get_cache_key(self, user_id: int, team_id: int | None = None) -> str:
         """
         生成用户权限缓存键
 
         Args:
             user_id: 用户ID
-            team_id: 团队ID（可选，不传则缓存所有团队权限）
+            team_id: 团队ID\uff08可选\uff0c不传则缓存所有团队权限\uff09
         """
         if team_id is not None:
             return f"{self.cache_prefix}:{user_id}:team:{team_id}"
         return f"{self.cache_prefix}:{user_id}"
 
-    def clear_user_permissions_cache(self, user_id: int, team_id: Optional[int] = None) -> bool:
+    def clear_user_permissions_cache(self, user_id: int, team_id: int | None = None) -> bool:
         """
         清除用户权限缓存
 
-        当用户的角色或角色权限发生变更时，应调用此方法清除缓存
+        当用户的角色或角色权限发生变更时\uff0c应调用此方法清除缓存
         确保下次获取权限时从数据库重新加载最新数据
 
         Args:
             user_id: 用户ID
-            team_id: 团队ID（可选，不传则清除所有团队缓存）
+            team_id: 团队ID\uff08可选\uff0c不传则清除所有团队缓存\uff09
 
         Returns:
             bool: 是否成功清除缓存
@@ -57,15 +58,15 @@ class PermissionService:
                     redis_client.delete(*keys)
             return True
         except Exception as e:
-            print(f"清除用户权限缓存失败: {str(e)}")
+            print(f"清除用户权限缓存失败: {e!s}")
             return False
 
     def clear_all_permissions_cache(self) -> bool:
         """
         清除所有用户权限缓存
 
-        当系统权限结构发生重大变更时使用（慎用）
-        例如：权限迁移、角色权限批量调整等
+        当系统权限结构发生重大变更时使用\uff08慎用\uff09
+        例如\uff1a权限迁移、角色权限批量调整等
 
         Returns:
             bool: 是否成功清除缓存
@@ -78,21 +79,21 @@ class PermissionService:
                 redis_client.delete(*keys)
             return True
         except Exception as e:
-            print(f"清除所有权限缓存失败: {str(e)}")
+            print(f"清除所有权限缓存失败: {e!s}")
             return False
 
-    def get_user_permissions_from_db(self, db: Session, user_id: int, team_id: Optional[int] = None) -> List[Permission]:
+    def get_user_permissions_from_db(self, db: Session, user_id: int, team_id: int | None = None) -> list[Permission]:
         """
-        从数据库获取用户的所有权限（合并去重）
+        从数据库获取用户的所有权限\uff08合并去重\uff09
 
-        权限合并策略：取并集（Union）
+        权限合并策略\uff1a取并集\uff08Union\uff09
         - 用户拥有其所有角色的权限集合
         - 相同的权限只保留一份
 
         Args:
             db: 数据库会话
             user_id: 用户ID
-            team_id: 团队ID（可选，不传则返回用户在所有团队的权限）
+            team_id: 团队ID\uff08可选\uff0c不传则返回用户在所有团队的权限\uff09
 
         Returns:
             List[Permission]: 用户的权限列表
@@ -115,16 +116,16 @@ class PermissionService:
         self,
         db: Session,
         user_id: int,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         use_cache: bool = True
-    ) -> tuple[List[Permission], bool]:
+    ) -> tuple[list[Permission], bool]:
         """
-        获取用户权限（支持缓存）
+        获取用户权限\uff08支持缓存\uff09
 
         Args:
             db: 数据库会话
             user_id: 用户ID
-            team_id: 团队ID（可选）
+            team_id: 团队ID\uff08可选\uff09
             use_cache: 是否使用缓存
 
         Returns:
@@ -140,7 +141,6 @@ class PermissionService:
                 cached_data = redis_client.get(cache_key)
 
                 if cached_data:
-                    from app.schemas.permission import UserPermissionResponse
                     permissions_dict = json.loads(cached_data)
                     cached = True
 
@@ -157,7 +157,7 @@ class PermissionService:
                         for p in permissions_dict
                     ], True
             except Exception as e:
-                print(f"读取权限缓存失败: {str(e)}")
+                print(f"读取权限缓存失败: {e!s}")
 
         if not permissions:
             permissions = self.get_user_permissions_from_db(db, user_id, team_id)
@@ -184,17 +184,17 @@ class PermissionService:
                         json.dumps(permissions_dict, ensure_ascii=False)
                     )
                 except Exception as e:
-                    print(f"写入权限缓存失败: {str(e)}")
+                    print(f"写入权限缓存失败: {e!s}")
 
         return permissions, cached
 
-    def invalidate_user_cache_on_role_change(self, user_id: int, team_id: Optional[int] = None) -> None:
+    def invalidate_user_cache_on_role_change(self, user_id: int, team_id: int | None = None) -> None:
         """
         用户角色变更时清除缓存
 
         Args:
             user_id: 用户ID
-            team_id: 团队ID（可选）
+            team_id: 团队ID\uff08可选\uff09
         """
         self.clear_user_permissions_cache(user_id, team_id)
 
@@ -202,23 +202,23 @@ class PermissionService:
         """
         权限变更时清除所有缓存
 
-        当权限本身被修改或删除时，需要清除所有缓存
+        当权限本身被修改或删除时\uff0c需要清除所有缓存
         """
         self.clear_all_permissions_cache()
 
-    def invalidate_cache_on_role_permission_change(self, role_id: int, team_id: Optional[int] = None) -> bool:
+    def invalidate_cache_on_role_permission_change(self, role_id: int, team_id: int | None = None) -> bool:
         """
         角色权限变更时清除相关用户缓存
 
         Args:
             role_id: 角色ID
-            team_id: 团队ID（可选）
+            team_id: 团队ID\uff08可选\uff09
 
         Returns:
             bool: 是否成功清除缓存
         """
         try:
-            redis_client = get_redis_client()
+            get_redis_client()
 
             from app.core.database import get_db
 
@@ -237,7 +237,7 @@ class PermissionService:
             finally:
                 db.close()
         except Exception as e:
-            print(f"清除角色相关用户权限缓存失败: {str(e)}")
+            print(f"清除角色相关用户权限缓存失败: {e!s}")
             return False
 
 

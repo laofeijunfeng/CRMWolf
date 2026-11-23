@@ -1,6 +1,5 @@
 """CRUD helpers for IM bot integrations."""
 
-from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -21,7 +20,7 @@ class AgentChannelSessionCRUD:
         provider: str,
         chat_id: str,
         thread_id: str,
-        external_tenant_key: Optional[str],
+        external_tenant_key: str | None,
         session_create: AgentSessionCreate,
     ) -> AgentChannelSession:
         thread_id = thread_id or ""
@@ -65,7 +64,7 @@ class AgentChannelSessionCRUD:
         provider: str,
         chat_id: str,
         thread_id: str = "",
-    ) -> Optional[AgentChannelSession]:
+    ) -> AgentChannelSession | None:
         return (
             db.query(AgentChannelSession)
             .filter(
@@ -86,7 +85,7 @@ class AgentChannelSessionCRUD:
         user_id: int,
         provider: str,
         agent_session_id: int,
-    ) -> Optional[AgentChannelSession]:
+    ) -> AgentChannelSession | None:
         return (
             db.query(AgentChannelSession)
             .filter(
@@ -134,10 +133,10 @@ class IMInboundEventCRUD:
         *,
         provider: str,
         event_id: str,
-        message_id: Optional[str],
+        message_id: str | None,
         request_hash: str,
-        team_id: Optional[int],
-        raw_event: Optional[dict],
+        team_id: int | None,
+        raw_event: dict | None,
     ) -> tuple[IMInboundEvent, bool]:
         db_obj = IMInboundEvent(
             provider=provider,
@@ -170,14 +169,14 @@ class IMInboundEventCRUD:
         db_obj: IMInboundEvent,
         status: str,
         *,
-        response_message_id: Optional[str] = None,
-        agent_session_id: Optional[int] = None,
-        agent_interaction_type: Optional[str] = None,
-        confirmation_delivery_public_id: Optional[str] = None,
-        confirmation_case_public_id: Optional[str] = None,
-        agent_interaction_id: Optional[str] = None,
-        prompt_delivery_key: Optional[str] = None,
-        error_message: Optional[str] = None,
+        response_message_id: str | None = None,
+        agent_session_id: int | None = None,
+        agent_interaction_type: str | None = None,
+        confirmation_delivery_public_id: str | None = None,
+        confirmation_case_public_id: str | None = None,
+        agent_interaction_id: str | None = None,
+        prompt_delivery_key: str | None = None,
+        error_message: str | None = None,
         commit: bool = True,
     ) -> IMInboundEvent:
         db_obj.status = status
@@ -204,8 +203,8 @@ class IMInboundEventCRUD:
         *,
         provider: str,
         response_message_id: str,
-        team_id: Optional[int] = None,
-    ) -> Optional[IMInboundEvent]:
+        team_id: int | None = None,
+    ) -> IMInboundEvent | None:
         query = db.query(IMInboundEvent).filter(
             IMInboundEvent.provider == provider,
             IMInboundEvent.response_message_id == response_message_id,
@@ -221,7 +220,7 @@ class IMInboundEventCRUD:
         provider: str,
         team_id: int,
         confirmation_delivery_public_id: str,
-    ) -> Optional[IMInboundEvent]:
+    ) -> IMInboundEvent | None:
         return (
             db.query(IMInboundEvent)
             .filter(

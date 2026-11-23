@@ -1,7 +1,8 @@
-import logging
-import httpx
 import inspect
-from typing import Optional, Dict, Any
+import logging
+
+import httpx
+
 from app.constants.business_types import BusinessType
 from app.core.config import get_settings
 from app.schemas.user import FeishuTokenResponse, FeishuUserInfo
@@ -9,10 +10,10 @@ from app.schemas.user import FeishuTokenResponse, FeishuUserInfo
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# DEPRECATED: 旧飞书通知服务，仅保留兼容历史调用。新的团队 OAuth 绑定和个人消息通知
+# DEPRECATED: 旧飞书通知服务,仅保留兼容历史调用。新的团队 OAuth 绑定和个人消息通知
 # 请使用 app.services.feishu_notification.feishu_notification_service。
 
-# 单据类型展示名 —— 通知文案标题里 fallback 用，避免硬编码"合同"
+# 单据类型展示名 —— 通知文案标题里 fallback 用,避免硬编码"合同"
 _ENTITY_TYPE_LABEL = {
     BusinessType.CONTRACT: "合同",
     BusinessType.PAYMENT: "回款登记",
@@ -38,17 +39,17 @@ _REMINDER_HEADER_TEMPLATE = {
 }
 
 
-def _entity_label(entity_type: Optional[str]) -> str:
-    """取单据类型中文标签；未知类型回退 '单据'。"""
+def _entity_label(entity_type: str | None) -> str:
+    """取单据类型中文标签\uff1b未知类型回退 '单据'。"""
     if not entity_type:
         return "合同"
     return _ENTITY_TYPE_LABEL.get(entity_type, "单据")
 
 
 def _approval_header_template(
-    entity_type: Optional[str],
+    entity_type: str | None,
     status: str = "pending",
-    reminder_level: Optional[str] = None,
+    reminder_level: str | None = None,
 ) -> str:
     if status == "approved":
         return "green"
@@ -62,13 +63,13 @@ def _approval_header_template(
 
 
 def _resolve_entity(
-    entity_type: Optional[str],
-    entity_name: Optional[str],
-    business_id: Optional[int],
-    contract_name: Optional[str],
-    contract_id: Optional[int],
-) -> tuple[str, Optional[str], Optional[int]]:
-    """feishu_service 内部别名解析：contract_name/contract_id 回退到新签名，
+    entity_type: str | None,
+    entity_name: str | None,
+    business_id: int | None,
+    contract_name: str | None,
+    contract_id: int | None,
+) -> tuple[str, str | None, int | None]:
+    """feishu_service 内部别名解析\uff1acontract_name/contract_id 回退到新签名\uff0c
     entity_type 缺省视为 CONTRACT。"""
     if entity_name is None and contract_name is not None:
         entity_name = contract_name
@@ -80,7 +81,7 @@ def _resolve_entity(
 
 
 class FeishuService:
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = "https://open.feishu.cn"
         self.app_id = settings.FEISHU_APP_ID if hasattr(settings, 'FEISHU_APP_ID') else ""
         self.app_secret = settings.FEISHU_APP_SECRET if hasattr(settings, 'FEISHU_APP_SECRET') else ""
@@ -173,16 +174,16 @@ class FeishuService:
         user_id: str,
         title: str,
         content: str,
-        button_url: Optional[str] = None,
-        tenant_access_token: Optional[str] = None,
+        button_url: str | None = None,
+        tenant_access_token: str | None = None,
         header_template: str = "blue",
     ) -> bool:
-        """发送飞书消息卡片（支持按钮链接）
+        """发送飞书消息卡片\uff08支持按钮链接\uff09
 
         Args:
-            user_id: 飞书 Open ID（参数名沿用历史兼容）
+            user_id: 飞书 Open ID\uff08参数名沿用历史兼容\uff09
             title: 卡片标题
-            content: 卡片内容（lark_md 格式）
+            content: 卡片内容\uff08lark_md 格式\uff09
             button_url: 可选按钮跳转链接
             tenant_access_token: 租户访问令牌
             header_template: 卡片头部颜色模板
@@ -205,7 +206,7 @@ class FeishuService:
                 }
             ]
 
-            # 添加按钮（如果有）
+            # 添加按钮(如果有)
             if button_url:
                 elements.append({
                     "tag": "action",
@@ -257,14 +258,14 @@ class FeishuService:
 
                 return True
         except Exception as e:
-            print(f"飞书发送消息异常: {str(e)}")
+            print(f"飞书发送消息异常: {e!s}")
             return False
 
     async def send_text_message(
         self,
         user_id: str,
         text: str,
-        tenant_access_token: Optional[str] = None
+        tenant_access_token: str | None = None
     ) -> bool:
         try:
             if not tenant_access_token:
@@ -295,7 +296,7 @@ class FeishuService:
                 
                 return True
         except Exception as e:
-            print(f"飞书发送消息异常: {str(e)}")
+            print(f"飞书发送消息异常: {e!s}")
             return False
 
     async def _send_message_card_compat(
@@ -303,11 +304,11 @@ class FeishuService:
         user_id: str,
         title: str,
         content: str,
-        button_url: Optional[str] = None,
+        button_url: str | None = None,
         *,
         header_template: str = "blue",
     ) -> bool:
-        """调用消息卡片发送器，并兼容历史 monkeypatch 的旧签名。"""
+        """调用消息卡片发送器\uff0c并兼容历史 monkeypatch 的旧签名。"""
         send_message_card = self.send_message_card
         try:
             signature = inspect.signature(send_message_card)
@@ -339,7 +340,7 @@ class FeishuService:
 **联系人**: {contact_name}
 **联系电话**: {contact_phone}
 
-请及时跟进该线索！"""
+请及时跟进该线索\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -349,9 +350,9 @@ class FeishuService:
         lead_name: str
     ) -> bool:
         title = "✅ 线索领取成功"
-        content = f"""您已成功领取线索：**{lead_name}**
+        content = f"""您已成功领取线索\uff1a**{lead_name}**
 
-请尽快跟进，祝您成交！"""
+请尽快跟进\uff0c祝您成交\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -367,7 +368,7 @@ class FeishuService:
 **线索名称**: {lead_name}
 **未跟进天数**: {days}天
 
-请尽快联系客户！"""
+请尽快联系客户\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -378,12 +379,12 @@ class FeishuService:
         contact_name: str
     ) -> bool:
         title = "🎉 新客户创建成功"
-        content = f"""客户创建成功！
+        content = f"""客户创建成功\uff01
 
 **客户名称**: {account_name}
 **主联系人**: {contact_name}
 
-请及时跟进客户！"""
+请及时跟进客户\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -393,11 +394,11 @@ class FeishuService:
         account_name: str
     ) -> bool:
         title = "🎊 恭喜赢单"
-        content = f"""恭喜您成功赢单！
+        content = f"""恭喜您成功赢单\uff01
 
 **客户名称**: {account_name}
 
-太棒了，继续保持！"""
+太棒了\uff0c继续保持\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -411,7 +412,7 @@ class FeishuService:
 
 **客户名称**: {account_name}
 
-请总结经验，继续加油！"""
+请总结经验\uff0c继续加油\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -425,7 +426,7 @@ class FeishuService:
 
 **客户名称**: {account_name}
 
-请及时跟进！"""
+请及时跟进\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -443,7 +444,7 @@ class FeishuService:
 **客户名称**: {customer_name}
 **预计金额**: ¥{expected_amount:,.2f}
 
-请及时跟进！"""
+请及时跟进\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -461,7 +462,7 @@ class FeishuService:
 **当前阶段**: {stage_name}
 **赢单概率**: {win_probability}%
 
-请继续推进！"""
+请继续推进\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -473,13 +474,13 @@ class FeishuService:
         customer_name: str
     ) -> bool:
         title = "🎊 恭喜赢单"
-        content = f"""恭喜您成功赢单！
+        content = f"""恭喜您成功赢单\uff01
 
 **商机名称**: {opportunity_name}
 **客户名称**: {customer_name}
 **实际金额**: ¥{actual_amount:,.2f}
 
-太棒了，继续保持！"""
+太棒了\uff0c继续保持\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -506,9 +507,9 @@ class FeishuService:
         customer_name: str
     ) -> bool:
         title = "✅ 客户领取成功"
-        content = f"""您已成功领取客户：**{customer_name}**
+        content = f"""您已成功领取客户\uff1a**{customer_name}**
 
-请尽快跟进，祝您成交！"""
+请尽快跟进\uff0c祝您成交\uff01"""
         
         return await self.send_message_card(user_id, title, content)
 
@@ -526,26 +527,26 @@ class FeishuService:
 **客户名称**: {customer_name}
 **输单原因**: {loss_reason}
 
-请总结经验，继续加油！"""
+请总结经验\uff0c继续加油\uff01"""
         
         return await self.send_message_card(user_id, title, content)
     
     async def notify_approval_pending(
         self,
         user_id: str,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
         flow_name: str = "",
         node_name: str = "",
         *,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
-        business_id: Optional[int] = None,
-        contract_id: Optional[int] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
+        business_id: int | None = None,
+        contract_id: int | None = None,
     ) -> bool:
-        """通过飞书 API 发送审批待处理通知（A8 泛化）。
+        """通过飞书 API 发送审批待处理通知\uff08A8 泛化\uff09。
 
         旧合同调用方仍可按 `(user_id, contract_name, flow_name, node_name)`
-        位置参数调用；新调用方传 `entity_type / entity_name / business_id`
+        位置参数调用\uff1b新调用方传 `entity_type / entity_name / business_id`
         关键字参数。两种形式内部统一解析到泛化字段。
         """
         entity_type, entity_name, business_id = _resolve_entity(
@@ -559,9 +560,9 @@ class FeishuService:
 **审批流程**: {flow_name}
 **当前节点**: {node_name}
 
-请及时处理，避免影响业务进度。"""
+请及时处理\uff0c避免影响业务进度。"""
 
-        # 审批通知：跳转到审批中心（而非单据详情页）
+        # 审批通知:跳转到审批中心(而非单据详情页)
         button_url = self._approval_center_url(entity_type)
 
         return await self._send_message_card_compat(
@@ -575,14 +576,14 @@ class FeishuService:
     async def notify_approval_approved(
         self,
         user_id: str,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
         *,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
-        business_id: Optional[int] = None,
-        contract_id: Optional[int] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
+        business_id: int | None = None,
+        contract_id: int | None = None,
     ) -> bool:
-        """通过飞书 API 发送审批通过通知（A8 泛化）。"""
+        """通过飞书 API 发送审批通过通知\uff08A8 泛化\uff09。"""
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
         )
@@ -592,9 +593,9 @@ class FeishuService:
 
 **{label}名称**: {entity_name}
 
-{label}已审批通过，可以进行后续操作。"""
+{label}已审批通过\uff0c可以进行后续操作。"""
 
-        # 审批通知：跳转到审批中心
+        # 审批通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self._send_message_card_compat(
@@ -608,15 +609,15 @@ class FeishuService:
     async def notify_approval_rejected(
         self,
         user_id: str,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
         reject_reason: str = "",
         *,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
-        business_id: Optional[int] = None,
-        contract_id: Optional[int] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
+        business_id: int | None = None,
+        contract_id: int | None = None,
     ) -> bool:
-        """通过飞书 API 发送审批拒绝通知（A8 泛化）。"""
+        """通过飞书 API 发送审批拒绝通知\uff08A8 泛化\uff09。"""
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
         )
@@ -629,7 +630,7 @@ class FeishuService:
 
 请根据审批意见修改后重新提交。"""
 
-        # 审批通知：跳转到审批中心
+        # 审批通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self._send_message_card_compat(
@@ -647,7 +648,7 @@ class FeishuService:
         webhook_url: str,
         title: str,
         content: str,
-        button_url: Optional[str] = None,
+        button_url: str | None = None,
         header_template: str = "blue",
     ) -> bool:
         """通过飞书群聊机器人 Webhook 发送消息卡片
@@ -655,12 +656,12 @@ class FeishuService:
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
             title: 消息卡片标题
-            content: 消息卡片内容（支持 lark_md 格式）
+            content: 消息卡片内容\uff08支持 lark_md 格式\uff09
             button_url: 可选按钮跳转链接
             header_template: 卡片头部颜色模板
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         try:
             elements = [
@@ -673,7 +674,7 @@ class FeishuService:
                 }
             ]
 
-            # 添加按钮（如果有）
+            # 添加按钮(如果有)
             if button_url:
                 elements.append({
                     "tag": "action",
@@ -725,14 +726,14 @@ class FeishuService:
 
                 return True
         except Exception as e:
-            logger.error(f"飞书 Webhook 发送异常: {str(e)}")
+            logger.error(f"飞书 Webhook 发送异常: {e!s}")
             return False
 
-    def _entity_detail_url(self, entity_type: str, business_id: Optional[int]) -> Optional[str]:
+    def _entity_detail_url(self, entity_type: str, business_id: int | None) -> str | None:
         """构造业务单据详情页跳转链接。
 
-        旧合同沿用 `/contracts/{id}`；PAYMENT / INVOICE / LICENSE 走各自的模块路由。
-        business_id 缺省或前端基址未配 → 返回 None（无按钮）。
+        旧合同沿用 `/contracts/{id}`\uff1bPAYMENT / INVOICE / LICENSE 走各自的模块路由。
+        business_id 缺省或前端基址未配 → 返回 None\uff08无按钮\uff09。
         """
         frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
         if not frontend_url or business_id is None:
@@ -748,23 +749,23 @@ class FeishuService:
         segment = path_map.get(entity_type, "contracts")
         return f"{frontend_url}/{segment}/{business_id}"
 
-    def _approval_center_url(self, business_type: Optional[str] = None) -> Optional[str]:
+    def _approval_center_url(self, business_type: str | None = None) -> str | None:
         """构造审批中心跳转链接。
 
         Args:
-            business_type: 可选业务类型筛选（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            business_type: 可选业务类型筛选\uff08CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY\uff09
 
         Returns:
-            审批中心链接，如 {FRONTEND_URL}/approvals?status=PENDING&business_type=PAYMENT
+            审批中心链接\uff0c如 {FRONTEND_URL}/approvals?status=PENDING&business_type=PAYMENT
         """
         frontend_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else ""
         if not frontend_url:
             return None
 
-        # 基础路径：审批中心，筛选待处理状态
+        # 基础路径:审批中心,筛选待处理状态
         url = f"{frontend_url}/approvals?status=PENDING"
 
-        # 可选：按业务类型筛选
+        # 可选:按业务类型筛选
         if business_type:
             url += f"&business_type={business_type}"
 
@@ -773,34 +774,34 @@ class FeishuService:
     async def notify_approval_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         flow_name: str = "",
         node_name: str = "",
         approver_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批待处理通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             flow_name: 审批流程名称
             node_name: 当前审批节点名称
             approver_name: 审批人姓名
-            business_id: 业务单据ID（用于生成跳转链接）
+            business_id: 业务单据ID\uff08用于生成跳转链接\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -814,9 +815,9 @@ class FeishuService:
 **当前节点**: {node_name}
 **审批人**: {approver_name}
 
-请及时处理，避免影响业务进度。"""
+请及时处理\uff0c避免影响业务进度。"""
 
-        # 审批通知：跳转到审批中心（而非单据详情页）
+        # 审批通知:跳转到审批中心(而非单据详情页)
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(
@@ -830,28 +831,28 @@ class FeishuService:
     async def notify_approval_approved_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
-        business_id: Optional[int] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批通过通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
-            business_id: 业务单据ID（用于生成跳转链接）
+            business_id: 业务单据ID\uff08用于生成跳转链接\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -862,9 +863,9 @@ class FeishuService:
 
 **{label}名称**: {entity_name}
 
-{label}已审批通过，可以进行后续操作。"""
+{label}已审批通过\uff0c可以进行后续操作。"""
 
-        # 审批通知：跳转到审批中心
+        # 审批通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(
@@ -878,30 +879,30 @@ class FeishuService:
     async def notify_approval_rejected_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         reject_reason: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批拒绝通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             reject_reason: 拒绝原因
-            business_id: 业务单据ID（用于生成跳转链接）
+            business_id: 业务单据ID\uff08用于生成跳转链接\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -915,7 +916,7 @@ class FeishuService:
 
 请根据审批意见修改后重新提交。"""
 
-        # 审批通知：跳转到审批中心
+        # 审批通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(
@@ -929,30 +930,30 @@ class FeishuService:
     async def notify_approval_cancelled_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         submitter_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批撤回通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             submitter_name: 撤回人姓名
-            business_id: 业务单据ID（用于生成跳转链接）
+            business_id: 业务单据ID\uff08用于生成跳转链接\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         entity_type, entity_name, business_id = _resolve_entity(
             entity_type, entity_name, business_id, contract_name, contract_id
@@ -964,9 +965,9 @@ class FeishuService:
 **{label}名称**: {entity_name}
 **撤回人**: {submitter_name}
 
-提交人已撤回审批，您无需继续处理此审批任务。"""
+提交人已撤回审批\uff0c您无需继续处理此审批任务。"""
 
-        # 审批通知：跳转到审批中心
+        # 审批通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(
@@ -982,29 +983,29 @@ class FeishuService:
     async def notify_approval_reminder(
         self,
         user_id: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         waiting_hours: int = 0,
         node_name: str = "",
         reminder_level: str = "light",
         *,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
     ) -> bool:
         """通过飞书 API 发送审批催办通知给审批人
 
-        泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name 替代 contract_name\uff08旧别名仍兼容\uff09。
 
         Args:
-            user_id: 审批人飞书 Open ID（参数名沿用历史兼容）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            user_id: 审批人飞书 Open ID\uff08参数名沿用历史兼容\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
             node_name: 当前审批节点名称
-            reminder_level: 提醒级别（light/medium/strong）
+            reminder_level: 提醒级别\uff08light/medium/strong\uff09
             contract_name: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         level_icons = {
             "light": "⏰",
@@ -1025,7 +1026,7 @@ class FeishuService:
         )
         label = _entity_label(entity_type)
 
-        title = f"{icon} 审批催办通知（{level_text}）"
+        title = f"{icon} 审批催办通知\uff08{level_text}\uff09"
         content = f"""您有待处理的审批任务
 
 **{label}名称**: {entity_name}
@@ -1034,7 +1035,7 @@ class FeishuService:
 
 请尽快处理或联系提交人说明情况。"""
 
-        # 审批催办通知：跳转到审批中心
+        # 审批催办通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_message_card(
@@ -1052,36 +1053,36 @@ class FeishuService:
     async def notify_approval_reminder_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         waiting_hours: int = 0,
         node_name: str = "",
         approver_name: str = "",
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         reminder_level: str = "light",
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批催办通知
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             waiting_hours: 已等待小时数
             node_name: 当前审批节点名称
             approver_name: 审批人姓名
             business_id: 业务单据ID
-            reminder_level: 提醒级别（light/medium/strong）
+            reminder_level: 提醒级别\uff08light/medium/strong\uff09
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         level_icons = {
             "light": "⏰",
@@ -1102,7 +1103,7 @@ class FeishuService:
         )
         label = _entity_label(entity_type)
 
-        title = f"{icon} 审批催办通知（{level_text}）"
+        title = f"{icon} 审批催办通知\uff08{level_text}\uff09"
         content = f"""审批人 {approver_name} 有待处理的审批任务
 
 **{label}名称**: {entity_name}
@@ -1112,7 +1113,7 @@ class FeishuService:
 
 请尽快处理或联系提交人说明情况。"""
 
-        # 审批催办通知：跳转到审批中心
+        # 审批催办通知:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(
@@ -1130,33 +1131,33 @@ class FeishuService:
     async def notify_approval_timeout_alert(
         self,
         user_id: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         node_name: str = "",
         approver_name: str = "",
         waiting_hours: int = 0,
         reminder_level: str = "medium",
         is_admin: bool = False,
         *,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
     ) -> bool:
         """通过飞书 API 发送审批超时告警给提交人或管理员
 
-        泛化签名（A8）：entity_type / entity_name 替代 contract_name（旧别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name 替代 contract_name\uff08旧别名仍兼容\uff09。
 
         Args:
-            user_id: 提交人/管理员飞书 Open ID（参数名沿用历史兼容）
-            entity_type: 业务单据类型，缺省 CONTRACT
+            user_id: 提交人/管理员飞书 Open ID\uff08参数名沿用历史兼容\uff09
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             node_name: 当前审批节点名称
             approver_name: 当前审批人姓名
             waiting_hours: 已等待小时数
-            reminder_level: 提醒级别（medium/strong）
+            reminder_level: 提醒级别\uff08medium/strong\uff09
             is_admin: 是否通知管理员
             contract_name: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         level_icons = {
             "medium": "⚠️",
@@ -1176,7 +1177,7 @@ class FeishuService:
         label = _entity_label(entity_type)
 
         if is_admin:
-            title = f"{icon} 审批超时告警（管理员）"
+            title = f"{icon} 审批超时告警\uff08管理员\uff09"
             content = f"""审批任务超时告警
 
 **{label}名称**: {entity_name}
@@ -1184,7 +1185,7 @@ class FeishuService:
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
 
-作为管理员，请关注此审批进度，必要时介入处理。"""
+作为管理员\uff0c请关注此审批进度\uff0c必要时介入处理。"""
         else:
             title = f"{icon} 您的审批任务等待超时"
             content = f"""您的审批任务等待超时
@@ -1194,11 +1195,11 @@ class FeishuService:
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
 
-您可以选择：
+您可以选择\uff1a
 → 联系审批人催办
-→ 撤回审批，修改后重新提交"""
+→ 撤回审批\uff0c修改后重新提交"""
 
-        # 审批超时告警：跳转到审批中心
+        # 审批超时告警:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_message_card(
@@ -1216,38 +1217,38 @@ class FeishuService:
     async def notify_approval_timeout_webhook(
         self,
         webhook_url: str,
-        entity_type: Optional[str] = None,
-        entity_name: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_name: str | None = None,
         node_name: str = "",
         approver_name: str = "",
         waiting_hours: int = 0,
-        business_id: Optional[int] = None,
+        business_id: int | None = None,
         reminder_level: str = "medium",
         is_admin: bool = False,
         *,
-        contract_name: Optional[str] = None,
-        contract_id: Optional[int] = None,
+        contract_name: str | None = None,
+        contract_id: int | None = None,
     ) -> bool:
         """通过 Webhook 发送审批超时告警
 
-        泛化签名（A8）：entity_type / entity_name / business_id 替代
-        contract_name / contract_id（旧合同别名仍兼容）。
+        泛化签名\uff08A8\uff09\uff1aentity_type / entity_name / business_id 替代
+        contract_name / contract_id\uff08旧合同别名仍兼容\uff09。
 
         Args:
             webhook_url: 飞书群聊机器人 Webhook URL
-            entity_type: 业务单据类型，缺省 CONTRACT
+            entity_type: 业务单据类型\uff0c缺省 CONTRACT
             entity_name: 业务单据展示名
             node_name: 当前审批节点名称
             approver_name: 当前审批人姓名
             waiting_hours: 已等待小时数
             business_id: 业务单据ID
-            reminder_level: 提醒级别（medium/strong）
+            reminder_level: 提醒级别\uff08medium/strong\uff09
             is_admin: 是否通知管理员
             contract_name: (已弃用) 旧合同别名
             contract_id: (已弃用) 旧合同别名
 
         Returns:
-            bool: 发送成功返回 True，失败返回 False
+            bool: 发送成功返回 True\uff0c失败返回 False
         """
         level_icons = {
             "medium": "⚠️",
@@ -1267,17 +1268,17 @@ class FeishuService:
         label = _entity_label(entity_type)
 
         if is_admin:
-            title = f"{icon} 审批超时告警（管理员 - {level_text}）"
-            content = f"""审批任务超时告警，请管理员关注
+            title = f"{icon} 审批超时告警\uff08管理员 - {level_text}\uff09"
+            content = f"""审批任务超时告警\uff0c请管理员关注
 
 **{label}名称**: {entity_name}
 **当前节点**: {node_name}
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
 
-作为管理员，请关注此审批进度，必要时介入处理。"""
+作为管理员\uff0c请关注此审批进度\uff0c必要时介入处理。"""
         else:
-            title = f"{icon} 审批超时通知（{level_text}）"
+            title = f"{icon} 审批超时通知\uff08{level_text}\uff09"
             content = f"""审批任务等待超时
 
 **{label}名称**: {entity_name}
@@ -1285,11 +1286,11 @@ class FeishuService:
 **当前审批人**: {approver_name}
 **已等待**: {waiting_hours}小时
 
-提交人可以选择：
+提交人可以选择\uff1a
 → 联系审批人催办
-→ 撤回审批，修改后重新提交"""
+→ 撤回审批\uff0c修改后重新提交"""
 
-        # 审批超时告警：跳转到审批中心
+        # 审批超时告警:跳转到审批中心
         button_url = self._approval_center_url(entity_type)
 
         return await self.send_webhook_message(

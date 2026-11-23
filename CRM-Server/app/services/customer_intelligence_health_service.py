@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.customer_context_answer_telemetry import CustomerContextAnswerTelemetry
 from app.models.customer_vector_document import CustomerVectorDocument
 from app.services.customer_qdrant_index_service import customer_qdrant_index_service
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 QUALITY_MIN_SAMPLE_SIZE = 5
 GROUNDED_RATE_DEGRADED_THRESHOLD = 0.55

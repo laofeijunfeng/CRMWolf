@@ -7,32 +7,19 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.core.exceptions import ConflictException
 from app.crud.customer import customer_crud
-from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
+from app.models.customer import Customer, CustomerProduct
+from app.models.product import Product
 from app.schemas.customer import CustomerUpdate
 
 
 @compiles(BigInteger, "sqlite")
 def _bigint_to_sqlite_int(element, compiler, **kwargs):  # noqa: ARG001
     return "INTEGER"
-
-
-@pytest.fixture(autouse=True)
-def _mock_progress_for_mocked_sessions(monkeypatch):
-    from app.crud import customer as customer_module
-
-    real_advance = customer_module.advance_eligible_progress
-
-    def advance(db, **kwargs):
-        if isinstance(db, Session):
-            return real_advance(db, **kwargs)
-
-    monkeypatch.setattr(customer_module, "advance_eligible_progress", advance)
 
 
 def test_customer_update_carries_expected_version_for_optimistic_locking() -> None:
@@ -49,7 +36,10 @@ def test_customer_update_rejects_invalid_expected_version() -> None:
 def test_customer_update_rejects_a_stale_version_before_mutating() -> None:
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = (
+        db.query.return_value.options.return_value.filter.return_value
+        .populate_existing.return_value.with_for_update.return_value
+    )
     locked_query.first.return_value = current
 
     with pytest.raises(ConflictException, match="已发生变化"):
@@ -62,7 +52,10 @@ def test_customer_update_rejects_a_stale_version_before_mutating() -> None:
 def test_customer_update_locks_and_updates_when_version_matches() -> None:
     db = MagicMock()
     current = SimpleNamespace(id=1, version=4, team_id=9, city="北京")
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = (
+        db.query.return_value.options.return_value.filter.return_value
+        .populate_existing.return_value.with_for_update.return_value
+    )
     locked_query.first.return_value = current
 
     updated = customer_crud.update(db, current, CustomerUpdate(city="上海", expected_version=4))
@@ -231,7 +224,7 @@ def test_update_customer_logs_both_submitted_source_fields(monkeypatch) -> None:
 
 def _sqlite_customer_sessions(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'customer-update-lock-refresh.db'}")
-    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerLegacySourceProgress.__table__])
+    Base.metadata.create_all(engine, tables=[Customer.__table__, CustomerProduct.__table__, Product.__table__])
     session_factory = sessionmaker(bind=engine, expire_on_commit=False)
     seed = session_factory()
     seed.add(
@@ -295,8 +288,12 @@ def test_customer_update_increments_version_once_for_combined_more_information_f
         status=0,
         license_type="TRIAL",
         license_expiry_date=None,
+        license_is_permanent=False,
     )
-    locked_query = db.query.return_value.filter.return_value.populate_existing.return_value.with_for_update.return_value
+    locked_query = (
+        db.query.return_value.options.return_value.filter.return_value
+        .populate_existing.return_value.with_for_update.return_value
+    )
     locked_query.first.return_value = current
     monkeypatch.setattr(
         "app.crud.customer.industry_crud.get_by_code_with_parent",

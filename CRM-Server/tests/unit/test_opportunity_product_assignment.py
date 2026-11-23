@@ -12,7 +12,6 @@ from app.core.database import Base
 from app.crud.opportunity import opportunity_crud
 from app.crud.product import product_crud
 from app.models.customer import Customer
-from app.models.customer_legacy_source_progress import CustomerLegacySourceProgress
 from app.models.opportunity import Opportunity, OpportunityProductModule
 from app.models.product import Product, ProductModule
 from app.models.team import Team
@@ -34,7 +33,7 @@ def db(tmp_path: Path):
         dbapi_connection.execute("PRAGMA foreign_keys=OFF")
 
     tables = [
-        Customer.__table__, CustomerLegacySourceProgress.__table__, Product.__table__,
+        Customer.__table__, Product.__table__,
         ProductModule.__table__, Opportunity.__table__, OpportunityProductModule.__table__,
         Team.__table__,
     ]
@@ -84,6 +83,7 @@ def test_assign_product_binds_selected_modules_and_rejects_foreign_modules(db):
     oa = product_crud.create(db, 1, ProductCreate(name="OA"), "u1")
     oa_base = oa.modules[0]
     opportunity = _opportunity(db)
+    initial_version = opportunity.version
 
     opportunity_crud.assign_product(
         db,
@@ -95,12 +95,13 @@ def test_assign_product_binds_selected_modules_and_rejects_foreign_modules(db):
 
     assert opportunity.product_id == crm.id
     assert [module.public_id for module in opportunity.selected_modules] == [addon.public_id]
-    revision = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one().eligible_revision
+    assert opportunity.version == initial_version + 1
     opportunity_crud.assign_product(
         db, opportunity, team_id=1, product_public_id=crm.public_id,
         module_public_ids=[addon.public_id, addon.public_id],
     )
-    assert db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one().eligible_revision == revision
+    assert opportunity.version == initial_version + 1
+    assert [module.public_id for module in opportunity.selected_modules] == [addon.public_id]
 
     with pytest.raises(ValueError, match="不属于所选产品"):
         opportunity_crud.assign_product(
@@ -113,12 +114,14 @@ def test_assign_product_binds_selected_modules_and_rejects_foreign_modules(db):
 
 def test_opportunity_update_advances_only_for_changed_business_fields(db):
     opportunity = _opportunity(db)
+    initial_version = opportunity.version
     opportunity_crud.update(db, opportunity, OpportunityUpdate(opportunity_name="新商机"))
-    progress = db.query(CustomerLegacySourceProgress).filter_by(team_id=1, customer_id=1).one()
-    assert progress.eligible_revision == 1
+    db.refresh(opportunity)
+    assert opportunity.opportunity_name == "新商机"
+    assert opportunity.version == initial_version + 1
     opportunity_crud.update(db, opportunity, OpportunityUpdate(opportunity_name="新商机"))
-    db.refresh(progress)
-    assert progress.eligible_revision == 1
+    db.refresh(opportunity)
+    assert opportunity.version == initial_version + 1
 
 
 

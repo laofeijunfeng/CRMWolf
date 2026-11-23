@@ -1,8 +1,9 @@
 """Unified IM entrypoint for Agent conversations."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, ClassVar
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.orm import Session
@@ -57,8 +58,8 @@ class IMAgentGateway:
     recency and latest-interaction inference are not routing authorities.
     """
 
-    confirmation_emojis = {"Get", "Yes", "CheckMark", "OK", "THUMBSUP", "DONE", "JIAYI", "LGTM"}
-    rejection_emojis = {"No", "CrossMark", "ThumbsDown", "MinusOne"}
+    confirmation_emojis: ClassVar[set[str]] = {"Get", "Yes", "CheckMark", "OK", "THUMBSUP", "DONE", "JIAYI", "LGTM"}
+    rejection_emojis: ClassVar[set[str]] = {"No", "CrossMark", "ThumbsDown", "MinusOne"}
 
     async def handle_text(
         self,
@@ -71,10 +72,10 @@ class IMAgentGateway:
         session_id: int,
         user_text: str,
         agent_content: str,
-        chat_id: Optional[str] = None,
-        thread_id: Optional[str] = None,
-        referenced_message_ids: Optional[Sequence[str]] = None,
-    ) -> Dict[str, Any]:
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+        referenced_message_ids: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
         del chat_id, thread_id  # Scope metadata is not an authority for continuation routing.
         referenced_ids = list(referenced_message_ids or [])
         reply_metadata = {
@@ -161,7 +162,7 @@ class IMAgentGateway:
         provider_event_id: str,
         response_message_id: str,
         emoji_type: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         intent = self.intent_from_emoji(emoji_type)
         if not intent:
             return None
@@ -204,7 +205,7 @@ class IMAgentGateway:
         )
         if not session_id:
             logger.info(
-                "IM 表情未命中精确机器人回复绑定，跳过: provider=%s message_id=%s", provider, response_message_id
+                "IM 表情未命中精确机器人回复绑定\uff0c跳过: provider=%s message_id=%s", provider, response_message_id
             )
             return None
         return await agent_im_conversation_service.handle_message(
@@ -227,7 +228,7 @@ class IMAgentGateway:
             session_id=session_id,
         )
 
-    def intent_from_emoji(self, emoji_type: str) -> Optional[str]:
+    def intent_from_emoji(self, emoji_type: str) -> str | None:
         if emoji_type in self.confirmation_emojis:
             return "confirm"
         if emoji_type in self.rejection_emojis:
@@ -355,7 +356,7 @@ class IMAgentGateway:
         user_id: int,
         provider: str,
         referenced_message_ids: Sequence[str],
-    ) -> Optional[int]:
+    ) -> int | None:
         if db is None:
             return None
         for message_id in referenced_message_ids:
@@ -375,7 +376,7 @@ class IMAgentGateway:
         target: IMConfirmationReplyTarget,
         *,
         provider: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
     ) -> AgentChannelContext:
         return AgentChannelContext(
             source="im",
@@ -399,7 +400,7 @@ class IMAgentGateway:
         user_id: int,
         provider: str,
         response_message_id: str,
-    ) -> Optional[int]:
+    ) -> int | None:
         if db is None:
             return None
         source_event = im_inbound_event_crud.get_by_response_message_id(
@@ -423,14 +424,14 @@ class IMAgentGateway:
             return session_id
 
         logger.info(
-            "IM 回复消息缺少有效 Agent session 绑定，跳过: provider=%s response_message_id=%s",
+            "IM 回复消息缺少有效 Agent session 绑定\uff0c跳过: provider=%s response_message_id=%s",
             provider,
             response_message_id,
         )
         return None
 
     @staticmethod
-    def _clean_string(value: Any) -> Optional[str]:
+    def _clean_string(value: object) -> str | None:
         if not isinstance(value, str):
             return None
         cleaned = value.strip()

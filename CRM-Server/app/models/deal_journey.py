@@ -1,8 +1,7 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Index, ForeignKey
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, String, Text
 
 from app.core.database import Base
 from app.utils.public_id import generate_public_id
-
 from app.utils.time import business_now
 
 
@@ -57,8 +56,12 @@ class CustomerDealJourney(Base):
     )
 
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, comment="客户ID")
-    primary_opportunity_id = Column(BigInteger, ForeignKey("crm_opportunities.id", ondelete="SET NULL"), nullable=True, comment="主商机ID")
+    customer_id = Column(
+        BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, comment="客户ID"
+    )
+    primary_opportunity_id = Column(
+        BigInteger, ForeignKey("crm_opportunities.id", ondelete="SET NULL"), nullable=True, comment="主商机ID"
+    )
     name = Column(String(255), nullable=False, comment="成交旅程名称")
     status = Column(String(20), nullable=False, default=DealJourneyStatus.ACTIVE, comment="成交旅程状态")
     started_at = Column(DateTime, nullable=True, comment="开始时间")
@@ -81,8 +84,15 @@ class CustomerDealJourneyEvent(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="主键")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
-    deal_journey_id = Column(BigInteger, ForeignKey("crm_customer_deal_journeys.id", ondelete="CASCADE"), nullable=False, comment="成交旅程ID")
-    customer_id = Column(BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, comment="客户ID")
+    deal_journey_id = Column(
+        BigInteger,
+        ForeignKey("crm_customer_deal_journeys.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="成交旅程ID",
+    )
+    customer_id = Column(
+        BigInteger, ForeignKey("crm_customers.id", ondelete="CASCADE"), nullable=False, comment="客户ID"
+    )
     event_type = Column(String(50), nullable=False, comment="事件类型")
     event_time = Column(DateTime, nullable=False, comment="事件发生时间")
     source_type = Column(String(50), nullable=False, comment="来源对象类型")

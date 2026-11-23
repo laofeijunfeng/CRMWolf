@@ -37,7 +37,7 @@ describe('assistant retry API', () => {
     expect(requestPost).toHaveBeenCalledWith(
       '/v1/assistant/conversation/entries/acm_1/retry',
       { expected_version: 3 },
-      { timeout: 150_000 },
+      { timeout: 190_000 },
     )
     const body = requestPost.mock.calls[0]?.[1] as Record<string, unknown>
     expect(body).not.toHaveProperty('client_request_id')

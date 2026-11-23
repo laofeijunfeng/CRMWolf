@@ -67,11 +67,16 @@ def _config_data(config: AIConfig, api_key: str) -> dict[str, object]:
     }
 
 
+_get_config_team_dependency = Depends(get_current_user_team)
+_get_config_db_dependency = Depends(get_db)
+_get_config_user_dependency = Depends(get_current_user)
+
+
 @router.get("/config")
 async def get_ai_config(
-    team_id: int = Depends(get_current_user_team),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    team_id: int = _get_config_team_dependency,
+    db: Session = _get_config_db_dependency,
+    current_user: User = _get_config_user_dependency,
 ):
     _require_read(db, current_user)
     config = ai_config_crud.get_config(db, team_id)
@@ -81,12 +86,17 @@ async def get_ai_config(
     return {"code": 0, "message": "success", "data": _config_data(config, api_key), "timestamp": int(time.time())}
 
 
+_save_config_team_dependency = Depends(get_current_user_team)
+_save_config_db_dependency = Depends(get_db)
+_save_config_user_dependency = Depends(get_current_user)
+
+
 @router.post("/config")
 async def save_ai_config(
     config_in: AIConfigCreate,
-    team_id: int = Depends(get_current_user_team),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    team_id: int = _save_config_team_dependency,
+    db: Session = _save_config_db_dependency,
+    current_user: User = _save_config_user_dependency,
 ):
     _require_manage(db, current_user)
     try:
@@ -101,11 +111,16 @@ async def save_ai_config(
     }
 
 
+_test_assistant_team_dependency = Depends(get_current_user_team)
+_test_assistant_db_dependency = Depends(get_db)
+_test_assistant_user_dependency = Depends(get_current_user)
+
+
 @router.post("/test-assistant", response_model=AssistantCapabilityEnvelope)
 async def test_assistant_capability(
-    team_id: int = Depends(get_current_user_team),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    team_id: int = _test_assistant_team_dependency,
+    db: Session = _test_assistant_db_dependency,
+    current_user: User = _test_assistant_user_dependency,
 ) -> dict[str, object]:
     _require_manage(db, current_user)
     result: AssistantCapabilityResponse = await assistant_model_capabilities.verify(db, team_id=team_id)
@@ -117,12 +132,17 @@ async def test_assistant_capability(
     }
 
 
+_test_connection_team_dependency = Depends(get_current_user_team)
+_test_connection_db_dependency = Depends(get_db)
+_test_connection_user_dependency = Depends(get_current_user)
+
+
 @router.post("/test")
 async def test_ai_connection(
     test_in: AITestRequest,
-    team_id: int = Depends(get_current_user_team),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    team_id: int = _test_connection_team_dependency,
+    db: Session = _test_connection_db_dependency,
+    current_user: User = _test_connection_user_dependency,
 ):
     """测试普通 AI 连接；该测试不代表销售助手结构化能力已就绪。"""
     _require_manage(db, current_user)
@@ -145,8 +165,9 @@ async def test_ai_connection(
             "stream": True,
         }
         try:
-            async with httpx.AsyncClient(timeout=ai_httpx_timeout(), **ai_httpx_client_kwargs()) as client:
-                async with client.stream(
+            async with (
+                httpx.AsyncClient(timeout=ai_httpx_timeout(), **ai_httpx_client_kwargs()) as client,
+                client.stream(
                     "POST", f"{config.api_host}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {api_key}",
@@ -154,34 +175,35 @@ async def test_ai_connection(
                         "Accept-Encoding": "identity",
                     },
                     json=request_body,
-                ) as response:
-                    response.raise_for_status()
-                    yield f"data: {json.dumps({'event': 'start', 'message': '开始接收 AI 响应'})}\n\n"
-                    buffer = ""
-                    async for text_chunk in response.aiter_text():
-                        buffer += text_chunk
-                        lines = buffer.split("\n")
-                        buffer = lines[-1] if lines else ""
-                        for line in lines[:-1]:
-                            if not line or not line.startswith("data: "):
-                                continue
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                continue
-                            try:
-                                chunk = json.loads(data_str)
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    piece = choices[0].get("delta", {}).get("content", "")
-                                    if piece:
-                                        full_content += piece
-                                        yield f"data: {json.dumps({'event': 'content', 'content': piece})}\n\n"
-                            except json.JSONDecodeError:
-                                continue
-                    done_event = {
-                        "event": "done", "success": True, "message": "AI 连接测试成功", "full_content": full_content,
-                    }
-                    yield f"data: {json.dumps(done_event)}\n\n"
+                ) as response,
+            ):
+                response.raise_for_status()
+                yield f"data: {json.dumps({'event': 'start', 'message': '开始接收 AI 响应'})}\n\n"
+                buffer = ""
+                async for text_chunk in response.aiter_text():
+                    buffer += text_chunk
+                    lines = buffer.split("\n")
+                    buffer = lines[-1] if lines else ""
+                    for line in lines[:-1]:
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(data_str)
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                piece = choices[0].get("delta", {}).get("content", "")
+                                if piece:
+                                    full_content += piece
+                                    yield f"data: {json.dumps({'event': 'content', 'content': piece})}\n\n"
+                        except json.JSONDecodeError:
+                            continue
+                done_event = {
+                    "event": "done", "success": True, "message": "AI 连接测试成功", "full_content": full_content,
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
         except httpx.HTTPStatusError as exc:
             error_event = {"event": "error", "success": False, "message": f"请求失败：{exc.response.status_code}"}
             yield f"data: {json.dumps(error_event)}\n\n"

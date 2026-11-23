@@ -1,36 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, require_permission, get_current_user_team
-from app.models.user import User
-from app.schemas.procurement import (
-    BatchMigrateProcurementMethodRequest,
-    ImpactAssessmentResponse,
-    MessageResponse
-)
+from app.core.deps import get_current_user_team, require_permission
 from app.crud.procurement import procurement_management_tool_crud
-
+from app.models.user import User
+from app.schemas.procurement import BatchMigrateProcurementMethodRequest, ImpactAssessmentResponse, MessageResponse
 
 router = APIRouter(prefix="/v1/procurement-admin", tags=["采购管理工具"])
 
 
-@router.get("/assess-template-change/{template_id}", response_model=ImpactAssessmentResponse, summary="评估阶段模板变更影响", description="""
+@router.get(
+    "/assess-template-change/{template_id}",
+    response_model=ImpactAssessmentResponse,
+    summary="评估阶段模板变更影响",
+    description="""
 评估修改阶段模板会影响的商机数量和详情。
 
-**业务规则：**
+**业务规则\uff1a**
 - 返回所有使用该阶段的活跃商机
 - 包括商机基本信息和当前阶段
 - 帮助管理员了解修改的影响范围
 
-**使用场景：**
+**使用场景\uff1a**
 - 修改阶段前评估影响
 - 判断修改是否会负面影响现有商机
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购管理评估权限
-""")
+""",
+)
 def assess_template_change_impact(
     template_id: int,
     team_id: int = Depends(get_current_user_team),
@@ -49,23 +49,28 @@ def assess_template_change_impact(
         )
 
 
-@router.post("/batch-migrate-opportunities", response_model=MessageResponse, summary="批量迁移商机采购方式", description="""
+@router.post(
+    "/batch-migrate-opportunities",
+    response_model=MessageResponse,
+    summary="批量迁移商机采购方式",
+    description="""
 将使用源采购方式的商机批量迁移到目标采购方式。
 
-**业务规则：**
-- 只迁移跟进中（status=0）的商机
+**业务规则\uff1a**
+- 只迁移跟进中\uff08status=0\uff09的商机
 - 迁移后商机会进入目标方式的默认起始阶段
 - 原阶段快照会被标记为已退出
 - 支持全部迁移或指定商机ID列表
 - 迁移失败不影响其他商机的迁移
 
-**使用场景：**
-- 采购方式调整，需要迁移现有商机
-- 客户采购方式变更，需要同步商机
+**使用场景\uff1a**
+- 采购方式调整\uff0c需要迁移现有商机
+- 客户采购方式变更\uff0c需要同步商机
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购管理迁移权限
-""")
+""",
+)
 def batch_migrate_opportunities(
     request: BatchMigrateProcurementMethodRequest,
     team_id: int = Depends(get_current_user_team),
@@ -94,30 +99,35 @@ def batch_migrate_opportunities(
         )
 
 
-@router.post("/rollback-template/{template_id}", response_model=MessageResponse, summary="回滚阶段模板到指定版本", description="""
+@router.post(
+    "/rollback-template/{template_id}",
+    response_model=MessageResponse,
+    summary="回滚阶段模板到指定版本",
+    description="""
 将阶段模板回滚到指定的历史版本。
 
-**业务规则：**
+**业务规则\uff1a**
 - 根据变更日志中的历史数据恢复模板
-- 回滚会创建新的变更日志（ROLLBACK类型）
+- 回滚会创建新的变更日志\uff08ROLLBACK类型\uff09
 - 回滚后会更新版本号
 - 需要提供目标版本号
 
-**使用场景：**
-- 修改后发现错误，需要回滚
+**使用场景\uff1a**
+- 修改后发现错误\uff0c需要回滚
 - 需要恢复到之前的某个版本
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购管理回滚权限
 
-**注意事项：**
+**注意事项\uff1a**
 - 回滚操作本身不可逆
-- 建议先查看变更日志，确认目标版本
-""")
+- 建议先查看变更日志\uff0c确认目标版本
+""",
+)
 def rollback_template_version(
     template_id: int,
     target_version: int = Query(..., ge=1, description="目标版本号"),
-    reason: Optional[str] = Query(None, description="回滚原因"),
+    reason: str | None = Query(None, description="回滚原因"),
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("procurement:admin:rollback"))
@@ -146,16 +156,16 @@ def rollback_template_version(
 @router.get("/active-opportunities/{stage_template_id}", summary="获取使用指定阶段的活跃商机", description="""
 获取当前使用指定阶段模板的所有活跃商机列表。
 
-**业务规则：**
-- 只返回跟进中（status=0）的商机
+**业务规则\uff1a**
+- 只返回跟进中\uff08status=0\uff09的商机
 - 只返回当前阶段使用该模板的商机
 - 包括商机基本信息和当前阶段状态
 
-**使用场景：**
+**使用场景\uff1a**
 - 查看某阶段的使用情况
 - 修改阶段前了解影响范围
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要采购管理评估权限
 """)
 def get_active_opportunities_by_stage(

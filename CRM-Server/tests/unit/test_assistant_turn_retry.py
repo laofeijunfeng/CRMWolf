@@ -12,10 +12,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api import assistant as api
 from app.main import app
-from app.models.assistant import AssistantTask
+from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant import turns
 from app.utils.time import business_now
+from tests.unit.test_assistant_api import _parse_sse
 from tests.unit.test_assistant_api import client as client
 from tests.unit.test_assistant_api import db_session as db_session
 from tests.unit.test_assistant_api import override_auth as override_auth
@@ -47,6 +48,50 @@ def retryable_turn(client: TestClient, db_session: Session) -> tuple[AssistantTa
         expected_version=None,
     )
     return task, turn
+
+
+@pytest.mark.parametrize("explicit_retry", [False, True])
+async def test_prepared_turn_reclaim_keeps_budget_unless_explicitly_retried(
+    db_session, monkeypatch, retryable_turn, explicit_retry,
+):
+    from app.services.assistant.coordinator import CoordinatorOutcome, CoordinatorReply
+    from app.services.assistant.failure_contract import capture_attempt_deadline
+
+    started = business_now()
+    monkeypatch.setattr(turns, "business_now", lambda: started)
+    task, turn = retryable_turn
+    original_deadline = started - timedelta(seconds=1)
+    turn.input_json = {**turn.input_json, "prepared_metadata": {"root_deadline": original_deadline.isoformat()}}
+    db_session.commit()
+    # The first worker dies after claim, before persisting its attempt event.
+    assert turns.claim(db_session, turn_id=turn.id, owner="crashed") is not None
+    db_session.refresh(turn)
+    turn.lease_expires_at = started - timedelta(seconds=1)
+    db_session.commit()
+    if explicit_retry:
+        restarted = turns.retry_owned_turn(
+            db_session, team_id=1, user_id=2, task_public_id=task.public_id, turn_public_id=turn.public_id,
+            expected_lease_version=turn.lease_version,
+        )
+        assert restarted is not None and restarted[2]
+        assert turns.claim(db_session, turn_id=turn.id, owner="crashed-again") is not None
+        db_session.refresh(turn)
+        turn.lease_expires_at = started - timedelta(seconds=1)
+        db_session.commit()
+
+    observed = []
+
+    async def handle_task(db, current, user_input, reporter):
+        observed.append(capture_attempt_deadline())
+        return CoordinatorOutcome(
+            task=current,
+            reply=CoordinatorReply(task_public_id=current.public_id, status=current.status, message="下一步"),
+        )
+
+    monkeypatch.setattr(api, "_coordinator", SimpleNamespace(handle_task=handle_task))
+    monkeypatch.setattr(turns, "business_now", lambda: started + timedelta(seconds=15))
+    await turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind()))
+    assert observed == [started + timedelta(seconds=180) if explicit_retry else original_deadline]
 
 
 @pytest.mark.parametrize("initial_status", ["PENDING", "RUNNING", "EXPIRED"])
@@ -515,6 +560,107 @@ def test_unknown_commit_result_retry_stays_failed_even_if_stale_event_claims_ret
     assert db_session.query(AssistantRequest).count() == requests_before
 
 
+def test_unknown_activity_allows_result_replay_but_blocks_new_task_mutations(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    task, turn = retryable_turn
+    task.activity_kind = "FOLLOW_UP"
+    task.authority_json = {"frozen_activity_command": {"submission_id": "unproven-activity"}}
+    db_session.commit()
+
+    async def unproven_activity(*_args, **_kwargs):
+        raise turns.AssistantActivityCommitUnknownError()
+
+    monkeypatch.setattr(api, "_coordinator", SimpleNamespace(handle_task=unproven_activity))
+    asyncio.run(turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind(), autoflush=False)))
+    db_session.refresh(task)
+    db_session.refresh(turn)
+    task_url = f"/api/v1/assistant/tasks/{task.public_id}"
+    before = client.get(task_url).json()
+    assert before["reconciliation_required"] is True
+    assert before["status"] == "ACTIVE"
+    counts = (db_session.query(AssistantTurn).count(), db_session.query(AssistantRequest).count(),
+              db_session.query(AssistantAction).count())
+    frozen = task.authority_json
+
+    def unexpected_schedule(*_args, **_kwargs):
+        pytest.fail("unknown activity must not schedule a turn")
+
+    monkeypatch.setattr(api, "schedule_turn", unexpected_schedule)
+    result = client.get(f"{task_url}/turns/{turn.public_id}")
+    assert result.status_code == 200
+    assert result.json()["status"] == "FAILED"
+    assert result.json()["reprocess_allowed"] is False
+    assert result.json()["events"][-1]["data"]["code"] == "UNKNOWN_COMMIT_RESULT"
+
+    original = {"kind": "text", "text": turn.input_json["text"], "client_request_id": "retry-same-turn-input"}
+    replay = client.post(f"{task_url}/submit", json=original)
+    assert replay.status_code == 200
+    assert _parse_sse(replay.text) == [(event["event"], event["data"]) for event in result.json()["events"]]
+    conflict = client.post(f"{task_url}/submit", json={**original, "text": "不同的输入"})
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "REQUEST_CONFLICT"
+
+    for endpoint, payload in (
+        ("submit", {"kind": "text", "text": "重新记录活动", "client_request_id": "unknown-activity-new-text"}),
+        ("submit", {"kind": "cancel", "client_request_id": "unknown-activity-cancel"}),
+        ("change-kind", {"kind": "ONLINE_MEETING"}),
+    ):
+        denied = client.post(f"{task_url}/{endpoint}", json=payload)
+        assert denied.status_code == 409
+        assert denied.json()["detail"]["code"] == "STATE_CONFLICT"
+        assert denied.json()["detail"]["task"] == before
+
+    db_session.refresh(task)
+    assert task.authority_json == frozen
+    assert task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+    assert client.get(task_url).json() == before
+    assert counts == (db_session.query(AssistantTurn).count(), db_session.query(AssistantRequest).count(),
+                      db_session.query(AssistantAction).count())
+
+    distinct = client.post(
+        "/api/v1/assistant/tasks", json={"goal": "记录另一次沟通", "client_request_id": "distinct-new-activity"},
+    )
+    assert distinct.status_code == 201
+    assert distinct.json()["public_id"] != task.public_id
+    assert distinct.json()["reconciliation_required"] is False
+    other = db_session.query(AssistantTask).filter_by(public_id=distinct.json()["public_id"]).one()
+    other_turn, accepted = turns.accept_submit(
+        db_session, task=other, key="distinct-new-activity-input",
+        input_data={"kind": "text", "text": "另一次客户沟通", "choice": None},
+        action_id=None, expected_version=None,
+    )
+    assert accepted and other_turn.task_id == other.id
+
+
+def test_prepared_turn_cannot_cancel_a_task_with_an_unknown_activity(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    from app.services.assistant.coordinator import AssistantCoordinator
+
+    task, turn = retryable_turn
+    turn.input_json = {**turn.input_json, "kind": "cancel", "text": None}
+    task.last_error_code = "UNKNOWN_COMMIT_RESULT"
+    db_session.commit()
+    version = task.version
+    monkeypatch.setattr(api, "_coordinator", AssistantCoordinator(next_action_chooser=None))
+
+    asyncio.run(turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind(), autoflush=False)))
+
+    db_session.refresh(task)
+    db_session.refresh(turn)
+    assert turn.status == "FAILED"
+    assert turn.last_error_code == "STATE_CONFLICT"
+    assert task.status == "ACTIVE"
+    assert task.version == version
+    assert task.last_error_code == "UNKNOWN_COMMIT_RESULT"
+
+
 def test_recover_expired_attempt_closes_dead_turn_without_scheduling(
     db_session: Session,
     retryable_turn: tuple[AssistantTask, AssistantTurn],
@@ -597,6 +743,72 @@ def test_overdue_attempt_fails_closed_without_a_live_worker(
     assert error.data_json["retryable"] is True
     assert error.data_json["activity_written"] is False
     assert "尚未写入客户活动" in error.data_json["message"]
+
+
+def test_overdue_attempt_preserves_actual_evidence_stage(db_session, retryable_turn):
+    task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_expires_at = business_now() - timedelta(seconds=1)
+    turns.add_event(db_session, turn, "attempt", {
+        "started_at": (business_now() - timedelta(seconds=181)).isoformat(), "attempt": 1,
+    })
+    turns.add_event(db_session, turn, "stage", {"stage": "context", "phase": "start"})
+    db_session.commit()
+
+    assert turns.close_overdue_turn(db_session, task, turn)
+    error = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").one()
+    assert error.data_json["stage"] == "context"
+    assert "读取客户记录" in error.data_json["message"]
+
+
+def test_dead_disposition_turn_keeps_its_selected_batch_for_recovery(db_session, retryable_turn):
+    task, turn = retryable_turn
+    task.waiting_type = "FOLLOW_UP_DISPOSITION"
+    task.waiting_field = "follow_up_disposition"
+    task.committed_json = [{"kind": "customer_activity", "public_id": "17"}]
+    task.authority_json = {"open_follow_up_batch": {"status": "ACTIVE", "settlement": {
+        "choices": ["i1"], "suppress_week": False, "turn_id": turn.id, "week_start": "2026-11-16",
+    }}}
+    turn.input_json = {"kind": "submit_field", "choices": ["i1"], "suppress_week": False}
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_expires_at = business_now() - timedelta(seconds=1)
+    turns.add_event(db_session, turn, "attempt", {
+        "started_at": (business_now() - timedelta(seconds=181)).isoformat(), "attempt": 1,
+    })
+    db_session.commit()
+
+    assert not turns.close_overdue_turn(db_session, task, turn)
+    assert task.active_turn_id == turn.id
+    assert not turns.reprocess_allowed(db_session, task, turn)
+    assert db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").count() == 0
+
+
+def test_disposition_database_failure_does_not_release_batch_to_another_command(
+    db_session, monkeypatch, retryable_turn,
+):
+    from sqlalchemy.exc import OperationalError
+
+    task, turn = retryable_turn
+    task.waiting_type = "FOLLOW_UP_DISPOSITION"
+    task.waiting_field = "follow_up_disposition"
+    task.committed_json = [{"kind": "customer_activity", "public_id": "17"}]
+    task.authority_json = {"open_follow_up_batch": {"status": "ACTIVE"}}
+    turn.input_json = {"kind": "submit_field", "choices": [], "suppress_week": True}
+    db_session.commit()
+
+    async def unavailable(*_args, **_kwargs):
+        raise OperationalError(None, None, OSError("database unavailable before binding"))
+
+    monkeypatch.setattr("app.api.assistant._coordinator", SimpleNamespace(handle_task=unavailable))
+    asyncio.run(turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind(), autoflush=False)))
+    db_session.refresh(turn)
+    db_session.refresh(task)
+    assert turn.status == "RUNNING"
+    assert task.active_turn_id == turn.id
+    assert not turns.reprocess_allowed(db_session, task, turn)
+    assert db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="error").count() == 0
 
 
 @pytest.mark.asyncio

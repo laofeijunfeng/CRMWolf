@@ -14,19 +14,20 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import SessionLocal
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.coordinator import AssistantInput
-from app.services.assistant.events import ProgressReporter, TurnStage
+from app.services.assistant.events import ProgressReporter, TurnStage, is_stage_name
 from app.services.assistant.failure_contract import (
     ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
     ATTEMPT_DEADLINE_SECONDS,
     AssistantFailureCode,
     AssistantStageFailure,
+    bind_absolute_attempt_deadline,
     bind_attempt_deadline,
     failure_origin_of,
     reset_attempt_deadline,
@@ -34,6 +35,7 @@ from app.services.assistant.failure_contract import (
     stage_user_message,
 )
 from app.services.assistant.llm import AssistantLLMError
+from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import InvalidTaskTransitionError, TaskStateConflictError, load_waiting
 from app.services.assistant_follow_up_projection_job_service import (
     AssistantFollowUpProjectionJobRequest,
@@ -153,6 +155,7 @@ def accept_submit(
     input_data: dict[str, object],
     action_id: str | None,
     expected_version: int | None,
+    prepared_metadata: dict[str, object] | None = None,
 ) -> tuple[AssistantTurn, bool]:
     normalized = {
         "operation": "submit",
@@ -160,6 +163,10 @@ def accept_submit(
         **input_data,
         "action_id": action_id,
         "expected_version": expected_version,
+        **(
+            {"correction": prepared_metadata["correction"]}
+            if prepared_metadata and "correction" in prepared_metadata else {}
+        ),
     }
     digest = fingerprint(normalized)
     previous = _request(db, team_id=task.team_id, user_id=task.user_id, key=key)
@@ -167,12 +174,36 @@ def accept_submit(
         if previous.input_fingerprint != digest or previous.turn_id is None or previous.task_id != task.id:
             raise AssistantRequestConflict("请求标识已被其他内容占用")
         return db.get(AssistantTurn, previous.turn_id), False
+    if activity_commit_is_unknown(task):
+        raise AssistantStateConflict(ACTIVITY_COMMIT_UNKNOWN_MESSAGE)
     if task.status != AssistantTaskStatus.ACTIVE:
         raise AssistantStateConflict("任务已结束，无法继续提交")
     waiting = load_waiting(task)
     kind = input_data["kind"]
     choice = input_data.get("choice")
     text = input_data.get("text")
+    choices = input_data.get("choices")
+    values = input_data.get("values")
+    correction = prepared_metadata.get("correction") if prepared_metadata else None
+    if correction is not None and (
+        kind != "text" or choice is not None or not isinstance(text, str)
+        or waiting is None or waiting.type != "CONFIRMATION" or waiting.field != "activity_write"
+    ):
+        raise AssistantStateConflict("当前没有可以修改的活动草稿")
+    if (values is not None or input_data.get("form_revision") is not None) and kind != "submit_form":
+        raise AssistantStateConflict("表单值仅用于当前表单")
+    if input_data.get("suppress_week") not in (None, False, True) or (
+        input_data.get("suppress_week") and choices is None
+    ):
+        raise AssistantStateConflict("暂不提示仅用于批量提交")
+    if (choices is not None or input_data.get("suppress_week")) and (
+        waiting is None or waiting.type != "FOLLOW_UP_DISPOSITION" or kind != "submit_field"
+    ):
+        raise AssistantStateConflict("当前没有待处理的历史跟进任务")
+    if input_data.get("reason") is not None and (
+        waiting is None or waiting.field != "activity_write" or kind != "confirm" or choice != "reject"
+    ):
+        raise AssistantStateConflict("拒绝原因只适用于活动确认")
     if waiting is not None and kind != "cancel":
         if not waiting.action_id or action_id != waiting.action_id or expected_version != waiting.expected_version:
             raise AssistantStateConflict("等待动作已过期，请读取最新任务")
@@ -182,10 +213,18 @@ def accept_submit(
             "FIELD": "submit_field",
             "CONFIRMATION": "confirm",
             "FOLLOW_UP_DISPOSITION": "submit_field",
+            "PROPOSAL_FORM": "submit_form",
+            "CONFIRMATION_EDIT": "submit_form",
         }
         revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
+        editing = waiting.type == "CONFIRMATION" and waiting.field == "activity_write" and kind == "request_edit"
         temporal_supplement = False
-        if waiting.type == "CONFIRMATION" and waiting.field == "activity_write" and kind == "text":
+        if (
+            correction is None
+            and waiting.type == "CONFIRMATION"
+            and waiting.field == "activity_write"
+            and kind == "text"
+        ):
             from app.services.assistant.task_state import load_draft
             from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
 
@@ -195,7 +234,13 @@ def accept_submit(
                 and is_temporal_supplement(text)
                 and temporal_supplement_target(load_draft(task)) is not None
             )
-        if kind != allowed[waiting.type] and not revising and not temporal_supplement:
+        if (
+            kind != allowed[waiting.type]
+            and not revising
+            and not editing
+            and not temporal_supplement
+            and correction is None
+        ):
             raise AssistantStateConflict("当前输入不符合等待动作")
         if waiting.type == "ACTIVITY_KIND":
             offered_ids: set[str] = set()
@@ -214,9 +259,26 @@ def accept_submit(
             ):
                 raise AssistantStateConflict("请选择当前签发的客户")
         elif waiting.type == "FOLLOW_UP_DISPOSITION":
-            offered = {candidate.get("id") for candidate in waiting.candidates}
-            if not isinstance(choice, str) or choice not in offered or text is not None:
+            from app.services.assistant.open_follow_up_disposition import disposition_choice_ids
+
+            disposition_ids = disposition_choice_ids(task)
+            legacy_refresh = choices is None and text is None and any(
+                candidate.get("id") in {f"{item}:complete", f"{item}:hold", f"{item}:skip"}
+                for candidate in waiting.candidates for item in disposition_ids
+            ) and (choice is None or choice in {candidate.get("id") for candidate in waiting.candidates})
+            invalid_batch = not isinstance(choices, list) or any(
+                not isinstance(item, str) or item not in disposition_ids for item in choices
+            ) or len(choices) != len(set(choices)) or choice is not None or text is not None
+            if not disposition_ids or (not legacy_refresh and invalid_batch):
                 raise AssistantStateConflict("请选择当前签发的历史任务处理")
+        elif waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}:
+            if (input_data.get("form_revision") != waiting.form_revision or text is not None
+                or (choice is None and not isinstance(values, dict))
+                or (choice is not None and (choice != "cancel" or values is not None))):
+                raise AssistantStateConflict("表单已变化，请读取最新任务")
+        elif editing:
+            if text is not None or choice is not None:
+                raise AssistantStateConflict("修改动作不接受其他回复")
         elif waiting.type == "FIELD" and waiting.field == "temporal_choice":
             offered: set[str] = set()
             for candidate in waiting.candidates:
@@ -242,18 +304,28 @@ def accept_submit(
             offered = set(preview.channel_options) if preview is not None else set()
             if not isinstance(choice, str) or choice not in offered or text is not None:
                 raise AssistantStateConflict("请选择当前签发的活动类型")
-        elif not temporal_supplement and (choice not in {"confirm", "reject"} or text is not None):
+        elif (
+            correction is None
+            and not temporal_supplement
+            and (choice not in {"confirm", "reject"} or text is not None)
+        ):
             raise AssistantStateConflict("请选择确认或拒绝当前动作")
     elif waiting is None and (
         action_id is not None
         or expected_version is not None
-        or kind in {"confirm", "submit_field", "revise_activity_kind"}
+        or kind in {"confirm", "submit_field", "revise_activity_kind", "submit_form", "request_edit"}
     ):
         raise AssistantStateConflict("没有待回复的动作")
     if kind == "cancel" and (choice is not None or text is not None):
         raise AssistantStateConflict("取消动作不接受其他回复")
     if task.active_turn_id is not None:
         raise AssistantStateConflict("前一轮尚在处理，请稍后补读")
+    from app.services.assistant.proposals import has_unresolved_proposal_claim
+
+    if has_unresolved_proposal_claim(db, task):
+        raise AssistantStateConflict("商机提交结果待核对，暂不能提交新操作。")
+    if kind == "cancel" and has_frozen_disposition_settlement(task):
+        raise AssistantStateConflict("历史任务结果待核对，暂不能取消。")
     request = AssistantRequest(
         team_id=task.team_id,
         user_id=task.user_id,
@@ -270,7 +342,7 @@ def accept_submit(
             user_id=task.user_id,
             task_id=task.id,
             request_id=request.id,
-            input_json=normalized,
+            input_json={**normalized, **({"prepared_metadata": prepared_metadata} if prepared_metadata else {})},
             status="PENDING",
         )
         db.add(turn)
@@ -283,6 +355,7 @@ def accept_submit(
                 AssistantTask.status == AssistantTaskStatus.ACTIVE,
                 AssistantTask.version == task.version,
                 AssistantTask.active_turn_id.is_(None),
+                AssistantTask.waiting_json["action_id"].as_string() == (task.waiting_json or {}).get("action_id"),
             )
             .values(active_turn_id=turn.id)
             .execution_options(synchronize_session=False)
@@ -292,6 +365,10 @@ def accept_submit(
             raise AssistantStateConflict("任务状态已变化，请读取最新任务")
         request.turn_id = turn.id
         add_event(db, turn, "accepted", {"turn_id": turn.public_id})
+        root_stages = prepared_metadata.get("root_stages") if prepared_metadata else None
+        if isinstance(root_stages, list):
+            for event in root_stages:
+                add_event(db, turn, "stage", event)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -352,7 +429,7 @@ def _latest_stage(db: Session, turn: AssistantTurn) -> str | None:
     if not isinstance(data, dict) or data.get("phase") != "start":
         return None
     stage = data.get("stage")
-    return stage if stage in {"classify", "structure", "quality_gate", "write"} else None
+    return stage if isinstance(stage, str) and is_stage_name(stage) else None
 
 
 def _error_payload(
@@ -390,10 +467,48 @@ def _error_payload(
     }
 
 
+def has_frozen_disposition_settlement(task: AssistantTask) -> bool:
+    batch = (task.authority_json or {}).get("open_follow_up_batch")
+    return isinstance(batch, dict) and batch.get("status") == "ACTIVE" and batch.get("settlement") is not None
+
+
+def _is_disposition_settlement(task: AssistantTask, turn: AssistantTurn) -> bool:
+    if (
+        task.active_turn_id != turn.id or task.id != turn.task_id or task.team_id != turn.team_id
+        or task.user_id != turn.user_id or task.status != AssistantTaskStatus.ACTIVE
+        or task.waiting_type != "FOLLOW_UP_DISPOSITION" or task.waiting_field != "follow_up_disposition"
+    ):
+        return False
+    data = turn.input_json
+    choices = data.get("choices")
+    if data.get("kind") != "submit_field" or not isinstance(choices, list) or not all(
+        isinstance(choice, str) for choice in choices
+    ):
+        return False
+    batch = (task.authority_json or {}).get("open_follow_up_batch")
+    if not isinstance(batch, dict) or batch.get("status") != "ACTIVE":
+        return False
+    binding = batch.get("settlement")
+    if binding is None:
+        return True  # The accepted turn owns the action even if its first claim rolled back.
+    return isinstance(binding, dict) and (
+        binding.get("turn_id") == turn.id and binding.get("choices") == sorted(choices)
+        and binding.get("suppress_week") is data.get("suppress_week", False)
+    )
+
+
 def close_overdue_turn(db: Session, task: AssistantTask, turn: AssistantTurn) -> bool:
     """Fail a dead attempt that missed the deadline. A live worker keeps its lease."""
 
     if turn.status != "RUNNING" or live_worker(turn.id, turn.lease_version):
+        return False
+    if _is_disposition_settlement(task, turn):
+        # An expired lease can be reclaimed; the accepted choices cannot be reissued by the client.
+        return False
+    from app.services.assistant.proposals import has_unresolved_proposal_claim
+
+    if has_unresolved_proposal_claim(db, task):
+        # Recovery may read the receipt, but a timeout must not free a claimed command for replay.
         return False
     event = (
         db.query(AssistantTurnEvent)
@@ -411,21 +526,15 @@ def close_overdue_turn(db: Session, task: AssistantTask, turn: AssistantTurn) ->
         started = started.replace(tzinfo=now.tzinfo)
     if now < started + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS):
         return False
-    stage_event = (
-        db.query(AssistantTurnEvent)
-        .filter_by(turn_id=turn.id, event="stage")
-        .order_by(AssistantTurnEvent.seq.desc())
-        .first()
-    )
-    stage = "structure"
-    stage_data = stage_event.data_json if stage_event is not None else None
-    if isinstance(stage_data, dict) and stage_data.get("stage") in {"classify", "structure", "quality_gate", "write"}:
-        stage = str(stage_data["stage"])
-    message = stage_user_message(
-        code=AssistantFailureCode.UPSTREAM_TIMEOUT,
-        stage=stage,
-        activity_kind=task.activity_kind,
-    )
+    stage = _latest_stage(db, turn)
+    if task_has_customer_activity(task):
+        message = "活动已记录，后续处理超时，请查看任务状态。"
+    else:
+        message = stage_user_message(
+            code=AssistantFailureCode.UPSTREAM_TIMEOUT,
+            stage=stage or "",
+            activity_kind=task.activity_kind,
+        )
     version = turn.lease_version
     fence = db.execute(
         update(AssistantTurn)
@@ -608,6 +717,11 @@ def retry_owned_turn(
         _log_retry(db, task, turn, "denied")
         return task, turn, False
     now = business_now()
+    input_data = turn.input_json
+    metadata = input_data.get("prepared_metadata") or {}
+    if isinstance(metadata.get("root_deadline"), str):
+        deadline = now + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)
+        input_data = {**input_data, "prepared_metadata": {**metadata, "root_deadline": deadline.isoformat()}}
     status_filter = (
         AssistantTurn.status == "FAILED"
         if turn.status == "FAILED"
@@ -627,6 +741,7 @@ def retry_owned_turn(
             lease_owner=None,
             lease_expires_at=None,
             lease_version=AssistantTurn.lease_version + 1,
+            input_json=input_data,
             last_modified_time=now,
         )
         .execution_options(synchronize_session=False)
@@ -779,6 +894,9 @@ class DurableProgressReporter(ProgressReporter):
             payload["score"] = score
         self._record(payload)
 
+    def stage_failed(self, stage: TurnStage) -> None:
+        self._record({"stage": stage.name, "phase": "failed"})
+
 
 def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEvent]:
     return (
@@ -815,6 +933,13 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             _workers[turn_id] = (version, worker)
         lease_token = _execution_lease.set((turn_id, owner, version))
         attempt_started = business_now()
+        metadata = turn.input_json.get("prepared_metadata") or {}
+        if not isinstance(metadata, dict):
+            raise TypeError("invalid prepared turn metadata")
+        inherited_deadline = metadata.get("root_deadline")
+        deadline = datetime.fromisoformat(inherited_deadline) if isinstance(inherited_deadline, str) else None
+        if deadline is not None:
+            attempt_started = deadline - timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)
         add_event(
             db,
             turn,
@@ -823,7 +948,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
         )
         db.commit()
         db.refresh(turn)
-        deadline_token = bind_attempt_deadline(attempt_started)
+        deadline_token = (
+            bind_absolute_attempt_deadline(deadline)
+            if deadline is not None else bind_attempt_deadline(attempt_started)
+        )
         try:
             task = db.get(AssistantTask, turn.task_id)
             if task is None or task.team_id != turn.team_id or task.user_id != turn.user_id:
@@ -837,11 +965,22 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 _keep_lease(factory, turn_id=turn_id, owner=owner, version=version, worker=asyncio.current_task())
             )
             data = turn.input_json
+            prior_proposal_keys = {receipt.get("proposal_key") for receipt in task.committed_json or []}
+            input_data = {key: value for key, value in data.items() if key in AssistantInput.model_fields}
+            if isinstance(data.get("correction"), dict):
+                from app.schemas.assistant_conversation import ActivityCorrection
+
+                correction = ActivityCorrection.model_validate(data["correction"])
+                correction_text = input_data.get("text")
+                if not isinstance(correction_text, str) or correction.quote not in correction_text:
+                    raise AssistantStateConflict("修正内容不匹配原文")
+                value = correction.model_dump(mode="json")["new_value"]
+                input_data = {"kind": "correct_activity", "values": {correction.field: value}}
             reporter = DurableProgressReporter(factory, turn_id=turn_id, owner=owner, version=version)
             outcome = await _coordinator.handle_task(
                 db,
                 task,
-                AssistantInput(kind=str(data["kind"]), text=data.get("text"), choice=data.get("choice")),
+                AssistantInput.model_validate(input_data),
                 reporter=reporter,
             )
             now = business_now()
@@ -918,6 +1057,14 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             db.refresh(turn)
             db.refresh(outcome.task)
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
+            from app.services.assistant.contracts import AcceptedProposalReceipt
+
+            for receipt in outcome.task.committed_json or []:
+                if receipt.get("kind") in {"follow_up_task_create", "opportunity_stage", "opportunity_create"} and (
+                    receipt.get("proposal_key") not in prior_proposal_keys
+                ):
+                    data["proposal_receipt"] = AcceptedProposalReceipt.model_validate(receipt).model_dump(mode="json")
+                    break
             card = getattr(outcome.reply, "card", None)
             if card:
                 data["card"] = card
@@ -927,10 +1074,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             if turn.input_json.get("kind") == "confirm" and turn.input_json.get("choice") == "confirm":
                 receipt_id = (outcome.task.authority_json or {}).get("confirmation_receipt")
                 if isinstance(receipt_id, str):
-                    receipt = db.query(AssistantAction).filter_by(
+                    receipt_row = db.query(AssistantAction).filter_by(
                         team_id=turn.team_id, task_id=turn.task_id, event_key=f"receipt:{receipt_id}"
                     ).one_or_none()
-                    fields = receipt.result_json if receipt is not None else {}
+                    fields = receipt_row.result_json if receipt_row is not None else {}
                     job_id = fields.get("follow_up_projection_job_public_id")
                     if fields.get("follow_up_projection_status") == "QUEUED" and isinstance(job_id, str):
                         projection_request = AssistantFollowUpProjectionJobRequest(
@@ -1031,7 +1178,21 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             turn = db.get(AssistantTurn, turn_id)
             if turn is None or turn.lease_owner != owner or turn.lease_version != version:
                 return
-            code = classify_turn_error(exc)
+            current_task = db.get(AssistantTask, turn.task_id)
+            if (
+                isinstance(exc, SQLAlchemyError)
+                and current_task is not None
+                and _is_disposition_settlement(current_task, turn)
+            ):
+                # Leave the durable turn and its lease intact; recovery can only resume this binding.
+                return
+            from app.services.assistant.proposals import has_unresolved_proposal_claim
+
+            code = (
+                "UNKNOWN_COMMIT_RESULT"
+                if current_task is not None and has_unresolved_proposal_claim(db, current_task)
+                else classify_turn_error(exc)
+            )
             now = business_now()
             fence = db.execute(
                 update(AssistantTurn)

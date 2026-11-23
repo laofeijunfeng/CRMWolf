@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.crud.industry import industry_crud
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 class IndustryDisplayService:

@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
+from app.models.assistant_crm_effect import AssistantCRMEffect
 from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_activity import CustomerActivity
 from app.models.opportunity import Opportunity, OpportunityProductModule
@@ -18,7 +19,9 @@ from app.models.product import Product, ProductModule
 from app.models.team import Team, UserTeam
 from app.models.user import User, UserStatus
 from app.schemas.opportunity import OpportunityCreate
+from app.services.assistant.crm_effects import AssistantCRMNoEffect
 from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor, validate_candidate
+from app.services.assistant.opportunity_nominator import OpportunityNominator
 from app.services.assistant.opportunity_target_matching import match_opportunity_target
 from app.services.assistant.proposals import offer_next_proposal
 
@@ -46,6 +49,7 @@ def crm_session(monkeypatch):
         tables=[
             AssistantTask.__table__,
             AssistantAction.__table__,
+            AssistantCRMEffect.__table__,
             CustomerActivity.__table__,
             User.__table__,
             Team.__table__,
@@ -114,6 +118,12 @@ def crm_session(monkeypatch):
         ]
     )
     session.commit()
+    nominations = []
+
+    async def nominate(self, db, task, activity):
+        return nominations
+
+    monkeypatch.setattr(OpportunityNominator, "nominate", nominate)
     permissions = {"opportunity:create", "customer:edit:own"}
     from app.crud.permission import permission_crud
 
@@ -123,7 +133,7 @@ def crm_session(monkeypatch):
         lambda db, user_id, team_id: [SimpleNamespace(code=code) for code in permissions],
     )
     try:
-        yield session, permissions
+        yield session, permissions, nominations
     finally:
         session.close()
         engine.dispose()
@@ -148,7 +158,7 @@ def _candidate(**payload_changes):
     }
 
 
-def _task(db, candidate):
+def _task(db):
     activity = CustomerActivity(
         id=1,
         team_id=1,
@@ -166,7 +176,7 @@ def _task(db, candidate):
         status=AssistantTaskStatus.ACTIVE,
         goal="记录虚构采购需求",
         draft_json={},
-        authority_json={"proposal_candidates": [candidate]},
+        authority_json={},
         committed_json=[{"kind": "customer_activity", "public_id": "1"}],
         version=0,
     )
@@ -236,10 +246,11 @@ def _match(db, candidate):
     ],
 )
 async def test_real_target_classification_controls_pre_offer(crm_session, target_changes, status):
-    db, _ = crm_session
+    db, _, nominations = crm_session
     _target(db, **target_changes)
     candidate = _candidate()
-    task = _task(db, candidate)
+    nominations.append(candidate)
+    task = _task(db)
     assert _match(db, candidate).status == status
     assert (validate_candidate(db, task, candidate) is not None) == (status == "DISTINCT")
 
@@ -260,13 +271,17 @@ async def test_real_target_classification_controls_pre_offer(crm_session, target
     ],
 )
 async def test_distinct_offer_rechecks_persisted_targets_before_execution(crm_session, late_change, status):
-    db, _ = crm_session
+    db, _, nominations = crm_session
     candidate = _candidate()
-    task = _task(db, candidate)
+    nominations.append(candidate)
+    task = _task(db)
     assert _match(db, candidate).status == "DISTINCT"
     offered, _, active = await offer_next_proposal(db, task)
     assert active
     proposal = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
+    form_values = OpportunityCreate.model_validate(
+        {**proposal["payload"], "customer_id": "cus_fictional"}
+    ).model_dump(mode="json")
     db.commit()
 
     if late_change == "inactive-catalog":
@@ -284,31 +299,38 @@ async def test_distinct_offer_rechecks_persisted_targets_before_execution(crm_se
     assert _match(db, candidate).status == status
     assert validate_candidate(db, task, proposal) is None
 
-    with pytest.raises(ValueError):
-        await RealCRMProposalExecutor().execute(db, offered, proposal)
+    submitted = {**proposal, "form_values": form_values}
+    assert validate_candidate(db, task, submitted) is not None
+    with pytest.raises(AssistantCRMNoEffect):
+        await RealCRMProposalExecutor().execute(db, offered, submitted)
     assert db.query(Opportunity.public_id).order_by(Opportunity.id).all() == before
 
 
 async def test_distinct_contained_target_reaches_real_executor_creation_boundary(crm_session, monkeypatch):
-    db, _ = crm_session
+    db, _, nominations = crm_session
     _target(db, name="分析平台")
     candidate = _candidate(opportunity_name="分析平台培训服务")
-    task = _task(db, candidate)
+    nominations.append(candidate)
+    task = _task(db)
     offered, _, active = await offer_next_proposal(db, task)
     assert active
     proposal = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
+    form_values = OpportunityCreate.model_validate(
+        {**proposal["payload"], "total_amount": 90000, "customer_id": "cus_fictional"}
+    ).model_dump(mode="json")
 
     class CreationBoundaryReached(Exception):
         pass
 
-    async def stop_at_creation(**kwargs):
+    async def stop_at_creation(*, opportunity, **kwargs):
+        assert opportunity.total_amount == 90000
         raise CreationBoundaryReached
 
     from app.api import opportunities
 
     monkeypatch.setattr(opportunities, "create_opportunity", stop_at_creation)
     with pytest.raises(CreationBoundaryReached):
-        await RealCRMProposalExecutor().execute(db, offered, proposal)
+        await RealCRMProposalExecutor().execute(db, offered, {**proposal, "form_values": form_values})
     # This proves real revalidation allows DISTINCT, not successful API creation.
     assert db.query(Opportunity.public_id).all() == [("opp_fictional_1",)]
 
@@ -321,15 +343,14 @@ async def test_distinct_contained_target_reaches_real_executor_creation_boundary
         "membership",
         "inactive-user",
         "source-quote",
-        "source-amount",
-        "incomplete-form",
         "foreign-customer-authority",
     ],
 )
 async def test_distinct_target_does_not_bypass_existing_validation(crm_session, invalidated):
-    db, permissions = crm_session
+    db, permissions, nominations = crm_session
     candidate = _candidate()
-    task = _task(db, candidate)
+    nominations.append(candidate)
+    task = _task(db)
     assert validate_candidate(db, task, candidate) is not None
     if invalidated == "create-permission":
         permissions.remove("opportunity:create")
@@ -341,13 +362,8 @@ async def test_distinct_target_does_not_bypass_existing_validation(crm_session, 
         db.query(User).one().status = UserStatus.INACTIVE
     elif invalidated == "source-quote":
         db.query(CustomerActivity).one().source_content = "客户只讨论了其他内容。"
-    elif invalidated == "source-amount":
-        candidate["payload"]["total_amount"] = 90000
-    elif invalidated == "incomplete-form":
-        del candidate["payload"]["expected_closing_date"]
     else:
         task.authority_json = {**task.authority_json, "customer_public_id": "cus_other"}
-    task.authority_json = {**task.authority_json, "proposal_candidates": [candidate]}
     db.commit()
     assert validate_candidate(db, task, candidate) is None
     finished, _, active = await offer_next_proposal(db, task)
@@ -355,15 +371,40 @@ async def test_distinct_target_does_not_bypass_existing_validation(crm_session, 
     assert db.query(Opportunity.public_id).all() == []
 
 
+async def test_purchase_signal_without_commercial_values_can_be_offered(crm_session):
+    db, _, nominations = crm_session
+    task = _task(db)
+    activity = db.query(CustomerActivity).one()
+    activity.source_content = "客户确认有采购意向。"
+    nominations.append({
+        "kind": "opportunity_create",
+        "evidence_quote": activity.source_content,
+        "segment_id": "seg_primary",
+        "payload": {},
+    })
+    db.commit()
+
+    offered, _, active = await offer_next_proposal(db, task)
+    assert active and offered.waiting_field == "proposal:opportunity_create"
+    assert db.query(Opportunity.public_id).all() == []
+
+
 async def test_executor_rejects_source_revision_change_even_when_target_remains_distinct(crm_session):
-    db, _ = crm_session
-    task = _task(db, _candidate())
+    db, _, nominations = crm_session
+    nominations.append(_candidate())
+    task = _task(db)
     offered, _, active = await offer_next_proposal(db, task)
     assert active
     proposal = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
+    form_values = OpportunityCreate.model_validate(
+        {**proposal["payload"], "customer_id": "cus_fictional"}
+    ).model_dump(mode="json")
     db.query(CustomerActivity).one().activity_revision += 1
     db.commit()
     assert _match(db, proposal).status == "DISTINCT"
-    with pytest.raises(ValueError):
-        await RealCRMProposalExecutor().execute(db, offered, proposal)
+    submitted = {**proposal, "form_values": form_values}
+    rebound = validate_candidate(db, task, submitted)
+    assert rebound is not None and rebound["source_revision"] != proposal["source_revision"]
+    with pytest.raises(AssistantCRMNoEffect):
+        await RealCRMProposalExecutor().execute(db, offered, submitted)
     assert db.query(Opportunity.public_id).all() == []

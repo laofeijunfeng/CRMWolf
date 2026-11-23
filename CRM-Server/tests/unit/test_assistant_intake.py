@@ -971,8 +971,12 @@ FUTURES_TEXT = (
 
 
 @pytest.mark.parametrize("month_kind", ["UNKNOWN", "FULL_MONTH"])
-async def test_month_only_commitment_survives_structuring(db_session, month_kind):
+async def test_month_only_commitment_survives_structuring(db_session, month_kind, monkeypatch):
+    from datetime import datetime
+
     from app.services.assistant.llm_contracts import ModelTemporalMention
+
+    monkeypatch.setattr("app.utils.time.business_now", lambda: datetime(2026, 10, 30, 10))
 
     task = _make_task(db_session, activity_kind="FOLLOW_UP")
 

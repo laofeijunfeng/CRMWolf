@@ -241,11 +241,11 @@ class WorkSummaryNarrativeService:
             facts=items,
         )
         lines = [
-            f"### 工作总结\n围绕“{question or '当前工作'}”，系统查询到 "
+            f"### 工作总结\n围绕“{question or '当前工作'}”\uff0c系统查询到 "
             f"{work_facts.get('available_total', len(items))} 条可确认事实。"
         ]
         for item in resolved.highlights[:8]:
-            lines.append(f"- **{item.title}**：{item.summary}")
+            lines.append(f"- **{item.title}**\uff1a{item.summary}")
         return WorkSummaryNarrativeResult(
             answer="\n".join(lines),
             highlights=resolved.highlights,
@@ -274,11 +274,11 @@ class WorkSummaryNarrativeService:
             facts=facts,
         )
         lines = [
-            f"### 工作总结\n围绕“{question or '当前工作'}”，系统已汇总 "
+            f"### 工作总结\n围绕“{question or '当前工作'}”\uff0c系统已汇总 "
             f"{len(facts)} 条可确认事实。"
         ]
         for item in resolved.highlights[:8]:
-            lines.append(f"- **{item.title}**：{item.summary}")
+            lines.append(f"- **{item.title}**\uff1a{item.summary}")
         confidences = [result.confidence for result in chunk_results]
         return WorkSummaryNarrativeResult(
             answer="\n".join(lines),
@@ -334,7 +334,7 @@ class WorkSummaryNarrativeService:
                 WorkSummaryNarrativeItem(
                     category="business_progress",
                     title=customer_name,
-                    summary=f"{customer_name} 共 {len(customer_items)} 条工作事实，包括 {type_summary}。",
+                    summary=f"{customer_name} 共 {len(customer_items)} 条工作事实\uff0c包括 {type_summary}。",
                     fact_ids=fact_ids,
                 )
             )
@@ -365,7 +365,7 @@ class WorkSummaryNarrativeService:
                 WorkSummaryNarrativeItem(
                     category=_fact_category(fact_items[0]),
                     title=label,
-                    summary=f"{label} {len(fact_items)} 条，代表事项包括 {examples}。",
+                    summary=f"{label} {len(fact_items)} 条\uff0c代表事项包括 {examples}。",
                     fact_ids=representative_ids,
                 )
             )
@@ -426,9 +426,9 @@ class WorkSummaryNarrativeService:
 
 _WORK_SUMMARY_SYNTHESIS_SYSTEM_PROMPT = """你是 CRMWolf 的销售工作总结归并器。
 
-输入是多个已经基于真实工作事实生成的分块总结。你必须：
-1. 只使用 chunks 中出现的 fact_id，不得创造新引用。
-2. 合并重复内容，形成一份完整、清晰的销售工作总结。
+输入是多个已经基于真实工作事实生成的分块总结。你必须\uff1a
+1. 只使用 chunks 中出现的 fact_id\uff0c不得创造新引用。
+2. 合并重复内容\uff0c形成一份完整、清晰的销售工作总结。
 3. 每个输出项至少引用一个 fact_id。
 4. coverage.truncated=true 时必须明确说明结果不完整。
 5. 不输出数据库内部字段或技术实现细节。
@@ -437,14 +437,14 @@ _WORK_SUMMARY_SYNTHESIS_SYSTEM_PROMPT = """你是 CRMWolf 的销售工作总结�
 
 _WORK_SUMMARY_SYSTEM_PROMPT = """你是 CRMWolf 的销售工作总结助手。
 
-你只能基于用户消息中 items 列出的 structured facts 生成工作总结，不能补充、猜测或使用外部知识。
+你只能基于用户消息中 items 列出的 structured facts 生成工作总结\uff0c不能补充、猜测或使用外部知识。
 
-必须遵守：
+必须遵守\uff1a
 1. 每个 highlights 和 customer_summaries 项必须引用至少一个真实存在的 fact_id。
 2. completed_follow_up_task 可以归为 completed_work。
-3. customer_activity 只能归为 process_record，不能写成“任务已完成”。
+3. customer_activity 只能归为 process_record\uff0c不能写成“任务已完成”。
 4. 商机阶段、合同、回款、开票、License 等业务事件归为 business_progress。
-5. 如果 pagination.truncated=true，必须在 answer 或 missing_context 中说明还需要后续分页事实，不能声称总结完整。
+5. 如果 pagination.truncated=true\uff0c必须在 answer 或 missing_context 中说明还需要后续分页事实\uff0c不能声称总结完整。
 6. 不输出内部数据库主键、表名、source_key、source_activity_id。
 """
 

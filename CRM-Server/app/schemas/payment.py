@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List, Generic, TypeVar, Self
 from datetime import date, datetime
 from enum import Enum
+from typing import Generic, Self, SupportsFloat, SupportsIndex, TypeVar
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.payment_composition import PaymentComposition
 
@@ -9,7 +10,7 @@ T = TypeVar('T')
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    items: List[T] = Field(..., description="数据列表")
+    items: list[T] = Field(..., description="数据列表")
     total: int = Field(..., description="总数")
     page: int = Field(..., description="当前页码")
     page_size: int = Field(..., description="每页大小")
@@ -23,7 +24,7 @@ class PaymentPlanStatusEnum(str, Enum):
     COMPLETED = "COMPLETED"
     
     @property
-    def description(self):
+    def description(self) -> str:
         descriptions = {
             "PENDING": "待回款",
             "OVERDUE": "已逾期",
@@ -40,7 +41,7 @@ class PaymentStatusEnum(str, Enum):
     OVERDUE = "OVERDUE"
     
     @property
-    def description(self):
+    def description(self) -> str:
         descriptions = {
             "UNPAID": "未回款",
             "PARTIAL": "部分回款",
@@ -54,7 +55,7 @@ class PaymentPlanBase(BaseModel):
     stage_name: str = Field(..., max_length=100, description="回款阶段名")
     planned_amount: float = Field(..., gt=0, description="计划回款金额")
     due_date: date = Field(..., description="计划回款日期")
-    notes: Optional[str] = Field(None, description="备注")
+    notes: str | None = Field(None, description="备注")
 
 
 class PaymentPlanCreate(PaymentPlanBase):
@@ -62,27 +63,27 @@ class PaymentPlanCreate(PaymentPlanBase):
 
 
 class PaymentPlanUpdate(BaseModel):
-    stage_name: Optional[str] = Field(None, max_length=100, description="回款阶段名")
-    planned_amount: Optional[float] = Field(None, gt=0, description="计划回款金额")
-    due_date: Optional[date] = Field(None, description="计划回款日期")
-    notes: Optional[str] = Field(None, description="备注")
+    stage_name: str | None = Field(None, max_length=100, description="回款阶段名")
+    planned_amount: float | None = Field(None, gt=0, description="计划回款金额")
+    due_date: date | None = Field(None, description="计划回款日期")
+    notes: str | None = Field(None, description="备注")
 
 
 class PaymentRecordInfo(BaseModel):
     id: int
     actual_amount: float
-    actual_payer_name: Optional[str] = Field(None, description="实际付款方名称")
+    actual_payer_name: str | None = Field(None, description="实际付款方名称")
     payment_date: date
-    proof_attachment: Optional[str]
-    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；没填则为空")
-    commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
-    commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
-    creator_id: Optional[str] = Field(None, description="登记人ID")
-    creator_name: Optional[str]
-    notes: Optional[str] = Field(None, description="备注")
-    confirmation_status: Optional[str] = Field(None, description="确认状态")
-    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
-    approval_id: Optional[int] = Field(None, description="审批ID")
+    proof_attachment: str | None
+    composition: PaymentComposition | None = Field(None, description="续购和增购构成\uff1b没填则为空")
+    commission_member_id: str | None = Field(None, description="提成协作成员用户ID")
+    commission_member_name: str | None = Field(None, description="提成协作成员姓名")
+    creator_id: str | None = Field(None, description="登记人ID")
+    creator_name: str | None
+    notes: str | None = Field(None, description="备注")
+    confirmation_status: str | None = Field(None, description="确认状态")
+    approval_phase: str | None = Field(None, description="审批流程状态\uff1adraft/pending_review/approved/rejected")
+    approval_id: int | None = Field(None, description="审批ID")
     created_time: datetime
 
     class Config:
@@ -92,28 +93,28 @@ class PaymentRecordInfo(BaseModel):
 class PaymentPlanResponse(PaymentPlanBase):
     id: int
     contract_id: int
-    plan_number: Optional[str] = Field(None, description="回款计划编号")
+    plan_number: str | None = Field(None, description="回款计划编号")
     status: PaymentPlanStatusEnum
-    status_name: Optional[str] = Field(None, description="状态名称")
+    status_name: str | None = Field(None, description="状态名称")
     created_time: datetime
     last_modified_time: datetime
-    paid_amount: Optional[float] = Field(None, description="已回款金额")
-    remaining_amount: Optional[float] = Field(None, description="待回款金额")
-    payment_records: List[PaymentRecordInfo] = Field(default_factory=list, description="回款记录列表")
-    contract_name: Optional[str] = Field(None, description="合同名称")
-    creator_id: Optional[str] = Field(None, description="合同创建人ID")
-    customer_id: Optional[str] = Field(None, description="客户对外ID")
-    customer_name: Optional[str] = Field(None, description="客户名称")
-    opportunity_id: Optional[int] = Field(None, description="商机ID")
-    opportunity_name: Optional[str] = Field(None, description="商机名称")
-    owner_id: Optional[str] = Field(None, description="负责人ID（商机负责人）")
-    owner_name: Optional[str] = Field(None, description="负责人姓名")
+    paid_amount: float | None = Field(None, description="已回款金额")
+    remaining_amount: float | None = Field(None, description="待回款金额")
+    payment_records: list[PaymentRecordInfo] = Field(default_factory=list, description="回款记录列表")
+    contract_name: str | None = Field(None, description="合同名称")
+    creator_id: str | None = Field(None, description="合同创建人ID")
+    customer_id: str | None = Field(None, description="客户对外ID")
+    customer_name: str | None = Field(None, description="客户名称")
+    opportunity_id: int | None = Field(None, description="商机ID")
+    opportunity_name: str | None = Field(None, description="商机名称")
+    owner_id: str | None = Field(None, description="负责人ID\uff08商机负责人\uff09")
+    owner_name: str | None = Field(None, description="负责人姓名")
     is_invoiced: bool = Field(False, description="是否已开票")
     invoice_count: int = Field(0, description="开票数量")
-    invoiced_amount: Optional[float] = Field(None, description="已开票金额")
+    invoiced_amount: float | None = Field(None, description="已开票金额")
 
     @field_validator('status_name', mode='before')
-    def set_status_name(cls, v, info):
+    def set_status_name(cls, v: object, info: ValidationInfo) -> object:
         if v is None and 'status' in info.data:
             status = info.data['status']
             if isinstance(status, PaymentPlanStatusEnum):
@@ -126,7 +127,7 @@ class PaymentPlanResponse(PaymentPlanBase):
         return v
 
     @field_validator('paid_amount', 'remaining_amount', mode='before')
-    def parse_amount(cls, v):
+    def parse_amount(cls, v: str | bytes | bytearray | SupportsFloat | SupportsIndex | None) -> float | None:
         return float(v) if v is not None else None
 
     class Config:
@@ -134,20 +135,20 @@ class PaymentPlanResponse(PaymentPlanBase):
 
 
 class PaymentPlanBatchCreate(BaseModel):
-    plans: List[PaymentPlanCreate] = Field(..., min_length=1, description="回款计划列表")
+    plans: list[PaymentPlanCreate] = Field(..., min_length=1, description="回款计划列表")
 
 
 class PaymentRecordBase(BaseModel):
     actual_amount: float = Field(..., gt=0, description="实际回款金额")
-    actual_payer_name: Optional[str] = Field(None, max_length=200, description="实际付款方名称")
+    actual_payer_name: str | None = Field(None, max_length=200, description="实际付款方名称")
     payment_date: date = Field(..., description="实际回款日期")
-    proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
-    notes: Optional[str] = Field(None, description="备注")
+    proof_attachment: str | None = Field(None, max_length=500, description="回款凭证附件URL")
+    notes: str | None = Field(None, description="备注")
 
 
 class PaymentRecordCreate(PaymentRecordBase):
     commission_member_id: str = Field(..., min_length=1, max_length=100, description="提成协作成员用户ID")
-    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；不填则不记")
+    composition: PaymentComposition | None = Field(None, description="续购和增购构成\uff1b不填则不记")
 
     @model_validator(mode="after")
     def composition_matches_payment_amount(self) -> Self:
@@ -157,13 +158,13 @@ class PaymentRecordCreate(PaymentRecordBase):
 
 
 class PaymentRecordUpdate(BaseModel):
-    actual_amount: Optional[float] = Field(None, gt=0, description="实际回款金额")
-    actual_payer_name: Optional[str] = Field(None, max_length=200, description="实际付款方名称")
-    payment_date: Optional[date] = Field(None, description="实际回款日期")
-    proof_attachment: Optional[str] = Field(None, max_length=500, description="回款凭证附件URL")
-    commission_member_id: Optional[str] = Field(None, min_length=1, max_length=100, description="提成协作成员用户ID")
-    notes: Optional[str] = Field(None, description="备注")
-    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；传空表示清除")
+    actual_amount: float | None = Field(None, gt=0, description="实际回款金额")
+    actual_payer_name: str | None = Field(None, max_length=200, description="实际付款方名称")
+    payment_date: date | None = Field(None, description="实际回款日期")
+    proof_attachment: str | None = Field(None, max_length=500, description="回款凭证附件URL")
+    commission_member_id: str | None = Field(None, min_length=1, max_length=100, description="提成协作成员用户ID")
+    notes: str | None = Field(None, description="备注")
+    composition: PaymentComposition | None = Field(None, description="续购和增购构成\uff1b传空表示清除")
 
     @model_validator(mode="after")
     def composition_matches_payment_amount(self) -> Self:
@@ -174,37 +175,37 @@ class PaymentRecordUpdate(BaseModel):
 
 class PaymentRecordResponse(PaymentRecordBase):
     id: int
-    composition: Optional[PaymentComposition] = Field(None, description="续购和增购构成；没填则为空")
+    composition: PaymentComposition | None = Field(None, description="续购和增购构成\uff1b没填则为空")
     payment_plan_id: int
-    record_number: Optional[str] = Field(None, description="回款记录编号")
+    record_number: str | None = Field(None, description="回款记录编号")
     creator_id: str
-    creator_name: Optional[str]
-    approval_phase: Optional[str] = Field(None, description="审批流程状态：draft/pending_review/approved/rejected")
+    creator_name: str | None
+    approval_phase: str | None = Field(None, description="审批流程状态\uff1adraft/pending_review/approved/rejected")
     created_time: datetime
-    contract_id: Optional[int] = Field(None, description="合同ID")
-    contract_name: Optional[str] = Field(None, description="合同名称")
-    stage_name: Optional[str] = Field(None, description="回款阶段名称")
-    customer_id: Optional[str] = Field(None, description="客户对外ID")
-    customer_name: Optional[str] = Field(None, description="客户名称")
-    opportunity_id: Optional[int] = Field(None, description="商机ID")
-    opportunity_name: Optional[str] = Field(None, description="商机名称")
+    contract_id: int | None = Field(None, description="合同ID")
+    contract_name: str | None = Field(None, description="合同名称")
+    stage_name: str | None = Field(None, description="回款阶段名称")
+    customer_id: str | None = Field(None, description="客户对外ID")
+    customer_name: str | None = Field(None, description="客户名称")
+    opportunity_id: int | None = Field(None, description="商机ID")
+    opportunity_name: str | None = Field(None, description="商机名称")
     license_type: str | None = Field(None, description="关联合同授权模式: SUBSCRIPTION/PERPETUAL")
     purchase_type: str | None = Field(None, description="关联合同商机采购类型: NEW/RENEWAL/EXPANSION")
-    invoice_title_text: Optional[str] = Field(None, description="关联发票开票抬头")
-    owner_id: Optional[str] = Field(None, description="负责人用户ID")
-    owner_name: Optional[str] = Field(None, description="负责人姓名")
-    commission_member_id: Optional[str] = Field(None, description="提成协作成员用户ID")
-    commission_member_name: Optional[str] = Field(None, description="提成协作成员姓名")
-    confirmation_status: Optional[str] = Field(
-        None, description="确认状态：PENDING/CONFIRMED/DISPUTED"
+    invoice_title_text: str | None = Field(None, description="关联发票开票抬头")
+    owner_id: str | None = Field(None, description="负责人用户ID")
+    owner_name: str | None = Field(None, description="负责人姓名")
+    commission_member_id: str | None = Field(None, description="提成协作成员用户ID")
+    commission_member_name: str | None = Field(None, description="提成协作成员姓名")
+    confirmation_status: str | None = Field(
+        None, description="确认状态\uff1aPENDING/CONFIRMED/DISPUTED"
     )
-    updated_time: Optional[datetime] = Field(None, description="最后更新时间")
+    updated_time: datetime | None = Field(None, description="最后更新时间")
     # Backward-compatible public timestamp used by existing list/detail clients.
-    last_modified_time: datetime = Field(..., description="最后更新时间（兼容字段）")
+    last_modified_time: datetime = Field(..., description="最后更新时间\uff08兼容字段\uff09")
     # Durable command metadata is optional so list/detail responses remain
     # backward-compatible while write responses can expose a queryable result.
-    operation_id: Optional[str] = Field(None, description="本次写操作ID")
-    status: Optional[str] = Field(None, description="本次写操作结果状态")
+    operation_id: str | None = Field(None, description="本次写操作ID")
+    status: str | None = Field(None, description="本次写操作结果状态")
 
     class Config:
         from_attributes = True
@@ -214,7 +215,7 @@ class PaymentPlanStatusSummary(BaseModel):
     """用于最终状态确认的回款计划摘要。"""
 
     id: int
-    plan_number: Optional[str] = None
+    plan_number: str | None = None
     stage_name: str
     planned_amount: float
     paid_amount: float
@@ -234,10 +235,10 @@ class ContractPaymentSummary(BaseModel):
     completed_plans_count: int
     overdue_plans_count: int
     remaining_amount: float
-    customer_id: Optional[str] = Field(None, description="客户对外ID")
-    customer_name: Optional[str] = Field(None, description="客户名称")
-    opportunity_id: Optional[int] = Field(None, description="商机ID")
-    opportunity_name: Optional[str] = Field(None, description="商机名称")
+    customer_id: str | None = Field(None, description="客户对外ID")
+    customer_name: str | None = Field(None, description="客户名称")
+    opportunity_id: int | None = Field(None, description="商机ID")
+    opportunity_name: str | None = Field(None, description="商机名称")
 
 
 class PaymentReminder(BaseModel):
@@ -248,8 +249,8 @@ class PaymentReminder(BaseModel):
     due_date: date
     days_until_due: int
     contract_owner_id: str
-    customer_name: Optional[str] = Field(None, description="客户名称")
-    opportunity_name: Optional[str] = Field(None, description="商机名称")
+    customer_name: str | None = Field(None, description="客户名称")
+    opportunity_name: str | None = Field(None, description="商机名称")
 
 
 class PaymentConfirmationStatusEnum(str, Enum):
@@ -258,7 +259,7 @@ class PaymentConfirmationStatusEnum(str, Enum):
     DISPUTED = "DISPUTED"
     
     @property
-    def description(self):
+    def description(self) -> str:
         descriptions = {
             "PENDING": "待确认",
             "CONFIRMED": "已确认",
@@ -268,50 +269,50 @@ class PaymentConfirmationStatusEnum(str, Enum):
 
 
 class PaymentRecordConfirm(BaseModel):
-    action: str = Field(..., description="确认操作：confirm(确认), dispute(争议)")
-    notes: Optional[str] = Field(None, description="确认备注或争议说明")
-    invoice_application_ids: Optional[List[int]] = Field(None, description="关联的发票申请ID列表")
+    action: str = Field(..., description="确认操作\uff1aconfirm(确认), dispute(争议)")
+    notes: str | None = Field(None, description="确认备注或争议说明")
+    invoice_application_ids: list[int] | None = Field(None, description="关联的发票申请ID列表")
 
 
 class PaymentRecordWithConfirmation(PaymentRecordResponse):
     confirmation_status: PaymentConfirmationStatusEnum
-    confirmed_by: Optional[str] = Field(None, description="确认人ID")
-    confirmed_by_name: Optional[str] = Field(None, description="确认人姓名")
-    confirmed_time: Optional[datetime] = Field(None, description="确认时间")
-    confirmation_notes: Optional[str] = Field(None, description="确认备注")
+    confirmed_by: str | None = Field(None, description="确认人ID")
+    confirmed_by_name: str | None = Field(None, description="确认人姓名")
+    confirmed_time: datetime | None = Field(None, description="确认时间")
+    confirmation_notes: str | None = Field(None, description="确认备注")
 
 
 # Task 1.4: PaymentRecord list response schemas
 
 class ApprovalNodeInfo(BaseModel):
-    """审批节点信息，使用提交时冻结的审批人列表。"""
+    """审批节点信息\uff0c使用提交时冻结的审批人列表。"""
     id: int
     node_order: int
     node_name: str
     node_type: str = "APPROVAL"
     status: str = "PENDING"
-    approver_ids: List[int] = Field(default_factory=list)
-    approver_names: List[str] = Field(default_factory=list)
-    approver_id: Optional[str] = None
-    approver_name: Optional[str] = None
-    comment: Optional[str] = None
+    approver_ids: list[int] = Field(default_factory=list)
+    approver_names: list[str] = Field(default_factory=list)
+    approver_id: str | None = None
+    approver_name: str | None = None
+    comment: str | None = None
 
 
 class ApprovalInfo(BaseModel):
     """审批信息。"""
     id: int
     status: str
-    current_node_name: Optional[str] = None
-    current_approver_ids: List[int] = Field(default_factory=list)
-    current_approver_name: Optional[str] = None
-    nodes: List[ApprovalNodeInfo] = Field(default_factory=list)
+    current_node_name: str | None = None
+    current_approver_ids: list[int] = Field(default_factory=list)
+    current_approver_name: str | None = None
+    nodes: list[ApprovalNodeInfo] = Field(default_factory=list)
 
 
 class PaymentRecordApprovalResponse(PaymentRecordResponse):
     """回款记录共有的审批信息。"""
     confirmation_status: PaymentConfirmationStatusEnum = Field(..., description="确认状态")
-    approval_id: Optional[int] = Field(None, description="审批ID")
-    approval: Optional[ApprovalInfo] = Field(None, description="审批信息")
+    approval_id: int | None = Field(None, description="审批ID")
+    approval: ApprovalInfo | None = Field(None, description="审批信息")
 
 
 class PaymentRecordListItem(PaymentRecordApprovalResponse):
@@ -321,14 +322,14 @@ class PaymentRecordListItem(PaymentRecordApprovalResponse):
 
 
 class PaymentRecordDetailResponse(PaymentRecordApprovalResponse):
-    """回款记录详情，支持超时后的最终状态确认。"""
+    """回款记录详情\uff0c支持超时后的最终状态确认。"""
 
     payment_plan: PaymentPlanStatusSummary
 
 
 class PaymentRecordListResponse(BaseModel, Generic[T]):
-    """回款记录列表响应（含待我审批数量）"""
-    items: List[T] = Field(..., description="数据列表")
+    """回款记录列表响应\uff08含待我审批数量\uff09"""
+    items: list[T] = Field(..., description="数据列表")
     total: int = Field(..., description="总数")
     page: int = Field(..., description="当前页码")
     page_size: int = Field(..., description="每页大小")

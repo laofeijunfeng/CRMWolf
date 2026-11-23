@@ -1,4 +1,3 @@
-from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -9,7 +8,6 @@ from app.models.user import User
 from app.models.user_role import UserRole
 from app.schemas.customer import CustomerMemberCreate, CustomerMemberUpdate
 
-
 ACCESS_LEVEL_RANK = {
     "VIEW": 1,
     "FOLLOW_UP": 2,
@@ -18,7 +16,7 @@ ACCESS_LEVEL_RANK = {
 
 
 class CustomerMemberCRUD:
-    def get_by_id(self, db: Session, member_id: int, team_id: int) -> Optional[CustomerMember]:
+    def get_by_id(self, db: Session, member_id: int, team_id: int) -> CustomerMember | None:
         return db.query(CustomerMember).filter(
             CustomerMember.id == member_id,
             CustomerMember.team_id == team_id,
@@ -31,7 +29,7 @@ class CustomerMemberCRUD:
         team_id: int,
         customer_id: int,
         user_id: str,
-    ) -> Optional[CustomerMember]:
+    ) -> CustomerMember | None:
         return db.query(CustomerMember).filter(
             CustomerMember.team_id == team_id,
             CustomerMember.customer_id == customer_id,
@@ -52,7 +50,7 @@ class CustomerMemberCRUD:
             return False
         return ACCESS_LEVEL_RANK.get(member.access_level, 0) >= ACCESS_LEVEL_RANK.get(required_level, 0)
 
-    def get_by_customer(self, db: Session, team_id: int, customer_id: int) -> List[CustomerMember]:
+    def get_by_customer(self, db: Session, team_id: int, customer_id: int) -> list[CustomerMember]:
         return db.query(CustomerMember).filter(
             CustomerMember.team_id == team_id,
             CustomerMember.customer_id == customer_id,
@@ -125,7 +123,7 @@ class CustomerMemberCRUD:
             db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 0) + 1
         db.commit()
 
-    def get_candidates(self, db: Session, team_id: int, customer_id: int) -> List[dict]:
+    def get_candidates(self, db: Session, team_id: int, customer_id: int) -> list[dict]:
         customer = db.query(Customer).filter(
             Customer.team_id == team_id,
             Customer.id == customer_id,

@@ -1,7 +1,6 @@
 """合同相关服务"""
-from datetime import datetime, date
+from datetime import date
 from decimal import Decimal
-from typing import Optional
 
 # ContractNumberGenerator 已迁移到 business_number_generator.py
 
@@ -14,7 +13,7 @@ class ContractPricingService:
         total_amount: Decimal,
         user_count: int,
         license_type: str,
-        subscription_years: Optional[int] = None
+        subscription_years: int | None = None
     ) -> Decimal:
         """
         计算标准单价
@@ -23,7 +22,7 @@ class ContractPricingService:
             total_amount: 合同总金额
             user_count: 采购用户数
             license_type: 授权模式 (SUBSCRIPTION:订阅, PERPETUAL:买断)
-            subscription_years: 订阅年限（默认1年）
+            subscription_years: 订阅年限\uff08默认1年\uff09
             
         Returns:
             Decimal: 计算出的标准单价
@@ -50,14 +49,14 @@ class ContractPricingService:
             return unit_price.quantize(Decimal('0.01'))
             
         except Exception as e:
-            raise ValueError(f"计算标准单价失败: {str(e)}")
+            raise ValueError(f"计算标准单价失败: {e!s}")
     
     @staticmethod
     def calculate_expiry_date(
-        effective_date: Optional[date],
+        effective_date: date | None,
         license_type: str,
-        subscription_years: Optional[int] = None
-    ) -> Optional[date]:
+        subscription_years: int | None = None
+    ) -> date | None:
         """
         计算到期日期
         

@@ -169,27 +169,28 @@ QUERY_SEMANTIC_INTENT_SYSTEM_PROMPT = """
 1. 先理解语义, 不要按固定关键词或固定句式匹配。口语、同义表达、倒装、省略都要按含义判断。
 2. global_work 的 resource 只能是 follow_up_tasks 或 completed_work。
    未来/当前要做的事归 follow_up_tasks; 已经做过的事归 completed_work。
-   query_goal 表示用户真正要做的查询：
-   - list：列出一组记录；
-   - search：按自然语言描述寻找记录；
-   - get_detail：查看明确记录的详情；
-   - get_status：确认明确待办的当前状态；
-   - summarize：汇总一段时间内已完成的工作。
-   “这个待办完成了吗/上次那个跟进现在怎样”属于 get_status 或 get_detail，
-   不要因为“历史/上次”就只查 completed_work。task_text 只填写用户对待办的自然语言描述，
-   不要填写数据库 ID；明确的服务端实体引用由系统提供。
+   query_goal 表示用户真正要做的查询\uff1a
+   - list\uff1a列出一组记录\uff1b
+   - search\uff1a按自然语言描述寻找记录\uff1b
+   - get_detail\uff1a查看明确记录的详情\uff1b
+   - get_status\uff1a确认明确待办的当前状态\uff1b
+   - summarize\uff1a汇总一段时间内已完成的工作。
+   “这个待办完成了吗/上次那个跟进现在怎样”属于 get_status 或 get_detail\uff0c
+   不要因为“历史/上次”就只查 completed_work。task_text 只填写用户对待办的自然语言描述\uff0c
+   不要填写数据库 ID\uff1b明确的服务端实体引用由系统提供。
 3. temporal.kind 只能填写标准语义: today、tomorrow、this_week、next_week、last_week、this_month、
    overdue、custom、unspecified。
    “未来两周”“最近几天”“截至月底”“9月上旬”等表达, 若能从原话明确得到边界,
    填写 custom 并给出 ISO 日期时间的 [start_at, end_at); 无法可靠确定边界则填写 unspecified。
 4. custom 的 end_at 是排他边界。日期范围必须给出完整 ISO 日期或 ISO 日期时间, 不要输出中文日期。
    日期计算必须以请求中提供的 reference_now 和 reference_timezone 为准, 不要使用模型自身的当前日期。
-5. “某客户下周有哪些待办”是 customer_scoped, 不是 global_work; customer_text 填写客户名称或简称；如果用户没有在原话中说出客户，但上下文提供了当前客户，也可以省略 customer_text。
+5. “某客户下周有哪些待办”是 customer_scoped, 不是 global_work; customer_text 填写客户名称或简称\uff1b如果用户没有在原话中说出客户\uff0c但上下文提供了当前客户\
+\uff0c也可以省略 customer_text。
    不要把时间和问题一起放进去。
 6. 不要根据公司名称、行业或上下文猜客户。没有明确客户提及时 customer_text 必须为空。
 7. completed_work 只能表达已经发生的工作; 未来时间与 completed_work 冲突时,
    返回 unknown 或把语义改为 follow_up_tasks。
-8. 如果用户没有给出时间范围，当前待办查询使用全部未完成待办；已完成工作查询使用安全的近期默认范围，
+8. 如果用户没有给出时间范围\uff0c当前待办查询使用全部未完成待办\uff1b已完成工作查询使用安全的近期默认范围\uff0c
    不要仅因为时间省略就追问。回答中应明确告知实际采用的范围。
 9. confidence 反映语义判断把握, 不是业务事实可信度。
 """

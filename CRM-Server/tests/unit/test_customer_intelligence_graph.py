@@ -1,5 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -15,7 +16,7 @@ from app.services.agent.customer_intelligence_graph import (
 from app.services.agent.schemas import CustomerContextAnswerResult
 from app.services.customer_activity_ai.checkpointer import SQLAlchemyCheckpointSaver
 from app.services.customer_context_answer_service import CustomerContextAnswerEnvelope
-from app.services.customer_fact_extraction_service import CustomerFactExtractionResult, ExtractedCustomerFact
+from app.services.customer_fact_service import CustomerFactService
 from app.services.customer_intelligence_event_service import (
     CustomerIntelligenceEvent,
     CustomerIntelligenceSource,
@@ -70,12 +71,6 @@ def _sql_checkpoint_saver() -> SQLAlchemyCheckpointSaver:
     )
     metadata.create_all(engine)
     return SQLAlchemyCheckpointSaver(engine)
-
-
-class FakePersistedFact:
-    def __init__(self, fact_id, version=1):
-        self.id = fact_id
-        self.version = version
 
 
 class FakeCustomerContext:
@@ -211,16 +206,6 @@ class FakeDB:
         self.closed = True
 
 
-class FakeReviewWorkflow:
-    def __init__(self, public_id: str = "rc_review_1"):
-        self.public_id = public_id
-        self.calls = []
-
-    def create_case(self, db, **kwargs):
-        self.calls.append({"db": db, **kwargs})
-        return SimpleNamespace(public_id=self.public_id)
-
-
 async def _invoke(service, input_state):
     result = {}
     async for chunk in service.stream_events(input_state):
@@ -228,50 +213,6 @@ async def _invoke(service, input_state):
             result = chunk.get("result") or {}
     return result
 
-
-class FakeCustomerFactExtractionService:
-    def __init__(self, facts=None):
-        self.calls = []
-        self.facts = facts or []
-
-    async def extract(self, db, *, team_id, event, customer_context, customer_memory=None, current_date=None):
-        self.calls.append(
-            {
-                "team_id": team_id,
-                "event": event,
-                "customer_context": customer_context,
-                "customer_memory": customer_memory,
-                "current_date": current_date,
-            }
-        )
-        return CustomerFactExtractionResult(summary="提炼客户最新动态", facts=self.facts)
-
-
-class FailingCustomerFactExtractionService:
-    async def extract(self, db, **kwargs):
-        raise RuntimeError("fact extraction unavailable")
-
-
-class FakeCustomerFactService:
-    def __init__(self):
-        self.calls = []
-
-    def assess_candidate_against_context(self, *, candidate, existing_facts):
-        from app.services.customer_fact_service import customer_fact_service
-
-        return customer_fact_service.assess_candidate_against_context(
-            candidate=candidate,
-            existing_facts=existing_facts,
-        )
-
-    def upsert_fact(self, db, fact_input):
-        self.calls.append({"db": db, "fact_input": fact_input})
-        return FakePersistedFact(901, version=len(self.calls) + 1)
-
-
-class FailingCustomerFactService(FakeCustomerFactService):
-    def upsert_fact(self, db, fact_input):
-        raise RuntimeError("fact persistence unavailable")
 
 def _business_event(*, event_key: str, occurred_at: datetime | None = None) -> CustomerIntelligenceEvent:
     return CustomerIntelligenceEvent(
@@ -345,29 +286,15 @@ async def test_customer_intelligence_graph_rejects_profile_refresh_at_its_bounda
 
 
 @pytest.mark.asyncio
-async def test_customer_intelligence_graph_loads_context_plans_refresh_and_checkpoints():
+async def test_customer_intelligence_graph_writes_memory_without_writing_facts_and_checkpoints(monkeypatch):
     context_service = FakeCustomerContextService()
     memory_store_service = FakeCustomerMemoryStoreService()
-    fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[
-            ExtractedCustomerFact(
-                fact_type="alias",
-                subject="POC",
-                content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
-                confidence=0.88,
-                action="upsert",
-                evidence_quote="张总说本周开始 POC",
-                reason="跟进记录明确表达客户进入 POC",
-            )
-        ]
-    )
-    fact_service = FakeCustomerFactService()
+    fact_upsert = Mock()
+    monkeypatch.setattr(CustomerFactService, "upsert_fact", fact_upsert)
     db = FakeDB()
     service = CustomerIntelligenceGraphService(
         context_service=context_service,
         memory_store_service=memory_store_service,
-        fact_extraction_service=fact_extraction_service,
-        fact_service=fact_service,
         checkpointer=InMemorySaver(),
         session_factory=lambda: db,
     )
@@ -412,11 +339,15 @@ async def test_customer_intelligence_graph_loads_context_plans_refresh_and_check
     assert context_service.calls[0]["team_id"] == 2
     assert memory_store_service.reads[0]["customer_id"] == 101
     assert memory_store_service.fact_writes == []
-    assert fact_extraction_service.calls == []
-    assert fact_service.calls == []
+    fact_upsert.assert_not_called()
     assert db.flush_count == 1
     assert result["route"] == "write_memory"
     assert result["refresh_plan"]["target_sections"] == ["memory"]
+    assert [write["key"] for write in memory_store_service.summary_writes] == ["latest_customer_intelligence_event"]
+    assert [write["key"] for write in memory_store_service.retrieval_writes] == ["latest_evidence_refs"]
+    assert memory_store_service.retrieval_writes[0]["value"]["evidence_refs"][0]["evidence_id"] == "ev-1"
+    memory_written = next(item for item in result["events"] if item["event"] == "customer_intelligence_memory_written")
+    assert memory_written["sections"] == ["summaries", "retrieval"]
     assert result["customer_context"]["strong_context"]["customer"]["account_name"] == "越秀金融"
     trace_titles = [step["title"] for step in result["visible_trace"]]
     assert trace_titles[0] == "理解触发来源"
@@ -436,20 +367,6 @@ async def test_customer_intelligence_graph_streams_visible_trace_before_final_re
     service = CustomerIntelligenceGraphService(
         context_service=FakeCustomerContextService(),
         memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=FakeCustomerFactExtractionService(
-            facts=[
-                ExtractedCustomerFact(
-                    fact_type="alias",
-                    subject="POC",
-                    content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
-                    confidence=0.88,
-                    action="upsert",
-                    evidence_quote="张总说本周开始 POC",
-                    reason="跟进记录明确表达客户进入 POC",
-                )
-            ]
-        ),
-        fact_service=FakeCustomerFactService(),
         checkpointer=InMemorySaver(),
         session_factory=FakeDB,
     )
@@ -596,14 +513,10 @@ async def test_customer_intelligence_graph_fails_closed_when_final_checkpoint_st
 @pytest.mark.asyncio
 async def test_customer_intelligence_graph_answers_agent_question_without_refreshing_profile():
     context_service = FakeCustomerContextService()
-    fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[ExtractedCustomerFact(fact_type="alias", content="不应提炼", confidence=0.9)]
-    )
     answer_service = FakeCustomerContextAnswerService()
     service = CustomerIntelligenceGraphService(
         context_service=context_service,
         memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=fact_extraction_service,
         answer_service=answer_service,
         checkpointer=InMemorySaver(),
         session_factory=FakeDB,
@@ -641,11 +554,12 @@ async def test_customer_intelligence_graph_answers_agent_question_without_refres
     assert result["events"][-2]["retrieval_status"] == "ok"
     assert result["events"][-2]["semantic_evidence_count"] == 1
     assert result["customer_context_answer"]["citations"][0]["evidence_id"] == "ev-1"
-    assert fact_extraction_service.calls == []
+    assert answer_service.calls[0]["customer_context"]["strong_context"]["customer_facts"][0]["id"] == 501
+    assert answer_service.calls[0]["customer_memory"]["summaries"][0]["key"] == "latest"
     assert "生成客户回答" in [step["title"] for step in result["visible_trace"]]
 
 
-def test_customer_intelligence_graph_has_single_non_blocking_fact_assessment_path():
+def test_customer_intelligence_graph_has_no_fact_write_or_review_nodes():
     service = CustomerIntelligenceGraphService(
         context_service=FakeCustomerContextService(),
         memory_store_service=FakeCustomerMemoryStoreService(),
@@ -655,161 +569,7 @@ def test_customer_intelligence_graph_has_single_non_blocking_fact_assessment_pat
 
     graph_nodes = set(service._graph.get_graph().nodes)
 
-    assert "assess_facts" not in graph_nodes
-    assert "review_facts" not in graph_nodes
-    assert "wait_fact_review" not in graph_nodes
-
-
-@pytest.mark.asyncio
-async def test_customer_intelligence_graph_ignores_low_confidence_facts_without_review_interaction():
-    fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[
-            ExtractedCustomerFact(
-                fact_type="alias",
-                subject="审批",
-                content="客户内部审批链可能较长。",
-                confidence=0.62,
-                action="upsert",
-                evidence_quote="张总提到需要再走内部流程",
-                reason="有风险信号，但表达不够确定",  # noqa: RUF001
-            )
-        ]
-    )
-    fact_service = FakeCustomerFactService()
-    service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
-        memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=fact_extraction_service,
-        fact_service=fact_service,
-        checkpointer=InMemorySaver(),
-        session_factory=FakeDB,
-    )
-    event = _business_event(event_key="refresh-low-confidence-1", occurred_at=datetime(2026, 8, 2, 13, 0, 0))
-
-    result = await _invoke(
-        service,
-        {
-            "team_id": 2,
-            "user_id": 9,
-            "session_id": 77,
-            "event": event,
-        },
-    )
-
-    assert "__interrupt__" not in result
-    assert "customer_fact_review" not in result
-    assert fact_service.calls == []
-    assert "需要确认" not in str(result)
-    assert not any(event.get("ignored_count") == 1 for event in result["events"])
-    visible_trace_titles = {step["title"] for step in result["visible_trace"]}
-    assert "提炼客户事实" not in visible_trace_titles
-    assert "沉淀客户事实" not in visible_trace_titles
-
-
-@pytest.mark.asyncio
-async def test_customer_intelligence_graph_keeps_fact_extraction_failure_internal():
-    service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
-        memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=FailingCustomerFactExtractionService(),
-        checkpointer=InMemorySaver(),
-        session_factory=FakeDB,
-    )
-    event = _business_event(event_key="refresh-extraction-failure-1", occurred_at=datetime(2026, 8, 2, 13, 0, 0))
-
-    result = await _invoke(
-        service,
-        {
-            "team_id": 2,
-            "user_id": 9,
-            "session_id": 77,
-            "event": event,
-        },
-    )
-
-    assert not any(error.get("event") == "customer_intelligence_fact_extraction_failed" for error in result["errors"])
-    assert "提炼客户事实" not in {step["title"] for step in result["visible_trace"]}
-
-
-@pytest.mark.asyncio
-async def test_customer_intelligence_graph_keeps_fact_persistence_failure_internal():
-    fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[
-            ExtractedCustomerFact(
-                fact_type="alias",
-                subject="POC",
-                content="周四跟进客户 POC 环境部署情况。",
-                confidence=0.94,
-                action="upsert",
-                evidence_quote="周四跟进客户 POC 环境部署情况",
-            )
-        ]
-    )
-    service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
-        memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=fact_extraction_service,
-        fact_service=FailingCustomerFactService(),
-        checkpointer=InMemorySaver(),
-        session_factory=FakeDB,
-    )
-    event = _business_event(event_key="refresh-persist-failure-1", occurred_at=datetime(2026, 8, 2, 13, 0, 0))
-
-    result = await _invoke(
-        service,
-        {
-            "team_id": 2,
-            "user_id": 9,
-            "session_id": 77,
-            "event": event,
-        },
-    )
-
-    assert not any(error.get("event") == "customer_intelligence_fact_persist_failed" for error in result["errors"])
-    assert "沉淀客户事实" not in {step["title"] for step in result["visible_trace"]}
-
-
-@pytest.mark.asyncio
-async def test_customer_intelligence_graph_auto_persists_high_confidence_fact_without_review():
-    fact_extraction_service = FakeCustomerFactExtractionService(
-        facts=[
-            ExtractedCustomerFact(
-                fact_type="alias",
-                subject="POC",
-                content="周四跟进客户 POC 环境部署情况。",
-                confidence=0.94,
-                action="upsert",
-                evidence_quote="周四跟进客户 POC 环境部署情况",
-            )
-        ]
-    )
-    fact_service = FakeCustomerFactService()
-    memory_store = FakeCustomerMemoryStoreService()
-    service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
-        memory_store_service=memory_store,
-        fact_extraction_service=fact_extraction_service,
-        fact_service=fact_service,
-        checkpointer=InMemorySaver(),
-        session_factory=FakeDB,
-    )
-    event = _business_event(event_key="refresh-high-confidence-1", occurred_at=datetime(2026, 8, 2, 13, 0, 0))
-
-    result = await _invoke(
-        service,
-        {
-            "team_id": 2,
-            "user_id": 9,
-            "session_id": 77,
-            "event": event,
-        },
-    )
-
-    assert "__interrupt__" not in result
-    assert "customer_fact_review" not in result
-    assert fact_service.calls == []
-    assert memory_store.fact_writes == []
-    assert "需要确认" not in str(result)
+    assert graph_nodes.isdisjoint({"extract_facts", "assess_facts", "persist_facts", "review_facts", "wait_fact_review"})
 
 
 @pytest.mark.asyncio
@@ -842,39 +602,27 @@ async def test_customer_intelligence_graph_records_error_when_db_missing():
 
 
 @pytest.mark.asyncio
-async def test_customer_intelligence_graph_restarts_running_checkpoint_without_repeating_fact_write(monkeypatch):
+@pytest.mark.parametrize("interrupt_before_write", [False, True])
+async def test_customer_intelligence_graph_reopens_sql_checkpoint(monkeypatch, interrupt_before_write):
     saver = _sql_checkpoint_saver()
-    first_fact_service = FakeCustomerFactService()
+    first_memory_store = FakeCustomerMemoryStoreService()
     production_compile = StateGraph.compile
 
-    def compile_with_persist_interrupt(graph, *args, **kwargs):
-        return production_compile(graph, *args, **kwargs)
+    def compile_with_write_interrupt(graph, *args, **kwargs):
+        return production_compile(graph, *args, **kwargs, interrupt_before=["write_memory"])
 
-    monkeypatch.setattr(StateGraph, "compile", compile_with_persist_interrupt)
-    first_service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
-        memory_store_service=FakeCustomerMemoryStoreService(),
-        fact_extraction_service=FakeCustomerFactExtractionService(
-            facts=[
-                ExtractedCustomerFact(
-                    fact_type="alias",
-                    subject="POC",
-                    content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
-                    confidence=0.88,
-                    action="upsert",
-                    evidence_quote="张总说本周开始 POC",
-                    reason="跟进记录明确表达客户进入 POC",
-                )
-            ]
-        ),
-        fact_service=first_fact_service,
-        checkpointer=saver,
-        session_factory=FakeDB,
-    )
-    monkeypatch.setattr(StateGraph, "compile", production_compile)
+    with monkeypatch.context() as patch:
+        if interrupt_before_write:
+            patch.setattr(StateGraph, "compile", compile_with_write_interrupt)
+        first_service = CustomerIntelligenceGraphService(
+            context_service=FakeCustomerContextService(),
+            memory_store_service=first_memory_store,
+            checkpointer=saver,
+            session_factory=FakeDB,
+        )
     event = _business_event(event_key="refresh-running-sql-1", occurred_at=datetime(2026, 8, 22, 13, 0, 0))
 
-    interrupted = await _invoke(
+    await _invoke(
         first_service,
         {
             "team_id": 2,
@@ -884,38 +632,16 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
         },
     )
 
-    assert first_fact_service.calls == []
-    assert interrupted["persisted_customer_fact_refs"] == []
-    crashed_snapshot = await first_service._graph.aget_state(
-        build_customer_intelligence_graph_config(
-            team_id=2,
-            user_id=9,
-            session_id=77,
-            event_key=event.event_key,
-        )
-    )
-    assert crashed_snapshot.next == ()
+    config = build_customer_intelligence_graph_config(team_id=2, user_id=9, session_id=77, event_key=event.event_key)
+    saved_snapshot = await first_service._graph.aget_state(config)
+    assert saved_snapshot.next == (("write_memory",) if interrupt_before_write else ())
+    assert len(first_memory_store.summary_writes) == (0 if interrupt_before_write else 1)
 
-    restarted_extraction = FakeCustomerFactExtractionService(
-        facts=[
-            ExtractedCustomerFact(
-                fact_type="alias",
-                subject="POC",
-                content="客户已经进入 POC，需准备试用环境。",  # noqa: RUF001
-                confidence=0.88,
-                action="upsert",
-                evidence_quote="张总说本周开始 POC",
-                reason="跟进记录明确表达客户进入 POC",
-            )
-        ]
-    )
-    restarted_fact_service = FakeCustomerFactService()
+    restarted_context = FakeCustomerContextService()
     restarted_memory_store = FakeCustomerMemoryStoreService()
     restarted_service = CustomerIntelligenceGraphService(
-        context_service=FakeCustomerContextService(),
+        context_service=restarted_context,
         memory_store_service=restarted_memory_store,
-        fact_extraction_service=restarted_extraction,
-        fact_service=restarted_fact_service,
         checkpointer=SQLAlchemyCheckpointSaver(saver.engine),
         session_factory=FakeDB,
     )
@@ -931,7 +657,18 @@ async def test_customer_intelligence_graph_restarts_running_checkpoint_without_r
         },
     )
 
-    assert restarted_extraction.calls == []
-    assert restarted_fact_service.calls == []
-    assert resumed["persisted_customer_fact_refs"] == []
+    assert resumed["route"] == "write_memory"
+    assert resumed["errors"] == []
+    assert resumed["events"][-1]["event"] == "customer_intelligence_trace_ready"
+    assert len(restarted_context.calls) == (0 if interrupt_before_write else 1)
+    assert [write["key"] for write in restarted_memory_store.summary_writes] == ["latest_customer_intelligence_event"]
+    assert [write["key"] for write in restarted_memory_store.retrieval_writes] == ["latest_evidence_refs"]
     assert restarted_memory_store.fact_writes == []
+    assert (await restarted_service._graph.aget_state(config)).next == ()
+    saved_checkpoint_id = saved_snapshot.config["configurable"]["checkpoint_id"]
+    history = [snapshot async for snapshot in restarted_service._graph.aget_state_history(config)]
+    assert any(
+        snapshot.config["configurable"]["checkpoint_id"] == saved_checkpoint_id
+        and snapshot.values["refresh_plan"]["route"] == "write_memory"
+        for snapshot in history
+    )

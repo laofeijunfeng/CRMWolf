@@ -2,10 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
-from typing import Optional
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
 from app.crud.ai_config import ai_config_crud
 from app.services.agent.langchain_runtime import (
@@ -21,6 +18,11 @@ from app.services.agent.schemas import (
 )
 from app.services.follow_up_quality_principles import get_follow_up_quality_principles
 
+if TYPE_CHECKING:
+    from datetime import date
+
+    from sqlalchemy.orm import Session
+
 
 class AgentFollowUpQualityEvaluatorError(Exception):
     """Raised when follow-up quality evaluation cannot call or validate AI output."""
@@ -31,8 +33,8 @@ class AgentFollowUpQualityEnvelope:
     result: AgentFollowUpQualityResult
     quality_source: str
     model: str
-    fallback_reason: Optional[str] = None
-    fallback_error: Optional[str] = None
+    fallback_reason: str | None = None
+    fallback_error: str | None = None
 
 
 class AgentFollowUpQualityEvaluator:
@@ -51,16 +53,16 @@ class AgentFollowUpQualityEvaluator:
         team_id: int,
         user_message: str,
         semantic_result: AgentSemanticParseResult,
-        memory: Optional[AgentMemorySnapshot] = None,
-        current_date: Optional[date] = None,
+        memory: AgentMemorySnapshot | None = None,
+        current_date: date | None = None,
     ) -> AgentFollowUpQualityEnvelope:
         config = ai_config_crud.get_config(db, team_id)
         if not config:
-            raise AgentFollowUpQualityEvaluatorError("AI 配置未设置，无法评估跟进质量。")
+            raise AgentFollowUpQualityEvaluatorError("AI 配置未设置\uff0c无法评估跟进质量。")
 
         api_key = ai_config_crud.get_decrypted_api_key(db, team_id)
         if not api_key:
-            raise AgentFollowUpQualityEvaluatorError("AI API Key 未设置，无法评估跟进质量。")
+            raise AgentFollowUpQualityEvaluatorError("AI API Key 未设置\uff0c无法评估跟进质量。")
 
         semantic_json = semantic_result.model_dump_json(exclude_none=True)
         memory_json = (memory or AgentMemorySnapshot()).model_dump_json(exclude_none=True)
@@ -93,8 +95,8 @@ class AgentFollowUpQualityEvaluator:
         memory_json: str,
         principles_text: str,
         temperature: float,
-        current_date: Optional[date] = None,
-    ) -> Optional[AgentFollowUpQualityResult]:
+        current_date: date | None = None,
+    ) -> AgentFollowUpQualityResult | None:
         system_prompt = build_follow_up_quality_system_prompt(
             current_date=current_date,
             principles_text=principles_text,
@@ -131,7 +133,7 @@ class AgentFollowUpQualityEvaluator:
         passed = score >= self.PASSING_SCORE
         supplement_question = result.supplement_question if not passed else None
         if not passed and not supplement_question:
-            supplement_question = "这条跟进还差一点关键信息，请补充下一步由谁在什么时间做什么。"
+            supplement_question = "这条跟进还差一点关键信息\uff0c请补充下一步由谁在什么时间做什么。"
         next_action_status = result.next_action_status
         return result.model_copy(update={
             "score": score,

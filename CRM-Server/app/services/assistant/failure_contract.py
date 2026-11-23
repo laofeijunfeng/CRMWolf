@@ -113,10 +113,22 @@ def root_failure_retryable(code: AssistantFailureCode) -> bool:
     return code in ROOT_RETRYABLE_FAILURE_CODES
 
 
+def capture_attempt_deadline() -> datetime | None:
+    """Return the current absolute deadline for handoff across execution contexts."""
+
+    return _ATTEMPT_DEADLINE.get()
+
+
+def bind_absolute_attempt_deadline(deadline: datetime | None) -> Token[datetime | None]:
+    """Bind an already-established deadline without extending the shared budget."""
+
+    return _ATTEMPT_DEADLINE.set(deadline)
+
+
 def bind_attempt_deadline(started_at: datetime) -> Token[datetime | None]:
     """One execution attempt must reach a card before this deadline."""
 
-    return _ATTEMPT_DEADLINE.set(started_at + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS))
+    return bind_absolute_attempt_deadline(started_at + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS))
 
 
 def reset_attempt_deadline(token: Token[datetime | None]) -> None:
@@ -126,7 +138,7 @@ def reset_attempt_deadline(token: Token[datetime | None]) -> None:
 def attempt_budget_remaining() -> float | None:
     """Seconds left in this attempt. None means the caller is not inside a turn."""
 
-    deadline = _ATTEMPT_DEADLINE.get()
+    deadline = capture_attempt_deadline()
     if deadline is None:
         return None
     return (deadline - business_now()).total_seconds()
@@ -269,7 +281,13 @@ def _stage_label(stage: str, activity_kind: str | None) -> str:
         return "会议整理时" if _meeting(activity_kind) else "跟进整理时"
     if stage == "write":
         return "写入客户活动时"
-    return ""
+    return {
+        "route": "理解输入时",
+        "locate": "定位客户时",
+        "context": "读取客户记录时",
+        "judge": "比对未完成任务时",
+        "propose": "生成后续建议时",
+    }.get(stage, "")
 
 
 def stage_user_message(
@@ -286,6 +304,8 @@ def stage_user_message(
         return QUALITY_GATE_FAILURE_MESSAGE
     if stage == "structure" and code is AssistantFailureCode.UPSTREAM_TIMEOUT:
         return MEETING_TIMEOUT_MESSAGE if _meeting(activity_kind) else ORGANIZE_FAILURE_MESSAGE
+    if code is AssistantFailureCode.UPSTREAM_TIMEOUT:
+        return f"{_stage_label(stage, activity_kind)}处理超时，尚未写入客户活动。{_SAVED_SOURCE}"
     if stage == "structure" and code is AssistantFailureCode.MODEL_OUTPUT_INVALID:
         return VALIDATION_FAILURE_MESSAGE
     if code is AssistantFailureCode.STRUCTURING_UNAVAILABLE:

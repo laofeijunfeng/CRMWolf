@@ -1,10 +1,9 @@
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.models.approval import ApprovalStatus
-
 
 LOCKED_APPROVAL_PHASES = {
     ApprovalPhase.PENDING_REVIEW.value,
@@ -16,7 +15,7 @@ LOCKED_APPROVAL_STATUSES = {
 }
 
 
-def _normalize(value: object) -> Optional[str]:
+def _normalize(value: object) -> str | None:
     if value is None:
         return None
     return str(getattr(value, "value", value))
@@ -28,7 +27,7 @@ def assert_deletable_approval_resource(
     resource: object,
     business_type: str,
     business_id: int,
-    team_id: Optional[int],
+    team_id: int | None,
     resource_name: str,
     locked_business_statuses: Iterable[str] = (),
 ) -> None:

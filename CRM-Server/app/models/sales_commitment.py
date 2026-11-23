@@ -520,7 +520,7 @@ class FollowUpTaskConfirmationPromptDelivery(Base):
     lease_expires_at = Column(DateTime, nullable=True, index=True, comment="当前投递租约过期时间")
     attempted_at = Column(DateTime, nullable=True, index=True, comment="最近投递尝试时间")
     delivered_at = Column(DateTime, nullable=True, index=True, comment="确认送达时间")
-    prompted_at = Column(DateTime, nullable=True, index=True, comment="兼容提示时间，仅真实送达后写入")
+    prompted_at = Column(DateTime, nullable=True, index=True, comment="兼容提示时间\uff0c仅真实送达后写入")
     created_time = Column(DateTime, nullable=False, default=business_now, comment="创建时间")
     updated_time = Column(DateTime, nullable=False, default=business_now, onupdate=business_now, comment="更新时间")
 
@@ -726,7 +726,7 @@ class FollowUpTaskReconciliationEvaluationRun(Base):
         default=lambda: generate_public_id("ter"),
         comment="对外reconciliation评测运行ID",
     )
-    team_id = Column(BigInteger, nullable=True, index=True, comment="团队ID；系统级评测可为空")
+    team_id = Column(BigInteger, nullable=True, index=True, comment="团队ID\uff1b系统级评测可为空")
     suite_name = Column(String(120), nullable=False, index=True, comment="评测套件名称")
     fixture_path = Column(String(500), nullable=True, comment="评测样本路径")
     fixture_hash = Column(String(64), nullable=True, index=True, comment="评测样本内容hash")

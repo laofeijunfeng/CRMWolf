@@ -116,7 +116,7 @@ class CustomerLifecyclePostCommitCoordinator:
                     enrichment_request = self._ensure_enrichment(db, customer=customer)
             except Exception as exc:
                 warnings.append(self._warning("客户初始补全登记失败", exc))
-                logger.exception("客户初始补全登记失败，将由恢复任务补偿")
+                logger.exception("客户初始补全登记失败\uff0c将由恢复任务补偿")
 
         try:
             with self._savepoint(db):
@@ -135,7 +135,7 @@ class CustomerLifecyclePostCommitCoordinator:
                 )
         except Exception as exc:
             warnings.append(self._warning("客户档案刷新登记失败", exc))
-            logger.exception("客户档案刷新登记失败，将由对账任务补偿")
+            logger.exception("客户档案刷新登记失败\uff0c将由对账任务补偿")
 
         return CustomerLifecyclePostCommitWork(
             enrichment_request=enrichment_request,
@@ -165,7 +165,7 @@ class CustomerLifecyclePostCommitCoordinator:
                 if db is not None:
                     db.rollback()
                 warnings.append(self._warning("客户初始补全登记失败", exc))
-                logger.exception("提交后客户初始补全登记失败，将由恢复任务补偿")
+                logger.exception("提交后客户初始补全登记失败\uff0c将由恢复任务补偿")
             finally:
                 if db is not None:
                     db.close()
@@ -185,7 +185,7 @@ class CustomerLifecyclePostCommitCoordinator:
             )
         except Exception as exc:
             warnings.append(self._warning("客户档案刷新登记失败", exc))
-            logger.exception("提交后客户档案刷新登记失败，将由对账任务补偿")
+            logger.exception("提交后客户档案刷新登记失败\uff0c将由对账任务补偿")
 
         return CustomerLifecyclePostCommitWork(
             enrichment_request=enrichment_request,
@@ -202,7 +202,7 @@ class CustomerLifecyclePostCommitCoordinator:
             except Exception as exc:
                 warnings.append(self._warning("客户初始补全唤醒失败", exc))
                 logger.exception(
-                    "客户初始补全唤醒失败，将由恢复任务执行: job=%s",
+                    "客户初始补全唤醒失败\uff0c将由恢复任务执行: job=%s",
                     work.enrichment_request.job_public_id,
                 )
         if work.profile_kick_pending and work.profile_request is not None:
@@ -214,7 +214,7 @@ class CustomerLifecyclePostCommitCoordinator:
             except Exception as exc:
                 warnings.append(self._warning("客户档案刷新唤醒失败", exc))
                 logger.exception(
-                    "客户档案刷新唤醒失败，将由恢复任务执行: request=%s",
+                    "客户档案刷新唤醒失败\uff0c将由恢复任务执行: request=%s",
                     work.profile_request.request_id,
                 )
         return tuple(warnings)

@@ -5,10 +5,9 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
 
 from app.crud.permission import permission_crud
 from app.models.contract import Contract
@@ -23,6 +22,11 @@ from app.models.sales_commitment import FollowUpTask, FollowUpTaskStatus
 from app.services.work_summary_models import WorkSummaryFactPage, WorkSummaryQuery
 from app.utils import time as business_time
 from app.utils.time import calculate_follow_up_task_due_window
+
+if TYPE_CHECKING:
+    from typing import SupportsFloat
+
+    from sqlalchemy.orm import Session
 
 WORK_SUMMARY_WINDOWS = {"today", "this_week", "last_week", "this_month", "custom"}
 
@@ -265,9 +269,10 @@ class WorkSummaryService:
             },
             "usage_policy": {
                 "fact_source": "mysql",
-                "summary_role": "Agent/LLM 只能基于 items 中的结构化事实做归纳总结，不能把向量证据当作完成事实。",
-                "ownership_rule": "工作归属按各业务事实 owner/applicant/creator 字段判断；客户 owner 不自动决定跟进任务或活动归属。",
-                "pagination_rule": "当 truncated=true 时，Agent 必须继续使用 next_cursor 获取后续 facts，或在回答中明确当前总结基于部分事实。",
+                "summary_role": "Agent/LLM 只能基于 items 中的结构化事实做归纳总结\uff0c不能把向量证据当作完成事实。",
+                "ownership_rule": "工作归属按各业务事实 owner/applicant/creator 字段判断\uff1b客户 owner 不自动决定跟进任务或活动归属。",
+                "pagination_rule": "当 truncated=true 时\uff0cAgent 必须继续使用 next_cursor 获取后续"
+                    " facts\uff0c或在回答中明确当前总结基于部分事实。",
             },
         }
 
@@ -684,8 +689,10 @@ class WorkSummaryService:
         )
         if customer_id is not None:
             query = query.filter(Opportunity.customer_id == customer_id)
-        rows = query.order_by(OpportunityStageSnapshot.entered_at.desc(), OpportunityStageSnapshot.id.desc()).limit(limit).all()
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[opportunity.customer_id for _, opportunity in rows])
+        rows = query.order_by(OpportunityStageSnapshot.entered_at.desc(),
+            OpportunityStageSnapshot.id.desc()).limit(limit).all()
+        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[
+            opportunity.customer_id for _, opportunity in rows])
         return [
             self._fact(
                 fact_type="opportunity_stage_entered",
@@ -739,7 +746,8 @@ class WorkSummaryService:
         if customer_id is not None:
             query = query.filter(Contract.customer_id == customer_id)
         contracts = query.order_by(Contract.created_time.desc(), Contract.id.desc()).limit(limit * 2).all()
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[contract.customer_id for contract in contracts])
+        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[
+            contract.customer_id for contract in contracts])
         facts = []
         for contract in contracts:
             occurred_at = self._date_or_datetime_for_window(contract.signing_date, contract.created_time, window)
@@ -807,7 +815,8 @@ class WorkSummaryService:
         if customer_id is not None:
             query = query.filter(Contract.customer_id == customer_id)
         rows = query.order_by(PaymentRecord.created_time.desc(), PaymentRecord.id.desc()).limit(limit * 2).all()
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[contract.customer_id for _, _, contract in rows])
+        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[
+            contract.customer_id for _, _, contract in rows])
         facts = []
         for record, plan, contract in rows:
             occurred_at = self._date_or_datetime_for_window(record.payment_date, record.created_time, window)
@@ -879,8 +888,10 @@ class WorkSummaryService:
         )
         if customer_id is not None:
             query = query.filter(InvoiceApplication.customer_id == customer_id)
-        invoices = query.order_by(InvoiceApplication.created_time.desc(), InvoiceApplication.id.desc()).limit(limit * 2).all()
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[invoice.customer_id for invoice in invoices])
+        invoices = query.order_by(InvoiceApplication.created_time.desc(),
+            InvoiceApplication.id.desc()).limit(limit * 2).all()
+        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[
+            invoice.customer_id for invoice in invoices])
         facts = []
         for invoice in invoices:
             occurred_at = self._first_datetime_in_window(
@@ -945,8 +956,10 @@ class WorkSummaryService:
         )
         if customer_id is not None:
             query = query.filter(LicenseApplication.customer_id == customer_id)
-        applications = query.order_by(LicenseApplication.created_time.desc(), LicenseApplication.id.desc()).limit(limit * 2).all()
-        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[application.customer_id for application in applications])
+        applications = query.order_by(LicenseApplication.created_time.desc(),
+            LicenseApplication.id.desc()).limit(limit * 2).all()
+        customers_by_id = self._customers_by_id(db, team_id=team_id, customer_ids=[
+            application.customer_id for application in applications])
         facts = []
         for application in applications:
             occurred_at = self._first_datetime_in_window(window, application.approved_time, application.created_time)
@@ -1129,7 +1142,8 @@ class WorkSummaryService:
     ) -> bool:
         if customer is None:
             return False
-        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(db, user_id, team_id)}
+        permission_codes = {permission.code for permission in permission_crud.get_user_permissions(
+            db, user_id, team_id)}
         user_id_text = str(user_id)
         if "customer:view:all" in permission_codes:
             return True
@@ -1266,7 +1280,7 @@ class WorkSummaryService:
         return counts
 
     @staticmethod
-    def _decimal(value: Any) -> float | None:
+    def _decimal(value: SupportsFloat | str | None) -> float | None:
         if value is None:
             return None
         if isinstance(value, Decimal):

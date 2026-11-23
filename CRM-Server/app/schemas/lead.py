@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List
 from datetime import date, datetime, time
-from app.models.lead import LeadStatus, CompanyScale, FollowUpMethod
+from typing import Self
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.models.lead import CompanyScale, FollowUpMethod, LeadStatus
 from app.schemas.acquisition_source import AcquisitionSourceInfo
 from app.schemas.product import ProductIntentRef
 
@@ -9,56 +11,64 @@ from app.schemas.product import ProductIntentRef
 class OwnerInfo(BaseModel):
     id: str = Field(..., description="系统用户ID")
     name: str = Field(..., description="用户姓名")
-    avatar_url: Optional[str] = Field(None, description="用户头像URL")
+    avatar_url: str | None = Field(None, description="用户头像URL")
     
     class Config:
         from_attributes = True
 
 
 class LeadBase(BaseModel):
-    lead_name: str = Field(..., min_length=1, max_length=255, description="线索名称（项目名称或公司名称）")
-    city: str = Field(..., min_length=1, max_length=100, description="所在城市（必填）")
-    contact_name: str = Field(..., min_length=1, max_length=100, description="联系人姓名（必填）")
-    contact_phone: str = Field(..., min_length=1, max_length=20, description="联系人手机（必填，主要联系方式）")
-    company_scale: Optional[CompanyScale] = Field(None, description="团队规模：如：1-10人、11-50人、51-200人、201-500人、500+人")
+    lead_name: str = Field(..., min_length=1, max_length=255, description="线索名称\uff08项目名称或公司名称\uff09")
+    city: str = Field(..., min_length=1, max_length=100, description="所在城市\uff08必填\uff09")
+    contact_name: str = Field(..., min_length=1, max_length=100, description="联系人姓名\uff08必填\uff09")
+    contact_phone: str = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="联系人手机\uff08必填\uff0c主要联系方式\uff09",
+    )
+    company_scale: CompanyScale | None = Field(
+        None,
+        description="团队规模\uff1a如\uff1a1-10人、11-50人、51-200人、201-500人、500+人",
+    )
     
     @field_validator('lead_name')
     @classmethod
-    def lead_name_must_not_be_empty(cls, v):
+    def lead_name_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('线索名称不能为空')
         return v.strip()
     
     @field_validator('city')
     @classmethod
-    def city_must_not_be_empty(cls, v):
+    def city_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('所在城市不能为空')
         return v.strip()
     
     @field_validator('contact_name')
     @classmethod
-    def contact_name_must_not_be_empty(cls, v):
+    def contact_name_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('联系人姓名不能为空')
         return v.strip()
     
     @field_validator('contact_phone')
     @classmethod
-    def contact_phone_must_not_be_empty(cls, v):
+    def contact_phone_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('联系人手机不能为空')
         return v.strip()
 
 
 class LeadCreate(LeadBase):
-    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（导入/兼容）")
-    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
+    source: str | None = Field(None, max_length=50, description="获客来源名称\uff08导入/兼容\uff09")
+    source_public_id: str | None = Field(None, description="获客来源对外ID")
     product_public_id: str = Field(..., min_length=1, description="意向产品对外ID")
 
     @model_validator(mode="before")
     @classmethod
-    def product_public_id_must_be_present_before(cls, data):
+    def product_public_id_must_be_present_before(cls, data: object) -> object:
         if not isinstance(data, dict):
             return data
         value = data.get("product_public_id")
@@ -69,13 +79,13 @@ class LeadCreate(LeadBase):
 
     @field_validator("product_public_id")
     @classmethod
-    def product_public_id_must_be_present(cls, v):
+    def product_public_id_must_be_present(cls, v: str) -> str:
         if not v or not str(v).strip():
             raise ValueError("缺少产品")
         return v.strip()
 
     @model_validator(mode="after")
-    def source_must_be_present(self):
+    def source_must_be_present(self) -> Self:
         public_id = (self.source_public_id or "").strip()
         source_name = (self.source or "").strip() if self.source is not None else ""
         if not public_id and not source_name:
@@ -84,40 +94,40 @@ class LeadCreate(LeadBase):
 
 
 class LeadUpdate(BaseModel):
-    lead_name: Optional[str] = Field(None, min_length=1, max_length=255, description="线索名称")
-    source: Optional[str] = Field(None, max_length=50, description="获客来源名称（兼容）")
-    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
-    city: Optional[str] = Field(None, min_length=1, max_length=100, description="所在城市")
-    contact_name: Optional[str] = Field(None, min_length=1, max_length=100, description="联系人姓名")
-    contact_phone: Optional[str] = Field(None, min_length=1, max_length=20, description="联系人手机")
-    company_scale: Optional[CompanyScale] = Field(None, description="团队规模")
-    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
-    status: Optional[LeadStatus] = Field(None, description="线索状态")
+    lead_name: str | None = Field(None, min_length=1, max_length=255, description="线索名称")
+    source: str | None = Field(None, max_length=50, description="获客来源名称\uff08兼容\uff09")
+    source_public_id: str | None = Field(None, description="获客来源对外ID")
+    city: str | None = Field(None, min_length=1, max_length=100, description="所在城市")
+    contact_name: str | None = Field(None, min_length=1, max_length=100, description="联系人姓名")
+    contact_phone: str | None = Field(None, min_length=1, max_length=20, description="联系人手机")
+    company_scale: CompanyScale | None = Field(None, description="团队规模")
+    product_public_id: str | None = Field(None, description="意向产品对外ID")
+    status: LeadStatus | None = Field(None, description="线索状态")
     
     @field_validator('lead_name')
     @classmethod
-    def lead_name_must_not_be_empty(cls, v):
+    def lead_name_must_not_be_empty(cls, v: str | None) -> str | None:
         if v is not None and (not v or not v.strip()):
             raise ValueError('线索名称不能为空')
         return v.strip() if v else v
     
     @field_validator('city')
     @classmethod
-    def city_must_not_be_empty(cls, v):
+    def city_must_not_be_empty(cls, v: str | None) -> str | None:
         if v is not None and (not v or not v.strip()):
             raise ValueError('所在城市不能为空')
         return v.strip() if v else v
     
     @field_validator('contact_name')
     @classmethod
-    def contact_name_must_not_be_empty(cls, v):
+    def contact_name_must_not_be_empty(cls, v: str | None) -> str | None:
         if v is not None and (not v or not v.strip()):
             raise ValueError('联系人姓名不能为空')
         return v.strip() if v else v
     
     @field_validator('contact_phone')
     @classmethod
-    def contact_phone_must_not_be_empty(cls, v):
+    def contact_phone_must_not_be_empty(cls, v: str | None) -> str | None:
         if v is not None and (not v or not v.strip()):
             raise ValueError('联系人手机不能为空')
         return v.strip() if v else v
@@ -127,33 +137,36 @@ class LeadResponse(LeadBase):
     id: str = Field(..., validation_alias="public_id", description="线索对外ID")
     public_id: str = Field(..., description="线索对外ID")
     source: str = Field(..., description="获客来源当前名称")
-    source_info: Optional[AcquisitionSourceInfo] = Field(None, description="获客来源对象")
-    owner_id: Optional[str] = Field(None, description="负责人系统用户ID")
-    status: LeadStatus = Field(..., description="线索状态：NEW:新线索, CONTACTED:已联系, QUALIFIED:已确认, CONVERTED:已转化, INVALID:无效")
-    invalid_reason: Optional[str] = Field(None, description="无效原因")
-    pool_id: Optional[int] = Field(None, description="线索池ID（公海池）")
+    source_info: AcquisitionSourceInfo | None = Field(None, description="获客来源对象")
+    owner_id: str | None = Field(None, description="负责人系统用户ID")
+    status: LeadStatus = Field(
+        ...,
+        description="线索状态\uff1aNEW:新线索, CONTACTED:已联系, QUALIFIED:已确认, CONVERTED:已转化, INVALID:无效",
+    )
+    invalid_reason: str | None = Field(None, description="无效原因")
+    pool_id: int | None = Field(None, description="线索池ID\uff08公海池\uff09")
     creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
     last_modified_time: datetime = Field(..., description="最后修改时间")
-    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
-    product_name: Optional[str] = Field(None, description="意向产品名称")
-    products: List[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
-    version: int = Field(..., description="版本号（乐观锁，防止并发修改冲突）")
+    product_public_id: str | None = Field(None, description="意向产品对外ID")
+    product_name: str | None = Field(None, description="意向产品名称")
+    products: list[ProductIntentRef] = Field(default_factory=list, description="意向产品列表")
+    version: int = Field(..., description="版本号\uff08乐观锁\uff0c防止并发修改冲突\uff09")
     class Config:
         from_attributes = True
 
 
 class LeadListResponse(LeadResponse):
-    owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
+    owner_info: OwnerInfo | None = Field(None, description="负责人信息")
     
     class Config:
         from_attributes = True
 
 
 class LeadDetailResponse(LeadResponse):
-    follow_ups: List['LeadFollowUpResponse'] = []
-    owner_info: Optional[OwnerInfo] = Field(None, description="负责人信息")
-    creator_info: Optional[OwnerInfo] = Field(None, description="创建人信息")
+    follow_ups: list['LeadFollowUpResponse'] = []
+    owner_info: OwnerInfo | None = Field(None, description="负责人信息")
+    creator_info: OwnerInfo | None = Field(None, description="创建人信息")
     
     class Config:
         from_attributes = True
@@ -162,19 +175,19 @@ class LeadDetailResponse(LeadResponse):
 class LeadFollowUpBase(BaseModel):
     content: str = Field(..., min_length=1, description="跟进内容")
     method: FollowUpMethod = Field(..., description="跟进方式")
-    next_follow_time: Optional[datetime] = Field(None, description="计划下次跟进时间")
-    next_action: Optional[str] = Field(None, max_length=200, description="下一步动作")
+    next_follow_time: datetime | None = Field(None, description="计划下次跟进时间")
+    next_action: str | None = Field(None, max_length=200, description="下一步动作")
 
     @field_validator('content')
     @classmethod
-    def content_must_not_be_empty(cls, v):
+    def content_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('跟进内容不能为空')
         return v.strip()
 
     @field_validator('next_follow_time', mode='before')
     @classmethod
-    def parse_next_follow_time(cls, v):
+    def parse_next_follow_time(cls, v: object) -> object:
         if v is None or isinstance(v, datetime):
             return v
         if isinstance(v, date):
@@ -196,7 +209,7 @@ class LeadFollowUpResponse(LeadFollowUpBase):
     lead_id: str = Field(..., description="线索对外ID")
     creator_id: str = Field(..., description="创建人系统用户ID")
     created_time: datetime = Field(..., description="创建时间")
-    creator_info: Optional[OwnerInfo] = Field(None, description="跟进人信息")
+    creator_info: OwnerInfo | None = Field(None, description="跟进人信息")
 
     class Config:
         from_attributes = True
@@ -210,41 +223,41 @@ class LeadConvertRequest(BaseModel):
     customer_name: str = Field(..., min_length=1, max_length=255, description="客户名称")
     customer_contact_name: str = Field(..., min_length=1, max_length=100, description="客户联系人姓名")
     customer_contact_phone: str = Field(..., min_length=1, max_length=20, description="客户联系人手机")
-    customer_address: Optional[str] = Field(None, max_length=500, description="客户地址")
-    customer_industry: Optional[str] = Field(None, max_length=100, description="客户行业")
-    product_public_id: Optional[str] = Field(None, description="意向产品对外ID")
+    customer_address: str | None = Field(None, max_length=500, description="客户地址")
+    customer_industry: str | None = Field(None, max_length=100, description="客户行业")
+    product_public_id: str | None = Field(None, description="意向产品对外ID")
     
     @field_validator('customer_name')
     @classmethod
-    def customer_name_must_not_be_empty(cls, v):
+    def customer_name_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('客户名称不能为空')
         return v.strip()
     
     @field_validator('customer_contact_name')
     @classmethod
-    def customer_contact_name_must_not_be_empty(cls, v):
+    def customer_contact_name_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('客户联系人姓名不能为空')
         return v.strip()
     
     @field_validator('customer_contact_phone')
     @classmethod
-    def customer_contact_phone_must_not_be_empty(cls, v):
+    def customer_contact_phone_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('客户联系人手机不能为空')
         return v.strip()
 
 
 class LeadBatchImportRequest(BaseModel):
-    leads: List[LeadCreate] = Field(..., min_length=1, max_length=100, description="线索列表（最多100条）")
+    leads: list[LeadCreate] = Field(..., min_length=1, max_length=100, description="线索列表\uff08最多100条\uff09")
 
 
 class LeadBatchImportResponse(BaseModel):
     total: int = Field(..., description="总数")
     success: int = Field(..., description="成功数量")
     failed: int = Field(..., description="失败数量")
-    failed_items: List[dict] = Field(default_factory=list, description="失败项详情")
+    failed_items: list[dict] = Field(default_factory=list, description="失败项详情")
 
 
 class LeadTrendResponse(BaseModel):
@@ -254,19 +267,19 @@ class LeadTrendResponse(BaseModel):
 
 class LeadConversionResponse(BaseModel):
     source: str = Field(..., description="来源当前名称")
-    source_public_id: Optional[str] = Field(None, description="获客来源对外ID")
-    source_name: Optional[str] = Field(None, description="来源当前名称")
+    source_public_id: str | None = Field(None, description="获客来源对外ID")
+    source_name: str | None = Field(None, description="来源当前名称")
     total: int = Field(..., description="总数")
     converted: int = Field(..., description="转化数")
-    conversion_rate: float = Field(..., description="转化率（%）")
+    conversion_rate: float = Field(..., description="转化率\uff08%\uff09")
 
 
 class LeadMarkInvalidRequest(BaseModel):
-    reason: str = Field(..., min_length=1, max_length=500, description="无效原因（必填）")
+    reason: str = Field(..., min_length=1, max_length=500, description="无效原因\uff08必填\uff09")
 
     @field_validator('reason')
     @classmethod
-    def reason_must_not_be_empty(cls, v):
+    def reason_must_not_be_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError('无效原因不能为空')
         return v.strip()

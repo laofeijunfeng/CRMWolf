@@ -1,13 +1,15 @@
 """Production assistant model calls fail closed and use activity-specific rubrics."""
 
 import json
-from datetime import datetime
+import logging
+from contextvars import Context
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from app.services.assistant import model_transport
+from app.services.assistant import failure_contract, model_transport
 from app.services.assistant.action_evidence import SourceSegment
 from app.services.assistant.contracts import TaskDraft
 from app.services.assistant.intake_flow import apply_structured_draft
@@ -107,8 +109,14 @@ async def test_http_timeout_is_typed_model_failure(monkeypatch):
         )
 
 
-
-async def test_classification_uses_thirty_second_budget(monkeypatch):
+@pytest.mark.parametrize(
+    ("turn_remaining", "call_timeout", "expected"),
+    [(None, 30, 30), (5, 30, 5), (175, None, 175), (None, None, 120)],
+)
+async def test_transport_uses_tighter_explicit_or_turn_bound(monkeypatch, turn_remaining, call_timeout, expected):
+    now = datetime(2026, 1, 1, 9)
+    monkeypatch.setattr(failure_contract, "business_now", lambda: now)
+    monkeypatch.setattr(model_transport, "monotonic", lambda: 0.0)
     seen = {}
 
     def fake_client(**kwargs):
@@ -116,13 +124,44 @@ async def test_classification_uses_thirty_second_budget(monkeypatch):
         raise httpx.ReadTimeout("timed out")
 
     monkeypatch.setattr(model_transport.httpx, "AsyncClient", fake_client)
-    with pytest.raises(AssistantLLMError):
-        await AssistantModelTransport().ainvoke_structured(
-            api_host="https://ai.example/v1", api_key="sk-test", model="fast-classifier", temperature=0,
-            system_prompt="classify", user_prompt="text", response_model=KindDecision,
-            error_prefix="活动类型判断", timeout_seconds=30,
-        )
-    assert seen["timeout"] == 30
+    deadline = None if turn_remaining is None else now + timedelta(seconds=turn_remaining)
+    token = failure_contract.bind_absolute_attempt_deadline(deadline)
+    try:
+        with pytest.raises(AssistantLLMError) as caught:
+            await AssistantModelTransport().ainvoke_structured(
+                api_host="https://ai.example/v1", api_key="sk-test", model="fast-classifier", temperature=0,
+                system_prompt="classify", user_prompt="text", response_model=KindDecision,
+                error_prefix="活动类型判断", timeout_seconds=call_timeout,
+            )
+        assert caught.value.code is failure_contract.AssistantFailureCode.UPSTREAM_TIMEOUT
+    finally:
+        failure_contract.reset_attempt_deadline(token)
+    assert seen["timeout"] == expected
+
+
+def test_absolute_deadline_handoff_does_not_restart_turn_budget(monkeypatch):
+    started_at = datetime(2026, 1, 1, 9)
+    now = started_at
+    monkeypatch.setattr(failure_contract, "business_now", lambda: now)
+    token = failure_contract.bind_attempt_deadline(started_at)
+    try:
+        inherited = failure_contract.capture_attempt_deadline()
+    finally:
+        failure_contract.reset_attempt_deadline(token)
+
+    def execute_in_new_context():
+        assert failure_contract.capture_attempt_deadline() is None
+        token = failure_contract.bind_absolute_attempt_deadline(inherited)
+        try:
+            assert failure_contract.attempt_budget_remaining() == 10
+        finally:
+            failure_contract.reset_attempt_deadline(token)
+        assert failure_contract.capture_attempt_deadline() is None
+
+    now += timedelta(seconds=170)
+    Context().run(execute_in_new_context)
+
+
 async def test_follow_up_structuring_uses_extended_budget(monkeypatch):
     _team_config(monkeypatch)
     seen = {}
@@ -613,15 +652,26 @@ def _sse(payload: dict) -> bytes:
     return f"data: {frame}\n\ndata: [DONE]\n".encode()
 
 
-async def test_streaming_timeout_retries_once_inside_the_attempt(monkeypatch):
-    calls = {"n": 0}
+@pytest.mark.parametrize("first_elapsed", [1.0, 2.0])
+async def test_streaming_timeout_retries_only_with_remaining_budget(monkeypatch, caplog, first_elapsed):
+    now = datetime(2026, 1, 1, 9)
+    elapsed = 0.0
+    timeouts = []
+    monkeypatch.setattr(failure_contract, "business_now", lambda: now + timedelta(seconds=elapsed))
+    monkeypatch.setattr(model_transport, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(model_transport, "_STAGE_LATENCIES", {})
+    caplog.set_level(logging.INFO, logger=model_transport.logger.name)
     original_client = httpx.AsyncClient
 
     def respond(request):
-        calls["n"] += 1
+        nonlocal elapsed
+        http_timeouts = request.extensions["timeout"]
+        timeouts.append(http_timeouts)
         assert json.loads(request.content)["stream"] is True
-        if calls["n"] == 1:
+        if len(timeouts) == 1:
+            elapsed += first_elapsed
             raise httpx.ReadTimeout("idle", request=request)
+        elapsed += 0.5
         return httpx.Response(
             200,
             content=_sse({"kind": "ONLINE_MEETING", "reason": "会议", "confidence": 1, "evidence_quote": "会议"}),
@@ -632,16 +682,56 @@ async def test_streaming_timeout_retries_once_inside_the_attempt(monkeypatch):
         "AsyncClient",
         lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs),
     )
-    decision = await AssistantModelTransport().ainvoke_structured(
-        api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
-        system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
-        stream=True, retry_timeouts=True,
-    )
-    assert calls["n"] == 2
-    assert decision.kind == "ONLINE_MEETING"
-async def test_streaming_does_not_call_provider_when_attempt_budget_is_gone(monkeypatch):
-    from datetime import timedelta
+    async def call():
+        return await AssistantModelTransport().ainvoke_structured(
+            api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
+            system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
+            stream=True, retry_timeouts=True,
+        )
 
+    token = failure_contract.bind_absolute_attempt_deadline(now + timedelta(seconds=2))
+    try:
+        if first_elapsed < 2:
+            assert (await call()).kind == "ONLINE_MEETING"
+        else:
+            with pytest.raises(AssistantLLMError) as caught:
+                await call()
+            assert caught.value.code is failure_contract.AssistantFailureCode.UPSTREAM_TIMEOUT
+    finally:
+        failure_contract.reset_attempt_deadline(token)
+    attempts = [record.extra_fields for record in caplog.records if record.msg.startswith("assistant_model_call ")]
+    if first_elapsed == 2:
+        assert [max(http_timeouts.values()) for http_timeouts in timeouts] == [2]
+        assert [(e["attempt"], e["outcome"]) for e in attempts] == [(1, "UPSTREAM_TIMEOUT")]
+        return
+
+    assert [max(http_timeouts.values()) for http_timeouts in timeouts] == [2, 1]
+    assert [(e["stage"], e["elapsed_ms"], e["attempt"], e["outcome"]) for e in attempts] == [
+        ("structure", 1000, 1, "UPSTREAM_TIMEOUT"),
+        ("structure", 500, 2, "success"),
+    ]
+    assert (attempts[-1]["sample_count"], attempts[-1]["p50_ms"], attempts[-1]["p95_ms"]) == (2, 500, 1000)
+
+
+def test_model_call_percentiles_use_recent_samples_per_stage(monkeypatch, caplog):
+    monkeypatch.setattr(model_transport, "_STAGE_LATENCIES", {})
+    caplog.set_level(logging.INFO, logger=model_transport.logger.name)
+
+    # The old route values must be evicted, and nominate is a separate series.
+    for stage, samples in (("route", [1000] * 128), ("nominate", [300]), ("route", range(1, 129))):
+        for elapsed_ms in samples:
+            model_transport._record_model_call(stage=stage, elapsed_ms=elapsed_ms, attempt=1, outcome="success")
+
+    latest = {
+        record.extra_fields["stage"]: record.extra_fields
+        for record in caplog.records if record.msg.startswith("assistant_model_call ")
+    }
+    assert (latest["route"]["sample_count"], latest["route"]["p50_ms"], latest["route"]["p95_ms"]) == (128, 64, 122)
+    assert (latest["nominate"]["p50_ms"], latest["nominate"]["p95_ms"]) == (300, 300)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_transport_does_not_call_provider_when_attempt_budget_is_gone(monkeypatch, stream):
     from app.services.assistant.failure_contract import (
         AssistantFailureCode,
         bind_attempt_deadline,
@@ -659,11 +749,12 @@ async def test_streaming_does_not_call_provider_when_attempt_budget_is_gone(monk
             await AssistantModelTransport().ainvoke_structured(
                 api_host="https://ai.example/v1", api_key="sk-test", model="model", temperature=0,
                 system_prompt="整理", user_prompt="长纪要", response_model=KindDecision, error_prefix="会议纪要整理",
-                stream=True, retry_timeouts=True,
+                stream=stream, retry_timeouts=True,
             )
         assert caught.value.code is AssistantFailureCode.UPSTREAM_TIMEOUT
     finally:
         reset_attempt_deadline(token)
+
 
 async def test_streaming_invalid_output_is_not_retried(monkeypatch):
     calls = {"n": 0}

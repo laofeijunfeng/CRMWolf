@@ -1,8 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/stores/user', () => ({ useUserStore: () => ({ token: 'token' }) }))
 vi.mock('@/utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 
 import { createSseSplitter, parseSseBlock, resolveAssistantApiBase, submitInputStream } from '@/api/assistant'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 
 describe('SSE parser', () => {
   it('parses a named event with json data', () => {
@@ -69,5 +73,32 @@ describe('assistant API base', () => {
     })
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/assistant/tasks/ast_one/submit')
     expect(lost).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('assistant stream stage events', () => {
+  it('delivers all nine server stages and ignores unknown stages', async () => {
+    const stages = ['route', 'locate', 'context', 'judge', 'propose', 'classify', 'structure', 'quality_gate', 'write']
+    const frames = [...stages, 'unrecognized'].map((stage, index) =>
+      `event: stage\ndata: ${JSON.stringify({ stage, phase: 'done', ms: 20, seq: index + 1 })}\n\n`)
+    frames.push('event: stage\ndata: {"stage":"context","phase":"failed","seq":11}\n\n')
+    frames.push('event: stage\ndata: {"stage":"judge","phase":"unrecognized","seq":12}\n\n')
+    const error = { code: 'AI_UNAVAILABLE', message: '建议生成失败', retryable: true, stage: 'propose', seq: 13 }
+    frames.push(`event: error\ndata: ${JSON.stringify(error)}\n\n`)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(frames.join(''))))
+
+    const onStage = vi.fn()
+    const onError = vi.fn()
+    const onNetworkLost = vi.fn()
+    await submitInputStream('ast_one', { kind: 'text', client_request_id: 'client-req' }, {
+      onAccepted: vi.fn(), onStage, onWaiting: vi.fn(), onError, onNetworkLost,
+    })
+
+    expect(onStage.mock.calls.flat()).toEqual([
+      ...stages.map((stage, index) => ({ stage, phase: 'done', ms: 20, seq: index + 1 })),
+      { stage: 'context', phase: 'failed', seq: 11 },
+    ])
+    expect(onError).toHaveBeenCalledWith(error)
+    expect(onNetworkLost).not.toHaveBeenCalled()
   })
 })

@@ -31,7 +31,7 @@ FOLLOW_UP_TASK_GENERIC_QUERY_PHRASES = (
     "还有",
     "跟进",
     "我",
-    "？",
+    "\uff1f",
     "?",
 )
 FOLLOW_UP_TASK_GENERIC_QUERY_RESIDUALS = {
@@ -62,7 +62,7 @@ def extract_follow_up_task_semantic_query_text(value: object, *, customer_name: 
         reduced = reduced.replace(normalized_customer_name, "")
     for phrase in sorted(FOLLOW_UP_TASK_GENERIC_QUERY_PHRASES, key=len, reverse=True):
         reduced = reduced.replace(phrase, "")
-    reduced = reduced.strip(" ，。；;、")
+    reduced = reduced.strip(" \uff0c。\uff1b;、")
     if reduced in FOLLOW_UP_TASK_GENERIC_QUERY_RESIDUALS:
         return None
     return reduced or None

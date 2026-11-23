@@ -1,34 +1,30 @@
 """审批超时催办定时任务
 
-定时检查审批超时情况，根据超时程度发送不同级别的催办通知：
-- 24小时：轻度提醒（审批人）
-- 48小时：中度催办（审批人 + 提交人）
-- 72小时：强度告警（审批人 + 提交人 + 管理员）
+定时检查审批超时情况\uff0c根据超时程度发送不同级别的催办通知\uff1a
+- 24小时\uff1a轻度提醒\uff08审批人\uff09
+- 48小时\uff1a中度催办\uff08审批人 + 提交人\uff09
+- 72小时\uff1a强度告警\uff08审批人 + 提交人 + 管理员\uff09
 
-使用 asyncio 实现定时调度，每小时检查一次。
+使用 asyncio 实现定时调度\uff0c每小时检查一次。
 """
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from app.core.database import SessionLocal
-from app.models.approval import Approval, ApprovalStatus
-from app.models.user import User
-from app.models.role import Role
-from app.models.team import Team
-from app.crud.approval import approval_crud
 from app.crud.role import role_crud
 from app.crud.team import team_crud
-from app.crud.system_config import system_config_crud
+from app.models.approval import Approval, ApprovalStatus
+from app.models.user import User
 from app.services.approval_adapter import get_adapter
-from app.services.approval_routing import current_approver_ids, current_snapshot_entry, snapshot_entry_for_node
+from app.services.approval_routing import current_approver_ids, current_snapshot_entry
 from app.services.notification import NotificationService
 from app.utils.time import business_now
 
 logger = logging.getLogger(__name__)
 
-# 超时阈值（小时）
+# 超时阈值(小时)
 REMINDER_THRESHOLDS = {
     "light": 24,      # 轻度提醒
     "medium": 48,     # 中度催办
@@ -41,11 +37,11 @@ class ApprovalReminderScheduler:
 
     def __init__(self):
         self._running = False
-        self._task: Optional[asyncio.Task] = None
-        # 记录已发送的通知，避免重复发送
-        self._sent_reminders: Dict[str, Dict[int, datetime]] = {}  # {approval_id: {threshold_hours: sent_time}}
+        self._task: asyncio.Task | None = None
+        # 记录已发送的通知,避免重复发送
+        self._sent_reminders: dict[str, dict[int, datetime]] = {}  # {approval_id: {threshold_hours: sent_time}}
 
-    async def check_approval_timeout(self) -> Dict[str, Any]:
+    async def check_approval_timeout(self) -> dict[str, Any]:
         """检查审批超时并发送催办通知
 
         Returns:
@@ -75,17 +71,17 @@ class ApprovalReminderScheduler:
 
             for approval in pending_approvals:
                 try:
-                    # 计算等待时间（小时）
+                    # 计算等待时间(小时)
                     waiting_hours = (business_now() - approval.created_time).total_seconds() / 3600
 
                     # 通过适配器按 business_type/business_id 取业务单据实体
-                    # （泛化后回款/发票审批 contract_id=None，不能再按合同查；
-                    #  ORPHAN/未知类型/单据被删 → 跳过，对齐原"合同不存在"语义）
+                    # (泛化后回款/发票审批 contract_id=None,不能再按合同查;
+                    #  ORPHAN/未知类型/单据被删 → 跳过,对齐原"合同不存在"语义)
                     try:
                         adapter = get_adapter(approval.business_type)
                     except ValueError:
                         logger.warning(
-                            f"审批实例 {approval.id} 业务类型 {approval.business_type} 不支持，跳过催办"
+                            f"审批实例 {approval.id} 业务类型 {approval.business_type} 不支持\uff0c跳过催办"
                         )
                         continue
 
@@ -93,7 +89,7 @@ class ApprovalReminderScheduler:
                     if entity is None:
                         logger.warning(
                             f"审批实例 {approval.id} 关联的 {approval.business_type}"
-                            f"#{approval.business_id} 不存在，跳过催办"
+                            f"#{approval.business_id} 不存在\uff0c跳过催办"
                         )
                         continue
 
@@ -101,7 +97,7 @@ class ApprovalReminderScheduler:
                     entity_name = adapter.get_name(entity)
                     business_id = approval.business_id
 
-                    # 快照实例仅依赖 current_node_id 与冻结节点名称；旧实例回退历史节点关系。
+                    # 快照实例仅依赖 current_node_id 与冻结节点名称;旧实例回退历史节点关系。
                     node_name = self._get_node_name(approval)
                     if not node_name:
                         logger.warning(f"审批实例 {approval.id} 当前节点不存在")
@@ -147,12 +143,12 @@ class ApprovalReminderScheduler:
                             stats["strong_reminders"] += 1
 
                 except Exception as e:
-                    error_msg = f"处理审批实例 {approval.id} 失败: {str(e)}"
+                    error_msg = f"处理审批实例 {approval.id} 失败: {e!s}"
                     logger.error(error_msg)
                     stats["errors"].append(error_msg)
 
         except Exception as e:
-            logger.error(f"审批超时检查任务执行失败: {str(e)}")
+            logger.error(f"审批超时检查任务执行失败: {e!s}")
             stats["errors"].append(str(e))
 
         finally:
@@ -172,24 +168,24 @@ class ApprovalReminderScheduler:
 
         return stats
 
-    def _get_node_name(self, approval: Approval) -> Optional[str]:
+    def _get_node_name(self, approval: Approval) -> str | None:
         if approval.nodes_snapshot is not None:
             entry = current_snapshot_entry(approval)
             return str(entry.get("node_name") or "") if entry else None
         current_node = getattr(approval, "current_node", None)
         return current_node.node_name if current_node is not None else None
 
-    def _get_node_approvers(self, db, approval: Approval, team_id: int) -> List[User]:
+    def _get_node_approvers(self, db, approval: Approval, team_id: int) -> list[User]:
         """获取当前审批节点的冻结审批人列表。"""
         if approval.team_id != team_id:
             return []
         user_ids = current_approver_ids(db, approval)
         if not user_ids:
             return []
-        approvers: List[User] = db.query(User).filter(User.id.in_(user_ids)).all()
+        approvers: list[User] = db.query(User).filter(User.id.in_(user_ids)).all()
         return approvers
 
-    def _get_team_admins(self, db, team_id: int) -> List[User]:
+    def _get_team_admins(self, db, team_id: int) -> list[User]:
         """获取团队管理员列表
 
         Args:
@@ -202,7 +198,7 @@ class ApprovalReminderScheduler:
         # 获取 TEAM_ADMIN 角色
         role = role_crud.get_by_code(db, "TEAM_ADMIN")
         if not role:
-            # 如果没有 TEAM_ADMIN 角色，则获取团队创建者
+            # 如果没有 TEAM_ADMIN 角色,则获取团队创建者
             team = team_crud.get_by_id(db, team_id)
             if team and team.owner_id:
                 owner = db.query(User).filter(User.id == team.owner_id).first()
@@ -213,8 +209,8 @@ class ApprovalReminderScheduler:
         users = role_crud.get_role_users(db, role.id, team_id)
         return users
 
-    def _get_submitter(self, db, submitter_id: str) -> Optional[User]:
-        """按当前系统用户ID查找提交人，兼容历史飞书 open_id 数据。"""
+    def _get_submitter(self, db, submitter_id: str) -> User | None:
+        """按当前系统用户ID查找提交人\uff0c兼容历史飞书 open_id 数据。"""
         if not submitter_id:
             return None
 
@@ -235,7 +231,7 @@ class ApprovalReminderScheduler:
 
         Args:
             approval_key: 审批实例标识
-            threshold_hours: 超时阈值（小时）
+            threshold_hours: 超时阈值\uff08小时\uff09
 
         Returns:
             是否已发送
@@ -251,7 +247,7 @@ class ApprovalReminderScheduler:
 
         Args:
             approval_key: 审批实例标识
-            threshold_hours: 超时阈值（小时）
+            threshold_hours: 超时阈值\uff08小时\uff09
         """
         if approval_key not in self._sent_reminders:
             self._sent_reminders[approval_key] = {}
@@ -266,26 +262,26 @@ class ApprovalReminderScheduler:
         entity_name: str,
         business_id,
         node_name: str,
-        approvers: List[User],
+        approvers: list[User],
         waiting_hours: float
     ):
-        """发送轻度提醒（24小时）- 仅通知审批人
+        """发送轻度提醒\uff0824小时\uff09- 仅通知审批人
 
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            entity_type: 业务单据类型\uff08CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY\uff09
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node_name: 当前审批节点名称
             approvers: 审批人列表
-            waiting_hours: 等待时间（小时）
+            waiting_hours: 等待时间\uff08小时\uff09
         """
         notification_service = NotificationService(db, approval.team_id)
 
         for approver in approvers:
             try:
-                # 使用 feishu_open_id 发送通知（如果有的话）
+                # 使用 feishu_open_id 发送通知(如果有的话)
                 approver_open_id = getattr(approver, 'feishu_open_id', None) or str(approver.id)
                 approver_name = approver.name
 
@@ -306,7 +302,7 @@ class ApprovalReminderScheduler:
                 )
 
             except Exception as e:
-                logger.error(f"发送轻度提醒失败: approver={approver.name}, error={str(e)}")
+                logger.error(f"发送轻度提醒失败: approver={approver.name}, error={e!s}")
 
     async def _send_medium_reminder(
         self,
@@ -316,20 +312,20 @@ class ApprovalReminderScheduler:
         entity_name: str,
         business_id,
         node_name: str,
-        approvers: List[User],
+        approvers: list[User],
         waiting_hours: float
     ):
-        """发送中度催办（48小时）- 通知审批人 + 提交人
+        """发送中度催办\uff0848小时\uff09- 通知审批人 + 提交人
 
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            entity_type: 业务单据类型\uff08CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY\uff09
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node_name: 当前审批节点名称
             approvers: 审批人列表
-            waiting_hours: 等待时间（小时）
+            waiting_hours: 等待时间\uff08小时\uff09
         """
         notification_service = NotificationService(db, approval.team_id)
 
@@ -356,7 +352,7 @@ class ApprovalReminderScheduler:
                 )
 
             except Exception as e:
-                logger.error(f"发送中度催办给审批人失败: approver={approver.name}, error={str(e)}")
+                logger.error(f"发送中度催办给审批人失败: approver={approver.name}, error={e!s}")
 
         # 通知提交人
         try:
@@ -365,7 +361,7 @@ class ApprovalReminderScheduler:
             if submitter:
                 submitter_open_id = getattr(submitter, 'feishu_open_id', None) or str(submitter.id)
 
-                # 获取当前审批人姓名（用于通知提交人）
+                # 获取当前审批人姓名(用于通知提交人)
                 approver_names = [a.name for a in approvers[:3]]  #最多取3个审批人姓名
                 approver_names_str = ", ".join(approver_names) if approver_names else "未知"
 
@@ -388,7 +384,7 @@ class ApprovalReminderScheduler:
                 logger.warning(f"无法找到提交人: submitter_id={approval.submitter_id}")
 
         except Exception as e:
-            logger.error(f"发送中度催办给提交人失败: error={str(e)}")
+            logger.error(f"发送中度催办给提交人失败: error={e!s}")
 
     async def _send_strong_reminder(
         self,
@@ -398,20 +394,20 @@ class ApprovalReminderScheduler:
         entity_name: str,
         business_id,
         node_name: str,
-        approvers: List[User],
+        approvers: list[User],
         waiting_hours: float
     ):
-        """发送强度告警（72小时）- 通知审批人 + 提交人 + 管理员
+        """发送强度告警\uff0872小时\uff09- 通知审批人 + 提交人 + 管理员
 
         Args:
             db: 数据库会话
             approval: 审批实例
-            entity_type: 业务单据类型（CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY）
+            entity_type: 业务单据类型\uff08CONTRACT/PAYMENT/INVOICE/LICENSE/OPPORTUNITY\uff09
             entity_name: 业务单据展示名
             business_id: 业务单据ID
             node_name: 当前审批节点名称
             approvers: 审批人列表
-            waiting_hours: 等待时间（小时）
+            waiting_hours: 等待时间\uff08小时\uff09
         """
         notification_service = NotificationService(db, approval.team_id)
 
@@ -438,7 +434,7 @@ class ApprovalReminderScheduler:
                 )
 
             except Exception as e:
-                logger.error(f"发送强度告警给审批人失败: approver={approver.name}, error={str(e)}")
+                logger.error(f"发送强度告警给审批人失败: approver={approver.name}, error={e!s}")
 
         # 通知提交人
         try:
@@ -468,7 +464,7 @@ class ApprovalReminderScheduler:
                 logger.warning(f"无法找到提交人: submitter_id={approval.submitter_id}")
 
         except Exception as e:
-            logger.error(f"发送强度告警给提交人失败: error={str(e)}")
+            logger.error(f"发送强度告警给提交人失败: error={e!s}")
 
         # 通知管理员
         try:
@@ -494,32 +490,32 @@ class ApprovalReminderScheduler:
                 )
 
         except Exception as e:
-            logger.error(f"发送强度告警给管理员失败: error={str(e)}")
+            logger.error(f"发送强度告警给管理员失败: error={e!s}")
 
     async def _run_hourly_scheduler(self):
         """每小时定时调度循环"""
         while self._running:
-            now = business_now()
+            _now = business_now()
 
             # 每小时执行一次检查
             try:
                 await self.check_approval_timeout()
             except Exception as e:
-                logger.error(f"审批超时检查任务执行异常: {str(e)}")
+                logger.error(f"审批超时检查任务执行异常: {e!s}")
 
-            # 清理过期提醒记录（超过7天的记录）
+            # 清理过期提醒记录(超过7天的记录)
             self._cleanup_old_reminders()
 
             # 每小时等待
             await asyncio.sleep(3600)  # 3600秒 = 1小时
 
     def _cleanup_old_reminders(self):
-        """清理过期的提醒记录（超过7天）"""
+        """清理过期的提醒记录\uff08超过7天\uff09"""
         cutoff_time = business_now() - timedelta(days=7)
         keys_to_remove = []
 
         for approval_key, reminders in self._sent_reminders.items():
-            # 如果所有提醒都超过7天，移除整个记录
+            # 如果所有提醒都超过7天,移除整个记录
             if all(sent_time < cutoff_time for sent_time in reminders.values()):
                 keys_to_remove.append(approval_key)
 
@@ -537,7 +533,7 @@ class ApprovalReminderScheduler:
 
         self._running = True
         self._task = asyncio.create_task(self._run_hourly_scheduler())
-        logger.info("审批超时催办任务已启动（每小时检查一次）")
+        logger.info("审批超时催办任务已启动\uff08每小时检查一次\uff09")
 
     def stop(self):
         """停止定时任务"""

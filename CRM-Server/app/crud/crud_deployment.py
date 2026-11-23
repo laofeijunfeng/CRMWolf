@@ -1,4 +1,3 @@
-from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -28,7 +27,7 @@ class DeploymentInfoCRUD:
         """
         deployment_data = obj_in.model_dump()
 
-        # 如果设置为默认部署，先清除该客户的其他默认部署
+        # 如果设置为默认部署,先清除该客户的其他默认部署
         if deployment_data.get('is_default', False):
             db.query(DeploymentInfo).filter(
                 DeploymentInfo.team_id == team_id,
@@ -50,7 +49,7 @@ class DeploymentInfoCRUD:
         db: Session,
         team_id: int,
         deployment_id: int
-    ) -> Optional[DeploymentInfo]:
+    ) -> DeploymentInfo | None:
         """
         获取单个部署信息
 
@@ -74,7 +73,7 @@ class DeploymentInfoCRUD:
         customer_id: int,
         skip: int = 0,
         limit: int = 100
-    ) -> Tuple[List[DeploymentInfo], int]:
+    ) -> tuple[list[DeploymentInfo], int]:
         """
         获取客户的部署信息列表
 
@@ -107,7 +106,7 @@ class DeploymentInfoCRUD:
         team_id: int,
         deployment_id: int,
         obj_in: DeploymentInfoUpdate
-    ) -> Optional[DeploymentInfo]:
+    ) -> DeploymentInfo | None:
         """
         更新部署信息
 
@@ -126,7 +125,7 @@ class DeploymentInfoCRUD:
 
         update_data = obj_in.model_dump(exclude_unset=True)
 
-        # 如果设置为默认部署，先清除该客户的其他默认部署
+        # 如果设置为默认部署,先清除该客户的其他默认部署
         if update_data.get('is_default') is True:
             db.query(DeploymentInfo).filter(
                 DeploymentInfo.team_id == team_id,
@@ -173,7 +172,7 @@ class DeploymentInfoCRUD:
         team_id: int,
         customer_id: int,
         deployment_id: int
-    ) -> Optional[DeploymentInfo]:
+    ) -> DeploymentInfo | None:
         """
         设置默认部署
 
@@ -212,7 +211,7 @@ class DeploymentInfoCRUD:
         db: Session,
         team_id: int,
         customer_id: int
-    ) -> Optional[DeploymentInfo]:
+    ) -> DeploymentInfo | None:
         """
         获取客户的默认部署信息
 
@@ -234,18 +233,21 @@ class DeploymentInfoCRUD:
 # 创建全局实例
 deployment_info_crud = DeploymentInfoCRUD()
 
-# 独立函数导出（供 API 直接导入）
+# 独立函数导出(供 API 直接导入)
 def create_deployment_info(db: Session, team_id: int, obj_in: DeploymentInfoInternalCreate) -> DeploymentInfo:
     return deployment_info_crud.create(db, team_id, obj_in)
 
-def get_deployment_info(db: Session, team_id: int, deployment_id: int) -> Optional[DeploymentInfo]:
+def get_deployment_info(db: Session, team_id: int, deployment_id: int) -> DeploymentInfo | None:
     return deployment_info_crud.get(db, team_id, deployment_id)
 
-def get_deployment_infos_by_customer(db: Session, team_id: int, customer_id: int) -> List[DeploymentInfo]:
+def get_deployment_infos_by_customer(db: Session, team_id: int, customer_id: int) -> list[DeploymentInfo]:
     deployments, _ = deployment_info_crud.get_by_customer(db, team_id, customer_id)
     return deployments
 
-def update_deployment_info(db: Session, team_id: int, deployment_id: int, obj_in: DeploymentInfoUpdate) -> Optional[DeploymentInfo]:
+
+def update_deployment_info(
+    db: Session, team_id: int, deployment_id: int, obj_in: DeploymentInfoUpdate
+) -> DeploymentInfo | None:
     return deployment_info_crud.update(db, team_id, deployment_id, obj_in)
 
 def delete_deployment_info(db: Session, team_id: int, deployment_id: int) -> bool:
@@ -256,5 +258,5 @@ def set_default_deployment_info(
     team_id: int,
     customer_id: int,
     deployment_id: int,
-) -> Optional[DeploymentInfo]:
+) -> DeploymentInfo | None:
     return deployment_info_crud.set_default(db, team_id, customer_id, deployment_id)

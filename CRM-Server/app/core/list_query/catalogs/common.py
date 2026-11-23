@@ -12,10 +12,9 @@ from app.core.list_query.license_status import license_status_expression
 from app.core.list_query.types import FilterCondition, ListQueryContext
 from app.models.approval import Approval, ApprovalStatus
 from app.models.contract import Contract
-from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.contract_change import ContractChangeRequest
+from app.models.customer import Customer, CustomerMember, CustomerProduct
 from app.models.customer_identity_term import CustomerIdentityTerm, CustomerIdentityTermStatus
-from app.models.product import Product
 from app.models.invoice import (
     InvoiceApplication,
     InvoiceRedOffset,
@@ -25,6 +24,7 @@ from app.models.invoice import (
 from app.models.license_application import LicenseApplication, LicenseApplicationStatus, LicenseType
 from app.models.opportunity import Opportunity
 from app.models.payment import PaymentPlan, PaymentRecord
+from app.models.product import Product
 from app.models.sales_commitment import (
     FollowUpTask,
     FollowUpTaskConfirmationCase,

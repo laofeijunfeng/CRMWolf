@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
@@ -17,14 +17,15 @@ from app.crud.agent import agent_idempotency_key_crud, agent_session_crud
 from app.crud.customer_activity import customer_activity_crud
 from app.crud.customer_activity_post_commit_job import customer_activity_post_commit_job_crud
 from app.crud.customer_opportunity_suggestion_job import customer_opportunity_suggestion_job_crud
-from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.crud.sales_commitment import follow_up_task_crud
+from app.models.customer_activity import CustomerActivity
+from app.models.customer_intelligence_run import CustomerIntelligenceRun
 from app.models.sales_commitment import FollowUpTaskProjectionTrigger
 from app.schemas.customer_activity import (
+    CustomerActivityAgentFinalizedCreate,
     CustomerActivityCreate,
     CustomerActivityCreateAndCompleteTrackingRequest,
     CustomerActivityCreateAndCompleteTrackingResponse,
-    CustomerActivityAgentFinalizedCreate,
     CustomerActivityResponse,
     MessageResponse,
     kind_infos,
@@ -57,7 +58,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/customer-activities", tags=["客户活动"])
 
 
-def _loads(value: str | None):
+def _loads(value: str | None) -> dict[str, object] | None:
     if not value:
         return None
     try:
@@ -67,7 +68,7 @@ def _loads(value: str | None):
     return parsed if isinstance(parsed, dict) else None
 
 
-def _load_user_info(db: Session, user_id: str | None):
+def _load_user_info(db: Session, user_id: str | None) -> dict[str, str | None] | None:
     if not user_id:
         return None
     try:
@@ -90,7 +91,7 @@ def _load_user_info(db: Session, user_id: str | None):
 
 def _build_activity_response(
     db: Session,
-    activity,
+    activity: CustomerActivity,
     *,
     post_commit: dict[str, Any] | None = None,
     write_result: CustomerActivityWriteResult | None = None,
@@ -193,7 +194,12 @@ def get_activity_kinds():
     return [item.model_dump() for item in kind_infos()]
 
 
-@router.post("/{customer_id}", response_model=CustomerActivityResponse, status_code=status.HTTP_201_CREATED, summary="创建客户活动")
+@router.post(
+    "/{customer_id}",
+    response_model=CustomerActivityResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建客户活动",
+)
 async def create_activity(
     customer_id: str,
     activity: CustomerActivityCreate,
@@ -436,7 +442,7 @@ def get_agent_submission_receipt(
     }
 
 
-@router.get("/{customer_id}", response_model=List[CustomerActivityResponse], summary="查询客户活动列表")
+@router.get("/{customer_id}", response_model=list[CustomerActivityResponse], summary="查询客户活动列表")
 def get_activities(
     customer_id: str,
     skip: int = Query(0, ge=0, description="跳过记录数"),

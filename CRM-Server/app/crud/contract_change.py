@@ -1,6 +1,5 @@
 """Team-scoped persistence queries for contract change requests."""
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,7 +14,7 @@ PENDING_GUARD = "pending"
 
 
 class ContractChangeCRUD:
-    def get_by_id(self, db: Session, change_id: int, team_id: int) -> Optional[ContractChangeRequest]:
+    def get_by_id(self, db: Session, change_id: int, team_id: int) -> ContractChangeRequest | None:
         return db.query(ContractChangeRequest).filter(
             ContractChangeRequest.id == change_id,
             ContractChangeRequest.team_id == team_id,
@@ -31,7 +30,7 @@ class ContractChangeCRUD:
             ContractChangeRequest.deleted_at.is_(None),
         ).all()
 
-    def get_pending(self, db: Session, team_id: int, contract_id: int) -> Optional[ContractChangeRequest]:
+    def get_pending(self, db: Session, team_id: int, contract_id: int) -> ContractChangeRequest | None:
         return db.query(ContractChangeRequest).filter(
             ContractChangeRequest.team_id == team_id,
             ContractChangeRequest.contract_id == contract_id,
@@ -46,14 +45,14 @@ class ContractChangeCRUD:
             ContractChangeRequest.deleted_at.is_(None),
         ).order_by(ContractChangeRequest.created_time.desc(), ContractChangeRequest.id.desc()).all()
 
-    def get_active_contract(self, db: Session, contract_id: int, team_id: int) -> Optional[Contract]:
+    def get_active_contract(self, db: Session, contract_id: int, team_id: int) -> Contract | None:
         return db.query(Contract).filter(
             Contract.id == contract_id,
             Contract.team_id == team_id,
             Contract.deleted_at.is_(None),
         ).first()
 
-    def lock_active_contract(self, db: Session, contract_id: int, team_id: int) -> Optional[Contract]:
+    def lock_active_contract(self, db: Session, contract_id: int, team_id: int) -> Contract | None:
         return db.query(Contract).filter(
             Contract.id == contract_id,
             Contract.team_id == team_id,

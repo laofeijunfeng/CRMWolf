@@ -20,6 +20,9 @@ from app.models.role_permission import RolePermission
 from app.models.team import Team, UserTeam
 from app.models.user import User
 from app.models.user_role import UserRole
+from app.services.assistant.crm_proposal_commands import build_proposal_command
+from app.services.assistant.proposals import _candidate_key, proposal_waiting
+from app.services.assistant.task_state import TaskUpdate, apply_task_update
 
 
 @compiles(BigInteger, "sqlite")
@@ -145,7 +148,7 @@ def test_reject_requires_not_started_proof(client, db_session, monkeypatch):
     assert resp.status_code == 409
 
 
-def test_rejected_with_durable_not_started(client, db_session, monkeypatch):
+def test_missing_started_flag_does_not_prove_rejection(client, db_session, monkeypatch):
     uid = _seed(db_session)
     _seed_claim(db_session, status="UNKNOWN", started=False)
     _grant_operator(db_session, monkeypatch)
@@ -156,8 +159,8 @@ def test_rejected_with_durable_not_started(client, db_session, monkeypatch):
         json={"decision": "REJECTED", "reason": "持久 NOT_STARTED，无调用"},
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "REJECTED"
+    assert resp.status_code == 409
+    assert db_session.query(AssistantAction).one().result_json["status"] == "UNKNOWN"
 
 
 def test_succeeded_requires_exact_target_effect(client, db_session, monkeypatch):
@@ -186,3 +189,61 @@ def test_unknown_claim_not_found_for_foreign_action(client, db_session, monkeypa
     )
 
     assert resp.status_code == 404
+
+
+@pytest.mark.parametrize("defect", [None, "kind", "actor", "fingerprint", "target", "version", "active_turn", "stale_wait"])
+def test_stage_adjudication_requires_current_authority_and_retires_it_atomically(client, db_session, monkeypatch, defect):
+    uid = _seed(db_session)
+    _grant_operator(db_session, monkeypatch)
+    task = AssistantTask(public_id="t_j", team_id=1, user_id=502, goal="g", status="ACTIVE", version=1,
+                         committed_json=[{"kind": "customer_activity", "public_id": "17"}])
+    db_session.add(task)
+    db_session.flush()
+    proposal = {
+        "kind": "opportunity_stage", "target_public_id": "opp_exact", "evidence_quote": "进入方案",
+        "activity_id": 17, "customer_id": 29, "source_revision": 1,
+        "prior_stage_snapshot_id": 2, "prior_version": 4, "payload": {"stage_template_id": 3},
+    }
+    proposal["key"] = _candidate_key(proposal)
+    command = build_proposal_command(task, proposal)
+    task = apply_task_update(db_session, task, TaskUpdate(
+        waiting=proposal_waiting(task, proposal), action_actor="SYSTEM", action_name="offer_proposal",
+    )).task
+    if defect == "active_turn":
+        task.active_turn_id = 901
+    if defect == "stale_wait":
+        task.waiting_json = {**task.waiting_json, "action_id": None}
+    claim = AssistantAction(task_id=task.id, team_id=1, public_id="aca_j", action="proposal_command_claim",
+                            actor="SYSTEM", input_json={"kind": "opportunity_stage"}, result_json={
+                                "status": "UNKNOWN", "command_id": command.command_id,
+                                "fingerprint": command.fingerprint, "proposal_key": proposal["key"],
+                            })
+    effect = AssistantCRMEffect(team_id=1, command_id=command.command_id,
+                                effect_kind="opportunity_auto_won" if defect == "kind" else "opportunity_stage",
+                                actor_id=uid if defect == "actor" else command.actor_id,
+                                fingerprint="wrong" if defect == "fingerprint" else command.fingerprint,
+                                target_public_id="opp_other" if defect == "target" else "opp_exact",
+                                previous_snapshot_id=2, stage_snapshot_id=3, previous_version=4,
+                                resulting_version=6 if defect == "version" else 5)
+    db_session.add_all([claim, effect])
+    db_session.commit()
+    version = task.version
+    reply = client.post("/api/v1/assistant/unknown-commands/aca_j/adjudicate", headers=_auth(uid),
+                        json={"decision": "SUCCEEDED", "reason": "核对目标回执"})
+    db_session.refresh(task)
+    db_session.refresh(claim)
+    if defect is not None:
+        assert reply.status_code == 409, reply.text
+        assert (task.version, task.waiting_field, claim.result_json["status"]) == (version, "proposal:opportunity_stage", "UNKNOWN")
+        assert task.committed_json == [{"kind": "customer_activity", "public_id": "17"}]
+        return
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["status"] == "SUCCEEDED"
+    assert claim.result_json["status"] == "RECONCILED"
+    assert claim.result_json["adjudicated_by"] == uid
+    assert task.status == "COMPLETED" and task.waiting_field is None
+    assert task.committed_json[1:] == [{"kind": "opportunity_stage", "public_id": "opp_exact",
+                                       "proposal_key": proposal["key"], "customer_id": 29}]
+    repeated = client.post("/api/v1/assistant/unknown-commands/aca_j/adjudicate", headers=_auth(uid),
+                           json={"decision": "SUCCEEDED", "reason": "重复核对"})
+    assert repeated.status_code == 409

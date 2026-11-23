@@ -23,13 +23,15 @@ class CustomerIntelligenceRun(Base):
     request_id = Column(String(120), nullable=False, index=True, comment="刷新请求ID")
     event_key = Column(String(120), nullable=False, index=True, comment="客户智能事件键")
     event_json = Column(JSON, nullable=True, comment="客户智能事件快照")
-    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID，当前与团队ID一致")
+    tenant_id = Column(BigInteger, nullable=False, index=True, comment="租户ID\uff0c当前与团队ID一致")
     team_id = Column(BigInteger, nullable=False, index=True, comment="团队ID")
     customer_id = Column(BigInteger, nullable=False, index=True, comment="客户ID")
     actor_id = Column(String(80), nullable=True, index=True, comment="触发人ID")
     trigger_type = Column(String(60), nullable=False, index=True, comment="触发类型")
     scope = Column(String(20), nullable=False, index=True, comment="刷新范围")
-    status = Column(String(20), nullable=False, default=CustomerIntelligenceRunStatus.PENDING, index=True, comment="运行状态")
+    status = Column(
+        String(20), nullable=False, default=CustomerIntelligenceRunStatus.PENDING, index=True, comment="运行状态"
+    )
     attempt_count = Column(Integer, nullable=False, default=0, comment="已尝试次数")
     max_attempts = Column(Integer, nullable=False, default=3, comment="最大尝试次数")
     last_duration_ms = Column(Integer, nullable=True, comment="最近一次运行耗时毫秒")

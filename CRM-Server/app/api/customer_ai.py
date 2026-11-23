@@ -1,38 +1,41 @@
 """
 AI 解析客户信息接口
 
-包含两个功能：
-1. 客户活动解析（MagicWand 魔术棒功能）- 已有
-2. 客户创建解析（AI 智能创建）- 新增
+包含两个功能\uff1a
+1. 客户活动解析\uff08MagicWand 魔术棒功能\uff09- 已有
+2. 客户创建解析\uff08AI 智能创建\uff09- 新增
 """
 import json
 import logging
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.api.customers import _ensure_customer_name_available
 from app.core.database import SessionLocal, get_db
 from app.core.deps import (
-    get_current_active_user,
-    get_current_user_team,
     check_customer_edit_permission,
     check_customer_view_permission,
+    get_current_active_user,
+    get_current_user_team,
 )
 from app.models.user import User
-from app.api.customers import _ensure_customer_name_available
+from app.schemas.customer_ai import CustomerAICreateRequest as CustomerActivityAICreateRequest
 
-# 已有功能（MagicWand）
-from app.schemas.customer_ai import CustomerAIParseRequest, CustomerAICreateRequest as CustomerActivityAICreateRequest
-from app.services.follow_up_parser import follow_up_parser_service
-from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
+# 已有功能(MagicWand)
+from app.schemas.customer_ai import CustomerAIParseRequest
 
-# 新增功能（AI 创建客户）
-from app.schemas.customer_ai_create import CustomerAICreateParseRequest, CustomerAICreateRequest as CustomerCreateAIRequest
+# 新增功能(AI 创建客户)
+from app.schemas.customer_ai_create import CustomerAICreateParseRequest
+from app.schemas.customer_ai_create import CustomerAICreateRequest as CustomerCreateAIRequest
 from app.services.ai_parser.factory import EntityAIParserFactory
+from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
 from app.services.customer_lifecycle_post_commit_coordinator import (
     customer_lifecycle_post_commit_coordinator,
 )
-
+from app.services.follow_up_parser import follow_up_parser_service
 
 router = APIRouter(prefix="/v1/customers/ai", tags=["AI 客户活动"])
 logger = logging.getLogger(__name__)
@@ -46,21 +49,24 @@ async def parse_customer_activity(
     db: Session = Depends(get_db)
 ):
     """
-    AI 解析客户活动信息（SSE 流式响应）
+    AI 解析客户活动信息\uff08SSE 流式响应\uff09
 
-    SSE 事件类型：
+    SSE 事件类型\uff1a
     - status: 状态更新
     - content: AI 思考过程内容片段
-    - parsed: 解析完成，返回结构化信息
+    - parsed: 解析完成\uff0c返回结构化信息
     - error: 错误信息
     """
     customer = check_customer_view_permission(request.customer_id, team_id, current_user, db)
 
-    async def generate_sse():
+    async def generate_sse() -> AsyncIterator[str]:
         db = SessionLocal()
         try:
             # 构建带客户上下文的消息
-            context_message = f"[客户：{request.customer_name}（ID：{customer.public_id}）]\n{request.content}"
+            context_message = (
+                f"[客户\uff1a{request.customer_name}\uff08ID\uff1a{customer.public_id}\uff09]\n"
+                f"{request.content}"
+            )
 
             async for event in follow_up_parser_service.parse_follow_up_info_stream(
                 db=db,
@@ -94,9 +100,9 @@ async def create_customer_activity_from_ai(
     db: Session = Depends(get_db)
 ):
     """
-    从 AI 解析结果创建客户活动（用户确认后提交）
+    从 AI 解析结果创建客户活动\uff08用户确认后提交\uff09
 
-    处理 next_action 和 next_follow_time（相对时间转换为具体日期）
+    处理 next_action 和 next_follow_time\uff08相对时间转换为具体日期\uff09
     """
     customer = check_customer_edit_permission(request.customer_id, team_id, current_user, db)
     result = await customer_ai_confirmed_write_service.create_customer_activity(
@@ -125,7 +131,7 @@ async def create_customer_activity_from_ai(
     }
 
 
-# ==================== 新增功能：AI 创建客户 ====================
+# ==================== 新增功能:AI 创建客户 ====================
 
 @router.post("/create/parse")
 async def parse_customer_create_info(
@@ -134,7 +140,7 @@ async def parse_customer_create_info(
     team_id: int = Depends(get_current_user_team)
 ):
     """
-    AI 解析客户创建信息（SSE 流式响应）
+    AI 解析客户创建信息\uff08SSE 流式响应\uff09
     
     用于 AI 智能创建客户
     """
@@ -142,14 +148,14 @@ async def parse_customer_create_info(
     if not parser:
         raise HTTPException(status_code=500, detail="Parser not found")
     
-    async def generate_sse():
+    async def generate_sse() -> AsyncIterator[str]:
         db = SessionLocal()
         try:
             async for event in parser.parse_stream(db, request.content, team_id):
                 yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
             logger.exception("Customer create AI parse stream failed")
-            event = {"event": "error", "message": f"AI 解析失败：{str(e)}"}
+            event = {"event": "error", "message": f"AI 解析失败\uff1a{e!s}"}
             yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
         finally:
             db.close()
@@ -173,7 +179,7 @@ async def create_customer_from_ai(
     db: Session = Depends(get_db)
 ):
     """
-    从 AI 解析结果创建客户（用户确认后提交）
+    从 AI 解析结果创建客户\uff08用户确认后提交\uff09
     
     创建客户 + 主联系人 + 触发档案生成 + 创建客户活动
     """
@@ -207,7 +213,7 @@ async def create_customer_from_ai(
         except Exception:
             logger.exception("AI 创建客户后的后台任务唤醒失败")
         
-        # 执行创建后的额外操作（仅创建客户活动）
+        # 执行创建后的额外操作(仅创建客户活动)
         await parser.post_create_actions(
             db=db,
             entity=customer,
@@ -231,4 +237,4 @@ async def create_customer_from_ai(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建失败：{str(e)}")
+        raise HTTPException(status_code=500, detail=f"创建失败\uff1a{e!s}")

@@ -1,10 +1,10 @@
-from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from typing import Optional
 import random
+from datetime import datetime, timedelta
 
-from app.models.email_verification_code import EmailVerificationCode, VerificationPurpose
+from sqlalchemy.orm import Session
+
 from app.core.config import get_settings
+from app.models.email_verification_code import EmailVerificationCode, VerificationPurpose
 
 settings = get_settings()
 
@@ -42,7 +42,7 @@ class EmailVerificationCodeCRUD:
         email: str,
         code: str,
         purpose: VerificationPurpose
-    ) -> Optional[EmailVerificationCode]:
+    ) -> EmailVerificationCode | None:
         """获取有效的验证码"""
         now = datetime.utcnow()
         return db.query(EmailVerificationCode).filter(

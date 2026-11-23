@@ -1,34 +1,35 @@
 """
 AI 实体解析工厂
 
-根据实体类型返回对应的 Parser 实例，提供统一调用接口
+根据实体类型返回对应的 Parser 实例\uff0c提供统一调用接口
 """
-from typing import Optional
+
+from typing import ClassVar
 
 from app.services.ai_parser.base_parser import EntityAIParserBase
-from app.services.ai_parser.lead_parser import LeadAIParser
 from app.services.ai_parser.customer_parser import CustomerAIParser
+from app.services.ai_parser.lead_parser import LeadAIParser
 
 
 class EntityAIParserFactory:
     """实体 AI 解析工厂"""
 
     # Parser 类型映射
-    PARSER_MAP = {
+    PARSER_MAP: ClassVar[dict[str, type[EntityAIParserBase]]] = {
         "lead": LeadAIParser,
         "customer": CustomerAIParser,
-        # 未来扩展：
+        # 未来扩展:
         # "opportunity": OpportunityAIParser,
         # "contract": ContractAIParser,
     }
 
     @classmethod
-    def get_parser(cls, entity_type: str) -> Optional[EntityAIParserBase]:
+    def get_parser(cls, entity_type: str) -> EntityAIParserBase | None:
         """
         根据实体类型获取 Parser 实例
 
         Args:
-            entity_type: 实体类型（lead, customer, opportunity, contract）
+            entity_type: 实体类型\uff08lead, customer, opportunity, contract\uff09
 
         Returns:
             Parser 实例

@@ -1,30 +1,62 @@
-"""审批引擎业务单据适配器：把审批 CRUD 与具体单据（合同/回款/发票/License）的状态机解耦。
+"""审批引擎业务单据适配器:把审批 CRUD 与具体单据(合同/回款/发票/License)的状态机解耦。
 
-每个 business_type 注册一个 ApprovalEntityAdapter，负责：
+每个 business_type 注册一个 ApprovalEntityAdapter,负责:
 - 取实体、取提交人、取匹配审批流的维度
 - 提交/通过/驳回/撤回时的单据状态切换
-- 取单据展示名（通知用）
+- 取单据展示名(通知用)
 
-E4 守卫规则（强制）：所有 on_submit/on_approved/on_rejected/on_cancelled 实现首行
-`if entity is None: return`——业务单据被软删/跨 team 时 get_entity 返 None，
-避免 `None.status` AttributeError（对齐现有合同 crud/approval.py 的 `if contract:` 守卫）。
+E4 守卫规则(强制):所有 on_submit/on_approved/on_rejected/on_cancelled 实现首行
+`if entity is None: return`——业务单据被软删/跨 team 时 get_entity 返 None,
+避免 `None.status` AttributeError(对齐现有合同 crud/approval.py 的 `if contract:` 守卫)。
 """
+from __future__ import annotations
+
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Protocol, Any, Optional
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, TypeVar, cast
 
 from sqlalchemy import inspect
-from sqlalchemy.orm import Session
 
 from app.constants.business_types import BusinessType
 from app.core.list_query.license_status import LICENSE_PERMANENT_LABEL
 from app.models.contract import Contract, ContractStatus
-from app.models.payment import PaymentPlan, PaymentRecord, PaymentConfirmationStatus
-from app.models.invoice import InvoiceApplication, InvoiceApplicationStatus, InvoiceReissueApplicationStatus
-from app.models.license_application import LicenseApplication, LicenseApplicationStatus
-from app.models.opportunity import Opportunity
 from app.models.customer import Customer
+from app.models.invoice import (
+    InvoiceApplication,
+    InvoiceApplicationStatus,
+    InvoiceReissueApplicationStatus,
+)
+from app.models.license_application import LicenseApplication, LicenseApplicationStatus
+from app.models.payment import PaymentConfirmationStatus, PaymentPlan
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.models.contract_change import ContractChangeRequest
+    from app.models.invoice import InvoiceReissueApplication
+    from app.models.opportunity import Opportunity
+    from app.models.payment import PaymentRecord
+
+_EntityT = TypeVar("_EntityT")
+
+
+class _ApprovalMatchKwargs(TypedDict):
+    amount: float
+    license_type: str | None
+
+
+class ApprovalEntityAdapter(Protocol[_EntityT]):
+    business_type: str
+
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> _EntityT | None: ...
+    def get_submitter(self, entity: _EntityT) -> tuple[str, str | None]: ...
+    def match_kwargs(self, entity: _EntityT) -> _ApprovalMatchKwargs: ...
+    def on_submit(self, db: Session, entity: _EntityT | None) -> None: ...
+    def on_approved(self, db: Session, entity: _EntityT | None) -> None: ...
+    def on_rejected(self, db: Session, entity: _EntityT | None) -> None: ...
+    def on_cancelled(self, db: Session, entity: _EntityT | None) -> None: ...
+    def get_name(self, entity: _EntityT) -> str: ...
 
 
 _BUSINESS_TYPE_DISPLAY_NAMES = {
@@ -38,42 +70,31 @@ _BUSINESS_TYPE_DISPLAY_NAMES = {
 }
 
 
-class ApprovalEntityAdapter(Protocol):
-    business_type: str
-
-    def get_entity(self, db: Session, business_id: int, team_id: int) -> Any: ...
-    def get_submitter(self, entity: Any) -> tuple[str, str | None]: ...
-    def match_kwargs(self, entity: Any) -> dict: ...
-    def on_submit(self, db: Session, entity: Any) -> None: ...
-    def on_approved(self, db: Session, entity: Any) -> None: ...
-    def on_rejected(self, db: Session, entity: Any) -> None: ...
-    def on_cancelled(self, db: Session, entity: Any) -> None: ...
-    def get_name(self, entity: Any) -> str: ...
-
-
 class ContractAdapter:
     business_type = BusinessType.CONTRACT
 
-    def get_entity(self, db, business_id, team_id):
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> Contract | None:
         from app.crud.contract import contract_crud
         return contract_crud.get_by_id(db, business_id, team_id)
 
-    def get_submitter(self, entity):
-        # Contract 模型只有 creator_id，无 creator_name 列；姓名非必须，通知层 A8 处理
+    def get_submitter(self, entity: Contract) -> tuple[str, str | None]:
+        # Contract 模型只有 creator_id,无 creator_name 列;姓名非必须,通知层 A8 处理
         return entity.creator_id, None
 
-    def match_kwargs(self, entity):
+    def match_kwargs(self, entity: Contract) -> _ApprovalMatchKwargs:
         return {
             "amount": float(entity.total_amount) if entity.total_amount else 0,
             "license_type": getattr(entity, "license_type", None),
         }
 
-    def on_submit(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_submit(self, db: Session, entity: Contract | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = ContractStatus.PENDING_REVIEW
 
-    def on_approved(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_approved(self, db: Session, entity: Contract | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = ContractStatus.SIGNED
         from app.models.deal_journey import DealJourneyEventType, DealJourneySourceType
         from app.services.deal_journey_service import deal_journey_service
@@ -87,56 +108,62 @@ class ContractAdapter:
             source_id=entity.id,
             event_time=entity.signing_date or business_now(),
             actor_id=entity.creator_id,
-            summary=f"合同签署：{entity.contract_name}",
+            summary=f"合同签署\uff1a{entity.contract_name}",
         )
 
-    def on_rejected(self, db, entity):
-        if entity is None: return  # E4 守卫
-        # 审批结果由 approval.status / approval_phase 保留；业务状态回到草稿，允许修改后重新提交。
+    def on_rejected(self, db: Session, entity: Contract | None) -> None:
+        if entity is None:  # E4 守卫
+            return
+        # 审批结果由 approval.status / approval_phase 保留;业务状态回到草稿,允许修改后重新提交。
         entity.status = ContractStatus.DRAFT
 
-    def on_cancelled(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_cancelled(self, db: Session, entity: Contract | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = ContractStatus.DRAFT
 
-    def get_name(self, entity):
-        # Contract 真实字段是 contract_name（非 name），否则 fallback 到 合同#{id}
+    def get_name(self, entity: Contract) -> str:
+        # Contract 真实字段是 contract_name(非 name),否则 fallback 到 合同#{id}
         return getattr(entity, "contract_name", None) or f"合同#{entity.id}"
 
 
 class ContractChangeAdapter:
-    """合同变更独立审批；只有末节点通过才把新金额写回原合同。"""
+    """合同变更独立审批;只有末节点通过才把新金额写回原合同。"""
 
     business_type = BusinessType.CONTRACT_CHANGE
 
-    def get_entity(self, db, business_id, team_id):
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> ContractChangeRequest | None:
         from app.crud.contract_change import contract_change_crud
         return contract_change_crud.get_by_id(db, business_id, team_id)
 
-    def get_submitter(self, entity):
-        return entity.creator_id, None
+    def get_submitter(self, entity: ContractChangeRequest) -> tuple[str, str | None]:
+        return cast("str", entity.creator_id), None
 
-    def match_kwargs(self, entity):
-        raise ValueError("合同变更不支持重新提交，请在合同详情重新发起变更")
+    def match_kwargs(self, entity: ContractChangeRequest) -> _ApprovalMatchKwargs:
+        raise ValueError("合同变更不支持重新提交\uff0c请在合同详情重新发起变更")
 
-    def on_submit(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_submit(self, db: Session, entity: ContractChangeRequest | None) -> None:
+        if entity is None:  # E4 守卫
+            return
 
-    def on_approved(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_approved(self, db: Session, entity: ContractChangeRequest | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         from app.services.contract_change import contract_change_service
         contract_change_service.apply_approved_change(db, entity)
 
-    def on_rejected(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_rejected(self, db: Session, entity: ContractChangeRequest | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         from app.services.contract_change import contract_change_service
         contract_change_service.release_pending(entity)
 
-    def on_cancelled(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_cancelled(self, db: Session, entity: ContractChangeRequest | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         raise ValueError("合同变更审批不支持撤回")
 
-    def get_name(self, entity):
+    def get_name(self, entity: ContractChangeRequest) -> str:
         contract = getattr(entity, "contract", None)
         contract_name = getattr(contract, "contract_name", None) if contract is not None else None
         return f"{contract_name}·合同变更" if contract_name else f"合同变更#{entity.id}"
@@ -145,31 +172,33 @@ class ContractChangeAdapter:
 class PaymentRecordAdapter:
     business_type = BusinessType.PAYMENT
 
-    def get_entity(self, db, business_id, team_id):
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> PaymentRecord | None:
         from app.crud.payment import payment_record_crud
         return payment_record_crud.get_by_id(db, business_id, team_id)
 
-    def get_submitter(self, entity):
+    def get_submitter(self, entity: PaymentRecord) -> tuple[str, str | None]:
         return entity.creator_id, getattr(entity, "creator_name", None)
 
-    def match_kwargs(self, entity):
+    def match_kwargs(self, entity: PaymentRecord) -> _ApprovalMatchKwargs:
         return {
             "amount": float(entity.actual_amount) if entity.actual_amount else 0,
             "license_type": None,
         }
 
-    def on_submit(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_submit(self, db: Session, entity: PaymentRecord | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.confirmation_status = PaymentConfirmationStatus.PENDING
 
     @staticmethod
-    def _lock_customer(db, entity):
+    def _lock_customer(db: Session, entity: PaymentRecord) -> None:
         from app.crud.payment import _plan_customer_id
 
-        customer_id = _plan_customer_id(db, plan_id=entity.payment_plan_id, team_id=entity.team_id)
+        _plan_customer_id(db, plan_id=entity.payment_plan_id, team_id=entity.team_id)
 
-    def on_approved(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_approved(self, db: Session, entity: PaymentRecord | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         self._lock_customer(db, entity)
         # 审批通过即确认入账
         entity.confirmation_status = PaymentConfirmationStatus.CONFIRMED
@@ -193,30 +222,32 @@ class PaymentRecordAdapter:
                 source_id=entity.id,
                 event_time=entity.confirmed_time,
                 actor_id=entity.creator_id,
-                summary=f"确认回款：{entity.actual_amount}",
+                summary=f"确认回款\uff1a{entity.actual_amount}",
                 metadata={"confirmation_status": entity.confirmation_status},
             )
             deal_journey_service.refresh_closure_status(db, entity.deal_journey_id)
 
-    def on_rejected(self, db, entity):
-        if entity is None: return  # E4 守卫
-        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = REJECTED）
-        # 此处不切换 confirmation_status（保持 PENDING）
+    def on_rejected(self, db: Session, entity: PaymentRecord | None) -> None:
+        if entity is None:  # E4 守卫
+            return
+        # approval_phase 切换由 Approval Engine 管理(entity.approval_phase = REJECTED)
+        # 此处不切换 confirmation_status(保持 PENDING)
         self._refresh_payment_status(db, entity)
 
-    def on_cancelled(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_cancelled(self, db: Session, entity: PaymentRecord | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         self._lock_customer(db, entity)
-        # approval_phase 切换由 Approval Engine 管理（entity.approval_phase = DRAFT）
-        # 回款的 confirmation_status 是财务确认状态；撤回审批只影响 approval_phase，
-        # 未审批通过前仍是待确认，重新提交能力由 approval_phase=DRAFT 表达。
+        # approval_phase 切换由 Approval Engine 管理(entity.approval_phase = DRAFT)
+        # 回款的 confirmation_status 是财务确认状态;撤回审批只影响 approval_phase,
+        # 未审批通过前仍是待确认,重新提交能力由 approval_phase=DRAFT 表达。
         entity.confirmation_status = PaymentConfirmationStatus.PENDING
         self._refresh_payment_status(db, entity)
 
-    def get_name(self, entity):
+    def get_name(self, entity: PaymentRecord) -> str:
         return f"回款登记#{entity.id}"
 
-    def _refresh_payment_status(self, db, entity):
+    def _refresh_payment_status(self, db: Session, entity: PaymentRecord) -> None:
         from app.crud.payment import payment_plan_crud, payment_record_crud
 
         if not self._payment_plan_table_available(db):
@@ -230,7 +261,7 @@ class PaymentRecordAdapter:
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.refresh_closure_status(db, plan.deal_journey_id)
 
-    def _payment_plan_table_available(self, db) -> bool:
+    def _payment_plan_table_available(self, db: Session) -> bool:
         get_bind = getattr(db, "get_bind", None)
         if not callable(get_bind):
             return True
@@ -239,151 +270,172 @@ class PaymentRecordAdapter:
             return True
         if not hasattr(bind, "dialect"):
             return True
-        return inspect(bind).has_table(PaymentPlan.__tablename__)
+        return cast("bool", inspect(bind).has_table(PaymentPlan.__tablename__))
 
 
 class InvoiceApplicationAdapter:
     business_type = BusinessType.INVOICE
 
-    def get_entity(self, db, business_id, team_id):
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> InvoiceApplication | None:
         from app.crud.invoice import invoice_application_crud
         return invoice_application_crud.get_by_id(db, business_id, team_id)
 
-    # 发票提交人字段是 applicant_id（非 creator_id），见决策 3
-    def get_submitter(self, entity):
-        # InvoiceApplication 无 applicant_name 列，只有 applicant_id；姓名非必须
+    # 发票提交人字段是 applicant_id(非 creator_id),见决策 3
+    def get_submitter(self, entity: InvoiceApplication) -> tuple[str, str | None]:
+        # InvoiceApplication 无 applicant_name 列,只有 applicant_id;姓名非必须
         return entity.applicant_id, None
 
-    def match_kwargs(self, entity):
-        # 开票金额字段是 invoice_amount（非 amount），见决策 3
+    def match_kwargs(self, entity: InvoiceApplication) -> _ApprovalMatchKwargs:
+        # 开票金额字段是 invoice_amount(非 amount),见决策 3
         return {"amount": float(entity.invoice_amount or 0), "license_type": None}
 
-    def on_submit(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_submit(self, db: Session, entity: InvoiceApplication | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = InvoiceApplicationStatus.PENDING_REVIEW
 
-    def on_approved(self, db, entity):
-        if entity is None: return  # E4 守卫
-        # 引擎终态回写快照，InvoiceDetail.vue 仍读这三字段，见决策 2(c)
+    def on_approved(self, db: Session, entity: InvoiceApplication | None) -> None:
+        if entity is None:  # E4 守卫
+            return
+        # 引擎终态回写快照,InvoiceDetail.vue 仍读这三字段,见决策 2(c)
         entity.status = InvoiceApplicationStatus.APPROVED
         entity.reviewed_time = business_now()
 
-    def on_approved_with_file(self, db, entity, file_path: str, invoice_number: str | None = None):
-        if entity is None: return  # E4 守卫
+    def on_approved_with_file(
+        self, db: Session, entity: InvoiceApplication | None, file_path: str, invoice_number: str | None = None
+    ) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = InvoiceApplicationStatus.ISSUED
         entity.invoice_file_path = file_path
         entity.invoice_number = invoice_number
         entity.issued_time = business_now()
 
-    def on_rejected(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_rejected(self, db: Session, entity: InvoiceApplication | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = InvoiceApplicationStatus.REJECTED
         entity.reviewed_time = business_now()
 
-    def on_cancelled(self, db, entity):
-        if entity is None: return  # E4 守卫
+    def on_cancelled(self, db: Session, entity: InvoiceApplication | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         entity.status = InvoiceApplicationStatus.DRAFT
 
-    def get_name(self, entity):
+    def get_name(self, entity: InvoiceApplication) -> str:
         return f"发票申请#{entity.id}"
 
 
 class InvoiceReissueApplicationAdapter:
     business_type = BusinessType.INVOICE_REISSUE
 
-    def get_entity(self, db, business_id, team_id):
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> InvoiceReissueApplication | None:
         from app.crud.invoice import invoice_reissue_application_crud
         return invoice_reissue_application_crud.get_by_id(db, business_id, team_id)
 
-    def get_submitter(self, entity):
+    def get_submitter(self, entity: InvoiceReissueApplication) -> tuple[str, str | None]:
         return entity.applicant_id, None
 
-    def match_kwargs(self, entity):
+    def match_kwargs(self, entity: InvoiceReissueApplication) -> _ApprovalMatchKwargs:
         return {"amount": float(entity.invoice_amount or 0), "license_type": None}
 
-    def on_submit(self, db, entity):
-        if entity is None: return
+    def on_submit(self, db: Session, entity: InvoiceReissueApplication | None) -> None:
+        if entity is None:
+            return
         entity.status = InvoiceReissueApplicationStatus.PENDING_REVIEW
 
-    def on_approved(self, db, entity):
-        if entity is None: return
+    def on_approved(self, db: Session, entity: InvoiceReissueApplication | None) -> None:
+        if entity is None:
+            return
         entity.status = InvoiceReissueApplicationStatus.APPROVED
 
-    def on_rejected(self, db, entity):
-        if entity is None: return
+    def on_rejected(self, db: Session, entity: InvoiceReissueApplication | None) -> None:
+        if entity is None:
+            return
         entity.status = InvoiceReissueApplicationStatus.REJECTED
 
-    def on_cancelled(self, db, entity):
-        if entity is None: return
+    def on_cancelled(self, db: Session, entity: InvoiceReissueApplication | None) -> None:
+        if entity is None:
+            return
         entity.status = InvoiceReissueApplicationStatus.DRAFT
 
-    def get_name(self, entity):
+    def get_name(self, entity: InvoiceReissueApplication) -> str:
         return f"发票重开申请#{entity.application_number or entity.id}"
+
+
+# The legacy LicenseApplication model declares a Column at class scope,
+# but SQLAlchemy exposes a writable string on instances.
+class _LicenseStatusRow(Protocol):
+    status: str
 
 
 class LicenseApplicationAdapter:
     """License 申请审批适配器
 
-    状态流转：
-    - on_submit: DRAFT → PENDING_REVIEW（提交审批）
-    - on_approved: PENDING_REVIEW → APPROVED（审批通过）
-    - on_rejected: PENDING_REVIEW → REJECTED（审批拒绝）
-    - on_cancelled: PENDING_REVIEW → DRAFT（撤回审批）
+    状态流转:
+    - on_submit: DRAFT → PENDING_REVIEW(提交审批)
+    - on_approved: PENDING_REVIEW → APPROVED(审批通过)
+    - on_rejected: PENDING_REVIEW → REJECTED(审批拒绝)
+    - on_cancelled: PENDING_REVIEW → DRAFT(撤回审批)
     """
     business_type = BusinessType.LICENSE
 
-    def get_entity(self, db: Session, business_id: int, team_id: int) -> Optional[LicenseApplication]:
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> LicenseApplication | None:
         """获取 License 申请实体"""
         from app.crud.crud_license_application import license_application_crud
         return license_application_crud.get(db, team_id, business_id)
 
-    def get_submitter(self, entity: LicenseApplication) -> tuple[str, str | None]:
+    def get_submitter(self, entity: LicenseApplication | None) -> tuple[str, str | None]:
         """获取提交人信息
 
         Returns:
-            (applicant_id, None) - License 申请只有 applicant_id，无姓名字段
+            (applicant_id, None) - License 申请只有 applicant_id,无姓名字段
         """
         if entity is None:
             return "", None
-        return entity.applicant_id or "", None
+        return cast("str | None", entity.applicant_id) or "", None
 
-    def match_kwargs(self, entity: LicenseApplication) -> dict:
+    def match_kwargs(self, entity: LicenseApplication) -> _ApprovalMatchKwargs:
         """匹配审批流程的维度参数
 
-        License 申请按 license_type（试用/正式）匹配流程
+        License 申请按 license_type(试用/正式)匹配流程
         """
         return {
             "amount": 0,  # License 申请无金额概念
             "license_type": getattr(entity, "license_type", None),
         }
 
-    def on_submit(self, db: Session, entity: LicenseApplication) -> None:
+    def on_submit(self, db: Session, entity: LicenseApplication | None) -> None:
         """提交审批时的状态切换"""
-        if entity is None: return  # E4 守卫
-        # 统一命名：PENDING → PENDING_REVIEW（与 InvoiceApplicationStatus 一致）
-        entity.status = LicenseApplicationStatus.PENDING_REVIEW
+        if entity is None:  # E4 守卫
+            return
+        # 统一命名:PENDING → PENDING_REVIEW(与 InvoiceApplicationStatus 一致)
+        cast("_LicenseStatusRow", entity).status = LicenseApplicationStatus.PENDING_REVIEW
 
-    def on_approved(self, db: Session, entity: LicenseApplication) -> None:
+    def on_approved(self, db: Session, entity: LicenseApplication | None) -> None:
         """审批通过时的状态切换
 
-        审批只负责批准申请。License 信息填写和发放是审批通过后的后置业务动作，
+        审批只负责批准申请。License 信息填写和发放是审批通过后的后置业务动作,
         由 License issue 接口在确认 Approval.status=APPROVED 后执行。
         """
-        if entity is None: return  # E4 守卫
-        entity.status = LicenseApplicationStatus.APPROVED
+        if entity is None:  # E4 守卫
+            return
+        cast("_LicenseStatusRow", entity).status = LicenseApplicationStatus.APPROVED
 
-    def on_rejected(self, db: Session, entity: LicenseApplication) -> None:
+    def on_rejected(self, db: Session, entity: LicenseApplication | None) -> None:
         """审批拒绝时的状态切换"""
-        if entity is None: return  # E4 守卫
-        entity.status = LicenseApplicationStatus.REJECTED
+        if entity is None:  # E4 守卫
+            return
+        cast("_LicenseStatusRow", entity).status = LicenseApplicationStatus.REJECTED
 
-    def on_cancelled(self, db: Session, entity: LicenseApplication) -> None:
+    def on_cancelled(self, db: Session, entity: LicenseApplication | None) -> None:
         """撤回审批时的状态切换"""
-        if entity is None: return  # E4 守卫
-        entity.status = LicenseApplicationStatus.DRAFT
+        if entity is None:  # E4 守卫
+            return
+        cast("_LicenseStatusRow", entity).status = LicenseApplicationStatus.DRAFT
 
-    def get_name(self, entity: LicenseApplication) -> str:
-        """获取申请展示名称（用于通知）"""
+    def get_name(self, entity: LicenseApplication | None) -> str:
+        """获取申请展示名称(用于通知)"""
         if entity is None:
             return "License申请"
         return f"License申请#{entity.application_number}"
@@ -392,47 +444,52 @@ class LicenseApplicationAdapter:
 class OpportunityAdapter:
     """商机审批适配器
 
-    商机的 status 表示跟进中/赢单/输单，审批状态由 approval_phase 独立承载。
+    商机的 status 表示跟进中/赢单/输单,审批状态由 approval_phase 独立承载。
     因此审批提交、通过、驳回、撤回均不改写业务 status。
     """
     business_type = BusinessType.OPPORTUNITY
 
-    def get_entity(self, db: Session, business_id: int, team_id: int) -> Optional[Opportunity]:
+    def get_entity(self, db: Session, business_id: int, team_id: int) -> Opportunity | None:
         from app.crud.opportunity import opportunity_crud
         return opportunity_crud.get_by_id(db, business_id, team_id)
 
-    def get_submitter(self, entity: Opportunity) -> tuple[str, str | None]:
+    def get_submitter(self, entity: Opportunity | None) -> tuple[str, str | None]:
         if entity is None:
             return "", None
         return entity.creator_id or "", None
 
-    def match_kwargs(self, entity: Opportunity) -> dict:
+    def match_kwargs(self, entity: Opportunity) -> _ApprovalMatchKwargs:
         return {
             "amount": float(entity.total_amount) if entity.total_amount else 0,
             "license_type": getattr(entity, "license_type", None),
         }
 
-    def on_submit(self, db: Session, entity: Opportunity) -> None:
-        if entity is None: return  # E4 守卫
+    def on_submit(self, db: Session, entity: Opportunity | None) -> None:
+        if entity is None:  # E4 守卫
+            return
 
-    def on_approved(self, db: Session, entity: Opportunity) -> None:
-        if entity is None: return  # E4 守卫
+    def on_approved(self, db: Session, entity: Opportunity | None) -> None:
+        if entity is None:  # E4 守卫
+            return
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.record_opportunity_approved(db, entity)
 
-    def on_rejected(self, db: Session, entity: Opportunity) -> None:
-        if entity is None: return  # E4 守卫
+    def on_rejected(self, db: Session, entity: Opportunity | None) -> None:
+        if entity is None:  # E4 守卫
+            return
 
-    def on_cancelled(self, db: Session, entity: Opportunity) -> None:
-        if entity is None: return  # E4 守卫
+    def on_cancelled(self, db: Session, entity: Opportunity | None) -> None:
+        if entity is None:  # E4 守卫
+            return
 
-    def get_name(self, entity: Opportunity) -> str:
+    def get_name(self, entity: Opportunity | None) -> str:
         if entity is None:
             return "商机"
         return getattr(entity, "opportunity_name", None) or f"商机#{entity.id}"
 
 
-_REGISTRY: dict[str, ApprovalEntityAdapter] = {
+# Each key selects both the adapter and its corresponding entity type.
+_REGISTRY: dict[str, ApprovalEntityAdapter[Any]] = {
     BusinessType.CONTRACT: ContractAdapter(),
     BusinessType.CONTRACT_CHANGE: ContractChangeAdapter(),
     BusinessType.PAYMENT: PaymentRecordAdapter(),
@@ -443,16 +500,16 @@ _REGISTRY: dict[str, ApprovalEntityAdapter] = {
 }
 
 
-def get_adapter(business_type: str) -> ApprovalEntityAdapter:
+def get_adapter(business_type: str) -> ApprovalEntityAdapter[Any]:
     adapter = _REGISTRY.get(business_type)
     if adapter is None:
         raise ValueError(f"不支持的业务单据类型: {business_type}")
     return adapter
 
 
-def get_approval_type_name(business_type: str, entity: Any = None) -> str:
+def get_approval_type_name(business_type: str, entity: object = None) -> str:
     if business_type == BusinessType.LICENSE:
-        # License 卡片标题按产品要求使用中英文间空格：「Hifox 的 License 申请」
+        # License 卡片标题按产品要求使用中英文间空格:「Hifox 的 License 申请」
         product_name = (getattr(entity, "product_name", None) or "").strip()
         return f"{product_name} 的 License 申请" if product_name else "License 申请"
     return _BUSINESS_TYPE_DISPLAY_NAMES.get(business_type, "审批")
@@ -489,7 +546,7 @@ def _payment_composition_card_fields(entity: object) -> dict[str, str] | None:
     }
 
 
-def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> dict[str, str]:
+def get_approval_card_fields(db: Session, business_type: str, entity: object) -> dict[str, str | None]:
     if entity is None:
         return {}
 
@@ -506,7 +563,7 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
     if business_type == BusinessType.CONTRACT_CHANGE:
         from app.services.contract_change import amount_change_values
         contract = _change_contract(db, entity)
-        old_amount, new_amount = amount_change_values(entity)
+        old_amount, new_amount = amount_change_values(cast("ContractChangeRequest", entity))
         return {
             "客户名称": _customer_name(db, business_type, entity),
             "合同名称": getattr(contract, "contract_name", None),
@@ -548,7 +605,7 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
         }
 
     if business_type == BusinessType.PAYMENT:
-        fields = {
+        fields: dict[str, str | None] = {
             "客户名称": _customer_name(db, business_type, entity),
             "实际付款方": getattr(entity, "actual_payer_name", None),
             "回款金额": _format_currency(getattr(entity, "actual_amount", None)),
@@ -582,7 +639,7 @@ def get_approval_card_fields(db: Session, business_type: str, entity: Any) -> di
     }
 
 
-def advance_approval_source(db: Session, business_type: str, entity: Any) -> None:
+def advance_approval_source(db: Session, business_type: str, entity: object) -> None:
     """Fence one visible approval transition before changing its source row.
 
     The caller owns the commit and invokes this once per actual transition,
@@ -598,8 +655,8 @@ def advance_approval_source(db: Session, business_type: str, entity: Any) -> Non
         return
 
 
-def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Optional[int]:
-    """从审批单据解析所属客户 ID，供客户树只读权限复用。"""
+def get_approval_customer_id(db: Session, business_type: str, entity: object) -> int | None:
+    """从审批单据解析所属客户 ID,供客户树只读权限复用。"""
     if entity is None:
         return None
 
@@ -649,14 +706,14 @@ def get_approval_customer_id(db: Session, business_type: str, entity: Any) -> Op
     return None
 
 
-def _change_contract(db: Session, entity: Any) -> Optional[Contract]:
+def _change_contract(db: Session, entity: object) -> Contract | None:
     return db.query(Contract).filter(
         Contract.id == getattr(entity, "contract_id", None),
         Contract.team_id == getattr(entity, "team_id", None),
     ).first()
 
 
-def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> Optional[str]:
+def get_approval_customer_name(db: Session, business_type: str, entity: object) -> str | None:
     if entity is None:
         return None
 
@@ -723,7 +780,7 @@ def get_approval_customer_name(db: Session, business_type: str, entity: Any) -> 
     return None
 
 
-def _customer_name(db: Session, business_type: str, entity: Any) -> str:
+def _customer_name(db: Session, business_type: str, entity: object) -> str:
     name = get_approval_customer_name(db, business_type, entity)
     if name:
         return name
@@ -741,7 +798,7 @@ def _customer_name(db: Session, business_type: str, entity: Any) -> str:
     return "-"
 
 
-def _format_currency(value: Any) -> str:
+def _format_currency(value: object) -> str:
     if value is None:
         return "-"
     try:
@@ -751,13 +808,13 @@ def _format_currency(value: Any) -> str:
     return f"¥{amount:,.2f}"
 
 
-def _format_count(value: Any) -> str:
+def _format_count(value: object) -> str:
     if value is None:
         return "-"
     return f"{value}人"
 
 
-def _format_date(value: Any) -> str:
+def _format_date(value: object) -> str:
     if value is None:
         return "-"
     if isinstance(value, datetime):
@@ -767,14 +824,14 @@ def _format_date(value: Any) -> str:
     return str(value) or "-"
 
 
-def _license_mode_label(value: Any) -> str:
+def _license_mode_label(value: object) -> str:
     return {
         "SUBSCRIPTION": "订阅制",
         "PERPETUAL": "买断制",
     }.get(str(value or ""), str(value or "-"))
 
 
-def _purchase_type_label(value: Any) -> str:
+def _purchase_type_label(value: object) -> str:
     return {
         "NEW": "新购",
         "RENEWAL": "续购",
@@ -782,14 +839,14 @@ def _purchase_type_label(value: Any) -> str:
     }.get(str(value or ""), str(value or "-"))
 
 
-def _invoice_type_label(value: Any) -> str:
+def _invoice_type_label(value: object) -> str:
     return {
         "VAT_SPECIAL": "增值税专用发票",
         "VAT_NORMAL": "普通发票",
     }.get(str(value or ""), str(value or "-"))
 
 
-def _license_application_type_label(value: Any) -> str:
+def _license_application_type_label(value: object) -> str:
     return {
         "TRIAL": "试用",
         "OFFICIAL": "正式",

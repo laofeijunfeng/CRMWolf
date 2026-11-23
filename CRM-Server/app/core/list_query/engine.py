@@ -1,34 +1,39 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from sqlalchemy.sql.elements import ColumnElement
+from typing import TYPE_CHECKING, TypeVar
 
 from sqlalchemy import and_, case, or_
 
-from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
 from app.core.list_query.errors import ListQueryError
 from app.core.list_query.parse import parse_filters, parse_sorts, uses_unified_list_query
 from app.core.list_query.types import (
     DATE_PRESET_OPS,
     EMPTY_OPS,
-    JoinSpec,
     ListQueryContext,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from sqlalchemy.orm import Query
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from app.core.list_query.catalog import ListQueryCatalog, ListQueryField
+    from app.core.list_query.types import JoinSpec
+
+_RowT = TypeVar("_RowT")
+
 
 def apply_search(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
     search: str | None,
     *,
     context: ListQueryContext | None = None,
-):
+) -> Query[_RowT]:
     """Apply an explicitly submitted, module-scoped search before filters and count."""
     normalized = (search or "").strip()
     if catalog.search_predicate is None or normalized == "":
@@ -40,13 +45,13 @@ def apply_search(
 
 
 def apply_filters(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
-    filters: Iterable[Any],
+    filters: Iterable[object],
     *,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-):
+) -> Query[_RowT]:
     ctx = context or ListQueryContext()
     joined_keys = joined if joined is not None else set()
     for condition in parse_filters(list(filters)):
@@ -76,13 +81,13 @@ def apply_filters(
 
 
 def apply_sorts(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
-    sorts: Iterable[Any],
+    sorts: Iterable[object],
     *,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-):
+) -> Query[_RowT]:
     ctx = context or ListQueryContext()
     joined_keys = joined if joined is not None else set()
     parsed = parse_sorts(list(sorts))
@@ -102,14 +107,14 @@ def apply_sorts(
 
 
 def apply_list_query(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
-    filters: Iterable[Any],
-    sorts: Iterable[Any],
+    filters: Iterable[object],
+    sorts: Iterable[object],
     *,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-):
+) -> Query[_RowT]:
     joined_keys = joined if joined is not None else set()
     query = apply_filters(query, catalog, filters, context=context, joined=joined_keys)
     query = apply_sorts(query, catalog, sorts, context=context, joined=joined_keys)
@@ -117,16 +122,16 @@ def apply_list_query(
 
 
 def execute_list_query(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
-    filters: Iterable[Any],
-    sorts: Iterable[Any],
+    filters: Iterable[object],
+    sorts: Iterable[object],
     *,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
     skip: int = 0,
     limit: int = 100,
-):
+) -> tuple[list[_RowT], int]:
     joined_keys = joined if joined is not None else set()
     query = apply_filters(query, catalog, filters, context=context, joined=joined_keys)
     total = query.count()
@@ -135,17 +140,17 @@ def execute_list_query(
 
 
 def build_optional_list_query(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
     *,
-    filters=None,
-    sorts=None,
+    filters: Iterable[object] | None = None,
+    sorts: Iterable[object] | None = None,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-    legacy_filters=None,
-    legacy_sorts=None,
+    legacy_filters: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
+    legacy_sorts: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
     search: str | None = None,
-):
+) -> tuple[Query[_RowT], Query[_RowT]]:
     """Return (filtered_query, ordered_query) without count or pagination."""
     ctx = context or ListQueryContext()
     joined_keys = joined if joined is not None else set()
@@ -165,17 +170,17 @@ def build_optional_list_query(
 
 
 def apply_optional_list_query(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
     *,
-    filters=None,
-    sorts=None,
+    filters: Iterable[object] | None = None,
+    sorts: Iterable[object] | None = None,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-    legacy_filters=None,
-    legacy_sorts=None,
+    legacy_filters: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
+    legacy_sorts: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
     search: str | None = None,
-):
+) -> tuple[Query[_RowT], int]:
     filtered, ordered = build_optional_list_query(
         query,
         catalog,
@@ -189,20 +194,21 @@ def apply_optional_list_query(
     )
     return ordered, filtered.count()
 
+
 def paginate_optional_list_query(
-    query,
+    query: Query[_RowT],
     catalog: ListQueryCatalog,
     *,
     skip: int = 0,
     limit: int = 100,
-    filters=None,
-    sorts=None,
+    filters: Iterable[object] | None = None,
+    sorts: Iterable[object] | None = None,
     context: ListQueryContext | None = None,
     joined: set[str] | None = None,
-    legacy_filters=None,
-    legacy_sorts=None,
+    legacy_filters: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
+    legacy_sorts: Callable[[Query[_RowT]], Query[_RowT]] | None = None,
     search: str | None = None,
-):
+) -> tuple[list[_RowT], int]:
     query, total = apply_optional_list_query(
         query,
         catalog,
@@ -224,7 +230,7 @@ def _require_field(catalog: ListQueryCatalog, key: str, *, kind: str) -> ListQue
     return field
 
 
-def _apply_joins(query, joins: Iterable[JoinSpec], joined_keys: set[str]):
+def _apply_joins(query: Query[_RowT], joins: Iterable[JoinSpec], joined_keys: set[str]) -> Query[_RowT]:
     for spec in joins:
         if spec.key in joined_keys or _query_already_joined(query, spec.target):
             joined_keys.add(spec.key)
@@ -234,13 +240,15 @@ def _apply_joins(query, joins: Iterable[JoinSpec], joined_keys: set[str]):
     return query
 
 
-def _query_already_joined(query, target) -> bool:
+def _query_already_joined(query: Query[_RowT], target: object) -> bool:
     setup_joins = getattr(query, "_setup_joins", None) or ()
     target_table = getattr(target, "__table__", None)
     for item in setup_joins:
         joined = item[0]
         joined_table = getattr(joined, "__table__", joined)
-        if joined == target or joined == target_table or joined_table == target_table:
+        if joined == target:
+            return True
+        if joined == target_table or joined_table == target_table:
             return True
 
     mapper = getattr(target, "__mapper__", target)
@@ -251,9 +259,9 @@ def _query_already_joined(query, target) -> bool:
         if mapper in entities or target in entities:
             return True
     try:
-        from sqlalchemy.orm import Query
+        from sqlalchemy.orm import Query as RuntimeQuery
 
-        if isinstance(query, Query):
+        if isinstance(query, RuntimeQuery):
             for item in query.column_descriptions:
                 entity = item.get("entity")
                 if entity is target or getattr(entity, "__mapper__", None) is mapper:
@@ -263,19 +271,17 @@ def _query_already_joined(query, target) -> bool:
     return False
 
 
-def _is_blank_raw_value(value: Any) -> bool:
+def _is_blank_raw_value(value: object) -> bool:
     if value is None or value == "":
         return True
-    if isinstance(value, list) and len(value) == 0:
-        return True
-    return False
+    return isinstance(value, list) and len(value) == 0
 
 
-def _prepare_value(field: ListQueryField, value: Any, context: ListQueryContext) -> Any:
+def _prepare_value(field: ListQueryField, value: object, context: ListQueryContext) -> object:
     parsed = _parse_value(field, value)
     if parsed is None:
         return None
-    values = parsed if isinstance(parsed, list) else [parsed]
+    values: list[object] = parsed if isinstance(parsed, list) else [parsed]
     if field.resolve_person_aliases:
         values = [_resolve_person_alias(item, context) for item in values]
     if field.resolve_values is not None:
@@ -285,14 +291,14 @@ def _prepare_value(field: ListQueryField, value: Any, context: ListQueryContext)
     return values[0] if values else []
 
 
-def _resolve_person_alias(value: Any, context: ListQueryContext) -> Any:
+def _resolve_person_alias(value: object, context: ListQueryContext) -> object:
     text = str(value).strip().lower()
     if text in {"me", "my"} and context.current_user_id is not None:
         return str(context.current_user_id)
     return value
 
 
-def _parse_value(field: ListQueryField, value: Any) -> Any:
+def _parse_value(field: ListQueryField, value: object) -> object:
     if value is None or value == "":
         return None
     if isinstance(value, list):
@@ -307,17 +313,19 @@ def _parse_value(field: ListQueryField, value: Any) -> Any:
     return str(value).strip()
 
 
-def _parse_enum(enum_type, value: Any):
+def _parse_enum(enum_type: Iterable[object], value: object) -> object:
     text = str(value).strip()
     for member in enum_type:
         member_value = member.value if isinstance(member, Enum) else member
         member_name = member.name if isinstance(member, Enum) else str(member)
-        if value == member or value == member_value or text == str(member_value) or text == member_name:
+        if value == member:
+            return member
+        if value == member_value or text == str(member_value) or text == member_name:
             return member
     return None
 
 
-def _parse_number(value: Any):
+def _parse_number(value: object) -> Decimal | int | None:
     try:
         text = str(value).strip()
         if text == "":
@@ -356,9 +364,15 @@ def parse_date_value(value: object) -> datetime | None:
         return None
 
 
-def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any, context: ListQueryContext):
+def _build_clause(
+    field: ListQueryField,
+    expression: ColumnElement[object],
+    op: str,
+    parsed_value: object,
+    context: ListQueryContext,
+) -> ColumnElement[bool]:
     if op in EMPTY_OPS:
-        null_present = field.null_present_expression(context)
+        null_present: ColumnElement[bool] | None = field.null_present_expression(context)
         if field.treats_blank_as_empty():
             empty = or_(expression.is_(None), expression == "")
             not_empty = and_(expression.is_not(None), expression != "")
@@ -373,7 +387,7 @@ def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any,
     if field.type == "date" and op in DATE_PRESET_OPS:
         return _date_preset_clause(field, expression, op, context)
     if field.type == "date":
-        return _date_clause(field, expression, op, parsed_value, context)
+        return _date_clause(field, expression, op, parsed_value)
 
     values = parsed_value if isinstance(parsed_value, list) else [parsed_value]
     comparable = [_enum_value(item, field) for item in values]
@@ -381,7 +395,7 @@ def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any,
     if op == "in":
         return expression.in_(comparable)
     if op == "not_in":
-        clause = expression.notin_(comparable)
+        clause: ColumnElement[bool] = expression.notin_(comparable)
         return or_(expression.is_(None), clause) if field.neq_includes_null else clause
 
     if op in {"eq", "contains"} and (isinstance(parsed_value, list) or (field.type == "enum" and op == "contains")):
@@ -417,13 +431,18 @@ def _build_clause(field: ListQueryField, expression, op: str, parsed_value: Any,
     raise ListQueryError(f"字段 {field.key} 不支持操作符 {op}")
 
 
-def _enum_value(value: Any, field: ListQueryField) -> Any:
+def _enum_value(value: object, field: ListQueryField) -> object:
     if isinstance(value, Enum):
         return value.name if field.enum_persist == "name" else value.value
     return value
 
 
-def _date_clause(field: ListQueryField, expression, op: str, parsed_value: object, context: ListQueryContext):
+def _date_clause(
+    field: ListQueryField,
+    expression: ColumnElement[object],
+    op: str,
+    parsed_value: object,
+) -> ColumnElement[bool]:
     if op == "between":
         pair = _closed_date_pair(parsed_value)
         if pair is None:

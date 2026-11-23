@@ -110,6 +110,7 @@ class FollowUpTaskProjectionService:
         commit: bool = True,
     ) -> FollowUpTaskProjectionResult:
         self._validate_trigger_type(trigger_type)
+        activity: CustomerActivity | None
         if activity_snapshot is not None:
             activity = activity_snapshot
         else:
@@ -652,7 +653,13 @@ class FollowUpTaskProjectionService:
         skip_reason = None
         if duplicate_existing_task is not None:
             skip_reason = FollowUpTaskProjectionSkipReason.DUPLICATE_EXISTING_TASK
-        if not created_task_ids and not updated_task_ids and not cancelled_task_ids and not created_commitment_ids and not updated_commitment_ids:
+        if (
+            not created_task_ids
+            and not updated_task_ids
+            and not cancelled_task_ids
+            and not created_commitment_ids
+            and not updated_commitment_ids
+        ):
             skip_reason = skip_reason or FollowUpTaskProjectionSkipReason.NO_CHANGE
 
         self._sync_vector_documents(
@@ -1219,7 +1226,8 @@ def _infer_due_at_granularity(value: datetime | None) -> str:
     return DueAtGranularity.DATETIME
 
 
-def _evidence_payload(activity: CustomerActivity, *, due_at_text: str | None, has_explicit_action: bool) -> dict[str, Any]:
+def _evidence_payload(activity: CustomerActivity, *, due_at_text: str | None,
+    has_explicit_action: bool) -> dict[str, Any]:
     return {
         "source_type": FollowUpTaskSourceType.CUSTOMER_ACTIVITY,
         "activity_kind": activity.activity_kind,
@@ -1263,7 +1271,8 @@ def _log_projection_run_result(
         task_ids=task_ids,
     )
     logger.info(
-        "客户活动任务投影完成: trigger_type=%s activity_id=%s projection_run_public_id=%s projection_run_id=%s status=%s skip_reason=%s task_public_ids=%s error=%s",
+        "客户活动任务投影完成: trigger_type=%s activity_id=%s projection_run_public_id=%s "
+        "projection_run_id=%s status=%s skip_reason=%s task_public_ids=%s error=%s",
         trigger_type,
         activity_id,
         run.public_id,

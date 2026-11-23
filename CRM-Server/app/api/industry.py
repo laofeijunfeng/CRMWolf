@@ -3,22 +3,23 @@
 
 提供行业层级结构的查询接口
 """
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
 
-from app.schemas.industry import IndustryHierarchyResponse
 from app.core.database import get_db
 from app.core.deps import get_current_active_user
 from app.crud.industry import industry_crud
+from app.schemas.industry import IndustryHierarchyResponse
 
 router = APIRouter(prefix="/v1/industries", tags=["行业管理"])
 
 
 @router.get("/hierarchy", response_model=IndustryHierarchyResponse, summary="获取行业层级结构", description="""
-获取完整的行业层级结构（一级 + 二级行业）。
+获取完整的行业层级结构\uff08一级 + 二级行业\uff09。
 
-**返回格式：**
+**返回格式\uff1a**
 ```json
 {
   "primary_code": {
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/v1/industries", tags=["行业管理"])
 }
 ```
 
-**用途：**
+**用途\uff1a**
 - 前端行业选择器
 - AI 提示词构建
 """)
@@ -41,10 +42,10 @@ def get_industry_hierarchy(
     return industry_crud.get_industry_hierarchy(db)
 
 
-@router.get("/primary", response_model=List[Dict[str, Any]], summary="获取一级行业列表", description="""
+@router.get("/primary", response_model=list[dict[str, Any]], summary="获取一级行业列表", description="""
 获取所有一级行业列表。
 
-**返回字段：**
+**返回字段\uff1a**
 - id: 行业ID
 - code: 行业编码
 - name: 行业名称
@@ -66,10 +67,10 @@ def get_primary_industries(
     ]
 
 
-@router.get("/secondary", response_model=List[Dict[str, Any]], summary="获取二级行业列表", description="""
+@router.get("/secondary", response_model=list[dict[str, Any]], summary="获取二级行业列表", description="""
 获取所有二级行业列表。
 
-**返回字段：**
+**返回字段\uff1a**
 - id: 行业ID
 - code: 行业编码
 - name: 行业名称
@@ -96,15 +97,20 @@ def get_secondary_industries(
     return result
 
 
-@router.get("/secondary/by-parent/{parent_code}", response_model=List[Dict[str, Any]], summary="根据父行业获取二级行业", description="""
+@router.get(
+    "/secondary/by-parent/{parent_code}",
+    response_model=list[dict[str, Any]],
+    summary="根据父行业获取二级行业",
+    description="""
 根据一级行业编码获取其所有二级行业。
 
-**路径参数：**
+**路径参数\uff1a**
 - parent_code: 一级行业编码
 
-**用途：**
-- 级联选择器：先选一级行业，再选二级行业
-""")
+**用途\uff1a**
+- 级联选择器\uff1a先选一级行业\uff0c再选二级行业
+""",
+)
 def get_secondary_by_parent(
     parent_code: str,
     current_user = Depends(get_current_active_user),

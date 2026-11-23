@@ -1,4 +1,4 @@
-"""CRMWolf Workflow DSL 结构校验（schema_version 1）。"""
+"""CRMWolf Workflow DSL schema validation (schema_version 1)."""
 
 NODE_CONFIG_REQUIREMENTS: dict[str, list[str]] = {
     "trigger.opportunity_stage_changed": ["to_stage"],
@@ -29,7 +29,7 @@ def validate_workflow_dsl(dsl: object) -> list[str]:
 
     nodes = dsl.get("nodes")
     if not isinstance(nodes, list) or not nodes:
-        return errors + ["nodes 必须是非空列表"]
+        return [*errors, "nodes 必须是非空列表"]
 
     seen_ids: set[str] = set()
     trigger_count = 0
@@ -61,19 +61,24 @@ def validate_workflow_dsl(dsl: object) -> list[str]:
         if not isinstance(config, dict):
             config = {}
             errors.append(f"节点 {nid} config 必须是对象")
-        for field in NODE_CONFIG_REQUIREMENTS.get(ntype, []) if is_known_type else []:
+        required_fields = (
+            NODE_CONFIG_REQUIREMENTS.get(ntype, [])
+            if isinstance(ntype, str) and is_known_type
+            else []
+        )
+        for field in required_fields:
             v = config.get(field)
             if v is None or (isinstance(v, str) and not v.strip()):
                 errors.append(f"节点 {nid} 缺少必填配置: {field}")
         if ntype == "control.condition" and (
             not isinstance(config.get("operator"), str) or config.get("operator") not in VALID_OPERATORS
         ):
-            errors.append("节点 {0} operator 非法，允许: eq/neq/gt/lt/in".format(nid))
+            errors.append(f"节点 {nid} operator 非法\N{FULLWIDTH COMMA}允许: eq/neq/gt/lt/in")
         if ntype == "action.notify" and (
             not isinstance(config.get("notify_target"), str)
             or config.get("notify_target") not in VALID_NOTIFY_TARGETS
         ):
-            errors.append("节点 {0} notify_target 非法，允许: owner/role/users".format(nid))
+            errors.append(f"节点 {nid} notify_target 非法\N{FULLWIDTH COMMA}允许: owner/role/users")
 
     if trigger_count > 1:
         errors.append("trigger 类型节点全图至多 1 个")

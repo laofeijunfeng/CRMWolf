@@ -4,7 +4,6 @@ This module only manages Agent-owned state. CRM business actions must go
 through existing API endpoints in the tool layer.
 """
 
-from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -37,9 +36,9 @@ class AgentSessionCRUD:
         self,
         db: Session,
         session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentSession]:
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AgentSession | None:
         query = db.query(AgentSession).filter(AgentSession.id == session_id)
         if team_id is not None:
             query = query.filter(AgentSession.team_id == team_id)
@@ -51,9 +50,9 @@ class AgentSessionCRUD:
         self,
         db: Session,
         session_key: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentSession]:
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AgentSession | None:
         query = db.query(AgentSession).filter(AgentSession.session_key == session_key)
         if team_id is not None:
             query = query.filter(AgentSession.team_id == team_id)
@@ -66,10 +65,10 @@ class AgentSessionCRUD:
         db: Session,
         team_id: int,
         user_id: int,
-        status: Optional[str] = None,
+        status: str | None = None,
         skip: int = 0,
         limit: int = 20,
-    ) -> Tuple[List[AgentSession], int]:
+    ) -> tuple[list[AgentSession], int]:
         query = db.query(AgentSession).filter(
             AgentSession.team_id == team_id,
             AgentSession.user_id == user_id,
@@ -142,11 +141,11 @@ class AgentMessageCRUD:
         self,
         db: Session,
         session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
+        team_id: int | None = None,
+        user_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[AgentMessage], int]:
+    ) -> tuple[list[AgentMessage], int]:
         query = db.query(AgentMessage).filter(AgentMessage.session_id == session_id)
         if team_id is not None:
             query = query.filter(AgentMessage.team_id == team_id)
@@ -168,12 +167,12 @@ class AgentMessageCRUD:
         db: Session,
         *,
         team_id: int,
-        user_id: Optional[int] = None,
-        outcome: Optional[str] = None,
-        q: Optional[str] = None,
+        user_id: int | None = None,
+        outcome: str | None = None,
+        q: str | None = None,
         skip: int = 0,
         limit: int = 20,
-    ) -> Tuple[List[Tuple[AgentMessage, AgentMessage]], int]:
+    ) -> tuple[list[tuple[AgentMessage, AgentMessage]], int]:
         query = self._run_log_turn_query(
             db,
             team_id=team_id,
@@ -196,7 +195,7 @@ class AgentMessageCRUD:
         *,
         team_id: int,
         turn_id: str,
-    ) -> Optional[Tuple[AgentMessage, AgentMessage]]:
+    ) -> tuple[AgentMessage, AgentMessage] | None:
         return (
             self._run_log_turn_query(db, team_id=team_id)
             .filter(self._user_alias.turn_id == turn_id)
@@ -212,9 +211,9 @@ class AgentMessageCRUD:
         db: Session,
         *,
         team_id: int,
-        user_id: Optional[int] = None,
-        outcome: Optional[str] = None,
-        q: Optional[str] = None,
+        user_id: int | None = None,
+        outcome: str | None = None,
+        q: str | None = None,
     ) -> Query:
         user_message = self._user_alias
         assistant_message = self._assistant_alias
@@ -301,9 +300,9 @@ class AgentToolCallCRUD:
         self,
         db: Session,
         call_key: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentToolCall]:
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AgentToolCall | None:
         query = db.query(AgentToolCall).filter(AgentToolCall.call_key == call_key)
         if team_id is not None:
             query = query.filter(AgentToolCall.team_id == team_id)
@@ -340,7 +339,7 @@ class AgentIdempotencyKeyCRUD:
         team_id: int,
         user_id: int,
         action_key: str,
-    ) -> Optional[AgentIdempotencyKey]:
+    ) -> AgentIdempotencyKey | None:
         return (
             db.query(AgentIdempotencyKey)
             .filter(
@@ -427,9 +426,9 @@ class AgentWorkflowActionCRUD:
         self,
         db: Session,
         action_id: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-    ) -> Optional[AgentWorkflowAction]:
+        team_id: int | None = None,
+        user_id: int | None = None,
+    ) -> AgentWorkflowAction | None:
         query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.action_id == action_id)
         if team_id is not None:
             query = query.filter(AgentWorkflowAction.team_id == team_id)
@@ -444,7 +443,7 @@ class AgentWorkflowActionCRUD:
         *,
         team_id: int,
         user_id: int,
-    ) -> Optional[AgentWorkflowAction]:
+    ) -> AgentWorkflowAction | None:
         return (
             db.query(AgentWorkflowAction)
             .filter(
@@ -495,12 +494,12 @@ class AgentWorkflowActionCRUD:
         self,
         db: Session,
         session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
+        team_id: int | None = None,
+        user_id: int | None = None,
+        status: str | None = None,
         skip: int = 0,
-        limit: Optional[int] = None,
-    ) -> List[AgentWorkflowAction]:
+        limit: int | None = None,
+    ) -> list[AgentWorkflowAction]:
         query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.session_id == session_id)
         if team_id is not None:
             query = query.filter(AgentWorkflowAction.team_id == team_id)
@@ -517,9 +516,9 @@ class AgentWorkflowActionCRUD:
         self,
         db: Session,
         session_id: int,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
-        status: Optional[str] = None,
+        team_id: int | None = None,
+        user_id: int | None = None,
+        status: str | None = None,
     ) -> int:
         query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.session_id == session_id)
         if team_id is not None:
@@ -535,17 +534,17 @@ class AgentWorkflowActionCRUD:
         db: Session,
         *,
         team_id: int,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         include_system_actions: bool = True,
-        session_id: Optional[int] = None,
-        workflow_id: Optional[str] = None,
-        status: Optional[str] = None,
-        source_type: Optional[str] = None,
-        target_type: Optional[str] = None,
-        target_id: Optional[int] = None,
+        session_id: int | None = None,
+        workflow_id: str | None = None,
+        status: str | None = None,
+        source_type: str | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
         skip: int = 0,
-        limit: Optional[int] = None,
-    ) -> List[AgentWorkflowAction]:
+        limit: int | None = None,
+    ) -> list[AgentWorkflowAction]:
         query = self._filtered_actions_query(
             db,
             team_id=team_id,
@@ -568,14 +567,14 @@ class AgentWorkflowActionCRUD:
         db: Session,
         *,
         team_id: int,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         include_system_actions: bool = True,
-        session_id: Optional[int] = None,
-        workflow_id: Optional[str] = None,
-        status: Optional[str] = None,
-        source_type: Optional[str] = None,
-        target_type: Optional[str] = None,
-        target_id: Optional[int] = None,
+        session_id: int | None = None,
+        workflow_id: str | None = None,
+        status: str | None = None,
+        source_type: str | None = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
     ) -> int:
         return self._filtered_actions_query(
             db,
@@ -595,14 +594,14 @@ class AgentWorkflowActionCRUD:
         db: Session,
         *,
         team_id: int,
-        user_id: Optional[int],
+        user_id: int | None,
         include_system_actions: bool,
-        session_id: Optional[int],
-        workflow_id: Optional[str],
-        status: Optional[str],
-        source_type: Optional[str],
-        target_type: Optional[str],
-        target_id: Optional[int],
+        session_id: int | None,
+        workflow_id: str | None,
+        status: str | None,
+        source_type: str | None,
+        target_type: str | None,
+        target_id: int | None,
     ):
         query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.team_id == team_id)
         if user_id is not None:
@@ -628,10 +627,10 @@ class AgentWorkflowActionCRUD:
         self,
         db: Session,
         workflow_id: str,
-        team_id: Optional[int] = None,
-        user_id: Optional[int] = None,
+        team_id: int | None = None,
+        user_id: int | None = None,
         include_system_actions: bool = False,
-    ) -> List[AgentWorkflowAction]:
+    ) -> list[AgentWorkflowAction]:
         query = db.query(AgentWorkflowAction).filter(AgentWorkflowAction.workflow_id == workflow_id)
         if team_id is not None:
             query = query.filter(AgentWorkflowAction.team_id == team_id)

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, update
@@ -12,13 +12,24 @@ from sqlalchemy.exc import IntegrityError
 from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantTurn, AssistantTurnEvent
-from app.services.assistant.failure_contract import ROOT_RETRYABLE_FAILURE_CODES
+from app.services.assistant.failure_contract import ATTEMPT_DEADLINE_SECONDS, ROOT_RETRYABLE_FAILURE_CODES
 from app.services.assistant.turns import fingerprint
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+
+_ROOT_CLEANUP_SECONDS = 5
+
+
+def _root_attempt(command: dict[str, object], now: datetime) -> tuple[dict[str, object], datetime]:
+    deadline = now + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)
+    return (
+        {**command, "root_deadline": deadline.isoformat(), "root_stages": []},
+        deadline + timedelta(seconds=_ROOT_CLEANUP_SECONDS),
+    )
 
 
 class ConversationConflict(ValueError):
@@ -158,6 +169,13 @@ def claim(
             conversation.lease_expires_at is not None and conversation.lease_expires_at > now
         ):
             raise ConversationConflict("这句话仍在处理中，请同步会话状态。")
+        lease_expiry = now + timedelta(seconds=120)
+        deadline = (previous.command_json or {}).get("root_deadline")
+        if isinstance(deadline, str):
+            lease_expiry = max(
+                lease_expiry,
+                datetime.fromisoformat(deadline) + timedelta(seconds=_ROOT_CLEANUP_SECONDS),
+            )
         changed = db.execute(
             update(AssistantConversation)
             .where(
@@ -167,7 +185,7 @@ def claim(
                 AssistantConversation.busy_entry_id == previous.public_id,
                 AssistantConversation.lease_expires_at <= now,
             )
-            .values(version=AssistantConversation.version + 1, lease_expires_at=now + timedelta(seconds=120))
+            .values(version=AssistantConversation.version + 1, lease_expires_at=lease_expiry)
             .execution_options(synchronize_session=False)
         )
         if changed.rowcount != 1:
@@ -179,6 +197,11 @@ def claim(
     if conversation.pending_choice_id != choice_id:
         raise ConversationConflict("请先回答当前这句的两个选择。")
     identifier = generate_public_id("acm")
+    now = business_now()
+    lease_expiry = now + timedelta(seconds=120)
+    command = payload
+    if payload.get("operation") == "text":
+        command, lease_expiry = _root_attempt(payload, now)
     changed = db.execute(
         update(AssistantConversation)
         .where(
@@ -191,7 +214,7 @@ def claim(
         .values(
             version=AssistantConversation.version + 1,
             busy_entry_id=identifier,
-            lease_expires_at=business_now() + timedelta(seconds=120),
+            lease_expires_at=lease_expiry,
         )
         .execution_options(synchronize_session=False)
     )
@@ -206,7 +229,7 @@ def claim(
         client_request_id=key,
         input_fingerprint=digest,
         user_text=text,
-        command_json=payload,
+        command_json=command,
     )
     db.add(entry)
     try:
@@ -236,7 +259,11 @@ def save(
     if focus is not None:
         values["focused_task_public_id"] = focus
     if not values:
-        values["lease_expires_at"] = now + timedelta(seconds=120)
+        values["lease_expires_at"] = (
+            AssistantConversation.lease_expires_at
+            if entry.command_json.get("operation") == "text"
+            else now + timedelta(seconds=120)
+        )
     changed = db.execute(
         update(AssistantConversation)
         .where(
@@ -248,36 +275,6 @@ def save(
             AssistantConversation.lease_expires_at > now,
         )
         .values(**values)
-        .execution_options(synchronize_session=False)
-    )
-    if changed.rowcount != 1:
-        db.rollback()
-        raise ConversationConflict("会话处理权已变化，请同步最新状态。")
-    db.commit()
-    db.refresh(conversation)
-
-
-def renew_model_lease(
-    db: Session,
-    conversation: AssistantConversation,
-    entry: AssistantConversationEntry,
-    *,
-    lease_version: int,
-    seconds: int,
-) -> None:
-    """Extend an unexpired owned lease without moving the conversation version."""
-    now = business_now()
-    changed = db.execute(
-        update(AssistantConversation)
-        .where(
-            AssistantConversation.id == conversation.id,
-            AssistantConversation.team_id == conversation.team_id,
-            AssistantConversation.user_id == conversation.user_id,
-            AssistantConversation.busy_entry_id == entry.public_id,
-            AssistantConversation.version == lease_version,
-            AssistantConversation.lease_expires_at > now,
-        )
-        .values(lease_expires_at=now + timedelta(seconds=seconds))
         .execution_options(synchronize_session=False)
     )
     if changed.rowcount != 1:
@@ -314,6 +311,7 @@ def claim_root_retry(
     )
     if not eligible:
         raise ConversationConflict("会话状态已变化，请刷新后重试。")
+    command, lease_expiry = _root_attempt(command, now)
     changed = db.execute(
         update(AssistantConversation)
         .where(
@@ -331,7 +329,7 @@ def claim_root_retry(
         .values(
             version=AssistantConversation.version + 1,
             busy_entry_id=entry.public_id,
-            lease_expires_at=now + timedelta(seconds=120),
+            lease_expires_at=lease_expiry,
         )
         .execution_options(synchronize_session=False)
     )
@@ -351,7 +349,7 @@ def claim_root_retry(
             AssistantConversationEntry.turn_public_id.is_(None),
             AssistantConversationEntry.task_snapshot_json.is_(None),
         )
-        .values(state="ROUTING", reply_text=None, error_code=None, error_retryable=None)
+        .values(state="ROUTING", reply_text=None, error_code=None, error_retryable=None, command_json=command)
         .execution_options(synchronize_session=False)
     )
     if reopened.rowcount != 1:

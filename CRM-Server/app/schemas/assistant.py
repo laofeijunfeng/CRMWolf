@@ -3,9 +3,17 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    field_serializer,
+    model_validator,
+)
 
 from app.services.assistant.contracts import (  # noqa: TC001 -- Pydantic resolves models at runtime.
     CommittedReceipt,
@@ -34,6 +42,8 @@ class AssistantTaskView(BaseModel):
     processing_turn_status: TurnStatus | None = None
     reprocess_turn_id: str | None = None
     follow_up_disposition: dict[str, object] | None = None
+    proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
+    reconciliation_required: bool = False
 
     @model_validator(mode="after")
     def match_processing_pointer(self) -> AssistantTaskView:
@@ -84,15 +94,69 @@ class CreateTaskRequest(BaseModel):
     client_request_id: str = Field(min_length=8, max_length=128)
 
 
+AssistantRejectReason = Literal["wrong_customer", "wrong_content", "should_not_record", "other"]
+DispositionChoice = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+
 class SubmitInputRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["text", "submit_field", "confirm", "cancel", "revise_activity_kind"]
+    kind: Literal[
+        "text",
+        "submit_field",
+        "confirm",
+        "cancel",
+        "revise_activity_kind",
+        "submit_form",
+        "request_edit",
+    ]
     text: str | None = Field(default=None, max_length=20000)
     choice: str | None = Field(default=None, max_length=64)
     client_request_id: str = Field(min_length=8, max_length=128)
     action_id: str | None = Field(default=None, max_length=128)
     expected_version: int | None = Field(default=None, ge=0)
+    # submit_form: values keyed by InteractionField.key plus the form revision they were edited against;
+    # choice="cancel" without values backs out of the form.
+    values: dict[str, JsonValue] | None = None
+    form_revision: int | None = Field(default=None, ge=0)
+    # FOLLOW_UP_DISPOSITION multi-select: checked task ids are completed, unchecked are kept.
+    choices: list[DispositionChoice] | None = Field(default=None, max_length=100)
+    suppress_week: bool = False
+    # Optional closed reason sent with kind="confirm", choice="reject".
+    reason: AssistantRejectReason | None = None
+
+    @model_validator(mode="after")
+    def validate_kind_fields(self) -> SubmitInputRequest:
+        if (self.values is not None or self.form_revision is not None) and self.kind != "submit_form":
+            raise ValueError("values/form_revision are only valid for submit_form")
+        if self.kind == "submit_form":
+            if self.text is not None or self.choice not in {None, "cancel"}:
+                raise ValueError("submit_form accepts values or choice='cancel' only")
+            if self.form_revision is None or (self.choice is None and self.values is None):
+                raise ValueError("submit_form requires values and form_revision")
+            if self.choice == "cancel" and self.values is not None:
+                raise ValueError("cancelling a form carries no values")
+        if self.kind == "request_edit" and (self.choice is not None or self.text is not None):
+            raise ValueError("request_edit takes no choice or text")
+        if (self.choices is not None or self.suppress_week) and self.kind != "submit_field":
+            raise ValueError("choices/suppress_week are only valid for submit_field")
+        if self.suppress_week and self.choices is None:
+            raise ValueError("suppress_week requires choices")
+        if self.choices is not None and len(self.choices) != len(set(self.choices)):
+            raise ValueError("choices must be unique")
+        if self.choices is not None and (self.choice is not None or self.text is not None):
+            raise ValueError("choices excludes choice and text")
+        if self.reason is not None and (self.kind != "confirm" or self.choice != "reject"):
+            raise ValueError("reason is only valid when rejecting a confirmation")
+        return self
+
+    def turn_input(self) -> dict[str, object]:
+        # Preserve the pre-form fingerprint for submissions without new fields.
+        return {
+            "kind": self.kind, "text": self.text, "choice": self.choice,
+            **self.model_dump(mode="json", include={"values", "form_revision", "choices", "suppress_week", "reason"},
+                              exclude_none=True, exclude_defaults=True),
+        }
 
 
 class SubmitInputResponse(BaseModel):

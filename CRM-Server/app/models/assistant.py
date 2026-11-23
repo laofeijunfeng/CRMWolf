@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
+from typing import Final
 
 from sqlalchemy import JSON, BigInteger, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,13 +23,15 @@ class AssistantTaskStatus:
 
 
 class AssistantWaitingType:
-    """Closed enum of pause points; extending requires a design review."""
+    """Closed enum of pause points; extending requires a design review (last: CRM-154)."""
 
-    FIELD = "FIELD"
-    CONFIRMATION = "CONFIRMATION"
-    ACTIVITY_KIND = "ACTIVITY_KIND"
-    OBJECT_SELECTION = "OBJECT_SELECTION"
-    FOLLOW_UP_DISPOSITION = "FOLLOW_UP_DISPOSITION"
+    FIELD: Final = "FIELD"
+    CONFIRMATION: Final = "CONFIRMATION"
+    ACTIVITY_KIND: Final = "ACTIVITY_KIND"
+    OBJECT_SELECTION: Final = "OBJECT_SELECTION"
+    FOLLOW_UP_DISPOSITION: Final = "FOLLOW_UP_DISPOSITION"
+    PROPOSAL_FORM: Final = "PROPOSAL_FORM"
+    CONFIRMATION_EDIT: Final = "CONFIRMATION_EDIT"
 
 
 class AssistantTask(Base):

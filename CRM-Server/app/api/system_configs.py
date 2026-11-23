@@ -1,16 +1,16 @@
 """
 系统配置管理 API
 """
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team, require_permission
+from app.core.deps import get_current_active_user, get_current_user_team
 from app.crud.system_config import system_config_crud
 from app.schemas.system_config import NotificationConfigResponse, NotificationConfigUpdate
 from app.services.feishu import feishu_service
-
 
 router = APIRouter(prefix="/v1/system/configs", tags=["系统配置管理"])
 
@@ -22,27 +22,27 @@ router = APIRouter(prefix="/v1/system/configs", tags=["系统配置管理"])
     description="""
 获取当前团队的通知配置信息。
 
-**功能说明：**
+**功能说明\uff1a**
 - 返回团队的通知配置详情
 - 包含飞书 Webhook 和 API 两种通知方式的配置
 
-**业务场景：**
+**业务场景\uff1a**
 - 管理员查看通知配置
 - 配置审批通知发送方式
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
-**返回字段：**
+**返回字段\uff1a**
 - id: 配置ID
 - team_id: 团队ID
-- notification_method: 通知方式（webhook/api）
+- notification_method: 通知方式\uff08webhook/api\uff09
 - feishu_webhook_url: 飞书Webhook地址
 - feishu_webhook_enabled: Webhook是否启用
 - notification_group_name: 通知群名称
-- feishu_app_id: 飞书应用ID（预留）
-- feishu_app_secret: 飞书应用密钥（预留）
-- feishu_api_enabled: API是否启用（预留）
+- feishu_app_id: 飞书应用ID\uff08预留\uff09
+- feishu_app_secret: 飞书应用密钥\uff08预留\uff09
+- feishu_api_enabled: API是否启用\uff08预留\uff09
 - created_time: 创建时间
 - updated_time: 更新时间
 """
@@ -52,9 +52,9 @@ def get_notification_config(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
-    from app.crud.role import role_crud
+    # 权限检查:TEAM_ADMIN 或 approval:flow:edit
     from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
 
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -88,32 +88,32 @@ def get_notification_config(
     description="""
 更新团队的通知配置信息。
 
-**功能说明：**
+**功能说明\uff1a**
 - 更新飞书 Webhook 配置
-- 更新飞书 API 配置（预留功能）
+- 更新飞书 API 配置\uff08预留功能\uff09
 - 支持启用/禁用通知
 
-**业务场景：**
+**业务场景\uff1a**
 - 管理员配置审批通知发送方式
 - 设置飞书群聊机器人 Webhook
 - 配置通知群名称
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
-**请求体字段：**
-- notification_method: 通知方式（webhook/api）
+**请求体字段\uff1a**
+- notification_method: 通知方式\uff08webhook/api\uff09
 - feishu_webhook_url: 飞书Webhook地址
 - feishu_webhook_enabled: Webhook是否启用
 - notification_group_name: 通知群名称
-- feishu_app_id: 飞书应用ID（预留）
-- feishu_app_secret: 飞书应用密钥（预留）
-- feishu_api_enabled: API是否启用（预留）
+- feishu_app_id: 飞书应用ID\uff08预留\uff09
+- feishu_app_secret: 飞书应用密钥\uff08预留\uff09
+- feishu_api_enabled: API是否启用\uff08预留\uff09
 
-**注意事项：**
-- 所有字段均为可选，只更新提供的字段
-- Webhook URL 格式：https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-- 敏感信息（如 app_secret）会加密存储
+**注意事项\uff1a**
+- 所有字段均为可选\uff0c只更新提供的字段
+- Webhook URL 格式\uff1ahttps://open.feishu.cn/open-apis/bot/v2/hook/xxx
+- 敏感信息\uff08如 app_secret\uff09会加密存储
 """
 )
 def update_notification_config(
@@ -122,9 +122,9 @@ def update_notification_config(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
-    from app.crud.role import role_crud
+    # 权限检查:TEAM_ADMIN 或 approval:flow:edit
     from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
 
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -138,10 +138,10 @@ def update_notification_config(
         if "approval:flow:edit" not in permission_codes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="您没有权限更新通知配置（需要 TEAM_ADMIN 角色或 approval:flow:edit 权限）"
+                detail="您没有权限更新通知配置\uff08需要 TEAM_ADMIN 角色或 approval:flow:edit 权限\uff09"
             )
-    # 准备更新数据（只包含非 None 的字段）
-    update_dict: Dict[str, Any] = {}
+    # 准备更新数据(只包含非 None 的字段)
+    update_dict: dict[str, Any] = {}
     if config_data.notification_method is not None:
         update_dict["notification_method"] = config_data.notification_method
     if config_data.feishu_webhook_url is not None:
@@ -169,7 +169,7 @@ def update_notification_config(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新通知配置失败: {str(e)}"
+            detail=f"更新通知配置失败: {e!s}"
         )
 
 
@@ -177,25 +177,25 @@ def update_notification_config(
     "/notification/test",
     summary="测试通知发送",
     description="""
-发送测试消息到配置的 Webhook URL，验证通知配置是否正确。
+发送测试消息到配置的 Webhook URL\uff0c验证通知配置是否正确。
 
-**功能说明：**
+**功能说明\uff1a**
 - 向配置的飞书 Webhook 发送测试消息
 - 验证 Webhook URL 是否有效
 - 测试消息发送是否成功
 
-**业务场景：**
+**业务场景\uff1a**
 - 配置 Webhook 后进行测试
 - 排查通知发送问题
 
-**权限要求：**
+**权限要求\uff1a**
 - 需要 TEAM_ADMIN 角色 **或** approval:flow:edit 权限
 
-**返回信息：**
+**返回信息\uff1a**
 - success: 是否发送成功
 - message: 详细信息
 
-**注意事项：**
+**注意事项\uff1a**
 - 需要先配置 Webhook URL 并启用
 - 测试消息会发送到配置的飞书群
 """
@@ -205,9 +205,9 @@ async def test_notification(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # 权限检查：TEAM_ADMIN 或 approval:flow:edit
-    from app.crud.role import role_crud
+    # 权限检查:TEAM_ADMIN 或 approval:flow:edit
     from app.crud.permission import permission_crud
+    from app.crud.role import role_crud
 
     user_roles = role_crud.get_user_roles(db, current_user.id, team_id)
     role_codes = {r.code for r in user_roles}
@@ -221,28 +221,28 @@ async def test_notification(
         if "approval:flow:edit" not in permission_codes:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="您没有权限测试通知配置（需要 TEAM_ADMIN 角色或 approval:flow:edit 权限）"
+                detail="您没有权限测试通知配置\uff08需要 TEAM_ADMIN 角色或 approval:flow:edit 权限\uff09"
             )
     # 获取通知配置
     config = system_config_crud.get_notification_config(db, team_id)
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="通知配置不存在，请先配置"
+            detail="通知配置不存在\uff0c请先配置"
         )
 
     # 检查 Webhook 是否启用
     if not config.feishu_webhook_enabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Webhook 未启用，请先启用 Webhook 通知"
+            detail="Webhook 未启用\uff0c请先启用 Webhook 通知"
         )
 
     # 检查 Webhook URL
     if not config.feishu_webhook_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Webhook URL 未配置，请先配置 Webhook 地址"
+            detail="Webhook URL 未配置\uff0c请先配置 Webhook 地址"
         )
 
     # 发送测试消息
@@ -250,15 +250,15 @@ async def test_notification(
         success = await feishu_service.send_webhook_message(
             webhook_url=config.feishu_webhook_url,
             title="🔔 通知配置测试",
-            content="这是一条测试消息，用于验证通知配置是否正确。\n\n如果您收到此消息，说明通知配置成功！"
+            content="这是一条测试消息\uff0c用于验证通知配置是否正确。\n\n如果您收到此消息\uff0c说明通知配置成功\uff01"
         )
 
         if success:
-            return {"success": True, "message": "测试消息发送成功，请检查飞书群是否收到消息"}
+            return {"success": True, "message": "测试消息发送成功\uff0c请检查飞书群是否收到消息"}
         else:
-            return {"success": False, "message": "测试消息发送失败，请检查 Webhook URL 是否正确"}
+            return {"success": False, "message": "测试消息发送失败\uff0c请检查 Webhook URL 是否正确"}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"发送测试消息失败: {str(e)}"
+            detail=f"发送测试消息失败: {e!s}"
         )

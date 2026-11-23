@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self, TypeAlias
+from typing import TYPE_CHECKING, ClassVar, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic_core import core_schema
+
+if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core.core_schema import CoreSchema, SerializerFunctionWrapHandler
 
 JsonDict: TypeAlias = dict[str, JsonValue]
 CRMResource: TypeAlias = Literal[
@@ -52,7 +57,29 @@ QueryErrorCode: TypeAlias = Literal[
 ]
 
 
-class QueryContractModel(BaseModel):
+class LegacyCompatibleModel(BaseModel):
+    """Omit only opted-in, unused UI extensions from the wire payload."""
+
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {}
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: type[BaseModel], handler: GetCoreSchemaHandler) -> CoreSchema:
+        schema = handler(source_type)
+        if not cls._omit_unused_extensions:
+            return schema
+        # No return_schema: keep the model's typed fields in serialization-mode OpenAPI.
+        serializer = core_schema.wrap_serializer_function_ser_schema(cls._serialize_optional_extensions)
+        return {**schema, "serialization": serializer}
+
+    def _serialize_optional_extensions(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload: dict[str, object] = handler(self)
+        for key, unused in self._omit_unused_extensions.items():
+            if getattr(self, key) == unused:
+                payload.pop(key, None)
+        return payload
+
+
+class QueryContractModel(LegacyCompatibleModel):
     """Closed-world base for contracts shared across planner and executor."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -61,11 +88,14 @@ class QueryContractModel(BaseModel):
 class EntityRef(QueryContractModel):
     """Server-issued reference to a CRM entity visible in a result set."""
 
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {"attributes": None}
+
     ref_id: str = Field(min_length=1, max_length=128)
     resource: CRMResource
     public_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     result_set_id: str | None = Field(default=None, min_length=1, max_length=128)
+    attributes: JsonDict | None = None
 
 
 class CRMFilter(QueryContractModel):

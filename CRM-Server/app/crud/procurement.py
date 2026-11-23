@@ -1,35 +1,38 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from typing import List, Optional, Tuple
 import json
 
+from sqlalchemy.orm import Session
+
+from app.models.opportunity import Opportunity
 from app.models.procurement import (
-    ProcurementMethod, ProcurementStageTemplate, 
-    OpportunityStageSnapshot, StageTemplateChangeLog
+    OpportunityStageSnapshot,
+    ProcurementMethod,
+    ProcurementStageTemplate,
+    StageTemplateChangeLog,
 )
 from app.schemas.procurement import (
-    ProcurementMethodCreate, ProcurementMethodUpdate,
-    ProcurementStageTemplateCreate, ProcurementStageTemplateUpdate,
+    ProcurementMethodCreate,
+    ProcurementMethodUpdate,
+    ProcurementStageTemplateCreate,
+    ProcurementStageTemplateUpdate,
 )
 from app.utils.time import business_now
-from app.models.opportunity import Opportunity
 
 
 class ProcurementMethodCRUD:
     """采购方式 CRUD 操作"""
 
-    def get(self, db: Session, id: int) -> Optional[ProcurementMethod]:
+    def get(self, db: Session, id: int) -> ProcurementMethod | None:
         """根据ID获取采购方式"""
         return db.query(ProcurementMethod).filter(ProcurementMethod.id == id).first()
 
-    def get_by_code(self, db: Session, code: str, team_id: Optional[int] = None) -> Optional[ProcurementMethod]:
+    def get_by_code(self, db: Session, code: str, team_id: int | None = None) -> ProcurementMethod | None:
         """根据编码获取采购方式"""
         query = db.query(ProcurementMethod).filter(ProcurementMethod.code == code)
         if team_id is not None:
             query = query.filter(ProcurementMethod.team_id == team_id)
         return query.first()
 
-    def get_by_name(self, db: Session, name: str, team_id: Optional[int] = None) -> Optional[ProcurementMethod]:
+    def get_by_name(self, db: Session, name: str, team_id: int | None = None) -> ProcurementMethod | None:
         """根据名称获取采购方式"""
         query = db.query(ProcurementMethod).filter(ProcurementMethod.name == name)
         if team_id is not None:
@@ -39,11 +42,11 @@ class ProcurementMethodCRUD:
     def get_multi(
         self,
         db: Session,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-        is_active: Optional[int] = None
-    ) -> Tuple[List[ProcurementMethod], int]:
+        is_active: int | None = None
+    ) -> tuple[list[ProcurementMethod], int]:
         """获取采购方式列表"""
         query = db.query(ProcurementMethod)
 
@@ -59,7 +62,7 @@ class ProcurementMethodCRUD:
 
     def create(self, db: Session, obj_in: ProcurementMethodCreate, creator_id: str, team_id: int) -> ProcurementMethod:
         """创建采购方式"""
-        # 校验code唯一性（在同一团队内）
+        # 校验code唯一性(在同一团队内)
         existing = self.get_by_code(db, obj_in.code, team_id)
         if existing:
             raise ValueError(f"采购方式编码 {obj_in.code} 已存在")
@@ -89,7 +92,7 @@ class ProcurementMethodCRUD:
                 db, db_obj.id
             )
             if active_count > 0:
-                raise ValueError(f"该采购方式下还有 {active_count} 个活跃商机，不能停用")
+                raise ValueError(f"该采购方式下还有 {active_count} 个活跃商机\uff0c不能停用")
         
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
@@ -101,7 +104,7 @@ class ProcurementMethodCRUD:
         return db_obj
     
     def delete(self, db: Session, id: int) -> bool:
-        """删除采购方式（逻辑删除）"""
+        """删除采购方式\uff08逻辑删除\uff09"""
         obj = self.get(db, id)
         if not obj:
             return False
@@ -110,7 +113,7 @@ class ProcurementMethodCRUD:
         from app.crud.procurement import procurement_stage_template_crud
         active_count = procurement_stage_template_crud.count_active_opportunities(db, id)
         if active_count > 0:
-            raise ValueError(f"该采购方式下还有 {active_count} 个商机，不能删除")
+            raise ValueError(f"该采购方式下还有 {active_count} 个商机\uff0c不能删除")
         
         db.delete(obj)
         db.commit()
@@ -120,7 +123,7 @@ class ProcurementMethodCRUD:
 class ProcurementStageTemplateCRUD:
     """采购阶段模板 CRUD 操作"""
 
-    def get(self, db: Session, id: int) -> Optional[ProcurementStageTemplate]:
+    def get(self, db: Session, id: int) -> ProcurementStageTemplate | None:
         """根据ID获取阶段模板"""
         return db.query(ProcurementStageTemplate).filter(ProcurementStageTemplate.id == id).first()
 
@@ -128,8 +131,8 @@ class ProcurementStageTemplateCRUD:
         self,
         db: Session,
         method_id: int,
-        team_id: Optional[int] = None
-    ) -> List[ProcurementStageTemplate]:
+        team_id: int | None = None
+    ) -> list[ProcurementStageTemplate]:
         """获取采购方式下的所有阶段模板"""
         query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == method_id
@@ -142,8 +145,8 @@ class ProcurementStageTemplateCRUD:
         self,
         db: Session,
         method_id: int,
-        team_id: Optional[int] = None
-    ) -> Optional[ProcurementStageTemplate]:
+        team_id: int | None = None
+    ) -> ProcurementStageTemplate | None:
         """获取采购方式的默认起始阶段"""
         query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == method_id,
@@ -157,9 +160,9 @@ class ProcurementStageTemplateCRUD:
         self,
         db: Session,
         method_id: int,
-        team_id: Optional[int] = None
-    ) -> Optional[ProcurementStageTemplate]:
-        """获取采购方式的最终阶段（赢单阶段，win_probability=100）"""
+        team_id: int | None = None
+    ) -> ProcurementStageTemplate | None:
+        """获取采购方式的最终阶段\uff08赢单阶段\uff0cwin_probability=100\uff09"""
         query = db.query(ProcurementStageTemplate).filter(
             ProcurementStageTemplate.procurement_method_id == method_id,
             ProcurementStageTemplate.win_probability == 100
@@ -173,7 +176,7 @@ class ProcurementStageTemplateCRUD:
         db: Session,
         obj_in: ProcurementStageTemplateCreate,
         creator_id: str,
-        team_id: Optional[int] = None
+        team_id: int | None = None
     ) -> ProcurementStageTemplate:
         """创建阶段模板"""
         # 校验同一方式下template_code唯一性
@@ -234,12 +237,12 @@ class ProcurementStageTemplateCRUD:
         db_obj: ProcurementStageTemplate, 
         obj_in: ProcurementStageTemplateUpdate,
         updater_id: str,
-        reason: Optional[str] = None
+        reason: str | None = None
     ) -> ProcurementStageTemplate:
         """更新阶段模板"""
         # 乐观锁校验
         if db_obj.version_lock != obj_in.version_lock:
-            raise ValueError("数据已被其他人修改，请刷新后重试")
+            raise ValueError("数据已被其他人修改\uff0c请刷新后重试")
         
         # 记录变更前的数据
         old_data = {
@@ -252,7 +255,7 @@ class ProcurementStageTemplateCRUD:
             "description": db_obj.description
         }
         
-        # 校验 template_code 唯一性（如果修改了编码）
+        # 校验 template_code 唯一性(如果修改了编码)
         if obj_in.template_code is not None and obj_in.template_code != db_obj.template_code:
             existing = db.query(ProcurementStageTemplate).filter(
                 ProcurementStageTemplate.procurement_method_id == db_obj.procurement_method_id,
@@ -307,7 +310,7 @@ class ProcurementStageTemplateCRUD:
         return db_obj
     
     def delete(self, db: Session, id: int) -> bool:
-        """删除阶段模板（逻辑删除）"""
+        """删除阶段模板\uff08逻辑删除\uff09"""
         obj = self.get(db, id)
         if not obj:
             return False
@@ -319,7 +322,7 @@ class ProcurementStageTemplateCRUD:
         ).count()
         
         if used_count > 0:
-            raise ValueError(f"该阶段正在被 {used_count} 个商机使用，不能删除")
+            raise ValueError(f"该阶段正在被 {used_count} 个商机使用\uff0c不能删除")
         
         # 记录删除日志
         old_data = {
@@ -342,10 +345,10 @@ class ProcurementStageTemplateCRUD:
         db: Session,
         template_id: int,
         change_type: str,
-        old_data: Optional[dict],
-        new_data: Optional[dict],
+        old_data: dict | None,
+        new_data: dict | None,
         changed_by: str,
-        reason: Optional[str]
+        reason: str | None
     ):
         """记录阶段模板变更日志"""
         log = StageTemplateChangeLog(
@@ -371,7 +374,7 @@ class ProcurementStageTemplateCRUD:
         self, 
         db: Session, 
         template_id: int
-    ) -> List[StageTemplateChangeLog]:
+    ) -> list[StageTemplateChangeLog]:
         """获取阶段模板的变更日志"""
         return db.query(StageTemplateChangeLog).filter(
             StageTemplateChangeLog.template_id == template_id
@@ -381,7 +384,7 @@ class ProcurementStageTemplateCRUD:
 class OpportunityStageSnapshotCRUD:
     """商机阶段快照 CRUD 操作"""
     
-    def get_current(self, db: Session, opportunity_id: int) -> Optional[OpportunityStageSnapshot]:
+    def get_current(self, db: Session, opportunity_id: int) -> OpportunityStageSnapshot | None:
         """获取商机当前阶段快照"""
         return db.query(OpportunityStageSnapshot).filter(
             OpportunityStageSnapshot.opportunity_id == opportunity_id,
@@ -392,7 +395,7 @@ class OpportunityStageSnapshotCRUD:
         self, 
         db: Session, 
         opportunity_id: int
-    ) -> List[OpportunityStageSnapshot]:
+    ) -> list[OpportunityStageSnapshot]:
         """获取商机阶段历史"""
         return db.query(OpportunityStageSnapshot).filter(
             OpportunityStageSnapshot.opportunity_id == opportunity_id
@@ -415,11 +418,11 @@ class OpportunityStageSnapshotCRUD:
                 Opportunity.id == opportunity_id, Opportunity.team_id == binding.team_id,
             ).populate_existing().with_for_update().one_or_none()
             if opportunity is None or opportunity.customer_id != binding.customer_id:
-                raise ValueError("商机客户归属已变更，请重试")
+                raise ValueError("商机客户归属已变更\uff0c请重试")
             if opportunity.status != 0:
                 raise ValueError("只能为跟进中的商机设置阶段")
             if opportunity.current_stage_snapshot_id is not None or self.get_current(db, opportunity_id):
-                raise ValueError("商机已有阶段，不能重复创建快照")
+                raise ValueError("商机已有阶段\uff0c不能重复创建快照")
         snapshot = OpportunityStageSnapshot(
             team_id=int(opportunity.team_id),
             opportunity_id=opportunity_id,
@@ -441,7 +444,7 @@ class OpportunityStageSnapshotCRUD:
         self,
         db: Session,
         opportunity_id: int
-    ) -> List[ProcurementStageTemplate]:
+    ) -> list[ProcurementStageTemplate]:
         """获取商机可推进到的阶段列表"""
         current = self.get_current(db, opportunity_id)
         if not current:
@@ -485,9 +488,9 @@ class ProcurementManagementToolCRUD:
         ).first()
 
         if not template:
-            raise ValueError(f"阶段模板不存在或不属于当前团队")
+            raise ValueError("阶段模板不存在或不属于当前团队")
 
-        # 查找使用该阶段的活跃商机（限制在当前团队）
+        # 查找使用该阶段的活跃商机(限制在当前团队)
         from app.models.opportunity import Opportunity
 
         active_opportunities = db.query(Opportunity).filter(
@@ -519,7 +522,7 @@ class ProcurementManagementToolCRUD:
         db: Session,
         source_method_id: int,
         target_method_id: int,
-        opportunity_ids: Optional[List[int]] = None,
+        opportunity_ids: list[int] | None = None,
         operator_id: str = None,
         team_id: int = None
     ) -> dict:
@@ -529,14 +532,14 @@ class ProcurementManagementToolCRUD:
             db: 数据库会话
             source_method_id: 源采购方式ID
             target_method_id: 目标采购方式ID
-            opportunity_ids: 要迁移的商机ID列表，为空则迁移所有使用源方式的商机
+            opportunity_ids: 要迁移的商机ID列表\uff0c为空则迁移所有使用源方式的商机
             operator_id: 操作人ID
             team_id: 团队ID
 
         Returns:
             迁移结果统计
         """
-        # 获取源和目标采购方式（验证团队归属）
+        # 获取源和目标采购方式(验证团队归属)
         source_method = db.query(ProcurementMethod).filter(
             ProcurementMethod.id == source_method_id,
             ProcurementMethod.team_id == team_id
@@ -548,9 +551,9 @@ class ProcurementManagementToolCRUD:
         ).first()
 
         if not source_method:
-            raise ValueError(f"源采购方式不存在或不属于当前团队")
+            raise ValueError("源采购方式不存在或不属于当前团队")
         if not target_method:
-            raise ValueError(f"目标采购方式不存在或不属于当前团队")
+            raise ValueError("目标采购方式不存在或不属于当前团队")
 
         # 获取目标采购方式的默认起始阶段
         default_stage = db.query(ProcurementStageTemplate).filter(
@@ -560,9 +563,9 @@ class ProcurementManagementToolCRUD:
         ).first()
 
         if not default_stage:
-            raise ValueError(f"目标采购方式没有设置默认起始阶段")
+            raise ValueError("目标采购方式没有设置默认起始阶段")
 
-        # 查询要迁移的商机（限制在当前团队）
+        # 查询要迁移的商机(限制在当前团队)
         from app.models.opportunity import Opportunity
 
         query = db.query(Opportunity).filter(
@@ -636,7 +639,7 @@ class ProcurementManagementToolCRUD:
         template_id: int,
         target_version: int,
         operator_id: str,
-        reason: Optional[str] = None,
+        reason: str | None = None,
         team_id: int = None
     ) -> ProcurementStageTemplate:
         """回滚阶段模板到指定版本
@@ -659,10 +662,10 @@ class ProcurementManagementToolCRUD:
         ).first()
 
         if not template:
-            raise ValueError(f"阶段模板不存在或不属于当前团队")
+            raise ValueError("阶段模板不存在或不属于当前团队")
         
         if template.version == target_version:
-            raise ValueError(f"当前版本已经是 {target_version}，无需回滚")
+            raise ValueError(f"当前版本已经是 {target_version}\uff0c无需回滚")
         
         # 查找目标版本的变更日志
         log = db.query(StageTemplateChangeLog).filter(
@@ -671,7 +674,7 @@ class ProcurementManagementToolCRUD:
         ).order_by(StageTemplateChangeLog.changed_at.desc()).first()
         
         if not log:
-            raise ValueError("没有找到变更历史记录，无法回滚")
+            raise ValueError("没有找到变更历史记录\uff0c无法回滚")
         
         # 解析旧数据
         import json
@@ -680,7 +683,7 @@ class ProcurementManagementToolCRUD:
         if not old_data:
             raise ValueError("无法获取历史数据")
         
-        # 记录当前状态（用于回滚的变更日志）
+        # 记录当前状态(用于回滚的变更日志)
         current_data = {
             "stage_name": template.stage_name,
             "win_probability": template.win_probability,
@@ -724,7 +727,7 @@ class ProcurementManagementToolCRUD:
         db: Session,
         stage_template_id: int,
         team_id: int
-    ) -> List[dict]:
+    ) -> list[dict]:
         """获取使用指定阶段的活跃商机列表"""
         # 验证阶段模板属于当前团队
         template = db.query(ProcurementStageTemplate).filter(
@@ -733,9 +736,9 @@ class ProcurementManagementToolCRUD:
         ).first()
 
         if not template:
-            raise ValueError(f"阶段模板不存在或不属于当前团队")
+            raise ValueError("阶段模板不存在或不属于当前团队")
 
-        # 查询当前使用该阶段的商机（限制在当前团队）
+        # 查询当前使用该阶段的商机(限制在当前团队)
         from app.models.opportunity import Opportunity
 
         opportunities = db.query(Opportunity).filter(

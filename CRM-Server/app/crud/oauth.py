@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -6,13 +6,13 @@ from app.models.oauth import OAuthProviderConfig, UserOAuthAccount
 
 
 class OAuthProviderConfigCRUD:
-    def get(self, db: Session, team_id: int, provider: str) -> Optional[OAuthProviderConfig]:
+    def get(self, db: Session, team_id: int, provider: str) -> OAuthProviderConfig | None:
         return db.query(OAuthProviderConfig).filter(
             OAuthProviderConfig.team_id == team_id,
             OAuthProviderConfig.provider == provider,
         ).first()
 
-    def get_by_app_id(self, db: Session, provider: str, app_id: str) -> Optional[OAuthProviderConfig]:
+    def get_by_app_id(self, db: Session, provider: str, app_id: str) -> OAuthProviderConfig | None:
         return db.query(OAuthProviderConfig).filter(
             OAuthProviderConfig.provider == provider,
             OAuthProviderConfig.app_id == app_id,
@@ -38,7 +38,7 @@ class OAuthProviderConfigCRUD:
         db: Session,
         provider: str,
         verification_token: str,
-    ) -> Optional[OAuthProviderConfig]:
+    ) -> OAuthProviderConfig | None:
         return db.query(OAuthProviderConfig).filter(
             OAuthProviderConfig.provider == provider,
             OAuthProviderConfig.bot_verification_token == verification_token,
@@ -51,12 +51,12 @@ class OAuthProviderConfigCRUD:
         app_id: str,
         redirect_uri: str,
         enabled: bool,
-        app_secret: Optional[str] = None,
+        app_secret: str | None = None,
         bot_enabled: bool = False,
-        bot_verification_token: Optional[str] = None,
-        bot_encrypt_key: Optional[str] = None,
-        bot_open_id: Optional[str] = None,
-        bot_callback_path: Optional[str] = None,
+        bot_verification_token: str | None = None,
+        bot_encrypt_key: str | None = None,
+        bot_open_id: str | None = None,
+        bot_callback_path: str | None = None,
     ) -> OAuthProviderConfig:
         config = self.get(db, team_id, "feishu")
         if config is None:
@@ -84,7 +84,7 @@ class OAuthProviderConfigCRUD:
         db.refresh(config)
         return config
 
-    def get_secret(self, config: OAuthProviderConfig) -> Optional[str]:
+    def get_secret(self, config: OAuthProviderConfig) -> str | None:
         if not config.app_secret_encrypted:
             return None
         return OAuthProviderConfig.decrypt_secret(config.app_secret_encrypted)
@@ -97,7 +97,7 @@ class UserOAuthAccountCRUD:
         team_id: int,
         provider: str,
         open_id: str,
-    ) -> Optional[UserOAuthAccount]:
+    ) -> UserOAuthAccount | None:
         return db.query(UserOAuthAccount).filter(
             UserOAuthAccount.team_id == team_id,
             UserOAuthAccount.provider == provider,
@@ -110,7 +110,7 @@ class UserOAuthAccountCRUD:
         team_id: int,
         provider: str,
         user_id: int,
-    ) -> Optional[UserOAuthAccount]:
+    ) -> UserOAuthAccount | None:
         return db.query(UserOAuthAccount).filter(
             UserOAuthAccount.team_id == team_id,
             UserOAuthAccount.provider == provider,
@@ -123,7 +123,7 @@ class UserOAuthAccountCRUD:
         team_id: int,
         provider: str,
         user_id: int,
-        profile: Dict[str, Any],
+        profile: dict[str, Any],
     ) -> UserOAuthAccount:
         account = self.get_by_user(db, team_id, provider, user_id)
         if account is None and profile.get("open_id"):

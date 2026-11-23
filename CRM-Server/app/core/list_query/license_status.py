@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import TYPE_CHECKING
 
 from sqlalchemy import case
+
+if TYPE_CHECKING:
+    from sqlalchemy.sql.elements import Case, SQLColumnExpression
 
 LICENSE_STATUS_NONE = "none"
 LICENSE_STATUS_EXPIRED = "expired"
@@ -47,7 +51,12 @@ def license_expiry_text(expiry_date: date | None, is_permanent: bool) -> str | N
     return expiry_date.isoformat()
 
 
-def license_status_expression(expiry_column, type_column, permanent_column, today: date):
+def license_status_expression(
+    expiry_column: SQLColumnExpression[date | None],
+    type_column: SQLColumnExpression[str | None],
+    permanent_column: SQLColumnExpression[bool | None],
+    today: date,
+) -> Case[str]:
     return case(
         (permanent_column.is_(True), LICENSE_STATUS_OFFICIAL),
         (expiry_column.is_(None), LICENSE_STATUS_NONE),

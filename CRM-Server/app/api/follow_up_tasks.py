@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -75,7 +74,11 @@ from app.services.follow_up_task_transition_plan_service import (
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Iterator
+
     from sqlalchemy.orm import Session
+
+    from app.models.sales_commitment import FollowUpTask, FollowUpTaskProjectionRun
 
 router = APIRouter(prefix="/v1/follow-up-tasks", tags=["客户跟进任务"])
 projection_router = APIRouter(prefix="/v1/follow-up-task-projection-runs", tags=["客户跟进任务投影"])
@@ -125,10 +128,10 @@ def _follow_up_export_row(item: dict[str, Any]) -> dict[str, object]:
 
 
 def _iter_follow_up_export_rows(
-    stream,
+    stream: Iterable[FollowUpTask],
     team_id: int,
     user_id: int,
-    projection_session_factory=SessionLocal,
+    projection_session_factory: Callable[[], Session] = SessionLocal,
 ) -> Iterator[dict[str, object]]:
     for batch in iter_batches(stream, 500):
         projection_db = projection_session_factory()
@@ -156,12 +159,12 @@ def list_follow_up_tasks(
     status_filter: str = Query("open", alias="status"),
     due_window: str | None = Query(None),
     customer_id: str | None = Query(None, description="客户 public_id"),
-    owner_scope: str = Query("mine", description="mine 只查当前 owner，customer 查客户范围"),
+    owner_scope: str = Query("mine", description="mine 只查当前 owner\uff0ccustomer 查客户范围"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     filters: str | None = Query(None, description="通用筛选条件 JSON"),
     sorts: str | None = Query(None, description="通用排序条件 JSON"),
-    search: str | None = Query(None, description="统一搜索，可搜索客户或跟进内容"),
+    search: str | None = Query(None, description="统一搜索\uff0c可搜索客户或跟进内容"),
     query_text: str | None = Query(None, description="按待办语义检索的自然语言描述"),
     retrieval_mode: str | None = Query(None, description="structured 或 semantic_filter"),
     team_id: int = Depends(get_current_user_team),
@@ -200,7 +203,7 @@ def list_follow_up_tasks(
     "/export",
     dependencies=[Depends(require_permission("follow_up_task:export"))],
     summary="导出客户追踪列表",
-    description="按当前筛选条件导出全部匹配客户跟进任务为 Excel，始终限定当前 owner",
+    description="按当前筛选条件导出全部匹配客户跟进任务为 Excel\uff0c始终限定当前 owner",
 )
 def export_follow_up_tasks(
     request: FollowUpTaskListExportRequest,
@@ -359,7 +362,10 @@ def get_customer_follow_up_arrangement(
         "surface": "customer_detail_current_follow_up_arrangement",
         "mode": "readonly",
         "task_state_source": "mysql",
-        "id_policy": "对外只返回 task/customer public_id；来源活动当前沿用既有客户活动内部ID路由，不作为任务展示字段。",
+        "id_policy": (
+            "对外只返回 task/customer public_id\uff1b"
+            "来源活动当前沿用既有客户活动内部ID路由\uff0c不作为任务展示字段。"
+        ),
     }
     return FollowUpTaskCustomerArrangementResponse.model_validate(payload)
 
@@ -452,7 +458,7 @@ def transition_follow_up_task(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
-            detail={"operation_id": str(exc), "message": "操作正在处理中，请查询操作结果"},
+            detail={"operation_id": str(exc), "message": "操作正在处理中\uff0c请查询操作结果"},
         ) from exc
     except CommandOperationConflict as exc:
         db.rollback()
@@ -506,7 +512,7 @@ def transition_follow_up_task(
                 db,
                 execution,
                 error_code=result.skip_reason or "TASK_TRANSITION_FAILED",
-                error_message="任务状态未发生变化，请刷新后确认当前状态",
+                error_message="任务状态未发生变化\uff0c请刷新后确认当前状态",
                 retryable=False,
             )
             db.commit()
@@ -560,7 +566,7 @@ def transition_follow_up_task(
                 request_fingerprint=fingerprint,
                 status=CommandExecutionStatus.UNKNOWN,
                 error_code="OUTCOME_UNKNOWN",
-                error_message="请求结果暂时无法确认，请查询操作结果",
+                error_message="请求结果暂时无法确认\uff0c请查询操作结果",
                 retryable=False,
                 correlation_id=correlation_id,
                 completed_time=business_now(),
@@ -571,11 +577,15 @@ def transition_follow_up_task(
             db.rollback()
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
-            detail={"operation_id": execution.operation_id, "message": "请求结果暂时无法确认，请查询操作结果"},
+            detail={"operation_id": execution.operation_id, "message": "请求结果暂时无法确认\uff0c请查询操作结果"},
         ) from exc
 
 
-@projection_router.get("/by-activity/{activity_id}", response_model=list[FollowUpTaskProjectionRunResponse], summary="按客户活动查询任务投影运行")
+@projection_router.get(
+    "/by-activity/{activity_id}",
+    response_model=list[FollowUpTaskProjectionRunResponse],
+    summary="按客户活动查询任务投影运行",
+)
 def list_projection_runs_by_activity(
     activity_id: int,
     limit: int = Query(50, ge=1, le=100),
@@ -594,7 +604,11 @@ def list_projection_runs_by_activity(
     return [_projection_run_response(db, run, team_id=team_id) for run in rows]
 
 
-@projection_router.get("/failed", response_model=list[FollowUpTaskProjectionRunResponse], summary="查询失败的任务投影运行")
+@projection_router.get(
+    "/failed",
+    response_model=list[FollowUpTaskProjectionRunResponse],
+    summary="查询失败的任务投影运行",
+)
 def list_failed_projection_runs(
     limit: int = Query(50, ge=1, le=100),
     team_id: int = Depends(get_current_user_team),
@@ -611,7 +625,11 @@ def list_failed_projection_runs(
     return [_projection_run_response(db, run, team_id=team_id) for run in rows]
 
 
-@projection_router.post("/{run_id}/retry", response_model=FollowUpTaskProjectionRunResponse, summary="重试失败的任务投影运行")
+@projection_router.post(
+    "/{run_id}/retry",
+    response_model=FollowUpTaskProjectionRunResponse,
+    summary="重试失败的任务投影运行",
+)
 def retry_projection_run(
     run_id: str,
     team_id: int = Depends(get_current_user_team),
@@ -640,9 +658,9 @@ def retry_projection_run(
 
 @observability_router.get("/summary", summary="查询任务状态迁移观测汇总")
 def get_transition_observability_summary(
-    start_at: datetime | None = Query(None, description="统计开始时间，默认最近 7 天"),
-    end_at: datetime | None = Query(None, description="统计结束时间，默认当前业务时间"),
-    owner_scope: str = Query("team", description="team 查团队汇总，mine 只查当前用户 owner"),
+    start_at: datetime | None = Query(None, description="统计开始时间\uff0c默认最近 7 天"),
+    end_at: datetime | None = Query(None, description="统计结束时间\uff0c默认当前业务时间"),
+    owner_scope: str = Query("team", description="team 查团队汇总\uff0cmine 只查当前用户 owner"),
     team_id: int = Depends(get_current_user_team),
     current_user=Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -681,7 +699,9 @@ def _ensure_projection_debug_permission(db: Session, *, team_id: int, user_id: i
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少任务投影排查权限")
 
 
-def _projection_run_response(db: Session, run, *, team_id: int) -> FollowUpTaskProjectionRunResponse:
+def _projection_run_response(
+    db: Session, run: FollowUpTaskProjectionRun, *, team_id: int,
+) -> FollowUpTaskProjectionRunResponse:
     return FollowUpTaskProjectionRunResponse.from_model(
         run,
         created_task_public_ids=follow_up_task_crud.list_public_ids_by_ids(

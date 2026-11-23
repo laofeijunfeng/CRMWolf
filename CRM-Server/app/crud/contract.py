@@ -1,20 +1,12 @@
-from sqlalchemy.orm import Query, Session
-from sqlalchemy import and_, case, func
-from typing import TYPE_CHECKING, Optional, List, Tuple
-from decimal import Decimal
-from datetime import date, datetime
 import logging
+from datetime import date
+from decimal import Decimal
+from typing import TYPE_CHECKING, Optional
 
-from app.models.contract import Contract, ContractStatus
-from app.models.customer import Customer
-from app.models.license_application import LicenseApplication
-from app.models.opportunity import Opportunity
+from sqlalchemy import case, func
+from sqlalchemy.orm import Query, Session
+
 from app.constants.business_types import BusinessType
-from app.utils.approval_delete_guard import assert_deletable_approval_resource
-from app.schemas.contract import ContractInternalCreate, ContractUpdate
-from app.services.business_number_generator import BusinessNumberGenerator
-from app.services.contract import ContractPricingService
-from app.utils.time import business_now
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -25,6 +17,15 @@ from app.core.list_query import (
     without_filter_field,
 )
 from app.core.list_query.catalogs import CONTRACTS_LIST_QUERY_CATALOG
+from app.models.contract import Contract, ContractStatus
+from app.models.customer import Customer
+from app.models.license_application import LicenseApplication
+from app.models.opportunity import Opportunity
+from app.schemas.contract import ContractInternalCreate, ContractUpdate
+from app.services.business_number_generator import BusinessNumberGenerator
+from app.services.contract import ContractPricingService
+from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from app.models.approval import Approval
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _split_csv(value: Optional[str]) -> List[str]:
+def _split_csv(value: str | None) -> list[str]:
     if value is None:
         return []
     raw_value = value.value if hasattr(value, "value") else value
@@ -47,23 +48,23 @@ class ApprovalService:
         """
         创建合同后自动提交审批
 
-        业务规则：
+        业务规则\uff1a
         - 创建合同后自动提交到审批流程
         - 只有草稿状态的合同可以提交
         - 系统自动匹配对应的审批流程
         - 创建审批实例并流转到第一个节点
-        - 向首个节点的审批人发送通知（由 API 层异步发送）
+        - 向首个节点的审批人发送通知\uff08由 API 层异步发送\uff09
 
-        注意：
-        - 保留撤回功能，用户可以手动撤回审批
-        - 撤回后合同回到草稿状态，可以修改后重新提交
+        注意\uff1a
+        - 保留撤回功能\uff0c用户可以手动撤回审批
+        - 撤回后合同回到草稿状态\uff0c可以修改后重新提交
 
         Returns:
-            Approval: 创建的审批实例（如果成功），None（如果失败或跳过）
+            Approval: 创建的审批实例\uff08如果成功\uff09\uff0cNone\uff08如果失败或跳过\uff09
         """
+        from app.crud.approval import approval_crud, approval_flow_crud
+        from app.models.approval import ApprovalStatus
         from app.models.contract import Contract
-        from app.models.approval import ApprovalFlow, Approval, ApprovalStatus, ApprovalAction, BusinessType
-        from app.crud.approval import approval_flow_crud, approval_crud
 
         contract = db.query(Contract).filter(Contract.id == contract_id).first()
         if not contract:
@@ -76,10 +77,10 @@ class ApprovalService:
         if existing_approval and existing_approval.status == ApprovalStatus.PENDING:
             return None
 
-        # A5 修复：match_flow(contract) 返回 tuple (flow, error_msg)，需要正确解构
+        # A5 修复:match_flow(contract) 返回 tuple (flow, error_msg),需要正确解构
         flow, error_msg = approval_flow_crud.match_flow(db, contract)
         if not flow:
-            logger.warning(f"合同自动提交审批失败：{error_msg or '未匹配审批流程'}")
+            logger.warning(f"合同自动提交审批失败\uff1a{error_msg or '未匹配审批流程'}")
             return None
 
         try:
@@ -99,25 +100,25 @@ class ApprovalService:
 
             db.refresh(approval)
 
-            # 注意：通知发送移至 API 层（异步上下文）
-            # CRUD 层不再包含异步通知逻辑，避免 "no running event loop" 错误
+            # 注意:通知发送移至 API 层(异步上下文)
+            # CRUD 层不再包含异步通知逻辑,避免 "no running event loop" 错误
             # API 层通过返回的 approval 对象发送通知
 
             return approval
 
         except Exception as e:
-            logger.error(f"合同提交审批异常（contract_id={contract_id}）: {e}", exc_info=True)
+            logger.error(f"合同提交审批异常\uff08contract_id={contract_id}\uff09: {e}", exc_info=True)
             return None
 
 
 class ContractCRUD:
-    def get_by_id(self, db: Session, contract_id: int, team_id: Optional[int] = None) -> Optional[Contract]:
+    def get_by_id(self, db: Session, contract_id: int, team_id: int | None = None) -> Contract | None:
         query = db.query(Contract).filter(Contract.id == contract_id)
         if team_id is not None:
             query = query.filter(Contract.team_id == team_id)
         return query.first()
 
-    def get_by_number(self, db: Session, contract_number: str, team_id: Optional[int] = None) -> Optional[Contract]:
+    def get_by_number(self, db: Session, contract_number: str, team_id: int | None = None) -> Contract | None:
         query = db.query(Contract).filter(Contract.contract_number == contract_number)
         if team_id is not None:
             query = query.filter(Contract.team_id == team_id)
@@ -127,11 +128,11 @@ class ContractCRUD:
         self,
         db: Session,
         customer_id: int,
-        team_id: Optional[int] = None,
+        team_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None
-    ) -> Tuple[List[Contract], int]:
+        status: str | None = None
+    ) -> tuple[list[Contract], int]:
         query = db.query(Contract).filter(Contract.customer_id == customer_id)
         if team_id is not None:
             query = query.filter(Contract.team_id == team_id)
@@ -147,8 +148,8 @@ class ContractCRUD:
         self,
         db: Session,
         opportunity_id: int,
-        team_id: Optional[int] = None
-    ) -> Optional[Contract]:
+        team_id: int | None = None
+    ) -> Contract | None:
         query = db.query(Contract).filter(
             Contract.opportunity_id == opportunity_id,
             Contract.deleted_at.is_(None)
@@ -274,7 +275,9 @@ class ContractCRUD:
         if purchase_type:
             query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.in_(_split_csv(purchase_type))))
         if purchase_type_exclude:
-            query = query.filter(Contract.opportunity.has(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude))))
+            query = query.filter(
+                Contract.opportunity.has(Opportunity.purchase_type.notin_(_split_csv(purchase_type_exclude)))
+            )
         if subscription_years is not None:
             query = query.filter(Contract.subscription_years == subscription_years)
         if subscription_years_exclude is not None:
@@ -292,7 +295,9 @@ class ContractCRUD:
         if customer_keyword:
             query = query.filter(Contract.customer.has(Customer.account_name.like(f"%{customer_keyword}%")))
         if opportunity_keyword:
-            query = query.filter(Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%")))
+            query = query.filter(
+                Contract.opportunity.has(Opportunity.opportunity_name.like(f"%{opportunity_keyword}%"))
+            )
         query = apply_search(query, CONTRACTS_LIST_QUERY_CATALOG, search, context=context)
         if owner_id:
             query = query.filter(Contract.owner_id.in_(_split_csv(owner_id)))
@@ -347,10 +352,10 @@ class ContractCRUD:
         db: Session,
         *,
         team_id: int,
-        customer_id: Optional[int] = None,
-        status: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        search: Optional[str] = None,
+        customer_id: int | None = None,
+        status: str | None = None,
+        owner_id: str | None = None,
+        search: str | None = None,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
     ) -> Query[Contract]:
@@ -372,40 +377,40 @@ class ContractCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100,
-        customer_id: Optional[int] = None,
-        status: Optional[str] = None,
-        status_exclude: Optional[str] = None,
-        contract_number: Optional[str] = None,
-        license_type: Optional[str] = None,
-        license_type_exclude: Optional[str] = None,
-        purchase_type: Optional[str] = None,
-        purchase_type_exclude: Optional[str] = None,
-        subscription_years: Optional[int] = None,
-        subscription_years_exclude: Optional[int] = None,
-        license_authorized_users: Optional[int] = None,
-        license_authorized_users_exclude: Optional[int] = None,
-        standard_unit_price: Optional[Decimal] = None,
-        standard_unit_price_exclude: Optional[Decimal] = None,
-        keyword: Optional[str] = None,
-        customer_keyword: Optional[str] = None,
-        opportunity_keyword: Optional[str] = None,
-        search: Optional[str] = None,
-        owner_id: Optional[str] = None,
-        owner_id_exclude: Optional[str] = None,
-        signing_date_start: Optional[date] = None,
-        signing_date_end: Optional[date] = None,
-        effective_date_start: Optional[date] = None,
-        effective_date_end: Optional[date] = None,
-        expiry_date_start: Optional[date] = None,
-        expiry_date_end: Optional[date] = None,
-        license_expiry_date_start: Optional[date] = None,
-        license_expiry_date_end: Optional[date] = None,
-        order_by: Optional[str] = None,
-        order_dir: Optional[str] = None,
+        customer_id: int | None = None,
+        status: str | None = None,
+        status_exclude: str | None = None,
+        contract_number: str | None = None,
+        license_type: str | None = None,
+        license_type_exclude: str | None = None,
+        purchase_type: str | None = None,
+        purchase_type_exclude: str | None = None,
+        subscription_years: int | None = None,
+        subscription_years_exclude: int | None = None,
+        license_authorized_users: int | None = None,
+        license_authorized_users_exclude: int | None = None,
+        standard_unit_price: Decimal | None = None,
+        standard_unit_price_exclude: Decimal | None = None,
+        keyword: str | None = None,
+        customer_keyword: str | None = None,
+        opportunity_keyword: str | None = None,
+        search: str | None = None,
+        owner_id: str | None = None,
+        owner_id_exclude: str | None = None,
+        signing_date_start: date | None = None,
+        signing_date_end: date | None = None,
+        effective_date_start: date | None = None,
+        effective_date_end: date | None = None,
+        expiry_date_start: date | None = None,
+        expiry_date_end: date | None = None,
+        license_expiry_date_start: date | None = None,
+        license_expiry_date_end: date | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
         include_deleted: bool = False,
         filters: list[FilterCondition] | None = None,
         sorts: list[SortCondition] | None = None,
-    ) -> Tuple[List[Contract], int]:
+    ) -> tuple[list[Contract], int]:
         query = self.build_population_query(
             db,
             team_id=team_id,
@@ -454,8 +459,8 @@ class ContractCRUD:
         creator_id: str,
         team_id: int
     ) -> Contract:
-        from app.crud.user import user_crud
         from app.crud.customer import customer_crud
+        from app.crud.user import user_crud
         from app.services.operation_log_service import operation_log_service
         
         contract_data = obj_in.model_dump()
@@ -490,7 +495,12 @@ class ContractCRUD:
             Customer.id == contract_data['customer_id'],
             Customer.team_id == team_id
         ).first()
-        owner_id = explicit_owner_id or (opportunity.owner_id if opportunity else None) or (customer.owner_id if customer else None) or creator_id
+        owner_id = (
+            explicit_owner_id
+            or (opportunity.owner_id if opportunity else None)
+            or (customer.owner_id if customer else None)
+            or creator_id
+        )
 
         deal_journey_id = opportunity.deal_journey_id if opportunity else None
 
@@ -547,12 +557,12 @@ class ContractCRUD:
             source_id=db_obj.id,
             event_time=db_obj.created_time,
             actor_id=creator_id,
-            summary=f"创建合同：{db_obj.contract_name}",
+            summary=f"创建合同\uff1a{db_obj.contract_name}",
         )
         db.commit()
         db.refresh(db_obj)
 
-        # 注意：审批提交移至 API 层（异步上下文）
+        # 注意:审批提交移至 API 层(异步上下文)
         # API 层调用 ApprovalService.submit_for_approval() 获取 approval 后发送通知
 
         return db_obj
@@ -567,8 +577,8 @@ class ContractCRUD:
         creator_id: str,
         team_id: int
     ) -> Contract:
-        from app.models.opportunity import Opportunity
         from app.models.customer import Customer
+        from app.models.opportunity import Opportunity
 
         if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
             raise ValueError("该商机已创建合同")
@@ -628,12 +638,12 @@ class ContractCRUD:
             source_id=db_obj.id,
             event_time=db_obj.created_time,
             actor_id=creator_id,
-            summary=f"创建合同：{db_obj.contract_name}",
+            summary=f"创建合同\uff1a{db_obj.contract_name}",
         )
         db.commit()
         db.refresh(db_obj)
 
-        # 注意：审批提交移至 API 层（异步上下文）
+        # 注意:审批提交移至 API 层(异步上下文)
 
         return db_obj
     
@@ -650,7 +660,7 @@ class ContractCRUD:
                 Contract.id == db_obj.id, Contract.team_id == team_id,
             ).populate_existing().with_for_update().one()
         if int(db_obj.customer_id) != customer_id:
-            raise ValueError("合同所属客户已变更，请重试")
+            raise ValueError("合同所属客户已变更\uff0c请重试")
         update_data = obj_in.model_dump(exclude_unset=True)
         
         if 'total_amount' in update_data or 'user_count' in update_data or \
@@ -687,13 +697,13 @@ class ContractCRUD:
     
     def delete(self, db: Session, contract_id: int) -> bool:
         """
-        删除合同（软删除）
+        删除合同\uff08软删除\uff09
 
-        业务规则：
+        业务规则\uff1a
         1. 只能删除草稿状态且未进入审批/审批未通过的合同
-        2. 使用软删除（设置 deleted_at 时间戳）
+        2. 使用软删除\uff08设置 deleted_at 时间戳\uff09
         3. 审批中或审批通过的合同不允许删除
-        4. 审批记录保留，不随合同删除
+        4. 审批记录保留\uff0c不随合同删除
 
         Args:
             db: 数据库会话
@@ -715,7 +725,7 @@ class ContractCRUD:
                 Contract.id == contract_id, Contract.team_id == team_id,
             ).populate_existing().with_for_update().one_or_none()
         if contract is None or int(contract.customer_id) != customer_id:
-            raise ValueError("合同所属客户已变更，请重试")
+            raise ValueError("合同所属客户已变更\uff0c请重试")
 
         if contract.deleted_at is not None:
             raise ValueError("合同已被删除")
@@ -733,7 +743,7 @@ class ContractCRUD:
         # 检查合同状态
         if contract.status != ContractStatus.DRAFT:
             raise ValueError("只有草稿状态的合同可以删除")
-        # 软删除：设置 deleted_at 时间戳
+        # 软删除:设置 deleted_at 时间戳
         contract.deleted_at = business_now()
         contract.status = ContractStatus.DRAFT  # 合同状态回到草稿
 
@@ -746,9 +756,9 @@ class ContractCRUD:
         team_id: int,
         skip: int = 0,
         limit: int = 100
-    ) -> Tuple[List[Contract], int]:
+    ) -> tuple[list[Contract], int]:
         """
-        查询已删除的合同列表（管理员查询）
+        查询已删除的合同列表\uff08管理员查询\uff09
 
         Args:
             db: 数据库会话
@@ -770,7 +780,7 @@ class ContractCRUD:
 
     def restore(self, db: Session, contract_id: int) -> bool:
         """
-        恢复已删除的合同（管理员操作）
+        恢复已删除的合同\uff08管理员操作\uff09
 
         Args:
             db: 数据库会话
@@ -789,12 +799,12 @@ class ContractCRUD:
                 Contract.id == contract_id, Contract.team_id == team_id,
             ).populate_existing().with_for_update().one_or_none()
         if contract is None or int(contract.customer_id) != customer_id:
-            raise ValueError("合同所属客户已变更，请重试")
+            raise ValueError("合同所属客户已变更\uff0c请重试")
         if not contract.deleted_at:
             return False
 
         if self.has_active_contract_for_opportunity(db, contract.opportunity_id, contract.team_id):
-            raise ValueError("该商机已创建合同，无法恢复该合同")
+            raise ValueError("该商机已创建合同\uff0c无法恢复该合同")
         contract.deleted_at = None
         db.commit()
         return True

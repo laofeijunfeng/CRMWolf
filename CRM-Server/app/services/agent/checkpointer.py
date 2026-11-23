@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from sqlalchemy.exc import SQLAlchemyError
+from typing import TYPE_CHECKING
 
 from app.services.customer_activity_ai.checkpointer import SQLAlchemyCheckpointSaver
+
+if TYPE_CHECKING:
+    from sqlalchemy.exc import SQLAlchemyError
 
 agent_checkpoint_saver = SQLAlchemyCheckpointSaver()
 

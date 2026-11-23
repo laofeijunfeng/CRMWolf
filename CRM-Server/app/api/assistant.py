@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -111,6 +111,8 @@ def _list_view(task: AssistantTask, db: Session) -> dict[str, object]:
             "processing_turn_status": None,
             "reprocess_turn_id": None,
             "follow_up_disposition": None,
+            "proposal_outcome": None,
+            "reconciliation_required": True,
         }
 
 def _owned_task(db: Session, *, team_id: int, user_id: int, public_id: str) -> AssistantTask:
@@ -278,20 +280,26 @@ async def list_unknown_commands(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="没有核对助手命令的权限")
 
 
+class CommandAdjudicationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    decision: Literal["SUCCEEDED", "REJECTED"]
+    reason: str = Field(min_length=1)
+
+
 @router.post("/unknown-commands/{action_public_id}/adjudicate", response_model=dict[str, object])
 async def adjudicate_unknown_command(
     action_public_id: str,
-    payload: dict[str, object],
+    payload: CommandAdjudicationRequest,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Operator-only manual adjudication; evidence rules per TRD §7.1 decision 3."""
-
-    from fastapi import HTTPException, status
+    """Operator-only readback; no target-service write or retry is permitted."""
 
     from app.crud.permission import permission_crud
-    from app.models.assistant import AssistantAction
+    from app.services.assistant.proposals import adjudicate_proposal_claim
+    from app.services.assistant.task_state import TaskStateConflictError
 
     permission_codes = {
         permission.code
@@ -312,63 +320,16 @@ async def adjudicate_unknown_command(
     if action is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="命令记录不存在")
 
-    result = dict(action.result_json or {})
-    if result.get("status") not in {"UNKNOWN", "CLAIMED"}:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=f"该命令已终态 {result.get('status')}，不可裁决"
-        )
-
-    decision = str(payload.get("decision") or "")
-    reason = str(payload.get("reason") or "").strip()
-    if not reason:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="裁决必须提供理由")
-
-    if decision == "SUCCEEDED":
-        command_id = str(result.get("command_id") or "")
-        if not command_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="老格式 claim 无 command_id，不能判成功；保持 UNKNOWN",
-            )
-        from app.models.assistant_crm_effect import AssistantCRMEffect
-
-        effect = (
-            db.query(AssistantCRMEffect)
-            .filter(
-                AssistantCRMEffect.team_id == team_id,
-                AssistantCRMEffect.command_id == command_id,
-            )
-            .first()
-        )
-        if effect is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="缺少 (team,command_id,effect_kind) 精确目标回执；不能凭相似对象判成功，保持 UNKNOWN",
-            )
-        new_status = "SUCCEEDED"
-    elif decision == "REJECTED":
-        if result.get("started"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="目标可能已提交（STARTED），无确定回滚证明；不能判拒绝，保持 UNKNOWN",
-            )
-        new_status = "REJECTED"
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="decision 只支持 SUCCEEDED/REJECTED"
-        )
-
-    result.update(
-        {
-            "status": new_status,
-            "adjudicated_by": int(current_user.id),
-            "adjudication_reason": reason,
-        }
-    )
-    action.result_json = result
-    db.commit()
-    # Adjudication never retries the command (TRD §7.1).
-    return {"action_public_id": action_public_id, "status": new_status}
+    if payload.decision == "REJECTED":
+        # No durable producer can prove that an unresolved claim never entered CRM.
+        raise HTTPException(status_code=409, detail="没有确定未执行的证据，结果仍待核对。")
+    try:
+        await adjudicate_proposal_claim(db, action, operator_id=int(current_user.id), reason=payload.reason)
+        db.commit()
+    except (TaskStateConflictError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="无法核对当前命令，结果仍待核对。") from exc
+    return {"action_public_id": action_public_id, "status": payload.decision}
 
 
 @router.get("/tasks/{public_id}/turns/{turn_id}", response_model=AssistantTurnView)
@@ -468,7 +429,7 @@ async def submit_input(
             db,
             task=task,
             key=request.client_request_id,
-            input_data={"kind": request.kind, "text": request.text, "choice": request.choice},
+            input_data=request.turn_input(),
             action_id=request.action_id,
             expected_version=request.expected_version,
         )

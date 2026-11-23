@@ -1,6 +1,8 @@
 import enum
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Enum
+
+from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String
 from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 
@@ -21,5 +23,5 @@ class EmailVerificationCode(Base):
     used = Column(Boolean, default=False, comment="是否已使用")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="创建时间")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<EmailVerificationCode(id={self.id}, email={self.email}, purpose={self.purpose})>"

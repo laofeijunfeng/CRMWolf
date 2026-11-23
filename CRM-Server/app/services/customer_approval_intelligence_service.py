@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from app.constants.business_types import BusinessType
-from app.models.approval import Approval
 from app.models.invoice import InvoiceApplication
 from app.models.license_application import LicenseApplication
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.models.approval import Approval
 
 ApprovalSupportedEntity: TypeAlias = InvoiceApplication | LicenseApplication
 ApprovalSupportedSourceType: TypeAlias = Literal["invoice_application", "license_application"]

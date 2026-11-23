@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any
 
 from app.models.customer import Customer
 from app.models.customer_vector_document import (
@@ -18,6 +16,9 @@ from app.services.customer_vector_document_service import (
     customer_vector_document_service,
 )
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 TASK_VECTOR_SOURCE_TYPES = (
     CustomerVectorDocumentSourceType.FOLLOW_UP_TASK,
@@ -119,7 +120,8 @@ class CustomerVectorEvidenceReconciliationService:
         team_id: int | None,
         limit: int,
     ) -> list[CustomerVectorDocument]:
-        query = db.query(CustomerVectorDocument).filter(CustomerVectorDocument.source_type.in_(TASK_VECTOR_SOURCE_TYPES))
+        query = db.query(CustomerVectorDocument).filter(CustomerVectorDocument.source_type.in_(
+            TASK_VECTOR_SOURCE_TYPES))
         if team_id is not None:
             query = query.filter(CustomerVectorDocument.team_id == team_id)
         return query.order_by(CustomerVectorDocument.updated_time.asc(), CustomerVectorDocument.id.asc()).limit(
@@ -336,7 +338,7 @@ class CustomerVectorEvidenceReconciliationService:
             reason=reason,
         )
 
-    def _json_value(self, value: Any) -> Any:
+    def _json_value(self, value: object) -> dict[str, object]:
         return value if isinstance(value, dict) else {}
 
 

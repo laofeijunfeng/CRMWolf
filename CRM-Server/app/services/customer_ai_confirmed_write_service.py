@@ -11,14 +11,11 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Any, cast
 
 from app.crud.agent import AgentIdempotencyKeyCRUD, agent_idempotency_key_crud
 from app.crud.customer_activity import CustomerActivityCRUD, customer_activity_crud
 from app.models.agent import AgentIdempotencyStatus
-from app.models.customer_activity import CustomerActivity
 from app.schemas.agent import AgentIdempotencyKeyCreate, AgentIdempotencyKeyUpdate
 from app.schemas.customer_activity import CustomerActivityCreate
 from app.services.agent.temporal import agent_temporal_resolver
@@ -42,6 +39,11 @@ from app.services.customer_intelligence_run_service import (
     customer_intelligence_run_service,
 )
 from app.utils.time import business_now
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from app.models.customer_activity import CustomerActivity
 
 
 @dataclass(frozen=True)
@@ -302,7 +304,7 @@ class CustomerAIConfirmedWriteService:
             intelligence_request = CustomerIntelligenceCommittedEventRequest(
                 request_id=request_id,
                 event=event,
-                scope=cast(CustomerIntelligenceRefreshScope, scope),
+                scope=cast("CustomerIntelligenceRefreshScope", scope),
                 scheduled=True,
                 kick_required=False,
             )

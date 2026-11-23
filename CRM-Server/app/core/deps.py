@@ -1,13 +1,14 @@
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from typing import List
+
 from app.core.database import get_db
 from app.core.request_scope import agent_worker_execution_id, agent_worker_permissions
 from app.core.security import decode_access_token
-from app.crud.user import user_crud
 from app.crud.permission import permission_crud
-from app.crud.team import team_crud, user_team_crud
+from app.crud.team import user_team_crud
+from app.crud.user import user_crud
 from app.models.team import UserTeam
 from app.utils.public_id import is_follow_up_task_public_id, is_opportunity_public_id
 
@@ -27,7 +28,7 @@ def _customer_member_has_access(db: Session, team_id: int, customer_id: int, use
 
 
 def user_can_view_customer(db: Session, team_id: int, customer_id: int, user_id: int) -> bool:
-    """客户是协作和可见性边界：全部可见、客户成员 VIEW+、或自己负责的客户。"""
+    """客户是协作和可见性边界\uff1a全部可见、客户成员 VIEW+、或自己负责的客户。"""
     from app.crud.customer import customer_crud
 
     customer = customer_crud.get_by_id(db, customer_id, team_id)
@@ -47,7 +48,7 @@ def user_can_view_customer(db: Session, team_id: int, customer_id: int, user_id:
 
 
 def get_viewable_customer_ids(db: Session, team_id: int, user_id: int) -> set[int] | None:
-    """返回当前用户可见客户 ID；None 表示可查看全部客户。"""
+    """返回当前用户可见客户 ID\uff1bNone 表示可查看全部客户。"""
     from app.crud.customer_member import ACCESS_LEVEL_RANK
     from app.models.customer import Customer, CustomerMember
 
@@ -162,7 +163,7 @@ async def get_current_user(
         agent_worker_execution_id.set(execution_id)
     elif purpose is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭证")
-    setattr(user, "_token_payload", payload)
+    user._token_payload = payload
     return user
 
 
@@ -181,7 +182,7 @@ async def get_current_user_team(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ) -> int:
-    """获取当前用户的活跃 team_id，无团队时抛出错误"""
+    """获取当前用户的活跃 team_id\uff0c无团队时抛出错误"""
     token_payload = getattr(current_user, "_token_payload", {}) or {}
     token_team_id = token_payload.get("team_id")
     if token_team_id is not None:
@@ -227,7 +228,7 @@ async def get_current_user_team(
 async def get_user_teams(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
-) -> List[int]:
+) -> list[int]:
     """获取用户所有所属团队的 ID 列表"""
     user_teams = db.query(UserTeam.team_id).filter(
         UserTeam.user_id == current_user.id
@@ -239,7 +240,7 @@ async def get_current_user_team_optional(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ) -> int | None:
-    """获取当前用户的活跃 team_id，无团队时返回 None"""
+    """获取当前用户的活跃 team_id\uff0c无团队时返回 None"""
     token_payload = getattr(current_user, "_token_payload", {}) or {}
     token_team_id = token_payload.get("team_id")
     if token_team_id is not None:
@@ -320,7 +321,6 @@ def check_lead_access(
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
-    from app.crud.lead import lead_crud
     from app.crud.role import role_crud
 
     lead = _get_lead_by_identifier(db, lead_id, team_id)
@@ -353,7 +353,6 @@ def check_lead_owner(
     team_id: int = Depends(get_current_user_team),
     db: Session = Depends(get_db)
 ):
-    from app.crud.lead import lead_crud
     from app.crud.role import role_crud
 
     lead = _get_lead_by_identifier(db, lead_id, team_id)
@@ -386,13 +385,12 @@ def check_lead_delete_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查线索删除权限（基于权限码）
+    检查线索删除权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - lead:delete:all → 可删除任何线索
     - lead:delete:own → 只能删除自己负责的线索
     """
-    from app.crud.lead import lead_crud
 
     lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
@@ -432,13 +430,12 @@ def check_lead_edit_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查线索编辑权限（基于权限码）
+    检查线索编辑权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - lead:edit:all → 可编辑任何线索
     - lead:edit:own → 只能编辑自己负责的线索
     """
-    from app.crud.lead import lead_crud
 
     lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
@@ -478,13 +475,12 @@ def check_customer_delete_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查客户删除权限（基于权限码）
+    检查客户删除权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - customer:delete:all → 可删除任何客户
     - customer:delete:own → 只能删除自己负责的客户
     """
-    from app.crud.customer import customer_crud
 
     customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
@@ -524,14 +520,13 @@ def check_customer_edit_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查客户编辑权限（基于权限码）
+    检查客户编辑权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - customer:edit:all → 可编辑任何客户
     - customer:edit:own → 可编辑自己负责的客户
     - 客户团队成员 EDIT → 可编辑被授权的客户
     """
-    from app.crud.customer import customer_crud
 
     customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
@@ -574,13 +569,12 @@ def check_opportunity_delete_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查商机删除权限（基于权限码）
+    检查商机删除权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - opportunity:delete:all → 可删除任何商机
     - opportunity:delete:own → 只能删除自己负责的商机
     """
-    from app.crud.opportunity import opportunity_crud
 
     opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
@@ -620,13 +614,12 @@ def check_opportunity_edit_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查商机编辑权限（基于权限码）
+    检查商机编辑权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - opportunity:edit:all → 可编辑任何商机
     - opportunity:edit:own → 只能编辑自己负责的商机
     """
-    from app.crud.opportunity import opportunity_crud
 
     opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
@@ -666,9 +659,9 @@ def check_contract_delete_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查合同删除权限（基于权限码）
+    检查合同删除权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - contract:delete:all → 可删除任何合同
     - contract:delete:own → 只能删除自己负责的合同
     """
@@ -712,9 +705,9 @@ def check_contract_edit_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查合同编辑权限（基于权限码）
+    检查合同编辑权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - contract:edit:all → 可编辑任何合同
     - contract:edit:own → 只能编辑自己负责的合同
     """
@@ -760,13 +753,12 @@ def check_lead_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查线索查看权限（基于权限码）
+    检查线索查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - lead:view:all → 可查看任何线索
     - lead:view:own → 只能查看自己负责或创建的线索
     """
-    from app.crud.lead import lead_crud
 
     lead = _get_lead_by_identifier(db, lead_id, team_id)
     if not lead:
@@ -805,14 +797,13 @@ def check_customer_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查客户查看权限（基于权限码）
+    检查客户查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - customer:view:all → 可查看任何客户
     - customer:view:own → 可查看自己负责的客户
     - 客户团队成员 VIEW/FOLLOW_UP/EDIT → 可查看被授权的客户
     """
-    from app.crud.customer import customer_crud
 
     customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
@@ -890,8 +881,8 @@ def check_follow_up_task_direct_view_permission(
     """
     检查跟进任务直接查看权限。
 
-    权限规则：
-    - task public_id 必须合法，内部不接受数据库主键作为对外入参。
+    权限规则\uff1a
+    - task public_id 必须合法\uff0c内部不接受数据库主键作为对外入参。
     - 任务 owner 可查看自己的任务。
     - 预留 follow_up_task:view:team / follow_up_task:view:all 用于后续管理视图。
     """
@@ -926,8 +917,8 @@ def check_follow_up_task_view_permission(
     """
     检查客户上下文里的跟进任务查看权限。
 
-    该 helper 适用于客户详情、客户上下文 Agent 回答等场景；全局任务详情应使用
-    check_follow_up_task_direct_view_permission，避免客户查看权限被扩大成任务管理视图权限。
+    该 helper 适用于客户详情、客户上下文 Agent 回答等场景\uff1b全局任务详情应使用
+    check_follow_up_task_direct_view_permission\uff0c避免客户查看权限被扩大成任务管理视图权限。
     """
     task = _get_follow_up_task_by_public_id(db, task_id, team_id)
     if not task:
@@ -958,7 +949,7 @@ def check_follow_up_task_owner_permission(
     """
     检查跟进任务状态操作权限。
 
-    能查看客户或任务，不代表能完成/取消任务；Phase 1 以任务 owner 为准，
+    能查看客户或任务\uff0c不代表能完成/取消任务\uff1bPhase 1 以任务 owner 为准\uff0c
     并预留 follow_up_task:operate:all / follow_up_task:edit:all 给后续管理能力。
     """
     task = _get_follow_up_task_by_public_id(db, task_id, team_id)
@@ -988,7 +979,6 @@ def check_customer_member_manage_permission(
     current_user = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    from app.crud.customer import customer_crud
 
     customer = _get_customer_by_identifier(db, customer_id, team_id)
     if not customer:
@@ -1020,14 +1010,13 @@ def check_opportunity_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查商机查看权限（基于权限码）
+    检查商机查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - opportunity:view:all → 可查看任何商机
     - opportunity:view:own → 只能查看自己负责的商机
     - 客户团队成员 VIEW/FOLLOW_UP/EDIT → 可查看该客户下的商机
     """
-    from app.crud.opportunity import opportunity_crud
 
     opportunity = _get_opportunity_by_public_id(db, opportunity_id, team_id)
     if not opportunity:
@@ -1069,9 +1058,9 @@ def check_contract_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查合同查看权限（基于权限码）
+    检查合同查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - contract:view:all → 可查看任何合同
     - contract:view:own → 只能查看自己负责的合同
     """
@@ -1114,9 +1103,9 @@ def check_invoice_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查发票申请查看权限（基于权限码）
+    检查发票申请查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - invoice:view:all → 可查看任何发票申请
     - 可查看发票所属客户 → 可查看该客户树上的发票
     - invoice:view:own → 可查看自己申请的发票申请
@@ -1167,7 +1156,7 @@ def check_invoice_write_scope(
     """
     单据负责人是写入责任边界。
 
-    客户可见只够只读。对指定发票发起重开等写入操作需要：
+    客户可见只够只读。对指定发票发起重开等写入操作需要\uff1a
     - invoice:view:all / invoice:edit:all
     - 或当前用户是该发票申请人
     """
@@ -1202,9 +1191,9 @@ def check_invoice_edit_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查发票申请编辑权限（基于权限码）
+    检查发票申请编辑权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - invoice:edit:all → 可编辑任何发票申请
     - invoice:edit:own → 只能编辑自己申请的发票申请
     """
@@ -1244,11 +1233,11 @@ def check_payment_view_permission(
     db: Session = Depends(get_db)
 ):
     """
-    检查回款计划查看权限（基于权限码）
+    检查回款计划查看权限\uff08基于权限码\uff09
 
-    权限规则：
+    权限规则\uff1a
     - payment:view:all → 可查看任何回款计划
-    - payment:view:own → 只能查看自己负责的回款计划（申请人）
+    - payment:view:own → 只能查看自己负责的回款计划\uff08申请人\uff09
     """
     from app.crud.payment import payment_plan_crud
 

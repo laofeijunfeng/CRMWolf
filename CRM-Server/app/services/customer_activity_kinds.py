@@ -12,7 +12,7 @@ class CustomerActivityKind:
     OTHER_FOLLOW_UP = "OTHER_FOLLOW_UP"
 
 
-ACTIVITY_KIND_META: dict[str, dict[str, object]] = {
+ACTIVITY_KIND_META: dict[str, dict[str, str]] = {
     CustomerActivityKind.PHONE_FOLLOW_UP: {
         "category": "FOLLOW_UP",
         "label": "电话跟进",
@@ -157,7 +157,7 @@ def infer_activity_kind(method: str | None, content: str | None = None) -> str:
     return CustomerActivityKind.OTHER_FOLLOW_UP
 
 
-def get_activity_kind_meta(activity_kind: str) -> dict[str, object]:
+def get_activity_kind_meta(activity_kind: str) -> dict[str, str]:
     kind = normalize_activity_kind(activity_kind)
     return {"value": kind, **ACTIVITY_KIND_META[kind]}
 

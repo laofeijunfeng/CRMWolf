@@ -78,7 +78,7 @@ flowchart LR
 
 ### 2.1 当前系统已经有“内部编排”，缺的是面向外部系统的通用自动化边界
 
-本仓库已有的 Agent 设计并不是没有编排能力。`CRM-Docs/design-agent/foundations/architecture-boundary.md` 已规定：
+当时的 Agent「架构边界」设计规定：
 
 - LangChain 负责模型调用、结构化输出和受控 tool-calling；
 - LangGraph 负责 root graph、domain subgraph、checkpoint、thread、interrupt/resume、conditional edge 和 streaming；
@@ -86,7 +86,7 @@ flowchart LR
 - CRM API 负责真实业务读写、权限、审批和通知；
 - Agent 不得直接访问 CRM CRUD/model/table，不得绕过 CRM API，不得由 AI 直接决定写入。
 
-`CRM-Docs/design-agent/foundations/product-positioning.md` 又明确了客户 → 商机 → 合同 → 回款计划 → 登记回款 → 发票 → License 的主链路，以及商机推进、跟进记录、上下文查询和用户确认的优先级。
+当时的 Agent「产品定位」又明确了客户 → 商机 → 合同 → 回款计划 → 登记回款 → 发票 → License 的主链路，以及商机推进、跟进记录、上下文查询和用户确认的优先级。
 
 所以未来引入工作流时，应该把问题拆成两个层次：
 

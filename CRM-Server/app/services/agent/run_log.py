@@ -15,8 +15,8 @@ from app.services.agent.orchestrator.contracts import (
     WorkflowDispatchResult,
 )
 from app.services.agent.workflow.contracts import (
-    WorkflowFailedResult,
     WorkflowCompletedResult,
+    WorkflowFailedResult,
     WorkflowQualityGate,
     WorkflowWaitingResult,
 )

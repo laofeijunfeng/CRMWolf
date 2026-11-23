@@ -1,12 +1,13 @@
+
 import redis
 from redis import asyncio as aioredis
-from typing import Optional
+
 from app.core.config import get_settings
 
 settings = get_settings()
 
-redis_client: Optional[redis.Redis] = None
-async_redis_client: Optional[aioredis.Redis] = None
+redis_client: redis.Redis | None = None
+async_redis_client: aioredis.Redis | None = None
 
 
 def get_redis_client() -> redis.Redis:

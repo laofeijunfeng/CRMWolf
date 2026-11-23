@@ -1,5 +1,6 @@
+
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+
 from app.schemas.user import UserResponse
 
 
@@ -10,15 +11,15 @@ class SendCodeRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """注册请求（验证码方式）"""
+    """注册请求\uff08验证码方式\uff09"""
     email: EmailStr
     code: str = Field(..., min_length=6, max_length=6)
     name: str = Field(..., min_length=1, max_length=100)
-    password: Optional[str] = Field(None, min_length=6, max_length=50)
+    password: str | None = Field(None, min_length=6, max_length=50)
 
 
 class RegisterPasswordRequest(BaseModel):
-    """注册请求（密码方式）"""
+    """注册请求\uff08密码方式\uff09"""
     email: EmailStr
     name: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=6, max_length=50)
@@ -55,5 +56,5 @@ class ChangePasswordRequest(BaseModel):
         ...,
         min_length=6,
         max_length=50,
-        description="新密码（6-50位）"
+        description="新密码\uff086-50位\uff09"
     )

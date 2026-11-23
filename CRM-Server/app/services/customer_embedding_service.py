@@ -1,7 +1,7 @@
 """Embedding provider for customer intelligence evidence."""
 
-from collections.abc import Sequence
 import logging
+from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
 

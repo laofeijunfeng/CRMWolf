@@ -27,6 +27,7 @@ def test_assign_customer_projects_source_lead_public_id(monkeypatch):
     monkeypatch.setattr(customers_api.team_crud, "is_member", lambda db, team_id, user_id: True)
     monkeypatch.setattr(customers_api, "_get_customer_or_404", lambda db, customer_id, team_id: customer)
     monkeypatch.setattr(customers_api.lead_crud, "get_by_id", lambda db, lead_id, team_id: source_lead)
+    monkeypatch.setattr(customers_api, "derive_customer_statuses_for_list", lambda _db, _team_id, _customers: {})
 
     def assign_customer(db, assigned_customer, owner_id, team_id, opportunity_transfer_scope):
         assigned_customer.owner_id = owner_id

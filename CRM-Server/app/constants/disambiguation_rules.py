@@ -3,18 +3,16 @@
 
 定义哪些场景需要歧义检测，以及检测逻辑
 """
-from typing import Dict, Any, List, Optional, Callable
-from sqlalchemy.orm import Session
-
+from typing import Any
 
 # 歧义检测规则定义
-# 格式：tool_name -> 检测规则
-DISAMBIGUATION_RULES: Dict[str, Dict[str, Any]] = {
+# 格式:tool_name -> 检测规则
+DISAMBIGUATION_RULES: dict[str, dict[str, Any]] = {
     # 商机相关操作 - 当客户有多个跟进中商机时需要消解
     "win_opportunity": {
         "trigger_field": "opportunity_name",  # 触发歧义检测的字段
         "entity_type": "opportunity",          # 实体类型
-        "search_context_field": "customer_name", # 用于限定搜索范围的字段（可选）
+        "search_context_field": "customer_name", # 用于限定搜索范围的字段(可选)
         "search_by_customer": True,            # 是否在客户范围内搜索
         "filter_status": ["跟进中"],           # 只搜索这些状态的实体
         "display_fields": ["opportunity_name", "total_amount"],  # 候选列表展示字段
@@ -57,12 +55,12 @@ DISAMBIGUATION_RULES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_disambiguation_rule(tool_name: str) -> Optional[Dict[str, Any]]:
+def get_disambiguation_rule(tool_name: str) -> dict[str, Any] | None:
     """获取工具的歧义检测规则"""
     return DISAMBIGUATION_RULES.get(tool_name)
 
 
-def get_entity_display_info(entity: Any, entity_type: str, display_fields: List[str]) -> str:
+def get_entity_display_info(entity: Any, entity_type: str, display_fields: list[str]) -> str:
     """
     生成实体的展示信息
 

@@ -805,17 +805,17 @@ def test_old_confirmation_card_cannot_authorize_next_card_but_same_key_replays(c
             TaskUpdate(
                 waiting=TaskWaiting(
                     type="CONFIRMATION",
-                    field="proposal:customer_fact",
+                    field="proposal:follow_up_task_create",
                     question_id="next-card",
-                    prompt="记录事实？",
+                    prompt="创建跟进任务？",
                     confirmation_payload={
                         "kind": "proposal",
-                        "proposal_kind": "customer_fact",
+                        "proposal_kind": "follow_up_task_create",
                         "candidate": {
-                            "kind": "customer_fact",
-                            "key": "fictional-fact-key",
-                            "payload": {"content": "采用虚构系统"},
-                            "evidence_quote": "采用虚构系统",
+                            "kind": "follow_up_task_create",
+                            "key": "fictional-task-key",
+                            "payload": {"action": "发送方案"},
+                            "evidence_quote": "发送方案",
                             "activity_id": 1,
                             "customer_id": 42,
                             "source_revision": 1,
@@ -1153,22 +1153,21 @@ def test_task_waiting_validates_command_discriminators_without_changing_proposal
     from app.services.assistant.contracts import TaskWaiting
 
     candidate = {
-        "kind": "customer_fact",
-        "key": "fictional-fact-key",
-        "payload": {"content": "采用虚构系统"},
-        "evidence_quote": "采用虚构系统",
+        "kind": "follow_up_task_create",
+        "key": "fictional-task-key",
+        "payload": {"action": "发送方案"},
+        "evidence_quote": "发送方案",
         "activity_id": 1,
         "customer_id": 42,
         "source_revision": 1,
-        "prior_fact_version": None,
         "action_id": "fictional-action",
     }
-    payload = {"kind": "proposal", "proposal_kind": "customer_fact", "candidate": candidate}
+    payload = {"kind": "proposal", "proposal_kind": "follow_up_task_create", "candidate": candidate}
     values = {
         "type": "CONFIRMATION",
-        "field": "proposal:customer_fact",
-        "question_id": "q-fact",
-        "prompt": "写入事实？",
+        "field": "proposal:follow_up_task_create",
+        "question_id": "q-follow-up",
+        "prompt": "创建跟进任务？",
         "confirmation_payload": payload,
     }
     waiting = TaskWaiting.model_validate(values)

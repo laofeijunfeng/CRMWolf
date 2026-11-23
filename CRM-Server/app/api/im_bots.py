@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services.im_feishu import FeishuBotEventError, feishu_bot_service
 
-
 router = APIRouter(prefix="/v1/im", tags=["IM机器人"])
 
 

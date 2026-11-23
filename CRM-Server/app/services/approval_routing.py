@@ -1,8 +1,8 @@
-"""审批人员解析与节点流转（CRM-152）。
+"""审批人员解析与节点流转\uff08CRM-152\uff09。
 
-提交时把流程节点冻结为快照 ``Approval.nodes_snapshot``：
+提交时把流程节点冻结为快照 ``Approval.nodes_snapshot``\uff1a
 ``[{node_id, node_name, node_code, node_type, user_ids}]``。之后的流转、权限、待我审批、
-通知都只读快照与 ``crm_approval_participants``，不再受流程或角色后续变更影响。
+通知都只读快照与 ``crm_approval_participants``\uff0c不再受流程或角色后续变更影响。
 """
 
 from collections.abc import Iterable
@@ -36,7 +36,7 @@ def _role_members(db: Session, role_codes: Iterable[str], team_id: int) -> dict[
 
 
 def resolve_node_user_ids(db: Session, node: ApprovalNode, team_id: int) -> list[int]:
-    """整角色成员 ∪ 仍持有所选角色的指定成员（Q3：离开角色的指定成员不再有效）。"""
+    """整角色成员 \u222a 仍持有所选角色的指定成员\uff08Q3\uff1a离开角色的指定成员不再有效\uff09。"""
     roles = list(node.approver_roles or [])
     users = list(node.approver_users or [])
     members = _role_members(db, roles + [u.get("role") for u in users], team_id)
@@ -51,13 +51,13 @@ def resolve_node_user_ids(db: Session, node: ApprovalNode, team_id: int) -> list
 
 
 def build_snapshot(db: Session, nodes: list[ApprovalNode], team_id: int) -> list[dict[str, Any]]:
-    """冻结节点与审批人；任何审批节点无人可批时拒绝提交。"""
+    """冻结节点与审批人\uff1b任何审批节点无人可批时拒绝提交。"""
     snapshot: list[dict[str, Any]] = []
     for index, node in enumerate(sorted(nodes, key=lambda n: n.node_order), start=1):
         node_type = node.node_type or NODE_TYPE_APPROVAL
         user_ids = resolve_node_user_ids(db, node, team_id)
         if node_type == NODE_TYPE_APPROVAL and not user_ids:
-            raise ValueError(f"第 {index} 个节点没有审批人，请联系管理员")
+            raise ValueError(f"第 {index} 个节点没有审批人\uff0c请联系管理员")
         snapshot.append({
             "node_id": node.id,
             "node_name": node.node_name,
@@ -66,7 +66,7 @@ def build_snapshot(db: Session, nodes: list[ApprovalNode], team_id: int) -> list
             "user_ids": user_ids,
         })
     if not any(item["node_type"] == NODE_TYPE_APPROVAL for item in snapshot):
-        raise ValueError("审批流程未配置审批节点，请联系管理员")
+        raise ValueError("审批流程未配置审批节点\uff0c请联系管理员")
     return snapshot
 
 
@@ -116,8 +116,8 @@ def clear_approvers(db: Session, approval: Approval) -> None:
 
 
 def enter_next(db: Session, approval: Approval, start_index: int | None = None) -> EnterResult:
-    """从 start_index（默认当前节点之后）向后流转：抄送节点写入抄送人后直接跳过，
-    停在下一个审批节点并替换 APPROVER 参与人；没有后续审批节点则返回 finished。"""
+    """从 start_index\uff08默认当前节点之后\uff09向后流转\uff1a抄送节点写入抄送人后直接跳过\uff0c
+    停在下一个审批节点并替换 APPROVER 参与人\uff1b没有后续审批节点则返回 finished。"""
     snapshot = _snapshot(approval)
     index = _snapshot_index(approval) + 1 if start_index is None else start_index
     clear_approvers(db, approval)

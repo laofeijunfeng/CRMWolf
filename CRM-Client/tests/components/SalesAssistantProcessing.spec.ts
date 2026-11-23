@@ -1,13 +1,33 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import { confirmation, drive, field, makeTask, message, mocks, prepared, reply, show, view } from './assistantChatHarness'
 import SalesAssistantChat from '@/components/sales-assistant/SalesAssistantChat.vue'
+import AgentUIMessage from '@/components/agent-ui/AgentUIMessage.vue'
+import type { AssistantTurn, StageEvent } from '@/api/assistant'
+import type { ConversationView } from '@/schemas/assistant-contracts'
 
-async function send(wrapper: ReturnType<typeof mount>, text = '今天客户沟通'): Promise<void> {
+async function send(wrapper: VueWrapper, text = '今天客户沟通'): Promise<void> {
   await wrapper.find('textarea').setValue(text)
   await wrapper.find('textarea').trigger('keydown.enter', { key: 'Enter' })
   await flushPromises()
+}
+
+const button = (wrapper: VueWrapper, label: string) =>
+  wrapper.findAll('button').find((item) => item.text() === label)
+
+const stageRow = (wrapper: VueWrapper, label: string) =>
+  wrapper.findAll('span').find((item) => item.text() === label)?.element.parentElement
+
+const expectContextFailureWhileJudging = (wrapper: VueWrapper): void => {
+  const context = stageRow(wrapper, '正在读取客户记录')
+  expect(context?.classList.contains('text-destructive')).toBe(true)
+  expect(context?.textContent).toContain('失败')
+  expect(context?.textContent).not.toContain('进行中')
+  expect(context?.classList.contains('text-success')).toBe(false)
+  expect(context?.textContent).not.toMatch(/91 分|1\.2s/)
+  expect(stageRow(wrapper, '正在比对未完成任务')?.textContent).toContain('进行中')
 }
 
 describe('durable processing and recovery in a continuous conversation', () => {
@@ -149,6 +169,58 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(mocks.choice).not.toHaveBeenCalled()
   })
 
+  it.each(['event', 'task'] as const)('does not reprocess when its fresh turn GET reports unknown via %s', async (source) => {
+    const offered = makeTask({ reprocess_turn_id: 'atn_one' })
+    show(view({ focused_task: offered }))
+    mocks.turn.mockResolvedValue({
+      turn_id: 'atn_one', status: 'FAILED', lease_version: 2, reprocess_allowed: true,
+      task: { ...offered, version: 2, reconciliation_required: source === 'task' },
+      events: source === 'event'
+        ? [{ seq: 1, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '结果待核对' } }]
+        : []
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(button(wrapper, '重新处理')).toBeDefined()
+    await button(wrapper, '重新处理')?.trigger('click')
+    await flushPromises()
+    expect(mocks.turn).toHaveBeenCalledWith('ast_one', 'atn_one', 0)
+    expect(mocks.retry).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(button(wrapper, '重新处理')).toBeUndefined()
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not retry an old turn after a concurrent conversation GET changes focus', async () => {
+    const old = makeTask({ reprocess_turn_id: 'atn_one' })
+    const next = makeTask({ public_id: 'ast_next', waiting: field() })
+    show(view({ version: 1, focused_task: old }))
+    let resolveConversation: ((value: ConversationView) => void) | undefined
+    let resolveTurn: ((value: AssistantTurn) => void) | undefined
+    mocks.get.mockImplementationOnce(() => new Promise<ConversationView>((resolve) => { resolveConversation = resolve }))
+    mocks.turn.mockImplementationOnce(() => new Promise<AssistantTurn>((resolve) => { resolveTurn = resolve }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await button(wrapper, '刷新状态')?.trigger('click')
+    await button(wrapper, '重新处理')?.trigger('click')
+    expect(mocks.get).toHaveBeenCalledTimes(1)
+    expect(mocks.turn).toHaveBeenCalledWith('ast_one', 'atn_one', 0)
+    resolveConversation?.(view({ version: 2, focused_task: next, messages: [message('next', '新沟通等待客户', next)] }))
+    await flushPromises()
+    resolveTurn?.({
+      turn_id: 'atn_one', status: 'FAILED', lease_version: 2, reprocess_allowed: true, task: old,
+      events: [{ seq: 1, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '旧沟通的未知结果' } }]
+    })
+    await flushPromises()
+    expect(mocks.retry).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('新沟通等待客户')
+    expect(wrapper.text()).not.toContain('旧沟通的未知结果')
+    expect(wrapper.get('textarea').element.disabled).toBe(false)
+    wrapper.unmount()
+  })
+
   it('hides reprocess when the organize failure is not retryable', async () => {
     const failure = '内容已保存，但整理未完成，尚未写入客户活动'
     const finished = makeTask({ reprocess_turn_id: null })
@@ -230,12 +302,12 @@ describe('durable processing and recovery in a continuous conversation', () => {
     wrapper.unmount()
   })
 
-  it('follows a successor turn discovered from a completed original turn using GET only', async () => {
+  it.each(['SUCCEEDED', 'RUNNING'] as const)('follows a successor when the original turn GET reports %s', async (status) => {
     const current = makeTask({ processing_turn_id: 'atn_original', processing_turn_status: 'RUNNING' })
     const next = makeTask({ processing_turn_id: 'atn_next', processing_turn_status: 'RUNNING' })
     show(view({ focused_task: current }))
     mocks.get.mockResolvedValue(view({ focused_task: next }))
-    mocks.turn.mockResolvedValueOnce({ turn_id: 'atn_original', status: 'SUCCEEDED', events: [], task: next })
+    mocks.turn.mockResolvedValueOnce({ turn_id: 'atn_original', status, events: [], task: status === 'SUCCEEDED' ? next : current })
       .mockResolvedValue({ turn_id: 'atn_next', status: 'RUNNING', events: [], task: next })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
@@ -417,7 +489,11 @@ describe('local process card after an authoritative result', () => {
     show(view({ focused_task: current, messages: [message('one', '确认？', current)] }))
     mocks.command.mockResolvedValue(reply(view({ focused_task: current, messages: [message('one', '确认？', current)] }), prepared(current, 'confirm')))
     let finish: (() => void) | undefined
-    drive(async () => { await new Promise<void>((resolve) => { finish = resolve }) })
+    drive(async (handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'write', phase: 'start', seq: 2 })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
@@ -534,7 +610,11 @@ describe('local process card after an authoritative result', () => {
       focused_task: current,
       messages: [{ ...message('failure', failure, current), outcome: 'failure' as const }]
     }))
-    drive((handlers) => handlers.onError({ code: 'UPSTREAM_TIMEOUT', retryable: true, message: failure }))
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'structure', phase: 'start', seq: 2 })
+      handlers.onError({ code: 'UPSTREAM_TIMEOUT', retryable: true, message: failure, stage: 'structure', seq: 3 })
+    })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper)
@@ -559,7 +639,11 @@ describe('local process card after an authoritative result', () => {
       ui: resultEnvelope([{ id: 'b_notice_1', type: 'notice', tone: 'warning', title: '结果待核对', text: notice }])
     }
     mocks.get.mockResolvedValue(view({ version: 4, focused_task: current, messages: [message('user', '确认', null, 'user'), unknown] }))
-    drive((handlers) => handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: notice }))
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'write', phase: 'start', seq: 2 })
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: notice, stage: 'write', seq: 3 })
+    })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
@@ -570,6 +654,169 @@ describe('local process card after an authoritative result', () => {
     expect(wrapper.text()).not.toContain('已更新')
     expect(wrapper.text()).not.toContain('本次跟进已写入')
     expect(wrapper.text()).not.toContain('重新写入')
+    wrapper.unmount()
+  })
+
+  it('keeps an unknown write reconciliation-only after the conversation read fails', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    mocks.get.mockRejectedValueOnce(new Error('read unavailable')).mockResolvedValue(initial)
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: '结果待核对', seq: 2 })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && !button.element.disabled)).toHaveLength(0)
+    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
+    expect(refresh).toBeDefined()
+    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', events: [], task: current })
+    await refresh?.trigger('click')
+    await flushPromises()
+    expect(mocks.turn).toHaveBeenCalledWith(current.public_id, 'atn_one', 2)
+    expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && !button.element.disabled)).toHaveLength(0)
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('fences the write when the terminal unknown result arrives by turn readback', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    mocks.get.mockResolvedValue(initial)
+    drive((handlers) => handlers.onAccepted('atn_one', 1))
+    mocks.turn.mockResolvedValue({
+      turn_id: 'atn_one', status: 'FAILED', task: current,
+      events: [{ seq: 2, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '结果待核对' } }]
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && button.attributes('disabled') === undefined)).toHaveLength(0)
+    expect(wrapper.findAll('button').some((button) => button.text() === '刷新状态')).toBe(true)
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('keeps an unknown result read-only when the current wait is suppressed', async () => {
+    const current = makeTask({ waiting: confirmation() })
+    const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
+    show(initial)
+    mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
+    const suppressed = { ...current, waiting: null, reconciliation_required: true }
+    mocks.get.mockResolvedValue(view({ version: 4, focused_task: suppressed }))
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: '结果待核对', seq: 2 })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', events: [], task: suppressed })
+    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
+    expect(refresh).toBeDefined()
+    await refresh?.trigger('click')
+    await flushPromises()
+    expect(mocks.turn).toHaveBeenCalledWith(current.public_id, 'atn_one', 2)
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('releases a null-wait local fence only for an explicitly reconciled newer signed wait', async () => {
+    const current = makeTask({ version: 2 })
+    const unknown = {
+      ...message('unknown', '结果待核对', current),
+      outcome: 'failure' as const,
+      ui: resultEnvelope([{ id: 'b_unknown', type: 'notice', tone: 'warning', title: '结果待核对', text: '不要重复提交' }])
+    }
+    const snapshot = (focused: typeof current) => view({
+      version: focused.version + 10, focused_task: focused, has_pending_request: true,
+      messages: [unknown, message('wait', '当前指令', focused)]
+    })
+    show(view({ version: 1, focused_task: current }))
+    mocks.text.mockResolvedValue(reply(view({ version: 2, focused_task: current }), prepared(current)))
+    mocks.get.mockResolvedValue(snapshot({ ...current, reconciliation_required: false }))
+    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', events: [], task: current })
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: '结果待核对', seq: 2 })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper)
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+
+    const refreshWith = async (focused: typeof current): Promise<void> => {
+      mocks.get.mockResolvedValue(snapshot(focused))
+      expect(button(wrapper, '刷新状态')).toBeDefined()
+      await button(wrapper, '刷新状态')?.trigger('click')
+      await flushPromises()
+    }
+    await refreshWith({ ...current, reconciliation_required: false, waiting: field({ expected_version: 2 }) })
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    await refreshWith({ ...current, version: 3, reconciliation_required: false })
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    await refreshWith({ ...current, version: 3, reconciliation_required: false, waiting: field({ action_id: null, expected_version: 3 }) })
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    await refreshWith({ ...current, version: 4, reconciliation_required: true, waiting: field({ action_id: 'fresh', expected_version: 4 }) })
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+
+    await refreshWith({ ...current, version: 5, reconciliation_required: false, waiting: field({ action_id: 'fresh', expected_version: 5 }) })
+    expect(wrapper.text()).toContain('结果待核对')
+    expect(wrapper.get('textarea').element.disabled).toBe(false)
+    expect(button(wrapper, '重试同步')).toBeUndefined()
+    expect(mocks.resume).not.toHaveBeenCalled()
+    expect(mocks.turn).toHaveBeenCalledWith('ast_one', 'atn_one', 2)
+    expect(mocks.text).toHaveBeenCalledTimes(1)
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(mocks.retry).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('rejects a Root retry action emitted while the focused task requires reconciliation', async () => {
+    const retryAction = { type: 'retry' as const, action_id: 'retry:root', label: '重试' }
+    const root = {
+      ...message('root:reply', '模型服务响应超时'), outcome: 'failure' as const,
+      ui: { ...resultEnvelope([{ id: 'b_error', type: 'error', code: 'UPSTREAM_TIMEOUT', title: '模型服务响应超时', message: '未接受输入', retryable: true }]),
+        state: 'failed' as const, suggested_actions: [retryAction] }
+    }
+    show(view({ focused_task: makeTask({ reconciliation_required: true }), messages: [root] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    wrapper.getComponent(AgentUIMessage).vm.$emit('action', retryAction.action_id)
+    expect(mocks.retryEntry).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('restores a read-only reconciliation fence on reload and clears it for a new current action', async () => {
+    const current = { ...makeTask({ waiting: null }), reconciliation_required: true }
+    const failure = { ...message('old', '结果待核对', current), outcome: 'failure' as const }
+    show(view({ focused_task: current, messages: [failure] }))
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
+    expect(refresh).toBeDefined()
+    const resolved = { ...current, version: 2, waiting: field({ action_id: 'next', expected_version: 2 }), reconciliation_required: false }
+    mocks.get.mockResolvedValue(view({ version: 2, focused_task: resolved, messages: [failure] }))
+    await refresh?.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('textarea').element.disabled).toBe(false)
+    expect(mocks.command).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -589,21 +836,98 @@ describe('local process card after an authoritative result', () => {
     wrapper.unmount()
   })
 
-  it('drops the previous process card when the conversation moves to another item', async () => {
+  it('keeps a failed live context row failed while judging continues', async () => {
+    const current = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ focused_task: current }), prepared(current)))
+    let finish: (() => void) | undefined
+    drive(async (handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'context', phase: 'done', ms: 1200, score: 91 })
+      handlers.onStage({ stage: 'context', phase: 'start' })
+      handlers.onStage({ stage: 'context', phase: 'failed' })
+      handlers.onStage({ stage: 'judge', phase: 'start' })
+      handlers.onStage({ stage: 'context', phase: 'future' as StageEvent['phase'] })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    try {
+      await flushPromises()
+      await send(wrapper)
+      expectContextFailureWhileJudging(wrapper)
+      expect(wrapper.text()).toContain('处理中')
+    } finally {
+      wrapper.unmount()
+      finish?.()
+    }
+  })
+
+  it('replays a failed context stage from GET without turning an unknown phase into success', async () => {
+    const current = makeTask({ processing_turn_id: 'atn_one', processing_turn_status: 'RUNNING' })
+    show(view({ focused_task: current }))
+    mocks.turn.mockResolvedValue({
+      turn_id: 'atn_one', status: 'RUNNING', lease_version: 1, reprocess_allowed: false, task: current,
+      events: [
+        { seq: 1, event: 'stage', data: { stage: 'context', phase: 'start' } },
+        { seq: 2, event: 'stage', data: { stage: 'context', phase: 'failed' } },
+        { seq: 3, event: 'stage', data: { stage: 'judge', phase: 'start' } },
+        { seq: 4, event: 'stage', data: { stage: 'context', phase: 'future', ms: 1200, score: 91 } },
+        { seq: 5, event: 'stage', data: { stage: 'propose', phase: 'future' } }
+      ]
+    })
+    const wrapper = mount(SalesAssistantChat)
+    try {
+      await flushPromises()
+      expectContextFailureWhileJudging(wrapper)
+      expect(stageRow(wrapper, '正在生成后续建议')).toBeUndefined()
+      expect(wrapper.text()).toContain('处理中')
+      expect(mocks.retry).not.toHaveBeenCalled()
+      expect(mocks.stream).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('can submit on a new focus while the old unknown commit remains in history', async () => {
     const current = makeTask({ waiting: confirmation() })
     const initial = view({ version: 3, focused_task: current, messages: [message('one', '确认？', current)] })
     show(initial)
     mocks.command.mockResolvedValue(reply(initial, prepared(current, 'confirm')))
     const next = makeTask({ public_id: 'ast_new', version: 2, waiting: field({ action_id: 'new-action', expected_version: 2 }) })
-    mocks.get.mockResolvedValue(view({ version: 5, focused_task: next, messages: [message('new', '新沟通等待客户', next)] }))
-    drive((handlers) => { handlers.onStage({ stage: 'write', phase: 'start' }) })
+    const unknown = {
+      ...message('old-result', '结果待核对', current), outcome: 'failure' as const,
+      ui: resultEnvelope([{ id: 'b_old_unknown', type: 'notice', tone: 'warning', title: '结果待核对', text: '不要重复提交' }])
+    }
+    const nextView = view({ version: 5, focused_task: next, messages: [unknown, message('new', '新沟通等待客户', next)] })
+    mocks.get.mockResolvedValue(nextView)
+    drive((handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'write', phase: 'start', seq: 2 })
+      handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, stage: 'write', message: '结果待核对', seq: 3 })
+    })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('新沟通等待客户')
+    expect(wrapper.text()).toContain('结果待核对')
     expect(wrapper.text()).not.toContain('执行过程')
     expect(wrapper.text()).not.toContain('原始内容已保存')
+    expect(wrapper.get('textarea').element.disabled).toBe(false)
+
+    const result = { ...next, version: 3, waiting: null }
+    mocks.text.mockResolvedValue(reply(nextView, { ...prepared(next), turn_id: 'atn_new' }))
+    mocks.get.mockResolvedValue(view({ ...nextView, version: 6, focused_task: result }))
+    drive((handlers) => {
+      handlers.onAccepted('atn_new', 1)
+      handlers.onWaiting({ task: result, message: '已处理新沟通', seq: 2 })
+    })
+    await send(wrapper, '继续这条新沟通')
+    expect(mocks.text).toHaveBeenCalledWith(expect.objectContaining({ text: '继续这条新沟通', expected_version: 5 }))
+    expect(mocks.stream).toHaveBeenCalledTimes(2)
+    expect(mocks.stream).toHaveBeenLastCalledWith('ast_new', expect.objectContaining({ kind: 'text' }), expect.any(Object))
+    expect(mocks.command).toHaveBeenCalledTimes(1)
+    expect(mocks.resume).not.toHaveBeenCalled()
+    expect(mocks.retry).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })

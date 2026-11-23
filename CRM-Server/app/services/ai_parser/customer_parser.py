@@ -1,5 +1,5 @@
 """客户 AI 解析器。"""
-from typing import Any, Dict
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -21,40 +21,39 @@ from app.services.ai_parser.constants import COMPANY_SCALE_ENUM_MAP
 from app.services.customer_ai_confirmed_write_service import customer_ai_confirmed_write_service
 from app.utils.time import business_now
 
-
-# 系统提示词（针对客户创建定制）
+# 系统提示词(针对客户创建定制)
 PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息解析助手。
 
 【当前日期】
 今天是 {current_date}
 
-你的任务是从用户的自然语言描述中提取客户信息，并分离出额外信息用于跟进记录。
+你的任务是从用户的自然语言描述中提取客户信息\uff0c并分离出额外信息用于跟进记录。
 
 ## 需要提取的字段
 
-**必填字段**：
-- account_name: 客户公司名称（必填）
-- city: 所在城市（必填）
-- contact_name: 主联系人姓名（必填）
-- contact_phone: 主联系人电话（11位手机号，必填）
-- contact_position: 主联系人职务（必填）
-- contact_gender: 主联系人性别（必填，男返回 "1"，女返回 "2"）
+**必填字段**\uff1a
+- account_name: 客户公司名称\uff08必填\uff09
+- city: 所在城市\uff08必填\uff09
+- contact_name: 主联系人姓名\uff08必填\uff09
+- contact_phone: 主联系人电话\uff0811位手机号\uff0c必填\uff09
+- contact_position: 主联系人职务\uff08必填\uff09
+- contact_gender: 主联系人性别\uff08必填\uff0c男返回 "1"\uff0c女返回 "2"\uff09
 
-**可选字段**：
+**可选字段**\uff1a
 - contact_email: 主联系人邮箱
 - company_scale: 公司规模
 - source: 客户来源
-- product: 意向产品名称。只能输出当前团队启用产品名称之一，未明确或无法唯一匹配时返回 null，禁止猜测：
+- product: 意向产品名称。只能输出当前团队启用产品名称之一\uff0c未明确或无法唯一匹配时返回 null\uff0c禁止猜测\uff1a
 {product_enum_block}
 ## 客户来源枚举值
 
-只能输出当前团队启用的获客来源名称之一，禁止发明新来源，禁止输出“线索转化”：
+只能输出当前团队启用的获客来源名称之一\uff0c禁止发明新来源\uff0c禁止输出“线索转化”\uff1a
 {source_enum_block}
-用户未明确来源时输出“{default_source_name}”，不要追问来源。
+用户未明确来源时输出“{default_source_name}”\uff0c不要追问来源。
 
 ## 缺失字段
 
-以下字段缺失时必须放入 missing_fields：
+以下字段缺失时必须放入 missing_fields\uff1a
 - account_name
 - city
 - contact_name
@@ -64,35 +63,36 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
 
 ## 公司规模枚举值
 
-用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等，你需要智能匹配：
+用户可能说"大概500人"、"几百人"、"几十人"、"10~29人"等\uff0c你需要智能匹配\uff1a
 - "1-50人": 人数在50人以下
 - "51-200人": 人数在51-200人之间
 - "201-500人": 人数在201-500人之间
 - "501-1000人": 人数在501-1000人之间
 - "1000人以上": 人数超过1000人
 
-**纯数字区间是人数规模**："10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间，
-是公司人数区间的常见写法，不是日期。按区间落在上述哪个枚举段就输出哪个（如 "10~29" →
-"1-50人"，"100~199" → "51-200人"）。区间跨两个枚举段时，按区间的**上限**归段，
-如 "800~1200" → "1000人以上"、"300-400" → "201-500人"，不要反复权衡。
+**纯数字区间是人数规模**\uff1a"10~29"、"100-199"、"15到40"这类用 ~、-、到 连接的数字区间\uff0c
+是公司人数区间的常见写法\uff0c不是日期。按区间落在上述哪个枚举段就输出哪个\uff08如 "10~29" →
+"1-50人"\uff0c"100~199" → "51-200人"\uff09。区间跨两个枚举段时\uff0c按区间的**上限**归段\uff0c
+如 "800~1200" → "1000人以上"、"300-400" → "201-500人"\uff0c不要反复权衡。
 
-如果用户未提及公司规模，返回 null。
+如果用户未提及公司规模\uff0c返回 null。
 
 ## 行业识别
 
-用户描述中如果包含行业关键词（如"互联网公司"、"金融"、"制造业"等），提取为 industry_hint 字段。
-如果无法识别，返回 null。
+用户描述中如果包含行业关键词\uff08如"互联网公司"、"金融"、"制造业"等\uff09\uff0c提取为 industry_hint 字段。
+如果无法识别\uff0c返回 null。
 
 ## 额外信息识别
 
-用户描述中不属于上述字段的额外信息需要提取出来，分为三部分：
-- **content**: 跟进内容（业务需求、意向产品、备注等，排除"下一步计划"）
-- **next_action**: 下一步动作/计划（识别"下一步"、"接下来"、"计划"等表述）
-- **next_follow_time**: 下次跟进时间（识别时间表达，**输出原始表述**，如"下周三"、"三天后"。注意：不要硬编码年份，年份由后续解析器基于当前日期 {current_date} 自动计算）
+用户描述中不属于上述字段的额外信息需要提取出来\uff0c分为三部分\uff1a
+- **content**: 跟进内容\uff08业务需求、意向产品、备注等\uff0c排除"下一步计划"\uff09
+- **next_action**: 下一步动作/计划\uff08识别"下一步"、"接下来"、"计划"等表述\uff09
+- **next_follow_time**: 下次跟进时间\uff08识别时间表达\uff0c**输出原始表述**\uff0c如"下周三"、"三天后"。注意\uff1a不要硬编码年份\uff0c年份由后续解析器基于当前\
+日期 {current_date} 自动计算\uff09
 
 ## 输出格式
 
-你必须输出严格的 JSON 格式：
+你必须输出严格的 JSON 格式\uff1a
 ```json
 {
   "customer_info": {
@@ -108,11 +108,11 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
     "contact_name": "提取的联系人姓名",
     "contact_phone": "提取的11位手机号",
     "contact_position": "职务或 null",
-    "contact_gender": "1或2，无法识别则返回null",
+    "contact_gender": "1或2\uff0c无法识别则返回null",
     "contact_email": "邮箱或 null"
   },
   "follow_up_info": {
-    "content": "跟进内容（除下一步计划外的信息）",
+    "content": "跟进内容\uff08除下一步计划外的信息\uff09",
     "next_action": "下一步动作",
     "next_follow_time": "下次跟进时间原始表述或null"
   },
@@ -122,9 +122,10 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
 
 ## 示例
 
-用户输入："阿里巴巴，杭州，张三 13800138000 技术总监 zhangsan@alibaba.com，大概500人，网上注册来的，互联网公司，想做电商系统，下周三再联系"
+用户输入\uff1a"阿里巴巴\uff0c杭州\uff0c张三 13800138000 技术总监 zhangsan@alibaba.com\uff0c大概500人\uff0c网上注册来的\uff0c互联网公司\uff0c\
+想做电商系统\uff0c下周三再联系"
 
-正确输出：
+正确输出\uff1a
 ```json
 {
   "customer_info": {
@@ -148,7 +149,8 @@ PARSE_CUSTOMER_SYSTEM_PROMPT_TEMPLATE = """你是 CRMWolf 系统的客户信息�
     "next_action": null,
     "next_follow_time": "下周三"
   },
-  "thinking_process": "识别客户阿里巴巴、城市杭州、规模500人匹配501-1000人、来源网上注册匹配线上注册、行业互联网。联系人张三、电话、职务技术总监、邮箱。额外信息中'想做电商系统'为跟进内容，'下周三'为下次跟进时间"
+  "thinking_process": "识别客户阿里巴巴、城市杭州、规模500人匹配501-1000人、来源网上注册匹配线上注册、行业互联网。联系人张三、电话、职务技术总监、邮箱。额外信息中'想做电商系统'为跟进内\
+容\uff0c'下周三'为下次跟进时间"
 }
 ```"""
 
@@ -173,12 +175,12 @@ class CustomerAIParser(EntityAIParserBase):
             .replace("{product_enum_block}", product_enum_block)
         )
 
-    def get_enum_maps(self) -> Dict[str, Dict[str, Any]]:
+    def get_enum_maps(self) -> dict[str, dict[str, Any]]:
         return {
             "scale": COMPANY_SCALE_ENUM_MAP
         }
 
-    def parse_ai_response(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_ai_response(self, parsed: dict[str, Any]) -> dict[str, Any]:
         """
         解析 AI 响应
 
@@ -226,7 +228,7 @@ class CustomerAIParser(EntityAIParserBase):
 
         return result
 
-    def attach_catalog_ids(self, result: Dict[str, Any], db: Session, team_id: int) -> None:
+    def attach_catalog_ids(self, result: dict[str, Any], db: Session, team_id: int) -> None:
         """把 AI 输出的来源/产品名称解析成表单可用的 public_id。"""
         customer_info = result.get("customer_info", {})
         raw_source = str(customer_info.get("source") or "").strip()
@@ -250,7 +252,7 @@ class CustomerAIParser(EntityAIParserBase):
     async def create_entity(
         self,
         db: Session,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> Any:
@@ -258,7 +260,7 @@ class CustomerAIParser(EntityAIParserBase):
         创建客户 + 主联系人
 
         Args:
-            parsed_data: 前端预览确认后的数据（包含 customer_info + contact_info）
+            parsed_data: 前端预览确认后的数据\uff08包含 customer_info + contact_info\uff09
         """
         customer_info = parsed_data.get("customer_info", {})
         contact_info = parsed_data.get("contact_info", {})
@@ -267,7 +269,7 @@ class CustomerAIParser(EntityAIParserBase):
         company_scale_str = customer_info.get("company_scale")
         company_scale_value = None
         if company_scale_str:
-            # Customer 使用字符串存储，直接使用显示值
+            # Customer 使用字符串存储,直接使用显示值
             company_scale_value = company_scale_str
 
 
@@ -301,7 +303,7 @@ class CustomerAIParser(EntityAIParserBase):
             is_primary=True
         )
 
-        contact = contact_crud.create(
+        contact_crud.create(
             db=db,
             obj_in=contact_create,
             customer_id=customer.id,
@@ -316,14 +318,14 @@ class CustomerAIParser(EntityAIParserBase):
         self,
         db: Session,
         entity: Any,
-        parsed_data: Dict[str, Any],
+        parsed_data: dict[str, Any],
         user_id: str,
         team_id: int
     ) -> None:
-        """创建客户后的额外操作：创建客户活动（如果有）。"""
+        """创建客户后的额外操作\uff1a创建客户活动\uff08如果有\uff09。"""
         customer = entity
 
-        # 创建客户活动（如果有）
+        # 创建客户活动(如果有)
         follow_up_info = parsed_data.get("follow_up_info")
         if follow_up_info and (follow_up_info.get("content") or follow_up_info.get("next_action")):
             from app.services.customer_activity_kinds import CustomerActivityKind
@@ -332,7 +334,7 @@ class CustomerAIParser(EntityAIParserBase):
             if follow_up_info.get("content"):
                 source_content_parts.append(str(follow_up_info["content"]))
             if follow_up_info.get("next_action"):
-                source_content_parts.append(f"下一步：{follow_up_info['next_action']}")
+                source_content_parts.append(f"下一步\uff1a{follow_up_info['next_action']}")
 
             await customer_ai_confirmed_write_service.create_customer_activity(
                 db=db,
