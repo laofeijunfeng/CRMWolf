@@ -36,7 +36,7 @@ const retry = async (): Promise<void> => {
       :loading="retrying"
       @click="retry"
     >
-      {{ retrying ? '同步中…' : '重试权限同步' }}
+      重试权限同步
     </Button>
   </Alert>
 </template>

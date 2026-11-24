@@ -360,7 +360,7 @@ function handleCancel(): void {
             取消
           </Button>
           <Button type="submit" form="contact-form" :loading="submitting">
-            {{ submitting ? '提交中...' : '确定' }}
+            确定
           </Button>
         </DialogFooter>
     </DialogContent>

@@ -27,4 +27,4 @@
 - 使用语义元素和关联标签；键盘顺序与视觉和任务顺序一致。
 - 出错后将焦点移动到首个需要处理的字段。
 
-所有禁用态统一使用 `--disabled-opacity` 与 `cursor: not-allowed`（`.disabled-state`），不得另设不透明度。禁用项必须有禁用语义与可辨识视觉，且不接受操作。减少动效要求见[动效与性能](motion-performance.md)。
+所有禁用态统一使用 `--disabled-opacity` 与 `cursor: not-allowed`（`.disabled-state`），不得另设不透明度。处理中不是禁用，按[按钮](../components/button.md#状态与反馈)保持原底色。禁用项必须有禁用语义与可辨识视觉，且不接受操作。减少动效要求见[动效与性能](motion-performance.md)。

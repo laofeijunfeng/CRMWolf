@@ -100,7 +100,7 @@ function close(open: boolean): void {
                 class="chart-bucket-dialog__load-more focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 @click="emit('load-more')"
               >
-                <slot name="load-more-label">{{ loading ? '正在读取…' : '查看更多' }}</slot>
+                <slot name="load-more-label">查看更多</slot>
               </Button>
             </div>
           </template>

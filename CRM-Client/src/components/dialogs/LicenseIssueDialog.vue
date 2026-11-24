@@ -213,7 +213,7 @@ const onSubmit = handleSubmit(async (formValues) => {
           class="w-full sm:w-auto"
           @click="onSubmit"
         >
-          {{ submitting ? '提交中...' : '确认发放' }}
+          确认发放
         </Button>
       </DialogFooter>
     </DialogContent>

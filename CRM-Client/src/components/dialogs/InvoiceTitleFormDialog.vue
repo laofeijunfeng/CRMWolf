@@ -285,7 +285,7 @@ function handleOpenChange(open: boolean): void {
             取消
           </Button>
           <Button type="submit" form="invoice-title-form" :loading="submitting">
-            {{ submitting ? '提交中...' : '确定' }}
+            确定
           </Button>
         </DialogFooter>
     </DialogContent>

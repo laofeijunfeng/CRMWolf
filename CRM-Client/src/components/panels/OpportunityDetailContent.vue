@@ -705,7 +705,6 @@ watch(approvalPhase, phase => {
       :opportunity="opportunity"
       :dialog-title="editMode === 'resubmit' ? '修改并重新提交商机' : undefined"
       :submit-text="editMode === 'resubmit' ? '重新提交审批' : undefined"
-      :submitting-text="editMode === 'resubmit' ? '提交中...' : undefined"
       :success-message="editMode === 'resubmit' ? null : undefined"
       customer-locked
       @update:open="handleEditDialogOpenChange"

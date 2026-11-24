@@ -787,7 +787,7 @@ function handleCancel(): void {
             取消
           </Button>
           <Button type="submit" form="contract-form" :loading="submitting" :disabled="!canSubmit">
-            {{ submitting ? '提交中...' : '确定' }}
+            确定
           </Button>
         </DialogFooter>
     </DialogContent>

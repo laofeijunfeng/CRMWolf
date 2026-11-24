@@ -299,7 +299,7 @@ watch(hasAccess, (ok) => {
     >
       <template #action>
         <Button :loading="retryingPermissions" @click="retryPermissions">
-          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+          重试权限同步
         </Button>
       </template>
     </ErrorState>
@@ -419,7 +419,7 @@ watch(hasAccess, (ok) => {
             </div>
             <div class="flex justify-end">
               <Button type="button" class="min-h-11" :loading="verifyingAssistant" :disabled="!configInfo || hasUnsavedChanges || saving || testing" @click="handleAssistantVerification">
-                {{ verifyingAssistant ? '验证中…' : '验证销售助手能力' }}
+                验证销售助手能力
               </Button>
             </div>
             <div v-if="assistantResult" role="status" aria-live="polite">
@@ -449,7 +449,7 @@ watch(hasAccess, (ok) => {
             />
             <div class="flex justify-end">
               <Button type="button" variant="outline" class="min-h-11" :loading="testing" :disabled="hasUnsavedChanges || saving || verifyingAssistant" @click="handleTest">
-                {{ testing ? '测试中...' : '测试连接' }}
+                测试连接
               </Button>
             </div>
             <div v-if="streamingContent || testResult" class="space-y-4">

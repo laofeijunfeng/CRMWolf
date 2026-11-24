@@ -15,7 +15,7 @@
 
 - 不得出现颜色、圆角、高度、字号的字面值；间距只用 `$space-*` 档，字号只用 `text-body` 与 `text-caption`，行高与字号成对。
 - 不得向 Button 传入颜色类改写变体，不得用 `:deep()` 覆盖基元外观。
-- 焦点只用全局 `*:focus-visible`；禁用只用 `--disabled-opacity`；处理中用 Button 的 `loading`，文字与宽度不变。
+- 焦点只用全局 `*:focus-visible`；禁用只用 `--disabled-opacity`；处理中用 Button 的 `loading`，标签保留为可读名称、宽度不变。
 - 状态色只通过 `data-tone` 与 `text-tone-*` 使用；透明度修饰符必须落在 opacity 刻度内，见[组件门禁](../governance/component-lifecycle.md#组件门禁)。
 
 ## 页面与消息骨架

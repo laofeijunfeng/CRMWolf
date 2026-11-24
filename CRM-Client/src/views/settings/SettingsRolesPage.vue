@@ -361,7 +361,7 @@ watch(() => route.query['action'], (action) => {
     >
       <template #action>
         <Button :loading="retryingPermissions" @click="retryPermissions">
-          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+          重试权限同步
         </Button>
       </template>
     </ErrorState>
@@ -485,7 +485,7 @@ watch(() => route.query['action'], (action) => {
             取消
           </Button>
           <Button type="submit" :loading="roleDialogSubmitting">
-            {{ roleDialogSubmitting ? '提交中...' : '确定' }}
+            确定
           </Button>
         </DialogFooter>
       </form>
@@ -593,7 +593,7 @@ watch(() => route.query['action'], (action) => {
           :loading="permissionsDialogSubmitting"
           @click="handleSavePermissions"
         >
-          {{ permissionsDialogSubmitting ? '保存中...' : '保存' }}
+          保存
         </Button>
       </DialogFooter>
     </DialogContent>

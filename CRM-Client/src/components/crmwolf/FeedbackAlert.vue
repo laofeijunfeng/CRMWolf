@@ -50,7 +50,7 @@ const feedbackAlertClass = computed(() => [
     <AlertTitle>{{ error.title }}</AlertTitle>
     <AlertDescription as-child>
       <div class="feedback-alert__body">
-        <p>{{ error.description }}</p>
+        <p v-if="error.description">{{ error.description }}</p>
         <p v-if="error.outcomeUnknown" class="feedback-alert__outcome">
           请先确认记录状态，避免重复提交。
         </p>

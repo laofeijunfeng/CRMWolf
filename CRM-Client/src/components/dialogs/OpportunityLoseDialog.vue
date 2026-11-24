@@ -253,7 +253,7 @@ const onSubmit = handleSubmit(async (formValues) => {
           :disabled="submitting || loading || loadError !== null || closeGuardPending"
           :loading="submitting"
         >
-          {{ submitting ? '提交中...' : '确认标记输单' }}
+          确认标记输单
         </Button>
       </DialogFooter>
     </DialogContent>

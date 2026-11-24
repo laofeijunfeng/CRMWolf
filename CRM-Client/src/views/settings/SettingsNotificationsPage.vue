@@ -227,7 +227,7 @@ watch(hasAccess, (ok) => {
     >
       <template #action>
         <Button :loading="retryingPermissions" @click="retryPermissions">
-          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+          重试权限同步
         </Button>
       </template>
     </ErrorState>
@@ -313,7 +313,7 @@ watch(hasAccess, (ok) => {
 
             <div class="flex justify-end">
               <Button type="button" variant="outline" :disabled="!canTest" :loading="testing" @click="handleTest">
-                {{ testing ? '发送中...' : '发送测试' }}
+                发送测试
               </Button>
             </div>
 

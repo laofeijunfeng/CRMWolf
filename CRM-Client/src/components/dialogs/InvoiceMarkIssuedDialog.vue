@@ -262,7 +262,7 @@ onUnmounted(() => {
           class="w-full sm:w-auto"
           @click="onSubmit"
         >
-          {{ submitting ? '提交中...' : '确认开票' }}
+          确认开票
         </Button>
       </DialogFooter>
     </DialogContent>

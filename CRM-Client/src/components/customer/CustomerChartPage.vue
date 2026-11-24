@@ -239,7 +239,7 @@ function openRank(card: CustomerChartCard | null, datum: RankDatum): void {
         @retry="() => { if (selectedCard && selectedBucket) emit('view-bucket', selectedCard, selectedBucket) }"
         @load-more="emit('load-more')"
       >
-        <template #load-more-label>{{ bucketLoading ? '正在读取…' : bucketError || '查看更多' }}</template>
+        <template #load-more-label>{{ bucketError || '查看更多' }}</template>
         <template #items>
           <div class="customer-chart-dialog-list">
             <button v-for="customer in bucketCustomers?.customers ?? []" :key="customer.id" type="button" @click="emit('open-customer', customer.id)">

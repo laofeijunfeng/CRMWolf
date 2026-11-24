@@ -431,7 +431,7 @@ watch([hasAccess, teamId], (): void => {
     >
       <template #action>
         <Button :loading="retryingPermissions" @click="retryPermissions">
-          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+          重试权限同步
         </Button>
       </template>
     </ErrorState>
@@ -614,7 +614,7 @@ watch([hasAccess, teamId], (): void => {
       <DialogFooter>
         <Button variant="outline" @click="roleDialogOpen = false">取消</Button>
         <Button :loading="saveRolesLoading" @click="handleSaveRoles">
-          {{ saveRolesLoading ? '保存中...' : '保存' }}
+          保存
         </Button>
       </DialogFooter>
     </DialogContent>
@@ -644,7 +644,7 @@ watch([hasAccess, teamId], (): void => {
         <DialogFooter>
           <Button type="button" variant="outline" @click="updateNameDialogOpen = false">取消</Button>
           <Button type="submit" :loading="updateNameSubmitting">
-            {{ updateNameSubmitting ? '保存中...' : '保存' }}
+            保存
           </Button>
         </DialogFooter>
       </form>
@@ -693,7 +693,7 @@ watch([hasAccess, teamId], (): void => {
         <DialogFooter>
           <Button type="button" variant="outline" @click="resetPasswordDialogOpen = false">取消</Button>
           <Button type="submit" :loading="resetPasswordSubmitting">
-            {{ resetPasswordSubmitting ? '提交中...' : '确认重置' }}
+            确认重置
           </Button>
         </DialogFooter>
       </form>

@@ -29,13 +29,17 @@ const isDisabled = (): boolean => props.disabled || props.loading
 <template>
   <Primitive
     v-bind="omitUndefined({ as, asChild })"
-    :class="cn(buttonVariants({ variant, size }), props.class)"
+    :class="cn(buttonVariants({ variant, size }), props.loading && 'relative disabled:opacity-100', props.class)"
     :disabled="isDisabled() ? true : undefined"
     :aria-disabled="isDisabled() ? 'true' : undefined"
     :aria-busy="props.loading ? 'true' : undefined"
   >
-    <LoaderCircle v-if="props.loading" class="button-loading-icon animate-spin" aria-hidden="true" />
-    <slot />
+    <!-- 处理中不是禁用：保留原底色；内容透明占位，宽度与可读名称不变，旋转图标叠在中央 -->
+    <template v-if="props.loading">
+      <span class="inline-flex items-center gap-control opacity-0"><slot /></span>
+      <LoaderCircle class="button-loading-icon absolute inset-0 m-auto animate-spin" aria-hidden="true" />
+    </template>
+    <slot v-else />
   </Primitive>
 </template>
 

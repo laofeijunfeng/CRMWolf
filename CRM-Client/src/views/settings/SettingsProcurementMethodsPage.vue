@@ -360,7 +360,7 @@ watch([hasAccess, teamId], (): void => {
     >
       <template #action>
         <Button :loading="retryingPermissions" @click="retryPermissions">
-          {{ retryingPermissions ? '同步中…' : '重试权限同步' }}
+          重试权限同步
         </Button>
       </template>
     </ErrorState>
@@ -494,7 +494,7 @@ watch([hasAccess, teamId], (): void => {
             取消
           </Button>
           <Button type="submit" :loading="dialogSubmitting">
-            {{ dialogSubmitting ? '提交中...' : '确定' }}
+            确定
           </Button>
         </DialogFooter>
       </form>

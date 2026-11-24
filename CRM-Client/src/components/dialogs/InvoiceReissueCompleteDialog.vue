@@ -257,7 +257,7 @@ onUnmounted(() => {
           class="w-full sm:w-auto"
           @click="submit"
         >
-          {{ submitting ? '提交中...' : '确认完成重开' }}
+          确认完成重开
         </Button>
       </DialogFooter>
     </DialogContent>

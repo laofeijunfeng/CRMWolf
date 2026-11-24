@@ -1079,7 +1079,7 @@ function handleCancel(): void { closeGuard.requestClose() }
           取消
         </Button>
         <Button type="submit" form="customer-form" :loading="submitting" :disabled="writeSubmitting || optionsLoading || optionsError">
-          {{ submitting ? '提交中...' : (mode === 'create' ? '创建客户' : '保存客户资料') }}
+          {{ mode === 'create' ? '创建客户' : '保存客户资料' }}
         </Button>
       </DialogFooter>
     </DialogContent>

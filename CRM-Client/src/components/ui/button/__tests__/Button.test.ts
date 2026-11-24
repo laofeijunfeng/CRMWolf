@@ -17,6 +17,17 @@ describe('Button loading state', () => {
     expect(button.find('svg').exists()).toBe(true)
   })
 
+  it('stays fully opaque while loading instead of looking disabled', () => {
+    const wrapper = mount(Button, {
+      props: { loading: true },
+      slots: { default: '保存' },
+    })
+
+    const classes = wrapper.get('button').classes()
+    expect(classes).toContain('disabled:opacity-100')
+    expect(classes).not.toContain('disabled:opacity-disabled')
+  })
+
   it('does not add a disabled attribute for an idle button', () => {
     const wrapper = mount(Button, {
       slots: { default: '继续' },

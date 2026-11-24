@@ -44,4 +44,13 @@ describe('FeedbackAlert', () => {
 
     wrapper.unmount()
   })
+
+  it('omits the description paragraph when only a title is given', () => {
+    const wrapper = mount(FeedbackAlert, {
+      props: { error: { title: '对话同步失败', description: '' } },
+    })
+
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.findAll('.feedback-alert__body p')).toHaveLength(0)
+  })
 })

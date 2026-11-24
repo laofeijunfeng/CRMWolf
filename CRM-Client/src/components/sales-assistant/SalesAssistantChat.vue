@@ -57,6 +57,7 @@ const emit = defineEmits<{
 const entries = shallowRef<ChatEntry[]>(shallowReactive([]))
 const inputText = ref('')
 const submitting = ref(false)
+const sendingText = ref(false)
 const heldActionIds = ref<ReadonlySet<string>>(new Set())
 const holdAction = (actionId: string | null): void => {
   if (actionId === null || heldActionIds.value.has(actionId)) return
@@ -759,17 +760,22 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
 const submitText = async (): Promise<void> => {
   const text = inputText.value.trim()
   if (!text || loadingConversation.value || busy.value || conversation.value === null || conversation.value.pending_choice !== null) return
-  if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
+  sendingText.value = true
+  try {
+    if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
+      explicitNone.value = false
+      await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
+      return
+    }
     explicitNone.value = false
-    await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
-    return
+    unacceptedText.value = text
+    const request = { text, client_request_id: crypto.randomUUID(), expected_version: conversation.value.version }
+    pushEntry('user', text)
+    inputText.value = ''
+    await dispatchConversation(() => assistantApi.conversationText(request), text)
+  } finally {
+    sendingText.value = false
   }
-  explicitNone.value = false
-  unacceptedText.value = text
-  const request = { text, client_request_id: crypto.randomUUID(), expected_version: conversation.value.version }
-  pushEntry('user', text)
-  inputText.value = ''
-  await dispatchConversation(() => assistantApi.conversationText(request), text)
 }
 
 const clearCardNotice = (key: string): void => {
@@ -1541,7 +1547,6 @@ void loadConversation()
       class="mb-space-2"
       density="compact"
       :error="historyErrorFeedback"
-      @retry="reconciliationRequired || pendingConversation ? retryPending() : conversation ? refreshConversation() : loadConversation()"
     >
       <template #actions>
         <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="reconciliationRequired || pendingConversation ? retryPending() : conversation ? refreshConversation() : loadConversation()">重试同步</Button>
@@ -1652,7 +1657,7 @@ void loadConversation()
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X aria-hidden="true" />算了
           </Button>
-          <Button aria-label="发送" :disabled="loadingConversation || busy || resultPending || conversation?.pending_choice != null" @click="submitText">
+          <Button aria-label="发送" :loading="sendingText" :disabled="loadingConversation || busy || conversation?.pending_choice != null" @click="submitText">
             <ArrowUp aria-hidden="true" />发送
           </Button>
         </div>

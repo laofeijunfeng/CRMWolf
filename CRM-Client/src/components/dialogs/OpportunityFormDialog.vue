@@ -65,7 +65,6 @@ interface Props {
   open: boolean
   dialogTitle?: string | undefined
   submitText?: string | undefined
-  submittingText?: string | undefined
   successMessage?: string | null | undefined
 }
 
@@ -82,7 +81,6 @@ const props = withDefaults(defineProps<Props>(), {
   open: false,
   dialogTitle: undefined,
   submitText: undefined,
-  submittingText: undefined,
   successMessage: undefined
 })
 const emit = defineEmits<Emits>()
@@ -138,7 +136,6 @@ const closeGuard = useDialogCloseGuard({
 const isEdit = computed(() => !!props.opportunity)
 const resolvedDialogTitle = computed(() => props.dialogTitle ?? (isEdit.value ? '编辑商机' : '新建商机'))
 const resolvedSubmitText = computed(() => props.submitText ?? '确定')
-const resolvedSubmittingText = computed(() => props.submittingText ?? '提交中...')
 const resolvedSuccessMessage = computed(() => {
   if (props.successMessage !== undefined) return props.successMessage
   return isEdit.value ? '商机更新成功' : '商机创建成功'
@@ -740,7 +737,7 @@ function handleCancel(): void {
             取消
           </Button>
           <Button type="submit" form="opportunity-form" :loading="submitting">
-            {{ submitting ? resolvedSubmittingText : resolvedSubmitText }}
+            {{ resolvedSubmitText }}
           </Button>
         </DialogFooter>
     </DialogContent>
