@@ -1068,33 +1068,6 @@ const submit = async (): Promise<void> => {
         {{ confirmationDisabledHint }}
       </div>
 
-      <div
-        v-if="cancelReasons.length > 0"
-        v-show="cancelReasonsOpen"
-        :id="`${block.id}-cancel-reasons`"
-        ref="cancelReasonsRef"
-        class="grid gap-space-2 rounded-md border border-border p-space-3"
-        role="group"
-        :aria-labelledby="`${block.id}-cancel-reasons-label`"
-      >
-        <p :id="`${block.id}-cancel-reasons-label`" class="m-0 text-body font-medium text-foreground">取消原因（选填）</p>
-        <div class="flex flex-wrap gap-space-2">
-          <Button
-            v-for="reason in cancelReasons"
-            :key="reason.value"
-            type="button"
-            variant="outline"
-            :disabled="controlsDisabled || reason.disabled"
-            @click="submitConfirmationCancel(reason.value)"
-          >
-            {{ reason.label }}
-          </Button>
-          <Button type="button" variant="ghost" :disabled="controlsDisabled" @click="submitConfirmationCancel()">
-            跳过原因
-          </Button>
-        </div>
-      </div>
-
       <template v-if="showsChoiceOptions && block.interaction_type === 'choice'">
         <div v-if="block.hint" class="grid gap-space-1" data-agent-ui-kind-hint>
           <p class="m-0 flex flex-wrap items-center gap-space-2 text-caption text-muted-foreground">
@@ -1258,6 +1231,33 @@ const submit = async (): Promise<void> => {
           />
         </template>
       </form>
+    </div>
+
+    <div
+      v-if="cancelReasons.length > 0"
+      v-show="cancelReasonsOpen"
+      :id="`${block.id}-cancel-reasons`"
+      ref="cancelReasonsRef"
+      class="grid gap-space-2 border-t border-border px-space-4 py-space-3"
+      role="group"
+      :aria-labelledby="`${block.id}-cancel-reasons-label`"
+    >
+      <p :id="`${block.id}-cancel-reasons-label`" class="m-0 text-body font-medium text-foreground">取消原因（选填）</p>
+      <div class="flex flex-wrap gap-space-2">
+        <Button
+          v-for="reason in cancelReasons"
+          :key="reason.value"
+          type="button"
+          variant="outline"
+          :disabled="controlsDisabled || reason.disabled"
+          @click="submitConfirmationCancel(reason.value)"
+        >
+          {{ reason.label }}
+        </Button>
+        <Button type="button" variant="ghost" :disabled="controlsDisabled" @click="submitConfirmationCancel()">
+          跳过原因
+        </Button>
+      </div>
     </div>
 
     <footer

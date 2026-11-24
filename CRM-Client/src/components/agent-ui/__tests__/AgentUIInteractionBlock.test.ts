@@ -447,6 +447,34 @@ it.each([
   expect(wrapper.emitted('submit')).toEqual([['act_confirm', expected]])
 })
 
+it('opens cancel reasons on the activity confirmation card without cancelling', async () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_activity_reasons', type: 'interaction', interaction_id: 'ix_activity_reasons',
+    interaction_type: 'confirmation', business_action: 'confirm_activity_write',
+    state: 'ACTIVE', prompt: '确认后写入这条客户活动？', fields: [],
+    facts: [{ key: 'customer', label: '客户', value: '通力电梯', group: 'write' }],
+    options: [{ value: 'confirm', label: '确认写入' }, { value: 'cancel', label: '取消' }],
+    selection_mode: 'single', submit_on_select: true, submit_action_id: 'act_1',
+    secondary_action: { value: 'request_edit', label: '修改内容' },
+    cancel_reasons: [{ value: 'wrong_customer', label: '客户不对' }],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block }, attachTo: document.body })
+  const cancel = wrapper.findAll('button').find(button => button.text() === '取消')
+  if (cancel === undefined) throw new Error('Expected the cancel button')
+  const panel = () => wrapper.find('[role="group"][id$="-cancel-reasons"]')
+
+  expect(cancel.attributes('aria-expanded')).toBe('false')
+  expect(panel().isVisible()).toBe(false)
+  await cancel.trigger('click')
+  expect(wrapper.emitted('submit')).toBeUndefined()
+  expect(cancel.attributes('aria-expanded')).toBe('true')
+  expect(panel().isVisible()).toBe(true)
+
+  await panel().findAll('button').find(button => button.text() === '客户不对')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_1', { choice: 'cancel', reason: 'wrong_customer' }]])
+  wrapper.unmount()
+})
+
 it('filters dependent form options and clears a prior value on parent change', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'opportunity', type: 'interaction', interaction_id: 'opportunity',
