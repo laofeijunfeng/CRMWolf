@@ -143,10 +143,6 @@ const dispositionStateLabels = {
 const cancelReasons = computed(() => props.block.cancel_reasons ?? [])
 const confirmationEdit = computed(() => props.block.secondary_action?.value === 'request_edit' ? props.block.secondary_action : null)
 const weeklySuppression = computed(() => props.block.secondary_action?.value === 'suppress_week' ? props.block.secondary_action : null)
-const evidenceOpenId = ref<string | null>(null)
-const toggleEvidence = (itemId: string): void => {
-  evidenceOpenId.value = evidenceOpenId.value === itemId ? null : itemId
-}
 const compactCompletionOption = computed(() => props.block.options[0])
 const compactCompletionSucceeded = computed(() => props.block.state === 'SUBMITTED')
 
@@ -684,28 +680,27 @@ const submit = async (): Promise<void> => {
             />
         </div>
         <p v-if="item.owner_line" class="m-0 text-caption text-muted-foreground">{{ item.owner_line }}</p>
-        <div v-if="item.related && item.evidence_quote" class="grid gap-space-1">
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            class="justify-start px-0"
-            :aria-expanded="evidenceOpenId === item.item_id"
-            :aria-controls="`${block.id}-evidence-${item.item_id}`"
-            data-agent-ui-related-toggle
-            @click="toggleEvidence(item.item_id)"
-          >
-            查看关联信息
-          </Button>
-          <p
-            v-if="evidenceOpenId === item.item_id"
-            :id="`${block.id}-evidence-${item.item_id}`"
-            class="m-0 rounded-md bg-muted px-space-3 py-space-2 text-body text-foreground"
-            data-agent-ui-related-line
-          >
-            本次跟进：“{{ item.evidence_quote }}”
-          </p>
-        </div>
+        <Collapsible v-if="item.related && item.evidence_quote" v-slot="{ open }" class="grid gap-space-1">
+          <CollapsibleTrigger as-child>
+            <button
+              type="button"
+              class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-full items-center gap-space-2 text-left text-caption text-muted-foreground transition-colors hover:text-foreground"
+              data-agent-ui-related-toggle
+            >
+              <ChevronRight
+                class="size-icon-sm shrink-0 transition-transform"
+                :class="open ? 'rotate-90' : ''"
+                aria-hidden="true"
+              />
+              查看关联信息
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <p class="m-0 rounded-md bg-muted px-space-3 py-space-2 text-body text-foreground" data-agent-ui-related-line>
+              本次跟进：“{{ item.evidence_quote }}”
+            </p>
+          </CollapsibleContent>
+        </Collapsible>
         <p v-if="item.result_message" class="m-0 text-caption text-foreground">{{ item.result_message }}</p>
         </li>
       </ol>

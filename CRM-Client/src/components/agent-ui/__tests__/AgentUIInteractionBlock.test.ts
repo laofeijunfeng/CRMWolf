@@ -370,8 +370,8 @@ const dispositionBlock = {
     disposition_items: Array.from({ length: 12 }, (_, index) => ({
       item_id: `task_${index + 1}`,
       title: `跟进任务 ${index + 1}`,
-      related: index === 0,
-      evidence_quote: index === 0 ? '已和林女士核对采购安排' : null,
+      related: index === 0 || index === 2,
+      evidence_quote: index === 0 ? '已和林女士核对采购安排' : index === 2 ? '林女士确认下周到场演示' : null,
       state: 'waiting',
     })),
     submit_label: '提交',
@@ -389,12 +389,15 @@ it('discloses the remaining disposition rows and submits selected IDs in server 
   expect(checkboxes[1]?.element.disabled).toBe(true)
   expect(wrapper.get('details').text()).toContain('跟进任务 12')
   const toggles = wrapper.findAll('[data-agent-ui-related-toggle]')
-  expect(toggles).toHaveLength(1)
+  expect(toggles).toHaveLength(2)
   expect(wrapper.find('[data-agent-ui-related-line]').exists()).toBe(false)
   await toggles[0]?.trigger('click')
-  expect(toggles[0]?.attributes('aria-expanded')).toBe('true')
-  expect(wrapper.findAll('[data-agent-ui-related-line]')).toHaveLength(1)
-  expect(wrapper.get('[data-agent-ui-related-line]').text()).toContain('已和林女士核对采购安排')
+  await toggles[1]?.trigger('click')
+  expect(toggles.map(toggle => toggle.attributes('aria-expanded'))).toEqual(['true', 'true'])
+  expect(wrapper.findAll('[data-agent-ui-related-line]').map(line => line.text())).toEqual([
+    '本次跟进：“已和林女士核对采购安排”',
+    '本次跟进：“林女士确认下周到场演示”',
+  ])
   await checkboxes[11]?.setValue(true)
   await checkboxes[0]?.setValue(true)
   expect(wrapper.emitted('submit')).toBeUndefined()

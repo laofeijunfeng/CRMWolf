@@ -139,7 +139,7 @@
   --context-tabs-height: 36px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --assistant-column: 720px;
+  --assistant-column: 960px;
 }
 
 @media (max-width: 767px) {

@@ -1,5 +1,7 @@
 import type { VueWrapper } from '@vue/test-utils'
 import { flushPromises, mount } from '@vue/test-utils'
+import type { VNode } from 'vue'
+import { defineComponent, h, KeepAlive, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as AssistantApiModule from '@/api/assistant'
 
@@ -85,5 +87,33 @@ describe('SalesAssistant send button loading', () => {
 
     resolvePage(view(null))
     await flushPromises()
+  })
+
+  it('scrolls back to the latest message when the kept-alive page is shown again, without refetching', async () => {
+    openConversation.mockResolvedValue(view(null))
+    const scrollTo = vi.fn()
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo')
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scrollTo })
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 0 })
+    const shown = ref(true)
+    const Host = defineComponent(() => (): VNode => h(KeepAlive, null, shown.value ? [h(SalesAssistantChat)] : []))
+    try {
+      mounted = mount(Host)
+      await flushPromises()
+      scrollTo.mockClear()
+
+      shown.value = false
+      await nextTick()
+      shown.value = true
+      await flushPromises()
+
+      expect(scrollTo).toHaveBeenCalled()
+      expect(openConversation).toHaveBeenCalledTimes(1)
+    }
+    finally {
+      vi.unstubAllGlobals()
+      if (original) Object.defineProperty(HTMLElement.prototype, 'scrollTo', original)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
+    }
   })
 })

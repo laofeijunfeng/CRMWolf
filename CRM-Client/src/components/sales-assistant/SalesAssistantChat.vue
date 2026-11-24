@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, shallowReactive, shallowRef } from 'vue'
+import { computed, nextTick, onActivated, onUnmounted, ref, shallowReactive, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
@@ -184,6 +184,8 @@ const scrollToBottom = (waitForLayout = false): void => {
     requestAnimationFrame(() => requestAnimationFrame(scroll))
   })
 }
+// 页面在 KeepAlive 里：切走时滚动容器被重置到顶部，回来时只重新定位到最新一条，不重新请求、不改任何状态。
+onActivated(() => scrollToBottom(true))
 
 
 interface LiveStage {
