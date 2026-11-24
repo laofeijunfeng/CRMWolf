@@ -18,14 +18,15 @@ const button = (wrapper: VueWrapper, label: string) =>
   wrapper.findAll('button').find((item) => item.text() === label)
 
 const stageRow = (wrapper: VueWrapper, label: string) =>
-  wrapper.findAll('span').find((item) => item.text() === label)?.element.parentElement
+  wrapper.findAll('span').find((item) => item.text() === label)?.element.closest('li')
 
 const expectContextFailureWhileJudging = (wrapper: VueWrapper): void => {
   const context = stageRow(wrapper, '正在读取客户记录')
-  expect(context?.classList.contains('text-destructive')).toBe(true)
+  // Status color is carried by the design-system tone token, never by a raw text class.
+  expect(context?.querySelector('.text-tone-danger') !== null).toBe(true)
   expect(context?.textContent).toContain('失败')
   expect(context?.textContent).not.toContain('进行中')
-  expect(context?.classList.contains('text-success')).toBe(false)
+  expect(context?.querySelector('.text-tone-success')).toBeNull()
   expect(context?.textContent).not.toMatch(/91 分|1\.2s/)
   expect(stageRow(wrapper, '正在比对未完成任务')?.textContent).toContain('进行中')
 }
