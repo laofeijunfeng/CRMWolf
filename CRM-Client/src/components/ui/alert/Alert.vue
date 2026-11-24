@@ -4,6 +4,7 @@
  * Alert message container
  */
 import { cva, type VariantProps } from 'class-variance-authority'
+import { computed } from 'vue'
 import { cn } from '@/lib/utils'
 
 const alertVariants = cva(
@@ -12,10 +13,10 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: 'bg-card text-foreground',
-        destructive: 'border-danger/30 text-danger [&>svg]:text-danger',
-        success: 'border-success/30 text-success [&>svg]:text-success',
-        warning: 'border-warning/30 text-warning [&>svg]:text-warning',
-        info: 'border-info/30 text-info [&>svg]:text-info',
+        destructive: 'border-danger/30',
+        success: 'border-success/30',
+        warning: 'border-warning/30',
+        info: 'border-info/30',
       },
     },
     defaultVariants: {
@@ -34,11 +35,16 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   variant: 'default',
 })
+
+// 语气浅底与文字统一由 [data-tone] 派生，与 AgentUIBanner、StatusBadge 同一条规则。
+// 该规则不在 @layer 内，调用方传入 bg-*、text-* 会被它覆盖；需要不同底色时改 variant。
+const tone = computed(() => props.variant === 'destructive' ? 'danger' : props.variant === 'default' ? undefined : props.variant)
 </script>
 
 <template>
   <div
     role="alert"
+    :data-tone="tone"
     :class="cn(alertVariants({ variant: props.variant }), props.class)"
   >
     <slot />

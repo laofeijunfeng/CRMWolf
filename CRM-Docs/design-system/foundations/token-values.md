@@ -35,7 +35,7 @@
 | `--status-neutral` | `= --muted-foreground` | 中性状态。 |
 | `text-tone-success` / `warning` / `danger` / `info` | 基色 `--status-fg-mix` + 前景 | 状态色的图标与文字（Tailwind `text-tone-*`）；不得直接用基色做图标或文字。 |
 | `--status-bg-mix` | `12%` | 语气浅底 = 基色 12%。 |
-| `--status-fg-mix` | `72%` | 语气文字 = 基色 72% + 前景 28%。 |
+| `--status-fg-mix` | `62%` | 语气文字 = 基色 62% + 前景 38%；在 `--card`、`--background` 与自身浅底上 ≥4.5:1，`--muted` 与悬停水洗上更低，不在其上放语气文字。 |
 | `--chart-1…5` | brand / success / warning / info / muted-foreground | 图表系列。 |
 
 状态只通过 `data-tone="success|warning|danger|info"` 或缺省中性使用，不使用 Tailwind 色阶类。

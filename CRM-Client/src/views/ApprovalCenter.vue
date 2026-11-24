@@ -300,7 +300,7 @@
         <!-- Content -->
         <ScrollArea class="flex-1 min-h-0 min-w-0">
           <div class="p-6 flex flex-col gap-6 min-h-[400px]">
-            <Alert v-if="activeTab === 'cc' && selectedApproval" variant="info" class="order-first border bg-info/10" data-testid="approval-cc-readonly-notice">
+            <Alert v-if="activeTab === 'cc' && selectedApproval" variant="info" class="order-first border" data-testid="approval-cc-readonly-notice">
               <AlertDescription>你是被抄送人，仅可查看</AlertDescription>
             </Alert>
             <!-- 申请主体信息：优先展示审批关联业务内容 -->

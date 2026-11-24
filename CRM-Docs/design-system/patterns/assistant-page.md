@@ -46,7 +46,7 @@
 
 - 提示、错误、动作结果与卡片内的失败、过期提示统一为反馈条 `AgentUIBanner`：由 `data-tone` 提供底色与语气色，左侧 `--icon-sm` 语气图标，标题用前景色，说明用 `--muted-foreground`，动作在右侧。
 - 反馈条不描边，圆角 `--radius-md`。
-- 语义色的文字与图标只用 `text-tone-*`，不得直接使用状态基色；success、warning、info 的派生色只给图标，不给文字，见[对比度](../foundations/accessibility.md#对比度)。
+- 语义色的文字与图标只用 `text-tone-*`，不得直接使用状态基色；语气文字在自身底色上须满足[对比度](../foundations/accessibility.md#对比度)，`ui/alert` 派生的反馈条同样适用。
 
 ## 数据块
 

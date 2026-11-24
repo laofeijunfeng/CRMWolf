@@ -49,7 +49,7 @@
   --status-info: 207.4 100% 57.5%; /* #269cff */
   --status-neutral: var(--muted-foreground);
   --status-bg-mix: 12%;
-  --status-fg-mix: 72%;
+  --status-fg-mix: 62%; /* 语气文字在 card/background 与自身 12% 浅底上 ≥4.5:1；success 最低（页面底色上 4.59），muted 与水洗底色上更低，不放语气文字 */
   --destructive: var(--status-danger);
   --destructive-foreground: 0 0% 100%;
 
