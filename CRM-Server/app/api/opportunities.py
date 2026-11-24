@@ -64,6 +64,7 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
+from app.services.opportunity_loss_side_effect_service import enqueue_opportunity_loss_side_effects
 from app.services.opportunity_presenter import (
     customer_public_id as _customer_public_id,
 )
@@ -75,6 +76,9 @@ from app.services.opportunity_presenter import (
 )
 from app.services.opportunity_presenter import (
     opportunity_detail_response,
+)
+from app.services.opportunity_presenter import (
+    opportunity_loss_unavailable_reason as _opportunity_loss_unavailable_reason,
 )
 from app.services.opportunity_presenter import (
     opportunity_product_payload as _opportunity_product_payload,
@@ -423,7 +427,8 @@ def get_opportunities(
                 "id": str(owner_info[0]),
                 "name": owner_info[1],
                 "avatar_url": owner_info[2]
-            } if owner_info else None
+            } if owner_info else None,
+            "contract_unavailable_reason": _opportunity_loss_unavailable_reason(db, opp, team_id),
         }
         opp_dict.update(_opportunity_product_payload(opp))
         
@@ -482,6 +487,16 @@ def _build_opportunity_list_responses(
             .all()
         )
         customers = {c.id: c for c in customers_list}
+    from app.models.contract import Contract
+
+    active_contract_opportunity_ids = {
+        opportunity_id
+        for (opportunity_id,) in projection_db.query(Contract.opportunity_id).filter(
+            Contract.team_id == team_id,
+            Contract.opportunity_id.in_([opp.id for opp in opportunities]),
+            Contract.deleted_at.is_(None),
+        ).distinct().all()
+    }
     product_payloads = _opportunity_product_payloads(projection_db, opportunities)
     empty_product_payload = _opportunity_product_payload(None)
 
@@ -541,6 +556,10 @@ def _build_opportunity_list_responses(
             "stage": stage,
             "stage_info": stage_info,
             "owner_info": users_info.get(str(opp.owner_id)),
+            "contract_unavailable_reason": (
+                "该商机已有合同，请先处理合同后再标记输单"
+                if opp.status == 1 and opp.id in active_contract_opportunity_ids else None
+            ),
         }
         opp_dict.update(product_payloads.get(opp.id, empty_product_payload))
         result.append(OpportunityListResponse(**opp_dict))
@@ -1200,29 +1219,11 @@ async def mark_opportunity_as_lost(
     _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
-    await _trigger_opportunity_intelligence_refresh(
+    enqueue_opportunity_loss_side_effects(
         db,
-        _build_opportunity_intelligence_change(
-            updated_opportunity,
-            change_type="updated",
-            actor_id=str(current_user.id),
-        ),
-    )
-
-    customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
-    outbound_notification_job_service.queue_committed(
-        db,
-        team_id=team_id,
-        event_type=OutboundNotificationEventType.OPPORTUNITY_LOST,
-        business_type="OPPORTUNITY",
-        business_id=int(updated_opportunity.id),
-        recipient_user_ids=[db_opportunity.owner_id],
+        updated_opportunity,
         actor_id=str(current_user.id),
-        payload_json={
-            "opportunity_name": db_opportunity.opportunity_name,
-            "customer_name": customer.account_name if customer else "",
-            "loss_reason": lose_data.loss_reason,
-        },
+        loss_reason=lose_data.loss_reason,
     )
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 

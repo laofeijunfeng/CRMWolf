@@ -128,6 +128,7 @@ export interface Opportunity {
   actual_amount?: number | null
   actual_closing_date?: string | null
   loss_reason?: string | null
+  contract_unavailable_reason?: string | null
   created_time: string
   updated_time: string
   version: number

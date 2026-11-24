@@ -154,11 +154,9 @@ def adjacent_stage(
 ProposalRejection = Literal["schema", "literal", "target", "permission"]
 
 
-def _matches_create_segment(activity: CustomerActivity, segment_id: object, quote: str) -> bool:
-    if not isinstance(segment_id, str) or not segment_id:
-        return False
+def _source_segments(activity: CustomerActivity) -> list[tuple[str, str]]:
     content_json: str | None = attrgetter("content_json")(activity)
-    source_content: str = attrgetter("source_content")(activity)
+    source_content: str = attrgetter("source_content")(activity) or ""
     try:
         content = json.loads(content_json or "{}")
     except (TypeError, ValueError):
@@ -168,9 +166,44 @@ def _matches_create_segment(activity: CustomerActivity, segment_id: object, quot
         (str(record["segment_id"]), str(record["text"]))
         for record in (records if isinstance(records, list) else [])
         if isinstance(record, dict) and record.get("segment_id") and record.get("text")
-    ] or [("seg_primary", source_content or "")]
-    matches = [text for identifier, text in segments if identifier == segment_id]
+    ]
+    return segments or [("seg_primary", source_content)]
+
+
+def _matches_create_segment(activity: CustomerActivity, segment_id: object, quote: str) -> bool:
+    if not isinstance(segment_id, str) or not segment_id:
+        return False
+    matches = [text for identifier, text in _source_segments(activity) if identifier == segment_id]
     return len(matches) == 1 and quote in matches[0]
+
+
+def _matches_current_loss_evidence(
+    activity: CustomerActivity,
+    *,
+    segment_id: object,
+    quote: str,
+    loss_reason: str,
+) -> bool:
+    if not isinstance(segment_id, str) or not segment_id:
+        return False
+    segments = _source_segments(activity)
+    matching = [
+        index for index, (identifier, text) in enumerate(segments)
+        if identifier == segment_id and quote in text
+    ]
+    if len(matching) != 1:
+        return False
+    index = matching[0]
+    if loss_reason not in segments[index][1]:
+        return False
+    later_text = "\n".join(text for _, text in segments[index + 1:])
+    if not later_text:
+        return True
+    correction_markers = (
+        "更正", "纠正", "不是", "改为", "改到", "应为", "而是",
+        "继续推进", "继续跟进", "重新推进",
+    )
+    return not any(marker in later_text for marker in correction_markers) or loss_reason in later_text
 
 
 def validate_candidate(
@@ -187,7 +220,7 @@ def validate_candidate(
             on_reject(reason)
 
     kind = candidate.get("kind")
-    if kind not in ("follow_up_task_create", "opportunity_stage", "opportunity_create"):
+    if kind not in ("follow_up_task_create", "opportunity_stage", "opportunity_create", "opportunity_lose"):
         reject("schema")
         return None
     activity = source_activity(db, task)
@@ -211,7 +244,7 @@ def validate_candidate(
     if not isinstance(payload, dict):
         reject("schema")
         return None
-    if kind == "opportunity_stage" and not candidate.get("target_public_id"):
+    if kind in {"opportunity_stage", "opportunity_lose"} and not candidate.get("target_public_id"):
         reject("schema")
         return None
     try:
@@ -390,6 +423,65 @@ def validate_candidate(
                 "customer_id": customer.id,
                 "source_revision": activity.activity_revision,
             }
+        if kind == "opportunity_lose":
+            opportunity = _opportunity(db, task, str(candidate.get("target_public_id") or ""))
+            if not opportunity or opportunity.customer_id != customer.id:
+                reject("target")
+                return None
+            from app.models.opportunity import OpportunityStatus
+            if opportunity.status != OpportunityStatus.WON.value:
+                reject("target")
+                return None
+            from app.crud.contract import contract_crud
+            if contract_crud.has_active_contract_for_opportunity(db, opportunity.id, task.team_id):
+                reject("target")
+                return None
+            if not (
+                "opportunity:lose" in codes
+                and (
+                    "opportunity:edit:all" in codes
+                    or ("opportunity:edit:own" in codes and opportunity.owner_id == str(task.user_id))
+                )
+            ):
+                reject("permission")
+                return None
+            from app.api.opportunities import _ensure_opportunity_approved
+            _ensure_opportunity_approved(db, opportunity, task.team_id)
+            loss_reason = payload.get("loss_reason")
+            if not isinstance(loss_reason, str) or not loss_reason.strip() or len(loss_reason.strip()) > 500:
+                reject("schema")
+                return None
+            segment_id = candidate.get("segment_id")
+            if not _matches_current_loss_evidence(
+                activity,
+                segment_id=segment_id,
+                quote=quote.strip(),
+                loss_reason=loss_reason.strip(),
+            ):
+                reject("literal")
+                return None
+            if "_nominated_loss_target" in candidate and candidate["_nominated_loss_target"] != (
+                activity.activity_revision, opportunity.public_id, opportunity.version,
+            ):
+                reject("target")
+                return None
+            fences = {
+                "activity_id": activity.id,
+                "customer_id": customer.id,
+                "source_revision": activity.activity_revision,
+                "prior_version": opportunity.version,
+            }
+            if "prior_version" in candidate and any(candidate.get(field) != value for field, value in fences.items()):
+                reject("target")
+                return None
+            return {
+                "kind": kind,
+                "target_public_id": opportunity.public_id,
+                "evidence_quote": quote,
+                "segment_id": segment_id,
+                "payload": {"loss_reason": loss_reason.strip(), "opportunity_name": opportunity.opportunity_name},
+                **fences,
+            }
     except (HTTPException, PermissionError):
         reject("permission")
         return None
@@ -415,12 +507,10 @@ def build_proposal_command(task: AssistantTask, proposal: ProposalData) -> Assis
         actor_id=task.user_id,
         fingerprint=fingerprint,
         expected_snapshot_id=proposal.get("prior_stage_snapshot_id")
-        if proposal["kind"] == "opportunity_stage"
-        else None,
-        expected_version=proposal.get("prior_version") if proposal["kind"] == "opportunity_stage" else None,
+        if proposal["kind"] == "opportunity_stage" else None,
+        expected_version=proposal.get("prior_version")
+        if proposal["kind"] in {"opportunity_stage", "opportunity_lose"} else None,
     )
-
-
 def opportunity_create_receipt_outcome(effect: AssistantCRMEffect | None) -> ProposalOutcome | None:
     """Project the original submission outcome from an already checked receipt."""
     if effect is None or not (effect.target_public_id or "").strip() or effect.approval_id is None:
@@ -472,7 +562,6 @@ class RealCRMProposalExecutor:
         ):
             raise rejection_error("CRM 状态已变化，不能继续执行旧提议")
         payload = proposal["payload"]
-
         if kind == "follow_up_task_create":
             from datetime import datetime, time
 
@@ -518,6 +607,38 @@ class RealCRMProposalExecutor:
                 commit=False,
             )
             return {"kind": "follow_up_task_create", "public_id": attrgetter("public_id")(row)}
+        if kind == "opportunity_lose":
+            from app.crud.opportunity import opportunity_crud
+            from app.schemas.opportunity import OpportunityLose
+
+            command = build_proposal_command(task, proposal)
+            existing = checked_effect(db, command, kind)
+            if existing is not None:
+                if existing.target_public_id != proposal["target_public_id"]:
+                    raise ValueError("商机输单命令目标不匹配")
+                return {"kind": kind, "public_id": existing.target_public_id}
+            try:
+                opportunity_crud.mark_as_lost(
+                    db, _opportunity(db, task, proposal["target_public_id"]),
+                    OpportunityLose(loss_reason=payload["loss_reason"]), str(task.user_id),
+                    assistant_command=command,
+                )
+            except ValueError as exc:
+                if str(exc) == "该商机已有合同，请先处理合同后再标记输单":
+                    raise AssistantCRMNoEffect(str(exc)) from exc
+                raise
+            from app.services.opportunity_loss_side_effect_service import enqueue_opportunity_loss_side_effects
+
+            enqueue_opportunity_loss_side_effects(
+                db,
+                _opportunity(db, task, proposal["target_public_id"]),
+                actor_id=str(task.user_id),
+                loss_reason=payload["loss_reason"],
+            )
+            effect = checked_effect(db, command, kind)
+            if effect is None or effect.target_public_id != proposal["target_public_id"]:
+                raise ValueError("商机输单命令缺少精确提交凭据")
+            return {"kind": kind, "public_id": proposal["target_public_id"]}
         if kind == "opportunity_stage":
             from app.api.opportunities import move_opportunity_stage
             from app.schemas.opportunity import OpportunityMoveToStage

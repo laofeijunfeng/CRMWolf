@@ -866,7 +866,9 @@ const getRowActions = (row: OpportunityListResponse): TableRowActionSet => ({
       resultType: 'status-changed',
       icon: XCircle,
       handler: () => handleMarkAsLost(row),
-      visible: row.status === 0 && isApprovalApproved(row)
+      disabled: row.status === 1 && (row.contract_unavailable_reason?.trim() ?? '') !== '',
+      disabledReason: row.status === 1 ? row.contract_unavailable_reason ?? undefined : undefined,
+      visible: (row.status === 0 || row.status === 1) && isApprovalApproved(row)
     },
     {
       id: 'delete',

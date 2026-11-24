@@ -288,6 +288,7 @@ class OpportunityResponse(BaseModel):
     updated_time: datetime | None = Field(None, description="最后修改时间\uff0c兼容前端字段")
     version: int = Field(..., description="版本号\uff08乐观锁\uff0c防止并发修改冲突\uff09")
     current_stage_snapshot: CurrentStageSnapshotInfo | None = Field(None, description="当前阶段快照信息")
+    contract_unavailable_reason: str | None = Field(None, description="存在未删除合同时不可标记输单的原因")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -349,7 +350,6 @@ class OpportunityListResponse(OpportunityResponse):
     stage_info: OpportunityStageInfo | None = Field(None, description="当前阶段信息\uff0c兼容旧前端字段")
     customer_name: str | None = Field(None, description="客户名称")
     owner_info: OwnerInfo | None = Field(None, description="负责人信息")
-    contract_unavailable_reason: str | None = Field(None, description="新建合同时不可选的原因。可创建时为空")
 class OpportunityChartPreview(BaseModel):
     id: str
     name: str

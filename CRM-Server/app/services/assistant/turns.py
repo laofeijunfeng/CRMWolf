@@ -1073,7 +1073,12 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             from app.services.assistant.contracts import AcceptedProposalReceipt
 
             for receipt in outcome.task.committed_json or []:
-                if receipt.get("kind") in {"follow_up_task_create", "opportunity_stage", "opportunity_create"} and (
+                if receipt.get("kind") in {
+                    "follow_up_task_create",
+                    "opportunity_stage",
+                    "opportunity_lose",
+                    "opportunity_create",
+                } and (
                     receipt.get("proposal_key") not in prior_proposal_keys
                 ):
                     data["proposal_receipt"] = AcceptedProposalReceipt.model_validate(receipt).model_dump(mode="json")

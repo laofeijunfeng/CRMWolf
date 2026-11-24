@@ -99,6 +99,7 @@ export const OpportunityApiResponseSchema = z.object({
   actual_amount: z.number().nullable().optional(),
   actual_closing_date: z.string().nullable().optional(),
   loss_reason: z.string().nullable().optional(),
+  contract_unavailable_reason: z.string().nullable().optional(),
   created_time: z.string(),
   updated_time: z.string(),
   version: z.number().int(),

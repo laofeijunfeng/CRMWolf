@@ -862,6 +862,40 @@ async def test_approval_business_rejection_settles_as_no_effect_with_its_reason(
     assert claim.result_json["status"] == "NO_EFFECT"
     assert db_session.query(Opportunity).count() == 0
 
+async def test_opportunity_loss_contract_block_settles_as_no_effect(db_session, monkeypatch, nominate):
+    from app.services.assistant import proposals
+    from app.services.assistant.crm_effects import AssistantCRMNoEffect
+
+    nominate[0].append({
+        "kind": "opportunity_lose",
+        "target_public_id": "opp_won",
+        "evidence_quote": "客户预算冻结",
+        "segment_id": "seg_loss",
+        "payload": {"loss_reason": "客户预算冻结", "opportunity_name": "赢单商机"},
+    })
+    task = _task(db_session)
+    monkeypatch.setattr(proposals, "validate_candidate", _bound_candidate)
+    offered, _, active = await offer_next_proposal(db_session, task)
+    assert active and offered.waiting_field == "proposal:opportunity_lose"
+
+    async def reject_contract(db, task, proposal):
+        raise AssistantCRMNoEffect("该商机已有合同，请先处理合同后再标记输单")
+
+    settled, message, offered_again = await settle_proposal(
+        db_session, offered, accepted=True, executor=reject_contract,
+    )
+    db_session.commit()
+
+    assert message == "该商机已有合同，请先处理合同后再标记输单"
+    assert not offered_again
+    assert settled.status == AssistantTaskStatus.COMPLETED
+    assert settled.waiting_field is None
+    assert settled.committed_json[-1]["kind"] == "refused:opportunity_lose"
+    assert isinstance(settled.committed_json[-1]["proposal_key"], str)
+    claim = db_session.query(AssistantAction).filter_by(action="proposal_command_claim").one()
+    assert claim.result_json["status"] == "NO_EFFECT"
+
+
 @pytest.mark.parametrize("kind", ["opportunity_stage", "opportunity_create"])
 async def test_success_response_without_exact_effect_stays_unknown(db_session, monkeypatch, kind, nominate):
     from app.services.assistant import proposals

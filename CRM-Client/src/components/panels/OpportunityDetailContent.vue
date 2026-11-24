@@ -115,6 +115,10 @@ const canWin = computed(() =>
 const canLose = computed(() =>
   canEditOpportunity.value && permissionStore.hasPermission('opportunity:lose')
 )
+const lossUnavailableReason = computed(() => {
+  const reason = opportunity.value?.contract_unavailable_reason
+  return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : undefined
+})
 
 const isActive = computed(() => opportunity.value?.status === 0)
 const approvalPhase = computed(() => opportunity.value?.approval_phase)
@@ -666,8 +670,11 @@ watch(approvalPhase, phase => {
         赢单
       </Button>
       <Button
-        v-if="isActive && canLose && isApprovalApproved"
+        v-if="(opportunity?.status === 0 || opportunity?.status === 1) && canLose && isApprovalApproved"
         variant="outline"
+        :disabled="lossUnavailableReason !== undefined"
+        :title="lossUnavailableReason"
+        :aria-label="lossUnavailableReason ? `输单（${lossUnavailableReason}）` : '输单'"
         @click="loseDialogOpen = true"
       >
         <XCircle class="w-4 h-4 mr-2" />

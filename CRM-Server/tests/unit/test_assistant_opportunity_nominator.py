@@ -131,6 +131,7 @@ def test_no_signal_returns_empty(monkeypatch):
 @pytest.fixture
 def stage_context():
     from app.core.database import Base
+    from app.models.contract import Contract
     from app.models.customer import Customer
     from app.models.customer_activity import CustomerActivity
     from app.models.opportunity import Opportunity
@@ -191,8 +192,8 @@ def stage_context():
         Base.metadata.create_all(
             engine,
             tables=[
-                Customer.__table__, CustomerActivity.__table__, Opportunity.__table__, ProcurementMethod.__table__,
-                ProcurementStageTemplate.__table__, OpportunityStageSnapshot.__table__,
+                Customer.__table__, CustomerActivity.__table__, Opportunity.__table__, Contract.__table__,
+                ProcurementMethod.__table__, ProcurementStageTemplate.__table__, OpportunityStageSnapshot.__table__,
             ],
         )
         with Session(engine) as db:
@@ -261,3 +262,87 @@ def test_injected_model_ids_do_not_change_the_stage_command(monkeypatch, stage_c
     assert crm_proposal_commands.validate_candidate(db, task, frozen) is None
     with pytest.raises(ValueError):
         asyncio.run(crm_proposal_commands.RealCRMProposalExecutor().execute(db, task, frozen))
+
+def test_loss_signal_is_structured_and_binds_reason(monkeypatch, stage_context):
+    from app.models.opportunity import OpportunityStatus
+    from app.services.assistant.opportunity_nominator import OpportunityNominator
+
+    db, task, activity = stage_context
+    opportunity = db.query(__import__("app.models.opportunity", fromlist=["Opportunity"]).Opportunity).one()
+    opportunity.status = OpportunityStatus.WON.value
+    activity.source_content = "客户明确表示项目已输单，原因是预算冻结"
+    activity.content_json = json.dumps({"source_records": [{"segment_id": "seg_loss", "text": activity.source_content}]})
+    transport = FakeTransport({
+        "candidates": [{"opportunity_ref": "L1", "lose": True, "reason": "预算冻结"}],
+    })
+    _patch(monkeypatch)
+    result = asyncio.run(OpportunityNominator(runtime=transport).nominate(db, task, activity))
+    assert result == [{
+        "kind": "opportunity_lose", "target_public_id": "opp_stage", "evidence_quote": "预算冻结",
+        "segment_id": "seg_loss", "payload": {"loss_reason": "预算冻结"},
+        "_nominated_loss_target": (1, "opp_stage", 4),
+    }]
+    assert json.loads(transport.calls[0]["user"])["active_opportunities"][-1] == {
+        "opportunity_ref": "L1", "name": "报销项目", "status": "WON",
+    }
+
+
+def test_loss_evidence_must_remain_in_one_current_segment():
+    from app.services.assistant.crm_proposal_commands import _matches_current_loss_evidence
+
+    activity = SimpleNamespace(
+        source_content="客户说项目已输单。预算冻结。",
+        content_json=json.dumps({
+            "source_records": [
+                {"segment_id": "seg_status", "text": "客户说项目已输单。"},
+                {"segment_id": "seg_reason", "text": "预算冻结。"},
+            ],
+        }),
+    )
+
+    assert not _matches_current_loss_evidence(
+        activity,
+        segment_id="seg_status",
+        quote="项目已输单",
+        loss_reason="预算冻结",
+    )
+
+
+def test_superseded_loss_evidence_is_rejected():
+    from app.services.assistant.crm_proposal_commands import _matches_current_loss_evidence
+
+    activity = SimpleNamespace(
+        source_content="客户说项目已输单，原因是预算冻结。客户说继续推进。",
+        content_json=json.dumps({
+            "source_records": [
+                {"segment_id": "seg_loss", "text": "客户说项目已输单，原因是预算冻结。"},
+                {"segment_id": "seg_correction", "text": "客户说继续推进。"},
+            ],
+        }),
+    )
+
+    assert not _matches_current_loss_evidence(
+        activity,
+        segment_id="seg_loss",
+        quote="项目已输单",
+        loss_reason="预算冻结",
+    )
+
+
+def test_contracted_won_opportunity_is_not_nominated_for_loss(monkeypatch, stage_context):
+    from app.crud.contract import contract_crud
+    from app.models.opportunity import Opportunity, OpportunityStatus
+    from app.services.assistant.opportunity_nominator import OpportunityNominator
+
+    db, task, activity = stage_context
+    opportunity = db.query(Opportunity).one()
+    opportunity.status = OpportunityStatus.WON.value
+    activity.source_content = "客户明确表示项目已输单，原因是预算冻结"
+    activity.content_json = json.dumps({"source_records": [{"segment_id": "seg_loss", "text": activity.source_content}]})
+    db.commit()
+    monkeypatch.setattr(contract_crud, "has_active_contract_for_opportunity", lambda *args, **kwargs: True)
+    transport = FakeTransport({"candidates": [{"opportunity_ref": "L1", "lose": True, "reason": "预算冻结"}]})
+    _patch(monkeypatch)
+
+    assert asyncio.run(OpportunityNominator(runtime=transport).nominate(db, task, activity)) == []
+    assert json.loads(transport.calls[0]["user"])["active_opportunities"] == []

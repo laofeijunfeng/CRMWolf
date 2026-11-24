@@ -484,13 +484,20 @@ class ContractCRUD:
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
 
-        if self.has_active_contract_for_opportunity(db, contract_data['opportunity_id'], team_id):
+        with db.no_autoflush:
+            opportunity = db.query(Opportunity).filter(
+                Opportunity.id == contract_data['opportunity_id'],
+                Opportunity.team_id == team_id,
+            ).populate_existing().with_for_update().one_or_none()
+        if opportunity is None:
+            raise ValueError("商机不存在")
+        if opportunity.customer_id != contract_data['customer_id']:
+            raise ValueError("商机关联的客户与合同客户不一致")
+        from app.models.opportunity import OpportunityStatus
+        if opportunity.status != OpportunityStatus.WON.value:
+            raise ValueError("只能从赢单商机创建合同")
+        if self.has_active_contract_for_opportunity(db, opportunity.id, team_id):
             raise ValueError("该商机已创建合同")
-
-        opportunity = db.query(Opportunity).filter(
-            Opportunity.id == contract_data['opportunity_id'],
-            Opportunity.team_id == team_id
-        ).first()
         customer = db.query(Customer).filter(
             Customer.id == contract_data['customer_id'],
             Customer.team_id == team_id
@@ -580,15 +587,20 @@ class ContractCRUD:
         from app.models.customer import Customer
         from app.models.opportunity import Opportunity
 
-        if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
-            raise ValueError("该商机已创建合同")
-
-        opportunity = db.query(Opportunity).filter(
-            Opportunity.id == opportunity_id,
-            Opportunity.team_id == team_id,
-        ).first()
+        with db.no_autoflush:
+            opportunity = db.query(Opportunity).filter(
+                Opportunity.id == opportunity_id,
+                Opportunity.team_id == team_id,
+            ).populate_existing().with_for_update().one_or_none()
         if not opportunity:
             raise ValueError("商机不存在")
+        from app.models.opportunity import OpportunityStatus
+        if opportunity.status != OpportunityStatus.WON.value:
+            raise ValueError("只能从赢单商机创建合同")
+        if opportunity.customer_id != customer_id:
+            raise ValueError("商机关联的客户与合同客户不一致")
+        if self.has_active_contract_for_opportunity(db, opportunity_id, team_id):
+            raise ValueError("该商机已创建合同")
         customer = db.query(Customer).filter(
             Customer.id == customer_id,
             Customer.team_id == team_id,
