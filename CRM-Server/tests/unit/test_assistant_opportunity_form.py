@@ -140,6 +140,18 @@ def test_ambiguous_original_values_are_left_empty_and_wrong_segment_is_rejected(
     )["defaults"].keys()
 
 
+def test_amount_keyword_may_come_from_preceding_clause_but_relative_date_is_not_guessed(form_context):
+    db, task, activity, candidate = form_context
+    quote = "客户同意采购 200 套，8.8 万，月底签"
+    activity.source_content = quote
+    activity.content_json = json.dumps({"source_records": [{"segment_id": "seg_1", "text": quote}]})
+    db.commit()
+    defaults = prepare_opportunity_form(db, task, {**candidate, "evidence_quote": quote})["defaults"]
+    assert defaults["total_amount"] == 88000
+    assert defaults["user_count"] == 200
+    assert "expected_closing_date" not in defaults
+
+
 def test_truncated_quote_cannot_hide_qualification_or_bind_uncommitted_text(form_context):
     db, task, activity, candidate = form_context
     quote = "客户确认采购120个账号，预算12.5万元"
@@ -206,7 +218,7 @@ def test_options_exclude_other_team_and_submission_rechecks_frozen_and_live_cata
         assert {"product_module_public_ids", "stage_id", "owner_id"} <= error.value.field_errors.keys()
 
 
-def test_cap_keeps_each_offered_product_selectable(form_context):
+def test_cap_keeps_each_offered_product_selectable_and_says_so(form_context):
     db, task, _, candidate = form_context
     db.add_all(_module(i, 1) for i in range(10, 80))
     db.commit()
@@ -215,6 +227,13 @@ def test_cap_keeps_each_offered_product_selectable(form_context):
     assert len(modules) == 50
     assert {item["product_public_id"] for item in modules} == {"prd_1", "prd_2"}
     assert "prm_79" not in {item["value"] for item in modules}
+    # A cut list must not look complete: the card says so instead of hiding the rest.
+    assert "只列出前 50 项" in spec["option_notice"]
+
+
+def test_form_inside_the_cap_has_no_truncation_notice(form_context):
+    db, task, _, candidate = form_context
+    assert prepare_opportunity_form(db, task, candidate)["option_notice"] is None
 
 
 def test_permission_revocation_makes_frozen_form_unusable(form_context):

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseAssistantTaskList, AssistantTaskViewSchema } from '@/schemas/assistant-contracts'
+import { AssistantTaskViewSchema } from '@/schemas/assistant-contracts'
 
 const task = {
   public_id: 'ast_123',
@@ -61,34 +61,26 @@ describe('assistant task committed projection', () => {
     expect(AssistantTaskViewSchema.parse({ ...task, committed: [historical] }).committed).toEqual([historical])
   })
 
-  it('keeps readable tasks when one historical refusal uses the legacy shape', () => {
+  it('accepts the legacy refusal shape without inventing a resource', () => {
     const legacy = { ...task, public_id: 'ast_legacy', committed: [{ kind: 'refused:opportunity' }] }
-    const current = { ...task, public_id: 'ast_current', committed: [activityReceipt] }
-    const result = parseAssistantTaskList([legacy, current])
-
-    expect(result.tasks.map((item) => item.public_id)).toEqual(['ast_legacy', 'ast_current'])
-    expect(result.tasks[0]?.committed).toEqual([{ kind: 'refused:opportunity' }])
-    expect(result.tasks[1]?.committed).toEqual([activityReceipt])
-    expect(result.skipped).toEqual([])
+    expect(AssistantTaskViewSchema.parse(legacy).committed).toEqual([{ kind: 'refused:opportunity' }])
   })
 
-  it('drops one unreadable historical task without hiding the readable tasks', () => {
+  it('rejects one unreadable task without affecting the readable one', () => {
     const broken = { ...task, public_id: 'ast_broken', committed: [{ kind: 'customer_activity' }] }
-    const current = { ...task, public_id: 'ast_current', committed: [activityReceipt] }
-
-    expect(parseAssistantTaskList([broken, current])).toEqual({
-      tasks: [{ ...current, committed: [activityReceipt] }],
-      skipped: [0],
-    })
+    expect(AssistantTaskViewSchema.safeParse(broken).success).toBe(false)
+    expect(AssistantTaskViewSchema.safeParse({ ...task, committed: [activityReceipt] }).success).toBe(true)
   })
 
-  it('counts a server-isolated unreadable list row while retaining a validated row', () => {
-    const unreadable = { ...task, public_id: 'ast_unreadable', draft: null, waiting: null, committed: [], processing_turn_id: null, processing_turn_status: null }
-    const readable = { ...task, committed: [activityReceipt] }
-    const result = parseAssistantTaskList([unreadable, readable])
-    expect(result.skipped).toEqual([0])
-    expect(result.tasks.map((row) => row.public_id)).toEqual(['ast_123'])
-    expect(result.tasks[0]?.committed).toEqual([activityReceipt])
+  it('loads a disposition card scoped to its customer and still rejects unknown card fields', () => {
+    const disposition = {
+      status: 'ACTIVE', customer_name: '虚构星河科技', customer_public_id: 'cus_fictional', activity_kind_label: '跟进',
+      total: 1, current_index: null, visible_count: 1,
+      items: [{ item_id: 'i1', task_public_id: 'fut_fictional', title: '确认预算', related: true, state: 'waiting' }]
+    }
+    const parsed = AssistantTaskViewSchema.parse({ ...task, committed: [activityReceipt], follow_up_disposition: disposition })
+    expect(parsed.follow_up_disposition?.customer_public_id).toBe('cus_fictional')
+    expect(AssistantTaskViewSchema.safeParse({ ...task, committed: [activityReceipt], follow_up_disposition: { ...disposition, extra: 1 } }).success).toBe(false)
   })
 })
 
@@ -118,10 +110,9 @@ describe('current assistant confirmation commands', () => {
       confirmation('activity_write', { kind: 'activity_write', preview: { ...preview, arbitrary_command: true } }),
       confirmation('activity_write', null)
     ].map((waiting, index) => ({ ...task, public_id: `invalid-${index}`, committed: [], waiting }))
+    for (const row of invalid) expect(AssistantTaskViewSchema.safeParse(row).success).toBe(false)
     const current = { ...task, committed: [activityReceipt], waiting: confirmation('proposal:follow_up_task_create', { kind: 'proposal', proposal_kind: 'follow_up_task_create', candidate }) }
-    const parsed = parseAssistantTaskList([...invalid, current])
-    expect(parsed.skipped).toEqual([0, 1, 2, 3, 4])
-    expect(parsed.tasks.map((row) => row.public_id)).toEqual(['ast_123'])
+    expect(AssistantTaskViewSchema.safeParse(current).success).toBe(true)
   })
 
 

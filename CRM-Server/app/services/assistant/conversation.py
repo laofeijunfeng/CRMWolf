@@ -21,6 +21,7 @@ from app.schemas.assistant_conversation import (
     ConversationDecision,
     ConversationDispositionProjection,
     ConversationKindRequest,
+    ConversationLink,
     ConversationMessage,
     ConversationProjection,
     ConversationReply,
@@ -74,6 +75,19 @@ class RootClassifier(Protocol):
         focused_task_public_id: str | None,
         recent_messages: list[dict[str, str]],
     ) -> ConversationDecision: ...
+
+
+
+# Real pages for what the assistant does not do itself; the Web host owns their routes.
+QUERY_REFUSAL_LINKS = (
+    ConversationLink(page="customers", label="客户管理"),
+    ConversationLink(page="follow_up_tasks", label="客户追踪"),
+)
+CORRECTION_UNCLEAR_MESSAGE = "没听明白要改哪一项。请说明要修改的内容，例如“日期是周三不是周二”；这次没有写入。"
+
+
+def _stored_links(raw: object) -> list[ConversationLink]:
+    return [ConversationLink.model_validate(item) for item in raw[:4]] if isinstance(raw, list) else []
 
 
 class ConversationService:
@@ -153,6 +167,7 @@ class ConversationService:
                     text=row.reply_text,
                     at=at,
                     task=snapshot,
+                    links=_stored_links(row.command_json.get("links")),
                     boundary=ConversationBoundary(entry_id=row.public_id, prompt=row.reply_text)
                     if row.state == "CHOICE"
                     else None,
@@ -371,11 +386,15 @@ class ConversationService:
         task: AssistantTask | None = None,
         *,
         lease_version: int,
+        links: tuple[ConversationLink, ...] = (),
     ) -> ConversationReply:
         if task is not None:
             entry.task_public_id = task.public_id
         entry.reply_text = message
         entry.state = "READY"
+        if links:
+            # Stored with the text it belongs to, so history projects the same links.
+            entry.command_json = {**entry.command_json, "links": [link.model_dump(mode="json") for link in links]}
         entry.task_snapshot_json = task_view(task, db).model_dump(mode="json") if task else None
         crud.save(
             db, conversation, entry, finish=True, focus=task.public_id if task else None, lease_version=lease_version
@@ -518,6 +537,7 @@ class ConversationService:
     ) -> ConversationDecision:
         remaining = attempt_budget_remaining()
         if remaining is not None and remaining <= 0:
+            self._close_root_stage(db, conversation, entry, ms=0, lease_version=lease_version)
             raise AssistantLLMError("模型服务响应超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
         stored_events = entry.command_json.get("root_stages")
         events = list(stored_events) if isinstance(stored_events, list) else []
@@ -544,9 +564,36 @@ class ConversationService:
         except crud.ConversationConflict:
             raise
         except AssistantLLMError:
+            self._close_root_stage(
+                db, conversation, entry, ms=int((monotonic() - started) * 1000), lease_version=lease_version,
+            )
             raise
         except Exception as exc:
+            self._close_root_stage(
+                db, conversation, entry, ms=int((monotonic() - started) * 1000), lease_version=lease_version,
+            )
             raise AssistantLLMError("处理失败", code=AssistantFailureCode.INTERNAL_ERROR, cause=exc) from exc
+
+    @staticmethod
+    def _close_root_stage(
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        ms: int,
+        lease_version: int,
+    ) -> None:
+        """Record the failed route stage so a retry replays why the attempt stopped."""
+
+        events = entry.command_json.get("root_stages")
+        stored = list(events) if isinstance(events, list) else []
+        if stored and stored[-1].get("phase") == "failed":
+            return
+        entry.command_json = {
+            **entry.command_json,
+            "root_stages": [*stored, {"stage": "route", "phase": "failed", "ms": ms}],
+        }
+        crud.save(db, conversation, entry, lease_version=lease_version)
 
     def _finish_root_failure(
         self,
@@ -619,6 +666,7 @@ class ConversationService:
                 entry,
                 "销售助手目前只记录客户沟通，查询请到客户管理或客户追踪页面；这次没有写入。",
                 lease_version=lease_version,
+                links=QUERY_REFUSAL_LINKS,
             )
         if (
             plan.business_object != "CUSTOMER_ACTIVITY"
@@ -635,7 +683,7 @@ class ConversationService:
         target = crud.owned_task(db, conversation, decision.target_task_public_id)
         supplied_ids = entry.command_json.get("route_candidate_ids")
         if plan.speech_act == "CORRECT":
-            from app.services.assistant.activity_edit import editable_activity_fields
+            from app.services.assistant.activity_edit import EDITABLE_ACTIVITY_FIELDS
 
             correction = decision.correction
             if target is not None and activity_commit_is_unknown(target):
@@ -647,14 +695,24 @@ class ConversationService:
                 target is None or target.status != "ACTIVE" or target.active_turn_id is not None
                 or not isinstance(supplied_ids, list) or target.public_id not in supplied_ids
                 or decision.boundary != "CONTINUE" or decision.task_relation != "CONTINUE_TASK"
-                or decision.route != "WORKFLOW" or correction is None or not correction.quote.strip()
-                or correction.quote not in entry.user_text
-                or correction.field not in editable_activity_fields(load_draft(target))
                 or waiting is None or waiting.type != "CONFIRMATION" or waiting.field != "activity_write"
                 or any(r.get("kind") == "customer_activity" for r in target.committed_json or [])
             ):
                 return self._finish_message(
                     db, conversation, entry, "这项不能在这里修改；这次没有写入。", lease_version=lease_version,
+                )
+            if decision.route == "CLARIFY" or correction is None:
+                # "Not sure what to change" is not a refusal: keep the card and ask once.
+                return self._finish_message(
+                    db, conversation, entry, CORRECTION_UNCLEAR_MESSAGE, target, lease_version=lease_version,
+                )
+            if not correction.quote.strip() or correction.quote not in entry.user_text:
+                return self._finish_message(
+                    db, conversation, entry, CORRECTION_UNCLEAR_MESSAGE, target, lease_version=lease_version,
+                )
+            if correction.field not in EDITABLE_ACTIVITY_FIELDS:
+                return self._finish_message(
+                    db, conversation, entry, "这项不能在这里修改；这次没有写入。", target, lease_version=lease_version,
                 )
             entry.command_json = {**entry.command_json, "correction": correction.model_dump(mode="json")}
             return self._accept(db, conversation, entry, target, SubmitInputRequest(

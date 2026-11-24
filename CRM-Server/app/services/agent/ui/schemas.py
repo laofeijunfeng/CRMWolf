@@ -379,7 +379,7 @@ class InteractionBlock(AgentUIBlockBase):
     _omit_unused_extensions: ClassVar[dict[str, object]] = {
         "secondary_action": None,
         "cancel_reasons": [],
-        "disposition_link": False,
+        "disposition_visible_count": None,
     }
 
     type: Literal["interaction"]
@@ -405,7 +405,8 @@ class InteractionBlock(AgentUIBlockBase):
     submitted_values: dict[str, JsonValue] | None = None
     secondary_action: InteractionOption | None = None
     cancel_reasons: list[InteractionOption] = Field(default_factory=list, max_length=4)
-    disposition_link: bool = False
+    # How many disposition rows start expanded; the rest stay behind one summary row.
+    disposition_visible_count: int | None = Field(default=None, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_interaction_shape(self) -> Self:
@@ -459,7 +460,7 @@ class InteractionBlock(AgentUIBlockBase):
             ):
                 raise ValueError("open follow-up disposition requires one optional checkbox per frozen task")
         else:
-            if self.disposition_items or self.disposition_link:
+            if self.disposition_items or self.disposition_visible_count is not None:
                 raise ValueError("disposition items and link require the open follow-up presentation")
             if len(self.options) > 50 or (self.max_selections is not None and self.max_selections > 50):
                 raise ValueError("generic interactions support at most 50 options")

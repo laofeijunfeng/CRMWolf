@@ -221,11 +221,42 @@ async def test_rejected_nominations_audit_each_reason(crm_session, monkeypatch):
     action = crm_session.query(AssistantAction).one()
     assert action.action == "proposal_rejected"
     assert action.result_json == {"rejected": [
-        {"kind": "opportunity_stage", "reason": "literal"},
-        {"kind": "opportunity_stage", "reason": "target"},
-        {"kind": "opportunity_stage", "reason": "schema"},
-        {"kind": "opportunity_create", "reason": "permission"},
+        {"kind": "opportunity_stage", "reason": "literal", "target": "opp_missing", "quote": "捏造的引用"},
+        {"kind": "opportunity_stage", "reason": "target", "target": "opp_missing", "quote": "明年采购"},
+        {"kind": "opportunity_stage", "reason": "schema", "quote": "明年采购"},
+        {"kind": "opportunity_create", "reason": "permission", "quote": "明年采购"},
     ]}
+
+
+async def test_failure_keeps_rejections_and_unexpected_error_is_internal(crm_session, monkeypatch):
+    from app.services.assistant import proposals
+    from app.services.assistant.events import SSEProgressReporter
+    from app.services.assistant.opportunity_nominator import OpportunityNominator
+
+    async def nominate(*args):
+        return [{"kind": "opportunity_create", "evidence_quote": "明年采购"}]
+
+    def fail_to_read_queue(db, *_args):
+        raise ValueError("unexpected queue failure with business text")
+
+    monkeypatch.setattr(OpportunityNominator, "nominate", nominate)
+    monkeypatch.setattr(proposals, "_take_queued_candidate", fail_to_read_queue)
+    reporter = SSEProgressReporter()
+    updated, message, offered = await offer_next_proposal(
+        crm_session, _task(crm_session), reporter=reporter,
+    )
+    assert [(payload["stage"], payload["phase"]) for _, payload in reporter.drain()] == [
+        ("propose", "start"), ("propose", "failed"),
+    ]
+    assert not offered and updated.status == AssistantTaskStatus.COMPLETED
+    assert message == "活动已记录。本次没能生成后续建议，可在客户页手动处理。"
+    action = crm_session.query(AssistantAction).one()
+    assert action.action == "proposal_failed"
+    # An earlier rejection is not erased, and no raw business text reaches the audit record.
+    assert action.result_json == {
+        "rejected": [{"kind": "opportunity_create", "reason": "permission", "quote": "明年采购"}],
+        "reason": "internal_error",
+    }
 
 
 @pytest.mark.parametrize("accepted", [False, True])
@@ -477,6 +508,10 @@ async def test_meeting_actions_create_distinct_real_tasks_and_events(crm_session
     crm_session.commit()
     offered, _, active = await offer_next_proposal(crm_session, task)
     assert active and offered.waiting_field == "proposal:follow_up_task_create"
+    candidate = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
+    # The prompt and the card carry the resolved owner name, never the raw record id.
+    assert candidate["payload"]["owner_name"] == "小李"
+    assert offered.waiting_json["payload"]["prompt"] == f"{action_a}：根据这次活动，为你建立这项跟进任务吗？"
     settled, _, _ = await settle_proposal(
         crm_session, offered, accepted=True, executor=RealCRMProposalExecutor()
     )
@@ -490,6 +525,24 @@ async def test_meeting_actions_create_distinct_real_tasks_and_events(crm_session
     assert {row.due_at_text for row in tasks} == {"2026-10-01", "2026-10-02"}
     assert len(crm_session.query(FollowUpTaskEvent).all()) == 2
     assert settled.committed_json[0] == {"kind": "customer_activity", "public_id": "1"}
+    assert [receipt["name"] for receipt in settled.committed_json[1:]] == [action_a, action_b]
+
+
+def test_proposal_prompt_and_receipt_lead_with_server_resolved_names(db_session):
+    from app.services.assistant import proposals
+
+    task = _task(db_session)
+    bound = {"evidence_quote": "明年采购", "activity_id": 1, "customer_id": 7, "source_revision": 1}
+    stage = {"kind": "opportunity_stage", "key": "k_stage", "target_public_id": "opp_raw", **bound,
+             "payload": {"opportunity_name": "睿狐 CRM 项目", "stage_name": "方案", "current_stage_name": "接触"}}
+    assert proposals.proposal_waiting(task, stage).prompt == "睿狐 CRM 项目：根据这次活动，推进这条商机到下一阶段吗？"
+    receipt = proposals._proposal_receipt(task, stage, {"public_id": "opp_raw"})
+    assert (receipt["name"], receipt["detail"]) == ("睿狐 CRM 项目", "睿狐 CRM 项目：接触 → 方案")
+    created = proposals._proposal_receipt(
+        task, {"kind": "opportunity_create", "key": "k_create", **bound, "form_values": {"opportunity_name": "培训服务"}},
+        {"public_id": "opp_new"},
+    )
+    assert (created["name"], created["public_id"]) == ("培训服务", "opp_new")
 
 
 async def test_no_activity_cannot_complete(db_session):
@@ -745,6 +798,69 @@ async def test_crashed_command_reconciles_only_exact_effect(db_session, monkeypa
     claim = db_session.query(AssistantAction).filter_by(action="proposal_command_claim").one()
     assert claim.result_json["status"] == "RECONCILED"
 
+
+
+async def test_approval_business_rejection_settles_as_no_effect_with_its_reason(db_session, monkeypatch, nominate):
+    """A rolled-back approval failure is a definite no-effect, never an unknown commit."""
+    from types import SimpleNamespace
+
+    from app.api import opportunities
+    from app.crud.approval import approval_crud, approval_flow_crud
+    from app.crud.user import user_crud
+    from app.models.opportunity import Opportunity
+    from app.schemas.opportunity import OpportunityCreate
+    from app.services.assistant import proposals
+    from app.services.assistant.crm_proposal_commands import build_proposal_command
+
+    nominate[0].append({"kind": "opportunity_create", "evidence_quote": "明年采购", "payload": {"opportunity_name": "项目"}})
+    task = _task(db_session)
+    monkeypatch.setattr(proposals, "validate_candidate", _bound_candidate)
+    offered, _, _ = await offer_next_proposal(db_session, task)
+    offered = _open_create_form(db_session, offered, monkeypatch)
+    submitted = _submit_create_form(db_session, offered, monkeypatch)
+    db_session.commit()
+
+    # Only the collaborators this fixture has no tables for are stubbed; the approval
+    # transaction itself is the real one.
+    monkeypatch.setattr(opportunities, "check_customer_edit_permission", lambda *args: SimpleNamespace(id=7))
+    monkeypatch.setattr(user_crud, "get_by_id", lambda *args: None)
+    monkeypatch.setattr(approval_flow_crud, "match_flow_generic", lambda *args, **kwargs: (SimpleNamespace(id=1), None))
+    def no_approver(*args, **kwargs):
+        raise ValueError("第 1 个节点没有审批人，请联系管理员")
+
+    def create_draft(db, data, submitter_id, team_id):
+        row = Opportunity(
+            public_id="opp_new", team_id=team_id, opportunity_number="T-2", opportunity_name=data.opportunity_name,
+            customer_id=7, total_amount=data.total_amount, user_count=data.user_count, unit_price=1000,
+            license_type="PERPETUAL", purchase_type="NEW", expected_closing_date=data.expected_closing_date,
+            owner_id=submitter_id, creator_id=submitter_id,
+        )
+        db.add(row)
+        db.flush()
+        return row
+
+    monkeypatch.setattr(approval_crud, "create_approval_only", no_approver)
+    monkeypatch.setattr(opportunities.opportunity_crud, "create_without_commit", create_draft)
+
+    async def create_via_real_api(db, task, proposal):
+        await opportunities.create_opportunity(
+            opportunity=OpportunityCreate.model_validate(proposal["form_values"]), team_id=task.team_id,
+            current_user=SimpleNamespace(id=task.user_id), db=db,
+            assistant_command=build_proposal_command(task, proposal),
+        )
+        pytest.fail("a rolled-back creation must not return an opportunity")
+
+    settled, message, offered_again = await settle_proposal(
+        db_session, offered, accepted=True, executor=create_via_real_api, form_proposal=submitted,
+    )
+    db_session.commit()
+
+    assert message == "第 1 个节点没有审批人，请联系管理员" and not offered_again
+    assert settled.status == AssistantTaskStatus.COMPLETED and settled.waiting_field is None
+    assert settled.committed_json[-1] == {"kind": "refused:opportunity_create", "proposal_key": submitted["key"]}
+    claim = db_session.query(AssistantAction).filter_by(action="proposal_command_claim").one()
+    assert claim.result_json["status"] == "NO_EFFECT"
+    assert db_session.query(Opportunity).count() == 0
 
 @pytest.mark.parametrize("kind", ["opportunity_stage", "opportunity_create"])
 async def test_success_response_without_exact_effect_stays_unknown(db_session, monkeypatch, kind, nominate):

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { AlertCircle, Check, ChevronRight, Circle, Info, LoaderCircle } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
@@ -81,33 +80,35 @@ const submittedChoiceOption = computed(() => {
     : props.block.options.find(option => option.value === value) ?? null
 })
 
-const resetValues = (): void => {
-  const failedChoice = props.notice?.kind === 'failed' ? props.notice.choice : null
-  const submitted = submittedChoiceValue.value
-  selectedValues.value = failedChoice !== null ? [failedChoice] : submitted === null ? [] : [submitted]
+/** Only a new card identity (or a new form revision) replaces what the user typed. */
+const resetFieldValues = (): void => {
   fieldValues.value = Object.fromEntries(
     props.block.fields.map(field => [field.key, field.default_value])
   )
-  cancelReasonsOpen.value = false
   editedFieldErrors.value = {}
   validationAttempted.value = false
-  submitting.value = false
   manualDate.value = ''
+}
+const resetSelection = (): void => {
+  const failedChoice = props.notice?.kind === 'failed' ? props.notice.choice : null
+  const submitted = submittedChoiceValue.value
+  selectedValues.value = failedChoice !== null ? [failedChoice] : submitted === null ? [] : [submitted]
+  submitting.value = false
 }
 
 watch(
-  () => [
-    props.block.interaction_id,
-    props.block.state,
-    props.block.submit_action_id,
-    submittedChoiceValue.value,
-    props.notice?.kind ?? null,
-  ] as const,
-  resetValues,
+  () => [props.block.interaction_id, props.block.state, props.block.submit_action_id] as const,
+  () => {
+    resetFieldValues()
+    resetSelection()
+    cancelReasonsOpen.value = false
+  },
   { immediate: true }
 )
-
-watch(() => props.block.fields, () => { editedFieldErrors.value = {} })
+// A retried submission reuses the same card; only its outcome marker changes.
+watch(() => [submittedChoiceValue.value, props.notice?.kind ?? null] as const, resetSelection)
+// A re-issued form revision carries the submitted values as its new defaults.
+watch(() => props.block.fields, resetFieldValues)
 
 watch(() => props.locked, (locked, previous) => {
   if (previous !== true || locked === true || props.block.state !== 'ACTIVE') return
@@ -130,9 +131,10 @@ const isCompactTaskCompletion = computed(() => (
 const isOpenFollowUpDisposition = computed(() => (
   props.block.presentation === 'OPEN_FOLLOW_UP_DISPOSITION'
 ))
+const visibleDispositionCount = computed(() => props.block.disposition_visible_count ?? props.block.disposition_items.length)
 const dispositionGroups = computed(() => [
-  props.block.disposition_items.slice(0, 10),
-  props.block.disposition_items.slice(10),
+  props.block.disposition_items.slice(0, visibleDispositionCount.value),
+  props.block.disposition_items.slice(visibleDispositionCount.value),
 ].filter(items => items.length > 0))
 const dispositionStateLabels = {
   current: '待处理', waiting: '待处理', complete: '已完成', hold: '保持未完成',
@@ -654,7 +656,7 @@ const submit = async (): Promise<void> => {
       <summary v-if="groupIndex > 0" class="min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target cursor-pointer px-space-4 py-space-3 text-body text-foreground focus-visible:outline-ring">
         其余 {{ items.length }} 项
       </summary>
-      <ol :start="groupIndex * 10 + 1" class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
+      <ol :start="groupIndex === 0 ? 1 : visibleDispositionCount + 1" class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
         <li
           v-for="(item, index) in items"
           :key="item.item_id"
@@ -667,7 +669,7 @@ const submit = async (): Promise<void> => {
                 class="size-4 shrink-0 rounded-sm border-input focus-visible:ring-ring"
                 :value="item.item_id"
                 :checked="optionSelected(item.item_id)"
-                :disabled="controlsDisabled || block.options[groupIndex * 10 + index]?.disabled !== false"
+                :disabled="controlsDisabled || block.options[groupIndex === 0 ? index : visibleDispositionCount + index]?.disabled !== false"
                 @change="toggleOption(item.item_id)"
               />
               <span><span class="sr-only">标记完成：</span>{{ item.title }}</span>
@@ -704,7 +706,7 @@ const submit = async (): Promise<void> => {
             本次跟进：“{{ item.evidence_quote }}”
           </p>
         </div>
-          <p v-if="item.result_message" class="m-0 text-caption text-muted-foreground">{{ item.result_message }}</p>
+        <p v-if="item.result_message" class="m-0 text-caption text-foreground">{{ item.result_message }}</p>
         </li>
       </ol>
     </component>
@@ -722,13 +724,6 @@ const submit = async (): Promise<void> => {
         {{ weeklySuppression.label }}
       </Button>
     </div>
-    <RouterLink
-      v-if="block.disposition_link"
-      :to="{ name: 'CustomerTracking' }"
-      class="mx-space-4 mb-space-3 inline-flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-fit items-center text-body text-brand underline underline-offset-2 focus-visible:outline-ring"
-    >
-      在客户追踪页处理
-    </RouterLink>
   </section>
 
   <!-- 已处理的选择 / 确认：折叠成一行 -->
@@ -1231,6 +1226,14 @@ const submit = async (): Promise<void> => {
           />
         </template>
       </form>
+      <!-- 表单级校验原因由服务端给出；字段级错误仍贴在各自输入框下。 -->
+      <p
+        v-if="block.interaction_type === 'form' && block.hint"
+        class="m-0 text-caption text-muted-foreground"
+        data-agent-ui-form-hint
+      >
+        {{ block.hint }}
+      </p>
     </div>
 
     <div
@@ -1262,7 +1265,8 @@ const submit = async (): Promise<void> => {
 
     <footer
       v-if="(isActivityConfirmation && showsChoiceOptions) || isGenericConfirmation || canCancel || (!isActivityConfirmation && isActive && !submitsOnOptionClick)"
-      class="flex flex-wrap items-center justify-end gap-space-2 border-t border-border px-space-4 py-space-3"
+      class="flex flex-wrap items-center justify-end gap-space-2 px-space-4 py-space-3"
+      :class="cancelReasonsOpen ? '' : 'border-t border-border'"
     >
       <p v-if="isActivityConfirmation && activityDisabledHint" class="m-0 min-w-0 flex-1 basis-full text-caption text-muted-foreground">
         {{ activityDisabledHint }}
@@ -1275,6 +1279,7 @@ const submit = async (): Promise<void> => {
           :variant="option.value === 'confirm' ? 'default' : 'outline'"
           :loading="option.value === 'confirm' && submitting"
           :disabled="controlsDisabled || option.disabled"
+          :class="option.disabled ? 'border-border bg-muted text-muted-foreground opacity-100' : ''"
           :aria-expanded="option.value === 'cancel' && cancelReasons.length > 0 ? cancelReasonsOpen : undefined"
           :aria-controls="option.value === 'cancel' && cancelReasons.length > 0 ? `${block.id}-cancel-reasons` : undefined"
           @click="handleOptionClick(option.value)"

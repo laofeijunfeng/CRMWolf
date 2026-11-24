@@ -581,8 +581,8 @@ async def intake_step(
         return task, "已整理完成。", None, False
 
     draft = TaskDraft.model_validate(task.draft_json or {})
-    # Quality keeps its own stream clock. The 180s attempt deadline must not
-    # skip a score after organizing already saved a draft.
+    # No budget pre-check here: once organizing saved a draft, scoring is still
+    # attempted. The transport still caps the call by the remaining attempt budget.
     reporter.stage_start(_S_GATE)
     _t0 = time.monotonic()
     try:

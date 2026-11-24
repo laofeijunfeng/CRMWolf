@@ -13,7 +13,7 @@ from app.services.assistant.action_evidence import parse_deadline
 from app.services.assistant.activity_channel import FOLLOW_UP_KINDS, MEETING_KINDS, kind_label
 from app.services.assistant.contracts import DraftField, TaskDraft
 from app.services.assistant.temporal_evidence import StoredMention, resolved_sales_follow_up
-from app.utils.time import to_business_naive
+from app.utils.time import business_now, to_business_naive
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -23,6 +23,15 @@ if TYPE_CHECKING:
 EDITABLE_ACTIVITY_FIELDS = frozenset({
     "communication_time", "channel_kind", "participants", "summary", "next_action", "next_follow_time",
 })
+# One user-facing name per editable field; validation copy never shows the internal key.
+EDITABLE_ACTIVITY_FIELD_LABELS = {
+    "communication_time": "沟通时间",
+    "channel_kind": "沟通方式",
+    "participants": "联系人",
+    "summary": "摘要",
+    "next_action": "下一步",
+    "next_follow_time": "下次跟进时间",
+}
 _TIME_FIELDS = {"communication_time", "next_follow_time"}
 _TIME_KEY = "activity_edit_times"
 _GROUPS = ("internal", "customer")
@@ -37,6 +46,7 @@ class ActivityEditValidationError(ValueError):
 
     def __init__(self, field: str, message: str) -> None:
         self.field = field
+        self.message = message
         super().__init__(f"{field}: {message}")
 
 
@@ -107,8 +117,19 @@ def communication_time_evidence(content_json: Mapping[str, object]) -> EditTime 
                 and mention.state == "ACTIVE"
                 and (resolved_mention := _resolved_time(mention.resolved_at, mention.granularity)) is not None
             ):
-                return resolved_mention
+                return _occurrence_daytime(mention.raw_text, resolved_mention)
     return None
+
+
+def _occurrence_daytime(raw_text: str, value: EditTime) -> EditTime:
+    """A same-day occurrence ("今天", "刚刚") is today's report time, never midnight."""
+
+    at, granularity = value
+    if at is None or granularity != "DATE" or at.date() != business_now().date():
+        return value
+    if not raw_text.strip().startswith(("今天", "今日", "刚刚", "刚才", "方才")):
+        return value
+    return business_now().replace(second=0, microsecond=0), "DATETIME"
 
 
 def resolved_communication_time(content_json: Mapping[str, object]) -> EditTime | None:

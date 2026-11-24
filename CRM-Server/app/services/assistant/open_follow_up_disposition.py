@@ -103,6 +103,7 @@ def public_disposition(task: AssistantTask) -> dict[str, object] | None:
         "activity_public_id": activity_id,
         "status": batch.get("status"),
         "customer_name": batch.get("customer_name") or "",
+        "customer_public_id": load_authority(task).customer_public_id,
         "activity_kind_label": batch.get("activity_kind_label") or "",
         "total": len(projected),
         "current_index": None,
@@ -415,6 +416,9 @@ def _settle_item(
             if isinstance(exc, PermissionError)
             else ("未能核对", "请到客户追踪页处理", "REVALIDATION_FAILED")
         )
+    if not complete and failure is not None and failure[2] != "ALREADY_HANDLED":
+        # Nothing is written for an unticked item, so a stale relation is not its failure.
+        failure = None
     if failure is not None:
         _observe(item, "failed", *failure)
         return

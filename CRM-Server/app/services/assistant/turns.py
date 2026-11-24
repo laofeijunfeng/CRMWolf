@@ -885,16 +885,22 @@ class DurableProgressReporter(ProgressReporter):
         except Exception:
             logger.exception("assistant stage persistence failed: turn=%s", self.turn_id)
 
-    def stage_start(self, stage: TurnStage) -> None:
+    def stage_start(self, stage: TurnStage | None) -> None:
+        if stage is None:
+            return
         self._record({"stage": stage.name, "phase": "start"})
 
-    def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None:
+    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
+        if stage is None:
+            return
         payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
         if score is not None:
             payload["score"] = score
         self._record(payload)
 
-    def stage_failed(self, stage: TurnStage) -> None:
+    def stage_failed(self, stage: TurnStage | None) -> None:
+        if stage is None:
+            return
         self._record({"stage": stage.name, "phase": "failed"})
 
 
@@ -938,6 +944,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             raise TypeError("invalid prepared turn metadata")
         inherited_deadline = metadata.get("root_deadline")
         deadline = datetime.fromisoformat(inherited_deadline) if isinstance(inherited_deadline, str) else None
+        if deadline is not None and turn.attempts > 1 and deadline <= attempt_started:
+            # A lease-recovered attempt is a fresh execution: an already-expired hand-off
+            # deadline would fail it before it could call the model once.
+            deadline = None
         if deadline is not None:
             attempt_started = deadline - timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)
         add_event(
@@ -975,7 +985,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 if not isinstance(correction_text, str) or correction.quote not in correction_text:
                     raise AssistantStateConflict("修正内容不匹配原文")
                 value = correction.model_dump(mode="json")["new_value"]
-                input_data = {"kind": "correct_activity", "values": {correction.field: value}}
+                input_data = {
+                    "kind": "correct_activity", "values": {correction.field: value},
+                    "correction_quote": correction.quote,
+                }
             reporter = DurableProgressReporter(factory, turn_id=turn_id, owner=owner, version=version)
             outcome = await _coordinator.handle_task(
                 db,

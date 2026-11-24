@@ -236,3 +236,83 @@ async def test_superseded_command_cannot_commit_or_write(confirmation_db, monkey
             expected_version=stale.expected_version,
         )
     assert session.query(CustomerActivity).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_activity_edit_keeps_the_version(confirmation_db, monkeypatch):
+    """Cancelling the edit form returns the original card without advancing authority."""
+    session, factory, _permissions = confirmation_db
+    task, coordinator, _gate, _original = await persisted_temporal_confirmation(confirmation_db, monkeypatch)
+    fingerprint = load_authority(task).frozen_activity_command["fingerprint"]
+    version_before = task.version
+
+    await _submit(
+        session, factory, task=task, key="a2-cancel-open",
+        input_data={"kind": "request_edit", "text": None, "choice": None},
+    )
+    form = load_waiting(task)
+    await _submit(
+        session, factory, task=task, key="a2-cancel-submit",
+        input_data={
+            "kind": "submit_form", "choice": "cancel", "text": None, "form_revision": form.form_revision,
+        },
+    )
+    assert coordinator is not None
+
+    restored = load_waiting(task)
+    assert restored.type == "CONFIRMATION" and restored.field == "activity_write"
+    assert task.version == version_before
+    assert load_authority(task).frozen_activity_command["fingerprint"] == fingerprint
+    assert session.query(CustomerActivity).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_reject_reason_is_recorded_in_the_action_log(confirmation_db, monkeypatch):
+    """W1-3: the optional closed reject reason is feedback for the quality gate."""
+    from app.models.assistant import AssistantAction
+
+    session, factory, _permissions = confirmation_db
+    task, _coordinator, _gate, _original = await persisted_temporal_confirmation(confirmation_db, monkeypatch)
+
+    await _submit(
+        session, factory, task=task, key="reject-with-reason",
+        input_data={"kind": "confirm", "text": None, "choice": "reject", "reason": "wrong_content"},
+    )
+
+    action = session.query(AssistantAction).filter_by(action="reject_confirmation").one()
+    assert action.result_json == {"reason": "wrong_content"}
+    assert load_waiting(task) is None
+    assert load_authority(task).frozen_activity_command is None
+    assert session.query(CustomerActivity).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_invalid_edit_form_keeps_the_typed_values_and_names_the_field(confirmation_db, monkeypatch):
+    """A rejected edit re-opens the form with what the user typed, labelled in Chinese."""
+    session, factory, _permissions = confirmation_db
+    task, _coordinator, _gate, _original = await persisted_temporal_confirmation(confirmation_db, monkeypatch)
+
+    await _submit(
+        session, factory, task=task, key="a2-invalid-open",
+        input_data={"kind": "request_edit", "text": None, "choice": None},
+    )
+    form = load_waiting(task)
+    version_before = task.version
+    invalid = "不是日期"
+
+    await _submit(
+        session, factory, task=task, key="a2-invalid-submit",
+        input_data={
+            "kind": "submit_form", "text": None, "choice": None,
+            "values": {"next_follow_time": invalid}, "form_revision": form.form_revision,
+        },
+    )
+
+    reopened = load_waiting(task)
+    assert reopened.type == "CONFIRMATION_EDIT" and reopened.form_revision == form.form_revision + 1
+    assert task.version == version_before
+    fields = {field["key"]: field for field in reopened.form_fields}
+    assert fields["next_follow_time"]["default_value"] == invalid
+    assert fields["next_follow_time"]["error_message"] == "下次跟进时间：请输入有效的日期或日期时间。"
+    assert fields["summary"]["error_message"] is None
+    assert session.query(CustomerActivity).count() == 0

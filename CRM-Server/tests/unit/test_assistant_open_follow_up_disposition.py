@@ -279,6 +279,31 @@ async def test_stale_evidence_prevents_completion(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unticked_item_with_stale_relation_is_held_not_failed(db_session, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.assistant.open_follow_up_disposition._permission_codes",
+        lambda db, task: {"follow_up_task:operate:all"},
+    )
+    activity = _activity(db_session)
+    _follow_up(db_session, public_id="fut_related", title="联系客户确认采购安排")
+    _follow_up(db_session, public_id="fut_plain", title="补充安全测评报告", due=datetime(2026, 11, 2, 9, 0, 0))
+    task = _task(db_session, activity)
+    offered = await advance_open_follow_up(db_session, task)
+    activity.source_content = "这次只谈了别的话题"
+    db_session.commit()
+
+    settled = await settle_open_follow_up(db_session, offered.task, choices=["i2"])
+
+    # The user left the first task alone; only the task they ticked reports the stale relation.
+    assert [(row["state"], row["failure_code"]) for row in public_disposition(settled.task)["items"]] == [
+        ("hold", None), ("failed", "RELATION_STALE"),
+    ]
+    assert {row.public_id: row.status for row in db_session.query(FollowUpTask).all()} == {
+        "fut_related": FollowUpTaskStatus.OPEN, "fut_plain": FollowUpTaskStatus.OPEN,
+    }
+
+
+@pytest.mark.asyncio
 async def test_offers_exactly_100_but_does_not_truncate_101(db_session, monkeypatch):
     monkeypatch.setattr("app.services.assistant.open_follow_up_disposition._permission_codes", lambda db, task: set())
     for index in range(100):

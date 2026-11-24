@@ -659,7 +659,6 @@ async def test_streaming_timeout_retries_only_with_remaining_budget(monkeypatch,
     timeouts = []
     monkeypatch.setattr(failure_contract, "business_now", lambda: now + timedelta(seconds=elapsed))
     monkeypatch.setattr(model_transport, "monotonic", lambda: elapsed)
-    monkeypatch.setattr(model_transport, "_STAGE_LATENCIES", {})
     caplog.set_level(logging.INFO, logger=model_transport.logger.name)
     original_client = httpx.AsyncClient
 
@@ -702,32 +701,14 @@ async def test_streaming_timeout_retries_only_with_remaining_budget(monkeypatch,
     attempts = [record.extra_fields for record in caplog.records if record.msg.startswith("assistant_model_call ")]
     if first_elapsed == 2:
         assert [max(http_timeouts.values()) for http_timeouts in timeouts] == [2]
-        assert [(e["attempt"], e["outcome"]) for e in attempts] == [(1, "UPSTREAM_TIMEOUT")]
+        assert [(e["attempt"], e["result"]) for e in attempts] == [(1, "UPSTREAM_TIMEOUT")]
         return
 
     assert [max(http_timeouts.values()) for http_timeouts in timeouts] == [2, 1]
-    assert [(e["stage"], e["elapsed_ms"], e["attempt"], e["outcome"]) for e in attempts] == [
+    assert [(e["stage"], e["duration_ms"], e["attempt"], e["result"]) for e in attempts] == [
         ("structure", 1000, 1, "UPSTREAM_TIMEOUT"),
         ("structure", 500, 2, "success"),
     ]
-    assert (attempts[-1]["sample_count"], attempts[-1]["p50_ms"], attempts[-1]["p95_ms"]) == (2, 500, 1000)
-
-
-def test_model_call_percentiles_use_recent_samples_per_stage(monkeypatch, caplog):
-    monkeypatch.setattr(model_transport, "_STAGE_LATENCIES", {})
-    caplog.set_level(logging.INFO, logger=model_transport.logger.name)
-
-    # The old route values must be evicted, and nominate is a separate series.
-    for stage, samples in (("route", [1000] * 128), ("nominate", [300]), ("route", range(1, 129))):
-        for elapsed_ms in samples:
-            model_transport._record_model_call(stage=stage, elapsed_ms=elapsed_ms, attempt=1, outcome="success")
-
-    latest = {
-        record.extra_fields["stage"]: record.extra_fields
-        for record in caplog.records if record.msg.startswith("assistant_model_call ")
-    }
-    assert (latest["route"]["sample_count"], latest["route"]["p50_ms"], latest["route"]["p95_ms"]) == (128, 64, 122)
-    assert (latest["nominate"]["p50_ms"], latest["nominate"]["p95_ms"]) == (300, 300)
 
 
 @pytest.mark.parametrize("stream", [False, True])

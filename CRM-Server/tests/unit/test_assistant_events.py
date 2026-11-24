@@ -26,9 +26,17 @@ def test_encode_sse_keeps_chinese_unescaped():
     assert "AI 服务暂时不可用" in frame
 
 
-def test_stage_rejects_unknown_name():
-    with pytest.raises(ValueError):
-        stage("explode")
+def test_unknown_stage_name_is_skipped_without_breaking_the_turn(caplog):
+    reporter = SSEProgressReporter()
+    with caplog.at_level("WARNING"):
+        unknown = stage("explode")
+    reporter.stage_start(unknown)
+    reporter.stage_done(unknown, ms=1)
+    reporter.stage_failed(unknown)
+    reporter.stage_start(stage("classify"))
+
+    assert [item[1]["stage"] for item in reporter.drain()] == ["classify"]
+    assert "explode" in caplog.text
 
 
 def test_reporter_preserves_order_and_payloads():
@@ -36,7 +44,6 @@ def test_reporter_preserves_order_and_payloads():
     s = stage("classify")
     reporter.stage_start(s)
     reporter.stage_done(s, ms=8120)
-    reporter.stage("structure") if False else None
     st = stage("structure")
     reporter.stage_start(st)
     reporter.stage_done(st, ms=2100)

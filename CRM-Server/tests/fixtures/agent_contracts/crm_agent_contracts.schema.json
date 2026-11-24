@@ -1383,10 +1383,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -3475,10 +3484,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -5694,10 +5712,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -8062,10 +8089,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -10548,10 +10584,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -12678,10 +12723,19 @@
               "title": "Disposition Items",
               "type": "array"
             },
-            "disposition_link": {
-              "default": false,
-              "title": "Disposition Link",
-              "type": "boolean"
+            "disposition_visible_count": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Disposition Visible Count"
             },
             "facts": {
               "items": {
@@ -18770,10 +18824,19 @@
           "title": "Disposition Items",
           "type": "array"
         },
-        "disposition_link": {
-          "default": false,
-          "title": "Disposition Link",
-          "type": "boolean"
+        "disposition_visible_count": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disposition Visible Count"
         },
         "facts": {
           "items": {

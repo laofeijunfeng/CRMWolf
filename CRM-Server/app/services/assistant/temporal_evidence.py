@@ -1735,6 +1735,10 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
         offsets = {"今天": 0, "今日": 0, "刚刚": 0, "刚才": 0, "方才": 0, "明天": 1, "后天": 2, "大后天": 3}
         key = next(name for name in offsets if found.raw_text.startswith(name))
         target = anchor.date() + timedelta(days=offsets[key])
+        if key in _JUST_NOW:
+            # "刚刚" is the moment of speaking, not midnight of today.
+            clock = hour_minute or (anchor.hour, anchor.minute)
+            return _dated(target.year, target.month, target.day, clock, anchor)
         return _dated(target.year, target.month, target.day, hour_minute, anchor)
     if kind == "RELATIVE_WEEKDAY":
         prefix = found.raw_text[0] if found.raw_text[0] in {"下", "本", "这"} else ""

@@ -100,7 +100,8 @@ export const ActivityPreviewSchema = z.object({
 
 export const ProposalKindSchema = z.enum(['follow_up_task_create', 'opportunity_stage', 'opportunity_create'])
 export type ProposalKind = z.infer<typeof ProposalKindSchema>
-// Waits frozen before CRM-154 may still carry retired kinds. They stay loadable; the server refuses to execute them.
+// Waits frozen before CRM-154 may still carry retired kinds; they stay loadable and the server settles
+// them as no-effect. `follow_up_task` receipts are still written by the follow-up disposition.
 export const StoredProposalKindSchema = z.enum([...ProposalKindSchema.options, 'customer_fact', 'follow_up_task'])
 
 export const ProposalCandidateSchema = z.object({
@@ -202,7 +203,8 @@ const AcceptedProposalReceiptSchema = z.object({
   customer_public_id: z.string().min(1).nullable().optional(),
   approval_id: z.number().int().nullable().optional(),
   approval_phase: z.literal('pending_review').nullable().optional(),
-  detail: z.string().nullable().optional()
+  detail: z.string().nullable().optional(),
+  name: z.string().min(1).max(200).nullable().optional()
 }).strict()
 
 const RefusedProposalReceiptSchema = z.object({
@@ -240,6 +242,7 @@ export const AssistantTaskViewSchema = z.object({
     activity_public_id: z.string().min(1).nullable().optional(),
     status: z.enum(['ACTIVE', 'DONE', 'OVERFLOW', 'QUERY_FAILED']),
     customer_name: z.string(),
+    customer_public_id: z.string().min(1).max(64).nullable().optional(),
     activity_kind_label: z.string(),
     total: z.number().int().nonnegative(),
     current_index: z.number().int().positive().nullable(),
@@ -267,29 +270,11 @@ export const AssistantTaskViewSchema = z.object({
 })
 export type AssistantTaskView = z.infer<typeof AssistantTaskViewSchema>
 
-export function parseAssistantTaskList(payload: unknown): { tasks: AssistantTaskView[]; skipped: number[] } {
-  if (!Array.isArray(payload)) throw new Error('任务列表格式不正确')
-  const tasks: AssistantTaskView[] = []
-  const skipped: number[] = []
-  payload.forEach((item, index) => {
-    const parsed = AssistantTaskViewSchema.safeParse(item)
-    if (parsed.success) tasks.push(parsed.data)
-    else skipped.push(index)
-  })
-  return { tasks, skipped }
-}
-
 export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel', 'revise_activity_kind', 'submit_form', 'request_edit'])
 export type AssistantInputKind = z.infer<typeof AssistantInputKindSchema>
 
 export const AssistantRejectReasonSchema = z.enum(['wrong_customer', 'wrong_content', 'should_not_record', 'other'])
 export type AssistantRejectReason = z.infer<typeof AssistantRejectReasonSchema>
-
-export const SubmitInputResponseSchema = z.object({
-  task: AssistantTaskViewSchema,
-  message: z.string().min(1)
-}).strict()
-export type SubmitInputResponse = z.infer<typeof SubmitInputResponseSchema>
 
 export const ConversationBoundarySchema = z.object({ entry_id: z.string().min(1), prompt: z.string().min(1) }).strict()
 export type ConversationBoundary = z.infer<typeof ConversationBoundarySchema>
@@ -308,11 +293,18 @@ export const ConversationProjectionSchema = z.object({
   disposition: ConversationDispositionProjectionSchema.nullable().optional()
 }).strict()
 export type ConversationProjection = z.infer<typeof ConversationProjectionSchema>
+export const ConversationLinkSchema = z.object({
+  page: z.enum(['customers', 'follow_up_tasks']),
+  label: z.string().min(1).max(40),
+  customer_public_id: z.string().min(1).max(64).nullable().optional()
+}).strict()
+export type ConversationLink = z.infer<typeof ConversationLinkSchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
   outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed', 'proposal_unavailable']).nullable(),
-  ui: AgentUIEnvelopeSchema.nullable(), projection: ConversationProjectionSchema.nullable().optional()
+  ui: AgentUIEnvelopeSchema.nullable(), links: z.array(ConversationLinkSchema).max(4).optional(),
+  projection: ConversationProjectionSchema.nullable().optional()
 }).strict()
 export const ConversationViewSchema = z.object({
   public_id: z.string().min(1), version: z.number().int().nonnegative(),

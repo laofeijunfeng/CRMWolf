@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from app.schemas.assistant_conversation import (
     ConversationBoundary,
     ConversationDispositionProjection,
+    ConversationLink,
     ConversationMessage,
     ConversationProjection,
 )
@@ -51,7 +52,7 @@ from app.services.assistant.failure_contract import (
     root_failure_presentation,
 )
 from app.services.customer_activity_kinds import ACTIVITY_KIND_META
-from app.utils.public_id import is_opportunity_public_id
+from app.utils.public_id import is_follow_up_task_public_id, is_opportunity_public_id
 
 if TYPE_CHECKING:
     from app.schemas.assistant import AssistantTaskView
@@ -61,6 +62,7 @@ _RAW_HTML_RE = re.compile(r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>")
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _CUSTOMER_PUBLIC_ID_RE = re.compile(r"cus_[0-9a-f]{32}")
 _UNAVAILABLE = "这条结果暂时无法显示"
+_DEFAULT_VISIBLE_CANDIDATES = 10
 _UNKNOWN_TEXT = "客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。"
 
 _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
@@ -116,7 +118,7 @@ _PROPOSAL_LABELS = {
     "opportunity_stage": "推进商机",
     "opportunity_create": "创建商机",
     "follow_up_task_create": "创建跟进任务",
-    # Retired kinds stay renderable: stored receipts still carry them.
+    # Retired kinds stay renderable: stored receipts still carry them. The disposition writes `follow_up_task`.
     "customer_fact": "写入客户事实",
     "follow_up_task": "更新跟进任务",
 }
@@ -169,6 +171,33 @@ def finalize_assistant_ui(
             )
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
+        message.links = _message_links(message)
+
+
+def _message_links(message: ConversationMessage) -> list[ConversationLink]:
+    """In-app destinations next to the card; the host owns the route for each page."""
+
+    links = list(message.links)
+    task = message.task
+    if (
+        message.ui is None or task is None or message.outcome == "failure" or message.error_code is not None
+        or not isinstance(task.follow_up_disposition, dict)
+    ):
+        return links
+    if not any(
+        block.type == "interaction" and block.presentation == "OPEN_FOLLOW_UP_DISPOSITION"
+        for block in message.ui.blocks
+    ):
+        return links
+    customer = task.follow_up_disposition.get("customer_public_id")
+    link = ConversationLink(
+        page="follow_up_tasks", label="在客户追踪页处理",
+        customer_public_id=customer if isinstance(customer, str) and customer else None,
+    )
+    # Re-projection must be stable, so the same destination is never appended twice.
+    if link not in links:
+        links.append(link)
+    return links
 
 
 def _is_task_completion(message: ConversationMessage) -> bool:
@@ -670,6 +699,10 @@ def _disposition_blocks(
     summary = _disposition_summary(rows, handled, payload.get("suppression_status")) if status == "DONE" else (
         "历史跟进任务结果待核对" if payload.get("settling") is True else ""
     )
+    # Batches frozen before the count existed still fold at the default page size.
+    visible_count = payload.get("visible_count")
+    if not isinstance(visible_count, int) or not 1 <= visible_count <= len(rows):
+        visible_count = min(_DEFAULT_VISIBLE_CANDIDATES, len(rows))
     interaction = InteractionBlock(
         id="b_interaction_1",
         type="interaction",
@@ -688,7 +721,7 @@ def _disposition_blocks(
         submit_on_select=False,
         submit_action_id=_action_id(waiting) if active and waiting is not None else None,
         secondary_action=InteractionOption(value="suppress_week", label="本周不再提示") if active else None,
-        disposition_link=True,
+        disposition_visible_count=visible_count,
     )
     return (interaction,)
 
@@ -1117,7 +1150,7 @@ def _proposal_facts(candidate: ProposalCandidate, message: ConversationMessage) 
                     datetime.fromisoformat(due), include_time=candidate.due_date_granularity == "DATETIME",
                 )
         _add_fact(facts, "due_date", "到期日", due)
-        _add_fact(facts, "owner", "负责人", _string(payload.get("owner")))
+        _add_fact(facts, "owner", "负责人", _string(payload.get("owner_name")) or _string(payload.get("owner")))
     elif candidate.kind == "opportunity_create" and message.task is not None:
         _add_fact(facts, "customer", "客户", _accepted_value(message.task.draft.customer))
     _add_fact(facts, "evidence", "证据", candidate.evidence_quote, group="context")
@@ -1306,6 +1339,8 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             proposal.customer_public_id,
             customer_name=customer_name,
             opportunity_id=proposal.public_id if proposal.kind.startswith("opportunity_") else None,
+            task_id=proposal.public_id if proposal.kind == "follow_up_task_create" else None,
+            name=proposal.name,
         )
     elif message.outcome == "activity_written":
         title, detail = "活动已写入", _result_message(message)
@@ -1314,7 +1349,10 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             receipt for receipt in message.task.committed
             if receipt.kind == "customer_activity" and (activity_id is None or receipt.public_id == activity_id)
         ), None) if message.task else None
-        entity = _receipt_entity(activity.customer_public_id, customer_name=customer_name) if activity else None
+        entity = (
+            _receipt_entity(activity.customer_public_id, customer_name=customer_name, activities=True)
+            if activity else None
+        )
     else:
         return None
     return ActionResultBlock(
@@ -1330,19 +1368,28 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
 
 def _receipt_entity(
     customer_id: str | None, *, customer_name: str, opportunity_id: str | None = None,
+    task_id: str | None = None, name: str | None = None, activities: bool = False,
 ) -> EntityRef | None:
+    """Link a receipt to its record; the link only exists when bound to the owning customer."""
     if customer_id is None or not _CUSTOMER_PUBLIC_ID_RE.fullmatch(customer_id):
         return None
+    label = _clip(name, 200) if name else ""
     if opportunity_id is not None:
         if not is_opportunity_public_id(opportunity_id):
             return None
         return EntityRef(
             ref_id=f"opportunity:{opportunity_id}", resource="opportunity", public_id=opportunity_id,
-            display_name="商机", attributes={"customer_public_id": customer_id},
+            display_name=label or "商机", attributes={"customer_public_id": customer_id},
+        )
+    if task_id is not None and is_follow_up_task_public_id(task_id):
+        return EntityRef(
+            ref_id=f"follow_up_task:{task_id}", resource="follow_up_task", public_id=task_id,
+            display_name=label or "跟进任务", attributes={"customer_public_id": customer_id},
         )
     return EntityRef(
         ref_id=f"customer:{customer_id}", resource="customer", public_id=customer_id,
         display_name=_clip(customer_name, 200) or "客户",
+        attributes={"customer_tab": "activities"} if activities else None,
     )
 
 

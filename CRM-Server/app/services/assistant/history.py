@@ -42,6 +42,12 @@ def command_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> s
         return KIND_LABELS.get(payload.choice or "", "修改活动类型")
     if payload.kind == "confirm":
         return "确认" if payload.choice == "confirm" else "取消"
+    if payload.kind == "request_edit":
+        return "修改内容"
+    if payload.kind == "submit_form":
+        if payload.choice == "cancel":
+            return "取消修改" if waiting is not None and waiting.type == "CONFIRMATION_EDIT" else "取消"
+        return "提交表单"
     if waiting and waiting.type == "OBJECT_SELECTION":
         for candidate in waiting.candidates:
             if candidate.get("id") == payload.choice and isinstance(candidate.get("account_name"), str):

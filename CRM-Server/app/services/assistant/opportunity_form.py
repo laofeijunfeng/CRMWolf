@@ -192,7 +192,11 @@ def _literal(original: str, quote: str, offset: int, pattern: re.Pattern[str], f
             continue
         start = next((b.end() for b in reversed(breaks) if b.end() <= match.start()), 0)
         stop = next((b.start() for b in breaks if b.start() >= match.end()), len(original))
-        if _CONTEXT[field].search(original[max(start, offset):min(stop, end)]):
+        context_start = start
+        if field == "total_amount" and start > 0 and original[start - 1] in "，、,":
+            # "采购 200 套，8.8 万": the money keyword may sit in the preceding clause of the same sentence.
+            context_start = next((b.end() for b in reversed(breaks) if b.end() < start), 0)
+        if _CONTEXT[field].search(original[max(context_start, offset):min(stop, end)]):
             clause = original[start:stop]
             prefix, suffix = original[start:match.start()], original[match.end():stop]
             if (
@@ -247,16 +251,17 @@ def _modules(db: Session, team_id: int) -> Query[ProductModule]:
     return db.query(ProductModule).filter(ProductModule.team_id == team_id, ProductModule.is_active.is_(True))
 
 
-def _bounded_children(groups: list[list[_Child]]) -> list[_Child]:
-    # Each offered parent keeps its preferred child even when another parent has
-    # more than a full page of children.
+def _bounded_children(groups: list[list[_Child]]) -> tuple[list[_Child], bool]:
+    """Every offered parent keeps its preferred child; the page size is the card limit."""
     remaining = _MAX_OPTIONS - len(groups)
-    return [group[0] for group in groups] + list(islice((item for group in groups for item in group[1:]), remaining))
+    children = [group[0] for group in groups] + list(islice((item for group in groups for item in group[1:]), remaining))
+    truncated = sum(len(group) for group in groups) > len(children)
+    return children, truncated
 
 
 def _stage_choices(
     db: Session, team_id: int, customer: Customer,
-) -> tuple[list[ProcurementMethod], list[ProcurementStageTemplate]]:
+) -> tuple[list[ProcurementMethod], list[ProcurementStageTemplate], bool]:
     stage_exists = _stages(db, team_id).filter(ProcurementStageTemplate.procurement_method_id == ProcurementMethod.id)
     methods = (
         _methods(db, team_id).filter(stage_exists.exists())
@@ -273,10 +278,13 @@ def _stage_choices(
                   ProcurementStageTemplate.id).all()
     ):
         groups[str(stage.procurement_method_id)].append(stage)
-    return methods, _bounded_children([groups[str(method.id)] for method in methods])
+    stages, truncated = _bounded_children([groups[str(method.id)] for method in methods])
+    return methods, stages, truncated
 
 
-def _product_choices(db: Session, team_id: int, customer: Customer) -> tuple[list[Product], list[ProductModule]]:
+def _product_choices(
+    db: Session, team_id: int, customer: Customer,
+) -> tuple[list[Product], list[ProductModule], bool]:
     module_exists = _modules(db, team_id).filter(ProductModule.product_id == Product.id)
     intent = db.query(CustomerProduct).filter(
         CustomerProduct.customer_id == customer.id, CustomerProduct.team_id == team_id,
@@ -296,7 +304,8 @@ def _product_choices(db: Session, team_id: int, customer: Customer) -> tuple[lis
                   ProductModule.sort_order, ProductModule.id).all()
     ):
         groups[str(module.product_id)].append(module)
-    return products, _bounded_children([groups[str(product.id)] for product in products])
+    modules, truncated = _bounded_children([groups[str(product.id)] for product in products])
+    return products, modules, truncated
 
 
 def _option(value: str, label: str, **parent: str) -> dict[str, str]:
@@ -319,8 +328,8 @@ def prepare_opportunity_form(db: Session, task: AssistantTask, candidate: dict[s
     with db.no_autoflush:
         activity, customer, actor = _authority(db, task, candidate)
         original, quote, offset = _verified_quote(activity, candidate)
-        methods, stages = _stage_choices(db, task.team_id, customer)
-        products, modules = _product_choices(db, task.team_id, customer)
+        methods, stages, stages_truncated = _stage_choices(db, task.team_id, customer)
+        products, modules, products_truncated = _product_choices(db, task.team_id, customer)
         owners = (
             _owners(db, task.team_id)
             .filter(User.id != actor.id)
@@ -375,6 +384,9 @@ def prepare_opportunity_form(db: Session, task: AssistantTask, candidate: dict[s
             "defaults": defaults,
             "sources": sources,
             "options": options,
+            # The card shows at most 50 options per field; say so when a list was cut.
+            "option_notice": "选项较多，表单只列出前 50 项；找不到时请在客户页手动创建商机。"
+            if stages_truncated or products_truncated else None,
         }
 
 

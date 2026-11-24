@@ -1,6 +1,7 @@
 import type { RouteLocationRaw } from 'vue-router'
 
 import type { EntityRef } from '@/schemas/agent-contracts'
+import type { ConversationLink } from '@/schemas/assistant-contracts'
 import { customerDetailRoute } from '@/utils/customerRoutes'
 import { isOpportunityPublicId } from '@/utils/opportunityRoutes'
 
@@ -13,6 +14,7 @@ export const isAgentEntityOpenable = (entityRef: Pick<EntityRef, 'resource'>): b
   entityRef.resource === 'customer'
   || entityRef.resource === 'opportunity'
   || entityRef.resource === 'contract'
+  || entityRef.resource === 'follow_up_task'
 )
 
 /**
@@ -34,7 +36,10 @@ const isCustomerEntityId = (value: unknown): value is string =>
 /** Routes only references bound to a customer by the server. */
 export const assistantEntityDetailRoute = (ref: EntityRef): RouteLocationRaw | null => {
   if (ref.resource === 'customer' && isCustomerEntityId(ref.public_id)) {
-    return customerDetailRoute(ref.public_id)
+    // Activity receipts point at the customer and ask for its activity panel.
+    return ref.attributes?.['customer_tab'] === 'activities'
+      ? customerDetailRoute(ref.public_id, { tab: 'followup' })
+      : customerDetailRoute(ref.public_id)
   }
   if (ref.resource === 'opportunity' && isOpportunityPublicId(ref.public_id)) {
     const customerId = ref.attributes?.['customer_public_id']
@@ -42,5 +47,23 @@ export const assistantEntityDetailRoute = (ref: EntityRef): RouteLocationRaw | n
       return customerDetailRoute(customerId, { tab: 'opportunities', opportunityId: ref.public_id })
     }
   }
+  if (ref.resource === 'follow_up_task' && ref.public_id.trim() !== '') {
+    const customerId = ref.attributes?.['customer_public_id']
+    if (isCustomerEntityId(customerId)) {
+      return { name: 'CustomerTracking', query: { customerId, taskId: ref.public_id } }
+    }
+  }
   return null
+}
+
+/** The server names the page; the host owns the route for it. */
+export const assistantPageRoute = (link: ConversationLink): RouteLocationRaw | null => {
+  if (link.page === 'customers') {
+    return link.customer_public_id != null && isCustomerEntityId(link.customer_public_id)
+      ? customerDetailRoute(link.customer_public_id)
+      : { path: '/customers' }
+  }
+  return link.customer_public_id != null && isCustomerEntityId(link.customer_public_id)
+    ? { name: 'CustomerTracking', query: { customerId: link.customer_public_id } }
+    : { name: 'CustomerTracking' }
 }

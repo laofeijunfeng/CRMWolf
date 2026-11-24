@@ -5,9 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections import deque
-from math import ceil
-from threading import Lock
 from time import monotonic
 from typing import Any, Literal, TypeVar
 
@@ -16,6 +13,7 @@ from cryptography.fernet import InvalidToken
 from pydantic import BaseModel, ValidationError
 
 from app.crud.ai_config import ai_config_crud
+from app.services.assistant.events import is_stage_name
 from app.services.assistant.failure_contract import (
     AssistantFailureCode,
     attempt_budget_remaining,
@@ -27,49 +25,36 @@ OutputMode = Literal["json_object", "json_schema"]
 ResultT = TypeVar("ResultT", bound=BaseModel)
 
 _DEFAULT_CALL_TIMEOUT_SECONDS = 120
+# Model call labels share the SSE StageName vocabulary so log and stream series line up;
+# capability probes run outside a turn and keep their own label.
 _STAGE_BY_ERROR_PREFIX = {
     "理解这次沟通": "route",
     "活动类型判断": "classify",
     "客户名称定位": "locate",
     "会议纪要整理": "structure",
     "跟进整理": "structure",
-    "商机排序": "choose",
+    "商机排序": "judge",
     "变化判断": "judge",
     "客户活动评分": "quality_gate",
-    "动作选择": "choose",
-    "商机提名": "nominate",
+    "动作选择": "judge",
+    "商机提名": "propose",
     "销售助手根决策验证": "capability",
     "销售助手会议流式验证": "capability",
     "销售助手质量流式验证": "capability",
 }
-_MODEL_STAGES = frozenset(_STAGE_BY_ERROR_PREFIX.values()) | {"context", "propose"}
-_LATENCY_WINDOW = 128
-_STAGE_LATENCIES: dict[str, deque[int]] = {}
-_LATENCY_LOCK = Lock()
 
 
-def _record_model_call(*, stage: str, elapsed_ms: int, attempt: int, outcome: str) -> None:
-    # Fixed stage labels and a rolling window bound both memory and sorting work per worker.
-    with _LATENCY_LOCK:
-        samples = _STAGE_LATENCIES.get(stage)
-        if samples is None:
-            samples = _STAGE_LATENCIES[stage] = deque(maxlen=_LATENCY_WINDOW)
-        samples.append(elapsed_ms)
-        ordered = sorted(samples)
-    count = len(ordered)
-    fields = {
-        "stage": stage,
-        "elapsed_ms": elapsed_ms,
-        "attempt": attempt,
-        "outcome": outcome,
-        "sample_count": count,
-        "p50_ms": ordered[ceil(count * 0.50) - 1],
-        "p95_ms": ordered[ceil(count * 0.95) - 1],
-    }
-    # The default app formatter emits message text; structured collectors can also use extra_fields.
+def _model_stage(stage: str | None, error_prefix: str) -> str:
+    label = stage or _STAGE_BY_ERROR_PREFIX.get(error_prefix, "other")
+    return label if label == "capability" or is_stage_name(label) else "other"
+
+
+def _record_model_call(*, stage: str, duration_ms: int, attempt: int, result: str) -> None:
+    """One durable record per attempt; P50/P95 are aggregated from logs across workers."""
+
+    fields = {"stage": stage, "duration_ms": duration_ms, "attempt": attempt, "result": result}
     logger.info(
-        "assistant_model_call stage=%(stage)s elapsed_ms=%(elapsed_ms)s attempt=%(attempt)s outcome=%(outcome)s "
-        "sample_count=%(sample_count)s p50_ms=%(p50_ms)s p95_ms=%(p95_ms)s",
+        "assistant_model_call stage=%(stage)s duration_ms=%(duration_ms)s attempt=%(attempt)s result=%(result)s",
         fields,
         extra={"extra_fields": fields},
     )
@@ -111,9 +96,7 @@ class AssistantModelTransport:
         if turn_remaining is not None:
             limit = min(limit, turn_remaining)
         deadline = started + limit
-        model_stage = stage or _STAGE_BY_ERROR_PREFIX.get(error_prefix, "other")
-        if model_stage not in _MODEL_STAGES:
-            model_stage = "other"
+        model_stage = _model_stage(stage, error_prefix)
         if not api_host or not api_key or not model:
             raise AssistantLLMError(f"{error_prefix}：AI 配置不完整", code=AssistantFailureCode.CONFIGURATION_ERROR)
         if output_mode not in {"json_object", "json_schema"}:
@@ -148,8 +131,8 @@ class AssistantModelTransport:
                     outcome = "cancelled"
                     raise
                 finally:
-                    _record_model_call(stage=model_stage, elapsed_ms=round((monotonic() - attempt_started) * 1000),
-                                       attempt=attempt, outcome=outcome)
+                    _record_model_call(stage=model_stage, duration_ms=round((monotonic() - attempt_started) * 1000),
+                                       attempt=attempt, result=outcome)
             except AssistantLLMError as exc:
                 logger.warning("assistant_model_failure stage=%s mode=%s stream=%s attempt=%s code=%s "
                                "status=%s request_id=%s provider_type=%s provider_param=%s",

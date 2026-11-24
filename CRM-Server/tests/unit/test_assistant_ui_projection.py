@@ -1725,8 +1725,27 @@ def test_disposition_bulk_keeps_frozen_order_and_folds_without_losing_choices() 
     assert block.state == "ACTIVE" and block.submit_action_id == "action_round"
     assert block.selection_mode == "multiple" and (block.min_selections, block.max_selections) == (0, 51)
     assert [option.value for option in block.options] == [row.item_id for row in block.disposition_items] == ids
-    assert block.disposition_link and not block.submit_on_select
+    assert block.disposition_visible_count == 10 and not block.submit_on_select
+    # The card points at the follow-up page, scoped to this customer.
+    assert [(link.page, link.customer_public_id) for link in message.links] == [
+        ("follow_up_tasks", task.follow_up_disposition.get("customer_public_id")),
+    ]
     assert block.secondary_action.value == "suppress_week"
+
+
+def test_disposition_frozen_before_visible_count_still_folds_at_default_page() -> None:
+    task = _round_task()
+    payload = task.follow_up_disposition
+    payload.pop("visible_count", None)
+    payload.update(total=14, settling=False)
+    payload["items"] = [
+        {"item_id": f"i{index}", "task_public_id": f"fut_i{index}", "state": "waiting", "title": f"跟进 {index}"}
+        for index in range(14)
+    ]
+    message = _message("batch", "历史跟进任务", task, outcome="follow_up_disposition")
+    finalize_assistant_ui([message], focused_task=task, pending_choice=None)
+    block = message.ui.blocks[0]
+    assert len(block.disposition_items) == 14 and block.disposition_visible_count == 10
 
 
 def test_settling_disposition_never_exposes_actions_even_if_a_wait_is_present() -> None:
@@ -1741,7 +1760,7 @@ def test_settling_disposition_never_exposes_actions_even_if_a_wait_is_present() 
 
 def test_settled_disposition_retains_each_result_and_suppression_status() -> None:
     task = _round_task(done=True, state="complete")
-    task.follow_up_disposition.update(total=3, suppression_status="applied")
+    task.follow_up_disposition.update(total=3, visible_count=2, suppression_status="applied")
     task.follow_up_disposition["items"].extend(
         [
             {
@@ -1764,7 +1783,8 @@ def test_settled_disposition_retains_each_result_and_suppression_status() -> Non
     message = _message("done", "历史跟进任务", task, outcome="follow_up_disposition")
     finalize_assistant_ui([message], focused_task=None, pending_choice=None)
     block = message.ui.blocks[0]
-    assert block.state == "READ_ONLY" and block.secondary_action is None and block.disposition_link
+    assert block.state == "READ_ONLY" and block.secondary_action is None
+    assert block.disposition_visible_count == 2
     assert [row.state for row in block.disposition_items] == ["complete", "failed", "unknown"]
     assert block.disposition_items[1].result_message == "任务已不是未完成状态"
     assert block.disposition_items[1].evidence_reason == "客户提到同一附件"
@@ -1825,26 +1845,35 @@ def test_terminal_create_receipt_requires_tied_approval_and_survives_reprojectio
         assert messages[1].ui is None and messages[1].proposal_receipt is None
 
 
-def test_activity_and_follow_up_receipts_link_to_owning_customer_only() -> None:
+def test_receipt_links_open_the_written_record_and_stay_bound_to_its_customer() -> None:
     activity_receipt = {"kind": "customer_activity", "public_id": "activity_one", "customer_id": 11,
                         "customer_public_id": _CUSTOMER_ID}
-    follow_up_receipt = {"kind": "follow_up_task_create", "public_id": "fut_one", "proposal_key": "follow_up_key",
-                         "customer_id": 11, "customer_public_id": _CUSTOMER_ID}
-    task = _task(committed=[activity_receipt, follow_up_receipt])
+    follow_up_receipt = {"kind": "follow_up_task_create", "public_id": f"fut_{'a' * 32}", "proposal_key": "follow_up_key",
+                         "customer_id": 11, "customer_public_id": _CUSTOMER_ID, "name": "发方案", "detail": "发方案"}
+    opportunity_receipt = {"kind": "opportunity_create", "public_id": _OPPORTUNITY_ID, "proposal_key": "create_key",
+                           "customer_id": 11, "customer_public_id": _CUSTOMER_ID, "name": "睿狐 CRM 项目"}
+    task = _task(committed=[activity_receipt, follow_up_receipt, opportunity_receipt])
     written = _message("written", "已记录", task, outcome="activity_written")
     created = _message("created", "已创建", task, proposal_receipt=follow_up_receipt)
+    won = _message("created_opportunity", "已创建", task, proposal_receipt=opportunity_receipt)
     ordinary = _message("ordinary", "接下来再记一条", task)
     failed = _message("failed", "结果待核对", task, outcome="failure", error_code="UNKNOWN_COMMIT_RESULT",
                       proposal_receipt=follow_up_receipt)
-    legacy = _message("legacy", "已创建", task, proposal_receipt={**follow_up_receipt, "customer_public_id": None})
-    finalize_assistant_ui([written, created, ordinary, failed, legacy], focused_task=None, pending_choice=None)
-    for message in (written, created):
-        assert [block.type for block in message.ui.blocks] == ["action_result"]
-        entity = message.ui.blocks[0].entity_ref
-        assert entity.resource == "customer" and entity.public_id == _CUSTOMER_ID
+    unbound = _message("unbound", "已创建", task, proposal_receipt={**follow_up_receipt, "customer_public_id": None})
+    finalize_assistant_ui([written, created, won, ordinary, failed, unbound], focused_task=None, pending_choice=None)
+
+    activity, follow_up, opportunity = (message.ui.blocks[0] for message in (written, created, won))
+    # An activity opens its customer's activity panel; a task or an opportunity opens itself.
+    assert activity.entity_ref.resource == "customer" and activity.entity_ref.public_id == _CUSTOMER_ID
+    assert activity.entity_ref.attributes == {"customer_tab": "activities"}
+    assert (follow_up.entity_ref.resource, follow_up.entity_ref.public_id) == ("follow_up_task", follow_up_receipt["public_id"])
+    assert follow_up.entity_ref.attributes == {"customer_public_id": _CUSTOMER_ID}
+    assert (follow_up.title, follow_up.message, follow_up.entity_ref.display_name) == ("跟进任务已创建", "发方案", "发方案")
+    assert (opportunity.entity_ref.resource, opportunity.entity_ref.display_name) == ("opportunity", "睿狐 CRM 项目")
+    assert opportunity.entity_ref.attributes == {"customer_public_id": _CUSTOMER_ID}
     assert [block.type for block in ordinary.ui.blocks] == ["text"]
     assert [block.type for block in failed.ui.blocks] == ["notice"]
-    assert legacy.ui.blocks[0].entity_ref is None
+    assert unbound.ui.blocks[0].entity_ref is None
 
 
 def test_every_accepted_proposal_receipt_kind_renders_a_structured_result() -> None:

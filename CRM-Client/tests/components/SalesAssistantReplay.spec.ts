@@ -271,7 +271,7 @@ describe('revision-bound sales assistant interactions', () => {
     const current = makeTask({ waiting: field({ type: 'FOLLOW_UP_DISPOSITION', field: 'follow_up_disposition' }),
       follow_up_disposition: disposition })
     const block = { interaction_type: 'choice', business_action: 'settle_follow_up_disposition',
-      presentation: 'OPEN_FOLLOW_UP_DISPOSITION', disposition_link: true, disposition_items: [item],
+      presentation: 'OPEN_FOLLOW_UP_DISPOSITION', disposition_visible_count: 10, disposition_items: [item],
       selection_mode: 'multiple', min_selections: 0, max_selections: 1,
       options: [{ label: item.title, value: item.item_id }], secondary_action: { label: '本周不再提示', value: 'suppress_week' } }
     const active = interactionMessage('active', current, block)
@@ -284,9 +284,8 @@ describe('revision-bound sales assistant interactions', () => {
     const settled = interactionMessage('settling', { ...current, follow_up_disposition: { ...disposition, settling: true } }, block)
     const second = await loadInteractions([settled])
     expect(second.interaction('settling')?.props('message').blocks[0]).toMatchObject({
-      state: 'READ_ONLY', submit_action_id: null, secondary_action: null, disposition_link: true
+      state: 'READ_ONLY', submit_action_id: null, secondary_action: null, disposition_visible_count: 10
     })
-    expect(second.wrapper.get('a[href="/customer-tracking"]').text()).toBe('在客户追踪页处理')
     await second.submit('settling', 'action1', { choices: [item.item_id], suppress_week: false })
     expect(mocks.command).not.toHaveBeenCalled()
     second.wrapper.unmount()

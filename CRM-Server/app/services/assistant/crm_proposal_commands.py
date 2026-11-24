@@ -282,6 +282,8 @@ def validate_candidate(
                 "source_revision": activity.activity_revision,
                 "task_hash": task_hash,
                 "due_date_granularity": evidence.granularity,
+                # Cards and receipts show the resolved owner; `owner` stays the spoken evidence.
+                "payload": {**payload, "owner_name": user.name or owner},
             }
         if kind == "opportunity_stage":
             opportunity = _opportunity(db, task, str(candidate.get("target_public_id") or ""))

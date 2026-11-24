@@ -38,6 +38,10 @@
 - 已 `CLAIMED` 的商机命令只核对目标效果，临近或超过租约也不能自动重发。没有效果记录、读失败或无法归因不构成“未调用”证明；保留 `UNKNOWN` 或待核对，不用新卡掩盖它。没有确定未执行的证据时不得裁决拒绝；已 `STARTED` 且无法证明未提交时也一样。
 - 同步/核对不是重试授权。`reprocess_allowed` 由服务端针对原轮次单独判断；正在运行的有效租约、已被更新轮次取代、活动已提交或提交未知均不允许盲目重处理。
 
+## 模型调用观测
+
+每次模型调用尝试（含重试）写一条 `assistant_model_call` 结构化日志，字段为 `stage`、`duration_ms`、`attempt`、`result`（`success`、`cancelled` 或失败码）。`stage` 沿用进度流的阶段名（`route`、`classify`、`locate`、`structure`、`judge`、`quality_gate`、`propose`），能力探测记为 `capability`，其余记为 `other`。P50/P95 由日志汇总，进程内不保留统计窗口。未知阶段名只记警告、不发进度事件，不中断本轮。
+
 ## 命令核对权限（迁移 149）
 
 - 迁移 [`149_assistant_command_reconciliation_permission.py`](../../../CRM-Server/migrations/versions/149_assistant_command_reconciliation_permission.py)（revision `149_assistant_command_operator`）为 opt-in 角色 `ASSISTANT_COMMAND_OPERATOR` 授予 `assistant:commands:reconcile:team`，不自动赋给团队成员或既有角色。

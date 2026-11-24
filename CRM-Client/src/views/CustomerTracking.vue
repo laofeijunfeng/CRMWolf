@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch, watchEffect } from 'vue'
 import { storeToRefs } from 'pinia'
 import { CheckCircle2, Clock3, FileText, PauseCircle, Plus, RefreshCw, XCircle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { useRoute, useRouter } from 'vue-router'
 import { DataTable, HoverInfo, TableRowActions, type ActionConfig, type TableRowActionSet } from '@/components/crmwolf'
 import type { ListFilterCondition } from '@/components/crmwolf/listFilterTypes'
 import type { ListFieldDefinition } from '@/components/crmwolf/listFieldCatalog'
@@ -54,6 +55,7 @@ import { formatLocalDate } from '@/utils/format'
 import { serializeListQuery, withoutFilterFields } from '@/utils/listQuery'
 import { buildDataTableExportFileName } from '@/utils/downloadBlob'
 import { toFeedbackError, type FeedbackError } from '@/types/feedback'
+import { isCustomerPublicId } from '@/utils/customerRoutes'
 
 usePageTitle()
 
@@ -111,6 +113,31 @@ const activeColumns = ref<ViewPreferenceConfig['columns']>([])
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
+
+const route = useRoute()
+const router = useRouter()
+const firstQueryValue = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+// Deep links from the assistant scope the list to one customer and may focus one task.
+const routeCustomerId = computed<string | null>(() => {
+  const customerId = firstQueryValue(route.query['customerId'])
+  return isCustomerPublicId(customerId) ? customerId : null
+})
+const routeTaskId = computed<string | null>(() => firstQueryValue(route.query['taskId']).trim() || null)
+const routeCustomerName = computed(() => {
+  const customer = tasks.value.find((task) => task.customer?.public_id === routeCustomerId.value)?.customer
+  return customer?.account_name ?? customer?.name ?? ''
+})
+
+function clearRouteCustomer(): void {
+  const query = { ...route.query }
+  delete query['customerId']
+  delete query['taskId']
+  void router.replace({ path: route.path, query })
+}
 let latestTaskListRequest = 0
 
 const tabs = computed<TabItem[]>(() => [
@@ -286,6 +313,7 @@ async function fetchTasks(): Promise<boolean> {
       skip: (page.value - 1) * pageSize.value,
       limit: pageSize.value,
       ...(search.value.trim() !== '' ? { search: search.value.trim() } : {}),
+      ...(routeCustomerId.value !== null ? { customer_id: routeCustomerId.value } : {}),
       ...serializeListQuery({ filters: effectiveFilters, sorts: activeSorts.value })
     })
     // A list request started before a transition may finish after the
@@ -308,20 +336,30 @@ async function refreshActiveView(): Promise<void> {
   await fetchTasks()
 }
 
+async function loadTaskDetail(taskId: string): Promise<void> {
+  detailLoading.value = true
+  try {
+    selectedTask.value = await followUpTaskApi.getDetail(taskId)
+  } catch (error) {
+    handleApiError(error, '获取追踪详情')
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 async function openDetail(row: TrackingRow, index?: number): Promise<void> {
   const rowIndex = index ?? rows.value.findIndex((item) => item.public_id === row.public_id)
   detailTriggerIndex.value = rowIndex
   focusedDetailTrigger.value = getDetailTrigger(rowIndex)
   selectedTaskId.value = row.public_id
   selectedTask.value = row
-  detailLoading.value = true
-  try {
-    selectedTask.value = await followUpTaskApi.getDetail(row.public_id)
-  } catch (error) {
-    handleApiError(error, '获取追踪详情')
-  } finally {
-    detailLoading.value = false
-  }
+  await loadTaskDetail(row.public_id)
+}
+
+async function openDetailById(taskId: string): Promise<void> {
+  selectedTaskId.value = taskId
+  selectedTask.value = null
+  await loadTaskDetail(taskId)
 }
 
 function clearSelectedTask(): void {
@@ -856,6 +894,15 @@ onMounted(() => {
   void fetchTasks()
 })
 
+watch(routeCustomerId, () => {
+  page.value = 1
+  void fetchTasks()
+})
+
+watch(routeTaskId, (taskId) => {
+  if (taskId !== null && taskId !== selectedTaskId.value) void openDetailById(taskId)
+}, { immediate: true })
+
 useTopBarRegistration({
   tabs: allTabs,
   activeTab,
@@ -905,6 +952,10 @@ watchEffect(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-space-6 bg-card p-[var(--page-padding)]">
+    <div v-if="routeCustomerId" class="flex items-center gap-space-3 text-body text-muted-foreground" role="status" data-testid="tracking-customer-scope">
+      <span>仅显示客户「{{ routeCustomerName || '所选客户' }}」的追踪</span>
+      <Button variant="ghost" size="sm" @click="clearRouteCustomer">查看全部</Button>
+    </div>
     <DataTable
       :export-enabled="canExportFollowUpTasks"
       export-title="客户追踪列表"
@@ -926,7 +977,7 @@ watchEffect(() => {
       :get-row-label="(row) => `客户跟进 ${row.customer_name || row.public_id}`"
       :get-row-actions="getRowActions"
       empty-title="暂无客户追踪"
-      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 ? 'filtered' : 'no-data'"
+      :empty-reason="search.trim() !== '' || effectiveFilters.length > 0 || routeCustomerId !== null ? 'filtered' : 'no-data'"
       mobile-title-key="customer_name"
       mobile-subtitle-key="tracking_content"
       mobile-status-key="status_label"

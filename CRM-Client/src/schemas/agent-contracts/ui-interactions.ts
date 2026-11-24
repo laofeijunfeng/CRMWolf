@@ -92,7 +92,7 @@ export const InteractionBlockObjectSchema = z.object({
   business_action: z.string().min(1).max(128).nullable().optional(),
   presentation: z.enum(['COMPACT_TASK_COMPLETION', 'OPEN_FOLLOW_UP_DISPOSITION']).nullable().optional(),
   disposition_items: z.array(OpenFollowUpDispositionCardItemSchema).max(100).default([]),
-  disposition_link: z.boolean().optional(),
+  disposition_visible_count: z.number().int().min(1).max(100).nullable().optional(),
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
   hint: z.string().max(400).nullable().optional(),
@@ -164,7 +164,7 @@ export function validateInteractionBlock(
       })
     }
   } else {
-    if (block.disposition_items.length > 0 || block.disposition_link === true) {
+    if (block.disposition_items.length > 0 || block.disposition_visible_count != null) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'disposition items and link require the open follow-up presentation', path: ['presentation'] })
     }
     if (block.options.length > 50 || (block.max_selections ?? 0) > 50) {

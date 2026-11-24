@@ -22,7 +22,8 @@ class CorrectedParticipants(ConversationModel):
 
 
 class ActivityCorrection(ConversationModel):
-    field: Literal["communication_time", "channel_kind", "participants", "summary", "next_action", "next_follow_time"]
+    # The model may name any field it heard; the server decides which ones can change here.
+    field: str = Field(min_length=1, max_length=64)
     new_value: str | CorrectedParticipants | None
     quote: str = Field(min_length=1, max_length=2000)
 
@@ -89,6 +90,14 @@ class ConversationProjection(ConversationModel):
     activity_public_id: str | None = Field(default=None, min_length=1)
     disposition: ConversationDispositionProjection | None = None
 
+class ConversationLink(ConversationModel):
+    """A server-signed in-app page a reply points at; the Web host owns the actual route."""
+
+    page: Literal["customers", "follow_up_tasks"]
+    label: str = Field(min_length=1, max_length=40)
+    customer_public_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 
 class ConversationMessage(ConversationModel):
     id: str
@@ -101,6 +110,7 @@ class ConversationMessage(ConversationModel):
         "activity_written", "failure", "follow_up_disposition", "task_completed", "proposal_unavailable"
     ] | None = None
     ui: AgentUIEnvelope | None = None
+    links: list[ConversationLink] = Field(default_factory=list, max_length=4)
     projection: ConversationProjection | None = None
     proposal_receipt: AcceptedProposalReceipt | None = Field(default=None, exclude=True)
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.

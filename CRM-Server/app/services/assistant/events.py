@@ -41,9 +41,16 @@ class TurnStage:
     name: StageName
 
 
-def stage(name: str) -> TurnStage:
+def stage(name: str) -> TurnStage | None:
+    """Typed stage handle; an unknown name logs a warning and yields ``None``.
+
+    Progress reporting must never break a turn, so callers treat ``None`` as
+    "emit nothing" instead of raising.
+    """
+
     if not is_stage_name(name):
-        raise ValueError(f"unknown stage name: {name!r}")
+        logger.warning("unknown assistant stage name skipped: %r", name)
+        return None
     return TurnStage(name=name)  # type: ignore[arg-type]
 
 
@@ -55,23 +62,25 @@ def encode_sse(event: str, data: dict[str, object]) -> str:
 
 
 class ProgressReporter(Protocol):
-    def stage_start(self, stage: TurnStage) -> None: ...
+    """Stage sink; every implementation emits nothing for a ``None`` stage."""
 
-    def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None: ...
+    def stage_start(self, stage: TurnStage | None) -> None: ...
 
-    def stage_failed(self, stage: TurnStage) -> None: ...
+    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None: ...
+
+    def stage_failed(self, stage: TurnStage | None) -> None: ...
 
 
 class NullProgressReporter:
     """Drop events; default for unit tests and in-process callers."""
 
-    def stage_start(self, stage: TurnStage) -> None:
+    def stage_start(self, stage: TurnStage | None) -> None:
         _ = stage
 
-    def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None:
+    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
         _ = stage, ms, score
 
-    def stage_failed(self, stage: TurnStage) -> None:
+    def stage_failed(self, stage: TurnStage | None) -> None:
         _ = stage
 
 
@@ -88,7 +97,9 @@ class SSEProgressReporter:
         self._queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = asyncio.Queue()
         self._started_at: dict[str, float] = {}
 
-    def stage_start(self, stage: TurnStage) -> None:
+    def stage_start(self, stage: TurnStage | None) -> None:
+        if stage is None:
+            return
         try:
             self._started_at[stage.name] = time.monotonic()
             self._queue.put_nowait(
@@ -97,7 +108,9 @@ class SSEProgressReporter:
         except Exception:
             logger.exception("stage_start reporting failed for %s", stage.name)
 
-    def stage_done(self, stage: TurnStage, *, ms: int, score: int | None = None) -> None:
+    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
+        if stage is None:
+            return
         try:
             self._started_at.pop(stage.name, None)
             payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
@@ -107,7 +120,9 @@ class SSEProgressReporter:
         except Exception:
             logger.exception("stage_done reporting failed for %s", stage.name)
 
-    def stage_failed(self, stage: TurnStage) -> None:
+    def stage_failed(self, stage: TurnStage | None) -> None:
+        if stage is None:
+            return
         try:
             self._started_at.pop(stage.name, None)
             self._queue.put_nowait(("stage", {"stage": stage.name, "phase": "failed"}))

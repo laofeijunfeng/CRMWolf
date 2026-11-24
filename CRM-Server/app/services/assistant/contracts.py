@@ -24,8 +24,8 @@ Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
 ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunity_create"]
-# Waits and receipts frozen before CRM-154 may still carry retired kinds. They stay readable;
-# every new proposal remains restricted to ProposalKind.
+# Waits and receipts frozen before CRM-154 may still carry retired kinds (`customer_fact`, and
+# `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
 
 
@@ -199,6 +199,8 @@ class AcceptedProposalReceipt(BaseModel):
     approval_id: int | None = None
     approval_phase: Literal["pending_review"] | None = None
     detail: str | None = None
+    # Server-resolved target name (opportunity or task title); older receipts have none.
+    name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class RefusedProposalReceipt(BaseModel):

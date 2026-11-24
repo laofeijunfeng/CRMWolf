@@ -12,6 +12,7 @@ defineOptions({
 interface MultiSelectFieldOption {
   value: string | number
   label: string
+  disabled?: boolean
 }
 
 interface Props {

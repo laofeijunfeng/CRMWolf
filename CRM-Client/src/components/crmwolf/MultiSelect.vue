@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 interface MultiSelectOption {
   value: string | number
   label: string
+  disabled?: boolean
 }
 
 defineOptions({
@@ -51,6 +52,7 @@ const selectedSummary = computed(() => {
 })
 
 function toggleValue(value: string): void {
+  if (props.options.find(option => String(option.value) === value)?.disabled === true) return
   const next = new Set(selectedValues.value)
   if (next.has(value)) next.delete(value)
   else next.add(value)
@@ -85,6 +87,8 @@ function toggleValue(value: string): void {
               v-for="option in props.options"
               :key="String(option.value)"
               :value="String(option.value)"
+              :disabled="option.disabled === true"
+              :data-disabled="option.disabled === true ? 'true' : undefined"
               @select.prevent="toggleValue(String(option.value))"
             >
               <Checkbox

@@ -125,7 +125,7 @@ const deletingCustomerIds = ref<Set<string>>(new Set())
 const selectedCustomerId = ref<string | null>(null)
 const targetOpportunityId = ref<string | null>(null)
 const targetJourneyId = ref<string | null>(null)
-const targetCustomerDetailPanel = ref<'journeys' | 'opportunities' | null>(null)
+const targetCustomerDetailPanel = ref<'followup' | 'journeys' | null>(null)
 
 const firstQueryValue = (value: unknown): string => {
   if (typeof value === 'string') return value
@@ -167,7 +167,9 @@ const applyCustomerDetailFromRoute = (): void => {
   const opportunityId = firstQueryValue(route.query['opportunityId'])
 
   selectedCustomerId.value = customerId
-  targetCustomerDetailPanel.value = tab === 'journeys' || tab === 'opportunities' ? 'journeys' : null
+  targetCustomerDetailPanel.value = tab === 'journeys' || tab === 'opportunities' ? 'journeys'
+    : tab === 'followup' ? 'followup'
+      : null
 
   if (isDealJourneyPublicId(journeyId)) {
     targetJourneyId.value = journeyId

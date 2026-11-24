@@ -43,6 +43,11 @@ logger = logging.getLogger(__name__)
 PROPOSAL_UNAVAILABLE_TEXT = "活动已记录。本次没能生成后续建议，可在客户页手动处理。"
 
 
+class _CommittedActivityMissing(ValueError):
+    """The task claims an activity receipt that no longer exists; the task must not complete."""
+
+
+
 _PROMPTS = {
     "opportunity_create": "根据这次活动，为客户创建商机吗？",
     "opportunity_stage": "根据这次活动，推进这条商机到下一阶段吗？",
@@ -117,10 +122,22 @@ def _bind_candidate(
     bound = validate_candidate(db, task, candidate, on_reject=reasons.append)
     kind = candidate.get("kind")
     if bound is None:
-        rejected.append({"kind": kind if isinstance(kind, str) and kind in _PRIORITY else "unknown",
-                         "reason": next(iter(reasons), "schema")})
+        rejected.append({
+            "kind": kind if isinstance(kind, str) and kind in _PRIORITY else "unknown",
+            "reason": next(iter(reasons), "schema"),
+            **_rejection_trail(candidate),
+        })
         return None
     return {**bound, "key": _candidate_key(bound)}
+
+def _rejection_trail(candidate: Mapping[str, object]) -> dict[str, str]:
+    """Which target and quote a dropped candidate referred to, for the action audit."""
+    trail: dict[str, str] = {}
+    for key, field, limit in (("target", "target_public_id", 128), ("quote", "evidence_quote", 200)):
+        value = candidate.get(field)
+        if isinstance(value, str) and value.strip():
+            trail[key] = value.strip()[:limit]
+    return trail
 
 
 def _take_queued_candidate(
@@ -136,16 +153,18 @@ def _take_queued_candidate(
         if rebound is None:
             continue
         if rebound["key"] != candidate.key:
-            rejected.append({"kind": candidate.kind, "reason": "target"})
+            rejected.append({"kind": candidate.kind, "reason": "target",
+                             **_rejection_trail(candidate.model_dump(mode="json", exclude_unset=True))})
             continue
         return candidate
     return None
 
 def proposal_waiting(task: AssistantTask, proposal: ProposalData) -> TaskWaiting:
     kind = proposal["kind"]
+    payload = proposal.get("payload") or {}
+    # Lead with the server-resolved target name; a raw id is only the last resort.
+    detail = payload.get("opportunity_name") or payload.get("action") or proposal.get("target_public_id") or ""
     label = _PROMPTS[kind]
-    payload = proposal.get("payload", {})
-    detail = proposal.get("target_public_id") or payload.get("content") or payload.get("opportunity_name") or ""
     if detail:
         label = f"{str(detail)[:80]}：{label}"
     return TaskWaiting(
@@ -206,7 +225,7 @@ async def offer_next_proposal(
         with db.begin_nested():
             activity = source_activity(db, task)
             if activity is None:
-                raise ValueError("committed customer activity is missing")
+                raise _CommittedActivityMissing("committed customer activity is missing")
             if saved is None:
                 if reporter is not None:
                     reporter.stage_start(stage("propose"))
@@ -240,7 +259,20 @@ async def offer_next_proposal(
             reason = "llm_error"
         logger.warning("后续建议不可用: %s", reason)
         action_name = proposal_outcome = "proposal_failed"
-        action_result = {"reason": reason}
+        # Rejections found before the failure stay in the audit record.
+        action_result = {"rejected": rejected} if rejected else {}
+        action_result["reason"] = reason
+        proposal = None
+    except _CommittedActivityMissing:
+        raise
+    except Exception as exc:
+        # The activity is already committed: any other failure is still only "no suggestions".
+        if started is not None and reporter is not None:
+            reporter.stage_failed(stage("propose"))
+        logger.warning("后续建议不可用: internal_error (%s)", type(exc).__name__)
+        action_name = proposal_outcome = "proposal_failed"
+        action_result = {"rejected": rejected} if rejected else {}
+        action_result["reason"] = "internal_error"
         proposal = None
     else:
         if started is not None and reporter is not None:
@@ -277,7 +309,10 @@ async def offer_next_proposal(
     return result.task, waiting.prompt, True
 
 
-def _proposal_form_waiting(spec: dict[str, Any], revision: int, errors: dict[str, str] | None = None) -> TaskWaiting:
+def _proposal_form_waiting(
+    spec: dict[str, Any], revision: int, errors: dict[str, str] | None = None,
+    submitted: dict[str, JsonValue] | None = None,
+) -> TaskWaiting:
     from app.services.agent.ui.schemas import InteractionField
 
     fields = []
@@ -291,16 +326,20 @@ def _proposal_form_waiting(spec: dict[str, Any], revision: int, errors: dict[str
                 bound["depends_on_value"] = option[parent]
             options.append(bound)
         fields.append(InteractionField.model_validate({
-            **field, "options": options, "default_value": spec["defaults"].get(key),
+            **field, "options": options,
+            # A rejected submission comes back with what the user typed, not the frozen defaults.
+            "default_value": submitted[key] if submitted and key in submitted else spec["defaults"].get(key),
             "depends_on_key": parent if options else None,
             "source_label": spec["sources"].get(key, {}).get("label"),
             "error_message": (errors or {}).get(key),
         }).model_dump(mode="json"))
     heading = f"为{spec['customer_name']}新建商机"
+    notice = spec.get("option_notice")
+    hint = (errors or {}).get("form") or (f"{notice}核对后提交；客户已锁定。" if notice else "核对后提交；客户已锁定。")
     return TaskWaiting(
         type="PROPOSAL_FORM", field="proposal:opportunity_create",
         question_id=f"q_form_{spec['task_public_id']}_{revision}", prompt=heading,
-        form_revision=revision, form_fields=fields, hint=(errors or {}).get("form", "核对后提交；客户已锁定。")[:400],
+        form_revision=revision, form_fields=fields, hint=hint[:400],
     )
 
 
@@ -350,7 +389,7 @@ def validate_proposal_form_submission(
         canonical = validate_opportunity_form(db, task, candidate, spec, values)
     except OpportunityFormError as exc:
         updated = apply_task_update(db, task, TaskUpdate(
-            waiting=_proposal_form_waiting(spec, waiting.form_revision + 1, exc.field_errors),
+            waiting=_proposal_form_waiting(spec, waiting.form_revision + 1, exc.field_errors, values),
             action_actor="USER", action_name="reject_opportunity_form",
             action_result={"proposal_key": candidate["key"], "fields": list(exc.field_errors)},
         )).task
@@ -390,24 +429,40 @@ def _proposal_receipt(
     customer_public_id = load_authority(task).customer_public_id
     if customer_public_id:
         receipt["customer_public_id"] = customer_public_id
+    payload = proposal.get("payload") if isinstance(proposal.get("payload"), dict) else {}
+    form_values = proposal.get("form_values") if isinstance(proposal.get("form_values"), dict) else {}
+    # The server-resolved target name: what the receipt says and what its link opens.
+    name = {
+        "opportunity_stage": payload.get("opportunity_name"),
+        "opportunity_create": form_values.get("opportunity_name"),
+        "follow_up_task_create": payload.get("action"),
+    }.get(proposal["kind"])
+    if isinstance(name, str) and name.strip():
+        name = name.strip()[:200]
+        receipt["name"] = name
+    else:
+        name = None
     if proposal["kind"] == "opportunity_stage":
-        facts = proposal["payload"]
-        if facts.get("opportunity_name") and facts.get("stage_name") and "current_stage_name" in facts:
-            current_stage = facts["current_stage_name"] or "未开始"
-            receipt["detail"] = f"{facts['opportunity_name']}：{current_stage} → {facts['stage_name']}"
+        if name and payload.get("stage_name") and "current_stage_name" in payload:
+            current_stage = payload["current_stage_name"] or "未开始"
+            receipt["detail"] = f"{name}：{current_stage} → {payload['stage_name']}"
+    elif proposal["kind"] == "follow_up_task_create" and name:
+        receipt["detail"] = name
     if proposal["kind"] == "opportunity_create" and outcome.get("approval_phase") == "pending_review":
         receipt.update(approval_phase="pending_review", approval_id=outcome["approval_id"])
     return receipt
 
 
-async def _advance_settled_proposal(db: Session, task: AssistantTask, message: str) -> tuple[AssistantTask, str, bool]:
+async def _advance_settled_proposal(
+    db: Session, task: AssistantTask, message: str, *, reporter: ProgressReporter | None = None,
+) -> tuple[AssistantTask, str, bool]:
     if load_authority(task).proposal_queue is None:
         # Old waits had no frozen queue. Never nominate again on this decision.
         task = apply_task_update(db, task, TaskUpdate(
             status="COMPLETED", action_actor="SYSTEM", action_name="complete_legacy_proposals",
         )).task
         return task, message, False
-    updated, prompt, offered = await offer_next_proposal(db, task)
+    updated, prompt, offered = await offer_next_proposal(db, task, reporter=reporter)
     return updated, prompt if offered or load_authority(updated).proposal_outcome else message, False
 
 
@@ -486,6 +541,7 @@ async def settle_proposal(
     accepted: bool,
     executor: ProposalExecutor | None = None,
     form_proposal: ProposalData | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> tuple[AssistantTask, str, bool]:
     """Settle exactly one authorized CRM effect, then advance the frozen queue."""
     from app.services.assistant.turns import AssistantUnknownCommitResultError, assert_owned_execution_lease
@@ -547,7 +603,9 @@ async def settle_proposal(
                     },
                 ),
             )
-            return await _advance_settled_proposal(db, result.task, "CRM 命令已按目标系统实际结果核对完成。")
+            return await _advance_settled_proposal(
+                db, result.task, "CRM 命令已按目标系统实际结果核对完成。", reporter=reporter,
+            )
     if accepted:
         if executor is None:
             raise RuntimeError("CRM proposal executor is required")
@@ -603,7 +661,7 @@ async def settle_proposal(
                 action_actor="SYSTEM", action_name="reject_stale_proposal",
                 action_result={"proposal_key": proposal["key"], "reason": str(exc)},
             ))
-            return await _advance_settled_proposal(db, result.task, str(exc))
+            return await _advance_settled_proposal(db, result.task, str(exc), reporter=reporter)
         except SQLAlchemyError as exc:
             if command is None:
                 raise
@@ -647,7 +705,7 @@ async def settle_proposal(
         ),
     )
     return await _advance_settled_proposal(
-        db, result.task, "已执行这条 CRM 提议。" if accepted else "已拒绝这条 CRM 提议。",
+        db, result.task, "已执行这条 CRM 提议。" if accepted else "已拒绝这条 CRM 提议。", reporter=reporter,
     )
 
 

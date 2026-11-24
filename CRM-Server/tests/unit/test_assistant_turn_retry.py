@@ -51,7 +51,7 @@ def retryable_turn(client: TestClient, db_session: Session) -> tuple[AssistantTa
 
 
 @pytest.mark.parametrize("explicit_retry", [False, True])
-async def test_prepared_turn_reclaim_keeps_budget_unless_explicitly_retried(
+async def test_recovered_turn_gets_a_live_budget_and_an_explicit_retry_restarts_the_window(
     db_session, monkeypatch, retryable_turn, explicit_retry,
 ):
     from app.services.assistant.coordinator import CoordinatorOutcome, CoordinatorReply
@@ -91,7 +91,9 @@ async def test_prepared_turn_reclaim_keeps_budget_unless_explicitly_retried(
     monkeypatch.setattr(api, "_coordinator", SimpleNamespace(handle_task=handle_task))
     monkeypatch.setattr(turns, "business_now", lambda: started + timedelta(seconds=15))
     await turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind()))
-    assert observed == [started + timedelta(seconds=180) if explicit_retry else original_deadline]
+    # A reclaimed attempt never starts with an already-expired budget; the explicit retry
+    # keeps the window it rewrote at retry time.
+    assert observed == [started + timedelta(seconds=180 if explicit_retry else 195)]
 
 
 @pytest.mark.parametrize("initial_status", ["PENDING", "RUNNING", "EXPIRED"])

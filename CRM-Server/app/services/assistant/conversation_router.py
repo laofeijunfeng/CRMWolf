@@ -22,12 +22,12 @@ CORRECT 只用于唯一可指向的候选：status=ACTIVE、activity_written=fal
 waiting.type=CONFIRMATION 且 waiting.field=activity_write。
 此时 route=WORKFLOW、boundary=CONTINUE、task_relation=CONTINUE_TASK、target_task_public_id 逐字来自该候选，
 resume_only 和 field_answer 均为 false；顶层 correction 只包含 {field, new_value, quote}。
-field 只允许 communication_time、channel_kind、participants、summary、next_action、next_follow_time。
+field 用英文键名：可在这里改的是 communication_time、channel_kind、participants、summary、next_action、\
+next_follow_time；用户要改其他内容（如客户、评分）时照样给出该字段名，route=CLARIFY，服务端会说明不能改。
 participants 的 new_value 是含 internal、customer 两个名单数组的对象；仅在两份替换名单都明确时提名，不臆填未提及的一侧。
 日期或时间的 new_value 保留用户明确给出的日期或时间原文，不把相对时间换算为日历日期。
-quote 必须是本轮 text 中逐字一致的连续片段，且支持对该字段的替换；\
-缺乏证据、目标不唯一、涉及多个字段或字段不可改时，route=CLARIFY。
-不提名纠正时 correction=null。
+quote 必须是本轮 text 中逐字一致的连续片段，且支持对该字段的替换。\
+听不清要改哪一项、缺少引文、目标不唯一或涉及多个字段时 route=CLARIFY 且 correction=null，追问一句。
 已提交活动不可纠正。CORRECT 只提名，不授权确认或写入。
 客户名称问题的直接回答属于补充，不另问任务边界。
 回款、合同、线索、联系人、发票抬头等写入不能伪装成活动。请求改变状态与询问已有事实必须区分。

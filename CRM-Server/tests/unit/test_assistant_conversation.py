@@ -1775,3 +1775,40 @@ async def test_lost_root_lease_is_not_stored_as_model_failure(db):
     assert entry.error_code is None
     assert entry.state == "ROUTING"
     assert conversation.busy_entry_id == entry.public_id
+
+
+async def test_root_timeout_records_a_failed_route_stage_and_retry_replays_it(db):
+    """W1-6/A9: progress must say the route attempt failed, not only the generic failure text."""
+    from app.services.assistant.failure_contract import AssistantFailureCode
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class Fails:
+        def __init__(self):
+            self.calls = 0
+
+        async def classify(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise AssistantLLMError("模型服务响应超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
+            return decision()
+
+    classifier = Fails()
+    service = ConversationService(classifier=classifier)
+    state = service.open(db, team_id=1, user_id=2)
+    failed = await service.submit_text(db, team_id=1, user_id=2, request=text(state.version))
+    entry = db.query(AssistantConversationEntry).one()
+    assert failed.submission is None
+    assert entry.command_json["root_stages"] == [
+        {"stage": "route", "phase": "start"},
+        {"stage": "route", "phase": "failed", "ms": entry.command_json["root_stages"][-1]["ms"]},
+    ]
+
+    retried = await service.retry_entry(
+        db, team_id=1, user_id=2, entry_id=entry.public_id, expected_version=failed.conversation.version
+    )
+    db.refresh(entry)
+    assert retried.submission is not None
+    # A retry is a fresh attempt window, so only its own stages remain.
+    assert [(item["stage"], item["phase"]) for item in entry.command_json["root_stages"]] == [
+        ("route", "start"), ("route", "done"),
+    ]

@@ -366,6 +366,7 @@ const dispositionBlock = {
       label: '标记完成',
       disabled: index === 1,
     })),
+    disposition_visible_count: 10,
     disposition_items: Array.from({ length: 12 }, (_, index) => ({
       item_id: `task_${index + 1}`,
       title: `跟进任务 ${index + 1}`,

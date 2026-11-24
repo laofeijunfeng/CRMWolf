@@ -20,8 +20,8 @@ import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
 import type { EntityRef, JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
 import { AssistantRejectReasonSchema } from '@/schemas/assistant-contracts'
-import type { AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection } from '@/schemas/assistant-contracts'
-import { assistantEntityDetailRoute } from '@/components/agent/agentEntityNavigation'
+import type { AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection, ConversationLink } from '@/schemas/assistant-contracts'
+import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
 
 interface ChatEntry {
   id: number
@@ -36,6 +36,7 @@ interface ChatEntry {
   replayed: boolean
   outcome?: NonNullable<ConversationView['messages'][number]['outcome']> | undefined
   ui?: AgentUIEnvelope | null | undefined
+  links?: ConversationLink[] | undefined
   projection?: ConversationProjection | null | undefined
 }
 
@@ -1234,7 +1235,8 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
     } else {
       input.values = values
     }
-    void submit(input, canceled ? '取消修改' : '提交表单', source)
+    // Cancelling a proposal form backs out of the form; it does not edit the activity.
+    void submit(input, canceled ? (source.type === 'CONFIRMATION_EDIT' ? '取消修改' : '取消') : '提交表单', source)
     return
   }
   const fieldKey = block.fields[0]?.key
@@ -1246,6 +1248,11 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
 
 const openAssistantEntity = (entity: EntityRef): void => {
   const target = assistantEntityDetailRoute(entity)
+  if (target !== null) void router?.push(target)
+}
+
+const openAssistantLink = (link: ConversationLink): void => {
+  const target = assistantPageRoute(link)
   if (target !== null) void router?.push(target)
 }
 
@@ -1452,7 +1459,8 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
     waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
     at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
-    ui: message.role === 'assistant' ? message.ui : null, projection: message.projection ?? null,
+    ui: message.role === 'assistant' ? message.ui : null, links: message.links,
+    projection: message.projection ?? null,
   }))
   const incomingIds = new Set(mapped.map((entry) => entry.serverId))
   const preservedIds = new Set(preserved.map((entry) => entry.serverId))
@@ -1599,6 +1607,19 @@ void loadConversation()
                 @open-entity="openAssistantEntity"
               />
               <div v-else class="rounded-lg border border-border bg-card px-space-3 py-space-2 text-body text-foreground">这条结果暂时无法显示</div>
+              <div v-if="(entry.links?.length ?? 0) > 0" class="flex flex-wrap gap-space-2" data-assistant-links>
+                <Button
+                  v-for="link in entry.links"
+                  :key="link.page + (link.customer_public_id ?? '')"
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  class="justify-start px-0"
+                  @click="openAssistantLink(link)"
+                >
+                  {{ link.label }}
+                </Button>
+              </div>
               <Button
                 v-if="showExplicitNone(entry)"
                 type="button"

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from app.models.assistant import AssistantTask, AssistantTaskStatus, AssistantWaitingType
 from app.services.assistant.action_evidence import append_source, parse_deadline, reconcile_action_evidence
 from app.services.assistant.activity_edit import (
+    EDITABLE_ACTIVITY_FIELD_LABELS,
     ActivityEditValidationError,
     activity_edit_time,
     apply_activity_edits,
@@ -75,6 +76,8 @@ class AssistantInput(BaseModel):
     choices: list[str] | None = None
     suppress_week: bool = False
     reason: str | None = None
+    # Natural-language correction: the exact quote the model bound the change to.
+    correction_quote: str | None = Field(default=None, max_length=2000)
 
 
 class CoordinatorReply(BaseModel):
@@ -253,7 +256,7 @@ class AssistantCoordinator:
         if waiting.type == AssistantWaitingType.CONFIRMATION_EDIT:
             return await self._answer_activity_edit(db, task, waiting, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.PROPOSAL_FORM:
-            return await self._answer_proposal_form(db, task, waiting, user_input)
+            return await self._answer_proposal_form(db, task, waiting, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.ACTIVITY_KIND:
             return await self._answer_activity_kind(db, task, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.OBJECT_SELECTION:
@@ -273,7 +276,6 @@ class AssistantCoordinator:
         pending_draft: TaskDraft | None = None,
         edit_action: str | None = None,
         edit_input: dict[str, object] | None = None,
-        context_cleared_opportunity: bool = False,
     ) -> CoordinatorOutcome:
         reporter = reporter or NullProgressReporter()
         draft = pending_draft if pending_draft is not None else load_draft(task)
@@ -1063,7 +1065,9 @@ class AssistantCoordinator:
         return await self._prepare_confirmation(db, updated, reporter=reporter)
 
     def _activity_edit_form(
-        self, db: Session, task: AssistantTask, *, error: ActivityEditValidationError | None = None
+        self, db: Session, task: AssistantTask, *,
+        error: ActivityEditValidationError | None = None,
+        submitted: dict[str, JsonValue] | None = None,
     ) -> CoordinatorOutcome:
         self._require_editable_activity(task)
         draft = load_draft(task)
@@ -1078,8 +1082,9 @@ class AssistantCoordinator:
             ("next_action", "下一步", 2000),
             ("next_follow_time", "下次跟进时间（日期或日期时间）", 64),
         ):
-            value = values.get(key)
-            if key.endswith("_participants") and isinstance(contacts, dict):
+            # A rejected submission comes back exactly as typed, not as the frozen default.
+            value = submitted[key] if submitted is not None and key in submitted else values.get(key)
+            if (submitted is None or key not in submitted) and key.endswith("_participants") and isinstance(contacts, dict):
                 names = contacts.get(key.removesuffix("_participants"))
                 value = "\n".join(str(name) for name in names) if isinstance(names, list) else None
             failed = error is not None and (
@@ -1089,17 +1094,18 @@ class AssistantCoordinator:
                 "key": key, "label": label, "field_type": "textarea" if limit > 64 else "text",
                 "min_length": 1 if key == "summary" else 0, "max_length": limit,
                 "required": key == "summary", "default_value": value,
-                "error_message": str(error)[:500] if failed else None,
+                "error_message": self._edit_error_text(error) if failed else None,
                 "placeholder": "例如 2026-11-24 或 2026-11-24T15:00" if limit == 64 else None,
             })
         from app.services.customer_activity_kinds import get_activity_kind_meta
 
         fields.insert(1, {
             "key": "channel_kind", "label": "沟通方式", "field_type": "select",
-            "default_value": values.get("channel_kind"),
+            "default_value": submitted.get("channel_kind") if submitted and "channel_kind" in submitted
+            else values.get("channel_kind"),
             "options": [{"value": kind, "label": get_activity_kind_meta(kind)["label"]}
                         for kind in editable_activity_channel_options(draft)],
-            "error_message": str(error)[:500] if error and error.field == "channel_kind" else None,
+            "error_message": self._edit_error_text(error) if error and error.field == "channel_kind" else None,
         })
         old = load_waiting(task)
         revision = (old.form_revision if old else None) or 0
@@ -1115,6 +1121,13 @@ class AssistantCoordinator:
             action_result={"field": error.field} if error else {},
         ))
         return self._waiting_outcome(result.task, waiting.prompt)
+
+    @staticmethod
+    def _edit_error_text(error: ActivityEditValidationError) -> str:
+        """Name the field the way the form does; the internal key never reaches the user."""
+
+        label = EDITABLE_ACTIVITY_FIELD_LABELS.get(error.field, "这项")
+        return f"{label}：{error.message}"[:500]
 
     @staticmethod
     def _waiting_outcome(task: AssistantTask, message: str) -> CoordinatorOutcome:
@@ -1143,7 +1156,8 @@ class AssistantCoordinator:
         if user_input.choice == "cancel":
             restored, frozen = restore_activity_confirmation(db, task)
             return self._waiting_outcome(restored, frozen.prompt)
-        values = dict(user_input.values or {})
+        submitted = dict(user_input.values or {})
+        values = dict(submitted)
         groups = {"internal_participants": "internal", "customer_participants": "customer"}
         if values.keys() & groups.keys():
             current = editable_activity_fields(load_draft(task))["participants"]
@@ -1153,16 +1167,19 @@ class AssistantCoordinator:
                     continue
                 raw = values.pop(key)
                 if raw is not None and not isinstance(raw, str):
-                    return self._activity_edit_form(db, task, error=ActivityEditValidationError(
+                    return self._activity_edit_form(db, task, submitted=submitted, error=ActivityEditValidationError(
                         "participants", "联系人必须为姓名列表。",
                     ))
                 contacts[group] = [name.strip() for name in (raw or "").splitlines() if name.strip()]
             values["participants"] = contacts
-        return await self._apply_activity_edit(db, task, values, reporter=reporter)
+        return await self._apply_activity_edit(
+            db, task, values, reporter=reporter, submitted=submitted,
+        )
 
     async def _apply_activity_edit(
         self, db: Session, task: AssistantTask, values: dict[str, JsonValue], *,
         reporter: ProgressReporter, correction: bool = False,
+        submitted: dict[str, JsonValue] | None = None, quote: str | None = None,
     ) -> CoordinatorOutcome:
         from app.utils.time import business_now
         self._require_editable_activity(task)
@@ -1170,9 +1187,10 @@ class AssistantCoordinator:
         try:
             draft, changed = apply_activity_edits(load_draft(task), values, anchor=business_now())
         except ActivityEditValidationError as exc:
+            label = EDITABLE_ACTIVITY_FIELD_LABELS.get(exc.field, "这项")
             if correction:
-                return self._waiting_outcome(task, "这项不能这样修改，请说明字段和正确内容；这次没有写入。")
-            return self._activity_edit_form(db, task, error=exc)
+                return self._waiting_outcome(task, f"{label}没有修改：{exc.message}这次没有写入。")
+            return self._activity_edit_form(db, task, error=exc, submitted=submitted)
         if not changed:
             restored, frozen = restore_activity_confirmation(db, task, action_name="no_change_activity_edit")
             return self._waiting_outcome(restored, frozen.prompt)
@@ -1191,11 +1209,13 @@ class AssistantCoordinator:
             reporter=reporter,
             pending_draft=scored,
             edit_action="correct_activity_draft" if correction else "edit_activity_draft",
-            edit_input={"fields": list(values)},
+            # The audit trail keeps what the user said and what it replaced, as feedback corpus.
+            edit_input={"fields": list(values), "values": values, **({"quote": quote} if quote else {})},
         )
 
     async def _answer_proposal_form(
         self, db: Session, task: AssistantTask, waiting: TaskWaiting, user_input: AssistantInput,
+        *, reporter: ProgressReporter | None = None,
     ) -> CoordinatorOutcome:
         from app.services.assistant.proposals import settle_proposal, validate_proposal_form_submission
 
@@ -1209,6 +1229,7 @@ class AssistantCoordinator:
             return self._waiting_outcome(invalid, "请检查表单；这次没有创建商机。")
         updated, message, _ = await settle_proposal(
             db, task, accepted=accepted, executor=self._proposal_executor, form_proposal=proposal,
+            reporter=reporter,
         )
         return self._waiting_outcome(updated, message)
 
@@ -1243,15 +1264,16 @@ class AssistantCoordinator:
                 except OpportunityFormError as exc:
                     return self._waiting_outcome(task, str(exc))
             updated, message, _ = await settle_proposal(
-                db, task, accepted=choice == "confirm", executor=self._proposal_executor
+                db, task, accepted=choice == "confirm", executor=self._proposal_executor,
+                reporter=reporter,
             )
             return self._waiting_outcome(updated, message)
-
         if user_input.kind == "request_edit":
             return self._activity_edit_form(db, task)
         if user_input.kind == "correct_activity":
             return await self._apply_activity_edit(
                 db, task, user_input.values or {}, reporter=reporter, correction=True,
+                quote=user_input.correction_quote,
             )
         if user_input.kind == "text" and user_input.text:
             from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target

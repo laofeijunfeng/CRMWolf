@@ -214,6 +214,8 @@ class ApprovalTransactionManager:
                 committed = self._read_assistant_creation(db, assistant_command)
                 if committed is not None:
                     return committed
+                # Rolled back before commit with no recorded effect: a definite, readable no-effect.
+                raise AssistantCRMNoEffect(str(e)) from e
             return (None, None, str(e))
         except IntegrityError as e:
             db.rollback()
