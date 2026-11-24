@@ -461,16 +461,15 @@ it('opens cancel reasons on the activity confirmation card without cancelling', 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block }, attachTo: document.body })
   const cancel = wrapper.findAll('button').find(button => button.text() === '取消')
   if (cancel === undefined) throw new Error('Expected the cancel button')
-  const panel = () => wrapper.find('[role="group"][id$="-cancel-reasons"]')
 
   expect(cancel.attributes('aria-expanded')).toBe('false')
-  expect(panel().isVisible()).toBe(false)
+  expect(wrapper.find('[role="group"][id$="-cancel-reasons"]').isVisible()).toBe(false)
   await cancel.trigger('click')
   expect(wrapper.emitted('submit')).toBeUndefined()
   expect(cancel.attributes('aria-expanded')).toBe('true')
-  expect(panel().isVisible()).toBe(true)
+  expect(wrapper.find('[role="group"][id$="-cancel-reasons"]').isVisible()).toBe(true)
 
-  await panel().findAll('button').find(button => button.text() === '客户不对')?.trigger('click')
+  await wrapper.find('[role="group"][id$="-cancel-reasons"]').findAll('button').find(button => button.text() === '客户不对')?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([['act_1', { choice: 'cancel', reason: 'wrong_customer' }]])
   wrapper.unmount()
 })
@@ -1069,6 +1068,7 @@ it('shows the chosen kind with its origin and only same-category revisions', asy
   expect(wrapper.findAll('button').some(button => button.text() === '收起类型选项')).toBe(true)
   const revisions = wrapper.findAll('[role="radio"]')
   expect(revisions.map(button => button.text())).toEqual(['电话跟进', '微信跟进'])
+  expect(revisions.map(button => button.attributes('aria-checked'))).toEqual(['false', 'true'])
 
   await revisions[0]?.trigger('click')
   expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind_confirm', { revise_activity_kind: 'PHONE_FOLLOW_UP' }])

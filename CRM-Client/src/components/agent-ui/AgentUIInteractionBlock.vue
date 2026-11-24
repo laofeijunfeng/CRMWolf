@@ -651,7 +651,7 @@ const submit = async (): Promise<void> => {
     </header>
     <p v-if="block.hint" class="m-0 px-space-4 pt-space-2 text-body text-muted-foreground" data-agent-ui-disposition-summary>{{ block.hint }}</p>
     <component :is="groupIndex === 0 ? 'div' : 'details'" v-for="(items, groupIndex) in dispositionGroups" :key="groupIndex">
-      <summary v-if="groupIndex > 0" class="min-h-touch-target cursor-pointer px-space-4 py-space-3 text-body text-foreground focus-visible:outline-ring">
+      <summary v-if="groupIndex > 0" class="min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target cursor-pointer px-space-4 py-space-3 text-body text-foreground focus-visible:outline-ring">
         其余 {{ items.length }} 项
       </summary>
       <ol :start="groupIndex * 10 + 1" class="m-0 mt-space-3 grid list-none gap-0 border-t border-border p-0">
@@ -661,7 +661,7 @@ const submit = async (): Promise<void> => {
           class="grid gap-space-1 border-b border-border px-space-4 py-space-2 last:border-b-0"
         >
           <div class="flex items-start justify-between gap-space-2">
-            <label v-if="isActive" class="flex min-h-touch-target min-w-0 cursor-pointer items-center gap-space-2 text-body text-foreground">
+            <label v-if="isActive" class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target min-w-0 cursor-pointer items-center gap-space-2 text-body text-foreground">
               <input
                 type="checkbox"
                 class="size-4 shrink-0 rounded-sm border-input focus-visible:ring-ring"
@@ -725,7 +725,7 @@ const submit = async (): Promise<void> => {
     <RouterLink
       v-if="block.disposition_link"
       :to="{ name: 'CustomerTracking' }"
-      class="mx-space-4 mb-space-3 inline-flex min-h-touch-target w-fit items-center text-body text-brand underline underline-offset-2 focus-visible:outline-ring"
+      class="mx-space-4 mb-space-3 inline-flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-fit items-center text-body text-brand underline underline-offset-2 focus-visible:outline-ring"
     >
       在客户追踪页处理
     </RouterLink>
@@ -865,7 +865,7 @@ const submit = async (): Promise<void> => {
       >
         <span :id="`${block.id}-kind-editor`" class="text-caption font-medium text-foreground">选择活动类型</span>
         <SegmentedChoiceControl
-          :model-value="activityKindFact.value"
+          :model-value="kindTileValue(activityKindFact)"
           :options="kindTileOptions(activityKindFact.options)"
           :disabled="controlsDisabled"
           :labelled-by="`${block.id}-kind-editor`"
@@ -1286,6 +1286,8 @@ const submit = async (): Promise<void> => {
         <Button
           type="button"
           variant="outline"
+          :aria-expanded="cancelReasons.length > 0 ? cancelReasonsOpen : undefined"
+          :aria-controls="cancelReasons.length > 0 ? `${block.id}-cancel-reasons` : undefined"
           :disabled="controlsDisabled || confirmationOptions.cancel?.disabled === true"
           @click="handleOptionClick('cancel')"
         >
