@@ -102,7 +102,7 @@ APPROVAL_PHASE_LABELS = {
     "pending_review": "审批中",
     "pending": "审批中",
     "approved": "已通过",
-    "rejected": "已拒绝",
+    "rejected": "已驳回",
 }
 
 

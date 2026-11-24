@@ -21,7 +21,7 @@ describe('dealJourney', () => {
       invoice_processing: '开票中',
       completed: '已完成',
       lost: '已输单',
-      approval_rejected: '审批未通过'
+      approval_rejected: '已驳回'
     })
   })
 })

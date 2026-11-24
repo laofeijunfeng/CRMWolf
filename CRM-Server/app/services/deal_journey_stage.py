@@ -38,7 +38,7 @@ BOARD_STAGE_LABELS: dict[BoardStageKey, str] = {
     "contract_processing": "签约中",
     "payment_processing": "回款中",
     "invoice_processing": "开票中",
-    "approval_rejected": "审批未通过",
+    "approval_rejected": "已驳回",
     "completed": "已完成",
     "lost": "已输单",
 }
@@ -51,7 +51,7 @@ BOARD_COLUMNS: list[tuple[BoardStageKey, str, str]] = [
     ("contract_processing", "签约中", "已创建合同\uff0c正在签约或合同履约前置处理"),
     ("payment_processing", "回款中", "已有回款计划或回款记录\uff0c合同尚未完成回款"),
     ("invoice_processing", "开票中", "已有发票申请\uff0c仍有发票未完成开具"),
-    ("approval_rejected", "审批未通过", "商机审批未通过"),
+    ("approval_rejected", "已驳回", "商机审批已驳回"),
     ("completed", "已完成", "旅程已完成闭环"),
     ("lost", "已输单", "商机或旅程已输单"),
 ]

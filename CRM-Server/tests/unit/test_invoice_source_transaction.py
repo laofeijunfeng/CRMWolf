@@ -159,7 +159,7 @@ def test_invoice_update_checks_locked_current_status_not_stale_instance(db):
     )
     assert application.status == InvoiceApplicationStatus.DRAFT
 
-    with pytest.raises(ValueError, match="只有草稿或已拒绝状态"):
+    with pytest.raises(ValueError, match="只有草稿或已驳回状态"):
         invoice_application_crud.update(db, application, InvoiceApplicationUpdate(invoice_amount=Decimal("900")))
     assert application.status == InvoiceApplicationStatus.APPROVED
     db.rollback()
@@ -187,7 +187,7 @@ def test_invoice_remark_is_optional_and_editable_before_approval(db):
         "UPDATE crm_invoice_applications SET status = 'PENDING_REVIEW' WHERE id = ?",
         (restored.id,),
     )
-    with pytest.raises(ValueError, match="只有草稿或已拒绝状态"):
+    with pytest.raises(ValueError, match="只有草稿或已驳回状态"):
         invoice_application_crud.update(db, restored, InvoiceApplicationUpdate(remark="不能改"))
     db.rollback()
     assert db.query(InvoiceApplication).filter_by(id=restored.id).one().remark == "分开邮寄"

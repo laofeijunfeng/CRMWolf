@@ -916,7 +916,7 @@ const getApprovalPhaseText = (phase: string | undefined): string => {
     pending_review: '审批中',
     pending: '审批中',
     approved: '已通过',
-    rejected: '已拒绝'
+    rejected: '已驳回'
   }
   const normalized = normalizeApprovalPhase(phase)
   return normalized === '' ? '-' : (map[normalized] ?? String(phase))

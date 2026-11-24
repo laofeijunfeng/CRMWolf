@@ -68,6 +68,35 @@ def test_description_reads_as_one_sentence():
     assert sentence == "当跟进中的商机进入当前阶段满 7 天，且期间没有新的客户活动，通知负责人和指定成员。"  # noqa: RUF001
 
 
+def test_approval_rejected_status_option_and_sentence_use_one_wording():
+    """提醒规则的状态选项和保存后的说明句用同一个叫法。"""
+    from app.services.reminder_rule_dsl import reminder_rule_catalog
+
+    approval = next(item for item in reminder_rule_catalog() if item["object_type"] == "approval")
+    status = next(field for field in approval["fields"] if field["value"] == "status")
+    labels = {option["value"]: option["label"] for option in status["options"]}
+
+    assert labels["REJECTED"] == "已驳回"
+    sentence = describe_reminder_rule(rule(
+        version=2,
+        object_type="approval",
+        trigger="schedule",
+        status=None,
+        inactive_days=None,
+        date_field=None,
+        offset_days=0,
+        require_no_new_activity=False,
+        trigger_time="09:30",
+        recipients=["submitter"],
+        message_title="提醒",
+        message_template="提醒",
+        channels=["feishu"],
+        conditions=[{"field": "status", "operator": "in", "value": ["REJECTED"]}],
+    ))
+    assert "已驳回" in sentence
+    assert "已拒绝" not in sentence
+
+
 @pytest.mark.parametrize("channels", [[], ["email"]])
 def test_channels_stay_inside_existing_delivery_options(channels):
     assert validate_reminder_rule(rule(channels=channels)) != []

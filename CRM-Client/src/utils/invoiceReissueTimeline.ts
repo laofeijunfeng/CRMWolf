@@ -141,7 +141,7 @@ export const buildReissueTimeline = (
     if (OPEN_REISSUE_STATUSES.has(reissue.status)) {
       heading = `第 ${ordinal} 次 · 重开处理中`
     } else if (reissue.status === 'REJECTED') {
-      heading = `第 ${ordinal} 次 · 已拒绝`
+      heading = `第 ${ordinal} 次 · 已驳回`
     } else if (isCurrent) {
       heading = `第 ${ordinal} 次 · 当前有效`
     } else if (reissue.status === 'COMPLETED' && laterCompleted) {

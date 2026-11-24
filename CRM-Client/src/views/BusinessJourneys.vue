@@ -87,7 +87,7 @@ const builtInTabs = [
   { key: 'active', label: '进行中' },
   { key: 'completed', label: '已完成' },
   { key: 'lost', label: '已流失' },
-  { key: 'approval_rejected', label: '审批未通过' }
+  { key: 'approval_rejected', label: '已驳回' }
 ]
 
 const fields = computed(() => createBusinessJourneyListFields(ownerOptions.value))

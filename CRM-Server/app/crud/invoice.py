@@ -507,7 +507,7 @@ class InvoiceApplicationCRUD:
     def update(self, db: Session, db_obj: InvoiceApplication, obj_in: InvoiceApplicationUpdate) -> InvoiceApplication:
         db_obj = self._lock_application(db, db_obj)
         if db_obj.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
-            raise ValueError("只有草稿或已拒绝状态的发票申请可以编辑")
+            raise ValueError("只有草稿或已驳回状态的发票申请可以编辑")
         
         update_data = obj_in.model_dump(exclude_unset=True)
         
@@ -622,7 +622,7 @@ class InvoiceApplicationCRUD:
         )
 
         if application.status not in [InvoiceApplicationStatus.DRAFT, InvoiceApplicationStatus.REJECTED]:
-            raise ValueError("只有草稿或已拒绝状态的发票申请可以删除")
+            raise ValueError("只有草稿或已驳回状态的发票申请可以删除")
         db.delete(application)
         db.commit()
         return True
@@ -742,7 +742,7 @@ class InvoiceReissueApplicationCRUD:
 
     def _assert_can_revise(self, db: Session, db_obj: InvoiceReissueApplication) -> None:
         if db_obj.status not in [InvoiceReissueApplicationStatus.DRAFT, InvoiceReissueApplicationStatus.REJECTED]:
-            raise ValueError("只有草稿或已拒绝状态的重开申请可以编辑")
+            raise ValueError("只有草稿或已驳回状态的重开申请可以编辑")
 
         active = self.get_active_by_original_invoice(db, db_obj.original_invoice_application_id, db_obj.team_id)
         if active is not None and active.id != db_obj.id:

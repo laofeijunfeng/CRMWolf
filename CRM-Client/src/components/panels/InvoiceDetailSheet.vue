@@ -949,7 +949,7 @@ const handleDelete = async (): Promise<void> => {
   if (deleting.value) return
 
   const confirmed = await confirmDialog(
-    `确定删除发票申请“${invoice.application_number}”吗？仅草稿或已拒绝的申请可以删除，删除后无法恢复。`,
+    `确定删除发票申请“${invoice.application_number}”吗？仅草稿或已驳回的申请可以删除，删除后无法恢复。`,
     '删除发票申请',
     { variant: 'destructive', confirmText: '删除' },
   )

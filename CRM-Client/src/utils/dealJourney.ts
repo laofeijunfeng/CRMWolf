@@ -21,7 +21,7 @@ export const DEAL_JOURNEY_BOARD_STAGE_LABELS: Record<DealJourneyBoardStage, stri
   invoice_processing: '开票中',
   completed: '已完成',
   lost: '已输单',
-  approval_rejected: '审批未通过'
+  approval_rejected: '已驳回'
 }
 
 export function isDealJourneyPublicId(value: string): boolean {

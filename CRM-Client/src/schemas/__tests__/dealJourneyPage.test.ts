@@ -220,7 +220,7 @@ describe('business journey page schemas', () => {
   it('accepts approval-rejected board stages from list and board contracts', () => {
     expect(DealJourneyBoardStageSchema.parse('approval_rejected')).toBe('approval_rejected')
     expect(BusinessJourneyListResponseSchema.parse({
-      items: [{ ...listItem, current_board_stage: 'approval_rejected', current_board_stage_label: '审批未通过' }],
+      items: [{ ...listItem, current_board_stage: 'approval_rejected', current_board_stage_label: '已驳回' }],
       total: 1,
       page: 1,
       page_size: 20,
@@ -229,8 +229,8 @@ describe('business journey page schemas', () => {
     expect(BusinessJourneyBoardResponseSchema.parse({
       columns: [{
         key: 'approval_rejected',
-        title: '审批未通过',
-        description: '主商机审批未通过的旅程',
+        title: '已驳回',
+        description: '商机审批已驳回的旅程',
         count: 1,
         amount: 168000,
         cards: [{ ...boardCard, current_board_stage: 'approval_rejected' }],

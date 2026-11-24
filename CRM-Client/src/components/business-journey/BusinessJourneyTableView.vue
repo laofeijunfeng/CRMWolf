@@ -78,7 +78,7 @@ const stageLabels = new Map([
   ['invoice_processing', '开票处理中'],
   ['completed', '已完成'],
   ['lost', '已流失'],
-  ['approval_rejected', '审批未通过']
+  ['approval_rejected', '已驳回']
 ])
 const getStageLabel = (stage: BusinessJourneyListItem['current_board_stage'], serverLabel?: string): string => {
   if (serverLabel !== undefined && serverLabel !== '') return serverLabel

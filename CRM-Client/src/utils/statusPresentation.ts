@@ -96,7 +96,7 @@ const statusMaps: Partial<Record<StatusDomain, Record<string, StatusConfig>>> = 
     draft: { label: '待提交', tone: 'neutral' },
     pending_review: { label: '审批中', tone: 'warning' },
     approved: { label: '审批通过', tone: 'success' },
-    rejected: { label: '审批拒绝', tone: 'danger' },
+    rejected: { label: '已驳回', tone: 'danger' },
   },
   contract: {
     draft: { label: '草稿', tone: 'neutral' },

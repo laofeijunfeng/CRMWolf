@@ -27,7 +27,7 @@ const approval = {
   updated_time: date, flow_is_active: true, flow_disabled_warning: null,
   records: [{ id: 1, approval_id: 123, node_id: 1, node_name: '主管审批', approver_id: '8', approver_name: '王明', approver_status: 'active', approver_status_display: '在职', action: 'REJECT', comment: '请补充采购预算与决策人信息', created_time: date }]
 }
-const stages = [['early_communication', '早期沟通'], ['active_progress', '持续推进'], ['closing_soon', '即将签约'], ['contract_processing', '签约中'], ['payment_processing', '回款中'], ['invoice_processing', '开票中'], ['completed', '已完成'], ['lost', '已流失'], ['approval_rejected', '审批未通过']]
+const stages = [['early_communication', '早期沟通'], ['active_progress', '持续推进'], ['closing_soon', '即将签约'], ['contract_processing', '签约中'], ['payment_processing', '回款中'], ['invoice_processing', '开票中'], ['completed', '已完成'], ['lost', '已流失'], ['approval_rejected', '已驳回']]
 const pageResponse = (items: unknown[]) => ({ items, total: items.length, page: 1, page_size: 20, total_pages: items.length ? 1 : 0 })
 const fulfill = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
@@ -36,7 +36,7 @@ test('rejected journey has paused progress across list, board and detail', async
   test.setTimeout(90000)
   let approved = false
   const requests: Array<{ path: string, tab: string | null }> = []
-  const journey = () => ({ id: journeyId, public_id: journeyId, name: '星河 CRM 升级', status: 'ACTIVE', current_board_stage: approved ? 'closing_soon' : 'approval_rejected', current_board_stage_label: approved ? '即将签约' : '审批未通过', cumulative_progress_percent: approved ? 75 : 0, amount: 320000, purchase_type: 'NEW', started_at: date, closed_at: null, last_event_at: date, primary_opportunity: { public_id: opportunityId, opportunity_name: '星河 CRM 升级', status: 0, approval_phase: approved ? 'approved' : 'rejected', win_probability: 80, expected_closing_date: '2026-12-30', product_name: 'CRM' } })
+  const journey = () => ({ id: journeyId, public_id: journeyId, name: '星河 CRM 升级', status: 'ACTIVE', current_board_stage: approved ? 'closing_soon' : 'approval_rejected', current_board_stage_label: approved ? '即将签约' : '已驳回', cumulative_progress_percent: approved ? 75 : 0, amount: 320000, purchase_type: 'NEW', started_at: date, closed_at: null, last_event_at: date, primary_opportunity: { public_id: opportunityId, opportunity_name: '星河 CRM 升级', status: 0, approval_phase: approved ? 'approved' : 'rejected', win_probability: 80, expected_closing_date: '2026-12-30', product_name: 'CRM' } })
   const row = () => ({ ...journey(), customer_id: customerId, customer_name: '星河科技', owner: { id: '7', name: '李娜' }, primary_opportunity_name: '星河 CRM 升级', product_name: 'CRM', created_time: date, expected_closing_date: '2026-12-30' })
   const lostRow = () => ({ ...row(), id: `djy_${'d'.repeat(32)}`, public_id: `djy_${'d'.repeat(32)}`, name: '已明确输单项目', status: 'LOST', current_board_stage: 'lost', current_board_stage_label: '已流失' })
   await page.addInitScript(() => localStorage.setItem('token', 'eyJhbGciOiJub25lIn0.eyJleHAiOjQxMDAwMDAwMDB9.sig'))
@@ -71,25 +71,25 @@ test('rejected journey has paused progress across list, board and detail', async
   await page.goto('/business-journeys')
   await expect(page.getByTestId('business-journey-name-link').filter({ hasText: '星河 CRM 升级' })).toBeVisible()
   const rejectedRow = page.locator('tbody tr').filter({ has: page.getByTestId('business-journey-name-link').filter({ hasText: '星河 CRM 升级' }) })
-  await expect(rejectedRow).toContainText('审批未通过')
+  await expect(rejectedRow).toContainText('已驳回')
   await expect(rejectedRow.getByTestId('business-journey-progress')).toContainText('0%')
   await expect(rejectedRow).not.toContainText('80%')
   await expect(page.locator('tbody tr').filter({ hasText: '已明确输单项目' })).toContainText('已流失')
   await page.screenshot({ path: path.join(evidence, 'crm123-all-list.png'), fullPage: true })
   await page.getByRole('tab', { name: '进行中', exact: true }).click()
   await expect(page.getByTestId('business-journey-name-link').filter({ hasText: '星河 CRM 升级' })).toHaveCount(0)
-  await page.getByRole('tab', { name: '审批未通过', exact: true }).click()
+  await page.getByRole('tab', { name: '已驳回', exact: true }).click()
   await expect(page.getByTestId('business-journey-name-link')).toHaveText('星河 CRM 升级')
   expect(requests.some(r => r.path.endsWith('/business-journeys') && r.tab === 'approval_rejected')).toBe(true)
   await page.getByRole('tab', { name: '看板', exact: true }).click()
-  const column = page.locator('.business-board-column').filter({ has: page.getByRole('heading', { name: '审批未通过', exact: true }) })
+  const column = page.locator('.business-board-column').filter({ has: page.getByRole('heading', { name: '已驳回', exact: true }) })
   await column.scrollIntoViewIfNeeded()
   await expect(column.getByRole('button', { name: '查看业务旅程：星河 CRM 升级' })).toContainText('0%')
   await expect(column).not.toContainText('赢率')
   await page.screenshot({ path: path.join(evidence, 'crm123-rejected-board.png'), fullPage: true })
   await column.getByRole('button', { name: '查看业务旅程：星河 CRM 升级' }).click()
   const detail = page.getByTestId('deal-journey-detail')
-  await expect(detail.getByTestId('deal-journey-header')).toContainText('审批未通过')
+  await expect(detail.getByTestId('deal-journey-header')).toContainText('已驳回')
   await expect(detail).toContainText('暂停销售推进')
   await expect(detail).toContainText('0%')
   await expect(detail).toContainText('请补充采购预算与决策人信息')
@@ -106,6 +106,6 @@ test('rejected journey has paused progress across list, board and detail', async
   })
   await expect(restoredRow).toContainText('即将签约')
   await expect(restoredRow.getByTestId('business-journey-progress')).toContainText('75%')
-  await expect(restoredRow).not.toContainText('审批未通过')
+  await expect(restoredRow).not.toContainText('已驳回')
   await page.screenshot({ path: path.join(evidence, 'crm123-approved-restored.png'), fullPage: true })
 })

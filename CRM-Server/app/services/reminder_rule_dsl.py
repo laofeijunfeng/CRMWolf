@@ -101,7 +101,7 @@ V2_STATUSES = {
     "customer": {"FOLLOWING": "跟进中", "WON": "已赢单", "LOST": "已输单", "INACTIVE": "沉寂"},
     "lead": {"NEW": "新线索", "FOLLOWING": "跟进中", "CONVERTED": "已转化", "INVALID": "无效"},
     "follow_up_task": {"OPEN": "待处理", "COMPLETED": "已完成", "CANCELLED": "已取消"},
-    "approval": {"PENDING": "待处理", "APPROVED": "已通过", "REJECTED": "已拒绝", "CANCELLED": "已取消"},
+    "approval": {"PENDING": "待处理", "APPROVED": "已通过", "REJECTED": "已驳回", "CANCELLED": "已取消"},
     "payment_plan": {"PENDING": "待回款", "OVERDUE": "已逾期", "PARTIAL": "部分回款", "COMPLETED": "已完成"},
 }
 

@@ -392,14 +392,15 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
     dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
       journeyFixture({
         current_board_stage: 'approval_rejected',
-        current_board_stage_label: '审批未通过',
+        current_board_stage_label: '已驳回',
       }),
       opportunityFixture({ approval_phase: 'rejected', win_probability: 80 }),
     ))
 
     const wrapper = await mountDetail()
 
-    expect(wrapper.text()).toContain('审批未通过')
+    expect(wrapper.text()).toContain('已驳回')
+    expect(wrapper.text()).not.toContain('审批未通过')
     expect(wrapper.text()).toContain('暂停销售推进')
     expect(wrapper.text()).toContain('0%')
     expect(wrapper.text()).not.toContain('80%')

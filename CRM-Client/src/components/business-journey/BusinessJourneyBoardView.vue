@@ -64,7 +64,7 @@ const shouldShowStageAge = (card: BusinessJourneyBoardCard): boolean =>
 
 const getEndStageLabel = (card: BusinessJourneyBoardCard): string =>
   card.current_board_stage === 'approval_rejected'
-    ? '审批未通过 · 0%'
+    ? `${DEAL_JOURNEY_BOARD_STAGE_LABELS.approval_rejected} · 0%`
     : DEAL_JOURNEY_BOARD_STAGE_LABELS[card.current_board_stage]
 
 type BoardCard = BusinessJourneyBoardCard

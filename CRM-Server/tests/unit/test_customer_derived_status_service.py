@@ -85,6 +85,15 @@ def test_deepest_active_journey_wins_stage_hint():
     assert result.stage_hint == "续购 · 回款中"
 
 
+def test_approval_rejected_hint_uses_one_wording():
+    """客户列表状态下方的小字也用同一个叫法。"""
+    result = derive_customer_status(
+        _customer(status=0), [_journey(DealJourneyStatus.ACTIVE, "approval_rejected")]
+    )
+
+    assert result.stage_hint == "新购 · 已驳回"
+
+
 def test_stage_rank_orders_by_depth():
     assert stage_rank("early_communication") < stage_rank("active_progress")
     assert stage_rank("active_progress") < stage_rank("closing_soon")

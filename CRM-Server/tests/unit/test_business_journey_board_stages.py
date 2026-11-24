@@ -7,6 +7,7 @@ from app.constants.approval_phase import ApprovalPhase
 from app.models.deal_journey import DealJourneyStatus
 from app.services.deal_journey_stage import (
     BOARD_COLUMNS,
+    BOARD_STAGE_LABELS,
     BusinessJourneyContractSummary,
     BusinessJourneyInvoiceSummary,
     BusinessJourneyPaymentSummary,
@@ -20,6 +21,14 @@ def test_closing_soon_column_is_titled_upcoming_contract():
 
     assert columns["closing_soon"] == "即将签约"
     assert "won_pending_contract" not in columns
+
+
+def test_approval_rejected_column_and_label_use_one_wording():
+    """驳回结果在界面上只有一个叫法。"""
+    columns = {key: (title, description) for key, title, description in BOARD_COLUMNS}
+
+    assert columns["approval_rejected"] == ("已驳回", "商机审批已驳回")
+    assert BOARD_STAGE_LABELS["approval_rejected"] == "已驳回"
 
 
 def test_won_pending_contract_merges_into_closing_soon_stage():

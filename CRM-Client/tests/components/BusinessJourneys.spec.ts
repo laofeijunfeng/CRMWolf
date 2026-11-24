@@ -47,7 +47,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/composables/usePageTitle', () => ({ usePageTitle: vi.fn() }))
 vi.mock('@/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('vue-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
-vi.mock('@/utils/renameDialog', () => ({ renameDialog: vi.fn().mockResolvedValue('审批未通过视图') }))
+vi.mock('@/utils/renameDialog', () => ({ renameDialog: vi.fn().mockResolvedValue('已驳回视图') }))
 vi.mock('@/components/panels/DealJourneyDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'DealJourneyDetailSheet',

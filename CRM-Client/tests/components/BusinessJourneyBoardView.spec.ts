@@ -91,7 +91,7 @@ describe('BusinessJourneyBoardView', () => {
   it.each([
     ['lost', '已输单', 'danger'],
     ['completed', '已完成', 'success'],
-    ['approval_rejected', '审批未通过 · 0%', 'warning'],
+    ['approval_rejected', '已驳回 · 0%', 'warning'],
   ] as const)('shows %s cards with an end-state tone and no freshness', (stage, label, tone) => {
     vi.setSystemTime(new Date('2026-12-01T12:00:00'))
     const column = board.columns[0]
