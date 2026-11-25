@@ -2,11 +2,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Numeric, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Numeric, String, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.constants.approval_phase import ApprovalPhase
 from app.core.database import Base
+from app.utils.dedupe_normalizer import normalize_taxpayer_id, taxpayer_dedupe_key
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -61,6 +62,9 @@ class InvoiceTitle(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, comment="开票抬头")
     taxpayer_id: Mapped[str] = mapped_column(String(100), nullable=False, comment="纳税人识别号")
+    taxpayer_dedupe_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="税号判重键\uff08ORM hook 维护\uff0c空税号为 NULL\uff09"
+    )
     bank_name: Mapped[str | None] = mapped_column(String(255), comment="开户行")
     bank_account: Mapped[str | None] = mapped_column(String(100), comment="开户账号")
     address: Mapped[str | None] = mapped_column(String(500), comment="开票地址")
@@ -78,10 +82,21 @@ class InvoiceTitle(Base):
         "InvoiceApplication", back_populates="invoice_title"
     )
 
-    __table_args__ = (Index("idx_invoice_title_team_id", "team_id"),)
+    __table_args__ = (
+        Index("idx_invoice_title_team_id", "team_id"),
+        Index("uq_invoice_title_customer_taxpayer_key", "customer_id", "taxpayer_dedupe_key", unique=True),
+    )
 
     def __repr__(self) -> str:
         return f"<InvoiceTitle(id={self.id}, title={self.title}, taxpayer_id={self.taxpayer_id})>"
+
+
+@event.listens_for(InvoiceTitle, "before_insert")
+@event.listens_for(InvoiceTitle, "before_update")
+def invoice_title_normalize_taxpayer_id(_mapper: object, _connection: object, target: InvoiceTitle) -> None:
+    """Store the normalized taxpayer id and keep its per-customer dedupe key in sync."""
+    target.taxpayer_id = normalize_taxpayer_id(target.taxpayer_id)
+    target.taxpayer_dedupe_key = taxpayer_dedupe_key(target.taxpayer_id)
 
 
 class InvoiceApplication(Base):

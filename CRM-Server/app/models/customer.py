@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import expression
 
 from app.core.database import Base
+from app.utils.dedupe_normalizer import mobile_dedupe_key, normalize_mobile
 from app.utils.name_normalizer import build_customer_name_dedupe_key, normalize_corp_name  # R-ST-02
 from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
@@ -243,6 +244,9 @@ class Contact(Base):
         Integer, nullable=False, default=0, comment="是否关键决策人\uff1a0:否, 1:是"
     )
     mobile: Mapped[str] = mapped_column(String(20), nullable=False, comment="手机号")
+    mobile_dedupe_key: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="手机号判重键\uff08ORM hook 维护\uff0c空手机号为 NULL\uff09"
+    )
     email: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="邮箱")
     wechat_id: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="微信ID")
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
@@ -264,8 +268,17 @@ class Contact(Base):
         Index('idx_name', 'name'),
         Index('idx_is_primary', 'is_primary'),
         Index('idx_team_id', 'team_id'),
+        Index('uq_contact_customer_mobile_key', 'customer_id', 'mobile_dedupe_key', unique=True),
         {'comment': '联系人表'}
     )
+
+
+@event.listens_for(Contact, 'before_insert')
+@event.listens_for(Contact, 'before_update')
+def contact_normalize_mobile(_mapper: Mapper[Contact], _connection: Connection, target: Contact) -> None:
+    """Store the normalized mobile and keep its per-customer dedupe key in sync."""
+    target.mobile = normalize_mobile(target.mobile)
+    target.mobile_dedupe_key = mobile_dedupe_key(target.mobile)
 
 
 class CustomerMember(Base):

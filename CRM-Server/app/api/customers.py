@@ -22,7 +22,7 @@ from app.core.deps import (
     get_current_user_team,
     require_permission,
 )
-from app.core.exceptions import ConflictException
+from app.core.exceptions import ConflictException, DuplicateRecordError
 from app.core.list_export import (
     CUSTOMERS_LIST_EXPORT_CATALOG,
     create_list_export_file,
@@ -1457,6 +1457,9 @@ async def create_customer(
         )
         db.commit()
         db.refresh(new_customer)
+    except DuplicateRecordError:
+        db.rollback()
+        raise
     except AcquisitionSourceError as exc:
         db.rollback()
         _raise_source_error(exc)

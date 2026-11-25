@@ -191,14 +191,6 @@ def create_invoice_title(
     db: Session = _DB
 ) -> InvoiceTitleResponse:
     customer = check_customer_edit_permission(customer_id, team_id, current_user, db)
-
-    existing_title = invoice_title_crud.get_by_taxpayer_id(db, customer.id, title_data.taxpayer_id, team_id)
-    if existing_title:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该纳税人识别号已存在"
-        )
-
     title = invoice_title_crud.create(db, customer.id, title_data, team_id)
     _enqueue_invoice_business_object_intelligence_refresh(
         db,

@@ -48,6 +48,7 @@
 - **Cutover evidence**：迁移运行键、watermark、接管/跳过/替代/保留计数的持久证据，固定运行键完成后重跑为 no-op。
 - **输入噪音（Input Noise）**：粘贴记录里不承载业务事实的片段，第一批只有发言时间戳和渠道提及。由分类模型标注、服务端核对，只能减少提问，不改原文、引用或偏移（ADR 0004）。
 - **客户初始补全（Customer Initial Enrichment）**：客户首次成为正式客户后，由 durable job 在后台只补缺失、允许自动补全的客户主数据；不阻塞客户创建，不覆盖人工值。
+- **重复记录（Duplicate Record）**：同一客户下规范化后相同的联系人手机号、开票抬头税号或部署服务器地址。规范化规则在 `app/utils/dedupe_normalizer.py`，空值不参与判重；新建和修改返回 409 `DUPLICATE_RECORD`，`duplicate` 给出已有记录的 id 和名称；并发由 `(customer_id, *_dedupe_key)` 唯一索引兜底。不同客户之间不算重复。
 
 ## 稳定不变量
 

@@ -46,3 +46,37 @@ describe('payment write outcome errors', () => {
     expect(toastWarning.mock.calls[0]?.[1].description).toContain('不要重复填写或提交')
   })
 })
+
+describe('duplicate record errors', () => {
+  const duplicateResponse = (status: number, data: unknown): unknown => ({
+    message: `Request failed with status code ${status}`,
+    response: { status, data },
+  })
+  const body = {
+    error_code: 'DUPLICATE_RECORD',
+    detail: '该客户下已有这个手机号的联系人：张三',
+    path: '/api/v1/customers/cus_1/contacts',
+    duplicate: { entity: 'contact', existing_id: 7, existing_name: '张三' },
+  }
+
+  it('reads the existing record from a 409 duplicate response', async () => {
+    const { parseDuplicateRecordError } = await import('../errorHandler')
+
+    expect(parseDuplicateRecordError(duplicateResponse(409, body))).toEqual({
+      entity: 'contact',
+      existingId: 7,
+      existingName: '张三',
+      detail: '该客户下已有这个手机号的联系人：张三',
+    })
+  })
+
+  it.each([
+    [duplicateResponse(409, { error_code: 'VERSION_CONFLICT', detail: '已被他人修改' }), 'other 409'],
+    [duplicateResponse(400, body), 'non-409 status'],
+    [duplicateResponse(409, { ...body, duplicate: { entity: 'customer', existing_id: 7, existing_name: '张三' } }), 'unknown entity'],
+    [{ message: 'Network Error' }, 'no response'],
+  ])('ignores %s (%s)', async (error, _label) => {
+    const { parseDuplicateRecordError } = await import('../errorHandler')
+    expect(parseDuplicateRecordError(error)).toBeNull()
+  })
+})

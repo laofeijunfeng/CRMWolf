@@ -1164,6 +1164,7 @@ def test_contact_create_flushes_without_commit_or_refresh_when_commit_false(monk
     added = []
     db.add.side_effect = lambda obj: added.append(obj)
     monkeypatch.setattr(contact_crud, "get_primary_by_customer_id", lambda *args, **kwargs: None)
+    monkeypatch.setattr(contact_crud, "find_duplicate", lambda *args, **kwargs: None)
 
     created = contact_crud.create(
         db,

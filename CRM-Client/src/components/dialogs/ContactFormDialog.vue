@@ -21,8 +21,11 @@ import {
   SegmentedChoiceControl,
   TextareaField,
 } from '@/components/crmwolf'
-import { handleApiError } from '@/utils/errorHandler'
+import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
+import { handleApiError, parseDuplicateRecordError, type DuplicateRecordError } from '@/utils/errorHandler'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
+import type { FeedbackError } from '@/types/feedback'
 import customerApi, { type ContactResponse, type ContactCreate, type ContactUpdate } from '@/api/customer'
 
 // Zod schema for form validation
@@ -54,6 +57,7 @@ interface Props {
 interface Emits {
   (e: 'update:open', value: boolean): void
   (e: 'success'): void
+  (e: 'open-existing', contactId: number): void
 }
 
 const props = defineProps<Props>()
@@ -100,6 +104,12 @@ const reportsToOptions = computed(() =>
 // State
 const submitting = ref(false)
 const isDirty = ref(false)
+const duplicate = ref<DuplicateRecordError | null>(null)
+const duplicateFeedback = computed<FeedbackError | null>(() =>
+  duplicate.value === null
+    ? null
+    : { title: '联系人重复', description: duplicate.value.detail, kind: 'conflict' }
+)
 
 // Computed property for edit mode
 const isEdit = computed(() => !!props.contact)
@@ -147,6 +157,7 @@ watch(() => props.open, (newOpen) => {
 
   if (newOpen) {
     closeGuard.reset()
+    duplicate.value = null
     if (props.contact) {
       // Edit mode: populate form with contact data
       const formGender = mapContactGenderToForm(props.contact.gender)
@@ -186,6 +197,7 @@ watch(() => props.open, (newOpen) => {
 // Form submission
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
+  duplicate.value = null
   try {
     const data: ContactCreate | ContactUpdate = {
       name: formValues.name.trim(),
@@ -212,11 +224,21 @@ const onSubmit = handleSubmit(async (formValues) => {
     visible.value = false
     emit('success')
   } catch (error) {
-    handleApiError(error, isEdit.value ? '更新联系人' : '创建联系人')
+    duplicate.value = parseDuplicateRecordError(error)
+    if (duplicate.value === null) {
+      handleApiError(error, isEdit.value ? '更新联系人' : '创建联系人')
+    }
   } finally {
     submitting.value = false
   }
 })
+
+async function openExisting(contactId: number): Promise<void> {
+  if (isDirty.value && !(await confirmDiscardChanges('close'))) return
+  closeGuard.approveClose()
+  visible.value = false
+  emit('open-existing', contactId)
+}
 
 // Cancel operation
 function handleOpenChange(open: boolean): void {
@@ -237,6 +259,14 @@ function handleCancel(): void {
       </DialogHeader>
 
       <div class="contact-form-dialog__body">
+
+      <FeedbackAlert :error="duplicateFeedback" density="compact">
+        <template v-if="duplicate !== null" #actions>
+          <Button type="button" variant="outline" size="sm" @click="openExisting(duplicate.existingId)">
+            打开已有联系人
+          </Button>
+        </template>
+      </FeedbackAlert>
 
       <form id="contact-form" class="space-y-4" @submit="onSubmit">
         <Field v-slot="{ value, handleChange, errorMessage }" name="name">

@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import and_, exists, or_
 from sqlalchemy.orm import Query, Session, selectinload
 
-from app.core.exceptions import ConflictException
+from app.core.exceptions import ConflictException, DuplicateRecordError
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -16,6 +16,7 @@ from app.core.list_query import (
     uses_unified_list_query,
 )
 from app.core.list_query.catalogs import CUSTOMERS_LIST_QUERY_CATALOG
+from app.crud.child_dedupe import persist_guarding_duplicate
 from app.crud.industry import industry_crud
 from app.crud.operation_log import operation_log_crud
 from app.crud.product import product_crud
@@ -42,6 +43,7 @@ from app.schemas.customer import (
     normalize_customer_license_pair,
 )
 from app.services.acquisition_source_service import get_by_id, resolve_source_for_entity_write
+from app.utils.dedupe_normalizer import mobile_dedupe_key, normalize_mobile
 from app.utils.name_normalizer import build_customer_name_dedupe_key
 from app.utils.time import business_now
 
@@ -873,17 +875,18 @@ class CustomerCRUD:
         )
 
 
-        contact = Contact(
+        contact = contact_crud.add(
+            db,
+            values={
+                "name": contact_name or lead.contact_name,
+                "mobile": contact_phone or lead.contact_phone or "",
+                "is_decision_maker": True,
+            },
             customer_id=customer.id,
             team_id=team_id,
-            name=contact_name or lead.contact_name,
-            mobile=contact_phone or lead.contact_phone or "",
             is_primary=True,
-            is_decision_maker=True,
+            commit=False,
         )
-
-        db.add(contact)
-        db.flush()
 
         customer_activity_crud.migrate_from_lead(db, lead_id, customer.id, team_id, commit=False)
 
@@ -1397,21 +1400,30 @@ class ContactCRUD:
             .first()
         )
 
-    def get_by_mobile(self, db: Session, mobile: str, team_id: int | None = None) -> Contact | None:
-        """根据手机号获取联系人
-
-        Args:
-            db: 数据库 session
-            mobile: 手机号
-            team_id: 团队 ID\uff08可选\uff0c用于团队隔离\uff09
-
-        Returns:
-            联系人对象或 None
-        """
-        query = db.query(Contact).filter(Contact.mobile == mobile)
-        if team_id is not None:
-            query = query.filter(Contact.team_id == team_id)
-        return query.first()
+    @staticmethod
+    def find_duplicate(
+        db: Session, *, customer_id: int, team_id: int, mobile: str | None, exclude_id: int | None = None
+    ) -> DuplicateRecordError | None:
+        """Return the error for an existing contact of this customer with the same normalized mobile."""
+        key = mobile_dedupe_key(mobile)
+        if key is None:
+            return None
+        query = db.query(Contact.id, Contact.name).filter(
+            Contact.team_id == team_id,
+            Contact.customer_id == customer_id,
+            Contact.mobile_dedupe_key == key,
+        )
+        if exclude_id is not None:
+            query = query.filter(Contact.id != exclude_id)
+        existing = query.order_by(Contact.id).first()
+        if existing is None:
+            return None
+        return DuplicateRecordError(
+            entity="contact",
+            existing_id=existing.id,
+            existing_name=existing.name,
+            detail=f"该客户下已有这个手机号的联系人：{existing.name}",  # noqa: RUF001
+        )
 
     def create(
         self,
@@ -1435,10 +1447,35 @@ class ContactCRUD:
         Returns:
             创建的联系人对象
         """
-        contact_data = obj_in.model_dump()
+        return self.add(
+            db, values=obj_in.model_dump(), customer_id=customer_id, team_id=team_id,
+            is_primary=is_primary, commit=commit,
+        )
+
+    def add(
+        self,
+        db: Session,
+        *,
+        values: dict[str, Any],
+        customer_id: int,
+        team_id: int,
+        is_primary: bool,
+        commit: bool,
+    ) -> Contact:
+        """Insert a contact from already-validated values; blocks a duplicate mobile within the customer.
+
+        Internal writers (lead conversion) may pass an empty mobile, which never counts as a duplicate.
+        """
+        contact_data = dict(values)
+        contact_data["mobile"] = normalize_mobile(contact_data.get("mobile"))
         contact_data["customer_id"] = customer_id
         contact_data["team_id"] = team_id
         contact_data["is_primary"] = 1 if is_primary else 0
+
+        mobile = contact_data["mobile"]
+        duplicate = self.find_duplicate(db, customer_id=customer_id, team_id=team_id, mobile=mobile)
+        if duplicate is not None:
+            raise duplicate
 
         if is_primary:
             existing_primary = self.get_primary_by_customer_id(db, customer_id, team_id)
@@ -1450,27 +1487,48 @@ class ContactCRUD:
 
         db_obj = Contact(**contact_data)
         db.add(db_obj)
+        persist_guarding_duplicate(
+            db,
+            commit=commit,
+            find_duplicate=lambda: self.find_duplicate(
+                db, customer_id=customer_id, team_id=team_id, mobile=mobile
+            ),
+        )
         if commit:
-            db.commit()
             db.refresh(db_obj)
-        else:
-            db.flush()
         return db_obj
 
     def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate) -> Contact:
         update_data = obj_in.model_dump(exclude_unset=True)
         if not update_data:
             return db_obj
+        if "mobile" in update_data:
+            update_data["mobile"] = normalize_mobile(update_data["mobile"])
         db_obj = self._locked_contact(db, db_obj)
         changed_fields = {field for field, value in update_data.items() if getattr(db_obj, field, None) != value}
         if not changed_fields:
             db.commit()
             db.refresh(db_obj)
             return db_obj
+        contact_id, customer_id, team_id = db_obj.id, db_obj.customer_id, db_obj.team_id
+        mobile = update_data.get("mobile")
+        check_mobile = "mobile" in changed_fields and mobile_dedupe_key(mobile) != db_obj.mobile_dedupe_key
+
+        def find_duplicate() -> DuplicateRecordError | None:
+            if not check_mobile:
+                return None
+            return self.find_duplicate(
+                db, customer_id=customer_id, team_id=team_id, mobile=mobile, exclude_id=contact_id
+            )
+
+        duplicate = find_duplicate()
+        if duplicate is not None:
+            db.rollback()
+            raise duplicate
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
-        db.commit()
+        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
         db.refresh(db_obj)
         return db_obj
 

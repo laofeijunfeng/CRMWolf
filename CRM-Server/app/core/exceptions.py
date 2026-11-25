@@ -77,6 +77,23 @@ class ConflictException(AppException):
         )
 
 
+class DuplicateRecordError(AppException):
+    """A customer child record collides with an existing one on its dedupe key."""
+
+    def __init__(self, *, entity: str, existing_id: int, existing_name: str, detail: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+            error_code="DUPLICATE_RECORD",
+        )
+        self.entity = entity
+        self.existing_id = existing_id
+        self.existing_name = existing_name
+
+    def payload(self) -> dict[str, object]:
+        return {"entity": self.entity, "existing_id": self.existing_id, "existing_name": self.existing_name}
+
+
 class ForbiddenException(AppException):
     def __init__(self, detail: str = "Access forbidden"):
         super().__init__(
@@ -167,14 +184,14 @@ async def app_exception_handler(request: Request, exc: AppException):
             code=exc.error_code,
             message=exc.detail,
         )
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error_code": exc.error_code,
-            "detail": exc.detail,
-            "path": str(request.url)
-        }
-    )
+    content: dict[str, object] = {
+        "error_code": exc.error_code,
+        "detail": exc.detail,
+        "path": str(request.url)
+    }
+    if isinstance(exc, DuplicateRecordError):
+        content["duplicate"] = exc.payload()
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

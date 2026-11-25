@@ -25,8 +25,11 @@ import {
   InputField,
   SegmentedChoiceControl,
 } from '@/components/crmwolf'
-import { handleApiError } from '@/utils/errorHandler'
+import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
+import { handleApiError, parseDuplicateRecordError, type DuplicateRecordError } from '@/utils/errorHandler'
+import { confirmDiscardChanges } from '@/utils/confirmDialog'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
+import type { FeedbackError } from '@/types/feedback'
 import invoiceApi, {
   type InvoiceTitleResponse,
   type InvoiceTitleCreate,
@@ -53,11 +56,14 @@ interface Props {
   customerId: string
   open: boolean
   invoiceTitle?: InvoiceTitleResponse | null
+  /** 重复时是否提供「打开已有抬头」；父组件须处理 open-existing。 */
+  allowOpenExisting?: boolean
 }
 
 interface Emits {
   (e: 'update:open', value: boolean): void
   (e: 'success', invoiceTitle: InvoiceTitleResponse): void
+  (e: 'open-existing', invoiceTitleId: number): void
 }
 
 const props = defineProps<Props>()
@@ -82,6 +88,12 @@ const { value: titleTypeValue } = useField<TitleType>('title_type')
 
 // ==================== State ====================
 const submitting = ref(false)
+const duplicate = ref<DuplicateRecordError | null>(null)
+const duplicateFeedback = computed<FeedbackError | null>(() =>
+  duplicate.value === null
+    ? null
+    : { title: '开票抬头重复', description: duplicate.value.detail, kind: 'conflict' }
+)
 
 // ==================== Computed ====================
 const isEdit = computed(() => !!props.invoiceTitle)
@@ -111,6 +123,7 @@ watch(() => props.open, (newOpen) => {
 
   if (newOpen) {
     closeGuard.reset()
+    duplicate.value = null
     if (props.invoiceTitle) {
       // Edit mode: populate form
       resetForm({
@@ -144,6 +157,7 @@ watch(() => props.open, (newOpen) => {
 // ==================== Methods ====================
 const onSubmit = handleSubmit(async (formValues) => {
   submitting.value = true
+  duplicate.value = null
   try {
     const data: InvoiceTitleCreate | InvoiceTitleUpdate = {
       title_type: formValues.title_type,
@@ -164,11 +178,21 @@ const onSubmit = handleSubmit(async (formValues) => {
     visible.value = false
     emit('success', savedInvoiceTitle)
   } catch (error) {
-    handleApiError(error, isEdit.value ? '更新发票抬头' : '创建发票抬头')
+    duplicate.value = parseDuplicateRecordError(error)
+    if (duplicate.value === null) {
+      handleApiError(error, isEdit.value ? '更新发票抬头' : '创建发票抬头')
+    }
   } finally {
     submitting.value = false
   }
 })
+
+async function openExisting(invoiceTitleId: number): Promise<void> {
+  if (isDirty.value && !(await confirmDiscardChanges('close'))) return
+  closeGuard.approveClose()
+  visible.value = false
+  emit('open-existing', invoiceTitleId)
+}
 
 function handleCancel(): void {
   closeGuard.requestClose()
@@ -187,6 +211,14 @@ function handleOpenChange(open: boolean): void {
       </DialogHeader>
 
       <div class="invoice-title-form-dialog__body">
+
+      <FeedbackAlert :error="duplicateFeedback" density="compact">
+        <template v-if="duplicate !== null && allowOpenExisting" #actions>
+          <Button type="button" variant="outline" size="sm" @click="openExisting(duplicate.existingId)">
+            打开已有抬头
+          </Button>
+        </template>
+      </FeedbackAlert>
 
       <form id="invoice-title-form" class="space-y-4" @submit="onSubmit">
         <!-- Title Type -->

@@ -13,10 +13,12 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { InputField } from '@/components/crmwolf'
+import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import type { DeploymentInfoCreate } from '@/schemas/deployment'
-import { handleApiError } from '@/utils/errorHandler'
+import { handleApiError, parseDuplicateRecordError } from '@/utils/errorHandler'
 import { useDialogCloseGuard } from '@/composables/useDialogCloseGuard'
+import type { FeedbackError } from '@/types/feedback'
 
 interface Props {
   elevated?: boolean
@@ -44,6 +46,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const submitting = ref(false)
+const duplicateFeedback = ref<FeedbackError | null>(null)
 
 const form = reactive<DeploymentForm>({
   deploymentName: '',
@@ -72,6 +75,7 @@ const closeGuard = useDialogCloseGuard({
 function clearErrors(): void {
   errors.deploymentName = ''
   errors.serverAddress = ''
+  duplicateFeedback.value = null
 }
 
 function resetForm(): void {
@@ -121,7 +125,12 @@ async function handleSubmit(): Promise<void> {
     visible.value = false
     emit('success', createdDeployment)
   } catch (error: unknown) {
-    handleApiError(error, '新增部署信息')
+    const duplicate = parseDuplicateRecordError(error)
+    if (duplicate === null) {
+      handleApiError(error, '新增部署信息')
+    } else {
+      duplicateFeedback.value = { title: '部署信息重复', description: duplicate.detail, kind: 'conflict' }
+    }
   } finally {
     submitting.value = false
   }
@@ -159,6 +168,8 @@ watch(
       </DialogHeader>
 
       <form class="deployment-dialog__form" novalidate @submit.prevent="handleSubmit">
+        <FeedbackAlert :error="duplicateFeedback" density="compact" />
+
         <InputField
           id="deployment-name"
           v-model="form.deploymentName"

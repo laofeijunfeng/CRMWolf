@@ -10,6 +10,7 @@
 
 import { toast } from 'vue-sonner'
 import type { AxiosError } from 'axios'
+import { z } from 'zod'
 import { logger } from '@/utils/logger'
 
 /**
@@ -71,6 +72,41 @@ export function handleOutcomeUnknown(context = '回款登记'): void {
   toast.warning('登记结果暂未确认', {
     description: `${context}请求可能已提交，系统暂时无法确认最终状态。请稍后点击重试，不要重复填写或提交。`,
   })
+}
+
+const duplicateRecordResponseSchema = z.object({
+  error_code: z.literal('DUPLICATE_RECORD'),
+  detail: z.string(),
+  duplicate: z.object({
+    entity: z.enum(['contact', 'invoice_title', 'deployment_info']),
+    existing_id: z.number().int(),
+    existing_name: z.string(),
+  }),
+})
+
+export interface DuplicateRecordError {
+  entity: 'contact' | 'invoice_title' | 'deployment_info'
+  existingId: number
+  existingName: string
+  /** 后端给出的完整提示，已包含已有记录的名称。 */
+  detail: string
+}
+
+/**
+ * 解析客户下联系人 / 开票抬头 / 部署信息重复时的 409 响应；其他错误返回 null。
+ */
+export function parseDuplicateRecordError(error: unknown): DuplicateRecordError | null {
+  if (typeof error !== 'object' || error === null || !('response' in error)) return null
+  const { response } = error as { response?: { status?: unknown; data?: unknown } }
+  if (response?.status !== 409) return null
+  const parsed = duplicateRecordResponseSchema.safeParse(response.data)
+  if (!parsed.success) return null
+  return {
+    entity: parsed.data.duplicate.entity,
+    existingId: parsed.data.duplicate.existing_id,
+    existingName: parsed.data.duplicate.existing_name,
+    detail: parsed.data.detail,
+  }
 }
 
 /**
