@@ -224,6 +224,10 @@ export const AssistantTaskViewSchema = z.object({
   public_id: z.string().min(1),
   status: AssistantTaskStatusSchema,
   goal: z.string().min(1),
+  task_kind: z.enum([
+    'customer_activity', 'opportunity_create', 'contact_create',
+    'invoice_title_create', 'deployment_create', 'customer_create'
+  ]).optional(),
   activity_kind: z.string().nullable().optional(),
   draft: TaskDraftSchema,
   waiting: TaskWaitingSchema.nullable().optional(),
@@ -294,7 +298,7 @@ export const ConversationProjectionSchema = z.object({
 }).strict()
 export type ConversationProjection = z.infer<typeof ConversationProjectionSchema>
 export const ConversationLinkSchema = z.object({
-  page: z.enum(['customers', 'follow_up_tasks']),
+  page: z.enum(['leads', 'payments', 'invoices', 'contracts', 'customers', 'follow_up_tasks']),
   label: z.string().min(1).max(40),
   customer_public_id: z.string().min(1).max(64).nullable().optional()
 }).strict()

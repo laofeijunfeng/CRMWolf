@@ -57,7 +57,17 @@ export const assistantEntityDetailRoute = (ref: EntityRef): RouteLocationRaw | n
 }
 
 /** The server names the page; the host owns the route for it. */
+const LIST_PAGE_ROUTES = {
+  leads: { name: 'Leads' },
+  payments: { name: 'PaymentRecords' },
+  invoices: { name: 'Invoices' },
+  contracts: { name: 'Contracts' }
+} as const satisfies Partial<Record<ConversationLink['page'], RouteLocationRaw>>
+
 export const assistantPageRoute = (link: ConversationLink): RouteLocationRaw | null => {
+  if (link.page === 'leads' || link.page === 'payments' || link.page === 'invoices' || link.page === 'contracts') {
+    return LIST_PAGE_ROUTES[link.page]
+  }
   if (link.page === 'customers') {
     return link.customer_public_id != null && isCustomerEntityId(link.customer_public_id)
       ? customerDetailRoute(link.customer_public_id)

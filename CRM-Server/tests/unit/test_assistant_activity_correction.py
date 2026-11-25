@@ -147,7 +147,6 @@ async def test_correction_keeps_follow_up_context_in_the_same_advance(confirmati
     assert command["context_evidence"][0]["summary"] == "报价后说下周答复"
     assert "opportunity_public_id" not in (task.authority_json or {})
     assert session.query(CustomerActivity).count() == 0
-    assert conversation_module.QUERY_REFUSAL_LINKS
 
 
 async def _refusal(session, reply) -> tuple[str, object]:

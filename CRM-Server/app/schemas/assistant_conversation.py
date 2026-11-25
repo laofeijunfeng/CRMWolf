@@ -93,7 +93,7 @@ class ConversationProjection(ConversationModel):
 class ConversationLink(ConversationModel):
     """A server-signed in-app page a reply points at; the Web host owns the actual route."""
 
-    page: Literal["customers", "follow_up_tasks"]
+    page: Literal["leads", "payments", "invoices", "contracts", "customers", "follow_up_tasks"]
     label: str = Field(min_length=1, max_length=40)
     customer_public_id: str | None = Field(default=None, min_length=1, max_length=64)
 

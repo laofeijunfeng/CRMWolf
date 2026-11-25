@@ -19,6 +19,7 @@ from app.services.assistant.contracts import (
     Actor,
     TaskAuthority,
     TaskDraft,
+    TaskKind,
     TaskStatus,
     TaskWaiting,
 )
@@ -50,6 +51,8 @@ class TaskUpdate:
     # Require absence of a durable turn claim in the same database CAS.
     require_no_active_turn: bool = False
     activity_kind: str | None = None
+    # Only an untouched task may switch kind (the intent question picks activity vs. entity).
+    task_kind: TaskKind | None = None
     draft: TaskDraft | None = None
     waiting: TaskWaiting | None = None
     # Sentinel-free removal: clear_waiting=True sets waiting to None.
@@ -120,7 +123,8 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
         raise InvalidTaskTransitionError("cannot set and clear waiting in one transition")
     if update.preserve_version and (
         update.waiting is None or task.waiting_type is None or update.status is not None
-        or update.draft is not None or update.activity_kind is not None or update.append_committed
+        or update.draft is not None or update.activity_kind is not None or update.task_kind is not None
+        or update.append_committed
         or update.clear_frozen_activity_command or update.clear_follow_up_opportunity
         or update.clear_proposal_form or update.authority is not None or update.error_code is not None
         or action_name == "chooser_nomination"
@@ -142,10 +146,14 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
             raise InvalidTaskTransitionError("committed activity draft cannot change")
         if update.append_committed and any(item.get("kind") == "customer_activity" for item in update.append_committed):
             raise InvalidTaskTransitionError("customer activity has already been committed")
-    if update.status == AssistantTaskStatus.COMPLETED and not committed_activity and not any(
-        item.get("kind") == "customer_activity" for item in update.append_committed or []
+    if update.task_kind is not None and update.task_kind != task.task_kind and task.committed_json:
+        raise InvalidTaskTransitionError("task kind cannot change after a commit")
+    # An activity task completes on its committed activity; an entity task on its created/existing receipt.
+    completing_kind = task.task_kind or "customer_activity"
+    if update.status == AssistantTaskStatus.COMPLETED and not any(
+        item.get("kind") == completing_kind for item in [*(task.committed_json or []), *(update.append_committed or [])]
     ):
-        raise InvalidTaskTransitionError("task cannot complete without a committed customer activity")
+        raise InvalidTaskTransitionError(f"task cannot complete without a committed {completing_kind} receipt")
 
     now: datetime = business_now()
     values: dict[str, object] = {
@@ -156,6 +164,8 @@ def apply_task_update(db: Session, task: AssistantTask, update: TaskUpdate) -> T
         values["status"] = update.status
     if update.activity_kind is not None:
         values["activity_kind"] = update.activity_kind
+    if update.task_kind is not None:
+        values["task_kind"] = update.task_kind
     if update.draft is not None:
         values["draft_json"] = update.draft.model_dump(mode="json")
     if update.clear_waiting:

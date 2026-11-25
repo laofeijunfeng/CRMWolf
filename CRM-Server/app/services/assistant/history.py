@@ -84,6 +84,7 @@ def legacy_messages(task: AssistantTask, actions: list[AssistantAction], prefix:
                 frozen = AssistantTaskView(
                     public_id=task.public_id,
                     status="ACTIVE",
+                    task_kind=task.task_kind,
                     goal=task.goal,
                     activity_kind=task.activity_kind,
                     draft=TaskDraft(),

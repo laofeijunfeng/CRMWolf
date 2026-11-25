@@ -18,6 +18,9 @@ WaitingType = Literal[
     "FOLLOW_UP_DISPOSITION",
     "PROPOSAL_FORM",
     "CONFIRMATION_EDIT",
+    "ENTITY_FORM",
+    "ENTITY_DEFERRED",
+    "PROFILE_PROPOSALS",
 ]
 TemporalWaitingReason = Literal["DATE", "MONTH", "ROLE", "STATUS", "PRIMARY"]
 Actor = Literal["MODEL", "USER", "SYSTEM"]
@@ -27,6 +30,21 @@ ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunit
 # Waits and receipts frozen before CRM-154 may still carry retired kinds (`customer_fact`, and
 # `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
+EntityKind = Literal["contact_create", "invoice_title_create", "deployment_create", "customer_create"]
+# Direct opportunity creation reuses the opportunity form and proposal claim, so it is a task kind only.
+TaskKind = Literal["customer_activity", "opportunity_create"] | EntityKind
+# Server-assigned provenance of one entity form value; rendered as `InteractionField.source_label`.
+FieldSource = Literal[
+    "ORIGINAL",
+    "DERIVED",
+    "DEFAULT",
+    "USER_CHOICE",
+    "SUPPLEMENT",
+    "NORMALIZED",
+    "AUTO_NAME",
+    "CUSTOMER_DEFAULT",
+]
+FORM_WAITING_TYPES = frozenset({"PROPOSAL_FORM", "CONFIRMATION_EDIT", "ENTITY_FORM"})
 
 
 class ContextEvidence(BaseModel):
@@ -214,11 +232,27 @@ class RefusedProposalReceipt(BaseModel):
         "refused:opportunity_create",
         "refused:opportunity_lose",
         "refused:opportunity",
+        "refused:contact_create",
+        "refused:invoice_title_create",
+        "refused:deployment_create",
+        "refused:customer_create",
     ]
     proposal_key: str | None = None
 
 
-CommittedReceipt = CustomerActivityReceipt | AcceptedProposalReceipt | RefusedProposalReceipt
+class EntityCreateReceipt(BaseModel):
+    """One directly created (or already existing) CRM record of an entity task."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: EntityKind
+    public_id: str = Field(min_length=1, max_length=64)
+    outcome: Literal["created", "existing"] = "created"
+    customer_public_id: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+CommittedReceipt = CustomerActivityReceipt | AcceptedProposalReceipt | RefusedProposalReceipt | EntityCreateReceipt
 
 
 class DraftField(BaseModel):
@@ -240,6 +274,30 @@ class VerifiedNoiseSpan(BaseModel):
     start: int = Field(ge=0)
     end: int = Field(ge=1)
     raw_text: str = Field(min_length=1, max_length=40)
+
+
+class EntityFieldValue(BaseModel):
+    """One entity form value with its server-assigned provenance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str | None = Field(default=None, max_length=2000)
+    source: FieldSource
+    # Verified user phrase the value came from (DERIVED shows it as 按“…”).
+    phrase: str | None = Field(default=None, max_length=200)
+
+
+class EntityDraft(BaseModel):
+    """Editable draft of one record a sales rep asked to create directly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: EntityKind
+    customer_public_id: str | None = Field(default=None, max_length=64)
+    customer_name: str | None = Field(default=None, max_length=200)
+    fields: dict[str, EntityFieldValue] = Field(default_factory=dict)
+    source_text: str = Field(default="", max_length=20000)
+    credentials_mentioned: bool = False
 
 
 class TaskDraft(BaseModel):
@@ -273,6 +331,8 @@ class TaskDraft(BaseModel):
     channel_options: list[str] = Field(default_factory=list, max_length=7)
     channel_origin_label: str | None = Field(default=None, max_length=40)
     input_noise: list[VerifiedNoiseSpan] = Field(default_factory=list, max_length=200)
+    # Entity tasks only (task_kind != customer_activity).
+    entity: EntityDraft | None = None
 
 
 class TemporalWaitingTarget(BaseModel):
@@ -301,13 +361,13 @@ class TaskWaiting(BaseModel):
     hint: str | None = Field(default=None, max_length=400)
     temporal_target: TemporalWaitingTarget | None = None
     confirmation_payload: ConfirmationPayload | None = None
-    # Form waits (PROPOSAL_FORM, CONFIRMATION_EDIT) only: bumped on every form edit; submit_form must echo it.
+    # Form waits (PROPOSAL_FORM, CONFIRMATION_EDIT, ENTITY_FORM) only: bumped on every form edit; submit_form must echo it.
     form_revision: int | None = Field(default=None, ge=0)
     form_fields: list[dict[str, object]] | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
     def match_confirmation_command(self) -> TaskWaiting:
-        if (self.form_revision is not None) != (self.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}):
+        if (self.form_revision is not None) != (self.type in FORM_WAITING_TYPES):
             raise ValueError("form_revision is required on form waits and forbidden elsewhere")
         if self.form_fields is not None and self.form_revision is None:
             raise ValueError("form fields require a form wait")

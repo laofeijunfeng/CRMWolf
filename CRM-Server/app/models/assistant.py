@@ -23,7 +23,7 @@ class AssistantTaskStatus:
 
 
 class AssistantWaitingType:
-    """Closed enum of pause points; extending requires a design review (last: CRM-154)."""
+    """Closed enum of pause points; extending requires a design review (last: CRM-165)."""
 
     FIELD: Final = "FIELD"
     CONFIRMATION: Final = "CONFIRMATION"
@@ -32,6 +32,9 @@ class AssistantWaitingType:
     FOLLOW_UP_DISPOSITION: Final = "FOLLOW_UP_DISPOSITION"
     PROPOSAL_FORM: Final = "PROPOSAL_FORM"
     CONFIRMATION_EDIT: Final = "CONFIRMATION_EDIT"
+    ENTITY_FORM: Final = "ENTITY_FORM"
+    ENTITY_DEFERRED: Final = "ENTITY_DEFERRED"
+    PROFILE_PROPOSALS: Final = "PROFILE_PROPOSALS"
 
 
 class AssistantTask(Base):
@@ -56,6 +59,12 @@ class AssistantTask(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, comment="任务状态")
     # Frozen business intent once first accepted; never rewritten afterwards.
     goal: Mapped[str] = mapped_column(Text, nullable=False, comment="任务目标")
+    # customer_activity, or one direct-create entity kind (one task = one CRM record).
+    task_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="customer_activity", server_default="customer_activity", comment="任务类型"
+    )
+    # Activity task a post-activity profile proposal was split from.
+    parent_task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="来源活动任务ID")
     activity_kind: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="活动类型")
     # Field-level draft: accepted fields, candidate fields, current gaps.
     draft_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, comment="字段级草稿")
@@ -82,6 +91,7 @@ class AssistantTask(Base):
 
     __table_args__ = (
         Index("idx_assistant_task_owner_active", "team_id", "user_id", "status"),
+        Index("idx_assistant_task_owner_kind", "team_id", "user_id", "status", "task_kind", "last_modified_time"),
         {"comment": "销售助手任务状态表（Agent 2.0 单一事实来源）"},
     )
 

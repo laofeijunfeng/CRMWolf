@@ -18,6 +18,7 @@ from pydantic import (
 from app.services.assistant.contracts import (  # noqa: TC001 -- Pydantic resolves models at runtime.
     CommittedReceipt,
     TaskDraft,
+    TaskKind,
     TaskStatus,
     TaskWaiting,
     TurnStatus,
@@ -31,6 +32,8 @@ class AssistantTaskView(BaseModel):
     status: TaskStatus
     goal: str
     activity_kind: str | None
+    # Persisted snapshots predating CRM-165 are activity tasks.
+    task_kind: TaskKind = "customer_activity"
     draft: TaskDraft
     waiting: TaskWaiting | None
     committed: list[CommittedReceipt]

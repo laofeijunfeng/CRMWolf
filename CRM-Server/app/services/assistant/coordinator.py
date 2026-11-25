@@ -31,6 +31,7 @@ from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraf
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter, stage
 from app.services.assistant.failure_contract import ACTIVITY_COMMIT_UNKNOWN_MESSAGE
+from app.services.assistant.intent import INTENT_FIELD
 from app.services.assistant.intake_flow import (
     _budget_exhausted,
     fail_model_stage,
@@ -153,6 +154,12 @@ class AssistantCoordinator:
 
         if user_input.kind == "cancel":
             return self._cancel(db, task)
+        if waiting is not None and waiting.type == AssistantWaitingType.OBJECT_SELECTION and waiting.field == INTENT_FIELD:
+            return await self._answer_intent(db, task, user_input, reporter)
+        if task.task_kind != "customer_activity":
+            from app.services.assistant.entity_tasks import handle_entity_task
+
+            return await handle_entity_task(db, task, user_input, reporter=reporter)
         if user_input.kind == "continue_proposals":
             if waiting is not None or not any(
                 item.get("kind") == "customer_activity" for item in task.committed_json or []
@@ -206,6 +213,25 @@ class AssistantCoordinator:
                     )
 
         return await self._prepare_confirmation(db, task, reporter=reporter)
+
+    async def _answer_intent(
+        self, db: Session, task: AssistantTask, user_input: AssistantInput, reporter: ProgressReporter
+    ) -> CoordinatorOutcome:
+        """The user settles entity-vs-activity once; the original sentence then runs on the chosen path."""
+
+        task = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                clear_waiting=True,
+                task_kind="customer_activity" if user_input.choice == "activity" else None,
+                action_actor="USER",
+                action_name="select_intent",
+                action_result={"choice": user_input.choice},
+            ),
+        ).task
+        db.commit()
+        return await self.handle_task(db, task, AssistantInput(kind="text", text=task.goal), reporter)
 
     def _cancel(self, db: Session, task: AssistantTask) -> CoordinatorOutcome:
         from app.services.assistant.proposals import has_unresolved_proposal_claim

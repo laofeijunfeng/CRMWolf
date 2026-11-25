@@ -464,7 +464,8 @@ def has_proposal_claim(db: Session, task: AssistantTask, waiting: TaskWaiting) -
     return _proposal_claim(db, task, _proposal_from_waiting(waiting)) is not None
 
 def has_unresolved_proposal_claim(db: Session, task: AssistantTask) -> bool:
-    if task.waiting_field not in {
+    # Entity tasks write exactly one record, so any open claim fences the whole task.
+    if task.task_kind == "customer_activity" and task.waiting_field not in {
         "proposal:opportunity_create",
         "proposal:opportunity_stage",
         "proposal:opportunity_lose",

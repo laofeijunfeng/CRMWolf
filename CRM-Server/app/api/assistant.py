@@ -38,13 +38,15 @@ from app.services.assistant.conversation import ConversationService
 from app.services.assistant.coordinator import (
     AssistantCoordinator,
 )
+from app.services.assistant.intent import judge_intent, open_verdict_task
+from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.presentation import task_view
 from app.services.assistant.turns import (
     AssistantRequestConflict,
     AssistantStateConflict,
-    accept_create,
     accept_submit,
     events_after,
+    replayed_create,
     reprocess_allowed,
     retry_owned_turn,
     schedule_turn,
@@ -98,6 +100,7 @@ def _list_view(task: AssistantTask, db: Session) -> dict[str, object]:
         return {
             "public_id": task.public_id,
             "status": task.status,
+            "task_kind": task.task_kind,
             "goal": task.goal,
             "activity_kind": task.activity_kind,
             "draft": None,
@@ -130,13 +133,39 @@ async def create_task(
     db: Session = Depends(get_db),
 ) -> AssistantTaskView:
     try:
-        task = accept_create(
-            db,
-            team_id=team_id,
-            user_id=current_user.id,
-            key=request.client_request_id,
-            goal=request.goal,
+        task = replayed_create(
+            db, team_id=team_id, user_id=current_user.id, key=request.client_request_id, goal=request.goal
         )
+        if task is None:
+            # The direct intake obeys the same verdict as the conversation root; no second rule set.
+            try:
+                decision = await _conversation_service.classifier.classify(
+                    db,
+                    team_id=team_id,
+                    text=request.goal,
+                    tasks=[],
+                    focused_task_public_id=None,
+                    recent_messages=[],
+                )
+            except AssistantLLMError as exc:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+            verdict = judge_intent(decision.semantic_plan, decision.confidence)
+            if verdict.route == "refuse":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "message": verdict.message,
+                        "links": [link.model_dump(mode="json") for link in verdict.links],
+                    },
+                )
+            task = open_verdict_task(
+                db,
+                team_id=team_id,
+                user_id=current_user.id,
+                key=request.client_request_id,
+                goal=request.goal,
+                verdict=verdict,
+            )
     except AssistantRequestConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return task_view(task, db)

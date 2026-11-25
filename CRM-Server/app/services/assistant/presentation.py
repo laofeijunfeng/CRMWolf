@@ -55,6 +55,7 @@ def task_view(task: AssistantTask, db: Session) -> AssistantTaskView:
             "status": task.status,
             "goal": task.goal,
             "activity_kind": task.activity_kind,
+            "task_kind": task.task_kind,
             "draft": load_draft(task),
             "waiting": None if reconciliation_required else load_waiting(task),
             "committed": task.committed_json or [],

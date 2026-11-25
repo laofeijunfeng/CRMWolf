@@ -43,6 +43,7 @@ from app.services.assistant.failure_contract import (
     root_failure_presentation,
     root_failure_retryable,
 )
+from app.services.assistant.intent import IntentVerdict, judge_intent, not_written, open_verdict_task
 from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.presentation import task_view
 from app.services.assistant.task_operations import activity_commit_is_unknown
@@ -78,12 +79,7 @@ class RootClassifier(Protocol):
 
 
 
-# Real pages for what the assistant does not do itself; the Web host owns their routes.
-QUERY_REFUSAL_LINKS = (
-    ConversationLink(page="customers", label="客户管理"),
-    ConversationLink(page="follow_up_tasks", label="客户追踪"),
-)
-CORRECTION_UNCLEAR_MESSAGE = "没听明白要改哪一项。请说明要修改的内容，例如“日期是周三不是周二”；这次没有写入。"
+CORRECTION_UNCLEAR_MESSAGE = not_written("没听明白要改哪一项。请说明要修改的内容，例如“日期是周三不是周二”")
 
 
 def _stored_links(raw: object) -> list[ConversationLink]:
@@ -644,7 +640,7 @@ class ConversationService:
             task = crud.owned_task(db, conversation, entry.task_public_id)
             if task is None:
                 return self._finish_message(
-                    db, conversation, entry, "原沟通已不可用，目前没有写入。", lease_version=lease_version
+                    db, conversation, entry, not_written("原沟通已不可用"), lease_version=lease_version
                 )
             return self._accept(
                 db,
@@ -655,31 +651,13 @@ class ConversationService:
                 lease_version=lease_version,
             )
         plan = decision.semantic_plan
-        if min(decision.confidence, plan.confidence) < 0.8:
+        verdict = judge_intent(plan, decision.confidence)
+        if verdict.route == "refuse":
             return self._finish_message(
-                db, conversation, entry, "请说明这次客户沟通要记录什么；目前没有写入。", lease_version=lease_version
+                db, conversation, entry, verdict.message, lease_version=lease_version, links=verdict.links
             )
-        if plan.speech_act == "ASK_FACT" and plan.operation == "READ":
-            return self._finish_message(
-                db,
-                conversation,
-                entry,
-                "销售助手目前只记录客户沟通，查询请到客户管理或客户追踪页面；这次没有写入。",
-                lease_version=lease_version,
-                links=QUERY_REFUSAL_LINKS,
-            )
-        if (
-            plan.business_object != "CUSTOMER_ACTIVITY"
-            or plan.operation != "CREATE"
-            or plan.speech_act not in {"ASSERT_EVENT", "REQUEST_ACTION", "PROVIDE_SUPPLEMENT", "CORRECT"}
-        ):
-            return self._finish_message(
-                db,
-                conversation,
-                entry,
-                "这里只记录客户沟通，这类操作请到对应业务页面处理；这次没有写入。",
-                lease_version=lease_version,
-            )
+        if verdict.route in {"entity", "intent_question"}:
+            return self._create_entity_task(db, conversation, entry, verdict, lease_version=lease_version)
         target = crud.owned_task(db, conversation, decision.target_task_public_id)
         supplied_ids = entry.command_json.get("route_candidate_ids")
         if plan.speech_act == "CORRECT":
@@ -699,7 +677,7 @@ class ConversationService:
                 or any(r.get("kind") == "customer_activity" for r in target.committed_json or [])
             ):
                 return self._finish_message(
-                    db, conversation, entry, "这项不能在这里修改；这次没有写入。", lease_version=lease_version,
+                    db, conversation, entry, not_written("这项不能在这里修改"), lease_version=lease_version,
                 )
             if decision.route == "CLARIFY" or correction is None:
                 # "Not sure what to change" is not a refusal: keep the card and ask once.
@@ -712,7 +690,7 @@ class ConversationService:
                 )
             if correction.field not in EDITABLE_ACTIVITY_FIELDS:
                 return self._finish_message(
-                    db, conversation, entry, "这项不能在这里修改；这次没有写入。", target, lease_version=lease_version,
+                    db, conversation, entry, not_written("这项不能在这里修改"), target, lease_version=lease_version,
                 )
             entry.command_json = {**entry.command_json, "correction": correction.model_dump(mode="json")}
             return self._accept(db, conversation, entry, target, SubmitInputRequest(
@@ -723,7 +701,7 @@ class ConversationService:
             target is None or not isinstance(supplied_ids, list) or decision.target_task_public_id not in supplied_ids
         ):
             return self._finish_message(
-                db, conversation, entry, "请说明要接回哪次客户沟通，目前没有写入。", lease_version=lease_version
+                db, conversation, entry, not_written("请说明要接回哪次客户沟通"), lease_version=lease_version
             )
         if decision.boundary == "AMBIGUOUS" and target:
             name = load_draft(target).customer.value
@@ -736,7 +714,7 @@ class ConversationService:
                 db,
                 conversation,
                 entry,
-                "请补充这次沟通的客户和要记录的内容，目前没有写入。",
+                not_written("请补充这次沟通的客户和要记录的内容"),
                 lease_version=lease_version,
             )
         return self._dispatch(
@@ -813,7 +791,7 @@ class ConversationService:
         if ConversationDecision.model_validate(entry.decision_json).resume_only:
             if target is None:
                 return self._finish_message(
-                    db, conversation, entry, "请说明要接回哪次客户沟通，目前没有写入。", lease_version=lease_version
+                    db, conversation, entry, not_written("请说明要接回哪次客户沟通"), lease_version=lease_version
                 )
             waiting = load_waiting(target)
             return self._finish_message(
@@ -828,7 +806,7 @@ class ConversationService:
             prepared_task = crud.owned_task(db, conversation, entry.task_public_id)
             if prepared_task is None:
                 return self._finish_message(
-                    db, conversation, entry, "原沟通已不可用，目前没有写入。", lease_version=lease_version
+                    db, conversation, entry, not_written("原沟通已不可用"), lease_version=lease_version
                 )
             return self._accept(
                 db,
@@ -845,6 +823,7 @@ class ConversationService:
         if (
             target is None
             or target.status != "ACTIVE"
+            or target.task_kind != "customer_activity"
             or any(r.get("kind") == "customer_activity" for r in target.committed_json or [])
         ):
             source = target
@@ -950,6 +929,38 @@ class ConversationService:
             expected_version=waiting.expected_version if waiting else None,
         )
         return self._accept(db, conversation, entry, target, payload, lease_version=lease_version)
+
+    def _create_entity_task(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        verdict: IntentVerdict,
+        *,
+        lease_version: int,
+    ) -> ConversationReply:
+        """One record = one task; an unsure create first asks entity-vs-activity on that task."""
+
+        task = open_verdict_task(
+            db,
+            team_id=conversation.team_id,
+            user_id=conversation.user_id,
+            key=f"conv-create-{entry.public_id}",
+            goal=entry.user_text,
+            verdict=verdict,
+        )
+        if verdict.route == "intent_question":
+            waiting = load_waiting(task)
+            prompt = waiting.prompt if waiting is not None else "已按你的选择继续处理。"
+            return self._finish_message(db, conversation, entry, prompt, task, lease_version=lease_version)
+        return self._accept(
+            db,
+            conversation,
+            entry,
+            task,
+            SubmitInputRequest(kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}"),
+            lease_version=lease_version,
+        )
 
     def _accept(
         self,

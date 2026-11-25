@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import BigInteger
 
+from app.api import assistant as api
 from app.core.database import Base
 from app.main import app
 from app.models.assistant import (
@@ -19,6 +20,7 @@ from app.models.assistant import (
 from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.contracts import TaskDraft
+from tests.unit.test_assistant_conversation import Classifier, decision
 
 
 def _make_user(team_id: int, user_id: int):
@@ -55,6 +57,8 @@ def client(db_session, override_auth, monkeypatch):
         yield db_session
 
     monkeypatch.setattr(turns, "SessionLocal", sessionmaker(bind=db_session.get_bind(), autoflush=False))
+    # Direct task intake asks the root classifier first; default it to an activity verdict.
+    monkeypatch.setattr(api._conversation_service, "classifier", Classifier(decision()))
     app.dependency_overrides[get_db] = _get_db_override
     yield TestClient(app)
     app.dependency_overrides.pop(get_db, None)

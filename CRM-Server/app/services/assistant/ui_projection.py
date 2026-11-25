@@ -852,6 +852,8 @@ def _waiting_interaction(
                 if waiting.field == "temporal_choice"
                 else "select_opportunity"
                 if waiting.field == "opportunity"
+                else "select_intent"
+                if waiting.field == "intent"
                 else "select_customer"
             )
             return _choice(

@@ -20,6 +20,7 @@ from app.core.database import SessionLocal
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.activity_channel import CANONICAL_KINDS
+from app.services.assistant.contracts import FORM_WAITING_TYPES
 from app.services.assistant.coordinator import AssistantInput
 from app.services.assistant.events import ProgressReporter, TurnStage, is_stage_name
 from app.services.assistant.failure_contract import (
@@ -45,6 +46,8 @@ from app.utils.time import business_now
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
+
+    from app.services.assistant.contracts import TaskKind
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 300
@@ -105,11 +108,34 @@ def _request(db: Session, *, team_id: int, user_id: int, key: str) -> AssistantR
     return db.query(AssistantRequest).filter_by(team_id=team_id, user_id=user_id, client_request_id=key).one_or_none()
 
 
-def accept_create(db: Session, *, team_id: int, user_id: int, key: str, goal: str) -> AssistantTask:
+def _create_fingerprint(goal: str, task_kind: str) -> str:
+    # Activity creates keep their pre-task-kind digest so existing request keys still replay.
+    if task_kind == "customer_activity":
+        return fingerprint({"operation": "create", "goal": goal})
+    return fingerprint({"operation": "create", "goal": goal, "task_kind": task_kind})
+
+
+def replayed_create(db: Session, *, team_id: int, user_id: int, key: str, goal: str) -> AssistantTask | None:
+    """A create key already accepted replays its task without consulting the model again."""
+
+    previous = _request(db, team_id=team_id, user_id=user_id, key=key)
+    if previous is None:
+        return None
+    task = db.get(AssistantTask, previous.task_id)
+    if task is None or previous.turn_id is not None or previous.input_fingerprint != _create_fingerprint(
+        goal.strip(), task.task_kind
+    ):
+        raise AssistantRequestConflict("请求标识已被其他内容占用")
+    return task
+
+
+def accept_create(
+    db: Session, *, team_id: int, user_id: int, key: str, goal: str, task_kind: TaskKind = "customer_activity"
+) -> AssistantTask:
     from app.services.assistant.contracts import TaskDraft
 
     goal = goal.strip()
-    digest = fingerprint({"operation": "create", "goal": goal})
+    digest = _create_fingerprint(goal, task_kind)
     previous = _request(db, team_id=team_id, user_id=user_id, key=key)
     if previous:
         if previous.input_fingerprint != digest or previous.turn_id is not None:
@@ -119,6 +145,7 @@ def accept_create(db: Session, *, team_id: int, user_id: int, key: str, goal: st
         team_id=team_id,
         user_id=user_id,
         status=AssistantTaskStatus.ACTIVE,
+        task_kind=task_kind,
         goal=goal,
         draft_json=TaskDraft().model_dump(mode="json"),
         authority_json={},
@@ -215,6 +242,9 @@ def accept_submit(
             "FOLLOW_UP_DISPOSITION": "submit_field",
             "PROPOSAL_FORM": "submit_form",
             "CONFIRMATION_EDIT": "submit_form",
+            "ENTITY_FORM": "submit_form",
+            "ENTITY_DEFERRED": "submit_field",
+            "PROFILE_PROPOSALS": "submit_field",
         }
         revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
         editing = waiting.type == "CONFIRMATION" and waiting.field == "activity_write" and kind == "request_edit"
@@ -271,11 +301,16 @@ def accept_submit(
             ) or len(choices) != len(set(choices)) or choice is not None or text is not None
             if not disposition_ids or (not legacy_refresh and invalid_batch):
                 raise AssistantStateConflict("请选择当前签发的历史任务处理")
-        elif waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}:
+        elif waiting.type in FORM_WAITING_TYPES:
+            # Entity forms may also be parked ("defer") instead of cancelled.
+            choices_allowed = {"cancel", "defer"} if waiting.type == "ENTITY_FORM" else {"cancel"}
             if (input_data.get("form_revision") != waiting.form_revision or text is not None
                 or (choice is None and not isinstance(values, dict))
-                or (choice is not None and (choice != "cancel" or values is not None))):
+                or (choice is not None and (choice not in choices_allowed or values is not None))):
                 raise AssistantStateConflict("表单已变化，请读取最新任务")
+        elif waiting.type in {"ENTITY_DEFERRED", "PROFILE_PROPOSALS"}:
+            if not isinstance(choice, str) or choice not in {c.get("id") for c in waiting.candidates} or text is not None:
+                raise AssistantStateConflict("请选择当前签发的操作")
         elif editing:
             if text is not None or choice is not None:
                 raise AssistantStateConflict("修改动作不接受其他回复")
@@ -323,7 +358,10 @@ def accept_submit(
     from app.services.assistant.proposals import has_unresolved_proposal_claim
 
     if has_unresolved_proposal_claim(db, task):
-        raise AssistantStateConflict("商机提交结果待核对，暂不能提交新操作。")
+        raise AssistantStateConflict(
+            "商机提交结果待核对，暂不能提交新操作。" if task.task_kind == "customer_activity"
+            else "上次保存结果待核对，暂不能提交新操作。"
+        )
     if kind == "cancel" and has_frozen_disposition_settlement(task):
         raise AssistantStateConflict("历史任务结果待核对，暂不能取消。")
     request = AssistantRequest(
