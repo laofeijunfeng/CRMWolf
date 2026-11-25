@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from hashlib import sha256
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Literal
@@ -16,7 +17,12 @@ from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskSt
 from app.services.assistant.action_evidence import validate_action_evidence
 from app.services.assistant.contracts import ProposalCandidate, ProposalConfirmation, TaskAuthority, TaskWaiting
 from app.services.assistant.crm_effects import AssistantCRMNoEffect, checked_effect
-from app.services.assistant.crm_proposal_commands import build_proposal_command, source_activity, validate_candidate
+from app.services.assistant.crm_proposal_commands import (
+    CONTRACT_BLOCK_REASON,
+    build_proposal_command,
+    source_activity,
+    validate_candidate,
+)
 from app.services.assistant.events import stage
 from app.services.assistant.failure_contract import AssistantFailureCode
 from app.services.assistant.model_transport import AssistantLLMError
@@ -29,7 +35,7 @@ from app.services.assistant.task_state import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Awaitable, Callable
 
     from pydantic import JsonValue
     from sqlalchemy.orm import Session
@@ -142,6 +148,7 @@ def _rejection_trail(candidate: Mapping[str, object]) -> dict[str, str]:
 
 def _take_queued_candidate(
     db: Session, task: AssistantTask, queue: list[ProposalCandidate], rejected: list[dict[str, str]],
+    blocked_loss_reasons: list[str],
 ) -> ProposalCandidate | None:
     settled = {receipt.get("proposal_key") for receipt in task.committed_json or []}
     while queue:
@@ -151,6 +158,11 @@ def _take_queued_candidate(
         hint = candidate.model_dump(mode="json", exclude_unset=True)
         rebound = _bind_candidate(db, task, hint, rejected)
         if rebound is None:
+            continue
+        if _is_contract_blocked_loss(rebound):
+            # The contract is authoritative now: explain it instead of asking for
+            # a confirmation that could only end in a refusal.
+            blocked_loss_reasons.append(_contract_block_reason(rebound))
             continue
         if rebound["key"] != candidate.key:
             # Contract presence is server-derived and may change after queueing.
@@ -181,6 +193,18 @@ def _take_queued_candidate(
             continue
         return candidate
     return None
+
+
+def _contract_block_reason(proposal: Mapping[str, object]) -> str:
+    payload = proposal.get("payload")
+    reason = payload.get("block_reason") if isinstance(payload, Mapping) else None
+    return reason if isinstance(reason, str) else CONTRACT_BLOCK_REASON
+
+
+def _is_contract_blocked_loss(proposal: Mapping[str, object]) -> bool:
+    return proposal.get("kind") == "opportunity_lose" and bool(
+        (proposal.get("payload") or {}).get("block_reason")
+    )
 
 def proposal_waiting(task: AssistantTask, proposal: ProposalData) -> TaskWaiting:
     kind = proposal["kind"]
@@ -242,6 +266,7 @@ async def offer_next_proposal(
     action_result: dict[str, object] = {}
     proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
     rejected: list[dict[str, str]] = []
+    blocked_loss_reasons: list[str] = []
     saved = load_authority(task).proposal_queue
     queue = list(saved) if saved is not None else []
     started: float | None = None
@@ -264,7 +289,7 @@ async def offer_next_proposal(
                         candidate = ProposalCandidate.model_validate(bound)
                         bound_by_key[candidate.key] = candidate
                 queue = sorted(bound_by_key.values(), key=lambda candidate: _PRIORITY[candidate.kind])
-            proposal = _take_queued_candidate(db, task, queue, rejected)
+            proposal = _take_queued_candidate(db, task, queue, rejected, blocked_loss_reasons)
             if rejected:
                 action_result = {"rejected": rejected}
             if proposal is None and rejected:
@@ -319,6 +344,9 @@ async def offer_next_proposal(
                 authority=TaskAuthority(proposal_outcome=proposal_outcome, proposal_queue=[]),
             ),
         )
+        if blocked_loss_reasons:
+            # "Already has a contract" is a definite refusal, not a missing suggestion.
+            return result.task, blocked_loss_reasons[0], False
         return result.task, PROPOSAL_UNAVAILABLE_TEXT if unavailable else "本次任务已完成。", False
     waiting = proposal_waiting(task, proposal.model_dump(mode="json", exclude_unset=True))
     result = apply_task_update(
