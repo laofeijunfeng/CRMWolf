@@ -46,6 +46,14 @@ _PENDING_OR_REMINDER = frozenset(
         OutboundNotificationEventType.APPROVAL_REMINDER,
     }
 )
+_OWNER_TRANSFER_RECEIVED = {
+    OutboundNotificationEventType.LEAD_ASSIGNED: "LEAD",
+    OutboundNotificationEventType.CUSTOMER_TRANSFERRED: "CUSTOMER",
+}
+_OWNER_TRANSFER_PREVIOUS = {
+    OutboundNotificationEventType.LEAD_ASSIGNED_PREVIOUS: "LEAD",
+    OutboundNotificationEventType.CUSTOMER_TRANSFERRED_PREVIOUS: "CUSTOMER",
+}
 
 
 class OutboundNotificationJobRequest(BaseModel):
@@ -793,14 +801,33 @@ class OutboundNotificationJobService:
                 recipients,
                 lead_name=_optional_str(payload.get("lead_name")) or "",
             )
-        if event_type == OutboundNotificationEventType.LEAD_ASSIGNED:
-            return await feishu_notification_service.notify_lead_assigned(
+        if event_type in _OWNER_TRANSFER_RECEIVED:
+            return await feishu_notification_service.notify_owner_transfer_received(
                 db,
                 team_id,
                 recipients,
-                lead_name=_optional_str(payload.get("lead_name")) or "",
-                contact_name=_optional_str(payload.get("contact_name")) or "",
-                contact_phone=_optional_str(payload.get("contact_phone")) or "",
+                entity_type=_OWNER_TRANSFER_RECEIVED[event_type],
+                # LEAD_ASSIGNED jobs queued before CRM-162 only carry lead_name/contact_*.
+                name=_optional_str(payload.get("name")) or _optional_str(payload.get("lead_name")) or "",
+                operator_name=_optional_str(payload.get("operator_name")),
+                previous_owner_name=_optional_str(payload.get("previous_owner_name")),
+                contact_name=_optional_str(payload.get("contact_name")),
+                contact_phone=_optional_str(payload.get("contact_phone")),
+                follow_up=_optional_str_dict(payload.get("follow_up")),
+                remark=_optional_str(payload.get("remark")),
+                cascade=_optional_cascade(payload.get("cascade")),
+                detail_path=_optional_str(payload.get("detail_path")),
+            )
+        if event_type in _OWNER_TRANSFER_PREVIOUS:
+            return await feishu_notification_service.notify_owner_transfer_previous(
+                db,
+                team_id,
+                recipients,
+                entity_type=_OWNER_TRANSFER_PREVIOUS[event_type],
+                name=_optional_str(payload.get("name")) or "",
+                new_owner_name=_optional_str(payload.get("new_owner_name")),
+                operator_name=_optional_str(payload.get("operator_name")),
+                cascade=_optional_cascade(payload.get("cascade")),
             )
         if event_type == OutboundNotificationEventType.OPPORTUNITY_WON:
             return await feishu_notification_service.notify_opportunity_won(
@@ -1017,6 +1044,18 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_str_dict(value: object) -> dict[str, str | None] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): _optional_str(item) for key, item in value.items()}
+
+
+def _optional_cascade(value: object) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    return {key: _optional_int(value.get(key)) or 0 for key in ("opportunities", "contracts", "locked")}
 
 
 outbound_notification_job_service = OutboundNotificationJobService()

@@ -528,6 +528,43 @@ async def test_run_delivers_business_event_without_adapter(job_session_factory, 
 
 
 @pytest.mark.asyncio
+async def test_run_renders_lead_assigned_job_queued_before_owner_transfer_cards(job_session_factory, monkeypatch):
+    """Jobs persisted before CRM-162 carry only lead_name/contact_*; they must still deliver."""
+    session = job_session_factory()
+    request = OutboundNotificationJobService().enqueue_in_transaction(
+        session,
+        team_id=1,
+        event_type=OutboundNotificationEventType.LEAD_ASSIGNED,
+        idempotency_key="1:lead_assigned:3",
+        recipient_user_ids=[11],
+        business_type="LEAD",
+        business_id=3,
+        payload_json={"lead_name": "线索A", "contact_name": "王五", "contact_phone": "13800000000"},
+    )
+    session.commit()
+    session.close()
+
+    captured = {}
+
+    async def fake_notify(db, team_id, user_ids, **kwargs):
+        captured.update({"user_ids": list(user_ids), **kwargs})
+        return {"success": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr(
+        "app.services.outbound_notification_job_service.feishu_notification_service.notify_owner_transfer_received",
+        fake_notify,
+    )
+
+    result = await OutboundNotificationJobService().run(request)
+
+    assert result["execution_status"] == "COMPLETED"
+    assert captured["user_ids"] == [11]
+    assert (captured["entity_type"], captured["name"], captured["contact_name"]) == ("LEAD", "线索A", "王五")
+    assert (captured["follow_up"], captured["cascade"], captured["previous_owner_name"]) == (None, None, None)
+
+
+
+@pytest.mark.asyncio
 async def test_unknown_business_event_is_skipped(job_session_factory, monkeypatch):
     monkeypatch.setattr(
         OutboundNotificationEventType,

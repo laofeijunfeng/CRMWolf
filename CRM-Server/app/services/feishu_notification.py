@@ -28,6 +28,16 @@ def _format_amount(value: object) -> str:
         return str(value or "0.00")
 
 
+_OWNER_TRANSFER_CUSTOMER = "CUSTOMER"
+
+
+def _cascade_text(cascade: dict[str, int]) -> str:
+    return (
+        f"商机 {cascade.get('opportunities', 0)} 个、合同 {cascade.get('contracts', 0)} 份\uff1b"
+        f"未转移合同 {cascade.get('locked', 0)} 份\uff08审批中或已签署\uff09"
+    )
+
+
 class FeishuNotificationService:
     api_base_url = "https://open.feishu.cn/open-apis"
 
@@ -439,27 +449,79 @@ class FeishuNotificationService:
             template="green",
         )
 
-    async def notify_lead_assigned(
+    async def notify_owner_transfer_received(
         self,
         db: Session,
         team_id: int,
         user_ids: Iterable[int],
         *,
-        lead_name: str,
-        contact_name: str,
-        contact_phone: str,
+        entity_type: str,
+        name: str,
+        operator_name: str | None,
+        previous_owner_name: str | None,
+        contact_name: str | None,
+        contact_phone: str | None,
+        follow_up: dict[str, str | None] | None,
+        remark: str | None,
+        cascade: dict[str, int] | None,
+        detail_path: str | None,
     ) -> dict[str, int]:
-        return await self.notify_markdown_card(
-            db,
-            team_id,
-            user_ids,
-            title="🎯 新线索分配通知",
-            markdown=(
-                f"**线索信息**\n\n**线索名称**: {lead_name}\n"
-                f"**联系人**: {contact_name}\n**联系电话**: {contact_phone}\n\n"
-                "请及时跟进该线索\uff01"
-            ),
+        is_customer = entity_type == _OWNER_TRANSFER_CUSTOMER
+        fields = {f"{'客户' if is_customer else '线索'}名称": name}
+        if operator_name:
+            fields["操作人"] = operator_name
+        fields["原负责人"] = previous_owner_name or "无"
+        fields["联系人"] = contact_name or "暂无联系人"
+        if contact_name and contact_phone:
+            fields["联系电话"] = contact_phone
+        if follow_up:
+            head = " · ".join(part for part in (follow_up.get("occurred_at"), follow_up.get("method")) if part)
+            content = follow_up.get("content") or ""
+            fields[f"最近{follow_up.get('kind_label') or '跟进记录'}"] = "\n".join(
+                part for part in (head, content) if part
+            )
+        if remark:
+            fields["移交备注"] = remark
+        if cascade:
+            fields["随客户转移"] = _cascade_text(cascade)
+        content_card = self._approval_card(
+            entity_type=entity_type,
+            title="📦 你收到一个移交的客户" if is_customer else "🎯 你收到一条新分配的线索",
+            template="blue",
+            fields=fields,
+            button_text="查看详情",
+            button_url=self._absolute_frontend_url(db, team_id, detail_path),
         )
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content_card)
+
+    async def notify_owner_transfer_previous(
+        self,
+        db: Session,
+        team_id: int,
+        user_ids: Iterable[int],
+        *,
+        entity_type: str,
+        name: str,
+        new_owner_name: str | None,
+        operator_name: str | None,
+        cascade: dict[str, int] | None,
+    ) -> dict[str, int]:
+        is_customer = entity_type == _OWNER_TRANSFER_CUSTOMER
+        fields = {
+            f"{'客户' if is_customer else '线索'}名称": name,
+            "移交给" if is_customer else "分配给": new_owner_name or "-",
+        }
+        if operator_name:
+            fields["操作人"] = operator_name
+        if cascade:
+            fields["随客户转移"] = _cascade_text(cascade)
+        content_card = self._approval_card(
+            entity_type=entity_type,
+            title="📤 你负责的客户已移交" if is_customer else "📤 你负责的线索已重新分配",
+            template="grey",
+            fields=fields,
+        )
+        return await self.send_to_users(db, team_id, user_ids, "interactive", content_card)
 
     async def notify_opportunity_won(
         self,

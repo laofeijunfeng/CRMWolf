@@ -147,6 +147,7 @@ from app.services.customer_status_transition_service import (
 )
 from app.services.operation_log_service import operation_log_service
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.services.owner_transfer_notification import queue_customer_transfer_notifications
 from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/customers", tags=["客户管理"])
@@ -3577,11 +3578,16 @@ def assign_customer(
     customer = _get_customer_or_404(db, customer_id, team_id)
     if not modern_command:
         try:
-            previous_owner = customer.owner_id
-            updated_customer, transferred_opportunities, transferred_contracts = cast(
-                "tuple[Customer, int, int]",
-                customer_crud.assign_customer(db, customer, assign_data.owner_id, team_id, legacy_scope),
+            legacy_assignment = cast(
+                "_AssignmentDetails",
+                customer_crud.assign_customer(
+                    db, customer, assign_data.owner_id, team_id, legacy_scope, return_details=True
+                ),
             )
+            updated_customer = legacy_assignment["customer"]
+            previous_owner = legacy_assignment["previous_owner_id"]
+            transferred_opportunities = legacy_assignment["transferred_opportunities"]
+            transferred_contracts = legacy_assignment["transferred_contracts"]
             operation_log_service.log(
                 db=db,
                 event_type="CUSTOMER_ASSIGNED",
@@ -3613,6 +3619,20 @@ def assign_customer(
                     "transferred_opportunities": transferred_opportunities,
                     "transferred_contracts": transferred_contracts,
                 },
+            )
+            queue_customer_transfer_notifications(
+                db,
+                team_id=team_id,
+                customer=updated_customer,
+                previous_owner_id=previous_owner,
+                new_owner_id=legacy_assignment["new_owner_id"],
+                transfer_scope=legacy_scope,
+                transferred_opportunities=transferred_opportunities,
+                transferred_contracts=transferred_contracts,
+                locked_contracts=len(legacy_assignment["skipped_objects"]),
+                remark=assign_data.normalized_reason(),
+                operator_id=_current_user.id,
+                operator_name=getattr(_current_user, "name", None),
             )
             return CustomerAssignResponse(
                 customer=_customer_response(db, updated_customer),
@@ -3843,6 +3863,21 @@ def assign_customer(
         # command result successful and let observability/retry handle the
         # non-critical projection side effect.
         logger.exception("客户移交后的智能档案刷新入队失败", extra={"operation_id": command_operation_id})
+    queue_customer_transfer_notifications(
+        db,
+        team_id=team_id,
+        customer=updated_customer,
+        previous_owner_id=assignment["previous_owner_id"],
+        new_owner_id=assignment["new_owner_id"],
+        transfer_scope=legacy_scope,
+        transferred_opportunities=assignment["transferred_opportunities"],
+        transferred_contracts=assignment["transferred_contracts"],
+        locked_contracts=len(assignment["skipped_objects"]),
+        remark=assign_data.normalized_reason(),
+        operator_id=_current_user.id,
+        operator_name=getattr(_current_user, "name", None),
+        idempotency_key=f"{team_id}:customer_transferred:{command_operation_id}",
+    )
     return command_execution_service.to_response_payload(execution)
 
 

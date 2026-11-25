@@ -700,6 +700,14 @@ class LeadFollowUpCRUD:
             LeadFollowUp.lead_id == lead_id
         ).order_by(LeadFollowUp.created_time.desc()).first()
 
+    def get_latest_for_team(self, db: Session, *, lead_id: int, team_id: int) -> LeadFollowUp | None:
+        return (
+            db.query(LeadFollowUp)
+            .filter(LeadFollowUp.team_id == team_id, LeadFollowUp.lead_id == lead_id)
+            .order_by(LeadFollowUp.created_time.desc(), LeadFollowUp.id.desc())
+            .first()
+        )
+
     def update_next_time(
         self,
         db: Session,

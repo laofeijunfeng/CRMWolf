@@ -32,6 +32,9 @@ class OutboundNotificationEventType:
     CUSTOMER_RETURNED = "customer_returned"
     LEAD_CLAIMED = "lead_claimed"
     LEAD_ASSIGNED = "lead_assigned"
+    LEAD_ASSIGNED_PREVIOUS = "lead_assigned_previous"
+    CUSTOMER_TRANSFERRED = "customer_transferred"
+    CUSTOMER_TRANSFERRED_PREVIOUS = "customer_transferred_previous"
     OPPORTUNITY_WON = "opportunity_won"
     OPPORTUNITY_LOST = "opportunity_lost"
 
@@ -54,6 +57,9 @@ class OutboundNotificationEventType:
             CUSTOMER_RETURNED,
             LEAD_CLAIMED,
             LEAD_ASSIGNED,
+            LEAD_ASSIGNED_PREVIOUS,
+            CUSTOMER_TRANSFERRED,
+            CUSTOMER_TRANSFERRED_PREVIOUS,
             OPPORTUNITY_WON,
             OPPORTUNITY_LOST,
         }
@@ -119,7 +125,8 @@ class OutboundNotificationJob(Base):
             "event_type IN ('approval_pending', 'approval_approved', 'approval_rejected', "
             "'approval_cancelled', 'approval_issued', 'approval_reminder', 'approval_cc', "
             "'account_created', 'account_status_won', 'account_status_lost', "
-            "'customer_returned', 'lead_claimed', 'lead_assigned', "
+            "'customer_returned', 'lead_claimed', 'lead_assigned', 'lead_assigned_previous', "
+            "'customer_transferred', 'customer_transferred_previous', "
             "'opportunity_won', 'opportunity_lost')",
             name="ck_outbound_notification_job_event_type",
         ),
