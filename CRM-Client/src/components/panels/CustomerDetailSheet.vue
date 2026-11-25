@@ -7,7 +7,7 @@
  *
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { DetailSheetHeader, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import { Button } from '@/components/ui/button'
@@ -552,6 +552,24 @@ const handleContactDialogClose = (open: boolean): void => {
   }
 }
 
+// 新建/编辑联系人撞上重复手机号时，打开已有的那条；列表可能已过时（并发创建），找不到就先刷新。
+const handleOpenExistingContact = async (contactId: number): Promise<void> => {
+  const findContact = (): ContactResponse | undefined =>
+    customer.value?.contacts.find(contact => contact.id === contactId)
+  let existing = findContact()
+  if (existing === undefined && props.customerId !== null) {
+    await loadAllData(props.customerId)
+    existing = findContact()
+  }
+  if (existing === undefined) {
+    toast.error('已有联系人暂时无法打开，请刷新后重试')
+    return
+  }
+  // 等表单关闭生效后再打开，否则 open 在同一轮里 false→true，表单不会重新填充。
+  await nextTick()
+  handleEditContact(existing)
+}
+
 const handleContactSuccess = async (): Promise<void> => {
   contactDialogOpen.value = false
   editingContact.value = null
@@ -703,6 +721,22 @@ const handleInvoiceTitleDialogClose = (open: boolean): void => {
   if (!open) {
     editingInvoiceTitle.value = null
   }
+}
+
+const handleOpenExistingInvoiceTitle = async (invoiceTitleId: number): Promise<void> => {
+  const findInvoiceTitle = (): InvoiceTitleResponse | undefined =>
+    invoiceTitles.value.find(invoiceTitle => invoiceTitle.id === invoiceTitleId)
+  let existing = findInvoiceTitle()
+  if (existing === undefined) {
+    await retryPanel('invoiceTitles')
+    existing = findInvoiceTitle()
+  }
+  if (existing === undefined) {
+    toast.error('已有开票抬头暂时无法打开，请刷新后重试')
+    return
+  }
+  await nextTick()
+  handleEditInvoiceTitle(existing)
 }
 
 const handleInvoiceTitleSuccess = async (): Promise<void> => {
@@ -1183,6 +1217,7 @@ watch(() => props.targetPanel, (panel): void => {
     :available-contacts="customer?.contacts ?? []"
     @update:open="handleContactDialogClose"
     @success="handleContactSuccess"
+    @open-existing="handleOpenExistingContact"
   />
 
   <OpportunityFormDialog v-bind="elevated ? { elevated: true } : {}"
@@ -1200,8 +1235,10 @@ watch(() => props.targetPanel, (panel): void => {
     :customer-id="customerId"
     :open="invoiceTitleDialogOpen"
     :invoice-title="editingInvoiceTitle"
+    allow-open-existing
     @update:open="handleInvoiceTitleDialogClose"
     @success="handleInvoiceTitleSuccess"
+    @open-existing="handleOpenExistingInvoiceTitle"
   />
 
   <DeploymentInfoFormDialog v-bind="elevated ? { elevated: true } : {}"

@@ -4,6 +4,7 @@ from sqlalchemy import and_, exists, not_, or_
 from sqlalchemy.orm import Query, Session
 
 from app.constants.business_types import BusinessType
+from app.core.exceptions import DuplicateRecordError
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -14,6 +15,7 @@ from app.core.list_query import (
     without_filter_field,
 )
 from app.core.list_query.catalogs import INVOICES_LIST_QUERY_CATALOG
+from app.crud.child_dedupe import persist_guarding_duplicate
 from app.models.contract import Contract
 from app.models.customer import Customer
 from app.models.invoice import (
@@ -36,6 +38,7 @@ from app.schemas.invoice import (
 )
 from app.services.business_number_generator import BusinessNumberGenerator
 from app.utils.approval_delete_guard import assert_deletable_approval_resource
+from app.utils.dedupe_normalizer import normalize_taxpayer_id, taxpayer_dedupe_key
 from app.utils.time import business_now
 
 
@@ -71,37 +74,68 @@ class InvoiceTitleCRUD:
             query = query.filter(InvoiceTitle.team_id == team_id)
         return query.first()
 
-    def get_by_taxpayer_id(
-        self, db: Session, customer_id: int, taxpayer_id: str, team_id: int | None = None
-    ) -> InvoiceTitle | None:
-        query = db.query(InvoiceTitle).filter(
-            and_(
-                InvoiceTitle.customer_id == customer_id,
-                InvoiceTitle.taxpayer_id == taxpayer_id
-            )
+    @staticmethod
+    def find_duplicate(
+        db: Session, *, customer_id: int, team_id: int, taxpayer_id: str | None, exclude_id: int | None = None
+    ) -> DuplicateRecordError | None:
+        """Return the error for an existing title of this customer with the same normalized taxpayer id."""
+        key = taxpayer_dedupe_key(taxpayer_id)
+        if key is None:
+            return None
+        query = db.query(InvoiceTitle.id, InvoiceTitle.title).filter(
+            InvoiceTitle.team_id == team_id,
+            InvoiceTitle.customer_id == customer_id,
+            InvoiceTitle.taxpayer_dedupe_key == key,
         )
-        if team_id is not None:
-            query = query.filter(InvoiceTitle.team_id == team_id)
-        return query.first()
+        if exclude_id is not None:
+            query = query.filter(InvoiceTitle.id != exclude_id)
+        existing = query.order_by(InvoiceTitle.id).first()
+        if existing is None:
+            return None
+        return DuplicateRecordError(
+            entity="invoice_title",
+            existing_id=existing.id,
+            existing_name=existing.title,
+            detail=f"该客户下已有这个税号的开票抬头：{existing.title}",  # noqa: RUF001
+        )
 
     def create(self, db: Session, customer_id: int, obj_in: InvoiceTitleCreate, team_id: int) -> InvoiceTitle:
-        db_obj = InvoiceTitle(
-            customer_id=customer_id,
-            team_id=team_id,
-            **obj_in.model_dump()
-        )
+        values = obj_in.model_dump()
+        taxpayer_id = values["taxpayer_id"] = normalize_taxpayer_id(values["taxpayer_id"])
+
+        def find_duplicate() -> DuplicateRecordError | None:
+            return self.find_duplicate(db, customer_id=customer_id, team_id=team_id, taxpayer_id=taxpayer_id)
+
+        duplicate = find_duplicate()
+        if duplicate is not None:
+            raise duplicate
+        db_obj = InvoiceTitle(customer_id=customer_id, team_id=team_id, **values)
         db.add(db_obj)
-        db.commit()
+        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
         db.refresh(db_obj)
         return db_obj
-    
+
     def update(self, db: Session, db_obj: InvoiceTitle, obj_in: InvoiceTitleUpdate) -> InvoiceTitle:
         update_data = obj_in.model_dump(exclude_unset=True)
-        
+        title_id, customer_id, team_id = db_obj.id, db_obj.customer_id, db_obj.team_id
+        taxpayer_id: str | None = None
+        if "taxpayer_id" in update_data:
+            taxpayer_id = update_data["taxpayer_id"] = normalize_taxpayer_id(update_data["taxpayer_id"])
+        check_taxpayer = taxpayer_id is not None and taxpayer_dedupe_key(taxpayer_id) != db_obj.taxpayer_dedupe_key
+
+        def find_duplicate() -> DuplicateRecordError | None:
+            if not check_taxpayer:
+                return None
+            return self.find_duplicate(
+                db, customer_id=customer_id, team_id=team_id, taxpayer_id=taxpayer_id, exclude_id=title_id
+            )
+
+        duplicate = find_duplicate()
+        if duplicate is not None:
+            raise duplicate
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-        
-        db.commit()
+        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
         db.refresh(db_obj)
         return db_obj
     

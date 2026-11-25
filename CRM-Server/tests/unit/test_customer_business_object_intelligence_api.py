@@ -1150,9 +1150,6 @@ def test_create_invoice_title_enqueues_business_object_intelligence(monkeypatch)
     monkeypatch.setattr(
         invoices_api, "check_customer_edit_permission", lambda customer_id, team_id, current_user, db: _customer()
     )
-    monkeypatch.setattr(
-        invoices_api.invoice_title_crud, "get_by_taxpayer_id", lambda db, customer_id, taxpayer_id, team_id: None
-    )
     monkeypatch.setattr(invoices_api.invoice_title_crud, "create", lambda db, customer_id, obj_in, team_id: title)
     monkeypatch.setattr(
         invoices_api,

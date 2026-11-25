@@ -183,6 +183,18 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
 docker exec crm-backend python -c "from app.core.database import SessionLocal; from app.models.sales_commitment import FollowUpTask, SalesCommitment, FollowUpTaskProjectionRun; db=SessionLocal(); print('follow_up_tasks', db.query(FollowUpTask).count()); print('sales_commitments', db.query(SalesCommitment).count()); print('projection_runs', db.query(FollowUpTaskProjectionRun).count()); db.close()"
 ```
 
+## 客户下重复记录合并与唯一索引上线（CRM-164）
+
+迁移 `171_customer_child_dedupe_keys` 给联系人、开票抬头、部署信息加判重键并回填；`172_customer_child_unique_keys` 把判重键改为每客户唯一，库里仍有重复时会报错并列出重复组，不会删数据。
+
+`deploy.sh` 在停止旧服务后执行 `alembic upgrade head`，迁移失败会使脚本退出、服务保持停止。因此必须在确认生产库没有重复之后，才发布包含 172 的版本：
+
+1. 发布代码和 171。此时新建、修改已经拦截重复。
+2. 导出合并计划：`docker exec crm-backend python scripts/dedupe_customer_children.py export --out /tmp/dedupe-plan.csv`，用 `docker cp` 取出。脚本同时打印每类空值和未规范化的数量。
+3. 人工确认计划：每组恰好一行 `keep`，只允许改动哪一行是 `keep`。默认保留被引用的记录，其次创建最早的。
+4. 执行合并：`docker exec crm-backend python scripts/dedupe_customer_children.py apply --plan /tmp/dedupe-plan.csv`。一个事务内把合同签约人、汇报对象、开票申请、License 申请的引用改到保留记录，把主联系人/默认标记交给它，再删除其余记录并核对引用总数。导出后数据有变化时拒绝执行、不改任何数据，重新导出即可。
+5. 再次 `export`，确认 `0 duplicate groups` 后，发布包含 172 的版本。
+
 ## 文件说明
 
 - `deploy.sh`：远程服务器一键部署脚本。
