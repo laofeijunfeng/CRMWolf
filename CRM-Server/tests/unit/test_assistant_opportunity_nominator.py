@@ -283,9 +283,8 @@ def test_loss_signal_is_structured_and_binds_reason(monkeypatch, stage_context):
         "_nominated_loss_target": (1, "opp_stage", 4),
     }]
     assert json.loads(transport.calls[0]["user"])["active_opportunities"][-1] == {
-        "opportunity_ref": "L1", "name": "报销项目", "status": "WON",
+        "opportunity_ref": "L1", "name": "报销项目", "status": "WON", "loss_blocked": False,
     }
-
 
 def test_loss_evidence_must_remain_in_one_current_segment():
     from app.services.assistant.crm_proposal_commands import _matches_current_loss_evidence
@@ -329,7 +328,7 @@ def test_superseded_loss_evidence_is_rejected():
     )
 
 
-def test_contracted_won_opportunity_is_not_nominated_for_loss(monkeypatch, stage_context):
+def test_contracted_won_opportunity_is_nominated_with_contract_block(monkeypatch, stage_context):
     from app.crud.contract import contract_crud
     from app.models.opportunity import Opportunity, OpportunityStatus
     from app.services.assistant.opportunity_nominator import OpportunityNominator
@@ -344,5 +343,16 @@ def test_contracted_won_opportunity_is_not_nominated_for_loss(monkeypatch, stage
     transport = FakeTransport({"candidates": [{"opportunity_ref": "L1", "lose": True, "reason": "预算冻结"}]})
     _patch(monkeypatch)
 
-    assert asyncio.run(OpportunityNominator(runtime=transport).nominate(db, task, activity)) == []
-    assert json.loads(transport.calls[0]["user"])["active_opportunities"] == []
+    result = asyncio.run(OpportunityNominator(runtime=transport).nominate(db, task, activity))
+
+    assert result == [{
+        "kind": "opportunity_lose", "target_public_id": "opp_stage", "evidence_quote": "预算冻结",
+        "segment_id": "seg_loss", "payload": {
+            "loss_reason": "预算冻结",
+            "block_reason": "该商机已有合同，请先处理合同后再标记输单",
+        },
+        "_nominated_loss_target": (1, "opp_stage", 4),
+    }]
+    assert json.loads(transport.calls[0]["user"])["active_opportunities"] == [{
+        "opportunity_ref": "L1", "name": "报销项目", "status": "WON", "loss_blocked": True,
+    }]

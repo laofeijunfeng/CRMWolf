@@ -153,6 +153,29 @@ def _take_queued_candidate(
         if rebound is None:
             continue
         if rebound["key"] != candidate.key:
+            # Contract presence is server-derived and may change after queueing.
+            # Keep the same fenced target/evidence and refresh only that reason so
+            # the executor can settle the race as an exact NO_EFFECT.
+            stable_fields = (
+                "kind", "target_public_id", "evidence_quote", "activity_id", "customer_id",
+                "source_revision", "segment_id", "prior_status", "task_owner_id",
+                "prior_stage_snapshot_id", "prior_version", "prior_fact_version", "task_hash",
+                "action_id", "due_date_granularity",
+            )
+            rebound_payload = rebound.get("payload") or {}
+            hint_payload = hint.get("payload") or {}
+            same_loss_payload = {
+                key: value for key, value in rebound_payload.items() if key != "block_reason"
+            } == {
+                key: value for key, value in hint_payload.items() if key != "block_reason"
+            }
+            if (
+                candidate.kind == "opportunity_lose"
+                and same_loss_payload
+                and all(rebound.get(field) == hint.get(field) for field in stable_fields)
+                and set(rebound_payload) - set(hint_payload) <= {"block_reason"}
+            ):
+                return ProposalCandidate.model_validate(rebound)
             rejected.append({"kind": candidate.kind, "reason": "target",
                              **_rejection_trail(candidate.model_dump(mode="json", exclude_unset=True))})
             continue
@@ -167,6 +190,8 @@ def proposal_waiting(task: AssistantTask, proposal: ProposalData) -> TaskWaiting
     label = _PROMPTS[kind]
     if detail:
         label = f"{str(detail)[:80]}：{label}"
+    if kind == "opportunity_lose" and payload.get("block_reason"):
+        label = f"{label}（{payload['block_reason']}）"
     return TaskWaiting(
         type="CONFIRMATION",
         field=f"proposal:{kind}",

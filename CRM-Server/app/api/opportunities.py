@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_customer_edit_permission,
@@ -36,6 +37,7 @@ from app.crud.customer import customer_crud
 from app.crud.deal_journey import deal_journey_crud
 from app.crud.opportunity import opportunity_crud
 from app.models.opportunity import Opportunity
+from app.models.opportunity import OpportunityStatus
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
@@ -77,9 +79,7 @@ from app.services.opportunity_presenter import (
 from app.services.opportunity_presenter import (
     opportunity_detail_response,
 )
-from app.services.opportunity_presenter import (
-    opportunity_loss_unavailable_reason as _opportunity_loss_unavailable_reason,
-)
+
 from app.services.opportunity_presenter import (
     opportunity_product_payload as _opportunity_product_payload,
 )
@@ -124,6 +124,39 @@ def _contract_unavailable_reason(db: Session, opportunity: Opportunity, team_id:
     ):
         return None
     return CONTRACT_NOT_READY_REASON
+
+
+def _opportunity_ids_with_active_contract(
+    db: Session,
+    opportunities: Sequence[Opportunity],
+    team_id: int | None,
+) -> set[int]:
+    """One query for the whole page: loss blocking must not add a lookup per row."""
+    if team_id is None:
+        return set()
+    opportunity_ids = [opportunity.id for opportunity in opportunities]
+    if not opportunity_ids:
+        return set()
+    from app.models.contract import Contract
+
+    return {
+        opportunity_id
+        for (opportunity_id,) in db.query(Contract.opportunity_id).filter(
+            Contract.team_id == team_id,
+            Contract.opportunity_id.in_(opportunity_ids),
+            Contract.deleted_at.is_(None),
+        ).distinct().all()
+    }
+
+def _loss_unavailable_reason(
+    status: int,
+    opportunity_id: int,
+    contract_blocked_ids: set[int],
+) -> str | None:
+    """Only a WON opportunity with an undeleted contract is blocked from loss."""
+    if status != OpportunityStatus.WON.value or opportunity_id not in contract_blocked_ids:
+        return None
+    return CONTRACT_LOSS_BLOCK_REASON
 
 
 def _ensure_opportunity_not_pending(db: Session, opportunity: Opportunity, team_id: int | None) -> None:
@@ -356,6 +389,7 @@ def get_opportunities(
         team_id=team_id,
         journey_ids=[opp.deal_journey_id for opp in opportunities],
     )
+    contract_blocked_opportunity_ids = _opportunity_ids_with_active_contract(db, opportunities, team_id)
     for opp in opportunities:
         customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
         
@@ -428,7 +462,9 @@ def get_opportunities(
                 "name": owner_info[1],
                 "avatar_url": owner_info[2]
             } if owner_info else None,
-            "contract_unavailable_reason": _opportunity_loss_unavailable_reason(db, opp, team_id),
+            "loss_unavailable_reason": _loss_unavailable_reason(
+                opp.status, opp.id, contract_blocked_opportunity_ids,
+            ),
         }
         opp_dict.update(_opportunity_product_payload(opp))
         
@@ -487,16 +523,9 @@ def _build_opportunity_list_responses(
             .all()
         )
         customers = {c.id: c for c in customers_list}
-    from app.models.contract import Contract
-
-    active_contract_opportunity_ids = {
-        opportunity_id
-        for (opportunity_id,) in projection_db.query(Contract.opportunity_id).filter(
-            Contract.team_id == team_id,
-            Contract.opportunity_id.in_([opp.id for opp in opportunities]),
-            Contract.deleted_at.is_(None),
-        ).distinct().all()
-    }
+    active_contract_opportunity_ids = _opportunity_ids_with_active_contract(
+        projection_db, opportunities, team_id,
+    )
     product_payloads = _opportunity_product_payloads(projection_db, opportunities)
     empty_product_payload = _opportunity_product_payload(None)
 
@@ -556,9 +585,8 @@ def _build_opportunity_list_responses(
             "stage": stage,
             "stage_info": stage_info,
             "owner_info": users_info.get(str(opp.owner_id)),
-            "contract_unavailable_reason": (
-                "该商机已有合同，请先处理合同后再标记输单"
-                if opp.status == 1 and opp.id in active_contract_opportunity_ids else None
+            "loss_unavailable_reason": _loss_unavailable_reason(
+                opp.status, opp.id, active_contract_opportunity_ids,
             ),
         }
         opp_dict.update(product_payloads.get(opp.id, empty_product_payload))

@@ -99,7 +99,7 @@ export const OpportunityApiResponseSchema = z.object({
   actual_amount: z.number().nullable().optional(),
   actual_closing_date: z.string().nullable().optional(),
   loss_reason: z.string().nullable().optional(),
-  contract_unavailable_reason: z.string().nullable().optional(),
+  loss_unavailable_reason: z.string().nullable().optional(),
   created_time: z.string(),
   updated_time: z.string(),
   version: z.number().int(),
@@ -163,7 +163,8 @@ export const OpportunityListItemApiSchema = z.object({
   last_modified_time: z.string(),
   customer_name: OptionalStringFromNullableSchema,
   owner_info: OpportunityOwnerInfoSchema.optional(),
-  contract_unavailable_reason: z.string().nullable().optional()
+  contract_unavailable_reason: z.string().nullable().optional(),
+  loss_unavailable_reason: z.string().nullable().optional()
 }).passthrough()
 
 export const OpportunityPaginatedListApiSchema = z.object({

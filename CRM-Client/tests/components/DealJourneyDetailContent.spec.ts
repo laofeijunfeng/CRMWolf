@@ -422,7 +422,7 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
       journeyFixture(),
       opportunityFixture({
         status: OpportunityStatus.WON,
-        contract_unavailable_reason: null,
+        loss_unavailable_reason: null,
       }),
     ))
 
@@ -438,15 +438,18 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
       journeyFixture(),
       opportunityFixture({
         status: OpportunityStatus.WON,
-        contract_unavailable_reason: reason,
+        loss_unavailable_reason: reason,
       }),
     ))
 
     const wrapper = await mountDetail()
-    const loseButton = wrapper.get(`[aria-label="输单 CRM 升级项目（${reason}）"]`)
+    const reasonWrapper = wrapper.get(`[aria-label="输单不可用：${reason}"]`)
+    const loseButton = reasonWrapper.get('button')
 
+    expect(reasonWrapper.attributes('title')).toBe(reason)
+    expect(reasonWrapper.attributes('tabindex')).toBe('0')
     expect(loseButton.attributes('disabled')).toBeDefined()
-    expect(loseButton.attributes('title')).toBe(reason)
+    expect(reasonWrapper.text()).toContain(reason)
   })
 
 

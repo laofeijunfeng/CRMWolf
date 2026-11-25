@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.services.assistant.failure_contract import attempt_budget_remaining
 from app.services.assistant.model_transport import (
     AssistantLLMError,
@@ -86,7 +87,11 @@ _SYSTEM_PROMPT = """你是销售助手的商机信号提名器，不是 CRM 操�
 
 def _stage_options(
     db: Session, task: AssistantTask, customer_id: int
-) -> tuple[list[dict[str, str | None]], dict[str, tuple[str, int | None, int, int, str]], dict[str, tuple[str, int]]]:
+) -> tuple[
+    list[dict[str, str | None | bool]],
+    dict[str, tuple[str, int | None, int, int, str]],
+    dict[str, tuple[str, int, bool]],
+]:
     from app.models.opportunity import Opportunity, OpportunityStatus
     from app.services.assistant.crm_proposal_commands import adjacent_stage
 
@@ -100,9 +105,9 @@ def _stage_options(
         .order_by(Opportunity.id)
         .all()
     )
-    options: list[dict[str, str | None]] = []
+    options: list[dict[str, str | None | bool]] = []
     stage_bindings: dict[str, tuple[str, int | None, int, int, str]] = {}
-    loss_bindings: dict[str, tuple[str, int]] = {}
+    loss_bindings: dict[str, tuple[str, int, bool]] = {}
     for row in active:
         public_id: str = attrgetter("public_id")(row)
         version: int = attrgetter("version")(row)
@@ -110,11 +115,15 @@ def _stage_options(
         if status == OpportunityStatus.WON.value:
             from app.crud.contract import contract_crud
 
-            if contract_crud.has_active_contract_for_opportunity(db, row.id, task.team_id):
-                continue
+            has_contract = contract_crud.has_active_contract_for_opportunity(db, row.id, task.team_id)
             ref = f"L{len(loss_bindings) + 1}"
-            loss_bindings[ref] = (public_id, version)
-            options.append({"opportunity_ref": ref, "name": attrgetter("opportunity_name")(row), "status": "WON"})
+            loss_bindings[ref] = (public_id, version, has_contract)
+            options.append({
+                "opportunity_ref": ref,
+                "name": attrgetter("opportunity_name")(row),
+                "status": "WON",
+                "loss_blocked": has_contract,
+            })
             continue
         transition = adjacent_stage(db, task, row)
         if transition is None:
@@ -216,13 +225,16 @@ class OpportunityNominator:
                 )
                 if binding is None or evidence is None:
                     continue
-                public_id, version = binding
+                public_id, version, has_contract = binding
                 candidates.append({
                     "kind": "opportunity_lose",
                     "target_public_id": public_id,
                     "evidence_quote": item.reason,
                     "segment_id": evidence["segment_id"],
-                    "payload": {"loss_reason": item.reason},
+                    "payload": {
+                        "loss_reason": item.reason,
+                        **({"block_reason": CONTRACT_LOSS_BLOCK_REASON} if has_contract else {}),
+                    },
                     "_nominated_loss_target": (source_revision, public_id, version),
                 })
                 continue

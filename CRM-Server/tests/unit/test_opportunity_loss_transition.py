@@ -13,6 +13,8 @@ def _won_opportunity() -> SimpleNamespace:
         id=11,
         team_id=7,
         status=OpportunityStatus.WON.value,
+        actual_amount=1000,
+        actual_closing_date=SimpleNamespace(isoformat=lambda: "2026-07-09"),
         loss_reason=None,
         win_probability=100,
         version=3,
@@ -50,6 +52,8 @@ def test_won_opportunity_without_active_contract_can_be_marked_lost(monkeypatch:
     assert result.status == OpportunityStatus.LOST.value
     assert result.loss_reason == "客户预算调整"
     assert result.win_probability == 0
+    assert result.actual_amount is None
+    assert result.actual_closing_date is None
     assert result.version == 4
 
 

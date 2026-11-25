@@ -228,7 +228,7 @@ const canShowOpportunityWin = computed(() =>
   isActive.value && canWin.value && isApprovalApproved.value
 )
 const lossUnavailableReason = computed(() => {
-  const reason = opportunity.value?.contract_unavailable_reason
+  const reason = opportunity.value?.loss_unavailable_reason
   return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : undefined
 })
 const canShowOpportunityLose = computed(() =>
@@ -1416,7 +1416,7 @@ watch(approvalPhase, phase => {
                     <span class="opportunity-action-hover-text">赢单</span>
                   </HoverInfo>
                   <HoverInfo
-                    v-if="canShowOpportunityLose"
+                    v-if="canShowOpportunityLose && !lossUnavailableReason"
                     side="top"
                     align="center"
                     content-class="opportunity-action-hover-card"
@@ -1426,16 +1426,33 @@ watch(approvalPhase, phase => {
                         variant="ghost"
                         size="icon"
                         class="opportunity-action-button opportunity-action-button--danger"
-                        :disabled="lossUnavailableReason !== undefined"
-                        :title="lossUnavailableReason"
-                        :aria-label="lossUnavailableReason ? `输单 ${item.opportunity_name}（${lossUnavailableReason}）` : `输单 ${item.opportunity_name}`"
+                        :aria-label="`输单 ${item.opportunity_name}`"
                         @click="loseDialogOpen = true"
                       >
                         <XCircle class="w-4 h-4" />
                       </Button>
                     </template>
-                    <span class="opportunity-action-hover-text">{{ lossUnavailableReason ?? '输单' }}</span>
+                    <span class="opportunity-action-hover-text">输单</span>
                   </HoverInfo>
+                  <span
+                    v-else-if="canShowOpportunityLose"
+                    class="inline-flex items-center"
+                    :title="lossUnavailableReason"
+                    tabindex="0"
+                    role="group"
+                    :aria-label="`输单不可用：${lossUnavailableReason}`"
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="opportunity-action-button opportunity-action-button--danger"
+                      disabled
+                      :aria-label="`输单（${lossUnavailableReason}）`"
+                    >
+                      <XCircle class="w-4 h-4" />
+                    </Button>
+                    <span class="sr-only">{{ lossUnavailableReason }}</span>
+                  </span>
                 </div>
               </template>
             </ListCard>

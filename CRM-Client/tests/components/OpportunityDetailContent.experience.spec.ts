@@ -293,7 +293,7 @@ describe('OpportunityDetailContent experience states', () => {
     opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
       status: OpportunityStatus.WON,
       approval_phase: 'approved',
-      contract_unavailable_reason: null,
+      loss_unavailable_reason: null,
     }))
 
     const wrapper = mount(OpportunityDetailContent, {
@@ -315,7 +315,7 @@ describe('OpportunityDetailContent experience states', () => {
     opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
       status: OpportunityStatus.WON,
       approval_phase: 'approved',
-      contract_unavailable_reason: reason,
+      loss_unavailable_reason: reason,
     }))
 
     const wrapper = mount(OpportunityDetailContent, {

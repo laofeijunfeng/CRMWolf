@@ -5,6 +5,7 @@ from sqlalchemy import Integer, and_, cast, func, or_
 from sqlalchemy.orm import Query, Session, selectinload
 
 from app.constants.business_types import BusinessType
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -1097,11 +1098,13 @@ class OpportunityCRUD:
         if db_obj.status == OpportunityStatus.WON.value and contract_crud.has_active_contract_for_opportunity(
             db, db_obj.id, db_obj.team_id,
         ):
-            raise ValueError("该商机已有合同，请先处理合同后再标记输单")
+            raise ValueError(CONTRACT_LOSS_BLOCK_REASON)
         previous_version = db_obj.version
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
+        db_obj.actual_amount = None
+        db_obj.actual_closing_date = None
         _bump_opportunity_version(db_obj)
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.mark_lost(db, db_obj, operator_id)

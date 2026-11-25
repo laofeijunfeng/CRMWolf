@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from fastapi import HTTPException
 
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.models.customer import Customer
 from app.models.customer_activity import CustomerActivity
 from app.services.assistant.action_evidence import validate_action_evidence
@@ -28,7 +29,8 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.services.assistant.contracts import ProposalKind
 
-# Candidate mappings retain the exact serialized shape, including omitted keys.
+# Proposal payloads keep the exact serialized shape, including omitted keys.
+CONTRACT_BLOCK_REASON = CONTRACT_LOSS_BLOCK_REASON
 ProposalData = dict[str, Any]
 
 
@@ -248,6 +250,7 @@ def validate_candidate(
         reject("schema")
         return None
     try:
+        from app.crud.contract import contract_crud
         codes = _permissions(db, task)
         if kind == "follow_up_task_create":
             from datetime import datetime, time
@@ -432,10 +435,7 @@ def validate_candidate(
             if opportunity.status != OpportunityStatus.WON.value:
                 reject("target")
                 return None
-            from app.crud.contract import contract_crud
-            if contract_crud.has_active_contract_for_opportunity(db, opportunity.id, task.team_id):
-                reject("target")
-                return None
+            contract_blocked = contract_crud.has_active_contract_for_opportunity(db, opportunity.id, task.team_id)
             if not (
                 "opportunity:lose" in codes
                 and (
@@ -474,12 +474,18 @@ def validate_candidate(
             if "prior_version" in candidate and any(candidate.get(field) != value for field, value in fences.items()):
                 reject("target")
                 return None
+            bound_payload = {
+                "loss_reason": loss_reason.strip(),
+                "opportunity_name": opportunity.opportunity_name,
+            }
+            if contract_blocked:
+                bound_payload["block_reason"] = CONTRACT_BLOCK_REASON
             return {
                 "kind": kind,
                 "target_public_id": opportunity.public_id,
                 "evidence_quote": quote,
                 "segment_id": segment_id,
-                "payload": {"loss_reason": loss_reason.strip(), "opportunity_name": opportunity.opportunity_name},
+                "payload": bound_payload,
                 **fences,
             }
     except (HTTPException, PermissionError):
@@ -545,6 +551,8 @@ class RealCRMProposalExecutor:
         validated = validate_candidate(db, task, proposal)
         if validated is None:
             raise rejection_error("CRM 状态已变化，或提议的证据或操作权限已失效，请刷新后重试")
+        if kind == "opportunity_lose" and validated["payload"].get("block_reason") == CONTRACT_BLOCK_REASON:
+            raise AssistantCRMNoEffect(CONTRACT_BLOCK_REASON)
         if any(
             validated.get(field) != proposal.get(field)
             for field in (
@@ -624,7 +632,7 @@ class RealCRMProposalExecutor:
                     assistant_command=command,
                 )
             except ValueError as exc:
-                if str(exc) == "该商机已有合同，请先处理合同后再标记输单":
+                if str(exc) == CONTRACT_BLOCK_REASON:
                     raise AssistantCRMNoEffect(str(exc)) from exc
                 raise
             from app.services.opportunity_loss_side_effect_service import enqueue_opportunity_loss_side_effects

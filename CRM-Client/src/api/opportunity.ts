@@ -128,7 +128,7 @@ export interface Opportunity {
   actual_amount?: number | null
   actual_closing_date?: string | null
   loss_reason?: string | null
-  contract_unavailable_reason?: string | null
+  loss_unavailable_reason?: string | null
   created_time: string
   updated_time: string
   version: number
@@ -353,6 +353,7 @@ export interface OpportunityListResponse {
     avatar_url?: string | null
   }
   contract_unavailable_reason?: string | null
+  loss_unavailable_reason?: string | null
 }
 
 export function parseOpportunityApiResponse(raw: unknown): Opportunity {
