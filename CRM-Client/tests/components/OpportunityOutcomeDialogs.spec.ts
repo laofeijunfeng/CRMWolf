@@ -236,6 +236,26 @@ describe('Opportunity outcome dialogs', () => {
 
     wrapper.unmount()
   })
+  it('shows a won opportunity as the current state while keeping loss reason required', async () => {
+    mocks.getOpportunity.mockResolvedValue({
+      ...opportunityFixture(),
+      status: 1,
+    })
+
+    const wrapper = mount(OpportunityLoseDialog, {
+      props: { open: true, opportunityId: 'opp-1' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前状态')
+    expect(wrapper.text()).toContain('已赢单')
+    expect(wrapper.get('#opportunity-lose-reason').attributes('required')).toBeDefined()
+    expect((wrapper.get('#opportunity-lose-reason').element as HTMLTextAreaElement).disabled).toBe(false)
+
+    wrapper.unmount()
+  })
+
 
   it('renders load failures through the shared feedback component without duplicate toast feedback', async () => {
     mocks.getOpportunity.mockRejectedValue(Object.assign(new Error('server error'), {

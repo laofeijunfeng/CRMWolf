@@ -417,6 +417,38 @@ describe('DealJourneyDetailContent fulfillment workbench', () => {
     ])
     expect(actions[0]?.attributes('class') ?? '').toContain('ghost')
   })
+  it('keeps loss enabled for a won opportunity without an active contract', async () => {
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
+      journeyFixture(),
+      opportunityFixture({
+        status: OpportunityStatus.WON,
+        contract_unavailable_reason: null,
+      }),
+    ))
+
+    const wrapper = await mountDetail()
+    const loseButton = wrapper.get('[aria-label="输单 CRM 升级项目"]')
+
+    expect(loseButton.attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps loss visible but disabled for a won opportunity with an active contract', async () => {
+    const reason = '该商机已有合同，请先处理合同后再标记输单'
+    dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
+      journeyFixture(),
+      opportunityFixture({
+        status: OpportunityStatus.WON,
+        contract_unavailable_reason: reason,
+      }),
+    ))
+
+    const wrapper = await mountDetail()
+    const loseButton = wrapper.get(`[aria-label="输单 CRM 升级项目（${reason}）"]`)
+
+    expect(loseButton.attributes('disabled')).toBeDefined()
+    expect(loseButton.attributes('title')).toBe(reason)
+  })
+
 
   it('does not fetch contracts when primary_opportunity is null', async () => {
     dealJourneyApi.getDetail.mockResolvedValue(detailFixture(
