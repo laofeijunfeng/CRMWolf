@@ -29,11 +29,24 @@ def test_assign_customer_projects_source_lead_public_id(monkeypatch):
     monkeypatch.setattr(customers_api.lead_crud, "get_by_id", lambda db, lead_id, team_id: source_lead)
     monkeypatch.setattr(customers_api, "derive_customer_statuses_for_list", lambda _db, _team_id, _customers: {})
 
-    def assign_customer(db, assigned_customer, owner_id, team_id, opportunity_transfer_scope):
+    def assign_customer(db, assigned_customer, owner_id, team_id, opportunity_transfer_scope, *, return_details=False):
+        assert return_details is True
         assigned_customer.owner_id = owner_id
-        return assigned_customer, 2, 1
+        return {
+            "customer": assigned_customer,
+            "previous_owner_id": "1",
+            "new_owner_id": owner_id,
+            "transferred_opportunities": 2,
+            "transferred_contracts": 1,
+            "updated_objects": [],
+            "skipped_objects": [{"type": "contract", "id": "con_locked"}],
+        }
 
+    notifications = []
     monkeypatch.setattr(customers_api.customer_crud, "assign_customer", assign_customer)
+    monkeypatch.setattr(
+        customers_api, "queue_customer_transfer_notifications", lambda db, **kwargs: notifications.append(kwargs)
+    )
 
     response = customers_api.assign_customer(
         customer_id="cus_test",
@@ -48,3 +61,8 @@ def test_assign_customer_projects_source_lead_public_id(monkeypatch):
     assert response.customer.source_lead_id == "lead_test"
     assert response.transferred_opportunities == 2
     assert response.transferred_contracts == 1
+    assert len(notifications) == 1
+    sent = notifications[0]
+    assert (sent["previous_owner_id"], sent["new_owner_id"], sent["transfer_scope"]) == ("1", "2", "all")
+    assert (sent["transferred_opportunities"], sent["transferred_contracts"], sent["locked_contracts"]) == (2, 1, 1)
+    assert sent["customer"] is customer

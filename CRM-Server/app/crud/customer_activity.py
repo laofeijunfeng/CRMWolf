@@ -158,6 +158,14 @@ class CustomerActivityCRUD:
         )
         return activities, total
 
+    def get_latest_by_customer_id(self, db: Session, *, customer_id: int, team_id: int) -> CustomerActivity | None:
+        return (
+            db.query(CustomerActivity)
+            .filter(CustomerActivity.team_id == team_id, CustomerActivity.customer_id == customer_id)
+            .order_by(CustomerActivity.occurred_at.desc(), CustomerActivity.id.desc())
+            .first()
+        )
+
     def get_by_original_lead_id(
         self,
         db: Session,

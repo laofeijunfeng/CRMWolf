@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import timedelta
+from typing import cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -67,6 +68,7 @@ from app.services.acquisition_source_service import (
 )
 from app.services.ai_parser.factory import EntityAIParserFactory
 from app.services.outbound_notification_job_service import outbound_notification_job_service
+from app.services.owner_transfer_notification import queue_lead_assignment_notifications
 from app.utils.time import business_now
 
 router = APIRouter(prefix="/v1/leads", tags=["线索管理"])
@@ -731,20 +733,16 @@ async def assign_lead(
             detail="线索不存在或不属于当前团队"
         )
 
+    previous_owner_id = cast("str | None", lead.owner_id)
     assigned_lead = lead_crud.assign(db, lead.id, request.owner_id)
-    outbound_notification_job_service.queue_committed(
+    queue_lead_assignment_notifications(
         db,
         team_id=team_id,
-        event_type=OutboundNotificationEventType.LEAD_ASSIGNED,
-        business_type="LEAD",
-        business_id=int(assigned_lead.id),
-        recipient_user_ids=[request.owner_id],
-        actor_id=str(current_user.id),
-        payload_json={
-            "lead_name": lead.lead_name,
-            "contact_name": lead.contact_name,
-            "contact_phone": lead.contact_phone,
-        },
+        lead=lead,
+        previous_owner_id=previous_owner_id,
+        new_owner_id=request.owner_id,
+        operator_id=current_user.id,
+        operator_name=getattr(current_user, "name", None),
     )
     return _build_lead_response(db, assigned_lead)
 

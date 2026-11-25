@@ -1388,6 +1388,15 @@ class ContactCRUD:
             query = query.filter(Contact.team_id == team_id)
         return query.first()
 
+    def get_card_contact(self, db: Session, *, customer_id: int, team_id: int) -> Contact | None:
+        """Contact shown on notification cards: primary first, else the newest."""
+        return (
+            db.query(Contact)
+            .filter(Contact.team_id == team_id, Contact.customer_id == customer_id)
+            .order_by(Contact.is_primary.desc(), Contact.created_time.desc(), Contact.id.desc())
+            .first()
+        )
+
     def get_by_mobile(self, db: Session, mobile: str, team_id: int | None = None) -> Contact | None:
         """根据手机号获取联系人
 
