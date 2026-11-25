@@ -8,11 +8,26 @@ from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.crud.customer import customer_crud
 from app.crud.deal_journey import deal_journey_crud
 from app.models.approval import ApprovalStatus
+from app.models.contract import Contract
+from app.models.opportunity import OpportunityStatus
 from app.schemas.customer import ProcurementMethodInfo
 from app.schemas.opportunity import CurrentStageSnapshotInfo, OpportunityDetailResponse
+
+
+def opportunity_loss_unavailable_reason(db: Session, opportunity, team_id: int | None) -> str | None:
+    """Return why a WON opportunity cannot be marked lost, or None when loss is allowed."""
+    if opportunity.status != OpportunityStatus.WON.value or team_id is None:
+        return None
+    has_contract = db.query(Contract.id).filter(
+        Contract.opportunity_id == opportunity.id,
+        Contract.team_id == team_id,
+        Contract.deleted_at.is_(None),
+    ).first() is not None
+    return CONTRACT_LOSS_BLOCK_REASON if has_contract else None
 
 
 def _normalize_approval_value(value) -> str | None:
@@ -235,6 +250,7 @@ def opportunity_response_dict(
         "updated_time": opportunity.last_modified_time,
         "version": opportunity.version,
         "current_stage_snapshot": None,
+        "loss_unavailable_reason": opportunity_loss_unavailable_reason(db, opportunity, team_id),
     }
     payload.update(opportunity_product_payload(opportunity))
     return payload

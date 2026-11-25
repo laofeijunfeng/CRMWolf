@@ -117,6 +117,7 @@ _TEMPORAL_LABELS: dict[str, str] = {
 _PROPOSAL_LABELS = {
     "opportunity_stage": "推进商机",
     "opportunity_create": "创建商机",
+    "opportunity_lose": "标记商机输单",
     "follow_up_task_create": "创建跟进任务",
     # Retired kinds stay renderable: stored receipts still carry them. The disposition writes `follow_up_task`.
     "customer_fact": "写入客户事实",
@@ -1137,19 +1138,16 @@ def _proposal_facts(candidate: ProposalCandidate, message: ConversationMessage) 
         _add_fact(facts, "opportunity_name", "商机", _string(payload.get("opportunity_name")))
         destination = _string(payload.get("stage_name"))
         current = _string(payload.get("current_stage_name"))
-        if "current_stage_name" in payload and payload["current_stage_name"] is None:
-            current = "未开始"
-        if destination and current:
-            _add_fact(facts, "stage_transition", "阶段", f"{current} → {destination}")
+        if destination:
+            _add_fact(facts, "stage_transition", "阶段", f"{current or '未开始'} → {destination}")
+    elif candidate.kind == "opportunity_lose":
+        _add_fact(facts, "opportunity_name", "商机", _string(payload.get("opportunity_name")))
+        _add_fact(facts, "loss_reason", "输单原因", _string(payload.get("loss_reason")))
     elif candidate.kind == "follow_up_task_create":
         _add_fact(facts, "action", "任务标题", _string(payload.get("action")))
         due = _string(payload.get("due_date"))
         if due and candidate.due_date_granularity in {"DATE", "DATETIME"}:
-            with suppress(ValueError):
-                due = _format_temporal_date(
-                    datetime.fromisoformat(due), include_time=candidate.due_date_granularity == "DATETIME",
-                )
-        _add_fact(facts, "due_date", "到期日", due)
+            _add_fact(facts, "due_date", "截止时间", due)
         _add_fact(facts, "owner", "负责人", _string(payload.get("owner_name")) or _string(payload.get("owner")))
     elif candidate.kind == "opportunity_create" and message.task is not None:
         _add_fact(facts, "customer", "客户", _accepted_value(message.task.draft.customer))
@@ -1322,6 +1320,7 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
     if proposal is not None and proposal.kind in _PROPOSAL_LABELS:
         title, fallback = {
             "opportunity_stage": ("商机阶段已推进", "商机阶段"),
+            "opportunity_lose": ("商机已标记输单", "商机输单"),
             "opportunity_create": ("商机已创建", "商机"),
             "follow_up_task_create": ("跟进任务已创建", "跟进任务"),
             "customer_fact": ("客户事实已写入", "客户事实"),

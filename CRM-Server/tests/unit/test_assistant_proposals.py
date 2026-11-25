@@ -862,6 +862,66 @@ async def test_approval_business_rejection_settles_as_no_effect_with_its_reason(
     assert claim.result_json["status"] == "NO_EFFECT"
     assert db_session.query(Opportunity).count() == 0
 
+async def test_opportunity_loss_contract_block_settles_as_no_effect(crm_session, monkeypatch, nominate):
+    from datetime import date
+
+    from app.crud.permission import permission_crud
+    from app.crud.contract import contract_crud
+    from app.models.opportunity import Opportunity, OpportunityStatus
+    from app.services.assistant.crm_proposal_commands import RealCRMProposalExecutor
+
+    opportunity = Opportunity(
+        id=1, public_id="opp_won", team_id=1, opportunity_number="T-1", opportunity_name="赢单商机",
+        customer_id=7, total_amount=1000, user_count=1, unit_price=1000, license_type="PERPETUAL",
+        purchase_type="NEW", expected_closing_date=date(2026, 12, 31), owner_id="2", creator_id="2",
+        status=OpportunityStatus.WON.value, approval_phase="approved", version=4,
+    )
+    crm_session.add(opportunity)
+    crm_session.commit()
+    monkeypatch.setattr(
+        permission_crud,
+        "get_user_permissions",
+        lambda *args: [
+            type("Permission", (), {"code": "opportunity:lose"})(),
+            type("Permission", (), {"code": "opportunity:edit:own"})(),
+        ],
+    )
+    monkeypatch.setattr(contract_crud, "has_active_contract_for_opportunity", lambda *args, **kwargs: True)
+    nominate[0].append({
+        "kind": "opportunity_lose",
+        "target_public_id": "opp_won",
+        "evidence_quote": "客户预算冻结",
+        "segment_id": "seg_loss",
+        "payload": {"loss_reason": "客户预算冻结"},
+    })
+    task = _task(crm_session, content="客户预算冻结")
+    activity = crm_session.get(CustomerActivity, 1)
+    activity.content_json = '{"source_records":[{"segment_id":"seg_loss","text":"客户预算冻结"}]}'
+    crm_session.commit()
+
+    offered, prompt, active = await offer_next_proposal(crm_session, task)
+    assert active and offered.waiting_field == "proposal:opportunity_lose"
+    assert "该商机已有合同，请先处理合同后再标记输单" in prompt
+    proposal = offered.waiting_json["payload"]["confirmation_payload"]["candidate"]
+    assert proposal["payload"]["block_reason"] == "该商机已有合同，请先处理合同后再标记输单"
+
+    settled, message, offered_again = await settle_proposal(
+        crm_session, offered, accepted=True, executor=RealCRMProposalExecutor(),
+    )
+    crm_session.commit()
+
+    assert message == "该商机已有合同，请先处理合同后再标记输单"
+    assert not offered_again
+    assert settled.status == AssistantTaskStatus.COMPLETED
+    assert settled.waiting_field is None
+    assert settled.committed_json[-1] == {
+        "kind": "refused:opportunity_lose", "proposal_key": proposal["key"],
+    }
+    claim = crm_session.query(AssistantAction).filter_by(action="proposal_command_claim").one()
+    assert claim.result_json["status"] == "NO_EFFECT"
+    crm_session.refresh(opportunity)
+    assert opportunity.status == OpportunityStatus.WON.value
+
 @pytest.mark.parametrize("kind", ["opportunity_stage", "opportunity_create"])
 async def test_success_response_without_exact_effect_stays_unknown(db_session, monkeypatch, kind, nominate):
     from app.services.assistant import proposals

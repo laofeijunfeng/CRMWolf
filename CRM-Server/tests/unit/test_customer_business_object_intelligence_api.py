@@ -470,15 +470,10 @@ async def test_mark_opportunity_lost_triggers_business_object_intelligence(monke
     )
     monkeypatch.setattr(opportunities_api.customer_crud, "get_by_id", lambda db, customer_id, team_id: _customer())
 
-    async def fake_trigger(db, change):
-        scheduled.append(change)
+    def fake_side_effects(db, changed_opportunity, *, actor_id, loss_reason):
+        scheduled.append((changed_opportunity, actor_id, loss_reason))
 
-    monkeypatch.setattr(opportunities_api, "_trigger_opportunity_intelligence_refresh", fake_trigger)
-    monkeypatch.setattr(
-        opportunities_api.outbound_notification_job_service,
-        "queue_committed",
-        lambda *args, **kwargs: SimpleNamespace(job_public_id="onj_opportunity_lost"),
-    )
+    monkeypatch.setattr(opportunities_api, "enqueue_opportunity_loss_side_effects", fake_side_effects)
 
     result = await opportunities_api.mark_opportunity_as_lost(
         301,
@@ -489,8 +484,7 @@ async def test_mark_opportunity_lost_triggers_business_object_intelligence(monke
     )
 
     assert result.id == "opp_301"
-    assert scheduled[0].source_type == "opportunity"
-    assert scheduled[0].change_type == "updated"
+    assert scheduled == [(opportunity, "9", "预算取消")]
 
 
 @pytest.mark.asyncio

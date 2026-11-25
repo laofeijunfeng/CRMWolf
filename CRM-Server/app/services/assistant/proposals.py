@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
 from app.services.assistant.action_evidence import validate_action_evidence
 from app.services.assistant.contracts import ProposalCandidate, ProposalConfirmation, TaskAuthority, TaskWaiting
-from app.services.assistant.crm_effects import AssistantCRMFingerprintConflict, AssistantCRMNoEffect, checked_effect
+from app.services.assistant.crm_effects import AssistantCRMNoEffect, checked_effect
 from app.services.assistant.crm_proposal_commands import build_proposal_command, source_activity, validate_candidate
 from app.services.assistant.events import stage
 from app.services.assistant.failure_contract import AssistantFailureCode
@@ -51,6 +51,7 @@ class _CommittedActivityMissing(ValueError):
 _PROMPTS = {
     "opportunity_create": "根据这次活动，为客户创建商机吗？",
     "opportunity_stage": "根据这次活动，推进这条商机到下一阶段吗？",
+    "opportunity_lose": "根据这次活动，将这条商机标记为输单吗？",
     "follow_up_task_create": "根据这次活动，为你建立这项跟进任务吗？",
 }
 
@@ -111,8 +112,7 @@ def _candidate_hints(db: Session, task: AssistantTask) -> list[ProposalData]:
             )
     return hints
 
-
-_PRIORITY = {"opportunity_stage": 0, "opportunity_create": 1, "follow_up_task_create": 2}
+_PRIORITY = {"opportunity_stage": 0, "opportunity_lose": 1, "opportunity_create": 2, "follow_up_task_create": 3}
 
 
 def _bind_candidate(
@@ -153,6 +153,29 @@ def _take_queued_candidate(
         if rebound is None:
             continue
         if rebound["key"] != candidate.key:
+            # Contract presence is server-derived and may change after queueing.
+            # Keep the same fenced target/evidence and refresh only that reason so
+            # the executor can settle the race as an exact NO_EFFECT.
+            stable_fields = (
+                "kind", "target_public_id", "evidence_quote", "activity_id", "customer_id",
+                "source_revision", "segment_id", "prior_status", "task_owner_id",
+                "prior_stage_snapshot_id", "prior_version", "prior_fact_version", "task_hash",
+                "action_id", "due_date_granularity",
+            )
+            rebound_payload = rebound.get("payload") or {}
+            hint_payload = hint.get("payload") or {}
+            same_loss_payload = {
+                key: value for key, value in rebound_payload.items() if key != "block_reason"
+            } == {
+                key: value for key, value in hint_payload.items() if key != "block_reason"
+            }
+            if (
+                candidate.kind == "opportunity_lose"
+                and same_loss_payload
+                and all(rebound.get(field) == hint.get(field) for field in stable_fields)
+                and set(rebound_payload) - set(hint_payload) <= {"block_reason"}
+            ):
+                return ProposalCandidate.model_validate(rebound)
             rejected.append({"kind": candidate.kind, "reason": "target",
                              **_rejection_trail(candidate.model_dump(mode="json", exclude_unset=True))})
             continue
@@ -167,6 +190,8 @@ def proposal_waiting(task: AssistantTask, proposal: ProposalData) -> TaskWaiting
     label = _PROMPTS[kind]
     if detail:
         label = f"{str(detail)[:80]}：{label}"
+    if kind == "opportunity_lose" and payload.get("block_reason"):
+        label = f"{label}（{payload['block_reason']}）"
     return TaskWaiting(
         type="CONFIRMATION",
         field=f"proposal:{kind}",
@@ -180,29 +205,30 @@ def proposal_waiting(task: AssistantTask, proposal: ProposalData) -> TaskWaiting
 
 async def readback_outcome(db: Session, task: AssistantTask, proposal: ProposalData) -> ProposalOutcome | None:
     """Only an exact CRM transaction receipt proves this frozen proposal ran."""
-    kind = proposal.get("kind")
-    if kind not in {"opportunity_create", "opportunity_stage"}:
+    kind = proposal["kind"]
+    if kind not in {"opportunity_create", "opportunity_stage", "opportunity_lose"}:
         return None
     command = build_proposal_command(task, proposal)
     try:
         effect = checked_effect(db, command, kind)
-    except AssistantCRMFingerprintConflict:
+    except (AssistantCRMNoEffect, ValueError):
         return None
-    if effect is None or not effect.target_public_id or not effect.target_public_id.strip():
+    if effect is None:
         return None
-    if kind == "opportunity_stage" and (
+    if kind in {"opportunity_stage", "opportunity_lose"} and (
         effect.target_public_id != proposal.get("target_public_id")
         or command.expected_version is None
-        or effect.previous_snapshot_id != command.expected_snapshot_id
         or effect.previous_version != command.expected_version
-        or effect.stage_snapshot_id is None
-        or effect.stage_snapshot_id == command.expected_snapshot_id
         or effect.resulting_version != command.expected_version + 1
+        or (
+            kind == "opportunity_stage"
+            and command.expected_snapshot_id is not None
+            and effect.previous_snapshot_id != command.expected_snapshot_id
+        )
     ):
         return None
     if kind == "opportunity_create":
         from app.services.assistant.crm_proposal_commands import opportunity_create_receipt_outcome
-
         return opportunity_create_receipt_outcome(effect)
     return {"kind": kind, "public_id": effect.target_public_id}
 
@@ -410,13 +436,16 @@ def has_proposal_claim(db: Session, task: AssistantTask, waiting: TaskWaiting) -
     return _proposal_claim(db, task, _proposal_from_waiting(waiting)) is not None
 
 def has_unresolved_proposal_claim(db: Session, task: AssistantTask) -> bool:
-    if task.waiting_field not in {"proposal:opportunity_create", "proposal:opportunity_stage"}:
+    if task.waiting_field not in {
+        "proposal:opportunity_create",
+        "proposal:opportunity_stage",
+        "proposal:opportunity_lose",
+    }:
         return False
     rows = db.query(AssistantAction.result_json).filter_by(
         task_id=task.id, team_id=task.team_id, action="proposal_command_claim",
     ).all()
     return any((result or {}).get("status") in {"CLAIMED", "UNKNOWN"} for (result,) in rows)
-
 
 
 def _proposal_receipt(
@@ -431,9 +460,9 @@ def _proposal_receipt(
         receipt["customer_public_id"] = customer_public_id
     payload = proposal.get("payload") if isinstance(proposal.get("payload"), dict) else {}
     form_values = proposal.get("form_values") if isinstance(proposal.get("form_values"), dict) else {}
-    # The server-resolved target name: what the receipt says and what its link opens.
     name = {
         "opportunity_stage": payload.get("opportunity_name"),
+        "opportunity_lose": payload.get("opportunity_name"),
         "opportunity_create": form_values.get("opportunity_name"),
         "follow_up_task_create": payload.get("action"),
     }.get(proposal["kind"])
@@ -442,10 +471,11 @@ def _proposal_receipt(
         receipt["name"] = name
     else:
         name = None
-    if proposal["kind"] == "opportunity_stage":
-        if name and payload.get("stage_name") and "current_stage_name" in payload:
-            current_stage = payload["current_stage_name"] or "未开始"
-            receipt["detail"] = f"{name}：{current_stage} → {payload['stage_name']}"
+    if proposal["kind"] == "opportunity_stage" and name and payload.get("stage_name"):
+        current_stage = payload.get("current_stage_name") or "未开始"
+        receipt["detail"] = f"{name}：{current_stage} → {payload['stage_name']}"
+    elif proposal["kind"] == "opportunity_lose" and name and payload.get("loss_reason"):
+        receipt["detail"] = f"{name}：输单原因：{payload['loss_reason']}"
     elif proposal["kind"] == "follow_up_task_create" and name:
         receipt["detail"] = name
     if proposal["kind"] == "opportunity_create" and outcome.get("approval_phase") == "pending_review":
@@ -492,7 +522,7 @@ async def adjudicate_proposal_claim(
         proposal = _proposal_from_waiting(waiting)
     kind = proposal["kind"]
     if (
-        kind not in {"opportunity_create", "opportunity_stage"}
+        kind not in {"opportunity_create", "opportunity_stage", "opportunity_lose"}
         or (is_form and kind != "opportunity_create")
         or waiting.field != f"proposal:{kind}"
         or proposal["key"] != _candidate_key(proposal)
@@ -561,7 +591,7 @@ async def settle_proposal(
         raise ValueError("proposal already settled")
     command = (
         build_proposal_command(task, proposal)
-        if proposal["kind"] in {"opportunity_create", "opportunity_stage"}
+        if proposal["kind"] in {"opportunity_create", "opportunity_stage", "opportunity_lose"}
         else None
     )
     if command is not None:
@@ -580,27 +610,20 @@ async def settle_proposal(
             )
             if proven is None:
                 _publish_unknown_claim(db, task, proposal)
-
                 raise AssistantUnknownCommitResultError(
                     "结果待核对，请先在客户活动里确认是否已写入，再继续下一笔"
                 )
             assert_owned_execution_lease(db, task)
             _mark_claim_status(db, claimed, "RECONCILED", public_id=proven["public_id"])
             result = apply_task_update(
-                db,
-                task,
+                db, task,
                 TaskUpdate(
                     clear_waiting=True,
                     clear_proposal_form=form_proposal is not None,
                     append_committed=[_proposal_receipt(task, proposal, proven)],
-                    action_actor="SYSTEM",
-                    action_name="reconcile_proposal_claim",
-                    action_result={
-                        "kind": proposal["kind"],
-                        "proposal_key": proposal["key"],
-                        "public_id": proven["public_id"],
-                        "reconciled": True,
-                    },
+                    action_actor="SYSTEM", action_name="reconcile_proposal_claim",
+                    action_result={"kind": proposal["kind"], "proposal_key": proposal["key"],
+                                   "public_id": proven["public_id"], "reconciled": True},
                 ),
             )
             return await _advance_settled_proposal(

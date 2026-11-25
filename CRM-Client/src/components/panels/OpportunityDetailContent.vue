@@ -115,6 +115,10 @@ const canWin = computed(() =>
 const canLose = computed(() =>
   canEditOpportunity.value && permissionStore.hasPermission('opportunity:lose')
 )
+const lossUnavailableReason = computed(() => {
+  const reason = opportunity.value?.loss_unavailable_reason
+  return typeof reason === 'string' && reason.trim() !== '' ? reason.trim() : undefined
+})
 
 const isActive = computed(() => opportunity.value?.status === 0)
 const approvalPhase = computed(() => opportunity.value?.approval_phase)
@@ -665,9 +669,29 @@ watch(approvalPhase, phase => {
         <Trophy class="w-4 h-4 mr-2" />
         赢单
       </Button>
+      <span
+        v-if="lossUnavailableReason"
+        class="inline-flex items-center"
+        :title="lossUnavailableReason"
+        tabindex="0"
+        role="group"
+        :aria-label="`输单不可用：${lossUnavailableReason}`"
+      >
+        <Button
+          v-if="(opportunity?.status === 0 || opportunity?.status === 1) && canLose && isApprovalApproved"
+          variant="outline"
+          disabled
+          :title="lossUnavailableReason"
+          :aria-label="`输单（${lossUnavailableReason}）`"
+        >
+          <XCircle class="w-4 h-4 mr-2" />
+          输单
+        </Button>
+      </span>
       <Button
-        v-if="isActive && canLose && isApprovalApproved"
+        v-else-if="(opportunity?.status === 0 || opportunity?.status === 1) && canLose && isApprovalApproved"
         variant="outline"
+        aria-label="输单"
         @click="loseDialogOpen = true"
       >
         <XCircle class="w-4 h-4 mr-2" />

@@ -68,9 +68,15 @@ const showDropdownMenu = computed(() => visibleSecondaryActions.value.length > 0
  */
 const executeAction = (event: Event, action: ActionConfig): void => {
   event.stopPropagation()
-  if (action.disabled === true) return
+  if (action.disabled === true) {
+    event.preventDefault()
+    return
+  }
   action.handler(props.row)
 }
+
+const hasDisabledReason = (action: ActionConfig): boolean =>
+  action.disabled === true && Boolean(action.disabledReason?.trim())
 </script>
 
 <template>
@@ -81,14 +87,18 @@ const executeAction = (event: Event, action: ActionConfig): void => {
       :key="getTableRowActionKey(action, actionIndex)"
       :size="size"
       variant="ghost"
-      :disabled="action.disabled === true"
-      :class="['action-button', { 'action-destructive': isDestructiveTableRowAction(action) }]"
+      :disabled="action.disabled === true && !hasDisabledReason(action)"
+      :aria-disabled="action.disabled === true ? 'true' : undefined"
+      :class="['action-button', { 'action-destructive': isDestructiveTableRowAction(action), 'action-has-disabled-reason': hasDisabledReason(action) }]"
       @click="executeAction($event, action)"
       :aria-label="getTableRowActionLabel(action)"
       :title="getTableRowActionLabel(action)"
     >
       <component :is="action.icon" v-if="action.icon" class="action-icon" aria-hidden="true" />
-      {{ action.label }}
+      <span class="action-copy">
+        <span>{{ action.label }}</span>
+        <span v-if="hasDisabledReason(action)" class="action-reason">{{ action.disabledReason }}</span>
+      </span>
     </Button>
 
     <!-- 低频操作下拉菜单 -->
@@ -112,14 +122,23 @@ const executeAction = (event: Event, action: ActionConfig): void => {
 
           <!-- 操作项 -->
           <DropdownMenuItem
-            :disabled="action.disabled === true"
-            :class="['dropdown-item', { 'dropdown-item-destructive': isDestructiveTableRowAction(action) }]"
-            :title="getTableRowActionLabel(action)"
-            :aria-label="getTableRowActionLabel(action)"
+            as-child
+            :disabled="action.disabled === true && !hasDisabledReason(action)"
             @select="executeAction($event, action)"
           >
-            <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
-            {{ action.label }}
+            <div
+              role="menuitem"
+              :aria-disabled="action.disabled === true ? 'true' : undefined"
+              :class="['dropdown-item', { 'dropdown-item-destructive': isDestructiveTableRowAction(action), 'dropdown-item-has-disabled-reason': hasDisabledReason(action) }]"
+              :title="getTableRowActionLabel(action)"
+              :aria-label="getTableRowActionLabel(action)"
+            >
+              <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
+              <span class="action-copy">
+                <span>{{ action.label }}</span>
+                <span v-if="hasDisabledReason(action)" class="action-reason">{{ action.disabledReason }}</span>
+              </span>
+            </div>
           </DropdownMenuItem>
         </template>
       </DropdownMenuContent>
@@ -135,6 +154,26 @@ const executeAction = (event: Event, action: ActionConfig): void => {
   align-items: center;
   gap: $space-1;
   justify-content: center;
+}
+
+.action-copy {
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.action-reason {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-caption);
+  font-weight: 400;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.dropdown-item-has-disabled-reason {
+  cursor: help;
 }
 
 // 操作按钮

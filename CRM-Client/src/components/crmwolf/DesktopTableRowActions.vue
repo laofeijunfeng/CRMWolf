@@ -42,8 +42,15 @@ function executeAction(event: Event, action: ActionConfig): void {
   // inside an interactive table row, so row-level navigation must never observe
   // this event, even when the handler changes reactive state synchronously.
   event.stopPropagation()
-  if (action.disabled === true) return
+  if (action.disabled === true) {
+    event.preventDefault()
+    return
+  }
   action.handler(props.row)
+}
+
+function hasDisabledReason(action: ActionConfig): boolean {
+  return action.disabled === true && Boolean(action.disabledReason?.trim())
 }
 </script>
 
@@ -61,14 +68,18 @@ function executeAction(event: Event, action: ActionConfig): void {
       variant="ghost"
       size="sm"
       class="desktop-table-row-action"
-      :disabled="action.disabled === true"
-      :class="{ 'is-destructive': isDestructiveTableRowAction(action) }"
+      :disabled="action.disabled === true && !hasDisabledReason(action)"
+      :class="{ 'is-destructive': isDestructiveTableRowAction(action), 'has-disabled-reason': hasDisabledReason(action) }"
+      :aria-disabled="action.disabled === true ? 'true' : undefined"
       :aria-label="getTableRowActionLabel(action)"
       :title="getTableRowActionLabel(action)"
       @click="executeAction($event, action)"
     >
       <component :is="action.icon" v-if="action.icon" class="desktop-table-row-action-icon" aria-hidden="true" />
-      <span>{{ action.label }}</span>
+      <span class="desktop-table-row-action-copy">
+        <span>{{ action.label }}</span>
+        <span v-if="hasDisabledReason(action)" class="desktop-table-row-action-reason">{{ action.disabledReason }}</span>
+      </span>
     </Button>
 
     <DropdownMenu v-if="hasMenuActions">
@@ -90,21 +101,31 @@ function executeAction(event: Event, action: ActionConfig): void {
           <DropdownMenuLabel v-if="showGroupLabels">
             {{ group.label }}
           </DropdownMenuLabel>
-          <DropdownMenuItem
-            v-for="(action, actionIndex) in group.items"
-            :key="`${group.key}-${getTableRowActionKey(action, actionIndex)}`"
-            :disabled="action.disabled === true"
-            :class="{ 'is-destructive': isDestructiveTableRowAction(action) }"
-            :title="getTableRowActionLabel(action)"
-            :aria-label="getTableRowActionLabel(action)"
-            @select="executeAction($event, action)"
-          >
-            <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
-            {{ action.label }}
-          </DropdownMenuItem>
+          <template v-for="action in group.items" :key="`${group.key}-${getTableRowActionKey(action, group.items.indexOf(action))}`">
+            <DropdownMenuItem
+              as-child
+              :disabled="action.disabled === true && !hasDisabledReason(action)"
+              @select="executeAction($event, action)"
+            >
+              <div
+                role="menuitem"
+                :aria-disabled="action.disabled === true ? 'true' : undefined"
+                :class="{ 'is-destructive': isDestructiveTableRowAction(action), 'has-disabled-reason': hasDisabledReason(action) }"
+                :title="getTableRowActionLabel(action)"
+                :aria-label="getTableRowActionLabel(action)"
+              >
+                <component :is="action.icon" v-if="action.icon" aria-hidden="true" />
+                <span class="desktop-table-row-menu-copy">
+                  <span>{{ action.label }}</span>
+                  <span v-if="hasDisabledReason(action)" class="desktop-table-row-menu-reason">{{ action.disabledReason }}</span>
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </template>
         </template>
       </DropdownMenuContent>
     </DropdownMenu>
+
   </div>
 </template>
 
@@ -119,10 +140,32 @@ function executeAction(event: Event, action: ActionConfig): void {
   max-width: 100%;
 }
 
+
 .desktop-table-row-action,
 .desktop-table-row-more {
   min-height: var(--touch-target);
   white-space: nowrap;
+}
+.desktop-table-row-action-copy,
+.desktop-table-row-menu-copy {
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.desktop-table-row-action-reason,
+.desktop-table-row-menu-reason {
+  color: hsl(var(--muted-foreground));
+  font-size: var(--font-size-caption);
+  font-weight: 400;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.desktop-table-row-menu :deep([data-slot='dropdown-menu-item'].has-disabled-reason) {
+  cursor: help;
 }
 
 .desktop-table-row-action {

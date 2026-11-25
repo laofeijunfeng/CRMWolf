@@ -289,6 +289,51 @@ describe('OpportunityDetailContent experience states', () => {
     expect(wrapper.text()).not.toContain('发票')
     expect(wrapper.text()).not.toContain('许可')
   })
+  it('enables loss for a won opportunity without an active contract', async () => {
+    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
+      status: OpportunityStatus.WON,
+      approval_phase: 'approved',
+      loss_unavailable_reason: null,
+    }))
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    const loseButton = wrapper.findAll('button').find(button => button.text().includes('输单'))
+    expect(loseButton).toBeDefined()
+    expect(loseButton?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('disables loss for a won opportunity with an active contract and explains why', async () => {
+    const reason = '该商机已有合同，请先处理合同后再标记输单'
+    opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({
+      status: OpportunityStatus.WON,
+      approval_phase: 'approved',
+      loss_unavailable_reason: reason,
+    }))
+
+    const wrapper = mount(OpportunityDetailContent, {
+      props: {
+        opportunityId: OPPORTUNITY_PUBLIC_ID,
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    const loseButton = wrapper.findAll('button').find(button => button.text().includes('输单'))
+    expect(loseButton).toBeDefined()
+    expect(loseButton?.attributes('disabled')).toBeDefined()
+    expect(loseButton?.attributes('title')).toBe(reason)
+    expect(loseButton?.attributes('aria-label')).toBe(`输单（${reason}）`)
+  })
+
 
   it('emits view-journey when deal_journey_id is present', async () => {
     opportunityApi.getOpportunity.mockResolvedValue(opportunityFixture({

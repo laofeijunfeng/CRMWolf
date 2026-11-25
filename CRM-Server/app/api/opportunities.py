@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.constants.approval_phase import ApprovalPhase
 from app.constants.business_types import BusinessType
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.core.database import SessionLocal, get_db
 from app.core.deps import (
     check_customer_edit_permission,
@@ -36,6 +37,7 @@ from app.crud.customer import customer_crud
 from app.crud.deal_journey import deal_journey_crud
 from app.crud.opportunity import opportunity_crud
 from app.models.opportunity import Opportunity
+from app.models.opportunity import OpportunityStatus
 from app.models.outbound_notification_job import OutboundNotificationEventType
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
@@ -64,6 +66,7 @@ from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectChangeRefreshInput,
     customer_business_object_intelligence_service,
 )
+from app.services.opportunity_loss_side_effect_service import enqueue_opportunity_loss_side_effects
 from app.services.opportunity_presenter import (
     customer_public_id as _customer_public_id,
 )
@@ -76,6 +79,7 @@ from app.services.opportunity_presenter import (
 from app.services.opportunity_presenter import (
     opportunity_detail_response,
 )
+
 from app.services.opportunity_presenter import (
     opportunity_product_payload as _opportunity_product_payload,
 )
@@ -120,6 +124,39 @@ def _contract_unavailable_reason(db: Session, opportunity: Opportunity, team_id:
     ):
         return None
     return CONTRACT_NOT_READY_REASON
+
+
+def _opportunity_ids_with_active_contract(
+    db: Session,
+    opportunities: Sequence[Opportunity],
+    team_id: int | None,
+) -> set[int]:
+    """One query for the whole page: loss blocking must not add a lookup per row."""
+    if team_id is None:
+        return set()
+    opportunity_ids = [opportunity.id for opportunity in opportunities]
+    if not opportunity_ids:
+        return set()
+    from app.models.contract import Contract
+
+    return {
+        opportunity_id
+        for (opportunity_id,) in db.query(Contract.opportunity_id).filter(
+            Contract.team_id == team_id,
+            Contract.opportunity_id.in_(opportunity_ids),
+            Contract.deleted_at.is_(None),
+        ).distinct().all()
+    }
+
+def _loss_unavailable_reason(
+    status: int,
+    opportunity_id: int,
+    contract_blocked_ids: set[int],
+) -> str | None:
+    """Only a WON opportunity with an undeleted contract is blocked from loss."""
+    if status != OpportunityStatus.WON.value or opportunity_id not in contract_blocked_ids:
+        return None
+    return CONTRACT_LOSS_BLOCK_REASON
 
 
 def _ensure_opportunity_not_pending(db: Session, opportunity: Opportunity, team_id: int | None) -> None:
@@ -352,6 +389,7 @@ def get_opportunities(
         team_id=team_id,
         journey_ids=[opp.deal_journey_id for opp in opportunities],
     )
+    contract_blocked_opportunity_ids = _opportunity_ids_with_active_contract(db, opportunities, team_id)
     for opp in opportunities:
         customer = customer_crud.get_by_id(db, opp.customer_id, team_id)
         
@@ -423,7 +461,10 @@ def get_opportunities(
                 "id": str(owner_info[0]),
                 "name": owner_info[1],
                 "avatar_url": owner_info[2]
-            } if owner_info else None
+            } if owner_info else None,
+            "loss_unavailable_reason": _loss_unavailable_reason(
+                opp.status, opp.id, contract_blocked_opportunity_ids,
+            ),
         }
         opp_dict.update(_opportunity_product_payload(opp))
         
@@ -482,6 +523,9 @@ def _build_opportunity_list_responses(
             .all()
         )
         customers = {c.id: c for c in customers_list}
+    active_contract_opportunity_ids = _opportunity_ids_with_active_contract(
+        projection_db, opportunities, team_id,
+    )
     product_payloads = _opportunity_product_payloads(projection_db, opportunities)
     empty_product_payload = _opportunity_product_payload(None)
 
@@ -541,6 +585,9 @@ def _build_opportunity_list_responses(
             "stage": stage,
             "stage_info": stage_info,
             "owner_info": users_info.get(str(opp.owner_id)),
+            "loss_unavailable_reason": _loss_unavailable_reason(
+                opp.status, opp.id, active_contract_opportunity_ids,
+            ),
         }
         opp_dict.update(product_payloads.get(opp.id, empty_product_payload))
         result.append(OpportunityListResponse(**opp_dict))
@@ -1200,29 +1247,11 @@ async def mark_opportunity_as_lost(
     _ensure_opportunity_approved(db, db_opportunity, team_id)
 
     updated_opportunity = opportunity_crud.mark_as_lost(db, db_opportunity, lose_data, str(current_user.id))
-    await _trigger_opportunity_intelligence_refresh(
+    enqueue_opportunity_loss_side_effects(
         db,
-        _build_opportunity_intelligence_change(
-            updated_opportunity,
-            change_type="updated",
-            actor_id=str(current_user.id),
-        ),
-    )
-
-    customer = customer_crud.get_by_id(db, db_opportunity.customer_id, team_id)
-    outbound_notification_job_service.queue_committed(
-        db,
-        team_id=team_id,
-        event_type=OutboundNotificationEventType.OPPORTUNITY_LOST,
-        business_type="OPPORTUNITY",
-        business_id=int(updated_opportunity.id),
-        recipient_user_ids=[db_opportunity.owner_id],
+        updated_opportunity,
         actor_id=str(current_user.id),
-        payload_json={
-            "opportunity_name": db_opportunity.opportunity_name,
-            "customer_name": customer.account_name if customer else "",
-            "loss_reason": lose_data.loss_reason,
-        },
+        loss_reason=lose_data.loss_reason,
     )
     return OpportunityResponse(**_opportunity_response_dict(db, updated_opportunity, team_id))
 

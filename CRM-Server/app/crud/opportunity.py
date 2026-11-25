@@ -5,6 +5,7 @@ from sqlalchemy import Integer, and_, cast, func, or_
 from sqlalchemy.orm import Query, Session, selectinload
 
 from app.constants.business_types import BusinessType
+from app.constants.opportunity_loss import CONTRACT_LOSS_BLOCK_REASON
 from app.core.list_query import (
     FilterCondition,
     ListQueryContext,
@@ -1048,33 +1049,78 @@ class OpportunityCRUD:
         db: Session,
         db_obj: Opportunity,
         lose_data: OpportunityLose,
-        operator_id: str
+        operator_id: str,
+        assistant_command: AssistantCRMCommand | None = None,
     ) -> Opportunity:
+        from app.crud.contract import contract_crud
         from app.crud.user import user_crud
         from app.services.operation_log_service import operation_log_service
-        
-        db_obj = _lock_opportunity(db, db_obj.id, team_id=db_obj.team_id)
+
+        if db_obj is None:
+            raise ValueError("商机不存在")
+        db_obj = _lock_opportunity(
+            db,
+            db_obj.id,
+            team_id=assistant_command.team_id if assistant_command is not None else db_obj.team_id,
+        )
+        if assistant_command is not None:
+            if str(assistant_command.actor_id) != str(operator_id):
+                raise ValueError("Assistant CRM command actor mismatch")
+            with db.no_autoflush:
+                existing = checked_effect(db, assistant_command, "opportunity_lose")
+            if existing is not None:
+                if db_obj is None or existing.target_public_id != db_obj.public_id:
+                    db.rollback()
+                    raise ValueError("Assistant CRM effect target mismatch")
+                return db_obj
+            if db_obj is None or assistant_command.expected_version is None or assistant_command.expected_version != db_obj.version:
+                db.rollback()
+                raise AssistantCRMStaleTarget("Assistant CRM loss target changed")
+            from app.services.opportunity_presenter import resolve_opportunity_approval_phase
+            if resolve_opportunity_approval_phase(db, db_obj, assistant_command.team_id) != "approved":
+                db.rollback()
+                raise ValueError("商机审批通过后才能进行该操作")
+            from app.crud.permission import permission_crud
+            permission_codes = {
+                permission.code for permission in permission_crud.get_user_permissions(
+                    db, assistant_command.actor_id, assistant_command.team_id,
+                )
+            }
+            if "opportunity:edit:all" not in permission_codes and not (
+                "opportunity:edit:own" in permission_codes and db_obj.owner_id == str(operator_id)
+            ):
+                db.rollback()
+                raise ValueError("Assistant CRM loss permission revoked")
         if db_obj is None:
             raise ValueError("商机不存在")
         if db_obj.status == OpportunityStatus.LOST.value:
             raise ValueError("商机已经是输单状态")
-        
-        if db_obj.status == OpportunityStatus.WON.value:
-            raise ValueError("商机已赢单，无法标记为输单")
+        if db_obj.status == OpportunityStatus.WON.value and contract_crud.has_active_contract_for_opportunity(
+            db, db_obj.id, db_obj.team_id,
+        ):
+            raise ValueError(CONTRACT_LOSS_BLOCK_REASON)
+        previous_version = db_obj.version
         db_obj.status = OpportunityStatus.LOST.value
         db_obj.loss_reason = lose_data.loss_reason
         db_obj.win_probability = 0
+        db_obj.actual_amount = None
+        db_obj.actual_closing_date = None
         _bump_opportunity_version(db_obj)
         from app.services.deal_journey_service import deal_journey_service
         deal_journey_service.mark_lost(db, db_obj, operator_id)
+        if assistant_command is not None:
+            record_effect(
+                db, assistant_command, "opportunity_lose",
+                target_public_id=db_obj.public_id,
+                previous_version=previous_version,
+                resulting_version=db_obj.version,
+            )
         db.commit()
         db.refresh(db_obj)
-        
+
         operator = user_crud.get_by_id(db, int(operator_id))
         operator_name = operator.name if operator else None
-        
         customer = db.query(Customer).filter(Customer.id == db_obj.customer_id).first()
-        
         operation_log_service.log(
             db=db,
             event_type="OPPORTUNITY_LOST",
@@ -1090,11 +1136,10 @@ class OpportunityCRUD:
                 "lossReason": db_obj.loss_reason,
                 "expectedAmount": float(db_obj.total_amount),
                 "customerId": db_obj.customer_id,
-                "customerName": customer.account_name if customer else None
+                "customerName": customer.account_name if customer else None,
             },
-            team_id=db_obj.team_id
+            team_id=db_obj.team_id,
         )
-        
         return db_obj
 
     def delete(self, db: Session, opportunity_id: int) -> bool:

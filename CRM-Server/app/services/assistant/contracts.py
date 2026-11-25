@@ -23,7 +23,7 @@ TemporalWaitingReason = Literal["DATE", "MONTH", "ROLE", "STATUS", "PRIMARY"]
 Actor = Literal["MODEL", "USER", "SYSTEM"]
 TaskStatus = Literal["ACTIVE", "COMPLETED", "CANCELLED", "FAILED"]
 TurnStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]
-ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunity_create"]
+ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunity_create", "opportunity_lose"]
 # Waits and receipts frozen before CRM-154 may still carry retired kinds (`customer_fact`, and
 # `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
@@ -157,7 +157,7 @@ class ProposalCandidate(BaseModel):
 
     @model_validator(mode="after")
     def require_existing_target(self) -> ProposalCandidate:
-        if self.kind == "opportunity_stage" and not self.target_public_id:
+        if self.kind in {"opportunity_stage", "opportunity_lose"} and not self.target_public_id:
             raise ValueError("existing-object proposal requires a target")
         return self
 
@@ -206,13 +206,13 @@ class AcceptedProposalReceipt(BaseModel):
 class RefusedProposalReceipt(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    # Historical snapshots retain retired proposal kinds for read compatibility.
     kind: Literal[
         "refused:customer_fact",
         "refused:follow_up_task_create",
         "refused:follow_up_task",
         "refused:opportunity_stage",
         "refused:opportunity_create",
+        "refused:opportunity_lose",
         "refused:opportunity",
     ]
     proposal_key: str | None = None
