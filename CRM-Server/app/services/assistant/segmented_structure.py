@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, TypeVar
 from app.models.assistant import AssistantAction
 from app.services.assistant.failure_contract import (
     ATTEMPT_DEADLINE_SECONDS,
+    AssistantFailureCode,
     bind_absolute_attempt_deadline,
     capture_attempt_deadline,
 )
 from app.services.assistant.llm_contracts import StructureDraftResult
+from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.task_state import TaskUpdate, apply_task_update
 from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingContent, MeetingParticipants
 from app.utils.time import business_now
@@ -208,6 +210,21 @@ def _extend_attempt_deadline() -> None:
         bind_absolute_attempt_deadline(max(deadline, business_now() + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS)))
 
 
+async def _structure_segment(
+    db: Session, task: AssistantTask, structurer: KindStructurer, *, kind: str, chunk: str
+) -> StructureDraftResult:
+    """Read one segment; a timeout gets one more full window, since a slow reply is not a wrong one."""
+
+    _extend_attempt_deadline()
+    try:
+        return await structurer.structure(db, team_id=task.team_id, kind=kind, user_text=chunk)
+    except AssistantLLMError as exc:
+        if exc.code is not AssistantFailureCode.UPSTREAM_TIMEOUT:
+            raise
+    _extend_attempt_deadline()
+    return await structurer.structure(db, team_id=task.team_id, kind=kind, user_text=chunk)
+
+
 async def structure_in_segments(
     db: Session,
     task: AssistantTask,
@@ -228,12 +245,11 @@ async def structure_in_segments(
     for index, (offset, chunk) in enumerate(chunks, start=1):
         part = saved.get(index)
         if part is None:
-            _extend_attempt_deadline()
             segment = (index, total)
             reporter.stage_start(stage, segment=segment)
             started = time.monotonic()
             try:
-                part = await structurer.structure(db, team_id=task.team_id, kind=kind, user_text=chunk)
+                part = await _structure_segment(db, task, structurer, kind=kind, chunk=chunk)
             except Exception:
                 reporter.stage_failed(stage, segment=segment)
                 raise

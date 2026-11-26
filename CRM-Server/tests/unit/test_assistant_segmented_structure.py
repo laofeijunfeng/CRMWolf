@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.models.assistant import AssistantTask
 from app.services.assistant.coordinator import AssistantCoordinator, AssistantInput
 from app.services.assistant.events import SSEProgressReporter
-from app.services.assistant.failure_contract import AssistantStageFailure
+from app.services.assistant.failure_contract import AssistantFailureCode, AssistantStageFailure
 from app.services.assistant.follow_up_context import RealFollowUpContext
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.llm_contracts import KindDecision, ModelDraftAction, StructureDraftResult
@@ -40,15 +40,18 @@ def _transcript(chars: int) -> str:
 class SegmentStructurer(Structurer):
     """Reports each chunk it saw; fails once on the configured call."""
 
-    def __init__(self, fail_on: int | None = None) -> None:
+    def __init__(self, fail_on: int | None = None, *, timeouts: frozenset[int] = frozenset()) -> None:
         self.chunks: list[str] = []
         self.fail_on = fail_on
+        self.timeouts = timeouts
 
     async def structure(self, db, *, team_id, kind, user_text):
         self.chunks.append(user_text)
         if len(self.chunks) == self.fail_on:
             self.fail_on = None
             raise AssistantLLMError("模型服务响应超时")
+        if len(self.chunks) in self.timeouts:
+            raise AssistantLLMError("AI 请求超时", code=AssistantFailureCode.UPSTREAM_TIMEOUT)
         head = user_text.split("：", 1)[0]
         return StructureDraftResult(
             kind_confirmed=kind,
@@ -148,6 +151,30 @@ async def test_failed_segment_resumes_without_reorganizing_saved_ones(db_session
     assert len(structurer.chunks) == 3 + total - 2
     assert "".join(structurer.chunks[3:]) == text[len("".join(structurer.chunks[:2])) :]
     assert task.draft_json["content"]["status"] != "MISSING"
+
+
+async def test_a_timed_out_segment_is_read_once_more_before_the_turn_fails(db_session):  # noqa: F811
+    text = _transcript(60_000)
+    total = len(split_transcript(text))
+    structurer = SegmentStructurer(timeouts=frozenset({3}))
+    reporter = SSEProgressReporter()
+    coordinator = AssistantCoordinator(Chooser(), structurer=structurer, quality_gate=PassGate())
+
+    task = (await coordinator.handle_task(
+        db_session, _task(db_session), AssistantInput(kind="text", text=text), reporter=reporter
+    )).task
+
+    assert len(structurer.chunks) == total + 1
+    assert structurer.chunks[2] == structurer.chunks[3]
+    assert "failed" not in [data["phase"] for _, data in reporter.drain() if data.get("stage") == "structure"]
+    assert task.draft_json["content"]["status"] != "MISSING"
+
+    # A second timeout on the same segment ends the turn; saved segments stay for reprocessing.
+    structurer = SegmentStructurer(timeouts=frozenset({3, 4}))
+    coordinator = AssistantCoordinator(Chooser(), structurer=structurer, quality_gate=PassGate())
+    with pytest.raises(AssistantStageFailure):
+        await coordinator.handle_task(db_session, _task(db_session), AssistantInput(kind="text", text=text))
+    assert len(structurer.chunks) == 4
 
 
 async def test_input_within_one_call_is_organized_once(db_session):  # noqa: F811
