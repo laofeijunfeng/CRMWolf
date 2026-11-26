@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
@@ -25,6 +25,7 @@ import type {
   ConversationLink, PendingEntityDraft
 } from '@/schemas/assistant-contracts'
 import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
+import { handOffAssistantTurn, reclaimAssistantTurn } from '@/components/sales-assistant/assistantBackgroundTurn'
 
 interface ChatEntry {
   id: number
@@ -327,7 +328,7 @@ const longOrganize = computed(() => elapsedSeconds.value >= 30
   && processing.value.stages.some((item) => (item.name === 'structure' || item.name === 'quality_gate') && item.status === 'running'))
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
-  return '内容已保存，处理仍在后台继续；关闭或刷新不会取消'
+  return '内容已保存，可以离开本页，完成后会通知你。'
 })
 const pendingRequest = shallowRef<{ input: SubmitAssistantInput; targetId: string; displayText: string; turnId: string; cursor: number } | null>(null)
 const processingRecovery = shallowRef<{ targetId: string; turnId: string; cursor: number } | null>(null)
@@ -1667,6 +1668,30 @@ const loadOlder = async (): Promise<void> => {
   catch { if (!disposed) historyError.value = '更早的对话暂时无法加载，请重试。' }
   finally { submitting.value = false }
 }
+
+// Leaving the page never stops a turn: the layout announces the result, and coming back reads
+// the turn from its last event instead of restarting it.
+const inFlightTurn = (): { targetId: string; turnId: string } | null => {
+  const pending = processingRecovery.value ?? pendingRequest.value
+  return pending !== null && pending.turnId !== '' ? { targetId: pending.targetId, turnId: pending.turnId } : null
+}
+const reattachProcessingTurn = (): void => {
+  if (disposed || autoRecovering.value || processingRecovery.value === null) return
+  void recoverProcessingTurn()
+}
+const onVisibilityChange = (): void => {
+  if (document.visibilityState === 'visible') reattachProcessingTurn()
+}
+onActivated(() => {
+  reclaimAssistantTurn()
+  reattachProcessingTurn()
+})
+onDeactivated(() => {
+  const turn = inFlightTurn()
+  if (turn !== null) handOffAssistantTurn(turn)
+})
+document.addEventListener('visibilitychange', onVisibilityChange)
+onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilityChange) })
 
 const loadConversation = async (): Promise<void> => {
   loadingConversation.value = true

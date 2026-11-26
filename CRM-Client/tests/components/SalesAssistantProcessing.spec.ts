@@ -58,11 +58,11 @@ describe('durable processing and recovery in a continuous conversation', () => {
     await flushPromises()
     await send(wrapper)
     expect(wrapper.text()).toContain('正在整理活动内容')
-    expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+    expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
     finish?.()
     await flushPromises()
     expect(wrapper.text()).toContain('请补充客户名称')
-    expect(wrapper.text()).not.toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+    expect(wrapper.text()).not.toContain('内容已保存，可以离开本页，完成后会通知你。')
   })
 
   it('shows the long organize hint only after thirty seconds of structuring', async () => {
@@ -82,7 +82,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
     expect(wrapper.text()).toContain('正在整理，内容较长，预计需要约 1 分钟')
-    expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+    expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
     finish?.()
     wrapper.unmount()
     vi.useRealTimers()
@@ -245,7 +245,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
       await send(wrapper)
       await vi.advanceTimersByTimeAsync(60_000)
       await flushPromises()
-      expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+      expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
       expect(wrapper.text()).not.toContain('刷新后可继续')
     } finally {
       wrapper.unmount()
