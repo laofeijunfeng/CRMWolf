@@ -2,11 +2,11 @@ import { z } from 'zod'
 
 import {
   AssistantTaskViewSchema,
-  ConversationViewSchema, ConversationReplySchema,
+  ConversationViewSchema, ConversationReplySchema, ConversationRequestStatusSchema,
   AssistantTurnStatusSchema, PendingEntityDraftSchema,
 } from '@/schemas/assistant-contracts'
 import type {
-  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationView, PendingEntityDraft
+  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationRequestStatus, ConversationView, PendingEntityDraft
 } from '@/schemas/assistant-contracts'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import { useUserStore } from '@/stores/user'
@@ -18,6 +18,9 @@ export const StageNameSchema = z.enum([
 export type StageName = z.infer<typeof StageNameSchema>
 export const StagePhaseSchema = z.enum(['start', 'done', 'failed'])
 
+const StageSegmentSchema = z.object({ index: z.number().int().positive(), total: z.number().int().positive() })
+export type StageSegment = z.infer<typeof StageSegmentSchema>
+
 export interface StageEvent {
   stage: StageName
   phase: z.infer<typeof StagePhaseSchema>
@@ -25,6 +28,23 @@ export interface StageEvent {
   score?: number | undefined
   /** What the stage works on (e.g. 部署信息); absent for generic stages. */
   subject?: string | undefined
+  segment?: StageSegment | undefined
+}
+
+// Stage events are progress only: a malformed one is dropped, never fatal.
+export const parseStageEvent = (data: Record<string, unknown>): StageEvent | null => {
+  const stage = StageNameSchema.safeParse(data['stage'])
+  const phase = StagePhaseSchema.safeParse(data['phase'])
+  if (!stage.success || !phase.success) return null
+  const segment = StageSegmentSchema.safeParse(data['segment'])
+  return {
+    stage: stage.data,
+    phase: phase.data,
+    ms: typeof data['ms'] === 'number' ? data['ms'] : undefined,
+    score: typeof data['score'] === 'number' ? data['score'] : undefined,
+    subject: typeof data['subject'] === 'string' && data['subject'] !== '' ? data['subject'] : undefined,
+    segment: segment.success ? segment.data : undefined
+  }
 }
 
 export interface SubmitStreamError {
@@ -156,18 +176,8 @@ export async function submitInputStream(
       return false
     }
     if (parsed.event === 'stage') {
-      const stage = StageNameSchema.safeParse(payload['stage'])
-      const phase = StagePhaseSchema.safeParse(payload['phase'])
-      if (stage.success && phase.success) {
-        handlers.onStage({
-          stage: stage.data,
-          phase: phase.data,
-          ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
-          score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
-          subject: typeof payload['subject'] === 'string' && payload['subject'] !== '' ? payload['subject'] : undefined,
-          seq: sequence
-        })
-      }
+      const stageEvent = parseStageEvent(payload)
+      if (stageEvent !== null) handlers.onStage({ ...stageEvent, seq: sequence })
       return false
     }
     if (parsed.event === 'waiting') {
@@ -278,6 +288,8 @@ export interface SubmitAssistantInput {
 
 // Leave room for the server's 180-second understanding budget.
 const CONVERSATION_UNDERSTANDING_TIMEOUT_MS = 190_000
+// A status read is cheap; fail fast so the card can fall back to 「查看结果」.
+const CONVERSATION_STATUS_TIMEOUT_MS = 10_000
 
 export const assistantApi = {
   async openConversation(): Promise<ConversationView> {
@@ -289,6 +301,14 @@ export const assistantApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
     const payload: unknown = await request.get('/v1/assistant/conversation', { params: { before } })
     return ConversationViewSchema.parse(payload)
+  },
+  async conversationRequestStatus(clientRequestId: string): Promise<ConversationRequestStatus> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.get(
+      `/v1/assistant/conversation/requests/${encodeURIComponent(clientRequestId)}`,
+      { timeout: CONVERSATION_STATUS_TIMEOUT_MS }
+    )
+    return ConversationRequestStatusSchema.parse(payload)
   },
   async conversationText(input: { text: string; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
@@ -306,12 +326,12 @@ export const assistantApi = {
   },
   async conversationChoice(input: { entry_id: string; choice: 'CONTINUE' | 'NEW' | 'CANCEL'; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/choices', input)
+    const payload: unknown = await request.post('/v1/assistant/conversation/choices', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async conversationCommand(input: { task_public_id: string; input: SubmitAssistantInput; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/commands', input)
+    const payload: unknown = await request.post('/v1/assistant/conversation/commands', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async resumeConversation(): Promise<ConversationReply> {

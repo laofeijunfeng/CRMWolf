@@ -8,6 +8,7 @@ from datetime import datetime  # noqa: TC003
 from typing import Final
 
 from sqlalchemy import JSON, BigInteger, DateTime, Index, Integer, String, Text
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -58,7 +59,9 @@ class AssistantTask(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="用户ID")
     status: Mapped[str] = mapped_column(String(20), nullable=False, comment="任务状态")
     # Frozen business intent once first accepted; never rewritten afterwards.
-    goal: Mapped[str] = mapped_column(Text, nullable=False, comment="任务目标")
+    goal: Mapped[str] = mapped_column(
+        Text().with_variant(mysql.MEDIUMTEXT, "mysql"), nullable=False, comment="任务目标"
+    )
     # customer_activity, or one direct-create entity kind (one task = one CRM record).
     task_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, default="customer_activity", server_default="customer_activity", comment="任务类型"

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 
 from app.core.database import Base
 from app.services.customer_activity_contracts import (
@@ -40,8 +41,8 @@ class CustomerActivity(Base):
     )
     activity_kind = Column(String(50), nullable=False, comment="活动分类")
     title = Column(String(255), nullable=True, comment="活动标题")
-    source_content = Column(Text, nullable=False, comment="原始输入内容")
-    content_json = Column(Text, nullable=True, comment="结构化活动内容JSON")
+    source_content = Column(Text().with_variant(mysql.MEDIUMTEXT, "mysql"), nullable=False, comment="原始输入内容")
+    content_json = Column(Text().with_variant(mysql.MEDIUMTEXT, "mysql"), nullable=True, comment="结构化活动内容JSON")
     summary = Column(Text, nullable=True, comment="列表摘要缓存")
     submission_source = Column(
         String(30),

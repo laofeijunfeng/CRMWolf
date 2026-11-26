@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { confirmation, field, makeTask, message, mocks, reply, show, view } from './assistantChatHarness'
 import SalesAssistantChat from '@/components/sales-assistant/SalesAssistantChat.vue'
 
@@ -283,20 +283,26 @@ describe('customer name text input', () => {
     expect(mocks.command).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps an unknown network result locked and does not send it again', async () => {
+  it('keeps an unknown network result locked while it asks the server and never sends it again', async () => {
     const prompt = '未找到对应客户，请核对并提供客户准确名称。'
     const current = makeTask({ waiting: field({ field: 'customer', prompt }) })
     show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
     mocks.command.mockRejectedValue(Object.assign(new Error('Network Error'), { isAxiosError: true, response: undefined }))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await submitCardText(wrapper, '星河科技')
-    expect(mocks.command).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[role="alert"]').text()).toContain('发送状态待确认：Network Error')
-    expect(submitBusy(wrapper)).toBe(true)
-    await flushPromises()
-    expect(mocks.command).toHaveBeenCalledTimes(1)
-    expect(wrapper.findAll('button').some((button) => button.text() === '重试同步')).toBe(true)
+    mocks.requestStatus.mockReturnValue(new Promise(() => undefined))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const wrapper = mount(SalesAssistantChat)
+      await flushPromises()
+      await submitCardText(wrapper, '星河科技')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(mocks.requestStatus).toHaveBeenCalledTimes(1)
+      expect(mocks.command).toHaveBeenCalledTimes(1)
+      expect(submitBusy(wrapper)).toBe(true)
+      expect(wrapper.text()).toContain('保存中')
+      expect(wrapper.text()).not.toMatch(/Network Error|重试同步/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -304,27 +310,33 @@ describe('activity kind card outcomes', () => {
   const prompt = '这次沟通属于哪种活动？'
   const kindWaiting = () => makeTask({ waiting: field({ type: 'ACTIVITY_KIND', field: 'activity_kind', prompt, hint: '原文提到：微信' }) })
 
-  it('keeps the kind card recoverable and retries it with the same request id', async () => {
+  it('offers the kind card again with the same request id once the server says it was not saved', async () => {
     const current = kindWaiting()
-    show(view({ focused_task: current, messages: [message('one', prompt, current)] }))
+    const state = view({ focused_task: current, messages: [message('one', prompt, current)] })
+    show(state)
     mocks.command.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { isAxiosError: true, response: undefined }))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await wrapper.findAll('button').find((button) => button.text().includes('微信跟进'))?.trigger('click')
-    await flushPromises()
+    mocks.requestStatus.mockResolvedValue({ state: 'not_saved', conversation: state })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const wrapper = mount(SalesAssistantChat)
+      await flushPromises()
+      await wrapper.findAll('button').find((button) => button.text().includes('微信跟进'))?.trigger('click')
+      await vi.advanceTimersByTimeAsync(2000)
 
-    expect(wrapper.text()).toContain('提交失败')
-    expect(wrapper.find('[data-agent-ui-card-notice="failed"]').exists()).toBe(true)
-    const first = mocks.command.mock.calls[0]?.[0] as { input: { client_request_id: string } }
+      expect(wrapper.get('[data-agent-ui-card-notice="failed"]').text()).toContain('刚才网络不稳定，这条还没有保存')
+      const first = mocks.command.mock.calls[0]?.[0] as { input: { client_request_id: string } }
 
-    mocks.command.mockResolvedValueOnce(reply(view({ version: 1, focused_task: { ...current, waiting: confirmation() }, messages: [message('one', prompt, current)] })))
-    await wrapper.findAll('button').find((button) => button.text() === '重新提交')?.trigger('click')
-    await flushPromises()
+      mocks.command.mockResolvedValueOnce(reply(view({ version: 1, focused_task: { ...current, waiting: confirmation() }, messages: [message('one', prompt, current)] })))
+      await wrapper.findAll('button').find((button) => button.text() === '重新提交')?.trigger('click')
+      await flushPromises()
 
-    const second = mocks.command.mock.calls[1]?.[0] as { input: { client_request_id: string, choice: string | null } }
-    expect(second.input.client_request_id).toBe(first.input.client_request_id)
-    expect(second.input.choice).toBe('WECHAT_FOLLOW_UP')
-    expect(wrapper.text()).not.toContain('提交失败')
+      const second = mocks.command.mock.calls[1]?.[0] as { input: { client_request_id: string, choice: string | null } }
+      expect(second.input.client_request_id).toBe(first.input.client_request_id)
+      expect(second.input.choice).toBe('WECHAT_FOLLOW_UP')
+      expect(wrapper.find('[data-agent-ui-card-notice="failed"]').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('marks the kind card stale when the conversation moved on elsewhere', async () => {

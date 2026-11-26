@@ -1812,3 +1812,129 @@ async def test_root_timeout_records_a_failed_route_stage_and_retry_replays_it(db
     assert [(item["stage"], item["phase"]) for item in entry.command_json["root_stages"]] == [
         ("route", "start"), ("route", "done"),
     ]
+
+
+async def test_request_status_answers_lost_response_without_writing(db):
+    """CRM-167: after a lost response the client asks; the answer never resends or advances anything."""
+    from app.crud import assistant_conversation as crud
+    from app.utils.time import business_now
+
+    classifier = Classifier(decision())
+    service = ConversationService(classifier=classifier)
+    initial = service.open(db, team_id=1, user_id=2)
+    req = text(initial.version, key="request-lost")
+
+    unknown = service.request_status(db, team_id=1, user_id=2, client_request_id="request-lost")
+    assert unknown.state == "none"
+    assert unknown.conversation.version == initial.version
+
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    crud.claim(
+        db,
+        conv,
+        key=req.client_request_id,
+        payload={"operation": "text", "text": req.text},
+        text=req.text,
+        expected_version=req.expected_version,
+    )
+    running = service.request_status(db, team_id=1, user_id=2, client_request_id="request-lost")
+    assert running.state == "running"
+    assert running.conversation.has_pending_request
+
+    conv.lease_expires_at = business_now() - timedelta(seconds=1)
+    db.commit()
+    stalled = service.request_status(db, team_id=1, user_id=2, client_request_id="request-lost")
+    assert stalled.state == "not_saved"
+    assert stalled.conversation.version == running.conversation.version
+    assert classifier.calls == []
+    assert db.query(AssistantTurn).count() == 0
+
+    # Resending the same key resumes the stalled entry instead of creating another one.
+    resumed = await service.submit_text(db, team_id=1, user_id=2, request=req)
+    assert resumed.submission is not None
+    assert db.query(AssistantConversationEntry).count() == 1
+    turn = db.query(AssistantTurn).one()
+    assert turn.status == "PENDING"
+    assert service.request_status(db, team_id=1, user_id=2, client_request_id="request-lost").state == "running"
+
+    turn.status = "SUCCEEDED"
+    db.commit()
+    saved = service.request_status(db, team_id=1, user_id=2, client_request_id="request-lost")
+    assert saved.state == "saved"
+    assert saved.conversation.messages[0].text == req.text
+    assert len(classifier.calls) == 1
+
+
+async def test_request_status_never_offers_a_resend_the_server_would_refuse(db):
+    """A stored entry is only not_saved when crud.claim would resume that same key."""
+    from app.crud import assistant_conversation as crud
+    from app.utils.time import business_now
+
+    service = ConversationService(classifier=Classifier(decision()))
+    initial = service.open(db, team_id=1, user_id=2)
+    conv = crud.owned_conversation(db, team_id=1, user_id=2)
+    entry, _, _ = crud.claim(
+        db,
+        conv,
+        key="request-orphan",
+        payload={"operation": "text", "text": "今天和睿狐科技电话沟通了部署"},
+        text="今天和睿狐科技电话沟通了部署",
+        expected_version=initial.version,
+    )
+    conv.lease_expires_at = None
+    db.commit()
+    assert service.request_status(db, team_id=1, user_id=2, client_request_id="request-orphan").state == "running"
+
+    conv.busy_entry_id = None
+    conv.lease_expires_at = business_now() - timedelta(seconds=1)
+    db.commit()
+    assert entry.state == "ROUTING"
+    assert service.request_status(db, team_id=1, user_id=2, client_request_id="request-orphan").state == "running"
+
+
+async def test_request_status_is_owner_scoped(db):
+    from app.crud.assistant_conversation import ConversationConflict
+
+    service = ConversationService(classifier=Classifier(decision()))
+    initial = service.open(db, team_id=1, user_id=2)
+    await service.submit_text(db, team_id=1, user_id=2, request=text(initial.version, key="request-mine"))
+    service.open(db, team_id=1, user_id=3)
+    assert service.request_status(db, team_id=1, user_id=3, client_request_id="request-mine").state == "none"
+    service.open(db, team_id=2, user_id=2)
+    assert service.request_status(db, team_id=2, user_id=2, client_request_id="request-mine").state == "none"
+    with pytest.raises(ConversationConflict):
+        service.request_status(db, team_id=9, user_id=9, client_request_id="request-mine")
+
+
+async def test_stale_second_request_is_rejected_and_reports_none(db):
+    """Two tabs sending from the same version: the stale one stores nothing, so it may be resent."""
+    from app.crud.assistant_conversation import ConversationConflict
+
+    service = ConversationService(classifier=Classifier(decision()))
+    initial = service.open(db, team_id=1, user_id=2)
+    await service.submit_text(db, team_id=1, user_id=2, request=text(initial.version, key="request-first"))
+    with pytest.raises(ConversationConflict):
+        await service.submit_text(
+            db, team_id=1, user_id=2, request=text(initial.version, "另一件事", key="request-stale")
+        )
+    db.rollback()
+    assert db.query(AssistantConversationEntry).count() == 1
+    assert service.request_status(db, team_id=1, user_id=2, client_request_id="request-stale").state == "none"
+
+
+async def test_double_click_with_same_key_saves_once(db):
+    classifier = Classifier(decision())
+    service = ConversationService(classifier=classifier)
+    initial = service.open(db, team_id=1, user_id=2)
+    req = text(initial.version, key="request-double")
+    results = await asyncio.gather(
+        service.submit_text(db, team_id=1, user_id=2, request=req),
+        service.submit_text(db, team_id=1, user_id=2, request=req),
+        return_exceptions=True,
+    )
+    failures = [item for item in results if isinstance(item, BaseException)]
+    assert len(failures) < len(results)
+    assert all("仍在处理中" in str(item) for item in failures)
+    assert db.query(AssistantConversationEntry).count() == 1
+    assert db.query(AssistantTurn).count() == 1
+    assert len(classifier.calls) == 1

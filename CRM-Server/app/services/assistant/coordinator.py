@@ -40,6 +40,7 @@ from app.services.assistant.intake_flow import (
 )
 from app.services.assistant.intent import INTENT_FIELD
 from app.services.assistant.llm import AssistantLLMError
+from app.services.assistant.segmented_structure import SINGLE_CALL_LIMIT
 from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
@@ -70,7 +71,7 @@ class AssistantInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(min_length=1, max_length=32, description="text | submit_field | confirm | cancel")
-    text: str | None = Field(default=None, max_length=20000, description="text or field answer payload")
+    text: str | None = Field(default=None, max_length=100_000, description="text or field answer payload")
     choice: str | None = Field(default=None, max_length=64, description="enum choice payload (kind, confirm)")
     values: dict[str, JsonValue] | None = None
     form_revision: int | None = None
@@ -198,7 +199,17 @@ class AssistantCoordinator:
             if target_id is not None and is_temporal_supplement(user_input.text):
                 return await self._apply_temporal_text(db, task, user_input.text, target_id, reporter)
 
-        if self._structurer is not None and user_input.text:
+        if (
+            not user_input.text
+            and task.activity_kind is not None
+            and load_draft(task).content.status == "MISSING"
+        ):
+            # Reprocessing an answer whose card is already closed: the goal text was never organized.
+            structured = await self._structure_goal(db, task, reporter)
+            if isinstance(structured, CoordinatorOutcome):
+                return structured
+            task = structured
+        elif self._structurer is not None and user_input.text:
             if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
                 begun = await self._begin_follow_up(db, task, user_input.text, reporter, accept_source=True)
                 if isinstance(begun, CoordinatorOutcome):
@@ -1457,34 +1468,31 @@ class AssistantCoordinator:
         db.refresh(updated)
         # Continue structuring from the original goal text instead of letting
         # the chooser end an unstructured task.
-        if self._follow_up is not None and kind in FOLLOW_UP_KINDS:
-            begun = await self._begin_follow_up(db, updated, updated.goal, reporter, accept_source=False)
-            if isinstance(begun, CoordinatorOutcome):
-                return begun
-            return await self._prepare_confirmation(db, begun, reporter=reporter)
-        if self._structurer is not None:
-            original_text = updated.goal
-            updated, message, paused_waiting, failed = await intake_step(
-                db,
-                updated,
-                original_text,
-                self._structurer,
-                gate=self._quality_gate,
-                reporter=reporter,
-                accept_source=False,
-            )
-            if failed or paused_waiting is not None:
-                return CoordinatorOutcome(
-                    reply=CoordinatorReply(
-                        task_public_id=updated.public_id,
-                        status=updated.status,
-                        message=message,
-                        waiting=paused_waiting,
-                    ),
-                    task=updated,
-                )
+        structured = await self._structure_goal(db, updated, reporter)
+        if isinstance(structured, CoordinatorOutcome):
+            return structured
+        return await self._prepare_confirmation(db, structured, reporter=reporter)
 
-        return await self._prepare_confirmation(db, updated, reporter=reporter)
+    async def _structure_goal(
+        self, db: Session, task: AssistantTask, reporter: ProgressReporter
+    ) -> AssistantTask | CoordinatorOutcome:
+        """Organize the already-accepted goal text under the task's chosen kind."""
+
+        if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
+            return await self._begin_follow_up(db, task, task.goal, reporter, accept_source=False)
+        if self._structurer is None:
+            return task
+        task, message, paused_waiting, failed = await intake_step(
+            db, task, task.goal, self._structurer, gate=self._quality_gate, reporter=reporter, accept_source=False
+        )
+        if failed or paused_waiting is not None:
+            return CoordinatorOutcome(
+                reply=CoordinatorReply(
+                    task_public_id=task.public_id, status=task.status, message=message, waiting=paused_waiting
+                ),
+                task=task,
+            )
+        return task
 
     async def _offer_profile_or_none(
         self, db: Session, task: AssistantTask, reporter: ProgressReporter
@@ -1757,7 +1765,10 @@ class AssistantCoordinator:
         reporter.stage_start(mk_stage("classify"))
         started = time.monotonic()
         try:
-            decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
+            # The opening of a long transcript decides its channel; noise is still recorded on the full text.
+            decision = await self._structurer.classify(
+                db, team_id=task.team_id, user_text=user_text[:SINGLE_CALL_LIMIT]
+            )
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))

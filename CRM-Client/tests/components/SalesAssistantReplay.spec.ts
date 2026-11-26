@@ -219,7 +219,7 @@ describe('revision-bound sales assistant interactions', () => {
     wrapper.unmount()
   })
 
-  it('sends normalized participant text and uses the server-prepared revision after recovering admission', async () => {
+  it('sends normalized participant text and resubmits the same key after the server says it was not saved', async () => {
     const waiting = field({ type: 'CONFIRMATION_EDIT', field: 'activity_write', form_revision: 0,
       form_fields: [formField('internal_participants'), formField('customer_participants')] })
     const { wrapper, state, submit } = await loadInteractions([formMessage('edit', waiting)])
@@ -229,20 +229,27 @@ describe('revision-bound sales assistant interactions', () => {
       client_request_id: 'server-prepared-key', action_id: 'server-prepared-action', expected_version: 1,
       form_revision: 0, values: { internal_participants: '小林\n小陈' } } }
     mocks.command.mockRejectedValueOnce(new Error('网络中断')).mockResolvedValueOnce(reply(state, submission))
+    let answer: (status: { state: 'not_saved', conversation: typeof state }) => void = () => undefined
+    mocks.requestStatus.mockReturnValue(new Promise((resolve) => { answer = resolve }))
     drive((handlers) => handlers.onWaiting({ task, message: '已修改' }))
-    await submit('edit', 'action1', { internal_participants: ' 小林 \r\n\r\n 小陈 ' })
-    const request = mocks.command.mock.calls[0]?.[0]
-    expect(request?.input).toEqual({ kind: 'submit_form', form_revision: 0, values: { internal_participants: '小林\n小陈' },
-      action_id: 'action1', expected_version: 1, client_request_id: expect.any(String) })
-    await submit('edit', 'action1', { internal_participants: '不得覆盖' })
-    expect(mocks.command).toHaveBeenCalledTimes(1)
-    const retry = wrapper.findAll('button').find((button) => button.text() === '重试同步')
-    expect(retry).toBeDefined()
-    await retry?.trigger('click')
-    await flushPromises()
-    expect(mocks.command.mock.calls[1]?.[0]).toEqual(request)
-    expect(mocks.stream.mock.calls[0]?.slice(0, 2)).toEqual(['ast_one', submission.input])
-    wrapper.unmount()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      await submit('edit', 'action1', { internal_participants: ' 小林 \r\n\r\n 小陈 ' })
+      const request = mocks.command.mock.calls[0]?.[0]
+      expect(request?.input).toEqual({ kind: 'submit_form', form_revision: 0, values: { internal_participants: '小林\n小陈' },
+        action_id: 'action1', expected_version: 1, client_request_id: expect.any(String) })
+      await vi.advanceTimersByTimeAsync(2000)
+      await submit('edit', 'action1', { internal_participants: '不得覆盖' })
+      expect(mocks.command).toHaveBeenCalledTimes(1)
+      answer({ state: 'not_saved', conversation: state })
+      await flushPromises()
+      await submit('edit', 'action1', { internal_participants: ' 小林 \r\n\r\n 小陈 ' })
+      expect(mocks.command.mock.calls[1]?.[0]).toEqual(request)
+      expect(mocks.stream.mock.calls[0]?.slice(0, 2)).toEqual(['ast_one', submission.input])
+    } finally {
+      vi.useRealTimers()
+      wrapper.unmount()
+    }
   })
 
   it('keeps confirmation edit and reasoned rejection distinct', async () => {

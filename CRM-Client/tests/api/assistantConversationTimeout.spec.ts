@@ -61,7 +61,7 @@ describe('assistant conversation understanding timeout', () => {
     )
   })
 
-  it('leaves the choice request on the normal timeout', async () => {
+  it('gives the choice request the same 190 seconds', async () => {
     await assistantApi.conversationChoice({
       entry_id: 'entry_1',
       choice: 'NEW',
@@ -73,6 +73,6 @@ describe('assistant conversation understanding timeout', () => {
       choice: 'NEW',
       client_request_id: 'request-002',
       expected_version: 2,
-    })
+    }, { timeout: 190_000 })
   })
 })

@@ -44,7 +44,7 @@ class ConversationDecision(ConversationModel):
 
 
 class ConversationTextRequest(ConversationModel):
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=8, max_length=128)
     expected_version: int = Field(ge=0)
 
@@ -137,6 +137,18 @@ class ConversationView(ConversationModel):
     has_pending_request: bool = False
     messages: list[ConversationMessage]
     older_cursor: int | None = None
+
+
+class ConversationRequestStatus(ConversationModel):
+    """Read-only answer to "did this client request land?" after a lost response.
+
+    none: the server never stored it. running: it is still being handled.
+    not_saved: it stalled before producing a result; resending the same request resumes it.
+    saved: it produced its result, which ``conversation`` already shows.
+    """
+
+    state: Literal["none", "running", "not_saved", "saved"]
+    conversation: ConversationView
 
 
 class PreparedSubmission(ConversationModel):

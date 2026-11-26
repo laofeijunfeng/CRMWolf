@@ -7,7 +7,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -16,13 +18,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.contracts import FORM_WAITING_TYPES
 from app.services.assistant.coordinator import AssistantInput
-from app.services.assistant.events import ProgressReporter, TurnStage, is_stage_name
+from app.services.assistant.events import ProgressReporter, Segment, TurnStage, is_stage_name, stage_payload
 from app.services.assistant.failure_contract import (
     ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
     ATTEMPT_DEADLINE_SECONDS,
@@ -51,8 +54,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 300
-_active: set[asyncio.Task[None]] = set()
+# Turns run on their own threads and event loops, so a turn blocked on the model, a row lock or the
+# connection pool stalls only itself, never requests or other users' turns.
+_runner: ThreadPoolExecutor | None = None
+_runner_lock = threading.Lock()
 _workers: dict[int, tuple[int, asyncio.Task[None]]] = {}
+_workers_lock = threading.Lock()
 _execution_lease: ContextVar[tuple[int, str, int] | None] = ContextVar("assistant_execution_lease", default=None)
 
 
@@ -467,14 +474,17 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     return turn.lease_version if turn is not None else None
 
 
-def _latest_stage(db: Session, turn: AssistantTurn) -> str | None:
-    """Stage still open when the turn stopped; a completed stage did not fail."""
-    event = (
+def _latest_stage_event(db: Session, turn: AssistantTurn) -> AssistantTurnEvent | None:
+    return (
         db.query(AssistantTurnEvent)
         .filter_by(turn_id=turn.id, event="stage")
         .order_by(AssistantTurnEvent.seq.desc())
         .first()
     )
+
+
+def _open_stage(event: AssistantTurnEvent | None) -> str | None:
+    """Stage still open when the turn stopped; a completed stage did not fail."""
     data = event.data_json if event is not None else None
     if not isinstance(data, dict) or data.get("phase") != "start":
         return None
@@ -571,12 +581,25 @@ def close_overdue_turn(db: Session, task: AssistantTask, turn: AssistantTurn) ->
     if not isinstance(raw, str):
         return False
     started = datetime.fromisoformat(raw)
+    recent_stages = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="stage")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .limit(8)
+        .all()
+    )
+    stage_event = recent_stages[0] if recent_stages else None
+    # Segmented organizing gives each segment, and the scoring after the last one, a full
+    # window from the segment's latest report (segmented_structure._extend_attempt_deadline).
+    segment_event = next((event for event in recent_stages if "segment" in event.data_json), None)
+    if segment_event is not None:
+        started = max(started.replace(tzinfo=None), segment_event.created_time.replace(tzinfo=None))
     now = business_now()
     if started.tzinfo is None and now.tzinfo is not None:
         started = started.replace(tzinfo=now.tzinfo)
     if now < started + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS):
         return False
-    stage = _latest_stage(db, turn)
+    stage = _open_stage(stage_event)
     if task_has_customer_activity(task):
         message = "活动已记录，后续处理超时，请查看任务状态。"
     else:
@@ -654,7 +677,8 @@ def task_has_customer_activity(task: AssistantTask) -> bool:
 
 
 def live_worker(turn_id: int, lease_version: int) -> bool:
-    worker = _workers.get(turn_id)
+    with _workers_lock:
+        worker = _workers.get(turn_id)
     return worker is not None and worker[0] == lease_version and not worker[1].done()
 
 
@@ -935,23 +959,19 @@ class DurableProgressReporter(ProgressReporter):
         except Exception:
             logger.exception("assistant stage persistence failed: turn=%s", self.turn_id)
 
-    def stage_start(self, stage: TurnStage | None) -> None:
-        if stage is None:
-            return
-        self._record(stage.payload("start"))
+    def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "start", segment=segment))
 
-    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
-        if stage is None:
-            return
-        payload = {**stage.payload("done"), "ms": ms}
-        if score is not None:
-            payload["score"] = score
-        self._record(payload)
+    def stage_done(
+        self, stage: TurnStage | None, *, ms: int, score: int | None = None, segment: Segment | None = None
+    ) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "done", ms=ms, score=score, segment=segment))
 
-    def stage_failed(self, stage: TurnStage | None) -> None:
-        if stage is None:
-            return
-        self._record(stage.payload("failed"))
+    def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "failed", segment=segment))
 
 
 def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEvent]:
@@ -986,7 +1006,8 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             return
         worker = asyncio.current_task()
         if worker is not None:
-            _workers[turn_id] = (version, worker)
+            with _workers_lock:
+                _workers[turn_id] = (version, worker)
         lease_token = _execution_lease.set((turn_id, owner, version))
         attempt_started = business_now()
         metadata = turn.input_json.get("prepared_metadata") or {}
@@ -1321,7 +1342,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                         turn,
                         failed_task,
                         code=code,
-                        stage=_latest_stage(db, turn),
+                        stage=_open_stage(_latest_stage_event(db, turn)),
                         retryable=retryable,
                         message=message,
                         failure_origin=failure_origin_of(exc),
@@ -1347,9 +1368,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             reset_attempt_deadline(deadline_token)
         if lease_token is not None:
             _execution_lease.reset(lease_token)
-        registered = _workers.get(turn_id)
-        if registered is not None and registered[1] is asyncio.current_task():
-            del _workers[turn_id]
+        with _workers_lock:
+            registered = _workers.get(turn_id)
+            if registered is not None and registered[1] is asyncio.current_task():
+                del _workers[turn_id]
         if heartbeat is not None:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError):
@@ -1434,10 +1456,35 @@ def _close_unknown_activity(
     db.commit()
 
 
+def _run_turn(turn_id: int, factory: sessionmaker[Session] | None) -> None:
+    try:
+        asyncio.run(execute_turn(turn_id, factory=factory))
+    except Exception:
+        logger.exception("Assistant turn %s runner failed", turn_id)
+
+
 def schedule_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:
-    runner = asyncio.create_task(execute_turn(turn_id, factory=factory))
-    _active.add(runner)
-    runner.add_done_callback(_active.discard)
+    global _runner
+    with _runner_lock:
+        if _runner is None:
+            _runner = ThreadPoolExecutor(
+                max_workers=max(1, get_settings().ASSISTANT_TURN_WORKERS), thread_name_prefix="assistant-turn"
+            )
+        runner = _runner
+    try:
+        runner.submit(_run_turn, turn_id, factory)
+    except RuntimeError:
+        # Shutting down: the turn stays PENDING and recovery claims it after restart.
+        logger.info("Assistant turn %s left for recovery during shutdown", turn_id)
+
+
+def stop_turn_runner() -> None:
+    """Stop taking turns; queued ones stay PENDING for recovery, running ones finish on their own."""
+
+    with _runner_lock:
+        runner = _runner
+    if runner is not None:
+        runner.shutdown(wait=False, cancel_futures=True)
 
 
 async def recover_turns(*, limit: int = 30) -> int:

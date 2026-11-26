@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # T2-T3 兼容:仍接受线索/客户旧 source 字符串
     ACQUISITION_SOURCE_ACCEPT_LEGACY_SOURCE: bool = True
     ASSISTANT_NEW_PROPOSALS_ENABLED: bool = True
+    # 每个轮次独占一个线程和一条数据库连接;须小于 DB_POOL_SIZE + DB_MAX_OVERFLOW,给请求留出连接。
+    ASSISTANT_TURN_WORKERS: int = 4
     LEGACY_PROFILE_PUBLICATION_ENABLED: bool = True
 
     # Redis 配置(用于限流)

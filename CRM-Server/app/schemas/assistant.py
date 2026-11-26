@@ -148,7 +148,7 @@ class SubmitInputRequest(BaseModel):
         "submit_form",
         "request_edit",
     ]
-    text: str | None = Field(default=None, max_length=20000)
+    text: str | None = Field(default=None, max_length=100_000)
     choice: str | None = Field(default=None, max_length=64)
     client_request_id: str = Field(min_length=8, max_length=128)
     action_id: str | None = Field(default=None, max_length=128)

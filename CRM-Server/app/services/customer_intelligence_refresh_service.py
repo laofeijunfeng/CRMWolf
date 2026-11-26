@@ -17,6 +17,7 @@ from uuid import uuid4
 from sqlalchemy import exists, or_
 from sqlalchemy import false as sa_false
 
+from app.core.app_loop import run_on_app_loop
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.team import team_crud
@@ -209,7 +210,10 @@ class CustomerIntelligenceRefreshService:
         except RuntimeError:
             logger.debug("当前线程没有运行中的事件循环, 延迟由客户智能恢复任务执行")
             return
-        self._start_background_task(self.run_committed_event_refresh(request))
+        run_on_app_loop(
+            lambda: self._start_background_task(self.run_committed_event_refresh(request)),
+            f"committed event refresh request={request.request_id}",
+        )
 
     def _start_background_task(self, coroutine: Coroutine[object, object, JSONDict]) -> None:
         task = asyncio.create_task(coroutine)

@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
+from app.core.app_loop import run_on_app_loop
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.assistant_follow_up_projection_job import assistant_follow_up_projection_job_crud
@@ -63,11 +65,14 @@ class AssistantFollowUpProjectionJobService:
 
     def kick(self, request: AssistantFollowUpProjectionJobRequest) -> None:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             logger.debug("当前线程没有运行中的事件循环, Assistant 2.0 跟进任务投影交由恢复器执行")
             return
-        task = loop.create_task(self._run_guarded(request))
+        run_on_app_loop(partial(self._start, request), f"follow-up projection job={request.job_public_id}")
+
+    def _start(self, request: AssistantFollowUpProjectionJobRequest) -> None:
+        task = asyncio.create_task(self._run_guarded(request))
         task.add_done_callback(self._consume_task_exception)
 
     async def run(self, request: AssistantFollowUpProjectionJobRequest) -> dict[str, object]:

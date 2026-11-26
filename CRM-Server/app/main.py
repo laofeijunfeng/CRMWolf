@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from fastapi import FastAPI, HTTPException
@@ -173,6 +174,9 @@ app.include_router(api_router, prefix="/api")
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化角色权限和定时任务"""
+    from app.core.app_loop import bind_app_loop
+
+    bind_app_loop(asyncio.get_running_loop())
     logger.info("应用启动，开始初始化角色权限...")
     init_roles_permissions()
 
@@ -294,6 +298,8 @@ async def shutdown_event():
     stop_agent_turn_execution_recovery_scheduler()
     from app.tasks.assistant_turn_recovery import stop_assistant_turn_recovery
     stop_assistant_turn_recovery()
+    from app.services.assistant.turns import stop_turn_runner
+    stop_turn_runner()
     stop_customer_evidence_sync_scheduler()
 
 

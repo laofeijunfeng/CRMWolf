@@ -57,6 +57,15 @@ def client(db_session, override_auth, monkeypatch):
         yield db_session
 
     monkeypatch.setattr(turns, "SessionLocal", sessionmaker(bind=db_session.get_bind(), autoflush=False))
+    # The in-memory SQLite engine shares one connection, so run each turn to completion in the
+    # scheduling request instead of on a concurrent runner thread.
+    from app.services.assistant import conversation as conversation_module
+
+    def run_inline(turn_id: int, *, factory: sessionmaker | None = None) -> None:
+        turns._run_turn(turn_id, factory)
+
+    for module in (turns, api, conversation_module):
+        monkeypatch.setattr(module, "schedule_turn", run_inline)
     # Direct task intake asks the root classifier first; default it to an activity verdict.
     monkeypatch.setattr(api._conversation_service, "classifier", Classifier(decision()))
     app.dependency_overrides[get_db] = _get_db_override

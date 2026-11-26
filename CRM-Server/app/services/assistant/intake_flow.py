@@ -33,6 +33,7 @@ from app.services.assistant.failure_contract import (
 )
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.quality_gate import QualityGateOutcome
+from app.services.assistant.segmented_structure import SINGLE_CALL_LIMIT, structure_in_segments
 from app.services.assistant.task_state import TaskUpdate, apply_task_update
 from app.services.customer_activity_ai.schemas import FollowUpContent, MeetingContent
 
@@ -479,7 +480,10 @@ async def intake_step(
         reporter.stage_start(_S_CLASSIFY)
         _t0 = time.monotonic()
         try:
-            decision = await structurer.classify(db, team_id=task.team_id, user_text=user_text)
+            # The opening of a long transcript decides its kind; noise is still recorded on the full text.
+            decision = await structurer.classify(
+                db, team_id=task.team_id, user_text=user_text[:SINGLE_CALL_LIMIT]
+            )
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(_S_CLASSIFY, ms=int((time.monotonic() - _t0) * 1000))
@@ -531,16 +535,27 @@ async def intake_step(
         if _budget_exhausted():
             fail_model_stage(db, task, TimeoutError(), stage="structure", draft=draft)
 
-        reporter.stage_start(_S_STRUCTURE)
-        _t0 = time.monotonic()
+        structure_text = (
+            "\n".join(record.text for record in draft.source_records) if temporal_answer_id else user_text
+        )
         try:
-            structure_text = (
-                "\n".join(record.text for record in draft.source_records) if temporal_answer_id else user_text
-            )
-            structured = await structurer.structure(
-                db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=structure_text
-            )
-            reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
+            if len(structure_text) > SINGLE_CALL_LIMIT:
+                structured = await structure_in_segments(
+                    db,
+                    task,
+                    structurer,
+                    kind=task.activity_kind or "FOLLOW_UP",
+                    text=structure_text,
+                    reporter=reporter,
+                    stage=_S_STRUCTURE,
+                )
+            else:
+                reporter.stage_start(_S_STRUCTURE)
+                _t0 = time.monotonic()
+                structured = await structurer.structure(
+                    db, team_id=task.team_id, kind=task.activity_kind or "FOLLOW_UP", user_text=structure_text
+                )
+                reporter.stage_done(_S_STRUCTURE, ms=int((time.monotonic() - _t0) * 1000))
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             # Technical failure keeps the task ACTIVE but must not look like success.
             _record_structuring_failure(db, task, draft, exc, stage="structure")

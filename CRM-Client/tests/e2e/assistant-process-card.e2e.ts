@@ -109,18 +109,24 @@ function heldStream(): string {
   return frame('accepted', { turn_id: 'atn_ok', seq: 1 }) + frame('stage', { stage: 'structure', phase: 'start', seq: 2 })
 }
 
-async function listen(running: 'classify' | 'structure' = 'classify'): Promise<{ url: string; close: () => Promise<void>; release: () => void }> {
+async function listen(running: 'classify' | 'structure' | 'segments' = 'classify'): Promise<{ url: string; close: () => Promise<void>; release: () => void }> {
   let release = (): void => undefined
   const gate = new Promise<void>((resolve) => { release = resolve })
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
     res.write(frame('accepted', { turn_id: 'atn_ok', seq: 1 }))
-    res.write(frame('stage', { stage: running, phase: 'start', seq: 2 }))
+    if (running === 'segments') {
+      res.write(frame('stage', { stage: 'structure', phase: 'start', segment: { index: 1, total: 3 }, seq: 2 }))
+      res.write(frame('stage', { stage: 'structure', phase: 'done', ms: 42_000, segment: { index: 1, total: 3 }, seq: 3 }))
+      res.write(frame('stage', { stage: 'structure', phase: 'start', segment: { index: 2, total: 3 }, seq: 4 }))
+    } else {
+      res.write(frame('stage', { stage: running, phase: 'start', seq: 2 }))
+    }
     const beat = setInterval(() => { res.write(': keep\n\n') }, 1000)
     void gate.then(() => {
       clearInterval(beat)
-      res.write(frame('stage', { stage: 'classify', phase: 'done', ms: 10, seq: 3 }))
-      res.write(frame('waiting', { task: task({ version: 5, committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] }), message: '活动已写入', seq: 4 }))
+      res.write(frame('stage', { stage: 'classify', phase: 'done', ms: 10, seq: 5 }))
+      res.write(frame('waiting', { task: task({ version: 5, committed: [{ kind: 'customer_activity', public_id: 'act_ok' }] }), message: '活动已写入', seq: 6 }))
       res.end()
     })
   })
@@ -175,9 +181,8 @@ for (const viewport of viewports) {
     }
   })
 
-  test(`long organize hint appears after thirty seconds on ${viewport.name}`, async ({ page }) => {
-    test.setTimeout(90_000)
-    const sse = await listen('structure')
+  test(`long transcript shows the segment being organized on ${viewport.name}`, async ({ page }) => {
+    const sse = await listen('segments')
     let submitted = false
     try {
       await install(page, async (route, pathname) => {
@@ -200,12 +205,8 @@ for (const viewport of viewports) {
       await openAssistant(page, viewport.width, viewport.height)
       await expect(page.getByText('整理活动内容')).toBeVisible()
       await expect(page.getByText('处理中')).toBeVisible()
-      await expect(page.getByText('正在整理，内容较长，预计需要约 1 分钟')).toHaveCount(0)
-      await page.screenshot({ path: path.join(evidence, `process-card-organizing-${viewport.name}.png`), fullPage: true })
-      await page.waitForTimeout(32_000)
-      await expect(page.getByText('正在整理，内容较长，预计需要约 1 分钟')).toBeVisible()
-      await expect(page.getByText('整理活动内容')).toBeVisible()
-      await page.screenshot({ path: path.join(evidence, `process-card-long-organize-${viewport.name}.png`), fullPage: true })
+      await expect(page.getByText('第 2/3 段 · 进行中…')).toBeVisible()
+      await page.screenshot({ path: path.join(evidence, `process-card-segments-${viewport.name}.png`), fullPage: true })
     } finally {
       sse.release()
       await sse.close()

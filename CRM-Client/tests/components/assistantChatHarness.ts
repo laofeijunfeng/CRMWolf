@@ -5,7 +5,7 @@ import type * as AssistantApiModule from '@/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), get: vi.fn(), text: vi.fn(), choice: vi.fn(), command: vi.fn(),
-  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), resume: vi.fn(), stream: vi.fn(), retryEntry: vi.fn()
+  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), resume: vi.fn(), stream: vi.fn(), retryEntry: vi.fn(), requestStatus: vi.fn()
 }))
 export { mocks }
 vi.mock('@/api/assistant', async (importOriginal) => ({
@@ -14,6 +14,7 @@ vi.mock('@/api/assistant', async (importOriginal) => ({
     openConversation: mocks.open, getConversation: mocks.get,
     conversationText: mocks.text, conversationChoice: mocks.choice, conversationCommand: mocks.command,
     resumeConversation: mocks.resume,
+    conversationRequestStatus: mocks.requestStatus,
     retryConversationEntry: mocks.retryEntry,
     getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task
   },
@@ -163,7 +164,7 @@ const fixtureEnvelope = (
     blocks.push({
       id: 'b_interaction_1', type: 'interaction' as const, interaction_id: `ix-${item.id}`, interaction_type: 'text_input' as const,
       business_action: 'collect_field', state: active ? 'ACTIVE' as const : 'READ_ONLY' as const, prompt: waiting.prompt,
-      fields: [{ key: waiting.field ?? 'answer', label: waiting.field === 'customer' ? '客户名称' : '补充内容', field_type: 'text' as const, required: true, min_length: 1, max_length: 2000, default_value: null, options: [] }],
+      fields: [{ key: waiting.field ?? 'answer', label: waiting.field === 'customer' ? '客户名称' : '补充内容', field_type: 'text' as const, required: true, min_length: 1, max_length: 2000, default_value: null, options: [], suggestions: [] }],
       facts: [], options: [], allow_blank: false, allow_cancel: false, submit_label: '提交',
       submit_action_id: active ? (waiting.action_id ?? 'act') : null
     })

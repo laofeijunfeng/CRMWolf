@@ -747,6 +747,31 @@ def test_overdue_attempt_fails_closed_without_a_live_worker(
     assert "尚未写入客户活动" in error.data_json["message"]
 
 
+def test_each_finished_segment_opens_a_fresh_attempt_window(db_session, retryable_turn):
+    """A long transcript is overdue only when its latest segment stalls, not the whole run (CRM-167)."""
+    task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_expires_at = business_now() + timedelta(seconds=200)
+    stale = business_now() - timedelta(seconds=181)
+    turns.add_event(db_session, turn, "attempt", {"started_at": stale.isoformat(), "attempt": 1})
+    turns.add_event(
+        db_session, turn, "stage", {"stage": "structure", "phase": "done", "segment": {"index": 2, "total": 5}}
+    )
+    db_session.commit()
+
+    assert turns.close_overdue_turn(db_session, task, turn) is False
+
+    segment = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="stage").one()
+    segment.created_time = stale
+    db_session.commit()
+
+    assert turns.close_overdue_turn(db_session, task, turn) is True
+    db_session.refresh(turn)
+    assert turn.status == "FAILED"
+    assert turn.last_error_code == "UPSTREAM_TIMEOUT"
+
+
 def test_overdue_attempt_preserves_actual_evidence_stage(db_session, retryable_turn):
     task, turn = retryable_turn
     turn.status = "RUNNING"
@@ -911,3 +936,43 @@ async def test_failed_date_correction_retry_cannot_replace_newer_frozen_confirma
         assert activity.next_follow_time == datetime(2026, 12, 7, 9)
         assert activity.source_content == "\n".join(command["source_segments"])
         assert activity.submission_fingerprint == command["fingerprint"]
+
+
+def test_blocked_turn_runs_off_the_request_loop_and_finishes_its_kicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    import time
+
+    started = threading.Event()
+    release = threading.Event()
+    seen: dict[str, object] = {}
+
+    async def blocked_turn(turn_id: int, *, factory: object = None) -> None:
+        seen["thread"] = threading.current_thread().name
+        started.set()
+        release.wait(5)  # a sync DB call stuck on a lock or an exhausted pool
+
+        async def kick() -> None:
+            seen["kick"] = True
+
+        asyncio.get_running_loop().create_task(kick())
+
+    monkeypatch.setattr(turns, "execute_turn", blocked_turn)
+
+    async def request_loop() -> int:
+        turns.schedule_turn(1)
+        assert await asyncio.to_thread(started.wait, 5)
+        ticks = 0
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+            ticks += 1
+        return ticks
+
+    try:
+        assert asyncio.run(request_loop()) == 3
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while "kick" not in seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert str(seen["thread"]).startswith("assistant-turn")
+    assert seen.get("kick") is True

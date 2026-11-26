@@ -7,7 +7,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
@@ -34,6 +35,7 @@ from app.schemas.assistant_conversation import (
     ConversationFocusRequest,
     ConversationKindRequest,
     ConversationReply,
+    ConversationRequestStatus,
     ConversationTextRequest,
     ConversationView,
 )
@@ -176,7 +178,7 @@ async def create_task(
 
 
 @router.get("/tasks/{public_id}", response_model=AssistantTaskView)
-async def get_task(
+def get_task(
     public_id: str,
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
@@ -215,7 +217,7 @@ async def list_pending_drafts(
 
 
 @router.get("/tasks/latest/active", response_model=AssistantTaskView | None)
-async def latest_active_task(
+def latest_active_task(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -380,7 +382,7 @@ async def adjudicate_unknown_command(
 
 
 @router.get("/tasks/{public_id}/turns/{turn_id}", response_model=AssistantTurnView)
-async def read_turn(
+def read_turn(
     public_id: str,
     turn_id: str,
     after_seq: int = 0,
@@ -420,7 +422,7 @@ async def read_turn(
 
 
 @router.post("/tasks/{public_id}/turns/{turn_id}/retry", response_model=AssistantTurnView)
-async def retry_turn(
+def retry_turn(
     public_id: str,
     turn_id: str,
     request: RetryTurnRequest,
@@ -459,7 +461,7 @@ async def retry_turn(
 
 
 @router.post("/tasks/{public_id}/submit")
-async def submit_input(
+def submit_input(
     public_id: str,
     request: SubmitInputRequest,
     team_id: int = Depends(get_current_user_team),
@@ -498,23 +500,33 @@ async def submit_input(
     if created:
         schedule_turn(turn.id, factory=factory)
 
-    async def stream() -> AsyncIterator[str]:
+    def poll(seq: int) -> tuple[list[tuple[int, str, dict[str, object]]], bool] | None:
+        from app.services.assistant.turns import close_overdue_turn
 
+        with factory() as stream_db:
+            current = stream_db.get(AssistantTurn, turn.id)
+            if current is None or current.team_id != team_id or current.user_id != user_id:
+                return None
+            task_row = stream_db.get(AssistantTask, current.task_id)
+            if (
+                task_row is not None
+                and task_row.team_id == team_id
+                and close_overdue_turn(stream_db, task_row, current)
+            ):
+                stream_db.refresh(current)
+            emitted = events_after(stream_db, turn_id=current.id, seq=seq)
+            return [(event.seq, event.event, event.data_json) for event in emitted], current.status in {
+                "SUCCEEDED",
+                "FAILED",
+            }
+
+    async def stream() -> AsyncIterator[str]:
         seq = 0
         while True:
-            with factory() as stream_db:
-                current = stream_db.get(AssistantTurn, turn.id)
-                if current is None or current.team_id != team_id or current.user_id != user_id:
-                    return
-                task_row = stream_db.get(AssistantTask, current.task_id)
-                if task_row is not None and task_row.team_id == team_id:
-                    from app.services.assistant.turns import close_overdue_turn
-
-                    if close_overdue_turn(stream_db, task_row, current):
-                        stream_db.refresh(current)
-                emitted = events_after(stream_db, turn_id=current.id, seq=seq)
-                frames = [(event.seq, event.event, event.data_json) for event in emitted]
-                finished = current.status in {"SUCCEEDED", "FAILED"}
+            polled = await run_in_threadpool(poll, seq)
+            if polled is None:
+                return
+            frames, finished = polled
             for next_seq, name, payload in frames:
                 seq = next_seq
                 yield encode_sse(name, payload)
@@ -552,6 +564,22 @@ def get_conversation(
 ) -> ConversationView:
     try:
         return _conversation_service.read(db, team_id=team_id, user_id=int(current_user.id), before=before)
+    except ConversationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/conversation/requests/{client_request_id}", response_model=ConversationRequestStatus)
+def get_conversation_request(
+    client_request_id: str = Path(min_length=8, max_length=128),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ConversationRequestStatus:
+    """Read-only: whether a request whose response was lost landed. Never resends it."""
+    try:
+        return _conversation_service.request_status(
+            db, team_id=team_id, user_id=int(current_user.id), client_request_id=client_request_id
+        )
     except ConversationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

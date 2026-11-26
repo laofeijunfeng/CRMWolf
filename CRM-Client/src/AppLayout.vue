@@ -176,7 +176,7 @@
  * - UI/UX Pro Max §1 Accessibility (aria-labels, keyboard-nav)
  * - §1.5 shadcn-vue 优先原则（Button 替换 el-button）
  */
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useUserStore } from '@/stores/user'
@@ -198,6 +198,7 @@ import PermissionStatusBanner from '@/components/PermissionStatusBanner.vue'
 import AppSidebar from '@/components/app-sidebar/AppSidebar.vue'
 import { TopBarTabs } from '@/components/crmwolf'
 import { logger } from '@/utils/logger'
+import { watchAssistantBackgroundTurn } from '@/components/sales-assistant/assistantBackgroundTurn'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 
 const router = useRouter()
@@ -297,6 +298,8 @@ const handleTabChange = (key: string): void => {
   // Emit custom event that page components can listen to via router events or direct callback
   // The page component should watch headerStore.activeTab for changes
 }
+
+onUnmounted(watchAssistantBackgroundTurn(router))
 
 onMounted(async () => {
   if (!userStore.isLoggedIn()) {

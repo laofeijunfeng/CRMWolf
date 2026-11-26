@@ -2216,14 +2216,22 @@ def _clause(text: str, index: int) -> str:
     return text[start:end]
 
 
+_CLAUSE_MARKS = "，,。；;！？!?\n"
+_CLAUSE_MARK = re.compile(f"[{_CLAUSE_MARKS}]")
+
+
+# Both scans stop at the nearest mark: per-mark find/rfind walked the whole text
+# whenever a mark was absent, which made long transcripts quadratic (CRM-167).
 def _clause_start(text: str, index: int) -> int:
-    return max(text.rfind(mark, 0, index) for mark in "，,。；;！？!?\n") + 1
+    start = min(index, len(text))
+    while start > 0 and text[start - 1] not in _CLAUSE_MARKS:
+        start -= 1
+    return start
 
 
 def _clause_end(text: str, index: int) -> int:
-    positions = [text.find(mark, index) for mark in "，,。；;！？!?\n"]
-    positions = [item for item in positions if item >= 0]
-    return min(positions) if positions else len(text)
+    found = _CLAUSE_MARK.search(text, index)
+    return found.start() if found else len(text)
 
 
 def _action_for(mention: StoredMention, actions: list[StoredAction]) -> StoredAction | None:

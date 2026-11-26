@@ -35,7 +35,7 @@ export const EntityDraftSchema = z.object({
   customer_fields: z.record(EntityFieldValueSchema).optional(),
   extracted: z.array(z.object({ key: z.string(), value: z.string(), quote: z.string() }).strict()).max(40).optional(),
   submitted: z.record(JsonObjectSchema).optional(),
-  source_text: z.string().max(20000).optional(),
+  source_text: z.string().max(100_000).optional(),
   credentials_mentioned: z.boolean().optional()
 }).strict()
 export type EntityDraft = z.infer<typeof EntityDraftSchema>
@@ -380,6 +380,12 @@ export const ConversationViewSchema = z.object({
   messages: z.array(ConversationMessageSchema), older_cursor: z.number().int().positive().nullable()
 }).strict()
 export type ConversationView = z.infer<typeof ConversationViewSchema>
+/** What the server knows about one send whose response was lost; never asks the client to resend blindly. */
+export const ConversationRequestStatusSchema = z.object({
+  state: z.enum(['none', 'running', 'not_saved', 'saved']),
+  conversation: ConversationViewSchema
+}).strict()
+export type ConversationRequestStatus = z.infer<typeof ConversationRequestStatusSchema>
 export const ConversationReplySchema = z.object({
   conversation: ConversationViewSchema,
   submission: z.object({

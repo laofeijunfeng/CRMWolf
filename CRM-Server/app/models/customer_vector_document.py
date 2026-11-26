@@ -1,4 +1,5 @@
 from sqlalchemy import JSON, BigInteger, Column, DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy.dialects import mysql
 
 from app.core.database import Base
 from app.utils.time import business_now
@@ -46,7 +47,7 @@ class CustomerVectorDocument(Base):
     business_object_type = Column(String(50), nullable=True, index=True, comment="业务对象类型")
     business_object_id = Column(String(100), nullable=True, comment="业务对象ID")
     title = Column(String(255), nullable=False, comment="证据标题")
-    text = Column(Text, nullable=False, comment="可检索证据文本")
+    text = Column(Text().with_variant(mysql.MEDIUMTEXT, "mysql"), nullable=False, comment="可检索证据文本")
     text_hash = Column(String(64), nullable=False, index=True, comment="证据文本SHA256")
     metadata_json = Column(JSON, nullable=True, comment="向量证据业务元数据")
     qdrant_point_id = Column(String(64), nullable=False, unique=True, comment="Qdrant point ID")

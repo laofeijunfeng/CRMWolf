@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime  # noqa: TC003 -- SQLAlchemy resolves Mapped types at runtime.
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -38,7 +39,7 @@ class AssistantConversationEntry(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     client_request_id: Mapped[str] = mapped_column(String(128), nullable=False)
     input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    user_text: Mapped[str] = mapped_column(Text, nullable=False)
+    user_text: Mapped[str] = mapped_column(Text().with_variant(mysql.MEDIUMTEXT, "mysql"), nullable=False)
     command_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     decision_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
     state: Mapped[str] = mapped_column(String(20), default="ROUTING", nullable=False)
