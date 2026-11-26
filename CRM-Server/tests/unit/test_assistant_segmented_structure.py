@@ -216,3 +216,28 @@ async def test_follow_up_channel_is_classified_from_the_opening_of_a_long_transc
 
     assert seen == [text[:SINGLE_CALL_LIMIT]]
     assert outcome.reply.waiting is not None
+
+
+async def test_reprocessing_a_kind_answer_resumes_the_segments_it_left_unread(db_session):  # noqa: F811
+    class Unclear(SegmentStructurer):
+        async def classify(self, db, *, team_id, user_text):
+            return KindDecision(kind="UNCLEAR")
+
+    text = _transcript(30_000)
+    total = len(split_transcript(text))
+    structurer = Unclear(timeouts=frozenset({2, 3}))
+    coordinator = AssistantCoordinator(Chooser(), structurer=structurer, quality_gate=PassGate())
+    task = _task(db_session, goal=text)
+    task = (await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text=text))).task
+    answer = AssistantInput(kind="submit_field", choice="OFFLINE_MEETING")
+    with pytest.raises(AssistantStageFailure):
+        await coordinator.handle_task(db_session, task, answer)
+    db_session.rollback()
+    task = db_session.get(AssistantTask, task.id)
+
+    # Reprocess replays the same answer; the kind card is gone, the transcript is still unread.
+    task = (await coordinator.handle_task(db_session, task, answer)).task
+
+    assert "".join(structurer.chunks[3:]) == text[len(structurer.chunks[0]) :]
+    assert len(structurer.chunks) == 3 + total - 1
+    assert task.draft_json["content"]["status"] != "MISSING"

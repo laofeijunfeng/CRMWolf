@@ -199,7 +199,17 @@ class AssistantCoordinator:
             if target_id is not None and is_temporal_supplement(user_input.text):
                 return await self._apply_temporal_text(db, task, user_input.text, target_id, reporter)
 
-        if self._structurer is not None and user_input.text:
+        if (
+            not user_input.text
+            and task.activity_kind is not None
+            and load_draft(task).content.status == "MISSING"
+        ):
+            # Reprocessing an answer whose card is already closed: the goal text was never organized.
+            structured = await self._structure_goal(db, task, reporter)
+            if isinstance(structured, CoordinatorOutcome):
+                return structured
+            task = structured
+        elif self._structurer is not None and user_input.text:
             if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
                 begun = await self._begin_follow_up(db, task, user_input.text, reporter, accept_source=True)
                 if isinstance(begun, CoordinatorOutcome):
@@ -1458,34 +1468,31 @@ class AssistantCoordinator:
         db.refresh(updated)
         # Continue structuring from the original goal text instead of letting
         # the chooser end an unstructured task.
-        if self._follow_up is not None and kind in FOLLOW_UP_KINDS:
-            begun = await self._begin_follow_up(db, updated, updated.goal, reporter, accept_source=False)
-            if isinstance(begun, CoordinatorOutcome):
-                return begun
-            return await self._prepare_confirmation(db, begun, reporter=reporter)
-        if self._structurer is not None:
-            original_text = updated.goal
-            updated, message, paused_waiting, failed = await intake_step(
-                db,
-                updated,
-                original_text,
-                self._structurer,
-                gate=self._quality_gate,
-                reporter=reporter,
-                accept_source=False,
-            )
-            if failed or paused_waiting is not None:
-                return CoordinatorOutcome(
-                    reply=CoordinatorReply(
-                        task_public_id=updated.public_id,
-                        status=updated.status,
-                        message=message,
-                        waiting=paused_waiting,
-                    ),
-                    task=updated,
-                )
+        structured = await self._structure_goal(db, updated, reporter)
+        if isinstance(structured, CoordinatorOutcome):
+            return structured
+        return await self._prepare_confirmation(db, structured, reporter=reporter)
 
-        return await self._prepare_confirmation(db, updated, reporter=reporter)
+    async def _structure_goal(
+        self, db: Session, task: AssistantTask, reporter: ProgressReporter
+    ) -> AssistantTask | CoordinatorOutcome:
+        """Organize the already-accepted goal text under the task's chosen kind."""
+
+        if self._follow_up is not None and task.activity_kind not in {"ONLINE_MEETING", "OFFLINE_MEETING"}:
+            return await self._begin_follow_up(db, task, task.goal, reporter, accept_source=False)
+        if self._structurer is None:
+            return task
+        task, message, paused_waiting, failed = await intake_step(
+            db, task, task.goal, self._structurer, gate=self._quality_gate, reporter=reporter, accept_source=False
+        )
+        if failed or paused_waiting is not None:
+            return CoordinatorOutcome(
+                reply=CoordinatorReply(
+                    task_public_id=task.public_id, status=task.status, message=message, waiting=paused_waiting
+                ),
+                task=task,
+            )
+        return task
 
     async def _offer_profile_or_none(
         self, db: Session, task: AssistantTask, reporter: ProgressReporter
