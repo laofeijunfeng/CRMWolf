@@ -141,6 +141,7 @@ from app.services.customer_intelligence_run_service import CustomerIntelligenceR
 from app.services.customer_lifecycle_post_commit_coordinator import (
     customer_lifecycle_post_commit_coordinator,
 )
+from app.services.customer_name_conflicts import customer_name_conflict_error
 from app.services.customer_status_transition_service import (
     CustomerStatusTransitionError,
     customer_status_transition_service,
@@ -209,25 +210,6 @@ def _queue_customer_returned_notification(
     )
 
 
-def _customer_name_conflict_error(
-    db: Session,
-    account_name: str,
-    team_id: int,
-    exclude_customer_id: int | None = None,
-    allowed_source_lead_id: int | None = None,
-) -> str | None:
-    existing_customer = customer_crud.get_by_name(db, account_name, team_id)
-    if existing_customer and existing_customer.id != exclude_customer_id:
-        return "客户名称已存在"
-    existing_lead = lead_crud.get_by_name(db, account_name, team_id)
-    excluded_customer = customer_crud.get_by_id(db, exclude_customer_id, team_id) if exclude_customer_id else None
-    if existing_lead and existing_lead.id != allowed_source_lead_id and not (
-        excluded_customer and excluded_customer.source_lead_id == existing_lead.id
-    ):
-        return "该名称已存在线索\uff0c请先处理或转化线索"
-    return None
-
-
 def _ensure_customer_name_available(
     db: Session,
     account_name: str,
@@ -235,7 +217,7 @@ def _ensure_customer_name_available(
     exclude_customer_id: int | None = None,
     allowed_source_lead_id: int | None = None,
 ) -> None:
-    error = _customer_name_conflict_error(
+    error = customer_name_conflict_error(
         db,
         account_name,
         team_id,

@@ -40,7 +40,9 @@ class DeploymentInfoCRUD:
         self,
         db: Session,
         team_id: int,
-        obj_in: DeploymentInfoInternalCreate
+        obj_in: DeploymentInfoInternalCreate,
+        *,
+        commit: bool = True,
     ) -> DeploymentInfo:
         """
         创建部署信息
@@ -77,8 +79,9 @@ class DeploymentInfoCRUD:
             **deployment_data
         )
         db.add(db_obj)
-        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
-        db.refresh(db_obj)
+        persist_guarding_duplicate(db, commit=commit, find_duplicate=find_duplicate)
+        if commit:
+            db.refresh(db_obj)
         return db_obj
 
     def get(

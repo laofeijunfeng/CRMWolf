@@ -309,7 +309,8 @@ def accept_submit(
                 or (choice is not None and (choice not in choices_allowed or values is not None))):
                 raise AssistantStateConflict("表单已变化，请读取最新任务")
         elif waiting.type in {"ENTITY_DEFERRED", "PROFILE_PROPOSALS"}:
-            if not isinstance(choice, str) or choice not in {c.get("id") for c in waiting.candidates} or text is not None:
+            issued = {candidate.get("id") for candidate in waiting.candidates}
+            if not isinstance(choice, str) or choice not in issued or text is not None:
                 raise AssistantStateConflict("请选择当前签发的操作")
         elif editing:
             if text is not None or choice is not None:
@@ -1014,6 +1015,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             )
             data = turn.input_json
             prior_proposal_keys = {receipt.get("proposal_key") for receipt in task.committed_json or []}
+            prior_receipts = len(task.committed_json or [])
             input_data = {key: value for key, value in data.items() if key in AssistantInput.model_fields}
             if isinstance(data.get("correction"), dict):
                 from app.schemas.assistant_conversation import ActivityCorrection
@@ -1108,8 +1110,12 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             db.refresh(turn)
             db.refresh(outcome.task)
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
-            from app.services.assistant.contracts import AcceptedProposalReceipt
+            from app.services.assistant.contracts import ENTITY_KINDS, AcceptedProposalReceipt, EntityCreateReceipt
 
+            for receipt in (outcome.task.committed_json or [])[prior_receipts:]:
+                if receipt.get("kind") in ENTITY_KINDS:
+                    data["entity_receipt"] = EntityCreateReceipt.model_validate(receipt).model_dump(mode="json")
+                    break
             for receipt in outcome.task.committed_json or []:
                 if receipt.get("kind") in {
                     "follow_up_task_create",

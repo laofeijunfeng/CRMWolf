@@ -9,7 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest  # noqa: TC001 -- Pydantic runtime models.
 from app.services.agent.semantic_plan import AgentSemanticPlan  # noqa: TC001 -- Pydantic runtime model.
 from app.services.agent.ui.schemas import AgentUIEnvelope  # noqa: TC001 -- Pydantic runtime model.
-from app.services.assistant.contracts import AcceptedProposalReceipt  # noqa: TC001 -- Pydantic runtime model.
+from app.services.assistant.contracts import (  # noqa: TC001 -- Pydantic runtime models.
+    AcceptedProposalReceipt,
+    EntityCreateReceipt,
+)
 
 
 class ConversationModel(BaseModel):
@@ -113,6 +116,7 @@ class ConversationMessage(ConversationModel):
     links: list[ConversationLink] = Field(default_factory=list, max_length=4)
     projection: ConversationProjection | None = None
     proposal_receipt: AcceptedProposalReceipt | None = Field(default=None, exclude=True)
+    entity_receipt: EntityCreateReceipt | None = Field(default=None, exclude=True)
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.
     error_code: str | None = Field(default=None, exclude=True)
     retryable: bool | None = Field(default=None, exclude=True)

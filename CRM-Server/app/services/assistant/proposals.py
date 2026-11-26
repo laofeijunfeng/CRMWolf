@@ -536,6 +536,11 @@ async def adjudicate_proposal_claim(
     task = db.query(AssistantTask).filter_by(id=claim.task_id, team_id=claim.team_id).one_or_none()
     if task is None or task.status != AssistantTaskStatus.ACTIVE or task.active_turn_id is not None:
         raise TaskStateConflictError("当前任务不能裁决此命令。")
+    if task.task_kind != "customer_activity":
+        from app.services.assistant.entity_tasks import adjudicate_entity_claim
+
+        await adjudicate_entity_claim(db, claim, task, operator_id=operator_id, reason=reason)
+        return
     waiting = load_waiting(task)
     if waiting is None or not waiting.action_id or waiting.field != task.waiting_field:
         raise TaskStateConflictError("缺少当前确认动作。")

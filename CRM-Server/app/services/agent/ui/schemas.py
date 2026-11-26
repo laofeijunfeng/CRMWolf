@@ -305,6 +305,7 @@ class InteractionField(AgentUIContractModel):
         "source_label": None,
         "depends_on_key": None,
         "error_message": None,
+        "suggestions": [],
     }
 
     key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
@@ -322,6 +323,8 @@ class InteractionField(AgentUIContractModel):
     source_label: str | None = Field(default=None, max_length=40)
     depends_on_key: str | None = Field(default=None, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     error_message: str | None = Field(default=None, min_length=1, max_length=500)
+    # Server-offered one-tap values for a text field (e.g. 生产环境 / 测试环境); tapping only fills the field.
+    suggestions: list[str] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_field_constraints(self) -> Self:
@@ -372,7 +375,10 @@ class OpenFollowUpDispositionCardItem(AgentUIContractModel):
 _CONFIRMATION_SECONDARY_ACTION = "request_edit"
 _DISPOSITION_SECONDARY_ACTION = "suppress_week"
 _CANCEL_REASON_VALUES = frozenset({"wrong_customer", "wrong_content", "should_not_record", "other"})
-_CANCELLABLE_FORM_ACTIONS = frozenset({"create_opportunity_proposal", "edit_confirmation"})
+_CANCELLABLE_FORM_ACTIONS = frozenset({
+    "create_opportunity_proposal", "edit_confirmation",
+    "create_contact", "create_invoice_title", "create_deployment", "create_customer",
+})
 
 
 class InteractionBlock(AgentUIBlockBase):

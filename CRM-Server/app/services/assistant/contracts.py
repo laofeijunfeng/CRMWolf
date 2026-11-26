@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
@@ -31,6 +31,7 @@ ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunit
 # `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
 EntityKind = Literal["contact_create", "invoice_title_create", "deployment_create", "customer_create"]
+ENTITY_KINDS: frozenset[str] = frozenset(get_args(EntityKind))
 # Direct opportunity creation reuses the opportunity form and proposal claim, so it is a task kind only.
 TaskKind = Literal["customer_activity", "opportunity_create"] | EntityKind
 # Server-assigned provenance of one entity form value; rendered as `InteractionField.source_label`.
@@ -285,6 +286,20 @@ class EntityFieldValue(BaseModel):
     source: FieldSource
     # Verified user phrase the value came from (DERIVED shows it as 按“…”).
     phrase: str | None = Field(default=None, max_length=200)
+    # Server-found alternatives the user must pick from (two numbers, an adjacent scale band, ...).
+    choices: list[str] = Field(default_factory=list, max_length=8)
+    # Draft-time problem shown on the field until the user submits (e.g. 原文少一位, 请核对).
+    warning: str | None = Field(default=None, max_length=200)
+
+
+class EntityQuote(BaseModel):
+    """One model-nominated value whose quote the server located in the user's own text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=64)
+    value: str = Field(min_length=1, max_length=2000)
+    quote: str = Field(min_length=1, max_length=2000)
 
 
 class EntityDraft(BaseModel):
@@ -296,6 +311,12 @@ class EntityDraft(BaseModel):
     customer_public_id: str | None = Field(default=None, max_length=64)
     customer_name: str | None = Field(default=None, max_length=200)
     fields: dict[str, EntityFieldValue] = Field(default_factory=dict)
+    # Inline 「新建客户」 form values while this task waits on its customer (child task created on write).
+    customer_fields: dict[str, EntityFieldValue] = Field(default_factory=dict)
+    # Verified extraction kept until the customer is bound; the form module prepares fields from it.
+    extracted: list[EntityQuote] = Field(default_factory=list, max_length=40)
+    # Last submitted values per form kind, so a refused submit re-renders exactly what the user typed.
+    submitted: dict[str, dict[str, str | bool | None]] = Field(default_factory=dict)
     source_text: str = Field(default="", max_length=20000)
     credentials_mentioned: bool = False
 
@@ -361,7 +382,8 @@ class TaskWaiting(BaseModel):
     hint: str | None = Field(default=None, max_length=400)
     temporal_target: TemporalWaitingTarget | None = None
     confirmation_payload: ConfirmationPayload | None = None
-    # Form waits (PROPOSAL_FORM, CONFIRMATION_EDIT, ENTITY_FORM) only: bumped on every form edit; submit_form must echo it.
+    # Form waits (PROPOSAL_FORM, CONFIRMATION_EDIT, ENTITY_FORM) only: bumped on every form edit;
+    # submit_form must echo it.
     form_revision: int | None = Field(default=None, ge=0)
     form_fields: list[dict[str, object]] | None = Field(default=None, max_length=20)
 

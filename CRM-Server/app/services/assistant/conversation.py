@@ -29,7 +29,13 @@ from app.schemas.assistant_conversation import (
     ConversationView,
     PreparedSubmission,
 )
-from app.services.assistant.contracts import AcceptedProposalReceipt, DraftField, TaskAuthority, TaskDraft
+from app.services.assistant.contracts import (
+    AcceptedProposalReceipt,
+    DraftField,
+    EntityCreateReceipt,
+    TaskAuthority,
+    TaskDraft,
+)
 from app.services.assistant.conversation_router import ConversationRootClassifier
 from app.services.assistant.failure_contract import (
     ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
@@ -205,6 +211,10 @@ class ConversationService:
                         AcceptedProposalReceipt.model_validate(data["proposal_receipt"])
                         if "proposal_receipt" in data else None
                     )
+                    entity_receipt = (
+                        EntityCreateReceipt.model_validate(data["entity_receipt"])
+                        if "entity_receipt" in data else None
+                    )
                     result.append(
                         ConversationMessage(
                             id=f"{row.public_id}:{turn.public_id}:{event.seq}",
@@ -223,11 +233,13 @@ class ConversationService:
                             else "task_completed"
                             if snapshot and snapshot.status == "COMPLETED" and snapshot.waiting is None
                             and proposal_receipt is None
+                            and entity_receipt is None
                             else None,
                             error_code=error_code if isinstance(error_code, str) else None,
                             retryable=retryable if isinstance(retryable, bool) else None,
                             projection=self._structured_projection(snapshot, card=card, is_activity=is_activity),
                             proposal_receipt=proposal_receipt,
+                            entity_receipt=entity_receipt,
                         )
                     )
                     followup = data.get("next_turn_id")

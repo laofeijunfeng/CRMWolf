@@ -31,7 +31,6 @@ from app.services.assistant.contracts import DraftField, TaskAuthority, TaskDraf
 from app.services.assistant.customer_resolution import resolve_customer_candidates_for_assistant
 from app.services.assistant.events import NullProgressReporter, ProgressReporter, stage
 from app.services.assistant.failure_contract import ACTIVITY_COMMIT_UNKNOWN_MESSAGE
-from app.services.assistant.intent import INTENT_FIELD
 from app.services.assistant.intake_flow import (
     _budget_exhausted,
     fail_model_stage,
@@ -39,6 +38,7 @@ from app.services.assistant.intake_flow import (
     kind_waiting,
     raise_quality_gate_failure,
 )
+from app.services.assistant.intent import INTENT_FIELD
 from app.services.assistant.llm import AssistantLLMError
 from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import (
@@ -154,7 +154,11 @@ class AssistantCoordinator:
 
         if user_input.kind == "cancel":
             return self._cancel(db, task)
-        if waiting is not None and waiting.type == AssistantWaitingType.OBJECT_SELECTION and waiting.field == INTENT_FIELD:
+        if (
+            waiting is not None
+            and waiting.type == AssistantWaitingType.OBJECT_SELECTION
+            and waiting.field == INTENT_FIELD
+        ):
             return await self._answer_intent(db, task, user_input, reporter)
         if task.task_kind != "customer_activity":
             from app.services.assistant.entity_tasks import handle_entity_task
@@ -238,7 +242,10 @@ class AssistantCoordinator:
         from app.services.assistant.turns import AssistantStateConflict, has_frozen_disposition_settlement
 
         if has_unresolved_proposal_claim(db, task):
-            raise AssistantStateConflict("商机提交结果待核对，暂不能取消。")
+            raise AssistantStateConflict(
+                "商机提交结果待核对，暂不能取消。" if task.task_kind == "customer_activity"
+                else "上次保存结果待核对，暂不能取消。"
+            )
         if has_frozen_disposition_settlement(task):
             raise AssistantStateConflict("历史任务结果待核对，暂不能取消。")
         result = apply_task_update(

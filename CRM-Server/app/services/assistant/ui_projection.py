@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from contextlib import suppress
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, TypeGuard, cast
 
@@ -42,6 +41,8 @@ from app.services.agent.ui.schemas import (
 )
 from app.services.assistant.activity_channel import CANONICAL_KINDS, kind_choice_candidates
 from app.services.assistant.activity_edit import activity_edit_time
+from app.services.assistant.entity_forms import ACTIONS as ENTITY_ACTIONS
+from app.services.assistant.entity_forms import module_for as entity_module_for
 from app.services.assistant.failure_contract import (
     ORGANIZE_FAILURE_MESSAGE,
     QUALITY_GATE_FAILURE_MESSAGE,
@@ -56,7 +57,13 @@ from app.utils.public_id import is_follow_up_task_public_id, is_opportunity_publ
 
 if TYPE_CHECKING:
     from app.schemas.assistant import AssistantTaskView
-    from app.services.assistant.contracts import ActivityPreview, ProposalCandidate, TaskDraft, TaskWaiting
+    from app.services.assistant.contracts import (
+        ActivityPreview,
+        EntityKind,
+        ProposalCandidate,
+        TaskDraft,
+        TaskWaiting,
+    )
 
 _RAW_HTML_RE = re.compile(r"<(?:[A-Za-z][^>]*|/[A-Za-z][^>]*|![^>]*|\?[^>]*)>")
 _FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -212,6 +219,7 @@ def _is_task_completion(message: ConversationMessage) -> bool:
         and (
             message.outcome in {"task_completed", "activity_written", "follow_up_disposition"}
             or message.proposal_receipt is not None
+            or message.entity_receipt is not None
         )
         and message.outcome != "failure"
         and message.error_code is None
@@ -223,6 +231,7 @@ def _is_completion_only(message: ConversationMessage) -> bool:
         _is_task_completion(message)
         and message.outcome not in {"activity_written", "follow_up_disposition"}
         and message.proposal_receipt is None
+        and message.entity_receipt is None
     )
 
 
@@ -242,7 +251,9 @@ def _normalize_task_completions(messages: list[ConversationMessage]) -> None:
             and task.public_id in last_completed
             and message.role == "assistant"
             and (
-                message.outcome in {"activity_written", "follow_up_disposition"} or message.proposal_receipt is not None
+                message.outcome in {"activity_written", "follow_up_disposition"}
+                or message.proposal_receipt is not None
+                or message.entity_receipt is not None
             )
             and message.error_code is None
         ):
@@ -307,7 +318,7 @@ def _split_activity_disposition(messages: list[ConversationMessage]) -> None:
         if identifier not in known:
             expanded.append(message.model_copy(update={
                 "id": identifier, "outcome": "follow_up_disposition", "projection": None, "ui": None,
-                "proposal_receipt": None,
+                "proposal_receipt": None, "entity_receipt": None,
                 "text": "历史跟进任务",
             }))
             known.add(identifier)
@@ -408,6 +419,7 @@ def _project_coverage(messages: list[ConversationMessage], live_id: str | None) 
                 message is not carrier
                 and message.projection
                 and message.proposal_receipt is None
+                and message.entity_receipt is None
                 and message.id != live_id
             ):
                 message.projection.visibility = "COVERED"
@@ -423,6 +435,7 @@ def _project_coverage(messages: list[ConversationMessage], live_id: str | None) 
                 message is not carrier
                 and message.projection
                 and message.proposal_receipt is None
+                and message.entity_receipt is None
                 and message.id != live_id
                 and _covers_disposition(carrier, message)
             ):
@@ -786,14 +799,24 @@ def _form_interaction(
     active: bool,
     action_id: str,
 ) -> InteractionBlock:
-    proposal = waiting.type == "PROPOSAL_FORM"
-    business_action = "create_opportunity_proposal" if proposal else "edit_confirmation"
-    expected_field = "proposal:opportunity_create" if proposal else "activity_write"
+    allowed: frozenset[str]
+    if waiting.type == "ENTITY_FORM":
+        kind = (waiting.field or "").removeprefix("entity:")
+        if kind not in ENTITY_ACTIONS:
+            raise ValueError("missing frozen form")
+        business_action = ENTITY_ACTIONS[cast("EntityKind", kind)]
+        expected_field = waiting.field
+        allowed = entity_module_for(kind).FIELD_KEYS
+    else:
+        proposal = waiting.type == "PROPOSAL_FORM"
+        business_action = "create_opportunity_proposal" if proposal else "edit_confirmation"
+        expected_field = "proposal:opportunity_create" if proposal else "activity_write"
+        allowed = _FORM_FIELDS[business_action]
     if waiting.field != expected_field or waiting.form_revision is None or not waiting.form_fields:
         raise ValueError("missing frozen form")
     fields = [InteractionField.model_validate(raw) for raw in waiting.form_fields]
     by_key = {field.key: field for field in fields}
-    if len(by_key) != len(fields) or not by_key.keys() <= _FORM_FIELDS[business_action]:
+    if len(by_key) != len(fields) or not by_key.keys() <= allowed:
         raise ValueError("duplicate or unsupported form field")
     for field in fields:
         if field.depends_on_key is not None:
@@ -827,7 +850,7 @@ def _waiting_interaction(
     submitted_kind: str | None = None,
 ) -> InteractionBlock:
     action_id = _action_id(waiting)
-    if waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT"}:
+    if waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT", "ENTITY_FORM"}:
         return _form_interaction(message, waiting, prompt=prompt, active=active, action_id=action_id)
     if waiting.type == "FOLLOW_UP_DISPOSITION":
         raise ValueError("missing frozen disposition batch")
@@ -1343,6 +1366,8 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             task_id=proposal.public_id if proposal.kind == "follow_up_task_create" else None,
             name=proposal.name,
         )
+    elif message.entity_receipt is not None:
+        title, detail, entity = _entity_result(message)
     elif message.outcome == "activity_written":
         title, detail = "活动已写入", _result_message(message)
         activity_id = message.projection.activity_public_id if message.projection else None
@@ -1351,7 +1376,7 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             if receipt.kind == "customer_activity" and (activity_id is None or receipt.public_id == activity_id)
         ), None) if message.task else None
         entity = (
-            _receipt_entity(activity.customer_public_id, customer_name=customer_name, activities=True)
+            _receipt_entity(activity.customer_public_id, customer_name=customer_name, tab="activities")
             if activity else None
         )
     else:
@@ -1369,7 +1394,7 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
 
 def _receipt_entity(
     customer_id: str | None, *, customer_name: str, opportunity_id: str | None = None,
-    task_id: str | None = None, name: str | None = None, activities: bool = False,
+    task_id: str | None = None, name: str | None = None, tab: str | None = None,
 ) -> EntityRef | None:
     """Link a receipt to its record; the link only exists when bound to the owning customer."""
     if customer_id is None or not _CUSTOMER_PUBLIC_ID_RE.fullmatch(customer_id):
@@ -1390,8 +1415,39 @@ def _receipt_entity(
     return EntityRef(
         ref_id=f"customer:{customer_id}", resource="customer", public_id=customer_id,
         display_name=_clip(customer_name, 200) or "客户",
-        attributes={"customer_tab": "activities"} if activities else None,
+        attributes={"customer_tab": tab} if tab else None,
     )
+
+
+_ENTITY_RESULTS: dict[str, tuple[str, str, str | None]] = {
+    "contact_create": ("联系人已保存", "联系人", "contacts"),
+    "invoice_title_create": ("开票抬头已保存", "开票抬头", "invoice_titles"),
+    "deployment_create": ("部署信息已保存", "部署信息", "deployments"),
+    "customer_create": ("客户已创建", "客户", None),
+}
+
+
+def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | None]:
+    """One directly created (or already existing) CRM record, linked on its customer page."""
+
+    receipt = message.entity_receipt
+    assert receipt is not None
+    title, label, tab = _ENTITY_RESULTS[receipt.kind]
+    name = _clip(_plain(receipt.name), 200)
+    entity_draft = message.task.draft.entity if message.task is not None else None
+    customer_name = (
+        name if receipt.kind == "customer_create"
+        else _plain(entity_draft.customer_name or "") if entity_draft is not None else ""
+    )
+    lines = [f"{label}：{name}" if name else label]
+    if receipt.kind != "customer_create" and customer_name:
+        lines.append(f"客户：{customer_name}")
+    if receipt.outcome == "existing":
+        title = f"{label}已存在，未重复创建"
+    if receipt.kind == "invoice_title_create":
+        lines.append("申请开票去发票管理")
+    entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
+    return title, "\n".join(lines), entity
 
 
 def _accepted_value(field: object) -> str:

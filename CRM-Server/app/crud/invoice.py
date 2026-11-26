@@ -99,7 +99,9 @@ class InvoiceTitleCRUD:
             detail=f"该客户下已有这个税号的开票抬头：{existing.title}",  # noqa: RUF001
         )
 
-    def create(self, db: Session, customer_id: int, obj_in: InvoiceTitleCreate, team_id: int) -> InvoiceTitle:
+    def create(
+        self, db: Session, customer_id: int, obj_in: InvoiceTitleCreate, team_id: int, *, commit: bool = True
+    ) -> InvoiceTitle:
         values = obj_in.model_dump()
         taxpayer_id = values["taxpayer_id"] = normalize_taxpayer_id(values["taxpayer_id"])
 
@@ -111,8 +113,9 @@ class InvoiceTitleCRUD:
             raise duplicate
         db_obj = InvoiceTitle(customer_id=customer_id, team_id=team_id, **values)
         db.add(db_obj)
-        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
-        db.refresh(db_obj)
+        persist_guarding_duplicate(db, commit=commit, find_duplicate=find_duplicate)
+        if commit:
+            db.refresh(db_obj)
         return db_obj
 
     def update(self, db: Session, db_obj: InvoiceTitle, obj_in: InvoiceTitleUpdate) -> InvoiceTitle:
