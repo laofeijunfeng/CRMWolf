@@ -40,6 +40,7 @@ from app.services.assistant.intake_flow import (
 )
 from app.services.assistant.intent import INTENT_FIELD
 from app.services.assistant.llm import AssistantLLMError
+from app.services.assistant.segmented_structure import SINGLE_CALL_LIMIT
 from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import (
     InvalidTaskTransitionError,
@@ -1757,7 +1758,10 @@ class AssistantCoordinator:
         reporter.stage_start(mk_stage("classify"))
         started = time.monotonic()
         try:
-            decision = await self._structurer.classify(db, team_id=task.team_id, user_text=user_text)
+            # The opening of a long transcript decides its channel; noise is still recorded on the full text.
+            decision = await self._structurer.classify(
+                db, team_id=task.team_id, user_text=user_text[:SINGLE_CALL_LIMIT]
+            )
         except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError) as exc:
             fail_model_stage(db, task, exc, stage="classify", draft=draft)
         reporter.stage_done(mk_stage("classify"), ms=int((time.monotonic() - started) * 1000))

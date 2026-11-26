@@ -7,10 +7,22 @@ from app.models.assistant import AssistantTask
 from app.services.assistant.coordinator import AssistantCoordinator, AssistantInput
 from app.services.assistant.events import SSEProgressReporter
 from app.services.assistant.failure_contract import AssistantStageFailure
+from app.services.assistant.follow_up_context import RealFollowUpContext
 from app.services.assistant.llm import AssistantLLMError
-from app.services.assistant.llm_contracts import ModelDraftAction, StructureDraftResult
-from app.services.assistant.segmented_structure import SEGMENT_SIZE, merge_structured, split_transcript
-from tests.unit.test_assistant_stage_events import Chooser, PassGate, Structurer, _task, db_session  # noqa: F401
+from app.services.assistant.llm_contracts import KindDecision, ModelDraftAction, StructureDraftResult
+from app.services.assistant.segmented_structure import (
+    SEGMENT_SIZE,
+    SINGLE_CALL_LIMIT,
+    merge_structured,
+    split_transcript,
+)
+from tests.unit.test_assistant_stage_events import (  # noqa: F401
+    Chooser,
+    PassGate,
+    Structurer,
+    _task,
+    db_session,
+)
 
 # ruff: noqa: RUF001
 
@@ -156,3 +168,24 @@ def test_input_over_100k_is_refused():
     AssistantInput(kind="text", text="呢" * 100_000)
     with pytest.raises(ValidationError):
         AssistantInput(kind="text", text="呢" * 100_001)
+
+
+async def test_follow_up_channel_is_classified_from_the_opening_of_a_long_transcript(db_session):  # noqa: F811
+    seen: list[str] = []
+
+    class Recording(Structurer):
+        async def classify(self, db, *, team_id, user_text):
+            seen.append(user_text)
+            return KindDecision(kind="UNCLEAR")
+
+    text = _transcript(30_000)
+    coordinator = AssistantCoordinator(
+        Chooser(), structurer=Recording(), quality_gate=PassGate(), follow_up=RealFollowUpContext(None)
+    )
+
+    outcome = await coordinator.handle_task(
+        db_session, _task(db_session), AssistantInput(kind="text", text=text), reporter=SSEProgressReporter()
+    )
+
+    assert seen == [text[:SINGLE_CALL_LIMIT]]
+    assert outcome.reply.waiting is not None
