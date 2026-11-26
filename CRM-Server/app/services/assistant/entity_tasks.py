@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from time import monotonic
 from typing import TYPE_CHECKING, NoReturn
 
@@ -18,7 +19,13 @@ from sqlalchemy import update as sql_update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
-from app.services.assistant.contracts import EntityCreateReceipt, EntityDraft, EntityQuote, TaskWaiting
+from app.services.assistant.contracts import (
+    EntityCreateReceipt,
+    EntityDraft,
+    EntityFieldValue,
+    EntityQuote,
+    TaskWaiting,
+)
 from app.services.assistant.crm_effects import AssistantCRMCommand, checked_effect, record_effect
 from app.services.assistant.entity_forms import (
     ACTIONS,
@@ -46,6 +53,8 @@ if TYPE_CHECKING:
     from app.core.exceptions import DuplicateRecordError
     from app.models.customer import Customer
     from app.models.user import User
+    from app.schemas.assistant import PendingEntityDraftView
+    from app.services.assistant.contracts import ProfileProposalItem
     from app.services.assistant.coordinator import AssistantInput, CoordinatorOutcome
     from app.services.assistant.events import ProgressReporter
 
@@ -64,6 +73,46 @@ _NAME_KEYS = {
     "opportunity_create": "opportunity_name",
 }
 _NOT_SAVED_HINT = "没有保存，表单内容都还在"
+# Parking an open form (D20): the draft waits in 「待补充」 with no expiry and nothing written.
+_DEFER_PHRASES = ("稍后再补", "先放着", "晚点再补", "回头再补")
+RESUME = "resume"
+# Prepared values the user did not say: a supplement never applies them (D18).
+_UNSAID_SOURCES = frozenset({"DEFAULT", "CUSTOMER_DEFAULT", "AUTO_NAME"})
+
+
+def is_defer_text(text: str | None) -> bool:
+    return bool(text) and any(phrase in text for phrase in _DEFER_PHRASES)
+
+
+def pending_drafts(db: Session, *, team_id: int, user_id: int) -> list[PendingEntityDraftView]:
+    """The owner's ACTIVE direct-create tasks, most recently touched first (D20)."""
+
+    from app.schemas.assistant import PendingEntityDraftView
+
+    tasks = (
+        db.query(AssistantTask)
+        .filter(
+            AssistantTask.team_id == team_id,
+            AssistantTask.user_id == user_id,
+            AssistantTask.status == AssistantTaskStatus.ACTIVE,
+            AssistantTask.task_kind.in_(tuple(ACTIONS)),
+        )
+        .order_by(AssistantTask.last_modified_time.desc(), AssistantTask.id.desc())
+        .limit(50)
+        .all()
+    )
+    views = []
+    for task in tasks:
+        waiting = load_waiting(task)
+        entity = load_draft(task).entity
+        views.append(PendingEntityDraftView(
+            public_id=task.public_id, task_kind=task.task_kind, label=module_for(task.task_kind).LABEL,
+            customer_name=entity.customer_name if entity is not None else None,
+            waiting_type=waiting.type if waiting is not None else None,
+            prompt=waiting.prompt if waiting is not None else None,
+            last_modified_time=task.last_modified_time,
+        ))
+    return views
 
 
 class _Quoted(BaseModel):
@@ -232,6 +281,23 @@ async def handle_entity_task(
         return await _intake(db, task, module, user, user_input.text or task.goal, reporter)
     if waiting.type == AssistantWaitingType.ENTITY_FORM and user_input.kind == "submit_form":
         return await _submit_form(db, task, waiting, module, user, user_input, reporter)
+    if waiting.type == AssistantWaitingType.ENTITY_FORM and user_input.kind == "text" and user_input.text:
+        if is_defer_text(user_input.text):
+            return _defer(db, task, waiting, module)
+        return await _supplement(db, task, waiting, module, user, user_input.text, reporter)
+    if waiting.type == AssistantWaitingType.ENTITY_DEFERRED and user_input.kind == "submit_field":
+        if user_input.choice == "cancel":
+            return cancel_entity_task(db, task)
+        if user_input.choice == RESUME:
+            return _resume(db, task, waiting, module, user)
+    if waiting.type == AssistantWaitingType.ENTITY_DEFERRED and user_input.kind == "text" and user_input.text:
+        if is_defer_text(user_input.text):
+            return _outcome(task, not_written(waiting.prompt))
+        resumed = _resume(db, task, waiting, module, user)
+        reopened = load_waiting(resumed.task)
+        if reopened is None or reopened.type != AssistantWaitingType.ENTITY_FORM:
+            return resumed
+        return await _supplement(db, resumed.task, reopened, module, user, user_input.text, reporter)
     if waiting.field == CUSTOMER_FIELD and waiting.type == AssistantWaitingType.OBJECT_SELECTION:
         return _select_customer(db, task, module, user, user_input.choice)
     if waiting.field == CUSTOMER_FIELD and waiting.type == AssistantWaitingType.FIELD and user_input.text:
@@ -366,7 +432,7 @@ def _bind_and_issue(
 def _issue_form(
     db: Session, task: AssistantTask, module: EntityFormModule, user: User, entity: EntityDraft, *,
     action_name: str, inline: bool = False, errors: dict[str, str] | None = None, hint: str | None = None,
-    fence: bool = False,
+    fence: bool = False, flag_cleared: bool = False,
 ) -> CoordinatorOutcome:
     form = module_for(_CUSTOMER_KIND) if inline else module
     customer = None if form.KIND == _CUSTOMER_KIND else _customer(db, task, entity.customer_public_id)
@@ -380,11 +446,20 @@ def _issue_form(
         notes.append("账号密码不会保存")
     prompt = f"为{customer.account_name}新建{form.LABEL}" if customer is not None else f"新建{form.LABEL}"
     revision = task.version
+    submitted = entity.submitted.get(form.KIND)
+    form_fields = form.fields(ctx, values, submitted, errors or {})[:20]
+    if flag_cleared:
+        # Options that disappeared since the draft was parked are cleared by render; say so (D20).
+        cleared = [
+            str(field["label"]) for field in form_fields
+            if _empty(field.get("default_value")) and not _empty(_current(values, submitted, str(field["key"])))
+        ]
+        if cleared:
+            notes.append(f"待补充：{'、'.join(cleared)}")
     waiting = TaskWaiting(
         type=AssistantWaitingType.ENTITY_FORM, field=f"entity:{form.KIND}",
         question_id=f"q_entity_{task.public_id}_{revision}", prompt=prompt[:2000], form_revision=revision,
-        form_fields=form.fields(ctx, values, entity.submitted.get(form.KIND), errors or {})[:20],
-        hint="；".join(notes)[:400] or None,
+        form_fields=form_fields, hint="；".join(notes)[:400] or None,
     )
     result = apply_task_update(db, task, TaskUpdate(
         require_no_active_turn=fence, draft=_with_entity(task, entity), waiting=waiting,
@@ -400,6 +475,125 @@ def _submitted(module: EntityFormModule, values: dict[str, JsonValue] | None) ->
     return {key: item for key, item in (values or {}).items() if key in module.FIELD_KEYS}
 
 
+def _empty(item: object) -> bool:
+    return item is None or item == "" or item == []
+
+
+def _current(
+    values: dict[str, EntityFieldValue], submitted: dict[str, JsonValue] | None, key: str,
+) -> object:
+    """What the form shows for ``key``: the last submitted value, else the drafted one."""
+
+    if submitted is not None and key in submitted:
+        return submitted[key]
+    drafted = values.get(key)
+    return drafted.value if drafted is not None else None
+
+
+# ---------------------------------------------------------------------------
+# 待补充 (D20) and typed supplements (D18)
+# ---------------------------------------------------------------------------
+
+
+def _defer(db: Session, task: AssistantTask, waiting: TaskWaiting, module: EntityFormModule) -> CoordinatorOutcome:
+    prompt = f"{module.LABEL}草稿先放着，随时可以继续"
+    # Keeps the form's field so an inline customer form resumes inline; the draft is untouched.
+    result = apply_task_update(db, task, TaskUpdate(
+        waiting=TaskWaiting(
+            type=AssistantWaitingType.ENTITY_DEFERRED, field=waiting.field,
+            question_id=f"q_defer_{task.public_id}_{task.version}", prompt=prompt,
+            candidates=[{"id": RESUME, "label": "继续填写"}, {"id": "cancel", "label": "不要了"}],
+        ),
+        action_actor="USER", action_name="defer_entity_form",
+    ))
+    return _outcome(result.task, not_written(f"{prompt}，在「待补充」里找到它"))
+
+
+def _resume(
+    db: Session, task: AssistantTask, waiting: TaskWaiting, module: EntityFormModule, user: User,
+) -> CoordinatorOutcome:
+    """Re-issue the parked form with fresh permission, duplicates and options; never re-prepares values."""
+
+    entity = _entity(task)
+    inline = waiting.field == f"entity:{_CUSTOMER_KIND}" and module.KIND != _CUSTOMER_KIND
+    customer = None
+    if module.KIND != _CUSTOMER_KIND and not inline:
+        customer = _customer(db, task, entity.customer_public_id)
+        if customer is None:
+            return _resolve_customer(db, task, module, user, entity.model_copy(update={"customer_public_id": None}))
+    refusal = _permission_refusal(db, task, _CUSTOMER_KIND if inline else module.KIND, customer)
+    if refusal is not None:
+        return _refuse(db, task, refusal)
+    return _issue_form(db, task, module, user, entity, inline=inline, flag_cleared=True,
+                       action_name="resume_entity_form")
+
+
+def _named_keys(form: EntityFormModule, waiting: TaskWaiting, text: str) -> set[str]:
+    """Keys the user named outright (「税号是…」): those override a filled value."""
+
+    aliases: dict[str, set[str]] = {}
+    for key, guide in form.EXTRACT_KEYS.items():
+        head = re.split("[，；（]", guide, maxsplit=1)[0]
+        aliases[key] = {alias.strip() for alias in head.split("/") if 1 < len(alias.strip()) <= 8}
+    for field in waiting.form_fields or []:
+        if isinstance(field.get("key"), str) and isinstance(field.get("label"), str):
+            aliases.setdefault(field["key"], set()).add(field["label"])
+    return {key for key, names in aliases.items() if any(name in text for name in names)}
+
+
+async def _supplement(
+    db: Session, task: AssistantTask, waiting: TaskWaiting, module: EntityFormModule, user: User, text: str,
+    reporter: ProgressReporter,
+) -> CoordinatorOutcome:
+    """Typed text fills empty fields and named ones; it re-issues the form and never writes (D18)."""
+
+    from app.services.assistant.llm import AssistantLLMError
+
+    inline = waiting.field == f"entity:{_CUSTOMER_KIND}" and module.KIND != _CUSTOMER_KIND
+    form = module_for(_CUSTOMER_KIND) if inline else module
+    entity = _entity(task)
+    source = text[:20000]
+    started = monotonic()
+    reporter.stage_start(stage("structure"))
+    try:
+        extraction = await extract_entity(db, task, form, source)
+        reporter.stage_done(stage("structure"), ms=int((monotonic() - started) * 1000))
+    except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError):
+        logger.warning("assistant entity supplement failed task=%s", task.public_id, exc_info=True)
+        reporter.stage_failed(stage("structure"))
+        return _issue_form(db, task, module, user, entity, inline=inline, hint="没能整理这段补充，请直接填写",
+                           action_name="supplement_entity_form")
+    quotes, _ = _verified(form, source, extraction)
+    customer = None if form.KIND == _CUSTOMER_KIND else _customer(db, task, entity.customer_public_id)
+    if form.KIND != _CUSTOMER_KIND and customer is None:
+        return _ask_customer(db, task, entity.model_copy(update={"customer_public_id": None}), "存到哪个客户？")
+    values = entity.customer_fields if inline else entity.fields
+    submitted = entity.submitted.get(form.KIND)
+    named = _named_keys(form, waiting, source)
+    applied: dict[str, EntityFieldValue] = {}
+    if quotes:
+        for key, item in form.prepare(FormContext(db, task, user, customer, entity), quotes).items():
+            if item.source in _UNSAID_SOURCES or (item.value is None and not item.choices):
+                continue
+            if key in named or _empty(_current(values, submitted, key)):
+                applied[key] = item.model_copy(update={"source": "SUPPLEMENT"})
+    if not applied:
+        return _issue_form(db, task, module, user, entity, inline=inline,
+                           hint="这段话里没有能补到表单的内容", action_name="supplement_entity_form")
+    merged = {**values, **applied}
+    update: dict[str, object] = {"customer_fields": merged} if inline else {
+        "fields": merged, "extracted": [*entity.extracted, *quotes][-40:],
+    }
+    if submitted is not None:
+        # Applied keys leave the submitted snapshot so the form shows them as 「刚补充」.
+        kept = {key: item for key, item in submitted.items() if key not in applied}
+        update["submitted"] = {**entity.submitted, form.KIND: kept}
+    labels = {field.get("key"): field.get("label") for field in waiting.form_fields or []}
+    names = "、".join(str(labels.get(key) or key) for key in applied)
+    return _issue_form(db, task, module, user, entity.model_copy(update=update), inline=inline,
+                       hint=f"刚补充：{names}，核对后保存", action_name="supplement_entity_form")
+
+
 async def _submit_form(
     db: Session, task: AssistantTask, waiting: TaskWaiting, module: EntityFormModule, user: User,
     user_input: AssistantInput, reporter: ProgressReporter,
@@ -407,6 +601,8 @@ async def _submit_form(
     inline = waiting.field == f"entity:{_CUSTOMER_KIND}" and module.KIND != _CUSTOMER_KIND
     if user_input.choice == "cancel":
         return cancel_entity_task(db, task)
+    if user_input.choice == "defer":
+        return _defer(db, task, waiting, module)
     if user_input.choice is not None:
         raise InvalidTaskTransitionError("当前表单不接受这个操作")
     form = module_for(_CUSTOMER_KIND) if inline else module
@@ -701,6 +897,37 @@ def _attach_inline_customer(db: Session, parent: AssistantTask, receipt: dict[st
         draft=_with_entity(parent, entity), action_actor="USER", action_name="inline_customer_create",
         action_result={"kind": _CUSTOMER_KIND, "public_id": receipt["public_id"]},
     ))
+
+
+def open_profile_child(db: Session, parent: AssistantTask, item: ProfileProposalItem) -> AssistantTask:
+    """「去补充」 on a post-activity profile item: its own entity task under the activity task (D29).
+
+    The child is bound to the activity's customer under the CRM's own permission rules and confirms
+    separately; it never writes here.
+    """
+
+    from app.services.assistant.contracts import TaskDraft
+    from app.services.assistant.task_state import load_authority
+
+    child = AssistantTask(
+        team_id=parent.team_id, user_id=parent.user_id, status=AssistantTaskStatus.ACTIVE, task_kind=item.kind,
+        parent_task_id=parent.id, goal=item.quote[:2000], draft_json=TaskDraft().model_dump(mode="json"),
+        waiting_json={}, authority_json={}, committed_json=[], version=0,
+    )
+    db.add(child)
+    db.flush()
+    module = module_for(item.kind)
+    entity = EntityDraft(kind=item.kind, extracted=item.extracted, source_text=item.quote[:20000])
+    user = _user(db, child)
+    if user is None:
+        _refuse(db, child, "你的账号已不在当前团队或已停用")
+        return child
+    customer = _customer(db, child, load_authority(parent).customer_public_id)
+    if customer is not None:
+        _bind_and_issue(db, child, module, user, entity, customer)
+    else:
+        _ask_customer(db, child, entity, "存到哪个客户？")
+    return child
 
 
 def _can_view_customer(db: Session, task: AssistantTask, user: User, customer: Customer) -> bool:

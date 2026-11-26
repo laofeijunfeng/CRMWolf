@@ -69,6 +69,7 @@ if TYPE_CHECKING:
 
     from app.models.assistant import AssistantTask
     from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
+    from app.services.assistant.contracts import TaskWaiting
 
 
 class RootClassifier(Protocol):
@@ -663,6 +664,9 @@ class ConversationService:
                 lease_version=lease_version,
             )
         plan = decision.semantic_plan
+        supplemented = self._route_entity_text(db, conversation, entry, decision, lease_version=lease_version)
+        if supplemented is not None:
+            return supplemented
         verdict = judge_intent(plan, decision.confidence)
         if verdict.route == "refuse":
             return self._finish_message(
@@ -736,6 +740,62 @@ class ConversationService:
             target=target if decision.boundary == "CONTINUE" else None,
             lease_version=lease_version,
         )
+
+    def _route_entity_text(
+        self, db: Session, conversation: AssistantConversation, entry: AssistantConversationEntry,
+        decision: ConversationDecision, *, lease_version: int,
+    ) -> ConversationReply | None:
+        """D19: the open entity form takes the text first; else exactly one parked draft may resume."""
+
+        from app.services.assistant.entity_tasks import is_defer_text
+        from app.services.assistant.intent import ENTITY_LABELS, ENTITY_TASK_KINDS
+
+        plan = decision.semantic_plan
+        text = entry.user_text
+        supplementing = plan.speech_act in {"PROVIDE_SUPPLEMENT", "CORRECT"}
+        focused = crud.owned_task(db, conversation, decision.target_task_public_id) or crud.owned_task(
+            db, conversation, conversation.focused_task_public_id
+        )
+        waiting = load_waiting(focused) if focused is not None else None
+        if (
+            focused is not None and waiting is not None and focused.status == "ACTIVE"
+            and focused.task_kind != "customer_activity" and focused.active_turn_id is None
+            and waiting.type == "ENTITY_FORM" and (supplementing or is_defer_text(text))
+        ):
+            return self._accept_text(db, conversation, entry, focused, waiting, lease_version=lease_version)
+        if plan.speech_act != "PROVIDE_SUPPLEMENT" or (
+            focused is not None and focused.status == "ACTIVE" and focused.task_kind == "customer_activity"
+        ):
+            return None
+        drafts = crud.deferred_entity_tasks(db, conversation)
+        kind = ENTITY_TASK_KINDS.get(plan.business_object)
+        if kind is not None:
+            drafts = [task for task in drafts if task.task_kind == kind]
+        named = [task for task in drafts if (name := _draft_customer(task)) and name in text]
+        drafts = named or drafts
+        if not drafts:
+            return None
+        if len(drafts) > 1:
+            listed = "、".join(
+                f"{_draft_customer(task) or '未定客户'}的{ENTITY_LABELS[task.task_kind]}" for task in drafts[:5]
+            )
+            return self._finish_message(db, conversation, entry, not_written(
+                f"待补充里有几份草稿：{listed}。要补到哪一份？请先在「待补充」里打开它"
+            ), lease_version=lease_version)
+        task = drafts[0]
+        parked = load_waiting(task)
+        if task.active_turn_id is not None or parked is None:
+            return None
+        return self._accept_text(db, conversation, entry, task, parked, lease_version=lease_version)
+
+    def _accept_text(
+        self, db: Session, conversation: AssistantConversation, entry: AssistantConversationEntry,
+        task: AssistantTask, waiting: TaskWaiting, *, lease_version: int,
+    ) -> ConversationReply:
+        return self._accept(db, conversation, entry, task, SubmitInputRequest(
+            kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}",
+            action_id=waiting.action_id, expected_version=waiting.expected_version,
+        ), lease_version=lease_version)
 
     async def choose(
         self, db: Session, *, team_id: int, user_id: int, request: ConversationChoiceRequest
@@ -1158,3 +1218,8 @@ class ConversationService:
             task,
             lease_version=lease_version,
         )
+
+
+def _draft_customer(task: AssistantTask) -> str | None:
+    entity = load_draft(task).entity
+    return entity.customer_name if entity is not None else None

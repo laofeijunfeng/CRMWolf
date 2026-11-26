@@ -99,6 +99,7 @@ def _extraction(customer: str = "睿狐科技") -> EntityExtraction:
 
 async def _start(
     db, monkeypatch, extraction: EntityExtraction, *, source: str = SOURCE, kind: str = "contact_create",
+    key: str = "entity-create",
 ) -> AssistantTask:
     session, factory, _ = db
 
@@ -106,9 +107,9 @@ async def _start(
         return extraction
 
     monkeypatch.setattr(entity_tasks, "extract_entity", extract)
-    task = turns.accept_create(session, team_id=1, user_id=2, key="entity-create", goal=source, task_kind=kind)
+    task = turns.accept_create(session, team_id=1, user_id=2, key=key, goal=source, task_kind=kind)
     turn, accepted = turns.accept_submit(
-        session, task=task, key="entity-text", input_data={"kind": "text", "text": source, "choice": None},
+        session, task=task, key=f"{key}-text", input_data={"kind": "text", "text": source, "choice": None},
         action_id=None, expected_version=None,
     )
     assert accepted
@@ -415,3 +416,234 @@ async def test_indistinguishable_opportunity_is_never_created_twice(db, monkeypa
     assert task.status == AssistantTaskStatus.ACTIVE
     waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
     assert waited.data_json["message"].startswith("已存在相同或无法区分的商机")
+
+
+# ---------------------------------------------------------------------------
+# D18 typed supplements, D20 待补充
+# ---------------------------------------------------------------------------
+
+
+async def _say(db, monkeypatch, task: AssistantTask, text: str, extraction: EntityExtraction, key: str) -> None:
+    async def extract(*args):
+        return extraction
+
+    monkeypatch.setattr(entity_tasks, "extract_entity", extract)
+    await _submit(db, task, key, {"kind": "text", "text": text})
+
+
+@pytest.mark.asyncio
+async def test_typed_supplement_fills_empty_fields_overrides_named_ones_and_never_writes(db, monkeypatch):
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    said = "她叫王敏敏，职位是采购总监，邮箱 wm@ruihu.example"
+
+    await _say(db, monkeypatch, task, said, EntityExtraction.model_validate({"fields": [
+        {"key": "name", "value": "王敏敏", "quote": "王敏敏"},
+        {"key": "position", "value": "采购总监", "quote": "采购总监"},
+        {"key": "email", "value": "wm@ruihu.example", "quote": "wm@ruihu.example"},
+    ]}), "entity-supplement")
+
+    form = _form(task)
+    assert (form["email"]["default_value"], form["email"]["source_label"]) == ("wm@ruihu.example", "刚补充")
+    assert (form["position"]["default_value"], form["position"]["source_label"]) == ("采购总监", "刚补充")
+    assert form["name"]["default_value"] == "王敏", "an unnamed filled field keeps its value"
+    assert form["mobile"]["default_value"] == "13800138000"
+    assert session.query(Contact).count() == 0 and _claims(session) == []
+
+
+@pytest.mark.asyncio
+async def test_deferred_draft_is_listed_and_resumes_with_its_values(db, monkeypatch):
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+
+    await _submit(db, task, "entity-defer", {
+        "kind": "submit_form", "choice": "defer", "form_revision": load_waiting(task).form_revision,
+    })
+
+    assert (task.status, load_waiting(task).type) == (AssistantTaskStatus.ACTIVE, "ENTITY_DEFERRED")
+    drafts = entity_tasks.pending_drafts(session, team_id=1, user_id=2)
+    assert [(d.public_id, d.label, d.customer_name) for d in drafts] == [(task.public_id, "联系人", "睿狐科技")]
+    assert entity_tasks.pending_drafts(session, team_id=1, user_id=9) == []
+
+    await _submit(db, task, "entity-resume", {"kind": "submit_field", "choice": "resume"})
+
+    form = _form(task)
+    assert form["name"]["default_value"] == "王敏" and form["position"]["default_value"] == "采购经理"
+    assert session.query(Contact).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_defer_phrase_parks_the_form_and_resume_rechecks_permission(db, monkeypatch):
+    session, _, permissions = db
+    task = await _start(db, monkeypatch, _extraction())
+
+    await _submit(db, task, "entity-defer-text", {"kind": "text", "text": "手机号稍后再补"})
+    assert load_waiting(task).type == "ENTITY_DEFERRED"
+    permissions.clear()
+
+    await _submit(db, task, "entity-resume", {"kind": "submit_field", "choice": "resume"})
+
+    assert task.status == AssistantTaskStatus.FAILED
+    assert session.query(Contact).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_supplement_never_fills_two_parked_drafts_at_once(db, monkeypatch):
+    from app.services.assistant.conversation import ConversationService
+    from tests.unit.test_assistant_conversation import Classifier, decision, text
+
+    session, _, _ = db
+    drafts = [
+        await _start(db, monkeypatch, _extraction(), key="entity-create-a"),
+        await _start(db, monkeypatch, _extraction(), key="entity-create-b"),
+    ]
+    for index, task in enumerate(drafts):
+        await _submit(db, task, f"entity-defer-{index}", {"kind": "text", "text": "先放着"})
+    service = ConversationService(classifier=Classifier(decision(speech="PROVIDE_SUPPLEMENT", obj="CONTACT")))
+    initial = service.open(session, team_id=1, user_id=2)
+
+    response = await service.submit_text(
+        session, team_id=1, user_id=2, request=text(initial.version, "睿狐科技那个联系人邮箱是 wm@ruihu.example"),
+    )
+
+    assert response.submission is None
+    assert "要补到哪一份" in response.conversation.messages[-1].text
+    for task in drafts:
+        session.refresh(task)
+        assert load_waiting(task).type == "ENTITY_DEFERRED"
+    assert session.query(Contact).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_supplement_in_conversation_resumes_the_only_parked_draft(db, monkeypatch):
+    from app.services.assistant.conversation import ConversationService
+    from tests.unit.test_assistant_conversation import Classifier, decision, text
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    await _submit(db, task, "entity-defer", {"kind": "text", "text": "先放着"})
+    service = ConversationService(classifier=Classifier(decision(speech="PROVIDE_SUPPLEMENT", obj="CONTACT")))
+    initial = service.open(session, team_id=1, user_id=2)
+
+    response = await service.submit_text(
+        session, team_id=1, user_id=2, request=text(initial.version, "睿狐科技那个联系人邮箱是 wm@ruihu.example"),
+    )
+
+    assert response.submission is not None and response.submission.task_public_id == task.public_id
+    assert session.query(AssistantTask).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# D29 跟进后资料
+# ---------------------------------------------------------------------------
+
+MEETING = "今天和睿狐科技开会，新对接人王敏，采购经理，手机 138 0013 8000；开票抬头用睿狐科技有限公司"
+
+
+def _committed_activity(session) -> AssistantTask:
+    from app.services.assistant.contracts import DraftField, TaskDraft
+
+    draft = TaskDraft(source_segments=[MEETING], content=DraftField(status="ACCEPTED", value=MEETING))
+    task = AssistantTask(
+        team_id=1, user_id=2, status=AssistantTaskStatus.ACTIVE, goal=MEETING,
+        draft_json=draft.model_dump(mode="json"),
+        authority_json={"customer_public_id": "cus_ruihu"},
+        committed_json=[{"kind": "customer_activity", "public_id": "act_1", "customer_public_id": "cus_ruihu"}],
+    )
+    session.add(task)
+    session.commit()
+    return task
+
+
+@pytest.fixture
+def profile_items(monkeypatch):
+    """The model names the invoice title first; the list must follow the rep's own order."""
+
+    from app.services.assistant import profile_proposals
+    from app.services.assistant.profile_proposals import ProfileExtraction
+
+    async def extract(*args):
+        return ProfileExtraction.model_validate({"items": [
+            {"kind": "invoice_title_create", "summary": "开票抬头：睿狐科技有限公司",
+             "quote": "开票抬头用睿狐科技有限公司",
+             "fields": [{"key": "title", "value": "睿狐科技有限公司", "quote": "睿狐科技有限公司"}]},
+            {"kind": "contact_create", "summary": "新联系人王敏", "quote": "新对接人王敏，采购经理，手机 138 0013 8000",
+             "fields": [{"key": "name", "value": "王敏", "quote": "王敏"},
+                        {"key": "mobile", "value": "13800138000", "quote": "138 0013 8000"}]},
+            {"kind": "contact_create", "summary": "编造的联系人", "quote": "原文没有这句"},
+        ]})
+
+    async def next_proposal(db, task, *, reporter=None):
+        return task, "没有其他建议", True
+
+    monkeypatch.setattr(profile_proposals, "extract_profile_items", extract)
+    monkeypatch.setattr("app.services.assistant.proposals.offer_next_proposal", next_proposal)
+
+
+async def _answer(session, task: AssistantTask, user_input: dict[str, object]):
+    from app.services.assistant.coordinator import AssistantInput
+
+    outcome = await AssistantCoordinator(NoChooser()).handle_task(session, task, AssistantInput(**user_input))
+    session.commit()
+    session.refresh(task)
+    return outcome
+
+
+@pytest.mark.asyncio
+async def test_profile_items_follow_the_activity_and_each_opens_its_own_child(db, profile_items):
+    from app.services.assistant.presentation import task_view
+
+    session, _, _ = db
+    activity = _committed_activity(session)
+
+    listed = await _answer(session, activity, {"kind": "continue_proposals"})
+
+    assert listed.reply.card == "profile_proposals"
+    rows = task_view(activity, session).profile_proposals
+    assert [(row.kind, row.decision) for row in rows] == [
+        ("contact_create", "pending"), ("invoice_title_create", "pending"),
+    ], "utterance order, and the made-up quote is dropped"
+
+    await _answer(session, activity, {"kind": "submit_field", "choice": "go:0"})
+
+    child = session.query(AssistantTask).filter_by(task_kind="contact_create").one()
+    assert child.parent_task_id == activity.id
+    assert _form(child)["name"]["default_value"] == "王敏"
+    assert load_waiting(activity).type == "PROFILE_PROPOSALS", "the other row is still open"
+    row = task_view(activity, session).profile_proposals[0]
+    assert (row.child_task_public_id, row.child_waiting_type) == (child.public_id, "ENTITY_FORM")
+
+    finished = await _answer(session, activity, {"kind": "submit_field", "choice": "skip:1"})
+
+    assert finished.reply.message.endswith("没有其他建议"), "the opportunity proposals follow the list"
+    assert session.query(Contact).count() == 0, "去补充 opens a form; it never writes"
+
+
+@pytest.mark.asyncio
+async def test_a_refused_profile_item_never_affects_the_others_or_the_activity(db, profile_items):
+    from app.services.assistant.presentation import task_view
+
+    session, _, _ = db
+    activity = _committed_activity(session)
+    await _answer(session, activity, {"kind": "continue_proposals"})
+
+    await _answer(session, activity, {"kind": "submit_field", "choice": "go:1"})  # no invoice-title permission
+    await _answer(session, activity, {"kind": "submit_field", "choice": "go:0"})
+
+    rows = task_view(activity, session).profile_proposals
+    assert [row.child_status for row in rows] == ["ACTIVE", "FAILED"]
+    assert activity.status == AssistantTaskStatus.ACTIVE
+    assert activity.committed_json[0]["public_id"] == "act_1"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_activity_lists_no_profile_items(db, profile_items):
+    session, _, _ = db
+    activity = _committed_activity(session)
+    activity.committed_json = []
+    session.commit()
+
+    outcome = await _answer(session, activity, {"kind": "cancel"})
+
+    assert outcome.reply.message.endswith("资料可以直接让我单独保存")
+    assert session.query(AssistantTask).count() == 1

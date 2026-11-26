@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import TYPE_CHECKING, Protocol
 
@@ -169,6 +169,9 @@ class AssistantCoordinator:
                 item.get("kind") == "customer_activity" for item in task.committed_json or []
             ):
                 raise InvalidTaskTransitionError("proposal continuation requires a committed activity")
+            listed = await self._offer_profile_or_none(db, task, reporter)
+            if listed is not None:
+                return listed
             handled = await self._open_follow_up_or_none(db, task, reporter)
             if handled is not None:
                 return handled
@@ -248,6 +251,11 @@ class AssistantCoordinator:
             )
         if has_frozen_disposition_settlement(task):
             raise AssistantStateConflict("历史任务结果待核对，暂不能取消。")
+        # D29: a cancelled activity lists no profile items; the rep can still save them directly.
+        uncommitted_activity = task.task_kind == "customer_activity" and not any(
+            item.get("kind") == "customer_activity" for item in task.committed_json or []
+        )
+        cancelled_message = "已停下这件事。资料可以直接让我单独保存" if uncommitted_activity else "已停下这件事"
         result = apply_task_update(
             db,
             task,
@@ -267,7 +275,7 @@ class AssistantCoordinator:
             reply=CoordinatorReply(
                 task_public_id=result.task.public_id,
                 status=result.task.status,
-                message="已停下这件事",
+                message=cancelled_message,
             ),
             task=result.task,
         )
@@ -296,6 +304,8 @@ class AssistantCoordinator:
             return await self._answer_object_selection(db, task, waiting, user_input, reporter=reporter)
         if waiting.type == AssistantWaitingType.FOLLOW_UP_DISPOSITION:
             return await self._answer_open_follow_up(db, task, user_input)
+        if waiting.type == AssistantWaitingType.PROFILE_PROPOSALS:
+            return await self._answer_profile(db, task, user_input, reporter)
         if waiting.field == "temporal_choice":
             return await self._answer_temporal_choice(db, task, waiting, user_input, reporter=reporter)
         return await self._answer_field(db, task, waiting, user_input, reporter=reporter)
@@ -1476,6 +1486,44 @@ class AssistantCoordinator:
 
         return await self._prepare_confirmation(db, updated, reporter=reporter)
 
+    async def _offer_profile_or_none(
+        self, db: Session, task: AssistantTask, reporter: ProgressReporter
+    ) -> CoordinatorOutcome | None:
+        """D29: the profile list comes before the open follow-up and opportunity proposals."""
+
+        from app.services.assistant.profile_proposals import PROMPT, offer_profile_proposals
+
+        listed = await offer_profile_proposals(db, task, reporter)
+        if listed is None:
+            return None
+        return CoordinatorOutcome(
+            CoordinatorReply(
+                task_public_id=listed.public_id, status=listed.status, message=PROMPT,
+                waiting=load_waiting(listed), card="profile_proposals",
+            ),
+            listed,
+        )
+
+    async def _answer_profile(
+        self, db: Session, task: AssistantTask, user_input: AssistantInput, reporter: ProgressReporter
+    ) -> CoordinatorOutcome:
+        from app.services.assistant.profile_proposals import answer_profile_proposals
+
+        if user_input.kind != "submit_field" or not user_input.choice:
+            raise InvalidTaskTransitionError("profile proposals take one issued choice")
+        updated, message, finished = answer_profile_proposals(db, task, user_input.choice)
+        if not finished:
+            return CoordinatorOutcome(
+                CoordinatorReply(
+                    task_public_id=updated.public_id, status=updated.status, message=message,
+                    waiting=load_waiting(updated), card="profile_proposals",
+                ),
+                updated,
+            )
+        following = await self._advance(db, updated, reporter)
+        reply = following.reply.model_copy(update={"message": f"{message}。{following.reply.message}"[:2000]})
+        return replace(following, reply=reply)
+
     async def _open_follow_up_or_none(
         self, db: Session, task: AssistantTask, reporter: ProgressReporter
     ) -> CoordinatorOutcome | None:
@@ -1534,6 +1582,9 @@ class AssistantCoordinator:
             and any(str(item.get("kind", "")) == "customer_activity" for item in task.committed_json or [])
             and task.status == AssistantTaskStatus.ACTIVE
         ):
+            listed = await self._offer_profile_or_none(db, task, reporter)
+            if listed is not None:
+                return listed
             handled = await self._open_follow_up_or_none(db, task, reporter)
             if handled is not None:
                 return handled

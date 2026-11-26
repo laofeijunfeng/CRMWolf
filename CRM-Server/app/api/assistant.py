@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import or_
 
 from app.core.database import get_db
 from app.core.deps import get_current_active_user, get_current_user_team
@@ -22,6 +23,7 @@ from app.schemas.assistant import (
     AssistantTurnEventView,
     AssistantTurnView,
     CreateTaskRequest,
+    PendingEntityDraftView,
     RetryTurnRequest,
     SubmitInputRequest,
 )
@@ -116,6 +118,7 @@ def _list_view(task: AssistantTask, db: Session) -> dict[str, object]:
             "follow_up_disposition": None,
             "proposal_outcome": None,
             "reconciliation_required": True,
+            "profile_proposals": None,
         }
 
 def _owned_task(db: Session, *, team_id: int, user_id: int, public_id: str) -> AssistantTask:
@@ -197,17 +200,31 @@ async def list_tasks(
     return [_list_view(task, db) for task in tasks]
 
 
+@router.get("/pending-drafts", response_model=list[PendingEntityDraftView])
+async def list_pending_drafts(
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> list[PendingEntityDraftView]:
+    """This user's unfinished direct-create drafts (「待补充」), most recently touched first."""
+
+    from app.services.assistant.entity_tasks import pending_drafts
+
+    return pending_drafts(db, team_id=team_id, user_id=current_user.id)
+
+
 @router.get("/tasks/latest/active", response_model=AssistantTaskView | None)
 async def latest_active_task(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> AssistantTaskView | None:
-    """The one in-flight task to resume in the UI, if any."""
+    """The one in-flight task to resume in the UI, if any; parked drafts stay in 「待补充」."""
 
     task = (
         db.query(AssistantTask)
         .filter_by(team_id=team_id, user_id=current_user.id, status="ACTIVE")
+        .filter(or_(AssistantTask.waiting_type.is_(None), AssistantTask.waiting_type != "ENTITY_DEFERRED"))
         .order_by(AssistantTask.id.desc())
         .first()
     )

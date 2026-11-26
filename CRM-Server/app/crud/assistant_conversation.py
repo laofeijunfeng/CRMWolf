@@ -68,6 +68,24 @@ def owned_task(db: Session, conversation: AssistantConversation, public_id: str 
     )
 
 
+def deferred_entity_tasks(db: Session, conversation: AssistantConversation) -> list[AssistantTask]:
+    """The owner's parked direct-create drafts (「待补充」), newest first."""
+
+    return (
+        db.query(AssistantTask)
+        .filter(
+            AssistantTask.team_id == conversation.team_id,
+            AssistantTask.user_id == conversation.user_id,
+            AssistantTask.status == "ACTIVE",
+            AssistantTask.task_kind != "customer_activity",
+            AssistantTask.waiting_type == "ENTITY_DEFERRED",
+        )
+        .order_by(AssistantTask.last_modified_time.desc(), AssistantTask.id.desc())
+        .limit(50)
+        .all()
+    )
+
+
 def candidates(db: Session, conversation: AssistantConversation) -> list[AssistantTask]:
     items = (
         db.query(AssistantTask)

@@ -248,6 +248,14 @@ def accept_submit(
         }
         revising = waiting.type == "CONFIRMATION" and kind == "revise_activity_kind"
         editing = waiting.type == "CONFIRMATION" and waiting.field == "activity_write" and kind == "request_edit"
+        # Typed text on an entity form supplements it (D18) or parks it; it never writes.
+        entity_text = (
+            waiting.type in {"ENTITY_FORM", "ENTITY_DEFERRED"}
+            and kind == "text"
+            and choice is None
+            and isinstance(text, str)
+            and bool(text.strip())
+        )
         temporal_supplement = False
         if (
             correction is None
@@ -269,6 +277,7 @@ def accept_submit(
             and not revising
             and not editing
             and not temporal_supplement
+            and not entity_text
             and correction is None
         ):
             raise AssistantStateConflict("当前输入不符合等待动作")
@@ -301,6 +310,8 @@ def accept_submit(
             ) or len(choices) != len(set(choices)) or choice is not None or text is not None
             if not disposition_ids or (not legacy_refresh and invalid_batch):
                 raise AssistantStateConflict("请选择当前签发的历史任务处理")
+        elif entity_text:
+            pass
         elif waiting.type in FORM_WAITING_TYPES:
             # Entity forms may also be parked ("defer") instead of cancelled.
             choices_allowed = {"cancel", "defer"} if waiting.type == "ENTITY_FORM" else {"cancel"}

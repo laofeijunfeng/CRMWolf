@@ -420,6 +420,22 @@ class TaskWaiting(BaseModel):
         return payload.model_dump(mode="json", exclude_unset=True) if payload is not None else None
 
 
+ProfileKind = Literal["contact_create", "invoice_title_create", "deployment_create"]
+
+
+class ProfileProposalItem(BaseModel):
+    """One profile record a committed activity mentioned (D29); an accepted item becomes its own child task."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ProfileKind
+    summary: str = Field(min_length=1, max_length=120)
+    quote: str = Field(min_length=1, max_length=2000)
+    extracted: list[EntityQuote] = Field(default_factory=list, max_length=40)
+    decision: Literal["pending", "go", "skip", "failed"] = "pending"
+    child_task_public_id: str | None = Field(default=None, max_length=64)
+
+
 class TaskAuthority(BaseModel):
     """Server-only zone: bound object ids and confirmation receipts."""
 
@@ -435,6 +451,8 @@ class TaskAuthority(BaseModel):
     proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
     proposal_queue: list[ProposalCandidate] | None = None
     proposal_form: dict[str, object] | None = None
+    # Offered at most once after the activity write; [] means offered and nothing found.
+    profile_proposals: list[ProfileProposalItem] | None = None
 
 
 class AssistantTaskSnapshot(BaseModel):

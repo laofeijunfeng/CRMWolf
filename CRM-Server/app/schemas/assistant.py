@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003 -- Pydantic resolves annotations at runtime.
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -17,12 +18,45 @@ from pydantic import (
 
 from app.services.assistant.contracts import (  # noqa: TC001 -- Pydantic resolves models at runtime.
     CommittedReceipt,
+    EntityCreateReceipt,
+    ProfileKind,
     TaskDraft,
     TaskKind,
     TaskStatus,
     TaskWaiting,
     TurnStatus,
 )
+
+
+class PendingEntityDraftView(BaseModel):
+    """One unfinished direct-create draft in 「待补充」 (D20)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    public_id: str
+    task_kind: TaskKind
+    label: str
+    customer_name: str | None
+    waiting_type: str | None
+    prompt: str | None
+    last_modified_time: datetime
+
+
+class ProfileProposalRowView(BaseModel):
+    """One row of the post-activity profile list, with its child task's own result (D29)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0)
+    kind: ProfileKind
+    label: str
+    summary: str
+    quote: str
+    decision: Literal["pending", "go", "skip", "failed"]
+    child_task_public_id: str | None = None
+    child_status: TaskStatus | None = None
+    child_waiting_type: str | None = None
+    child_receipt: EntityCreateReceipt | None = None
 
 
 class AssistantTaskView(BaseModel):
@@ -47,6 +81,7 @@ class AssistantTaskView(BaseModel):
     follow_up_disposition: dict[str, object] | None = None
     proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
     reconciliation_required: bool = False
+    profile_proposals: list[ProfileProposalRowView] | None = None
 
     @model_validator(mode="after")
     def match_processing_pointer(self) -> AssistantTaskView:
