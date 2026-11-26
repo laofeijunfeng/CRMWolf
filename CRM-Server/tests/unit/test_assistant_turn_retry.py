@@ -747,6 +747,31 @@ def test_overdue_attempt_fails_closed_without_a_live_worker(
     assert "尚未写入客户活动" in error.data_json["message"]
 
 
+def test_each_finished_segment_opens_a_fresh_attempt_window(db_session, retryable_turn):
+    """A long transcript is overdue only when its latest segment stalls, not the whole run (CRM-167)."""
+    task, turn = retryable_turn
+    turn.status = "RUNNING"
+    turn.lease_owner = "dead-worker"
+    turn.lease_expires_at = business_now() + timedelta(seconds=200)
+    stale = business_now() - timedelta(seconds=181)
+    turns.add_event(db_session, turn, "attempt", {"started_at": stale.isoformat(), "attempt": 1})
+    turns.add_event(
+        db_session, turn, "stage", {"stage": "structure", "phase": "done", "segment": {"index": 2, "total": 5}}
+    )
+    db_session.commit()
+
+    assert turns.close_overdue_turn(db_session, task, turn) is False
+
+    segment = db_session.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="stage").one()
+    segment.created_time = stale
+    db_session.commit()
+
+    assert turns.close_overdue_turn(db_session, task, turn) is True
+    db_session.refresh(turn)
+    assert turn.status == "FAILED"
+    assert turn.last_error_code == "UPSTREAM_TIMEOUT"
+
+
 def test_overdue_attempt_preserves_actual_evidence_stage(db_session, retryable_turn):
     task, turn = retryable_turn
     turn.status = "RUNNING"

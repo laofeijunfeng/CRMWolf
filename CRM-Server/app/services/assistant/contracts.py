@@ -266,7 +266,7 @@ class DraftField(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["MISSING", "CANDIDATE", "ACCEPTED", "EXPLICITLY_NONE"]
-    value: str | None = Field(default=None, max_length=20000)
+    value: str | None = Field(default=None, max_length=100_000)
 
 
 class VerifiedNoiseSpan(BaseModel):
@@ -324,7 +324,7 @@ class EntityDraft(BaseModel):
     extracted: list[EntityQuote] = Field(default_factory=list, max_length=40)
     # Last submitted values per form kind, so a refused submit re-renders exactly what the user typed.
     submitted: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
-    source_text: str = Field(default="", max_length=20000)
+    source_text: str = Field(default="", max_length=100_000)
     credentials_mentioned: bool = False
 
 

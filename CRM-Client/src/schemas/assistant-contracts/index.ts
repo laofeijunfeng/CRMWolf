@@ -35,7 +35,7 @@ export const EntityDraftSchema = z.object({
   customer_fields: z.record(EntityFieldValueSchema).optional(),
   extracted: z.array(z.object({ key: z.string(), value: z.string(), quote: z.string() }).strict()).max(40).optional(),
   submitted: z.record(JsonObjectSchema).optional(),
-  source_text: z.string().max(20000).optional(),
+  source_text: z.string().max(100_000).optional(),
   credentials_mentioned: z.boolean().optional()
 }).strict()
 export type EntityDraft = z.infer<typeof EntityDraftSchema>

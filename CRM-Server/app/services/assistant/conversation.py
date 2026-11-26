@@ -54,6 +54,7 @@ from app.services.assistant.failure_contract import (
 from app.services.assistant.intent import IntentVerdict, judge_intent, not_written, open_verdict_task
 from app.services.assistant.model_transport import AssistantLLMError
 from app.services.assistant.presentation import task_view
+from app.services.assistant.segmented_structure import SINGLE_CALL_LIMIT
 from app.services.assistant.task_operations import activity_commit_is_unknown
 from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority, load_draft, load_waiting
 from app.services.assistant.turns import (
@@ -592,7 +593,8 @@ class ConversationService:
             decision = await self.classifier.classify(
                 db,
                 team_id=conversation.team_id,
-                text=text,
+                # Routing reads the opening; a long transcript is organized in segments later.
+                text=text[:SINGLE_CALL_LIMIT],
                 tasks=self._root_context(tasks),
                 focused_task_public_id=conversation.focused_task_public_id,
                 recent_messages=recent_messages,

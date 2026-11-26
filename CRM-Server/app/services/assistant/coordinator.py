@@ -70,7 +70,7 @@ class AssistantInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str = Field(min_length=1, max_length=32, description="text | submit_field | confirm | cancel")
-    text: str | None = Field(default=None, max_length=20000, description="text or field answer payload")
+    text: str | None = Field(default=None, max_length=100_000, description="text or field answer payload")
     choice: str | None = Field(default=None, max_length=64, description="enum choice payload (kind, confirm)")
     values: dict[str, JsonValue] | None = None
     form_revision: int | None = None

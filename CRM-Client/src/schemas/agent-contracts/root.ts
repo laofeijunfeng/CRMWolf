@@ -52,7 +52,7 @@ const AgentSemanticPlanSchema = z.object({
   operation: z.enum(['CREATE', 'READ', 'TRANSITION', 'DELETE', 'NONE', 'UNKNOWN']).default('UNKNOWN'),
   user_goal: z.string().max(2000).nullable().optional(),
   customer_reference: z.string().max(255).nullable().optional(),
-  activity_content: z.string().max(20000).nullable().optional(),
+  activity_content: z.string().max(100_000).nullable().optional(),
   query_target: z.string().max(2000).nullable().optional(),
   query_plan: AgentQueryPlanSchema.nullable().optional(),
   confidence: z.number().min(0).max(1).default(0),

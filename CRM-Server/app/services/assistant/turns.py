@@ -474,14 +474,17 @@ def claim(db: Session, *, turn_id: int, owner: str) -> int | None:
     return turn.lease_version if turn is not None else None
 
 
-def _latest_stage(db: Session, turn: AssistantTurn) -> str | None:
-    """Stage still open when the turn stopped; a completed stage did not fail."""
-    event = (
+def _latest_stage_event(db: Session, turn: AssistantTurn) -> AssistantTurnEvent | None:
+    return (
         db.query(AssistantTurnEvent)
         .filter_by(turn_id=turn.id, event="stage")
         .order_by(AssistantTurnEvent.seq.desc())
         .first()
     )
+
+
+def _open_stage(event: AssistantTurnEvent | None) -> str | None:
+    """Stage still open when the turn stopped; a completed stage did not fail."""
     data = event.data_json if event is not None else None
     if not isinstance(data, dict) or data.get("phase") != "start":
         return None
@@ -578,12 +581,25 @@ def close_overdue_turn(db: Session, task: AssistantTask, turn: AssistantTurn) ->
     if not isinstance(raw, str):
         return False
     started = datetime.fromisoformat(raw)
+    recent_stages = (
+        db.query(AssistantTurnEvent)
+        .filter_by(turn_id=turn.id, event="stage")
+        .order_by(AssistantTurnEvent.seq.desc())
+        .limit(8)
+        .all()
+    )
+    stage_event = recent_stages[0] if recent_stages else None
+    # Segmented organizing gives each segment, and the scoring after the last one, a full
+    # window from the segment's latest report (segmented_structure._extend_attempt_deadline).
+    segment_event = next((event for event in recent_stages if "segment" in event.data_json), None)
+    if segment_event is not None:
+        started = max(started.replace(tzinfo=None), segment_event.created_time.replace(tzinfo=None))
     now = business_now()
     if started.tzinfo is None and now.tzinfo is not None:
         started = started.replace(tzinfo=now.tzinfo)
     if now < started + timedelta(seconds=ATTEMPT_DEADLINE_SECONDS):
         return False
-    stage = _latest_stage(db, turn)
+    stage = _open_stage(stage_event)
     if task_has_customer_activity(task):
         message = "活动已记录，后续处理超时，请查看任务状态。"
     else:
@@ -1326,7 +1342,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                         turn,
                         failed_task,
                         code=code,
-                        stage=_latest_stage(db, turn),
+                        stage=_open_stage(_latest_stage_event(db, turn)),
                         retryable=retryable,
                         message=message,
                         failure_origin=failure_origin_of(exc),

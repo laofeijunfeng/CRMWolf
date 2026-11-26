@@ -44,7 +44,7 @@ class ConversationDecision(ConversationModel):
 
 
 class ConversationTextRequest(ConversationModel):
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(min_length=1, max_length=100_000)
     client_request_id: str = Field(min_length=8, max_length=128)
     expected_version: int = Field(ge=0)
 
