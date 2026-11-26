@@ -41,9 +41,10 @@ ACTIONS: dict[EntityKind, str] = {
     "invoice_title_create": "create_invoice_title",
     "deployment_create": "create_deployment",
     "customer_create": "create_customer",
+    "opportunity_create": "create_opportunity",
 }
 
-Canonical = dict[str, str | bool | None]
+Canonical = dict[str, JsonValue]
 Submitted = Mapping[str, JsonValue]
 
 
@@ -76,10 +77,14 @@ class FormContext:
 class FieldSpec:
     key: str
     label: str
-    field_type: Literal["text", "textarea", "select", "boolean"] = "text"
+    field_type: Literal["text", "textarea", "number", "date", "select", "multi_select", "boolean"] = "text"
     required: bool = False
     max_length: int | None = None
     placeholder: str | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    # Select options filtered by another field's value (option ``depends_on_value``).
+    depends_on_key: str | None = None
 
     def render(
         self,
@@ -104,10 +109,14 @@ class FieldSpec:
         else:
             value = drafted.value if drafted is not None else None
             label = source_label(drafted)
+        allowed = {option["value"] for option in options or []}
         if self.field_type == "boolean":
             value = value is True or value == "true"
-        elif self.field_type == "select" and value not in {option["value"] for option in options or []}:
+        elif self.field_type == "select" and value not in allowed:
             value, label = None, None
+        elif self.field_type == "multi_select":
+            kept = [item for item in value if item in allowed] if isinstance(value, list) else []
+            value, label = kept, label if kept == value else None
         error = errors.get(self.key)
         if error is None and submitted is None and drafted is not None:
             error = drafted.warning
@@ -121,7 +130,10 @@ class FieldSpec:
             "default_value": value,
             "min_length": (1 if self.required else 0) if text else None,
             "max_length": self.max_length if text else None,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
             "options": options or [],
+            "depends_on_key": self.depends_on_key,
             "source_label": label,
             "error_message": error,
             "suggestions": (suggestions if suggestions is not None else drafted.choices if drafted else [])[:8],
@@ -145,13 +157,15 @@ class FieldSpec:
         return raw is True or raw == "true"
 
 
-def _same(value: JsonValue, drafted: str) -> bool:
+def _same(value: JsonValue, drafted: str | float | list[str]) -> bool:
     if isinstance(value, bool):
         return ("true" if value else "false") == drafted
-    return isinstance(value, (str, int, float)) and str(value).strip() == drafted
+    if isinstance(drafted, list) or (isinstance(drafted, (int, float)) and isinstance(value, (int, float))):
+        return value == drafted
+    return isinstance(value, (str, int, float)) and str(value).strip() == str(drafted)
 
 
-def value(source: FieldSource, text: str | None, **extra: object) -> EntityFieldValue:
+def value(source: FieldSource, text: str | float | list[str] | None, **extra: object) -> EntityFieldValue:
     return EntityFieldValue.model_validate({"value": text, "source": source, **extra})
 
 
@@ -199,13 +213,14 @@ class EntityFormModule(Protocol):
 
 
 def module_for(kind: str) -> EntityFormModule:
-    from app.services.assistant.entity_forms import contact, customer, deployment, invoice_title
+    from app.services.assistant.entity_forms import contact, customer, deployment, invoice_title, opportunity
 
     modules: dict[str, EntityFormModule] = {
         "contact_create": contact.FORM,
         "invoice_title_create": invoice_title.FORM,
         "deployment_create": deployment.FORM,
         "customer_create": customer.FORM,
+        "opportunity_create": opportunity.FORM,
     }
     return modules[kind]
 

@@ -1,4 +1,4 @@
-"""Direct-create entity tasks: one task per CRM record (contact, invoice title, deployment, customer).
+"""Direct-create entity tasks: one task per CRM record (contact, invoice title, deployment, customer, opportunity).
 
 The coordinator hands every non-activity task here; activity intake never sees entity tasks.
 Text never writes: only a submitted form claims, writes and records one attributable CRM effect.
@@ -13,7 +13,7 @@ import logging
 from time import monotonic
 from typing import TYPE_CHECKING, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from sqlalchemy import update as sql_update
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -61,6 +61,7 @@ _NAME_KEYS = {
     "invoice_title_create": "title",
     "deployment_create": "deployment_name",
     "customer_create": "account_name",
+    "opportunity_create": "opportunity_name",
 }
 _NOT_SAVED_HINT = "没有保存，表单内容都还在"
 
@@ -183,6 +184,8 @@ def _permission_refusal(db: Session, task: AssistantTask, kind: str, customer: C
             return f"你没有修改客户“{customer.account_name}”资料的权限"
         if kind == "invoice_title_create" and "invoice:title:create" not in _permissions(db, task):
             return "你没有新建开票抬头的权限"
+        if kind == "opportunity_create" and "opportunity:create" not in _permissions(db, task):
+            return "你没有新建商机的权限"
     except PermissionError:
         return "你的账号已不在当前团队或已停用"
     return None
@@ -217,8 +220,7 @@ async def handle_entity_task(
     db: Session, task: AssistantTask, user_input: AssistantInput, *, reporter: ProgressReporter
 ) -> CoordinatorOutcome:
     if task.task_kind not in ACTIONS:
-        # Direct opportunity creation lands with the opportunity form; until then nothing is written.
-        return _refuse(db, task, "暂时不能直接新建商机，请到商机管理新建", code="UNSUPPORTED")
+        raise InvalidTaskTransitionError(f"task kind {task.task_kind} is not a direct-create entity")
     module = module_for(task.task_kind)
     user = _user(db, task)
     if user is None:
@@ -229,7 +231,7 @@ async def handle_entity_task(
             raise InvalidTaskTransitionError("an entity task starts from text")
         return await _intake(db, task, module, user, user_input.text or task.goal, reporter)
     if waiting.type == AssistantWaitingType.ENTITY_FORM and user_input.kind == "submit_form":
-        return _submit_form(db, task, waiting, module, user, user_input, reporter)
+        return await _submit_form(db, task, waiting, module, user, user_input, reporter)
     if waiting.field == CUSTOMER_FIELD and waiting.type == AssistantWaitingType.OBJECT_SELECTION:
         return _select_customer(db, task, module, user, user_input.choice)
     if waiting.field == CUSTOMER_FIELD and waiting.type == AssistantWaitingType.FIELD and user_input.text:
@@ -394,15 +396,11 @@ def _issue_form(
     return _outcome(result.task, message)
 
 
-def _submitted(module: EntityFormModule, values: dict[str, object] | None) -> dict[str, str | bool | None]:
-    out: dict[str, str | bool | None] = {}
-    for key, item in (values or {}).items():
-        if key in module.FIELD_KEYS:
-            out[key] = item if item is None or isinstance(item, (str, bool)) else str(item)
-    return out
+def _submitted(module: EntityFormModule, values: dict[str, JsonValue] | None) -> dict[str, JsonValue]:
+    return {key: item for key, item in (values or {}).items() if key in module.FIELD_KEYS}
 
 
-def _submit_form(
+async def _submit_form(
     db: Session, task: AssistantTask, waiting: TaskWaiting, module: EntityFormModule, user: User,
     user_input: AssistantInput, reporter: ProgressReporter,
 ) -> CoordinatorOutcome:
@@ -426,6 +424,8 @@ def _submit_form(
     if errors:
         return _issue_form(db, task, module, user, entity, inline=inline, errors=errors,
                            action_name="entity_form_rejected")
+    if form.KIND == "opportunity_create":
+        return await _write_opportunity(db, task, module, user, ctx, canonical, reporter)
     return _write(db, task, module, form, user, ctx, canonical, reporter, inline=inline)
 
 
@@ -485,10 +485,10 @@ def _publish_unknown(db: Session, task: AssistantTask, kind: str, label: str) ->
 
 
 def _receipt(kind: str, public_id: str, name: str, customer_public_id: str | None,
-             outcome: str = "created") -> dict[str, object]:
+             outcome: str = "created", *, pending_review: bool = False) -> dict[str, object]:
     return EntityCreateReceipt(
         kind=kind, public_id=public_id[:64], outcome=outcome, customer_public_id=customer_public_id,
-        name=(name.strip() or "未命名")[:200],
+        name=(name.strip() or "未命名")[:200], approval_phase="pending_review" if pending_review else None,
     ).model_dump(mode="json", exclude_none=True)
 
 
@@ -496,12 +496,11 @@ def _saved_message(kind: str, label: str, name: str) -> str:
     return f"客户已创建：{name}" if kind == _CUSTOMER_KIND else f"{label}已保存：{name}"
 
 
-def _write(
-    db: Session, task: AssistantTask, module: EntityFormModule, form: EntityFormModule, user: User,
-    ctx: FormContext, canonical: Canonical, reporter: ProgressReporter, *, inline: bool,
-) -> CoordinatorOutcome:
-    from app.core.exceptions import DuplicateRecordError
-    from app.services.assistant.proposals import _mark_claim_status
+def _claim(
+    db: Session, task: AssistantTask, form: EntityFormModule, ctx: FormContext, canonical: Canonical,
+) -> tuple[AssistantTask, AssistantAction, AssistantCRMCommand]:
+    """Durably claim the frozen command before any CRM write, then reacquire the turn lock."""
+
     from app.services.assistant.turns import assert_owned_execution_lease
 
     kind = form.KIND
@@ -522,6 +521,19 @@ def _write(
         _publish_unknown(db, task, kind, form.LABEL)
     # The claim commit released the turn lock; reacquire it before the CRM write.
     assert_owned_execution_lease(db, task)
+    return task, claim, command
+
+
+def _write(
+    db: Session, task: AssistantTask, module: EntityFormModule, form: EntityFormModule, user: User,
+    ctx: FormContext, canonical: Canonical, reporter: ProgressReporter, *, inline: bool,
+) -> CoordinatorOutcome:
+    from app.core.exceptions import DuplicateRecordError
+    from app.services.assistant.proposals import _mark_claim_status
+    from app.services.assistant.turns import assert_owned_execution_lease
+
+    kind = form.KIND
+    task, claim, command = _claim(db, task, form, ctx, canonical)
     started = monotonic()
     reporter.stage_start(stage("write"))
     try:
@@ -580,6 +592,98 @@ def _write(
             raise InvalidTaskTransitionError("inline customer vanished after commit")
         return _bind_and_issue(db, task, module, user, _entity(task), customer)
     return _outcome(task, _saved_message(kind, form.LABEL, result.name))
+
+
+_OPPORTUNITY_DUPLICATE = "已存在相同或无法区分的商机，未创建新商机，请到商机页查看"
+
+
+async def _write_opportunity(
+    db: Session, task: AssistantTask, module: EntityFormModule, user: User, ctx: FormContext,
+    canonical: Canonical, reporter: ProgressReporter,
+) -> CoordinatorOutcome:
+    """The CRM commits the opportunity, its approval and the effect together; never record the effect here."""
+
+    from fastapi import HTTPException
+
+    from app.api.opportunities import create_opportunity
+    from app.crud.product import product_crud
+    from app.schemas.opportunity import OpportunityCreate
+    from app.services.assistant.crm_proposal_commands import opportunity_create_receipt_outcome
+    from app.services.assistant.opportunity_target_matching import match_opportunity_target
+    from app.services.assistant.proposals import _mark_claim_status
+    from app.services.assistant.turns import assert_owned_execution_lease
+
+    kind = module.KIND
+    task, claim, command = _claim(db, task, module, ctx, canonical)
+    started = monotonic()
+    reporter.stage_start(stage("write"))
+
+    def refuse(message: str) -> CoordinatorOutcome:
+        db.rollback()
+        reporter.stage_failed(stage("write"))
+        assert_owned_execution_lease(db, task)
+        _mark_claim_status(db, claim, "NO_EFFECT")
+        return _issue_form(db, task, module, user, _entity(task), errors={"form": message[:400]},
+                           action_name="entity_write_refused")
+
+    try:
+        # The CRM creation path takes this fence; hold it from the re-check through the commit.
+        product_crud.lock_catalog_team(db, task.team_id)
+        effect = checked_effect(db, command, kind)
+        if effect is None:
+            customer = ctx.customer
+            assert customer is not None
+            current, errors = module.validate(ctx, ctx.draft.submitted.get(kind, {}))
+            if errors or current != canonical:
+                return refuse(next(iter(errors.values()), "商机选项已变化，请核对后再保存"))
+            data = OpportunityCreate.model_validate(canonical)
+            if match_opportunity_target(
+                db, team_id=task.team_id, customer_id=customer.id, data=data, current_read=True,
+            ).status != "DISTINCT":
+                return refuse(_OPPORTUNITY_DUPLICATE)
+            await create_opportunity(
+                OpportunityCreate.model_validate(canonical), team_id=task.team_id, current_user=user, db=db,
+                assistant_command=command,
+            )
+            effect = checked_effect(db, command, kind)
+    except HTTPException as exc:
+        return refuse(str(exc.detail))
+    except EntityFormError as exc:
+        return refuse(next(iter(exc.errors.values()), "暂时不能新建商机"))
+    except SQLAlchemyError:
+        logger.exception("assistant opportunity write failed task=%s", task.public_id)
+        db.rollback()
+        reporter.stage_failed(stage("write"))
+        try:
+            effect = checked_effect(db, command, kind)
+        except Exception:
+            _publish_unknown(db, task, kind, module.LABEL)
+        if effect is not None:
+            _publish_unknown(db, task, kind, module.LABEL)
+        assert_owned_execution_lease(db, task)
+        _mark_claim_status(db, claim, "NO_EFFECT")
+        return _issue_form(db, task, module, user, _entity(task), hint=_NOT_SAVED_HINT,
+                           action_name="entity_write_no_effect")
+    except ValueError as exc:  # AssistantCRMNoEffect included: the CRM rolled back before writing.
+        return refuse(str(exc) or "暂时不能新建商机")
+    if opportunity_create_receipt_outcome(effect) is None:
+        _publish_unknown(db, task, kind, module.LABEL)
+    assert effect is not None and effect.target_public_id is not None
+    name = str(canonical.get("opportunity_name") or module.LABEL)
+    try:
+        assert_owned_execution_lease(db, task)
+        _mark_claim_status(db, claim, "SUCCEEDED", public_id=effect.target_public_id)
+        receipt = _receipt(kind, effect.target_public_id, name, ctx.draft.customer_public_id, pending_review=True)
+        task = apply_task_update(db, task, TaskUpdate(
+            append_committed=[receipt], status=AssistantTaskStatus.COMPLETED, clear_waiting=True,
+            action_actor="USER", action_name="entity_create",
+            action_result={"kind": kind, "public_id": effect.target_public_id, "approval_id": effect.approval_id},
+        )).task
+        db.commit()
+    except SQLAlchemyError:
+        _publish_unknown(db, task, kind, module.LABEL)
+    reporter.stage_done(stage("write"), ms=int((monotonic() - started) * 1000))
+    return _outcome(task, f"商机已创建，待审批：{name}")
 
 
 def _attach_inline_customer(db: Session, parent: AssistantTask, receipt: dict[str, object]) -> None:
@@ -683,8 +787,10 @@ async def adjudicate_entity_claim(
             raise TaskStateConflictError("已提交的客户不存在，结果仍待核对。")
         receipt = _receipt(kind, public_id, customer.account_name, public_id)
     else:
+        if kind == "opportunity_create" and effect.approval_id is None:
+            raise TaskStateConflictError("商机创建缺少审批凭据，结果仍待核对。")
         receipt = _receipt(kind, public_id, str(canonical.get(_NAME_KEYS[kind]) or module_for(kind).LABEL),
-                           entity.customer_public_id)
+                           entity.customer_public_id, pending_review=kind == "opportunity_create")
     if kind == task.task_kind:
         apply_task_update(db, task, TaskUpdate(
             require_no_active_turn=True, clear_waiting=True, status=AssistantTaskStatus.COMPLETED,

@@ -1424,6 +1424,7 @@ _ENTITY_RESULTS: dict[str, tuple[str, str, str | None]] = {
     "invoice_title_create": ("开票抬头已保存", "开票抬头", "invoice_titles"),
     "deployment_create": ("部署信息已保存", "部署信息", "deployments"),
     "customer_create": ("客户已创建", "客户", None),
+    "opportunity_create": ("商机已创建", "商机", None),
 }
 
 
@@ -1444,9 +1445,15 @@ def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | 
         lines.append(f"客户：{customer_name}")
     if receipt.outcome == "existing":
         title = f"{label}已存在，未重复创建"
+    elif receipt.approval_phase == "pending_review":
+        title = f"{title}，待审批"
     if receipt.kind == "invoice_title_create":
         lines.append("申请开票去发票管理")
-    entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
+    if receipt.kind == "opportunity_create" and receipt.outcome == "created":
+        entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name,
+                                 opportunity_id=receipt.public_id, name=name)
+    else:
+        entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
     return title, "\n".join(lines), entity
 
 

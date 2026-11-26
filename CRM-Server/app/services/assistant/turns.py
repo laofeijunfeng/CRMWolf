@@ -1112,11 +1112,14 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
             from app.services.assistant.contracts import ENTITY_KINDS, AcceptedProposalReceipt, EntityCreateReceipt
 
-            for receipt in (outcome.task.committed_json or [])[prior_receipts:]:
+            # Activity tasks commit proposal receipts; entity tasks commit entity receipts. Both kinds
+            # share "opportunity_create", so the task kind decides how a receipt is read.
+            is_activity = outcome.task.task_kind == "customer_activity"
+            for receipt in [] if is_activity else (outcome.task.committed_json or [])[prior_receipts:]:
                 if receipt.get("kind") in ENTITY_KINDS:
                     data["entity_receipt"] = EntityCreateReceipt.model_validate(receipt).model_dump(mode="json")
                     break
-            for receipt in outcome.task.committed_json or []:
+            for receipt in outcome.task.committed_json or [] if is_activity else []:
                 if receipt.get("kind") in {
                     "follow_up_task_create",
                     "opportunity_stage",

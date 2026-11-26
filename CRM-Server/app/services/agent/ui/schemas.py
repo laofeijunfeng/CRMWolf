@@ -377,7 +377,7 @@ _DISPOSITION_SECONDARY_ACTION = "suppress_week"
 _CANCEL_REASON_VALUES = frozenset({"wrong_customer", "wrong_content", "should_not_record", "other"})
 _CANCELLABLE_FORM_ACTIONS = frozenset({
     "create_opportunity_proposal", "edit_confirmation",
-    "create_contact", "create_invoice_title", "create_deployment", "create_customer",
+    "create_contact", "create_invoice_title", "create_deployment", "create_customer", "create_opportunity",
 })
 
 

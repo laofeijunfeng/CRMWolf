@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_serializer, model_validator
 
 from app.services.assistant.action_evidence import (
     SourceSegment,  # noqa: TC001 - Pydantic resolves the source-record schema at runtime.
@@ -30,10 +30,12 @@ ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunit
 # Waits and receipts frozen before CRM-154 may still carry retired kinds (`customer_fact`, and
 # `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
-EntityKind = Literal["contact_create", "invoice_title_create", "deployment_create", "customer_create"]
+EntityKind = Literal[
+    "contact_create", "invoice_title_create", "deployment_create", "customer_create", "opportunity_create",
+]
 ENTITY_KINDS: frozenset[str] = frozenset(get_args(EntityKind))
-# Direct opportunity creation reuses the opportunity form and proposal claim, so it is a task kind only.
-TaskKind = Literal["customer_activity", "opportunity_create"] | EntityKind
+# One task per record: a follow-up activity, or one directly created entity (opportunities included).
+TaskKind = Literal["customer_activity"] | EntityKind
 # Server-assigned provenance of one entity form value; rendered as `InteractionField.source_label`.
 FieldSource = Literal[
     "ORIGINAL",
@@ -251,6 +253,8 @@ class EntityCreateReceipt(BaseModel):
     outcome: Literal["created", "existing"] = "created"
     customer_public_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    # Only a created opportunity whose effect carries an approval id is pending review (D26).
+    approval_phase: Literal["pending_review"] | None = None
 
 
 CommittedReceipt = CustomerActivityReceipt | AcceptedProposalReceipt | RefusedProposalReceipt | EntityCreateReceipt
@@ -282,7 +286,10 @@ class EntityFieldValue(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    value: str | None = Field(default=None, max_length=2000)
+    # Text for most fields; opportunity forms also carry numbers and multi-select ids.
+    value: Annotated[str, Field(max_length=2000)] | int | float | list[Annotated[str, Field(max_length=64)]] | None = (
+        Field(default=None)
+    )
     source: FieldSource
     # Verified user phrase the value came from (DERIVED shows it as 按“…”).
     phrase: str | None = Field(default=None, max_length=200)
@@ -316,7 +323,7 @@ class EntityDraft(BaseModel):
     # Verified extraction kept until the customer is bound; the form module prepares fields from it.
     extracted: list[EntityQuote] = Field(default_factory=list, max_length=40)
     # Last submitted values per form kind, so a refused submit re-renders exactly what the user typed.
-    submitted: dict[str, dict[str, str | bool | None]] = Field(default_factory=dict)
+    submitted: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     source_text: str = Field(default="", max_length=20000)
     credentials_mentioned: bool = False
 

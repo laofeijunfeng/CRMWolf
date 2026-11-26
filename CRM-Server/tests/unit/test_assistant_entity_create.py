@@ -293,3 +293,125 @@ async def test_unprovable_write_result_fences_cancel_until_reconciled(db, monkey
     assert session.query(Contact).count() == 0
     with pytest.raises(AssistantStateConflict, match="待核对"):
         entity_tasks.cancel_entity_task(session, task)
+
+
+OPPORTUNITY_SOURCE = "给睿狐科技建个商机，200 个账号，3 年"
+
+
+@pytest.fixture
+def opportunity_catalog(db, monkeypatch):
+    """A live catalog and a stand-in for the CRM create-with-approval transaction."""
+
+    from app.models.opportunity import Opportunity, OpportunityProductModule
+    from app.models.procurement import ProcurementMethod, ProcurementStageTemplate
+    from app.models.product import Product, ProductModule
+    from app.services.assistant.crm_effects import AssistantCRMNoEffect, record_effect
+
+    session, _, permissions = db
+    Base.metadata.create_all(session.bind, tables=[
+        Product.__table__, ProductModule.__table__, ProcurementMethod.__table__, ProcurementStageTemplate.__table__,
+        Opportunity.__table__, OpportunityProductModule.__table__,
+    ])
+    session.add_all([
+        ProcurementMethod(id=11, team_id=1, code="P11", name="直采", sort_order=1, created_by="2"),
+        ProcurementStageTemplate(id=21, team_id=1, procurement_method_id=11, template_code="S21", stage_name="初步接触",
+                                 win_probability=10, sort_order=1, is_default_start=1, created_by="2"),
+        Product(id=1, public_id="prd_1", team_id=1, code="P1", name="Apifox", created_by="2", is_active=True),
+        ProductModule(id=1, public_id="prm_1", team_id=1, product_id=1, code="M1", name="基础版", created_by="2",
+                      sort_order=1, is_active=True),
+    ])
+    session.query(Customer).filter_by(public_id="cus_ruihu").update({"default_procurement_method_id": 11})
+    session.commit()
+    permissions.append(SimpleNamespace(code="opportunity:create"))
+    created: list[dict[str, object]] = []
+    approval = {"flow": True}
+
+    async def create_opportunity(opportunity, *, team_id, current_user, db, assistant_command):
+        if not approval["flow"]:
+            raise AssistantCRMNoEffect("请先配置审批流程")
+        created.append(opportunity.model_dump(mode="json"))
+        record_effect(db, assistant_command, "opportunity_create", target_public_id="opp_new", approval_id=42)
+        db.commit()
+        return SimpleNamespace(public_id="opp_new")
+
+    monkeypatch.setattr("app.api.opportunities.create_opportunity", create_opportunity)
+    return created, approval
+
+
+def _customer_only() -> EntityExtraction:
+    return EntityExtraction.model_validate({"customer_name": {"value": "睿狐科技", "quote": "睿狐科技"}, "fields": []})
+
+
+async def _start_opportunity(db, monkeypatch) -> AssistantTask:
+    return await _start(db, monkeypatch, _customer_only(), source=OPPORTUNITY_SOURCE, kind="opportunity_create")
+
+
+async def _save_opportunity(db, task: AssistantTask, key: str = "opp-save", **overrides: object) -> None:
+    waiting = load_waiting(task)
+    values = {field["key"]: field["default_value"] for field in waiting.form_fields}
+    values |= {"total_amount": 600000, "expected_closing_date": "2027-03-31", **overrides}
+    await _submit(db, task, key, {"kind": "submit_form", "values": values, "form_revision": waiting.form_revision})
+
+
+@pytest.mark.asyncio
+async def test_opportunity_form_prefills_from_text_and_submits_for_approval(db, monkeypatch, opportunity_catalog):
+    session, _, _ = db
+    created, _ = opportunity_catalog
+    task = await _start_opportunity(db, monkeypatch)
+
+    form = _form(task)
+    assert (form["user_count"]["default_value"], form["subscription_years"]["default_value"]) == (200, 3)
+    assert not created
+
+    await _save_opportunity(db, task)
+
+    assert len(created) == 1 and created[0]["customer_id"] == "cus_ruihu" and created[0]["user_count"] == 200
+    assert _claims(session) == ["SUCCEEDED"]
+    assert task.status == AssistantTaskStatus.COMPLETED
+    receipt = task.committed_json[-1]
+    assert (receipt["kind"], receipt["public_id"], receipt["approval_phase"]) == (
+        "opportunity_create", "opp_new", "pending_review")
+    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
+    assert waited.data_json["entity_receipt"]["approval_phase"] == "pending_review"
+    assert "proposal_receipt" not in waited.data_json
+    assert waited.data_json["message"].startswith("商机已创建，待审批")
+
+
+@pytest.mark.asyncio
+async def test_missing_approval_flow_is_relayed_and_the_form_stays_open(db, monkeypatch, opportunity_catalog):
+    session, _, _ = db
+    created, approval = opportunity_catalog
+    approval["flow"] = False
+    task = await _start_opportunity(db, monkeypatch)
+
+    await _save_opportunity(db, task)
+
+    assert task.status == AssistantTaskStatus.ACTIVE
+    assert _form(task)["user_count"]["default_value"] == 200
+    assert load_waiting(task).form_fields and _claims(session) == ["NO_EFFECT"]
+    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
+    assert waited.data_json["message"] == "请先配置审批流程"
+    assert session.query(AssistantCRMEffect).count() == 0
+
+    approval["flow"] = True
+    await _save_opportunity(db, task, key="opp-save-again")
+
+    assert _claims(session) == ["NO_EFFECT", "SUCCEEDED"] and len(created) == 1
+
+
+@pytest.mark.asyncio
+async def test_indistinguishable_opportunity_is_never_created_twice(db, monkeypatch, opportunity_catalog):
+    session, _, _ = db
+    created, _ = opportunity_catalog
+    monkeypatch.setattr(
+        "app.services.assistant.opportunity_target_matching.match_opportunity_target",
+        lambda *args, **kwargs: SimpleNamespace(status="AMBIGUOUS"),
+    )
+    task = await _start_opportunity(db, monkeypatch)
+
+    await _save_opportunity(db, task)
+
+    assert not created and _claims(session) == ["NO_EFFECT"]
+    assert task.status == AssistantTaskStatus.ACTIVE
+    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
+    assert waited.data_json["message"].startswith("已存在相同或无法区分的商机")
