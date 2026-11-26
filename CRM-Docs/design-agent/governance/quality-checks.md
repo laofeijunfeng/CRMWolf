@@ -13,7 +13,7 @@
 
 ## 语义检查
 
-顶层自然语言意图路由不得使用正则、关键词或硬编码分类来替代结构化语义判断。这个边界与 [ADR 0002](../../../docs/adr/0002-root-semantic-route-recovery.md) 中旧 Agent 的路由教训一致，但不把旧 Root 架构带入 `/assistant`。禁令不涵盖 `temporal_evidence.py` 对时间证据的确定性解析。
+顶层自然语言意图路由不得使用正则、关键词或硬编码分类来替代结构化语义判断。这个边界与 [ADR 0002](../../../docs/adr/0002-root-semantic-route-recovery.md) 中旧 Agent 的路由教训一致，但不把旧 Root 架构带入 `/assistant`。`temporal_evidence.py` 只做日历计算和交叉核对，不得作为时间语义的唯一来源（详见 [ADR 0006](../../../docs/adr/0006-assistant-temporal-model-structured.md)）。
 
 语义结果必须由 AI structured output 产生，并通过 schema 校验。
 

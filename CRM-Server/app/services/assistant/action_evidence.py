@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, time
+from datetime import datetime  # noqa: TC003
 from hashlib import sha256
 from typing import TYPE_CHECKING, Literal
 
@@ -18,17 +18,9 @@ if TYPE_CHECKING:
 
     from app.models.assistant import AssistantTask
     from app.services.assistant.contracts import TaskDraft
+    from app.services.assistant.temporal_evidence import FoundSpan
 
 PARSER_VERSION = "assistant-date-v1"
-_DAY = (
-    r"(?:20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?|大后天|后天|明天|今天|今日|"
-    r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天])"
-)
-_CLOCK = (
-    r"(?:(?:上午|下午|晚上|中午|早上)?(?:\d{1,2}[:：]\d{2}(?::\d{2})?|"
-    r"[零〇一二两三四五六七八九十\d]{1,3}[点时](?:半|[零〇一二两三四五六七八九十\d]{1,3}分?)?))"
-)
-_DATE = re.compile(rf"{_DAY}(?:(?:[ T]|的)?{_CLOCK})?(?:Z|[+-]\d{{2}}:\d{{2}})?")
 _CORRECTION = re.compile(r"更正|纠正|不是|改为|改到|应为|而是")
 _REPLACEMENT = re.compile(r"改为|改到|应为|而是")
 _UNCERTAIN = re.compile(r"大概|大约|左右|前后|差不多|可能|也许|有空|暂定|争取|看情况|约")
@@ -98,71 +90,44 @@ def append_source(db: Session, task: AssistantTask, draft: TaskDraft, text: str)
     return True
 
 
-def _number(value: str) -> int:
-    if value.isdigit():
-        return int(value)
-    digits = {
-        "零": 0,
-        "〇": 0,
-        "一": 1,
-        "二": 2,
-        "两": 2,
-        "三": 3,
-        "四": 4,
-        "五": 5,
-        "六": 6,
-        "七": 7,
-        "八": 8,
-        "九": 9,
-    }
-    if "十" in value:
-        left, right = value.split("十", 1)
-        return digits.get(left, 1) * 10 + digits.get(right, 0)
-    return digits[value]
+def _deadline_spans(text: str) -> list[FoundSpan]:
+    from app.services.assistant.temporal_evidence import deadline_spans
+
+    return deadline_spans(text)
 
 
-def parse_deadline(text: str, *, anchor: datetime) -> tuple[datetime | None, str]:
+def _is_deadline_only(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    spans = _deadline_spans(stripped)
+    return len(spans) == 1 and spans[0].start == 0 and spans[0].end == len(stripped)
+
+
+def _is_replacement_deadline(text: str) -> bool:
+    stripped = text.strip()
+    match = _REPLACEMENT.match(stripped)
+    return match is not None and _is_deadline_only(stripped[match.end() :])
+
+
+def _strip_deadlines(text: str) -> str:
+    spans = _deadline_spans(text)
+    if not spans:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for span in spans:
+        parts.append(text[cursor : span.start])
+        cursor = span.end
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def parse_deadline(text: str, *, anchor: datetime) -> tuple[datetime | None, Literal["DATE", "DATETIME", "UNKNOWN"]]:
     """No default hour for task dates; ambiguous or invalid expressions stay unresolved."""
-    value = text.strip()
-    if _DATE.fullmatch(value) is None:
-        return None, "UNKNOWN"
-    if re.match(r"20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}", value):
-        try:
-            return business_time.to_business_naive(datetime.fromisoformat(value.replace("Z", "+00:00"))), "DATETIME"
-        except ValueError:
-            return None, "UNKNOWN"
-    day_match = re.match(_DAY, value)
-    if day_match is None:
-        return None, "UNKNOWN"
-    day_text = day_match.group()
-    day = business_time.resolve_follow_up_time(day_text, base=business_time.to_business_naive(anchor))
-    if day is None:
-        return None, "UNKNOWN"
-    clock = value[day_match.end() :].lstrip(" T的")
-    if not clock:
-        return datetime.combine(day.date(), time.min), "DATE"
-    match = re.fullmatch(
-        r"(上午|下午|晚上|中午|早上)?(?:(\d{1,2})[:：](\d{2})(?::(\d{2}))?|([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?)",
-        clock,
-    )
-    if match is None:
-        return None, "UNKNOWN"
-    try:
-        hour = int(match[2]) if match[2] else _number(match[5])
-        minute = (
-            int(match[3]) if match[3] else 30 if match[6] == "半" else _number(match[6].rstrip("分")) if match[6] else 0
-        )
-        if match[1] in {"上午", "早上", "下午", "晚上", "中午"} and not 1 <= hour <= 12:
-            return None, "UNKNOWN"
-        if match[1] in {"下午", "晚上"} and hour < 12:
-            hour += 12
-        elif match[1] in {"上午", "早上"} and hour == 12:
-            hour = 0
-        elif match[1] == "中午" and hour < 11:
-            return None, "UNKNOWN"
-        return day.replace(hour=hour, minute=minute, second=int(match[4] or 0)), "DATETIME"
-    except (ValueError, KeyError):
-        return None, "UNKNOWN"
+    from app.services.assistant.temporal_evidence import resolve_deadline_text
+
+    return resolve_deadline_text(text, anchor=anchor)
 
 
 def _clauses(text: str) -> list[tuple[int, int, str]]:
@@ -176,8 +141,8 @@ def _clauses(text: str) -> list[tuple[int, int, str]]:
                 and clauses[-1][0] >= sentence.start()
                 and clauses[-1][1] == start - 1
                 and (
-                    _DATE.fullmatch(quote.strip())
-                    or re.fullmatch(rf"(?:{_REPLACEMENT.pattern})\s*(?:{_DATE.pattern})", quote.strip())
+                    _is_deadline_only(quote)
+                    or _is_replacement_deadline(quote)
                 )
             ):
                 prior_start = clauses[-1][0]
@@ -191,7 +156,7 @@ def _owned_action(quote: str, owner: str, action: str) -> bool:
     """Dates may separate the subject and verb; unrelated subjects may not."""
     if not owner or not action:
         return False
-    without_dates = re.sub(r"\s+", "", _DATE.sub("", quote))
+    without_dates = re.sub(r"\s+", "", _strip_deadlines(quote))
     pattern = (
         rf"(?:^|[，,：:]|由|决定|安排|承诺|确认){re.escape(owner)}"
         rf"(?:(?:将|会|负责|计划|要|在)|取消|不(?:会|再|安排|准备|打算|是)|无需|不用|暂无)*{re.escape(action)}"
@@ -211,7 +176,7 @@ def _follow_up_action(content: dict[str, object], records: list[SourceSegment]) 
     title = str(content.get("next_action") or "").strip()
     if not title:
         return None
-    normalized = re.sub(r"\s+", "", _DATE.sub("", title))
+    normalized = re.sub(r"\s+", "", _strip_deadlines(title))
     subject = re.match(r"^(本人|我)(?:将|会|负责|计划|要|在)?(.+)$", normalized)
     if subject:
         owner, action = subject.groups()
@@ -259,17 +224,17 @@ def _resolve_action(action: dict[str, object], records: list[SourceSegment], rev
         result.quote_start, result.quote_end, result.anchor_at = start, end, record.recorded_at
         correction = is_action_deadline_correction(quote, owner, title)
         effective = _REPLACEMENT.split(quote)[-1] if correction else quote
-        dates = list(_DATE.finditer(effective))
+        dates = _deadline_spans(effective)
         if len(dates) != 1 or _UNCERTAIN.search(effective):
             result.resolution_status = "AMBIGUOUS" if dates else "UNRESOLVED"
             return result
         date = dates[0]
-        suffix = effective[date.end() :].lstrip()
+        suffix = effective[date.end :].lstrip()
         if re.match(
             r"上午|下午|晚上|中午|早上|[零〇一二两三四五六七八九十\d:：]|前|后|之|以|内|间|至|到|起", suffix
         ) or (not correction and _NEGATION.search(quote)):
             return result
-        result.due_at_text = date.group()
+        result.due_at_text = date.raw_text
         resolved, granularity = parse_deadline(result.due_at_text, anchor=record.recorded_at)
         canonical_due, canonical_granularity = parse_deadline(result.due_date, anchor=record.recorded_at)
         if resolved is None or canonical_due != resolved or canonical_granularity != granularity:

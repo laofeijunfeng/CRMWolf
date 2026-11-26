@@ -77,13 +77,20 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
   NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
   但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
 - temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
-  role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+  role、owner、action_ref、confidence 以及下面的结构化字段。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
   DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
   RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
   月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
   不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、
   SALES_FOLLOW_UP、INTERNAL_ACTION、COMMUNICATION_TIME、COMPLETED_EVENT、
   NON_BUSINESS_TIME、OTHER。不要输出 ISO 日期或公历结果。
+  每个时间同时按原话填写结构化字段（不适用留空）：year（明确年份）、year_offset（今年0/明年1/后年2/去年-1）、
+  month、month_offset（下个月1）、day、week_offset（本周0/下周1/下下周2）配 weekday（周一1…周日7）、
+  day_offset（今天0/明天1/三天后3）、segment（月初EARLY/月中MID/月末月底LATE/整月WHOLE_MONTH）、
+  clock（24小时制HH:MM，如「下午3点半」填"15:30"，无时刻留空）；
+  「春节后」「过阵子」等无法落到具体日期的时间填 vague=true。
+  中文数字一律换成阿拉伯数字，如「明年二月二十六号」填 year_offset=1、month=2、day=26；「2/26」填 month=2、day=26。
+  只照原话填写，不要自己推算日历，不要纠正无效日期。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
   action_status、evidence_quote、quote_start、quote_end。
   owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、
@@ -114,13 +121,20 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
   NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
   但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
 - temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
-  role、owner、action_ref、confidence。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+  role、owner、action_ref、confidence 以及下面的结构化字段。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
   DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
   RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
   月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
   不要当成某一天。无法归类时才用 UNKNOWN。role 只能是 CUSTOMER_COMMITMENT、CUSTOMER_ACTION、
   SALES_FOLLOW_UP、INTERNAL_ACTION、COMMUNICATION_TIME、COMPLETED_EVENT、
   NON_BUSINESS_TIME、OTHER。不要输出 ISO 日期或公历结果。
+  每个时间同时按原话填写结构化字段（不适用留空）：year（明确年份）、year_offset（今年0/明年1/后年2/去年-1）、
+  month、month_offset（下个月1）、day、week_offset（本周0/下周1/下下周2）配 weekday（周一1…周日7）、
+  day_offset（今天0/明天1/三天后3）、segment（月初EARLY/月中MID/月末月底LATE/整月WHOLE_MONTH）、
+  clock（24小时制HH:MM，如「下午3点半」填"15:30"，无时刻留空）；
+  「春节后」「过阵子」等无法落到具体日期的时间填 vague=true。
+  中文数字一律换成阿拉伯数字，如「明年二月二十六号」填 year_offset=1、month=2、day=26；「2/26」填 month=2、day=26。
+  只照原话填写，不要自己推算日历，不要纠正无效日期。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
   action_status、evidence_quote、quote_start、quote_end。
   owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、

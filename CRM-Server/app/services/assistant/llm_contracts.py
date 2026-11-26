@@ -79,6 +79,18 @@ class ModelTemporalMention(BaseModel):
     owner: str = Field(default="", max_length=80)
     action_ref: str = Field(default="", max_length=64)
     confidence: float = Field(default=0, ge=0, le=1)
+    # Structured calendar reading of raw_text. The server computes and validates the date.
+    year: int | None = Field(default=None, ge=2000, le=2100)
+    year_offset: int | None = Field(default=None, ge=-1, le=2)
+    month: int | None = Field(default=None, ge=1, le=12)
+    month_offset: int | None = Field(default=None, ge=-12, le=12)
+    day: int | None = Field(default=None, ge=1, le=31)
+    week_offset: int | None = Field(default=None, ge=-4, le=4)
+    weekday: int | None = Field(default=None, ge=1, le=7)
+    day_offset: int | None = Field(default=None, ge=-366, le=366)
+    vague: bool = False
+    segment: Literal["EARLY", "MID", "LATE", "WHOLE_MONTH"] | None = None
+    clock: str | None = Field(default=None, max_length=16)
 
 
 class ModelDraftAction(BaseModel):

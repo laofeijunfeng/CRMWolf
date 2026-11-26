@@ -36,33 +36,39 @@ def configured_db():
     engine.dispose()
 
 
-def _meeting() -> StructuredMeeting:
+def _meeting(*, week_offset: int | None = 2, weekday: int | None = 3) -> StructuredMeeting:
     mentions = []
-    for raw_text, kind, role, owner in (
-        ("11月", "FULL_MONTH", "CUSTOMER_COMMITMENT", "客户王经理"),
-        ("下周三", "RELATIVE_WEEKDAY", "SALES_FOLLOW_UP", "我方李经理"),
+    for raw_text, kind, role, owner, extra in (
+        ("11月", "FULL_MONTH", "CUSTOMER_COMMITMENT", "客户王经理", {"month": 11, "segment": "WHOLE_MONTH"}),
+        (
+            "下下周三",
+            "RELATIVE_WEEKDAY",
+            "SALES_FOLLOW_UP",
+            "我方李经理",
+            {"week_offset": week_offset, "weekday": weekday},
+        ),
     ):
         start = CAPABILITY_SAMPLE.index(raw_text)
         mentions.append({
             "raw_text": raw_text, "quote_start": start, "quote_end": start + len(raw_text),
-            "kind": kind, "role": role, "owner": owner, "confidence": 1,
+            "kind": kind, "role": role, "owner": owner, "confidence": 1, **extra,
         })
     content = MeetingContent(
         meeting_subject="产品评估", meeting_background="客户评估产品", communication_context="线上会议",
         participants={"internal": ["李经理"], "customer": ["王经理"]},
         key_minutes=["客户承诺11月完成评估"], qa_items=[], requirements=["产品评估"],
         concerns_or_objections=[], risks=[], decisions_or_commitments=["11月完成评估"],
-        action_items=[], next_step_summary="李经理下周三发送方案", next_action_absence_reason="",
+        action_items=[], next_step_summary="李经理下下周三发送方案", next_action_absence_reason="",
     )
     return StructuredMeeting(
         customer_name="示例客户", meeting_subject="产品评估", content=CAPABILITY_SAMPLE,
-        participants="客户王经理、我方李经理", next_action="李经理下周三发送方案",
-        next_follow_time_text="下周三", temporal_mentions=mentions, actions=[], content_json=content,
+        participants="客户王经理、我方李经理", next_action="李经理下下周三发送方案",
+        next_follow_time_text="下下周三", temporal_mentions=mentions, actions=[], content_json=content,
     )
 
 
 class CapabilityTransport:
-    def __init__(self, *, quality=None, failure=None, on_quality=None, plan_confidence=1):
+    def __init__(self, *, quality=None, failure=None, on_quality=None, plan_confidence=1, meeting=None):
         self.quality = quality or {
             "score": 82, "reason": "事实完整",
             "principle_scores": [{"name": "客户反馈", "score": 18, "max_score": 20, "comment": "清晰"}],
@@ -71,6 +77,7 @@ class CapabilityTransport:
         self.failure = failure
         self.on_quality = on_quality
         self.plan_confidence = plan_confidence
+        self.meeting = meeting
         self.modes = []
 
     async def ainvoke_structured(self, **kwargs):
@@ -87,7 +94,7 @@ class CapabilityTransport:
                 "task_relation": "NEW_TASK", "route": "WORKFLOW", "boundary": "NEW", "confidence": 1,
             })
         if kwargs["response_model"] is StructuredMeeting:
-            return _meeting()
+            return self.meeting if self.meeting is not None else _meeting()
         if self.on_quality:
             self.on_quality()
         return deepcopy(self.quality)
@@ -138,6 +145,16 @@ async def test_invalid_quality_prevents_false_readiness(configured_db):
     assert result.code == "MODEL_OUTPUT_INVALID"
     assert configured_db.get(AIConfig, 1).assistant_verified_fingerprint is None
 
+
+
+@pytest.mark.parametrize("week_offset,weekday", [(None, None), (1, 3), (2, 4)])
+async def test_missing_or_wrong_structured_temporal_fields_is_not_certified(configured_db, week_offset, weekday):
+    transport = CapabilityTransport(meeting=_meeting(week_offset=week_offset, weekday=weekday))
+    result = await AssistantModelCapabilities(transport).verify(configured_db, team_id=1)
+    assert not result.success
+    assert result.stage == "MEETING_STREAM"
+    assert result.code == "MODEL_OUTPUT_INVALID"
+    assert not assistant_verification_is_current(configured_db.get(AIConfig, 1), "sk-test")
 
 async def test_configuration_changed_during_probe_cannot_be_certified(configured_db):
     def change_model():

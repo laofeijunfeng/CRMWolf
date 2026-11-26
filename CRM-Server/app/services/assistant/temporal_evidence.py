@@ -11,14 +11,17 @@ from __future__ import annotations
 
 import calendar
 import re
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from hashlib import sha256
+from itertools import pairwise
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.services.assistant.contracts import DraftField, TaskDraft
-from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeRole
+from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention, TimeKind, TimeRole
+from app.utils import time as business_time
 
 StoredTimeKind = Literal[
     "EXPLICIT_DATE",
@@ -64,7 +67,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("FULL_MONTH", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月份")),
     ("FULL_MONTH", re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月(?!份|\d|初|中|末|底)")),
     ("EXPLICIT_DATE", re.compile(r"20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?")),
-    ("RELATIVE_WEEKDAY", re.compile(r"(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
+    ("RELATIVE_WEEKDAY", re.compile(r"(?<!下)(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]")),
     ("RELATIVE_WEEK", re.compile(r"(?:下个?|本|这)(?:周|星期|礼拜)(?![一二三四五六日天期])")),
     ("RELATIVE_DAY", re.compile(r"大后天|后天|明天|今天|今日|刚刚|刚才|方才")),
     ("DAY_OF_MONTH", re.compile(r"([0-9]{1,2})\s*[号日]")),
@@ -72,6 +75,11 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _JUST_NOW = ("刚刚", "刚才", "方才")
 _WEEKDAYS = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
 _DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_ISO_DATETIME = re.compile(r"20\d{2}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?")
+_DEADLINE_KINDS = frozenset(
+    {"EXPLICIT_DATE", "RELATIVE_DAY", "RELATIVE_WEEKDAY", "RELATIVE_YEAR_DATE", "MONTH_DAY", "RELATIVE_MONTH"}
+)
+_BARE_PERIOD_TAIL = re.compile(r"(?:上午|下午|晚上|中午|早上)\s*$")
 
 
 class TemporalContractError(ValueError):
@@ -187,6 +195,71 @@ def find_time_spans(text: str) -> list[FoundSpan]:
         accepted.append(item)
         cursor = item.end
     return accepted
+
+
+def deadline_spans(text: str) -> list[FoundSpan]:
+    """Non-overlapping deadline expressions shared by temporal and action evidence."""
+
+    found: list[FoundSpan] = [
+        FoundSpan(kind="EXPLICIT_DATE", start=match.start(), end=match.end(), raw_text=match.group())
+        for match in _ISO_DATETIME.finditer(text)
+    ]
+    found.extend(
+        span for span in find_time_spans(text) if span.kind in _DEADLINE_KINDS and not _is_just_now(span)
+    )
+    found.sort(key=lambda item: (item.start, -(item.end - item.start)))
+    accepted: list[FoundSpan] = []
+    cursor = -1
+    for item in found:
+        if item.start < cursor:
+            continue
+        accepted.append(item)
+        cursor = item.end
+    return accepted
+
+
+def resolve_deadline_text(
+    text: str, *, anchor: datetime
+) -> tuple[datetime | None, Literal["DATE", "DATETIME", "UNKNOWN"]]:
+    """Deterministic deadline resolution via the single temporal grammar and compute_temporal."""
+
+    value = text.strip()
+    if not value:
+        return None, "UNKNOWN"
+    if _ISO_DATETIME.fullmatch(value) is not None:
+        try:
+            return business_time.to_business_naive(datetime.fromisoformat(value.replace("Z", "+00:00"))), "DATETIME"
+        except ValueError:
+            return None, "UNKNOWN"
+    naive_anchor = business_time.to_business_naive(anchor)
+    spans = find_time_spans(value)
+    if len(spans) != 1 or spans[0].start != 0 or spans[0].end != len(value):
+        return None, "UNKNOWN"
+    span = spans[0]
+    if span.kind not in _DEADLINE_KINDS or _is_just_now(span):
+        return None, "UNKNOWN"
+    clock_match = _CLOCK.search(value)
+    has_clock_syntax = clock_match is not None and clock_match.start() > 0
+    clock = _clock_in_text(value)
+    if clock is None and (has_clock_syntax or _BARE_PERIOD_TAIL.search(value) is not None):
+        return None, "UNKNOWN"
+    resolved = _resolve_kind(span, naive_anchor, value)
+    resolved_at = resolved.get("resolved_at")
+    granularity = resolved.get("granularity")
+    if (
+        resolved.get("resolution_status") != "RESOLVED"
+        or not isinstance(resolved_at, datetime)
+        or granularity not in {"DATE", "DATETIME"}
+    ):
+        return None, "UNKNOWN"
+    if granularity == "DATETIME" and clock_match is not None and clock_match.group(4):
+        second = int(clock_match.group(4))
+        if not 0 <= second <= 59:
+            return None, "UNKNOWN"
+        resolved_at = resolved_at.replace(second=second)
+    if granularity == "DATE":
+        return resolved_at, "DATE"
+    return resolved_at, "DATETIME"
 
 
 def validate_temporal_quotes(text: str, mentions: list[object]) -> None:
@@ -338,6 +411,7 @@ def _build_segment_evidence(
             model_role=hint.role if hint else "OTHER",
             model_owner=hint.owner if hint else "",
             confidence=hint.confidence if hint else 0,
+            structured=hint,
         )
         stored.source_quotes = sources
         stored.source_actions = [
@@ -352,8 +426,24 @@ def _build_segment_evidence(
             stored.role = "CUSTOMER_ACTION" if linked and linked.owner_role == "CUSTOMER" else "OTHER"
             stored.ambiguity_reason = None
         if len(nominated) > 1:
-            stored.ambiguity_reason = "ROLE"
-            stored.resolution_status = "AMBIGUOUS"
+            nominated_actions = sorted(
+                (item for item in built_actions if item.action_id in nominated),
+                key=lambda item: item.quote_start,
+            )
+            shared_sales = (
+                len(nominated_actions) == len(nominated)
+                and all(item.owner_role == "SALES" and item.action_status == "PLANNED" for item in nominated_actions)
+                and all(
+                    left.quote_end <= right.quote_start
+                    and _SHARED_JOINER.fullmatch(segment_text[left.quote_end : right.quote_start]) is not None
+                    for left, right in pairwise(nominated_actions)
+                )
+            )
+            if not shared_sales:
+                stored.ambiguity_reason = "ROLE"
+                stored.resolution_status = "AMBIGUOUS"
+            else:
+                stored.action_id = nominated_actions[0].action_id
         if (
             stored.role in {"SALES_FOLLOW_UP", "CUSTOMER_COMMITMENT"} or stored.ambiguity_reason in {"ROLE", "STATUS"}
         ) and linked is None:
@@ -386,6 +476,7 @@ def _build_segment_evidence(
                 stored.action_id = action_id
         built_mentions.append(stored)
     _link_actions(built_mentions, built_actions)
+    _merge_shared_time_actions(segment_text, built_mentions, built_actions)
     _supersede_replacements(segment_text, built_mentions, built_actions)
     _guard_conflicting_dates(built_mentions, built_actions)
     return built_mentions, built_actions
@@ -429,11 +520,74 @@ def is_temporal_supplement(text: str) -> bool:
     spans = find_time_spans(value)
     if not spans or any(_is_just_now(span) for span in spans):
         return False
+    return not _remainder_after_spans(value, spans)
+
+
+_MODEL_TEMPORAL_CANDIDATE = re.compile(
+    r"(?:"
+    r"(?:下{1,4}|上{1,4}|本|这)(?:周|星期|礼拜)[一二三四五六日天末]"
+    r"|(?:[一二三四五六七八九十两\d]{1,3}(?:个?(?:天|日|周|星期|礼拜|月))|半个?月)[前后]"
+    r"|(?:\d{4}[/.])?\d{1,2}[/.]\d{1,2}"
+    r"|(?:今年|明年|后年|去年)(?:(?:\d{1,2}|[零〇一二三四五六七八九十]{1,2})月(?:(?:\d{1,2}|[零〇一二三四五六七八九十]{1,3})[日号]?|[上中下]旬|初|底)?|年初|年底|初|底)"
+    r"|(?:下{1,3}|上{1,3}|本|这)个?月(?:(?:\d{1,2}|[零〇一二三四五六七八九十]{1,3})[日号]?|[上中下]旬|月底|初|底)?"
+    r"|[一二三四五六七八九十]{1,2}月[一二三四五六七八九十]{1,3}[日号]"
+    r")"
+    r"(?:(?:早上|早晨|上午|中午|下午|傍晚|晚上|晚间)?(?:\d{1,2}(?:[:：]\d{2}|[点时](?:半|\d{1,2}分?)?)|[一二三四五六七八九十两]{1,2}[点时](?:半|[一二三四五六七八九十]{1,2}分?)?))?"
+)
+
+_TIME_KIND_MAP: dict[str, TimeKind] = {
+    "EXPLICIT_DATE": "EXPLICIT_DATE",
+    "RELATIVE_YEAR_DATE": "EXPLICIT_DATE",
+    "MONTH_DAY": "MONTH_DAY",
+    "DAY_OF_MONTH": "DAY_OF_MONTH",
+    "MONTH_SEGMENT": "MONTH_SEGMENT",
+    "MONTH_END": "MONTH_SEGMENT",
+    "FULL_MONTH": "FULL_MONTH",
+    "RELATIVE_DAY": "RELATIVE_DAY",
+    "RELATIVE_WEEK": "RELATIVE_WEEK",
+    "RELATIVE_MONTH": "RELATIVE_MONTH",
+    "RELATIVE_WEEKDAY": "RELATIVE_WEEKDAY",
+    "UNKNOWN": "UNKNOWN",
+}
+
+
+def is_temporal_supplement_candidate(text: str) -> bool:
+    """Accept regex or compact model-parsed date replies/corrections, never an action sentence."""
+
+    if is_temporal_supplement(text):
+        return True
+    value = re.sub(r"\s+", "", text)
+    if not value:
+        return False
+    regex_spans = find_time_spans(value)
+    if any(_is_just_now(span) for span in regex_spans):
+        return False
+    intervals = [(span.start, span.end) for span in regex_spans]
+    intervals.extend((match.start(), match.end()) for match in _MODEL_TEMPORAL_CANDIDATE.finditer(value))
+    if not intervals:
+        return False
+    intervals.sort(key=lambda item: (item[0], -item[1]))
+    merged: list[FoundSpan] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1].end:
+            if end > merged[-1].end:
+                merged[-1] = FoundSpan(
+                    kind="UNKNOWN",
+                    start=merged[-1].start,
+                    end=end,
+                    raw_text=value[merged[-1].start : end],
+                )
+        else:
+            merged.append(FoundSpan(kind="UNKNOWN", start=start, end=end, raw_text=value[start:end]))
+    return not _remainder_after_spans(value, merged)
+
+
+def _remainder_after_spans(value: str, spans: list[FoundSpan]) -> str:
     remainder = value
     for span in reversed(spans):
         remainder = remainder[: span.start] + remainder[span.end :]
     remainder = re.sub(r"也就是|也即|就是|改成|改为|改到|应为|而是|不是|日期|时间|补充|更正|调整为", "", remainder)
-    return not remainder.strip("，,。；;：:、（）()‘’“”\"'！？!?的为是")
+    return remainder.strip("，,。；;：:、（）()‘’“”\"'！？!?的为是")
 
 
 def is_temporal_choice_answer(draft: TaskDraft, text: str) -> bool:
@@ -635,7 +789,19 @@ def apply_temporal_answer(
     target = next((item for item in stored if item.mention_id == target_id and item.state == "ACTIVE"), None)
     if target is None:
         raise TemporalContractError("temporal answer target is no longer active")
-    target_action = _action_for(target, bound)
+    waiting_spec = temporal_waiting(draft)
+    waiting_action_id = (
+        waiting_spec.get("business_action_id")
+        if isinstance(waiting_spec, dict)
+        and waiting_spec.get("mention_id") == target_id
+        and isinstance(waiting_spec.get("business_action_id"), str)
+        else None
+    )
+    target_action = (
+        next((item for item in bound if item.action_id == waiting_action_id and item.state == "ACTIVE"), None)
+        if waiting_action_id
+        else None
+    ) or _action_for(target, bound)
     if target_action is None or target_action.state != "ACTIVE":
         raise TemporalContractError("temporal answer has no current action")
     answer = next((record for record in records if record.segment_id == answer_segment_id), None)
@@ -669,6 +835,7 @@ def apply_temporal_answer(
                     model_role="OTHER",
                     model_owner="",
                     confidence=quote.confidence,
+                    structured=quote,
                 )
                 stored.append(matched)
             if quote not in matched.source_quotes:
@@ -732,6 +899,13 @@ def apply_temporal_answer(
     independent: list[StoredMention] = []
     replacements: list[StoredMention] = []
     for span in candidates:
+        answer_quotes = [
+            q for q in quotes[answer_segment_id] if span.start <= q.quote_start and q.quote_end <= span.end
+        ]
+        hint = next(
+            (q for q in answer_quotes if q.quote_start == span.start and q.quote_end == span.end),
+            answer_quotes[0] if answer_quotes else None,
+        )
         item = _resolve_span(
             span,
             segment_text=answer.text,
@@ -740,7 +914,8 @@ def apply_temporal_answer(
             action_id=target_action.action_id,
             model_role=target.role,
             model_owner=target.owner,
-            confidence=0,
+            confidence=hint.confidence if hint else 0,
+            structured=hint,
         )
         source = next(
             (value for value in source_mentions if value.quote_start == span.start and value.quote_end == span.end),
@@ -748,7 +923,18 @@ def apply_temporal_answer(
         )
         # Source-qualified foreign ownership and completed/communication facts
         # remain evidence, not candidate answers to this action's date question.
-        date_only = is_temporal_supplement(_clause(answer.text, span.start))
+        clause = _clause(answer.text, span.start)
+        compact_clause = re.sub(r"\s+", "", clause)
+        compact_raw = re.sub(r"\s+", "", span.raw_text)
+        raw_pos = compact_clause.find(compact_raw) if compact_raw else -1
+        date_only = is_temporal_supplement(clause) or (
+            item.resolution_status == "RESOLVED"
+            and raw_pos >= 0
+            and not _remainder_after_spans(
+                compact_clause,
+                [FoundSpan(kind=span.kind, start=raw_pos, end=raw_pos + len(compact_raw), raw_text=compact_raw)],
+            )
+        )
         foreign = source is not None and (
             (
                 source.role in {"CUSTOMER_COMMITMENT", "CUSTOMER_ACTION", "INTERNAL_ACTION"}
@@ -778,7 +964,7 @@ def apply_temporal_answer(
                     raw_text=span.raw_text,
                     quote_start=span.start,
                     quote_end=span.end,
-                    kind=span.kind,
+                    kind=_TIME_KIND_MAP.get(span.kind, "UNKNOWN"),
                     role=target.role,
                     confidence=0,
                 )
@@ -887,8 +1073,23 @@ def apply_temporal_answer(
                 target = selected
                 target_id = selected.mention_id
                 target_action.temporal_mention_id = selected.mention_id
-        equivalent = target.resolved_at == replacement.resolved_at and target.granularity == replacement.granularity
-        if equivalent:
+        unbound_target = target_action.temporal_mention_id is None
+        is_equivalent = (
+            not unbound_target
+            and target.resolved_at == replacement.resolved_at
+            and target.granularity == replacement.granularity
+        )
+        if unbound_target:
+            for item in stored:
+                if item.state == "ACTIVE" and item.action_id == target_action.action_id:
+                    item.state = "SUPERSEDED"
+            replacement.correction_of = None
+            replacement.role = "SALES_FOLLOW_UP"
+            target_action.temporal_mention_id = replacement.mention_id
+            target_action.revision += 1
+            stored.extend(replacements)
+            draft.next_follow_time = DraftField(status="ACCEPTED", value=replacement.raw_text)
+        elif is_equivalent:
             stored.extend(replacements)
             replacement.state = "SUPERSEDED"
             replacement.correction_of = None
@@ -935,16 +1136,22 @@ def apply_temporal_answer(
             last = dated[-1]
             gap = last.answer_gap or (
                 "INVALID_DATE"
-                if last.day is not None and last.kind != "DAY_OF_MONTH"
+                if last.ambiguity_reason == "INVALID_DATE" or (last.day is not None and last.kind != "DAY_OF_MONTH")
                 else "MONTH"
                 if last.kind == "DAY_OF_MONTH"
                 else "DATE"
             )
-        target.answer_gap = gap
+        same_action_target = target.action_id == target_action.action_id
+        if same_action_target:
+            target.answer_gap = gap
         for item in dated:
             item.role = target.role
-            item.ambiguity_reason = pending_reason or "DATE"
+            item.ambiguity_reason = pending_reason or (
+                "INVALID_DATE" if item.ambiguity_reason == "INVALID_DATE" else "DATE"
+            )
             item.resolution_status = "AMBIGUOUS" if len(dated) > 1 else "UNRESOLVED"
+            if not same_action_target:
+                item.answer_gap = gap
         stored.extend(replacements)
     _write_bundle(draft, stored, bound)
     project_draft(draft)
@@ -1088,14 +1295,14 @@ def _project_answered_actions(draft: TaskDraft, mentions: list[StoredMention], a
             for item in items
         )
         base = _source_action_text(action.action_text)
-        variants = {action.action_text, *(date + base for date in dates)}
-        for date in dates:
+        variants = {action.action_text, *(raw + base for raw in dates)}
+        for raw in dates:
             variant = action.action_text
             for span in reversed(find_time_spans(variant)):
                 if span.raw_text in dates:
-                    variant = variant[: span.start] + date + variant[span.end :]
+                    variant = variant[: span.start] + raw + variant[span.end :]
             variants.add(variant)
-            variants.add(re.sub(r"(?:大概|大约|可能|也许|暂定)\s*(?=" + re.escape(date) + r")", "", variant))
+            variants.add(re.sub(r"(?:大概|大约|可能|也许|暂定)\s*(?=" + re.escape(raw) + r")", "", variant))
         for key in ("next_action", "next_step_summary"):
             text = draft.content_json.get(key)
             if not isinstance(text, str):
@@ -1174,10 +1381,11 @@ def project_draft(draft: TaskDraft) -> None:
             draft.next_action = DraftField(status="CANDIDATE", value=sales_action.action_text)
             draft.content_json["next_action"] = sales_action.action_text
         if sales_mention is None:
-            if draft.next_follow_time.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
-                draft.next_follow_time = DraftField(status="MISSING")
-            draft.content_json["next_follow_time_text"] = ""
-            notices.append("已识别下一步动作，但未指定跟进日期；如需记录日期，请补充日期。")
+            if not _active_resolved_sales_mentions(mentions):
+                if draft.next_follow_time.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
+                    draft.next_follow_time = DraftField(status="MISSING")
+                draft.content_json["next_follow_time_text"] = ""
+                notices.append("已识别下一步动作，但未指定跟进日期；如需记录日期，请补充日期。")
             sales_text = _sentence(f"下一步：{sales_action.action_text}")
         elif sales_mention.resolution_status == "RESOLVED" and sales_mention.resolved_at is not None:
             if draft.next_follow_time.status not in {"ACCEPTED", "EXPLICITLY_NONE"}:
@@ -1295,8 +1503,8 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
         action = action_by_id.get(vague.action_id or "")
         scoped = [item for item in mentions if item.action_id == vague.action_id]
         latest = scoped[-1] if scoped else vague
-        gap = vague.answer_gap or "DATE"
-        if gap == "INVALID_DATE":
+        gap = vague.answer_gap or ("INVALID_DATE" if vague.ambiguity_reason == "INVALID_DATE" else "DATE")
+        if vague.answer_gap == "INVALID_DATE":
             prompt = f"已保留原有信息，但“{latest.raw_text}”不是有效日期，请补充这个动作的有效日期。"
         elif gap == "MONTH":
             prompt = f"已保留“{latest.raw_text}”，还缺少月份，请补充这个动作的完整年月日。"
@@ -1308,6 +1516,8 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
             )
             labels = "、".join(dates)
             prompt = f"已保留这个动作的日期{labels}，请确认采用哪一个日期；如需更正，请明确说明。"
+        elif vague.ambiguity_reason == "INVALID_DATE":
+            prompt = f"“{vague.raw_text}”不是有效日期，请补充具体日期。"
         else:
             prompt = f"“{vague.raw_text}”无法确定为唯一日期，请补充具体日期。"
         return {
@@ -1324,10 +1534,58 @@ def temporal_waiting(draft: TaskDraft) -> dict[str, object] | None:
             "reason": "PRIMARY",
             "prompt": "请确认哪一项是你的下一步。",
             "candidates": [
-                {"id": f"primary:{action.action_id}", "label": action.action_text} for _mention, action in sales
+                {"id": f"primary:{action.action_id}", "label": _primary_label(mention, action)}
+                for mention, action in sales
             ],
         }
+    resolved_sales = _active_resolved_sales_mentions(mentions)
+    if (
+        resolved_sales
+        and draft.next_follow_time.status != "EXPLICITLY_NONE"
+        and not (draft.next_follow_time.status == "ACCEPTED" and draft.next_follow_time.value)
+    ):
+        sales_mention = sales[0] if isinstance(sales, tuple) else None
+        sales_action = sales[1] if isinstance(sales, tuple) else None
+        if sales_mention is None:
+            anchor_mention = resolved_sales[0]
+            action = sales_action or _action_for(anchor_mention, actions)
+            day_text = anchor_mention.resolved_at.date().isoformat() if anchor_mention.resolved_at else ""
+            if sales_action is not None:
+                prompt = (
+                    f"已识别跟进日期“{anchor_mention.raw_text}”（{day_text}），"
+                    f"但未绑定到当前下一步“{sales_action.action_text}”，请确认或补充具体日期。"
+                )
+            else:
+                prompt = (
+                    f"已识别跟进日期“{anchor_mention.raw_text}”（{day_text}），"
+                    "但未确定对应下一步跟进时间，请确认或补充具体日期。"
+                )
+            return {
+                "reason": "DATE",
+                "mention_id": anchor_mention.mention_id,
+                "business_action_id": action.action_id if action else None,
+                "prompt": prompt,
+                "candidates": [],
+                "gap": "DATE",
+            }
     return None
+
+
+def _active_resolved_sales_mentions(mentions: list[StoredMention]) -> list[StoredMention]:
+    return [
+        item
+        for item in mentions
+        if item.state == "ACTIVE"
+        and item.role == "SALES_FOLLOW_UP"
+        and item.resolution_status == "RESOLVED"
+        and item.resolved_at is not None
+    ]
+
+
+def _primary_label(mention: StoredMention | None, action: StoredAction) -> str:
+    if mention is not None and mention.resolution_status == "RESOLVED" and mention.resolved_at is not None:
+        return f"{action.action_text}（{mention.resolved_at.date().isoformat()}）"
+    return action.action_text
 
 
 _FUZZY_TIME_LABEL = "（模糊时间，未确定具体日期）"
@@ -1542,8 +1800,12 @@ def _resolve_span(
     model_role: TimeRole,
     model_owner: str,
     confidence: float,
+    structured: ModelTemporalMention | None = None,
 ) -> StoredMention:
     resolved = _resolve_kind(found, anchor, segment_text)
+    computed = compute_temporal(structured, anchor) if structured is not None else None
+    if computed is not None:
+        resolved = _cross_check(resolved, computed, _clock_in_text(found.raw_text), anchor)
     resolved_at = resolved.get("resolved_at")
     role, _action_status, reason = _bind_role(
         segment_text,
@@ -1587,6 +1849,255 @@ def _resolve_span(
     return base.model_copy(update=resolved)
 
 
+@dataclass(frozen=True, slots=True)
+class TemporalFields:
+    """Structured calendar fields shared by model mentions and scanner fallback."""
+
+    year: int | None = None
+    year_offset: int | None = None
+    month: int | None = None
+    month_offset: int | None = None
+    day: int | None = None
+    week_offset: int | None = None
+    weekday: int | None = None
+    day_offset: int | None = None
+    vague: bool = False
+    segment: Literal["EARLY", "MID", "LATE", "WHOLE_MONTH"] | None = None
+    clock: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ComputedTemporal:
+    """Deterministic server calendar calculation for structured temporal fields."""
+
+    status: Literal["RESOLVED", "INVALID_DATE", "UNRESOLVED"]
+    granularity: MentionGranularity = "UNKNOWN"
+    resolved_date: date | None = None
+    year: int | None = None
+    month: int | None = None
+    day: int | None = None
+    segment: MonthSegmentName | None = None
+    clock: tuple[int, int] | None = None
+    ambiguity_reason: str | None = None
+
+
+_STRUCTURED_CLOCK = re.compile(r"^(\d{1,2}):(\d{2})$")
+_SEGMENT_MAP: dict[str, MonthSegmentName] = {"EARLY": "EARLY", "MID": "MIDDLE", "LATE": "LATE"}
+
+
+def _parse_structured_clock(raw: str | None) -> tuple[tuple[int, int] | None, bool]:
+    if raw is None:
+        return None, True
+    text = raw.strip()
+    if not text:
+        return None, True
+    match = _STRUCTURED_CLOCK.fullmatch(text)
+    if match is None:
+        return None, False
+    hour, minute = int(match.group(1)), int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None, False
+    return (hour, minute), True
+
+
+def compute_temporal(mention: ModelTemporalMention | TemporalFields, anchor: datetime) -> ComputedTemporal | None:
+    """Single calendar computation for the model's structured reading.
+
+    Returns a ComputedTemporal (RESOLVED, INVALID_DATE, or UNRESOLVED), or None
+    when the model gave no structured reading.
+    """
+
+    parsed_clock, clock_ok = _parse_structured_clock(mention.clock)
+    if not clock_ok:
+        return ComputedTemporal(status="INVALID_DATE", ambiguity_reason="INVALID_DATE")
+    if mention.vague:
+        return ComputedTemporal(status="UNRESOLVED")
+    today = anchor.date()
+    if mention.segment is not None:
+        if parsed_clock is not None or mention.day is not None:
+            return ComputedTemporal(status="UNRESOLVED", ambiguity_reason="DATE")
+        if mention.month_offset is not None:
+            year, month = _shift_month(today.year, today.month, mention.month_offset)
+        elif mention.month is not None:
+            month = mention.month
+            if not 1 <= month <= 12:
+                return ComputedTemporal(status="UNRESOLVED", month=month)
+            if mention.year is not None:
+                year = mention.year
+            elif mention.year_offset is not None:
+                year = today.year + mention.year_offset
+            else:
+                year = today.year if month >= today.month else today.year + 1
+        else:
+            return None
+        if mention.segment == "WHOLE_MONTH":
+            return ComputedTemporal(status="RESOLVED", granularity="FULL_MONTH", year=year, month=month)
+        return ComputedTemporal(
+            status="RESOLVED",
+            granularity="MONTH_SEGMENT",
+            year=year,
+            month=month,
+            segment=_SEGMENT_MAP[mention.segment],
+        )
+    if mention.day_offset is not None:
+        resolved_day = today + timedelta(days=mention.day_offset)
+        return ComputedTemporal(
+            status="RESOLVED",
+            granularity="DATETIME" if parsed_clock else "DATE",
+            resolved_date=resolved_day,
+            year=resolved_day.year,
+            month=resolved_day.month,
+            day=resolved_day.day,
+            clock=parsed_clock,
+        )
+    if mention.week_offset is not None and mention.weekday is not None:
+        monday = today - timedelta(days=today.weekday())
+        resolved_day = monday + timedelta(days=7 * mention.week_offset + mention.weekday - 1)
+        return ComputedTemporal(
+            status="RESOLVED",
+            granularity="DATETIME" if parsed_clock else "DATE",
+            resolved_date=resolved_day,
+            year=resolved_day.year,
+            month=resolved_day.month,
+            day=resolved_day.day,
+            clock=parsed_clock,
+        )
+    if mention.day is None or (mention.month is None and mention.month_offset is None):
+        return None
+    if mention.month_offset is not None:
+        year, month = _shift_month(today.year, today.month, mention.month_offset)
+    else:
+        assert mention.month is not None
+        month = mention.month
+        if not 1 <= month <= 12:
+            return ComputedTemporal(status="UNRESOLVED", month=month, day=mention.day)
+        if mention.year is not None:
+            year = mention.year
+        elif mention.year_offset is not None:
+            year = today.year + mention.year_offset
+        else:
+            if mention.day < 1:
+                return ComputedTemporal(status="UNRESOLVED", month=month, day=mention.day)
+            year = today.year + (1 if (month, mention.day) < (today.month, today.day) else 0)
+    if mention.day < 1:
+        return ComputedTemporal(status="UNRESOLVED", year=year, month=month, day=mention.day)
+    if mention.day > calendar.monthrange(year, month)[1]:
+        return ComputedTemporal(
+            status="INVALID_DATE",
+            year=year,
+            month=month,
+            day=mention.day,
+            ambiguity_reason="INVALID_DATE",
+        )
+    resolved_day = date(year, month, mention.day)
+    return ComputedTemporal(
+        status="RESOLVED",
+        granularity="DATETIME" if parsed_clock else "DATE",
+        resolved_date=resolved_day,
+        year=year,
+        month=month,
+        day=mention.day,
+        clock=parsed_clock,
+    )
+
+
+def _cross_check(
+    resolved: dict[str, object], computed: ComputedTemporal, clock: tuple[int, int] | None, anchor: datetime
+) -> dict[str, object]:
+    """The model's structured date wins only where the scanner is silent; disagreement asks."""
+
+    disagree: dict[str, object] = {
+        "year": None,
+        "month": None,
+        "day": None,
+        "hour": None,
+        "minute": None,
+        "segment": None,
+        "resolved_at": None,
+        "granularity": "UNKNOWN",
+        "resolution_status": "AMBIGUOUS",
+        "ambiguity_reason": "DATE",
+        "candidates": [],
+    }
+    status = resolved.get("resolution_status")
+    scanned = resolved.get("resolved_at")
+    if computed.status == "INVALID_DATE":
+        if status == "RESOLVED":
+            return disagree
+        invalid: dict[str, object] = {
+            **resolved,
+            "resolution_status": "UNRESOLVED",
+            "ambiguity_reason": "INVALID_DATE",
+            "candidates": [],
+        }
+        if computed.year is not None:
+            invalid["year"] = computed.year
+        if computed.month is not None:
+            invalid["month"] = computed.month
+        if computed.day is not None:
+            invalid["day"] = computed.day
+        return invalid
+    if computed.status == "UNRESOLVED":
+        if computed.ambiguity_reason == "DATE":
+            if status == "RESOLVED":
+                return disagree
+            return {
+                **resolved,
+                "resolution_status": "UNRESOLVED",
+                "ambiguity_reason": "DATE",
+                "granularity": "UNKNOWN",
+                "resolved_at": None,
+                "candidates": [],
+            }
+        return disagree if status == "RESOLVED" else resolved
+    if computed.granularity in {"MONTH_SEGMENT", "FULL_MONTH"}:
+        if status == "RESOLVED":
+            if resolved.get("granularity") != computed.granularity:
+                return disagree
+            if resolved.get("year") != computed.year or resolved.get("month") != computed.month:
+                return disagree
+            if computed.granularity == "MONTH_SEGMENT" and resolved.get("segment") != computed.segment:
+                return disagree
+            return resolved
+        if status == "UNRESOLVED" and resolved.get("ambiguity_reason") is None:
+            return {
+                "kind": computed.granularity,
+                "year": computed.year,
+                "month": computed.month,
+                "day": None,
+                "hour": None,
+                "minute": None,
+                "segment": computed.segment,
+                "resolved_at": None,
+                "granularity": computed.granularity,
+                "resolution_status": "RESOLVED",
+                "ambiguity_reason": None,
+                "candidates": [],
+            }
+        return resolved
+    assert computed.resolved_date is not None
+    if status == "RESOLVED":
+        if not isinstance(scanned, datetime) or scanned.date() != computed.resolved_date:
+            return disagree
+        if (resolved.get("granularity") == "DATETIME") != (computed.clock is not None):
+            return disagree
+        if computed.clock is not None and (resolved.get("hour"), resolved.get("minute")) != computed.clock:
+            return disagree
+        return resolved
+    if status == "UNRESOLVED" and resolved.get("ambiguity_reason") is None:
+        if computed.clock is not None and clock is not None and computed.clock != clock:
+            return disagree
+        return _dated(
+            computed.resolved_date.year,
+            computed.resolved_date.month,
+            computed.resolved_date.day,
+            computed.clock or clock,
+            anchor,
+        )
+    # Scanner already asks (bare-day month choice, invalid day): keep its question.
+    return resolved
+
+
 def _full_month_mention(mention: StoredMention) -> bool:
     """Resolved whole-month evidence, including drafts stored before FULL_MONTH existed."""
 
@@ -1615,24 +2126,62 @@ def _year_for_month(text: str, start: int, month: int, anchor: datetime) -> int:
     return anchor.year if month >= anchor.month else anchor.year + 1
 
 
+def _computed_to_dict(
+    computed: ComputedTemporal | None,
+    clock: tuple[int, int] | None,
+    anchor: datetime,
+) -> dict[str, object]:
+    if computed is None:
+        return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
+    if computed.status == "RESOLVED":
+        if computed.granularity in {"MONTH_SEGMENT", "FULL_MONTH"}:
+            return {
+                "year": computed.year,
+                "month": computed.month,
+                "day": None,
+                "hour": None,
+                "minute": None,
+                "segment": computed.segment,
+                "resolved_at": None,
+                "granularity": computed.granularity,
+                "resolution_status": "RESOLVED",
+                "ambiguity_reason": None,
+                "candidates": [],
+            }
+        assert computed.resolved_date is not None
+        return _dated(
+            computed.resolved_date.year,
+            computed.resolved_date.month,
+            computed.resolved_date.day,
+            computed.clock or clock,
+            anchor,
+        )
+    result: dict[str, object] = {
+        "resolution_status": "UNRESOLVED",
+        "ambiguity_reason": computed.ambiguity_reason,
+        "granularity": "UNKNOWN",
+    }
+    if computed.year is not None:
+        result["year"] = computed.year
+    if computed.month is not None:
+        result["month"] = computed.month
+    if computed.day is not None:
+        result["day"] = computed.day
+    return result
+
+
 def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict[str, object]:
     hour_minute = _clock_in_text(found.raw_text)
     kind = found.kind
     if kind == "RELATIVE_YEAR_DATE":
         relative, explicit, month_text, day_text = found.groups[:4]
-        year = int(explicit) if explicit else anchor.year + _YEAR_OFFSETS[relative or "今年"]
-        month, day = int(month_text or 0), int(day_text or 0)
-        try:
-            datetime(year, month, day)
-        except ValueError:
-            return {
-                "year": year,
-                "month": month,
-                "day": day,
-                "resolution_status": "UNRESOLVED",
-                "granularity": "UNKNOWN",
-            }
-        return _dated(year, month, day, hour_minute, anchor)
+        fields = TemporalFields(
+            year=int(explicit) if explicit else None,
+            year_offset=_YEAR_OFFSETS[relative or "今年"] if not explicit else None,
+            month=int(month_text or 0),
+            day=int(day_text or 0),
+        )
+        return _computed_to_dict(compute_temporal(fields, anchor), hour_minute, anchor)
     if kind == "MONTH_SEGMENT":
         if hour_minute is not None:
             return {
@@ -1644,29 +2193,25 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
             }
         first = found.groups[0] if found.groups else None
         segment_char = found.groups[1] if len(found.groups) > 1 else None
-        segment = {"初": "EARLY", "中": "MIDDLE", "末": "LATE", "底": "LATE"}.get(segment_char or "")
+        segment_map: dict[str, Literal["EARLY", "MID", "LATE"]] = {
+            "初": "EARLY",
+            "中": "MID",
+            "末": "LATE",
+            "底": "LATE",
+        }
+        segment = segment_map.get(segment_char or "")
         if segment is None:
             return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
         if first and first.isdigit():
             month = int(first)
-            if not 1 <= month <= 12:
-                return {"month": month, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-            year = _year_for_month(segment_text, found.start, month, anchor)
+            fields = TemporalFields(
+                year=_explicit_year(segment_text, found.start),
+                month=month,
+                segment=segment,
+            )
         else:
-            year, month = _shift_month(anchor.year, anchor.month, 1 if first in {"下", "下个"} else 0)
-        return {
-            "year": year,
-            "month": month,
-            "day": None,
-            "hour": None,
-            "minute": None,
-            "segment": segment,
-            "resolved_at": None,
-            "granularity": "MONTH_SEGMENT",
-            "resolution_status": "RESOLVED",
-            "ambiguity_reason": None,
-            "candidates": [],
-        }
+            fields = TemporalFields(month_offset=1 if first in {"下", "下个"} else 0, segment=segment)
+        return _computed_to_dict(compute_temporal(fields, anchor), None, anchor)
     if kind == "DAY_OF_MONTH":
         day = int(found.groups[0] or "0")
         options = _bare_day_candidates(day, anchor)
@@ -1684,19 +2229,15 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
         return {"day": day, "resolution_status": "UNRESOLVED", "ambiguity_reason": "MONTH", "granularity": "UNKNOWN"}
     if kind == "RELATIVE_MONTH":
         day = int(found.groups[0] or "0")
-        year, month = _shift_month(anchor.year, anchor.month, 1)
-        if day < 1 or day > calendar.monthrange(year, month)[1]:
-            return {"day": day, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        return _dated(year, month, day, hour_minute, anchor)
+        return _computed_to_dict(compute_temporal(TemporalFields(month_offset=1, day=day), anchor), hour_minute, anchor)
     if kind == "MONTH_DAY":
         year_text, month_text, day_text = (*found.groups, None, None, None)[:3]
-        month, day = int(month_text or 0), int(day_text or 0)
-        year = int(year_text) if year_text else anchor.year
-        if year_text is None and (month, day) < (anchor.month, anchor.day):
-            year += 1
-        if month < 1 or month > 12 or day < 1 or day > calendar.monthrange(year, month)[1]:
-            return {"month": month, "day": day, "resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        return _dated(year, month, day, hour_minute, anchor)
+        fields = TemporalFields(
+            year=int(year_text) if year_text else None,
+            month=int(month_text or 0),
+            day=int(day_text or 0),
+        )
+        return _computed_to_dict(compute_temporal(fields, anchor), hour_minute, anchor)
     if kind == "FULL_MONTH":
         if hour_minute is not None:
             return {
@@ -1708,21 +2249,12 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
             }
         month_text = found.groups[0] if found.groups else None
         month = int(month_text) if month_text and month_text.isdigit() else 0
-        if not 1 <= month <= 12:
-            return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        year = _year_for_month(segment_text, found.start, month, anchor)
-        return {
-            "year": year,
-            "month": month,
-            "day": None,
-            "hour": None,
-            "minute": None,
-            "resolved_at": None,
-            "granularity": "FULL_MONTH",
-            "resolution_status": "RESOLVED",
-            "ambiguity_reason": None,
-            "candidates": [],
-        }
+        fields = TemporalFields(
+            year=_explicit_year(segment_text, found.start),
+            month=month,
+            segment="WHOLE_MONTH",
+        )
+        return _computed_to_dict(compute_temporal(fields, anchor), None, anchor)
     if kind == "RELATIVE_WEEK":
         return {
             "resolution_status": "RESOLVED",
@@ -1734,35 +2266,26 @@ def _resolve_kind(found: FoundSpan, anchor: datetime, segment_text: str) -> dict
     if kind == "RELATIVE_DAY":
         offsets = {"今天": 0, "今日": 0, "刚刚": 0, "刚才": 0, "方才": 0, "明天": 1, "后天": 2, "大后天": 3}
         key = next(name for name in offsets if found.raw_text.startswith(name))
-        target = anchor.date() + timedelta(days=offsets[key])
-        if key in _JUST_NOW:
-            # "刚刚" is the moment of speaking, not midnight of today.
-            clock = hour_minute or (anchor.hour, anchor.minute)
-            return _dated(target.year, target.month, target.day, clock, anchor)
-        return _dated(target.year, target.month, target.day, hour_minute, anchor)
+        # "刚刚" is the moment of speaking, not midnight of today.
+        clock = (hour_minute or (anchor.hour, anchor.minute)) if key in _JUST_NOW else hour_minute
+        return _computed_to_dict(compute_temporal(TemporalFields(day_offset=offsets[key]), anchor), clock, anchor)
     if kind == "RELATIVE_WEEKDAY":
         prefix = found.raw_text[0] if found.raw_text[0] in {"下", "本", "这"} else ""
         weekday = re.match(r"(?:下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])", found.raw_text)
         if weekday is None:
             return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        day_name = weekday.group(1)
-        offset = _WEEKDAYS[day_name] - anchor.weekday()
-        if prefix == "下" or (prefix == "" and offset < 0):
-            offset += 7
-        target = anchor.date() + timedelta(days=offset)
-        return _dated(target.year, target.month, target.day, hour_minute, anchor)
+        day_index = _WEEKDAYS[weekday.group(1)]
+        week_offset = 1 if prefix == "下" or (prefix == "" and day_index < anchor.weekday()) else 0
+        fields = TemporalFields(week_offset=week_offset, weekday=day_index + 1)
+        return _computed_to_dict(compute_temporal(fields, anchor), hour_minute, anchor)
     if kind == "EXPLICIT_DATE":
         match = re.match(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})", found.raw_text)
         if match is None:
             return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
         year, month, day = (int(part) for part in match.groups())
-        try:
-            datetime(year, month, day)
-        except ValueError:
-            return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN"}
-        return _dated(year, month, day, hour_minute, anchor)
+        computed = compute_temporal(TemporalFields(year=year, month=month, day=day), anchor)
+        return _computed_to_dict(computed, hour_minute, anchor)
     return {"resolution_status": "UNRESOLVED", "granularity": "UNKNOWN", "kind": "UNKNOWN"}
-
 
 def _dated(year: int, month: int, day: int, clock: tuple[int, int] | None, anchor: datetime) -> dict[str, object]:
     del anchor
@@ -1932,6 +2455,37 @@ def _link_actions(mentions: list[StoredMention], actions: list[StoredAction]) ->
             action.owner_role = "OTHER"
             if mention.ambiguity_reason != "ROLE":
                 action.action_status = "COMPLETED"
+
+
+_SHARED_JOINER = re.compile(r"[\s，,、]*(?:(?:同时|并且|并|顺便|另外|再)[\s，,、]*)?")
+_JOINER_PREFIX = re.compile(r"^(?:同时|并且|并|顺便|另外|再)\s*")
+
+
+def _merge_shared_time_actions(text: str, mentions: list[StoredMention], actions: list[StoredAction]) -> None:
+    """One time shared by adjacent planned sales actions in one sentence is one next step."""
+
+    def planned(item: StoredAction) -> bool:
+        return item.state == "ACTIVE" and item.owner_role == "SALES" and item.action_status == "PLANNED"
+
+    timed = {item.mention_id for item in mentions if item.state == "ACTIVE" and item.role == "SALES_FOLLOW_UP"}
+    ordered = sorted((item for item in actions if planned(item)), key=lambda item: item.quote_start)
+    head: StoredAction | None = None
+    for action in ordered:
+        if head is not None and action.temporal_mention_id in {None, head.temporal_mention_id}:
+            between = text[head.quote_end : action.quote_start]
+            others = any(
+                item.state == "ACTIVE"
+                and item.mention_id != head.temporal_mention_id
+                and head.quote_end <= item.quote_start < action.quote_end
+                for item in mentions
+            )
+            if head.quote_end <= action.quote_start and _SHARED_JOINER.fullmatch(between) and not others:
+                head.action_text = f"{head.action_text}，并{_JOINER_PREFIX.sub('', action.action_text)}"
+                head.quote_end = action.quote_end
+                head.evidence_quote = text[head.quote_start : head.quote_end]
+                action.state = "SUPERSEDED"
+                continue
+        head = action if action.temporal_mention_id in timed else None
 
 
 def _guard_conflicting_dates(mentions: list[StoredMention], actions: list[StoredAction]) -> None:
@@ -2192,10 +2746,14 @@ def _clock_parts(match: re.Match[str]) -> tuple[int, int] | None:
     except (ValueError, KeyError):
         return None
     period = match.group(1)
+    if period in {"上午", "早上", "下午", "晚上", "中午"} and not 1 <= hour <= 12:
+        return None
     if period in {"下午", "晚上"} and hour < 12:
         hour += 12
     elif period in {"上午", "早上"} and hour == 12:
         hour = 0
+    elif period == "中午" and hour < 11:
+        return None
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
         return None
     return hour, minute

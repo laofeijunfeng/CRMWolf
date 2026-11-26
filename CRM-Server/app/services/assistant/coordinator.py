@@ -193,10 +193,13 @@ class AssistantCoordinator:
             return await self._answer_waiting(db, task, waiting, user_input, reporter=reporter)
 
         if user_input.text:
-            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+            from app.services.assistant.temporal_evidence import (
+                is_temporal_supplement_candidate,
+                temporal_supplement_target,
+            )
 
             target_id = temporal_supplement_target(load_draft(task))
-            if target_id is not None and is_temporal_supplement(user_input.text):
+            if target_id is not None and is_temporal_supplement_candidate(user_input.text):
                 return await self._apply_temporal_text(db, task, user_input.text, target_id, reporter)
 
         if (
@@ -801,11 +804,13 @@ class AssistantCoordinator:
             apply_temporal_answer,
             is_temporal_choice_answer,
             is_temporal_supplement,
+            is_temporal_supplement_candidate,
             temporal_waiting,
         )
 
         scoped_answer = is_temporal_supplement(text) or is_temporal_choice_answer(load_draft(task), text)
-        if not scoped_answer and self._structurer is not None and self._quality_gate is not None:
+        candidate_answer = is_temporal_supplement_candidate(text)
+        if not scoped_answer and self._structurer is not None and (candidate_answer or self._quality_gate is not None):
             updated = apply_task_update(
                 db,
                 task,
@@ -824,6 +829,7 @@ class AssistantCoordinator:
                 gate=self._quality_gate,
                 reporter=reporter,
                 from_waiting=True,
+                temporal_answer_id=target_id,
             )
             if failed or paused is not None:
                 return CoordinatorOutcome(
@@ -1330,10 +1336,13 @@ class AssistantCoordinator:
                 quote=user_input.correction_quote,
             )
         if user_input.kind == "text" and user_input.text:
-            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+            from app.services.assistant.temporal_evidence import (
+                is_temporal_supplement_candidate,
+                temporal_supplement_target,
+            )
 
             target_id = temporal_supplement_target(load_draft(task))
-            if target_id is not None and is_temporal_supplement(user_input.text):
+            if target_id is not None and is_temporal_supplement_candidate(user_input.text):
                 return await self._apply_temporal_text(db, task, user_input.text.strip(), target_id, reporter)
             waiting = load_waiting(task)
             return CoordinatorOutcome(

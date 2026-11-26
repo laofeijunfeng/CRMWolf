@@ -38,6 +38,12 @@
 - 写入沿用 claim → CRM 事实 + 效果 → 回执；重复记录不覆盖、不重复创建；提交未知只核对一次，不自动重试。
 - 决策依据：`docs/adr/0005-assistant-direct-entity-create.md`。迁移 172 新增 `task_kind` / `parent_task_id`；前后端同批发布，回滚前先结清 ACTIVE 实体任务。
 
+## 销售助手时间结构化与同句动作合并（CRM-170）
+
+- 时间语义由模型在 `ModelTemporalMention` 中输出可选结构化字段，服务端通过唯一入口 `compute_temporal` 完成日历计算与校验（`action_evidence` 共用），正则仅做交叉核对；双方冲突时进入 `AMBIGUOUS` 追问，不静默采信任一侧。
+- 同一句内共用单一时间的多个 `SALES`/`PLANNED` 动作按原文顺序以「，并」合并为一个下一步并共享 mention；不同时间不合并，`PRIMARY` 选项追加「（YYYY-MM-DD）」。存在已解析销售跟进日期时，不得静默清空 `next_follow_time`，必须进入 `DATE` 追问。
+- 决策依据：`docs/adr/0006-assistant-temporal-model-structured.md`。无数据库迁移，兼容不含新增可选字段的历史草稿。
+
 ## 领域词汇
 
 - **客户活动（Customer Activity）**：客户下的跟进记录或会议纪要。本期只有“新增”和“删除”，没有修改操作。

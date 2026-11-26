@@ -271,12 +271,15 @@ def accept_submit(
             and kind == "text"
         ):
             from app.services.assistant.task_state import load_draft
-            from app.services.assistant.temporal_evidence import is_temporal_supplement, temporal_supplement_target
+            from app.services.assistant.temporal_evidence import (
+                is_temporal_supplement_candidate,
+                temporal_supplement_target,
+            )
 
             temporal_supplement = (
                 choice is None
                 and isinstance(text, str)
-                and is_temporal_supplement(text)
+                and is_temporal_supplement_candidate(text)
                 and temporal_supplement_target(load_draft(task)) is not None
             )
         if (

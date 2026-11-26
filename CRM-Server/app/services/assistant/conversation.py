@@ -976,7 +976,7 @@ class ConversationService:
         decision = ConversationDecision.model_validate(entry.decision_json)
         from app.services.assistant.temporal_evidence import (
             is_temporal_choice_answer,
-            is_temporal_supplement,
+            is_temporal_supplement_candidate,
             temporal_supplement_target,
         )
 
@@ -984,7 +984,7 @@ class ConversationService:
             waiting is not None
             and (
                 decision.field_answer
-                or is_temporal_supplement(text)
+                or is_temporal_supplement_candidate(text)
                 or is_temporal_choice_answer(load_draft(target), text)
             )
             and waiting.type == "FIELD"
@@ -999,7 +999,7 @@ class ConversationService:
             and waiting.type == "CONFIRMATION"
             and waiting.field == "activity_write"
             and decision.semantic_plan.speech_act == "PROVIDE_SUPPLEMENT"
-            and is_temporal_supplement(text)
+            and is_temporal_supplement_candidate(text)
             and temporal_supplement_target(load_draft(target)) is not None
         )
         if (

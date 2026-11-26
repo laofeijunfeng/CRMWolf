@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 CAPABILITY_SAMPLE = (
     "与示例客户开线上会议，客户王经理与我方李经理参加，讨论产品评估。"
-    "客户王经理承诺11月完成评估，我方李经理下周三发送方案。"
+    "客户王经理承诺11月完成评估，我方李经理下下周三发送方案。"
 )
 _CAPABILITY_TIMEOUT_SECONDS = 300
 
@@ -181,7 +181,11 @@ class AssistantModelCapabilities:
         except (AssistantLLMError, ValueError, TypeError) as exc:
             raise AssistantLLMError("会议结构或时间证据无效", code=AssistantFailureCode.MODEL_OUTPUT_INVALID) from exc
         mentions = {item.raw_text for item in result.temporal_mentions}
-        if not {"11月", "下周三"}.issubset(mentions) or not result.content.strip():
+        has_structured_weekday = any(
+            item.raw_text == "下下周三" and item.week_offset == 2 and item.weekday == 3
+            for item in result.temporal_mentions
+        )
+        if not {"11月", "下下周三"}.issubset(mentions) or not has_structured_weekday or not result.content.strip():
             raise AssistantLLMError("会议缺少样例时间证据或正文", code=AssistantFailureCode.MODEL_OUTPUT_INVALID)
         return result
 
