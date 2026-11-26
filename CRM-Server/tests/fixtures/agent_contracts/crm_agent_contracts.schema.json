@@ -1833,6 +1833,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -3934,6 +3942,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -6162,6 +6178,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -8539,6 +8563,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -11034,6 +11066,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -13173,6 +13213,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -18588,6 +18636,14 @@
               ],
               "default": null,
               "title": "Source Label"
+            },
+            "suggestions": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Suggestions",
+              "type": "array"
             }
           },
           "required": [
@@ -19269,6 +19325,14 @@
           ],
           "default": null,
           "title": "Source Label"
+        },
+        "suggestions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Suggestions",
+          "type": "array"
         }
       },
       "required": [

@@ -28,7 +28,7 @@ def upgrade() -> None:
             sa.String(32),
             nullable=False,
             server_default="customer_activity",
-            comment="任务类型：customer_activity 或直接新建的实体类型",
+            comment="任务类型 customer_activity 或直接新建的实体类型",
         ),
     )
     op.add_column(
