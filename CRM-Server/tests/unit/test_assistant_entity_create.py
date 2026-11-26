@@ -451,6 +451,23 @@ async def test_typed_supplement_fills_empty_fields_overrides_named_ones_and_neve
     assert session.query(Contact).count() == 0 and _claims(session) == []
 
 
+def _wait_card(session, task) -> list[tuple[str | None, str, str, bool]]:
+    """The live card the rep sees for the task's current wait: (group, value, label, disabled) per option."""
+
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import project_assistant_message
+
+    view = task_view(task, session)
+    message = ConversationMessage(
+        id="m1", role="assistant", text=view.waiting.prompt, at="2026-01-01T00:00:00", task=view,
+    )
+    envelope = project_assistant_message(message, active_waiting=True, active_boundary=False)
+    block = next(block for block in envelope.blocks if block.type == "interaction")
+    assert (block.interaction_type, block.state) == ("choice", "ACTIVE"), "typed text is rejected here"
+    return [(option.group, option.value, option.label, option.disabled) for option in block.options]
+
+
 @pytest.mark.asyncio
 async def test_deferred_draft_is_listed_and_resumes_with_its_values(db, monkeypatch):
     session, _, _ = db
@@ -464,6 +481,9 @@ async def test_deferred_draft_is_listed_and_resumes_with_its_values(db, monkeypa
     drafts = entity_tasks.pending_drafts(session, team_id=1, user_id=2)
     assert [(d.public_id, d.label, d.customer_name) for d in drafts] == [(task.public_id, "联系人", "睿狐科技")]
     assert entity_tasks.pending_drafts(session, team_id=1, user_id=9) == []
+    assert [(value, label) for _, value, label, _ in _wait_card(session, task)] == [
+        ("resume", "继续填写"), ("cancel", "不要了"),
+    ]
 
     await _submit(db, task, "entity-resume", {"kind": "submit_field", "choice": "resume"})
 
@@ -512,6 +532,36 @@ async def test_supplement_never_fills_two_parked_drafts_at_once(db, monkeypatch)
         session.refresh(task)
         assert load_waiting(task).type == "ENTITY_DEFERRED"
     assert session.query(Contact).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_opening_a_parked_draft_makes_it_the_live_card_once(db, monkeypatch):
+    from app.crud.assistant_conversation import ConversationConflict
+    from app.schemas.assistant_conversation import ConversationFocusRequest
+    from app.services.assistant.conversation import ConversationService
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    await _submit(db, task, "entity-defer", {"kind": "text", "text": "先放着"})
+    service = ConversationService()
+    initial = service.open(session, team_id=1, user_id=2)
+
+    reply = service.focus(session, team_id=1, user_id=2, request=ConversationFocusRequest(
+        task_public_id=task.public_id, expected_version=initial.version,
+    ))
+
+    view = reply.conversation
+    assert view.focused_task.public_id == task.public_id and view.version == initial.version + 1
+    block = next(block for block in view.messages[-1].ui.blocks if block.type == "interaction")
+    assert (block.state, [option.value for option in block.options]) == ("ACTIVE", ["resume", "cancel"])
+    with pytest.raises(ConversationConflict):
+        service.focus(session, team_id=1, user_id=2, request=ConversationFocusRequest(
+            task_public_id=task.public_id, expected_version=initial.version,
+        ))
+    with pytest.raises(ConversationConflict):
+        service.focus(session, team_id=1, user_id=9, request=ConversationFocusRequest(
+            task_public_id=task.public_id, expected_version=0,
+        ))
 
 
 @pytest.mark.asyncio
@@ -612,6 +662,12 @@ async def test_profile_items_follow_the_activity_and_each_opens_its_own_child(db
     assert load_waiting(activity).type == "PROFILE_PROPOSALS", "the other row is still open"
     row = task_view(activity, session).profile_proposals[0]
     assert (row.child_task_public_id, row.child_waiting_type) == (child.public_id, "ENTITY_FORM")
+    card = _wait_card(session, activity)
+    assert [(value, label, disabled) for _, value, label, disabled in card] == [
+        ("row:0", "表单填写中", True), ("go:1", "去补充", False), ("skip:1", "不保存", False),
+        ("none", "都不需要", False),
+    ], "a settled row shows its child's state and cannot be chosen again"
+    assert card[0][0].startswith("联系人：") and card[1][0].startswith("开票抬头：")
 
     finished = await _answer(session, activity, {"kind": "submit_field", "choice": "skip:1"})
 

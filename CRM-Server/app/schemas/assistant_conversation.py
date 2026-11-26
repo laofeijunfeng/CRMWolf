@@ -62,6 +62,13 @@ class ConversationCommandRequest(ConversationModel):
     expected_version: int = Field(ge=0)
 
 
+class ConversationFocusRequest(ConversationModel):
+    """Open one of the owner's 「待补充」 drafts as the conversation's current card."""
+
+    task_public_id: str = Field(min_length=1, max_length=64)
+    expected_version: int = Field(ge=0)
+
+
 class ConversationEntryRetryRequest(ConversationModel):
     expected_version: int = Field(ge=0)
 

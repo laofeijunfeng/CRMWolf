@@ -31,6 +31,7 @@ from app.schemas.assistant_conversation import (
     ConversationChoiceRequest,
     ConversationCommandRequest,
     ConversationEntryRetryRequest,
+    ConversationFocusRequest,
     ConversationKindRequest,
     ConversationReply,
     ConversationTextRequest,
@@ -629,6 +630,20 @@ async def resume_conversation(
     try:
         return await _conversation_service.resume(db, team_id=team_id, user_id=int(current_user.id))
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/conversation/focus", response_model=ConversationReply)
+def conversation_focus(
+    request: ConversationFocusRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ConversationReply:
+    try:
+        return _conversation_service.focus(db, team_id=team_id, user_id=int(current_user.id), request=request)
+    except ConversationConflict as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

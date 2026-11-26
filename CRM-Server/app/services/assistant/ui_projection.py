@@ -56,7 +56,7 @@ from app.services.customer_activity_kinds import ACTIVITY_KIND_META
 from app.utils.public_id import is_follow_up_task_public_id, is_opportunity_public_id
 
 if TYPE_CHECKING:
-    from app.schemas.assistant import AssistantTaskView
+    from app.schemas.assistant import AssistantTaskView, ProfileProposalRowView
     from app.services.assistant.contracts import (
         ActivityPreview,
         EntityKind,
@@ -854,6 +854,20 @@ def _waiting_interaction(
         return _form_interaction(message, waiting, prompt=prompt, active=active, action_id=action_id)
     if waiting.type == "FOLLOW_UP_DISPOSITION":
         raise ValueError("missing frozen disposition batch")
+    if waiting.type in {"ENTITY_DEFERRED", "PROFILE_PROPOSALS"}:
+        # Both waits take only an issued choice; typed text is rejected, so never offer a text box.
+        deferred = waiting.type == "ENTITY_DEFERRED"
+        options = _candidate_options(waiting.candidates) if deferred else _profile_options(message, waiting)
+        if not options:
+            raise ValueError("missing issued choices")
+        return _choice(
+            message,
+            prompt=prompt,
+            active=active,
+            action_id=action_id,
+            business_action="resume_entity_draft" if deferred else "settle_profile_proposals",
+            options=options,
+        )
     if waiting.type == "CONFIRMATION" and waiting.confirmation_payload is not None:
         return _confirmation(message, waiting, prompt=prompt, active=active, action_id=action_id)
     if waiting.type == "ACTIVITY_KIND":
@@ -1228,6 +1242,45 @@ def _choice(
         submitted_values={"choice": submitted} if settled and not active else None,
         submit_action_id=action_id if active else None,
     )
+
+
+_PROFILE_ROW_STATES: dict[str, str] = {"skip": "不保存", "failed": "没能打开表单"}
+
+
+def _profile_row_state(row: ProfileProposalRowView) -> str:
+    if row.decision != "go":
+        return _PROFILE_ROW_STATES[row.decision]
+    if row.child_receipt is not None:
+        saved = "已存在" if row.child_receipt.outcome == "existing" else "已保存"
+        return f"{saved}，待审批" if row.child_receipt.approval_phase == "pending_review" else saved
+    if row.child_status == "ACTIVE":
+        return "草稿在「待补充」" if row.child_waiting_type == "ENTITY_DEFERRED" else "表单填写中"
+    return "已取消" if row.child_status == "CANCELLED" else "没有保存"
+
+
+def _profile_options(message: ConversationMessage, waiting: TaskWaiting) -> list[InteractionOption]:
+    """One group per profile row in utterance order: pending rows take 去补充/不保存, settled rows show their child."""
+
+    rows = message.task.profile_proposals if message.task is not None else None
+    issued = {str(candidate.get("id")) for candidate in waiting.candidates}
+    options: list[InteractionOption] = []
+    for row in rows or []:
+        group = _clip(f"{row.label}：{row.summary}", 40)
+        if row.decision == "pending":
+            go, skip = f"go:{row.index}", f"skip:{row.index}"
+            if go not in issued or skip not in issued:
+                raise ValueError("profile row without issued choices")
+            options += [
+                InteractionOption(value=go, label="去补充", group=group, description=_clip(f"原话：{row.quote}", 1000)),
+                InteractionOption(value=skip, label="不保存", group=group),
+            ]
+        else:
+            options.append(InteractionOption(
+                value=f"row:{row.index}", label=_profile_row_state(row), group=group, disabled=True,
+            ))
+    if options and "none" in issued:
+        options.append(InteractionOption(value="none", label="都不需要", group="全部"))
+    return options
 
 
 def _activity_kind_options(waiting: TaskWaiting) -> list[InteractionOption]:

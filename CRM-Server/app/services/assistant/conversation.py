@@ -20,6 +20,7 @@ from app.schemas.assistant_conversation import (
     ConversationCommandRequest,
     ConversationDecision,
     ConversationDispositionProjection,
+    ConversationFocusRequest,
     ConversationKindRequest,
     ConversationLink,
     ConversationMessage,
@@ -1169,6 +1170,17 @@ class ConversationService:
                 ),
             )
         raise crud.ConversationConflict("上次发送暂时无法恢复，请保留当前对话并联系管理员。")
+
+    def focus(self, db: Session, *, team_id: int, user_id: int, request: ConversationFocusRequest) -> ConversationReply:
+        """Open a 「待补充」 draft: only focus moves; its current wait renders as the live card."""
+
+        conversation = self._conversation(db, team_id, user_id)
+        task = crud.owned_task(db, conversation, request.task_public_id)
+        parked = task is not None and task.task_kind != "customer_activity" and task.status == "ACTIVE"
+        if task is None or not parked or task.waiting_type is None:
+            raise crud.ConversationConflict("这份草稿已经处理完了，请刷新「待补充」。")
+        crud.focus_task(db, conversation, task, expected_version=request.expected_version)
+        return ConversationReply(conversation=self.read(db, team_id=team_id, user_id=user_id), submission=None)
 
     def change_kind(
         self, db: Session, *, team_id: int, user_id: int, request: ConversationKindRequest

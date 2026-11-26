@@ -86,6 +86,29 @@ def deferred_entity_tasks(db: Session, conversation: AssistantConversation) -> l
     )
 
 
+def focus_task(db: Session, conversation: AssistantConversation, task: AssistantTask, *, expected_version: int) -> None:
+    """Point an idle conversation at one owned task; a concurrent tab or turn loses the CAS."""
+
+    changed = db.execute(
+        update(AssistantConversation)
+        .where(
+            AssistantConversation.id == conversation.id,
+            AssistantConversation.team_id == conversation.team_id,
+            AssistantConversation.user_id == conversation.user_id,
+            AssistantConversation.version == expected_version,
+            AssistantConversation.busy_entry_id.is_(None),
+            AssistantConversation.pending_choice_id.is_(None),
+        )
+        .values(version=AssistantConversation.version + 1, focused_task_public_id=task.public_id)
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        raise ConversationConflict("会话状态已变化，请刷新后重试。")
+    db.commit()
+    db.refresh(conversation)
+
+
 def candidates(db: Session, conversation: AssistantConversation) -> list[AssistantTask]:
     items = (
         db.query(AssistantTask)
