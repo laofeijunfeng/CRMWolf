@@ -380,6 +380,12 @@ export const ConversationViewSchema = z.object({
   messages: z.array(ConversationMessageSchema), older_cursor: z.number().int().positive().nullable()
 }).strict()
 export type ConversationView = z.infer<typeof ConversationViewSchema>
+/** What the server knows about one send whose response was lost; never asks the client to resend blindly. */
+export const ConversationRequestStatusSchema = z.object({
+  state: z.enum(['none', 'running', 'not_saved', 'saved']),
+  conversation: ConversationViewSchema
+}).strict()
+export type ConversationRequestStatus = z.infer<typeof ConversationRequestStatusSchema>
 export const ConversationReplySchema = z.object({
   conversation: ConversationViewSchema,
   submission: z.object({

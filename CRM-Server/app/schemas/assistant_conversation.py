@@ -139,6 +139,18 @@ class ConversationView(ConversationModel):
     older_cursor: int | None = None
 
 
+class ConversationRequestStatus(ConversationModel):
+    """Read-only answer to "did this client request land?" after a lost response.
+
+    none: the server never stored it. running: it is still being handled.
+    not_saved: it stalled before producing a result; resending the same request resumes it.
+    saved: it produced its result, which ``conversation`` already shows.
+    """
+
+    state: Literal["none", "running", "not_saved", "saved"]
+    conversation: ConversationView
+
+
 class PreparedSubmission(ConversationModel):
     task_public_id: str
     turn_id: str

@@ -1,8 +1,8 @@
 /**
  * Per-card submission state owned by the chat column.
  *
- * The server card alone cannot say whether a submit definitely failed (the
- * request never reached the server) or was already handled elsewhere (stale
+ * The server card alone cannot say whether a submit was confirmed not saved (the
+ * lost-response check said so) or was already handled elsewhere (stale
  * action id), so the chat records that outcome next to the card it came from.
  */
 export type InteractionNotice =

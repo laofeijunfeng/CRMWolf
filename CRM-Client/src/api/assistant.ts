@@ -2,11 +2,11 @@ import { z } from 'zod'
 
 import {
   AssistantTaskViewSchema,
-  ConversationViewSchema, ConversationReplySchema,
+  ConversationViewSchema, ConversationReplySchema, ConversationRequestStatusSchema,
   AssistantTurnStatusSchema, PendingEntityDraftSchema,
 } from '@/schemas/assistant-contracts'
 import type {
-  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationView, PendingEntityDraft
+  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationRequestStatus, ConversationView, PendingEntityDraft
 } from '@/schemas/assistant-contracts'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import { useUserStore } from '@/stores/user'
@@ -275,6 +275,8 @@ export interface SubmitAssistantInput {
 
 // Leave room for the server's 180-second understanding budget.
 const CONVERSATION_UNDERSTANDING_TIMEOUT_MS = 190_000
+// A status read is cheap; fail fast so the card can fall back to 「查看结果」.
+const CONVERSATION_STATUS_TIMEOUT_MS = 10_000
 
 export const assistantApi = {
   async openConversation(): Promise<ConversationView> {
@@ -286,6 +288,14 @@ export const assistantApi = {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
     const payload: unknown = await request.get('/v1/assistant/conversation', { params: { before } })
     return ConversationViewSchema.parse(payload)
+  },
+  async conversationRequestStatus(clientRequestId: string): Promise<ConversationRequestStatus> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.get(
+      `/v1/assistant/conversation/requests/${encodeURIComponent(clientRequestId)}`,
+      { timeout: CONVERSATION_STATUS_TIMEOUT_MS }
+    )
+    return ConversationRequestStatusSchema.parse(payload)
   },
   async conversationText(input: { text: string; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
@@ -303,12 +313,12 @@ export const assistantApi = {
   },
   async conversationChoice(input: { entry_id: string; choice: 'CONTINUE' | 'NEW' | 'CANCEL'; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/choices', input)
+    const payload: unknown = await request.post('/v1/assistant/conversation/choices', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async conversationCommand(input: { task_public_id: string; input: SubmitAssistantInput; expected_version: number }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
-    const payload: unknown = await request.post('/v1/assistant/conversation/commands', input)
+    const payload: unknown = await request.post('/v1/assistant/conversation/commands', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async resumeConversation(): Promise<ConversationReply> {

@@ -21,7 +21,7 @@ import type { EntityRef, JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
 import { AssistantRejectReasonSchema } from '@/schemas/assistant-contracts'
 import type {
-  AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection,
+  AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationRequestStatus, ConversationBoundary, ConversationProjection,
   ConversationLink, PendingEntityDraft
 } from '@/schemas/assistant-contracts'
 import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
@@ -79,17 +79,39 @@ const loadingConversation = ref(true)
 const historyError = ref('')
 const routing = ref(false)
 const olderCursor = ref<number | null>(null)
-const pendingConversation = shallowRef<(() => Promise<ConversationReply>) | null>(null)
 const unacceptedText = ref('')
 /** Submission outcome per card (submit_action_id) that the server card cannot express. */
 const interactionNotices = ref<Record<string, InteractionNotice>>({})
+const lostSend = shallowRef<LostSend | null>(null)
+const lostSendBlocking = computed(() => lostSend.value !== null && lostSend.value.phase !== 'not_saved')
+/** Same content after a confirmed not-saved send keeps its key, so the server can never save it twice. */
+const requestKey = (fingerprint: string): string => {
+  const lost = lostSend.value
+  return lost?.phase === 'not_saved' && lost.fingerprint === fingerprint ? lost.key : crypto.randomUUID()
+}
 
 const SESSION_UPDATED_MESSAGE = '会话已更新，请查看当前提示；未接受的内容可重新发送。'
 const LOGIN_EXPIRED_MESSAGE = '登录状态已失效，请重新登录后重试；不会自动开始新的记录。'
 const REJECTED_SUBMIT_MESSAGE = '这次提交没有被接受，请按当前提示修改后再提交。'
-const PENDING_RESULT_PREFIX = '发送状态待确认：'
+const NOT_SAVED_MESSAGE = '刚才网络不稳定，这条还没有保存。内容都在，可以直接再提交。'
+const UNCONFIRMED_MESSAGE = '网络较慢，还没确认是否已保存。为避免重复，先不要再次提交。'
+// Lost-response checks back off 2/4/8/16/30 s (about one minute) before handing over to 「查看结果」.
+const LOST_SEND_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000]
 type CommandFailure = 'conflict' | 'auth' | 'rejected'
-type CommandOutcome = 'accepted' | 'explicit' | 'unknown' | 'conflict'
+type CommandOutcome = 'accepted' | 'explicit' | 'not_saved' | 'unconfirmed' | 'conflict'
+/**
+ * A keyed send whose response never arrived. The client only asks the server what
+ * became of `key`; it never resends on its own. A resend after `not_saved` reuses `key`.
+ */
+interface LostSend {
+  key: string
+  fingerprint: string
+  phase: 'checking' | 'not_saved' | 'unconfirmed'
+  /** The card shows its own not-saved banner, so the composer stays quiet. */
+  cardNotice: boolean
+  onNotSaved: () => void
+}
+type KeyedSend = Omit<LostSend, 'phase'>
 interface CommandDispatch {
   outcome: CommandOutcome
   detail: string
@@ -334,7 +356,6 @@ const captureUnknownResult = (targetId: string, turnId: string, cursor: number, 
     previous.cursor = Math.max(previous.cursor, cursor)
   }
   suppressConversationResume.value = true
-  pendingConversation.value = null
   reprocessAllowed.value = false
   reprocessTarget.value = null
 }
@@ -406,7 +427,6 @@ const adoptProcessingTurn = (updated: AssistantTaskView): void => {
     processingRecovery.value = null
     resultPending.value = false
   }
-  if (updated.reconciliation_required === true) pendingConversation.value = null
   if (updated.reprocess_turn_id != null && updated.reprocess_turn_id !== '' && !reconciliationRequired.value) {
     reprocessAllowed.value = true
     const current = reprocessTarget.value
@@ -750,10 +770,11 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     if (!active()) return
     if (!resultPending.value) pendingRequest.value = null
     await refreshConversation()
-  } catch (error) {
+  } catch {
     if (disposed || navigation !== navigationVersion) return
+    // The turn was already accepted; read it back instead of surfacing transport errors.
     resultPending.value = true
-    pushEntry('assistant', `提交状态待确认：${error instanceof Error ? error.message : '网络请求失败'}`)
+    processingRecovery.value ??= { targetId, turnId: prepared.turn_id, cursor: 0 }
   } finally {
     if (navigation === navigationVersion) {
       endProcessing()
@@ -775,10 +796,13 @@ const submitText = async (): Promise<void> => {
     }
     explicitNone.value = false
     unacceptedText.value = text
-    const request = { text, client_request_id: crypto.randomUUID(), expected_version: conversation.value.version }
+    const fingerprint = `text:${text}`
+    const request = { text, client_request_id: requestKey(fingerprint), expected_version: conversation.value.version }
     pushEntry('user', text)
     inputText.value = ''
-    await dispatchConversation(() => assistantApi.conversationText(request), text)
+    await dispatchConversation(() => assistantApi.conversationText(request), text, {
+      key: request.client_request_id, fingerprint, cardNotice: false, onNotSaved: restoreUnacceptedText
+    })
   } finally {
     sendingText.value = false
   }
@@ -810,7 +834,9 @@ const submit = async (
 ): Promise<boolean> => {
   if (busy.value || task.value === null || conversation.value === null) return false
   if (source !== null && !isSameWait(source, task.value.waiting)) return false
-  const clientRequestId = reuseClientRequestId ?? crypto.randomUUID()
+  const actionId = source?.action_id ?? null
+  const fingerprint = `command:${task.value.public_id}:${actionId ?? ''}:${JSON.stringify(input)}`
+  const clientRequestId = reuseClientRequestId ?? requestKey(fingerprint)
   const choice = typeof input.choice === 'string' ? input.choice : null
   const noticeKey = choice === null ? null : cardNoticeKey(source)
   const payload: SubmitAssistantInput = { ...input, client_request_id: clientRequestId,
@@ -819,17 +845,20 @@ const submit = async (
   if (noticeKey !== null) clearCardNotice(noticeKey)
   pushEntry('user', displayText)
   inputText.value = ''
-  const dispatched = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText)
+  const onNotSaved = (): void => {
+    releaseAction(actionId)
+    // The card cannot show this itself: the server confirmed the choice was never saved.
+    if (noticeKey !== null && choice !== null) interactionNotices.value[noticeKey] = { kind: 'failed', choice, clientRequestId }
+  }
+  const dispatched = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText, {
+    key: clientRequestId, fingerprint, cardNotice: noticeKey !== null && choice !== null, onNotSaved
+  })
   const outcome = dispatched.outcome
-  if (outcome !== 'unknown') releaseAction(source?.action_id ?? null)
+  // An unconfirmed send keeps its card held until 「查看结果」 settles it.
+  if (outcome !== 'unconfirmed') releaseAction(actionId)
   if (noticeKey !== null && choice !== null) {
-    // The card cannot show these itself: the choice never left the browser, or the
-    // card was already handled elsewhere. An out-of-range choice is not stale.
-    if (outcome === 'unknown') {
-      resultPending.value = false
-      if (historyError.value.startsWith(PENDING_RESULT_PREFIX)) historyError.value = ''
-      interactionNotices.value[noticeKey] = { kind: 'failed', choice, clientRequestId }
-    } else if (outcome === 'conflict') {
+    // The card was already handled elsewhere. An out-of-range choice is not stale.
+    if (outcome === 'conflict') {
       if (historyError.value === SESSION_UPDATED_MESSAGE) historyError.value = ''
       interactionNotices.value[noticeKey] = dispatched.detail.includes(OUT_OF_RANGE_KIND)
         ? { kind: 'invalid' }
@@ -877,22 +906,77 @@ const retryRootFailure = async (entry: ChatEntry, actionId: string): Promise<voi
 }
 
 const restoreUnacceptedText = (): void => {
-  pendingConversation.value = null
   if (unacceptedText.value !== '') inputText.value = unacceptedText.value
   unacceptedText.value = ''
 }
 
-const dispatchConversation = async (send: () => Promise<ConversationReply>, displayText: string): Promise<CommandDispatch> => {
-  if (disposed || submitting.value || reconciliationRequired.value) return { outcome: 'explicit', detail: '' }
+/** One read of what the server knows about the lost send; null means ask again later. */
+const readLostSend = async (lost: LostSend): Promise<CommandOutcome | null> => {
+  const order = ++viewRequestSequence
+  let status: ConversationRequestStatus
+  try {
+    status = await assistantApi.conversationRequestStatus(lost.key)
+  } catch {
+    return null
+  }
+  if (disposed || lostSend.value?.key !== lost.key) return 'explicit'
+  if (status.state === 'none' || status.state === 'not_saved') {
+    lostSend.value = { ...lost, phase: 'not_saved' }
+    resultPending.value = false
+    applyConversation(status.conversation, false, order)
+    lost.onNotSaved()
+    return 'not_saved'
+  }
+  applyConversation(status.conversation, false, order)
+  // Still routing with no turn to follow yet: keep asking.
+  if (status.state === 'running' && processingRecovery.value === null) return null
+  lostSend.value = null
+  if (processingRecovery.value !== null) void recoverProcessingTurn()
+  else if (!canResumeConversation.value) resultPending.value = false
+  return 'accepted'
+}
+
+const confirmLostSend = async (lost: LostSend): Promise<CommandOutcome> => {
+  for (const delay of LOST_SEND_DELAYS_MS) {
+    await new Promise<void>((resolve) => { window.setTimeout(resolve, delay) })
+    if (disposed || lostSend.value?.key !== lost.key) return 'explicit'
+    const settled = await readLostSend(lost)
+    if (settled !== null) return settled
+  }
+  if (disposed || lostSend.value?.key !== lost.key) return 'explicit'
+  lostSend.value = { ...lost, phase: 'unconfirmed' }
+  return 'unconfirmed'
+}
+
+/** 「查看结果」: ask once more; never resend. */
+const checkLostSend = async (): Promise<void> => {
+  const lost = lostSend.value
+  if (lost === null || lost.phase !== 'unconfirmed' || submitting.value) return
+  submitting.value = true
+  const checking: LostSend = { ...lost, phase: 'checking' }
+  lostSend.value = checking
+  try {
+    const settled = await readLostSend(checking)
+    if (settled === null && lostSend.value?.key === lost.key) lostSend.value = { ...lost, phase: 'unconfirmed' }
+  } finally {
+    if (!disposed) submitting.value = false
+  }
+}
+
+const dispatchConversation = async (
+  send: () => Promise<ConversationReply>,
+  displayText: string,
+  keyed: KeyedSend | null = null
+): Promise<CommandDispatch> => {
+  if (disposed || submitting.value || reconciliationRequired.value || lostSendBlocking.value) return { outcome: 'explicit', detail: '' }
   const navigation = navigationVersion
   const requestOrder = ++viewRequestSequence
   submitting.value = true
   routing.value = true
-  pendingConversation.value = send
+  lostSend.value = null
   try {
     const response = await send()
     if (disposed || navigation !== navigationVersion) return { outcome: 'accepted', detail: '' }
-    pendingConversation.value = null
     unacceptedText.value = ''
     if (!applyConversation(response.conversation, false, requestOrder)) return { outcome: 'explicit', detail: '' }
     routing.value = false
@@ -900,7 +984,7 @@ const dispatchConversation = async (send: () => Promise<ConversationReply>, disp
       if (reconciliationRequired.value) return { outcome: 'accepted', detail: '' }
       await runPrepared(response.submission, displayText)
     } else if (processingRecovery.value === null) resultPending.value = false
-    return { outcome: resultPending.value ? 'unknown' : 'accepted', detail: '' }
+    return { outcome: 'accepted', detail: '' }
   } catch (error) {
     if (disposed || navigation !== navigationVersion || reconciliationRequired.value) return { outcome: 'explicit', detail: '' }
     const failure = explicitCommandFailure(error)
@@ -918,9 +1002,16 @@ const dispatchConversation = async (send: () => Promise<ConversationReply>, disp
       }
       return { outcome: failure === 'conflict' ? 'conflict' : 'explicit', detail: conflictDetail(error) }
     }
-    resultPending.value = true
-    historyError.value = `${PENDING_RESULT_PREFIX}${error instanceof Error ? error.message : '网络请求失败'}`
-    return { outcome: 'unknown', detail: '' }
+    if (keyed === null) {
+      // Unkeyed sends (focus, resume) change nothing twice; just show the server's current view.
+      await refreshConversation()
+      return { outcome: 'explicit', detail: '' }
+    }
+    // Timeout or dropped connection: the server may or may not have saved it. Ask, never resend.
+    const lost: LostSend = { ...keyed, phase: 'checking' }
+    lostSend.value = lost
+    routing.value = false
+    return { outcome: await confirmLostSend(lost), detail: '' }
   } finally {
     if (!disposed && navigation === navigationVersion) { routing.value = false; submitting.value = false }
   }
@@ -929,8 +1020,11 @@ const dispatchConversation = async (send: () => Promise<ConversationReply>, disp
 const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Promise<void> => {
   const boundary = entry.boundary
   if (!boundary || conversation.value?.pending_choice?.entry_id !== boundary.entry_id || busy.value) return
-  const request = { entry_id: boundary.entry_id, choice, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
-  await dispatchConversation(() => assistantApi.conversationChoice(request), choice === 'CONTINUE' ? '接着刚才' : '另记一件')
+  const fingerprint = `choice:${boundary.entry_id}:${choice}`
+  const request = { entry_id: boundary.entry_id, choice, expected_version: conversation.value.version, client_request_id: requestKey(fingerprint) }
+  await dispatchConversation(() => assistantApi.conversationChoice(request), choice === 'CONTINUE' ? '接着刚才' : '另记一件', {
+    key: request.client_request_id, fingerprint, cardNotice: false, onNotSaved: () => undefined
+  })
 }
 
 const choiceLabel = (choice: string, source: TaskWaiting | null): string => {
@@ -954,8 +1048,11 @@ const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<v
   if (busy.value) return
   const pending = conversation.value?.pending_choice
   if (pending && conversation.value) {
-    const request = { entry_id: pending.entry_id, choice: 'CANCEL' as const, expected_version: conversation.value.version, client_request_id: crypto.randomUUID() }
-    await dispatchConversation(() => assistantApi.conversationChoice(request), '算了，不记了')
+    const fingerprint = `choice:${pending.entry_id}:CANCEL`
+    const request = { entry_id: pending.entry_id, choice: 'CANCEL' as const, expected_version: conversation.value.version, client_request_id: requestKey(fingerprint) }
+    await dispatchConversation(() => assistantApi.conversationChoice(request), '算了，不记了', {
+      key: request.client_request_id, fingerprint, cardNotice: false, onNotSaved: () => undefined
+    })
     return
   }
   await submit({ kind: 'cancel' }, '算了，不记了', source)
@@ -982,9 +1079,15 @@ const openPendingDraft = async (draft: PendingEntityDraft): Promise<void> => {
   await dispatchConversation(() => assistantApi.focusConversation(draft.public_id, view.version), draft.label)
 }
 
-const showConversationRetry = computed(() => !reconciliationRequired.value && resultPending.value && !autoRecovering.value && processingRecovery.value === null
-  && (pendingConversation.value !== null || canResumeConversation.value))
-const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showConversationRetry.value
+// The server already holds this request (its original key); continuing cannot save it twice.
+const showContinuePending = computed(() => !reconciliationRequired.value && resultPending.value && !autoRecovering.value
+  && processingRecovery.value === null && lostSend.value === null && canResumeConversation.value)
+const lostSendNotice = computed(() => {
+  const lost = lostSend.value
+  if (lost?.phase === 'unconfirmed') return UNCONFIRMED_MESSAGE
+  return lost?.phase === 'not_saved' && !lost.cardNotice ? NOT_SAVED_MESSAGE : ''
+})
+const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showContinuePending.value
   && (processingRecovery.value !== null || (pendingRequest.value?.turnId ?? '') !== ''))
 const showReprocess = computed(() => !reconciliationRequired.value && reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
 const showRefreshStatus = computed(() => {
@@ -1081,16 +1184,8 @@ const retryPending = async (): Promise<void> => {
     return
   }
   if (submitting.value) return
-  if (canResumeConversation.value && pendingConversation.value === null && processingRecovery.value === null) {
+  if (showContinuePending.value) {
     await dispatchConversation(() => assistantApi.resumeConversation(), '')
-    return
-  }
-  if (processingRecovery.value !== null) {
-    await syncResult()
-    return
-  }
-  if (pendingConversation.value !== null) {
-    await dispatchConversation(pendingConversation.value, '')
     return
   }
   await syncResult()
@@ -1103,7 +1198,7 @@ const gapNone = (entry: ChatEntry): Promise<void> => {
   return Promise.resolve()
 }
 
-const busy = computed(() => submitting.value || resultPending.value || reconciliationRequired.value)
+const busy = computed(() => submitting.value || resultPending.value || reconciliationRequired.value || lostSendBlocking.value)
 
 const visibleEntries = computed(() => entries.value.filter((entry) => entry.projection?.visibility !== 'COVERED'))
 const isSeparator = (entry: ChatEntry): boolean => entry.role === 'assistant' && entry.outcome === 'task_completed'
@@ -1473,7 +1568,6 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
       recoveryToken += 1
       stopAutoRecovery()
       recoveryNotice.value = ''
-      pendingConversation.value = null
       unacceptedText.value = ''
       routing.value = false
       pendingRequest.value = null
@@ -1533,7 +1627,10 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   }
   recomputeProjectionCoverage()
   if (!older && current !== null) adoptProcessingTurn(current)
-  if (!older && canResumeConversation.value && !reconciliationRequired.value) resultPending.value = true
+  // A confirmed not-saved send leaves the stale busy entry for the same-key resend to resume.
+  if (!older && canResumeConversation.value && !reconciliationRequired.value && lostSend.value?.phase !== 'not_saved') {
+    resultPending.value = true
+  }
   if (!older) noteEpisodeMessages()
   if (!older) scrollToBottom(true)
   return true
@@ -1547,7 +1644,7 @@ const refreshConversation = async (): Promise<void> => {
     if (navigation === navigationVersion) applyConversation(view, false, order)
   } catch {
     if (!disposed && navigation === navigationVersion && order >= appliedViewRequest) {
-      historyError.value = '对话同步失败，已留下的内容仍保留，请重试同步。'
+      historyError.value = '对话暂时没有刷新，已有内容都还在，可以点「刷新」再看一次。'
     }
   }
 }
@@ -1593,7 +1690,7 @@ void loadConversation()
       :error="historyErrorFeedback"
     >
       <template #actions>
-        <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="reconciliationRequired || pendingConversation ? retryPending() : conversation ? refreshConversation() : loadConversation()">重试同步</Button>
+        <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="reconciliationRequired ? retryPending() : conversation ? refreshConversation() : loadConversation()">刷新</Button>
       </template>
     </FeedbackAlert>
 
@@ -1704,10 +1801,18 @@ void loadConversation()
         <Lock class="size-icon-sm shrink-0" aria-hidden="true" />
         <span>{{ INPUT_LOCKED_HINT }}</span>
       </p>
-      <div v-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand">
+      <div v-if="lostSend?.phase === 'checking'" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status" data-assistant-lost-send="checking">
+        <LoaderCircle class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span>保存中…</span>
+      </div>
+      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand">
         <LoaderCircle v-if="routing || processing.active || autoRecovering" class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>
+      <p v-if="lostSendNotice" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" :data-assistant-lost-send="lostSend?.phase">
+        <Info class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ lostSendNotice }}</span>
+      </p>
       <Textarea
         aria-label="客户沟通内容"
         v-model="inputText"
@@ -1726,7 +1831,8 @@ void loadConversation()
           <Button v-if="showRefreshStatus" variant="outline" :disabled="submitting" @click="unknownResult !== null || showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
           <p v-if="showReprocess" class="m-0 text-caption text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
           <Button v-if="showReprocess" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
-          <Button v-if="showConversationRetry" variant="outline" :disabled="submitting" @click="retryPending">重试同步</Button>
+          <Button v-if="lostSend?.phase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="checkLostSend">查看结果</Button>
+          <Button v-if="showContinuePending" variant="outline" :disabled="submitting" @click="retryPending">继续处理</Button>
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X aria-hidden="true" />算了
           </Button>

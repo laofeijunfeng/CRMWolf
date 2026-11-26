@@ -7,7 +7,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
@@ -34,6 +34,7 @@ from app.schemas.assistant_conversation import (
     ConversationFocusRequest,
     ConversationKindRequest,
     ConversationReply,
+    ConversationRequestStatus,
     ConversationTextRequest,
     ConversationView,
 )
@@ -552,6 +553,22 @@ def get_conversation(
 ) -> ConversationView:
     try:
         return _conversation_service.read(db, team_id=team_id, user_id=int(current_user.id), before=before)
+    except ConversationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/conversation/requests/{client_request_id}", response_model=ConversationRequestStatus)
+def get_conversation_request(
+    client_request_id: str = Path(min_length=8, max_length=128),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> ConversationRequestStatus:
+    """Read-only: whether a request whose response was lost landed. Never resends it."""
+    try:
+        return _conversation_service.request_status(
+            db, team_id=team_id, user_id=int(current_user.id), client_request_id=client_request_id
+        )
     except ConversationConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

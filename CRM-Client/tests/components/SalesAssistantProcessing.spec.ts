@@ -278,18 +278,6 @@ describe('durable processing and recovery in a continuous conversation', () => {
     }
   })
 
-  it('replays the exact Root request key after an uncertain response instead of starting another item', async () => {
-    mocks.text.mockRejectedValueOnce(new Error('断网')).mockResolvedValueOnce(reply(view({ messages: [message('user', '原句', null, 'user')] })))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await send(wrapper, '原句')
-    const request = mocks.text.mock.calls[0]?.[0]
-    await wrapper.findAll('button').find((b) => b.text() === '重试同步')?.trigger('click')
-    await flushPromises()
-    expect(mocks.text.mock.calls[1]?.[0]).toEqual(request)
-    expect(wrapper.text().match(/原句/g)).toHaveLength(1)
-  })
-
   it('recovers the same internal turn on mount with GET and never creates user input', async () => {
     const current = makeTask({ processing_turn_id: 'atn_internal', processing_turn_status: 'RUNNING' })
     show(view({ focused_task: current, messages: [message('old', '已记录这条客户活动。')] }))
@@ -334,7 +322,7 @@ describe('shared conversation recovery', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
-    await wrapper.findAll('button').find((b) => b.text() === '重试同步')?.trigger('click')
+    await wrapper.findAll('button').find((b) => b.text() === '继续处理')?.trigger('click')
     await flushPromises()
     expect(mocks.resume).toHaveBeenCalledTimes(1)
     expect(mocks.text).not.toHaveBeenCalled()

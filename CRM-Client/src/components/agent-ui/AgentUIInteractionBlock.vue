@@ -1042,9 +1042,10 @@ const submit = async (): Promise<void> => {
       <!-- 卡片级提示只由宿主挂在活动类型选择卡上（见 SalesAssistantChat.cardNoticeKey），所以只出现在通用卡片里。 -->
       <AgentUIBanner
         v-if="notice?.kind === 'failed'"
-        tone="danger"
-        :icon="AlertCircle"
-        title="选择没有提交成功，请重新选择"
+        tone="neutral"
+        :icon="Info"
+        role="status"
+        title="刚才网络不稳定，这条还没有保存"
         data-agent-ui-card-notice="failed"
       >
         <template #actions>

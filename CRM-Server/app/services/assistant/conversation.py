@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from time import monotonic
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,6 +26,7 @@ from app.schemas.assistant_conversation import (
     ConversationMessage,
     ConversationProjection,
     ConversationReply,
+    ConversationRequestStatus,
     ConversationTextRequest,
     ConversationView,
     PreparedSubmission,
@@ -62,6 +63,7 @@ from app.services.assistant.turns import (
     accept_submit,
     schedule_turn,
 )
+from app.utils.time import business_now
 
 logger = get_logger(__name__)
 
@@ -149,6 +151,37 @@ class ConversationService:
             older_cursor=older,
             has_pending_request=conversation.busy_entry_id is not None,
         )
+
+    def request_status(
+        self, db: Session, *, team_id: int, user_id: int, client_request_id: str
+    ) -> ConversationRequestStatus:
+        """Answer whether a request whose response was lost landed. Never writes or schedules."""
+
+        conversation = self._conversation(db, team_id, user_id)
+        entry = crud.request_entry(db, conversation, client_request_id)
+        state: Literal["none", "running", "not_saved", "saved"]
+        if entry is None:
+            state = "none"
+        elif entry.state in {"ROUTING", "ROUTED"}:
+            # not_saved only where crud.claim would resume the same key; anything else stays
+            # running so the client never offers a resend the server would refuse or duplicate.
+            lease = conversation.lease_expires_at
+            resumable = conversation.busy_entry_id == entry.public_id and lease is not None and lease <= business_now()
+            state = "not_saved" if resumable else "running"
+        else:
+            state = "running" if self._turn_in_flight(db, conversation, entry) else "saved"
+        return ConversationRequestStatus(
+            state=state, conversation=self.read(db, team_id=team_id, user_id=user_id)
+        )
+
+    def _turn_in_flight(
+        self, db: Session, conversation: AssistantConversation, entry: AssistantConversationEntry
+    ) -> bool:
+        task = crud.owned_task(db, conversation, entry.task_public_id)
+        if task is None or not entry.turn_public_id:
+            return False
+        turn = crud.owned_turn(db, conversation, task, entry.turn_public_id)
+        return turn is not None and turn.status in {"PENDING", "RUNNING"}
 
     def _messages(
         self, db: Session, conversation: AssistantConversation, row: AssistantConversationEntry
