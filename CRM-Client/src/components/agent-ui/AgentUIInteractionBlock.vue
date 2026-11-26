@@ -133,10 +133,13 @@ const canCancel = computed(() => (
   ))
 ))
 // A direct-create form can be parked in 「待补充」 and reopened later with its values.
-const canDefer = computed(() => (
-  isActive.value && props.block.interaction_type === 'form' && ENTITY_FORM_ACTIONS.includes(props.block.business_action ?? '')
+const isEntityForm = computed(() => (
+  props.block.interaction_type === 'form' && ENTITY_FORM_ACTIONS.includes(props.block.business_action ?? '')
 ))
+const canDefer = computed(() => isActive.value && isEntityForm.value)
 const readonly = computed(() => props.block.state === 'READ_ONLY')
+const isCollapsedEntityForm = computed(() => isEntityForm.value && props.block.state !== 'ACTIVE')
+const isCollapsedEntityFormDone = computed(() => props.block.prompt.startsWith('已提交'))
 const isCompactTaskCompletion = computed(() => (
   props.block.presentation === 'COMPACT_TASK_COMPLETION'
 ))
@@ -496,7 +499,7 @@ const selectedFieldValues = (field: InteractionField): string[] => {
 // 桌面端多字段表单排两列；长文本、多行与多选独占一行，DOM 顺序即视觉顺序。
 const SHORT_TEXT_MAX_LENGTH = 100
 const isWideField = (field: InteractionField): boolean => {
-  if (field.field_type === 'textarea' || field.field_type === 'multi_select') return true
+  if (field.field_type === 'textarea' || field.field_type === 'multi_select' || field.field_type === 'boolean') return true
   if (field.field_type !== 'text') return false
   return field.max_length == null || field.max_length > SHORT_TEXT_MAX_LENGTH
 }
@@ -768,6 +771,29 @@ const submit = async (): Promise<void> => {
       已选择：<b class="font-medium text-foreground">{{ submittedChoiceOption?.label ?? submittedChoiceValue }}</b>
     </p>
     <StatusBadge class="ml-auto shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
+  </section>
+
+  <!-- 已处理的建档表单：折叠成一行摘要 -->
+  <section
+    v-else-if="isCollapsedEntityForm"
+    ref="interactionRef"
+    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 overflow-hidden px-space-4 py-space-2 text-foreground"
+    :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
+    :data-state="readonly ? 'readonly' : undefined"
+    :aria-labelledby="`${block.id}-prompt`"
+    data-agent-ui-collapsed-form
+  >
+    <component
+      :is="isCollapsedEntityFormDone ? Check : Circle"
+      class="size-icon-sm shrink-0"
+      :class="isCollapsedEntityFormDone ? 'text-tone-success' : 'text-muted-foreground'"
+      aria-hidden="true"
+    />
+    <p
+      :id="`${block.id}-prompt`"
+      class="m-0 min-w-0 truncate text-body font-medium text-muted-foreground"
+      :title="block.prompt"
+    >{{ block.prompt }}</p>
   </section>
 
   <!-- 通用卡片：标题行 + 正文 + 底部操作区 -->

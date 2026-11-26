@@ -12,15 +12,14 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
 import {
   InputField,
   SelectField,
   SegmentedChoiceControl,
   TextareaField,
 } from '@/components/crmwolf'
+import CheckboxField from '@/components/crmwolf/CheckboxField.vue'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import { handleApiError, parseDuplicateRecordError, type DuplicateRecordError } from '@/utils/errorHandler'
 import { confirmDiscardChanges } from '@/utils/confirmDialog'
@@ -78,7 +77,7 @@ const { handleSubmit, resetForm, setValues, values } = useForm({
   }
 })
 
-// Use useField for RadioGroup and Switch to handle type compatibility
+// Use useField for RadioGroup and CheckboxField to handle type compatibility
 const { value: genderValue, errorMessage: genderError } = useField<string | undefined>('gender')
 const { value: isDecisionMakerValue } = useField<boolean>('is_decision_maker')
 const genderRadioValue = computed({
@@ -309,15 +308,12 @@ function handleCancel(): void {
           />
         </Field>
 
-        <!-- Is Decision Maker (Switch) -->
-        <div class="flex items-center space-x-2">
-          <Switch
-            id="is_decision_maker"
-            :checked="isDecisionMakerValue"
-            @update:checked="isDecisionMakerValue = $event"
-          />
-          <Label for="is_decision_maker" class="cursor-pointer">是否决策者</Label>
-        </div>
+        <CheckboxField
+          id="is_decision_maker"
+          :model-value="isDecisionMakerValue === true"
+          label="关键决策人"
+          @update:model-value="isDecisionMakerValue = $event"
+        />
 
         <Field v-slot="{ value, handleChange, errorMessage }" name="mobile">
           <InputField

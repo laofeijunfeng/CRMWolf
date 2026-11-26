@@ -47,25 +47,22 @@ const describedBy = computed(() => {
 
 <template>
   <div :class="cn('grid gap-1', props.class)">
-    <div v-if="label || $slots['label-action']" class="flex h-5 items-center justify-between gap-2">
-      <Label :for="checkboxId" class="text-caption font-medium text-foreground">
-        {{ label }}
-        <span v-if="required" class="text-danger" aria-hidden="true">*</span>
-      </Label>
-      <slot name="label-action" />
-    </div>
     <div class="flex h-control items-center gap-space-2">
       <Checkbox
         :id="checkboxId"
         v-bind="$attrs"
-        :model-value="modelValue === true"
+        :checked="modelValue === true"
         :disabled="disabled === true"
+        :required="required === true"
         :aria-invalid="error !== ''"
         :aria-describedby="describedBy"
-        :aria-required="required || undefined"
         @update:checked="emit('update:modelValue', $event === true)"
       />
-      <span class="text-caption text-muted-foreground">{{ modelValue ? '是' : '否' }}</span>
+      <Label v-if="label" :for="checkboxId" class="cursor-pointer text-body font-normal text-foreground">
+        {{ label }}
+        <span v-if="required" class="text-danger" aria-hidden="true">*</span>
+      </Label>
+      <slot name="label-action" />
     </div>
     <p v-if="error" :id="errorId" class="m-0 text-caption font-medium text-danger" role="alert">
       {{ error }}

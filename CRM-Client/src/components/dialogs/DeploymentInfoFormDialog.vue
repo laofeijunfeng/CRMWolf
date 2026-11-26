@@ -10,9 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { InputField } from '@/components/crmwolf'
+import { CheckboxField, InputField } from '@/components/crmwolf'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
 import deploymentApi, { type DeploymentInfoResponse } from '@/api/deployment'
 import type { DeploymentInfoCreate } from '@/schemas/deployment'
@@ -192,14 +190,12 @@ watch(
           :error="errors.serverAddress"
         />
 
-        <div class="deployment-dialog__switch-row">
-          <Switch
-            id="deployment-default"
-            v-model="form.isDefault"
-            :disabled="submitting"
-          />
-          <Label for="deployment-default" class="deployment-dialog__switch-label">设为默认部署</Label>
-        </div>
+        <CheckboxField
+          id="deployment-default"
+          v-model="form.isDefault"
+          label="设为默认部署"
+          :disabled="submitting"
+        />
 
         <DialogFooter class="deployment-dialog__footer">
           <Button type="button" variant="outline" :disabled="submitting" @click="handleCancel">
@@ -228,18 +224,6 @@ watch(
   flex-direction: column;
   gap: $space-1;
   min-width: 0;
-}
-
-.deployment-dialog__switch-label {
-  color: hsl(var(--foreground));
-  font-size: var(--font-size-caption);
-  font-weight: 500;
-}
-
-.deployment-dialog__switch-row {
-  display: flex;
-  align-items: center;
-  gap: $space-2;
 }
 
 .deployment-dialog__footer {

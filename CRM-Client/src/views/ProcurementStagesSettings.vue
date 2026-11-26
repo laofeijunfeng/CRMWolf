@@ -8,12 +8,10 @@ import { Plus } from 'lucide-vue-next'
 import { Field, useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod'
-import { DataTable, InputField, TableRowActions, TextareaField } from '@/components/crmwolf'
+import { CheckboxField, DataTable, InputField, TableRowActions, TextareaField } from '@/components/crmwolf'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
 import ErrorState from '@/components/crmwolf/ErrorState.vue'
 import procurementApi, { type ProcurementMethodWithStages, type ProcurementStageTemplate, type ProcurementStageTemplateCreate, type ProcurementStageTemplateUpdate } from '@/api/procurement'
 import { useSettingsAccess } from '@/composables/useSettingsAccess'
@@ -252,8 +250,8 @@ useTopBarRegistration({
         <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="template_code"><InputField id="procurement-stage-template-code" name="template_code" :model-value="String(value ?? '')" label="阶段编码" :disabled="editingStage !== null" placeholder="如：QUALIFICATION" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
         <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="stage_name"><InputField id="procurement-stage-name" name="stage_name" :model-value="String(value ?? '')" label="阶段名称" placeholder="请输入阶段名称" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
         <div class="grid grid-cols-2 gap-4"><Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="win_probability"><InputField id="procurement-stage-win-probability" name="win_probability" :model-value="typeof value === 'number' ? value : ''" label="赢率（%）" type="number" :error="errorMessage ?? ''" @update:model-value="handleChange($event === '' ? undefined : Number($event))" @blur="handleBlur" /></Field><Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="sort_order"><InputField id="procurement-stage-sort-order" name="sort_order" :model-value="typeof value === 'number' ? value : ''" label="排序" type="number" :error="errorMessage ?? ''" @update:model-value="handleChange($event === '' ? undefined : Number($event))" @blur="handleBlur" /></Field></div>
-        <Field v-slot="{ value, handleChange }" name="is_default_start"><div class="flex items-center justify-between rounded-lg border p-3"><Label for="procurement-stage-default-start">默认起点</Label><Switch id="procurement-stage-default-start" :model-value="value" @update:model-value="handleChange" /></div></Field>
-        <Field v-slot="{ value, handleChange }" name="can_skip"><div class="flex items-center justify-between rounded-lg border p-3"><Label for="procurement-stage-can-skip">允许跳过</Label><Switch id="procurement-stage-can-skip" :model-value="value" @update:model-value="handleChange" /></div></Field>
+        <Field v-slot="{ value, handleChange }" name="is_default_start"><CheckboxField id="procurement-stage-default-start" :model-value="value === true" label="默认起点" @update:model-value="handleChange" /></Field>
+        <Field v-slot="{ value, handleChange }" name="can_skip"><CheckboxField id="procurement-stage-can-skip" :model-value="value === true" label="允许跳过" @update:model-value="handleChange" /></Field>
         <Field v-slot="{ value, handleChange, handleBlur, errorMessage }" name="description"><TextareaField id="procurement-stage-description" name="description" :model-value="String(value ?? '')" label="描述" :rows="3" placeholder="可选" :error="errorMessage ?? ''" @update:model-value="handleChange" @blur="handleBlur" /></Field>
         <DialogFooter><Button type="button" variant="outline" @click="dialogOpen = false">取消</Button><Button type="submit" :disabled="submitting">{{ submitting ? '提交中…' : '保存' }}</Button></DialogFooter>
       </form>

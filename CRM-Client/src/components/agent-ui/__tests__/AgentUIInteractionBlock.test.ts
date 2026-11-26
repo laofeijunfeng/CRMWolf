@@ -1125,3 +1125,81 @@ it('shows an unopenable subject as plain text', () => {
   expect(wrapper.get('[data-agent-ui-subject]').text()).toBe('客户：睿狐科技')
   expect(wrapper.find('[data-agent-ui-subject] button').exists()).toBe(false)
 })
+
+it('renders boolean entity-form fields as a full-row checkbox without 是/否 text', async () => {
+  const block = InteractionBlockSchema.parse({
+    ...contactFormBlock(),
+    business_action: 'create_deployment',
+    prompt: '新建部署信息',
+    submit_label: '提交',
+    fields: [
+      { key: 'deployment_name', label: '部署名称', field_type: 'text', required: true, default_value: '生产环境', min_length: 1, max_length: 100, options: [] },
+      { key: 'is_default', label: '设为默认部署', field_type: 'boolean', required: false, default_value: false, options: [] },
+    ],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  const checkbox = wrapper.get('[role="checkbox"]')
+  const label = wrapper.get('label[for="contact-is_default"]')
+  expect(checkbox.attributes('aria-checked')).toBe('false')
+  expect(label.text()).toBe('设为默认部署')
+  expect(checkbox.element.compareDocumentPosition(label.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(wrapper.text()).not.toMatch(/[是否]/)
+  expect(wrapper.findAll('[data-agent-ui-field]')[1]?.classes()).toContain('sm:col-span-2')
+
+  await checkbox.trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === '提交')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_contact', { deployment_name: '生产环境', is_default: true }]])
+})
+
+it('collapses non-active entity forms into a single summary line without form chrome', () => {
+  const submitted = mount(AgentUIInteractionBlock, {
+    props: {
+      block: InteractionBlockSchema.parse({
+        ...entityFormWithSubject('customer'),
+        state: 'READ_ONLY',
+        prompt: '已提交 · 新建联系人 · 王敏 · 采购经理',
+        hint: '不应再显示的提示',
+        submit_action_id: null,
+      }),
+    },
+  })
+
+  const collapsed = submitted.get('[data-agent-ui-collapsed-form]')
+  expect(collapsed.text()).toBe('已提交 · 新建联系人 · 王敏 · 采购经理')
+  expect(collapsed.get('svg').classes()).toContain('text-tone-success')
+  expect(submitted.find('form').exists()).toBe(false)
+  expect(submitted.find('footer').exists()).toBe(false)
+  expect(submitted.find('[data-agent-ui-subject]').exists()).toBe(false)
+  expect(submitted.find('[data-agent-ui-form-hint]').exists()).toBe(false)
+
+  const cancelled = mount(AgentUIInteractionBlock, {
+    props: {
+      block: InteractionBlockSchema.parse({
+        ...contactFormBlock(),
+        state: 'READ_ONLY',
+        prompt: '已取消 · 新建联系人',
+        submit_action_id: null,
+      }),
+    },
+  })
+  expect(cancelled.get('[data-agent-ui-collapsed-form]').text()).toBe('已取消 · 新建联系人')
+  expect(cancelled.get('[data-agent-ui-collapsed-form] svg').classes()).toContain('text-muted-foreground')
+})
+
+it('does not collapse non-entity forms such as proposal or confirmation edit', () => {
+  for (const business_action of ['create_opportunity_proposal', 'edit_confirmation'] as const) {
+    const wrapper = mount(AgentUIInteractionBlock, {
+      props: {
+        block: InteractionBlockSchema.parse({
+          ...contactFormBlock(),
+          business_action,
+          state: 'READ_ONLY',
+          prompt: '补全商机',
+          submit_action_id: null,
+        }),
+      },
+    })
+    expect(wrapper.find('[data-agent-ui-collapsed-form]').exists()).toBe(false)
+  }
+})

@@ -1361,7 +1361,7 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
     void submit(onlyChoice
       ? { kind: 'submit_form', form_revision: formRevision, choice }
       : { kind: 'submit_form', form_revision: formRevision, values },
-    onlyChoice ? (choice === 'cancel' ? '取消' : '稍后补充') : '提交表单', source)
+    onlyChoice ? (choice === 'cancel' ? '取消' : '稍后补充') : '提交', source)
     return
   }
   if (source.type === 'PROPOSAL_FORM' || source.type === 'CONFIRMATION_EDIT') {
@@ -1385,7 +1385,7 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
       input.values = values
     }
     // Cancelling a proposal form backs out of the form; it does not edit the activity.
-    void submit(input, canceled ? (source.type === 'CONFIRMATION_EDIT' ? '取消修改' : '取消') : '提交表单', source)
+    void submit(input, canceled ? (source.type === 'CONFIRMATION_EDIT' ? '取消修改' : '取消') : '提交', source)
     return
   }
   const fieldKey = block.fields[0]?.key

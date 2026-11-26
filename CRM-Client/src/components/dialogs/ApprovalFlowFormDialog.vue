@@ -21,9 +21,8 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { DataViewStatePanel } from '@/components/crmwolf'
+import { CheckboxField, DataViewStatePanel } from '@/components/crmwolf'
 import ApprovalNodeApproverPicker from '@/components/ApprovalNodeApproverPicker.vue'
 import approvalFlowApi, { type ApprovalFlow, type ApprovalFlowDetail, type ApprovalNode, type ApprovalNodeAssignees, type ApprovalNodeType } from '@/api/approvalFlow'
 import { handleApiError } from '@/utils/errorHandler'
@@ -456,14 +455,11 @@ watch(
             </div>
             <p v-if="errors.amountRange" class="field-error">{{ errors.amountRange }}</p>
 
-            <div class="switch-row">
-              <Switch
-                id="approval-flow-active"
-                :checked="form.active"
-                @update:checked="form.active = $event"
-              />
-              <Label for="approval-flow-active" class="cursor-pointer">启用流程</Label>
-            </div>
+            <CheckboxField
+              id="approval-flow-active"
+              v-model="form.active"
+              label="启用流程"
+            />
           </section>
 
           <section class="form-section">
@@ -643,13 +639,6 @@ watch(
   font-size: var(--font-size-caption);
   line-height: 20px;
   margin: 0;
-}
-
-.switch-row {
-  align-items: center;
-  display: flex;
-  gap: $space-2;
-  min-height: var(--touch-target);
 }
 
 

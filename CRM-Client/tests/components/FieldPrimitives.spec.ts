@@ -10,8 +10,32 @@ describe('CheckboxField / MultiSelectField', () => {
     const wrapper = mount(CheckboxField, { props: { id: 'confirmed', label: '已确认', modelValue: false } })
 
     expect(wrapper.get('label').attributes('for')).toBe('confirmed')
+    // The label is the question: box first, text on its right, no 是/否 echo.
+    expect(wrapper.text()).toBe('已确认')
+    expect(wrapper.get('[role="checkbox"]').element.compareDocumentPosition(wrapper.get('label').element)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await wrapper.get('[role="checkbox"]').trigger('click')
     expect(wrapper.emitted('update:modelValue')).toEqual([[true]])
+    wrapper.unmount()
+  })
+
+  it('preserves error and helper accessibility attributes on CheckboxField', () => {
+    const wrapper = mount(CheckboxField, {
+      props: {
+        id: 'default-deploy',
+        label: '设为默认部署',
+        modelValue: false,
+        required: true,
+        helperText: '每个客户仅可设一个默认部署',
+        error: '请确认部署环境',
+      },
+    })
+
+    const checkbox = wrapper.get('[role="checkbox"]')
+    expect(checkbox.attributes('aria-invalid')).toBe('true')
+    expect(checkbox.attributes('aria-required')).toBe('true')
+    expect(checkbox.attributes('aria-describedby')).toBe('default-deploy-error default-deploy-description')
+    expect(wrapper.get('[role="alert"]').text()).toBe('请确认部署环境')
     wrapper.unmount()
   })
 

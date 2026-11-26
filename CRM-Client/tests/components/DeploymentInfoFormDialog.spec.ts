@@ -13,15 +13,6 @@ vi.mock('@/api/deployment', () => ({
 vi.mock('@/utils/errorHandler', () => ({ handleApiError: vi.fn() }))
 
 const passthrough = (name: string) => defineComponent({ name, template: '<div><slot /></div>' })
-const SwitchStub = defineComponent({
-  name: 'Switch',
-  props: {
-    modelValue: { type: Boolean, default: false },
-    disabled: Boolean,
-  },
-  emits: ['update:modelValue'],
-  template: '<button type="button" :disabled="disabled" @click="$emit(\'update:modelValue\', !modelValue)">切换</button>',
-})
 
 const Dialog = defineComponent({
   name: 'Dialog',
@@ -56,28 +47,44 @@ const stubs = {
   DialogTitle: passthrough('DialogTitle'),
   Button: passthrough('Button'),
   InputField,
-  Label: passthrough('Label'),
-  Switch: SwitchStub,
 }
 
 describe('DeploymentInfoFormDialog', () => {
-  it('persists the default deployment choice in the form state', async () => {
+  it('defaults is_default unchecked and renders a checkbox instead of a switch', async () => {
+    deploymentApi.create.mockResolvedValue({
+      id: 'deployment-1',
+      customer_id: 'customer-1',
+      deployment_name: '测试环境',
+      server_address: 'https://test.example.com',
+      is_default: false,
+    })
+
     const wrapper = mount(DeploymentInfoFormDialog, {
       props: { open: true, customerId: 'customer-1' },
       global: { stubs },
     })
 
-    const switchControl = wrapper.getComponent(SwitchStub)
-    expect(switchControl.props('modelValue')).toBe(false)
+    const checkbox = wrapper.get('#deployment-default[role="checkbox"]')
+    expect(checkbox.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('label[for="deployment-default"]').text()).toBe('设为默认部署')
+    expect(wrapper.text()).not.toMatch(/[是否]/)
 
-    await switchControl.trigger('click')
+    await wrapper.get('#deployment-name').setValue('测试环境')
+    await wrapper.get('#deployment-server').setValue('https://test.example.com')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
 
-    expect(wrapper.getComponent(SwitchStub).props('modelValue')).toBe(true)
+    expect(deploymentApi.create).toHaveBeenCalledWith({
+      customer_id: 'customer-1',
+      deployment_name: '测试环境',
+      server_address: 'https://test.example.com',
+      is_default: false,
+    })
   })
 
-  it('submits the selected default deployment flag to the API', async () => {
+  it('submits the checked default deployment flag to the API', async () => {
     deploymentApi.create.mockResolvedValue({
-      id: 'deployment-1',
+      id: 'deployment-2',
       customer_id: 'customer-1',
       deployment_name: '生产环境',
       server_address: 'https://crm.example.com',
@@ -91,7 +98,8 @@ describe('DeploymentInfoFormDialog', () => {
 
     await wrapper.get('#deployment-name').setValue('  生产环境  ')
     await wrapper.get('#deployment-server').setValue('  https://crm.example.com  ')
-    await wrapper.getComponent(SwitchStub).trigger('click')
+    await wrapper.get('#deployment-default[role="checkbox"]').trigger('click')
+    expect(wrapper.get('#deployment-default[role="checkbox"]').attributes('aria-checked')).toBe('true')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 

@@ -33,7 +33,7 @@ const contactTask: AssistantTaskView = {
 const formBlock = InteractionBlockSchema.parse({
   id: 'b-contact', type: 'interaction', interaction_id: 'q-contact', interaction_type: 'form',
   business_action: 'create_contact', allow_cancel: true, state: 'ACTIVE', prompt: '请补全联系人',
-  submit_label: '创建联系人', submit_action_id: 'act-contact', options: [],
+  submit_label: '提交', submit_action_id: 'act-contact', options: [],
   fields: [{ key: 'name', label: '姓名', field_type: 'text', required: true, default_value: '王敏', min_length: 1, max_length: 50, options: [] }],
 })
 const view = (focused: AssistantTaskView | null): ConversationView => ({
@@ -71,9 +71,9 @@ afterEach(() => {
 })
 
 describe('SalesAssistant direct-create drafts', () => {
-  it('submits entity form values and parks the form with a bare defer choice', async () => {
+  it('submits entity form values and parks the form with a bare defer choice and matching echo', async () => {
     api.openConversation.mockResolvedValue(view(contactTask))
-    api.conversationCommand.mockRejectedValue(new Error('offline'))
+    api.conversationCommand.mockImplementation(() => new Promise(() => undefined))
     wrapper = mount(SalesAssistantChat)
     await flushPromises()
 
@@ -86,23 +86,39 @@ describe('SalesAssistant direct-create drafts', () => {
       input: { kind: 'submit_form', form_revision: 2, choice: 'defer', action_id: 'act-contact', expected_version: 3 },
     })
     expect(sentInput()).not.toHaveProperty('values')
+    expect(wrapper.findAll('.justify-end').map((el) => el.text())).toContain('稍后补充')
   })
 
-  it('sends the filled values when the entity form is submitted', async () => {
+  it('sends the filled values and echoes 提交 when the entity form is submitted', async () => {
     api.openConversation.mockResolvedValue(view(contactTask))
-    api.conversationCommand.mockRejectedValue(new Error('offline'))
+    api.conversationCommand.mockImplementation(() => new Promise(() => undefined))
     wrapper = mount(SalesAssistantChat)
     await flushPromises()
 
-    await button('创建联系人').trigger('click')
+    await button('提交').trigger('click')
     await flushPromises()
 
     expect(sentInput()).toMatchObject({
       kind: 'submit_form', form_revision: 2, values: { name: '王敏' },
     })
     expect(sentInput()).not.toHaveProperty('choice')
+    expect(wrapper.findAll('.justify-end').map((el) => el.text())).toContain('提交')
   })
 
+  it('echoes 取消 when the entity form is cancelled', async () => {
+    api.openConversation.mockResolvedValue(view(contactTask))
+    api.conversationCommand.mockImplementation(() => new Promise(() => undefined))
+    wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+
+    await button('取消').trigger('click')
+    await flushPromises()
+
+    expect(sentInput()).toMatchObject({
+      kind: 'submit_form', form_revision: 2, choice: 'cancel',
+    })
+    expect(wrapper.findAll('.justify-end').map((el) => el.text())).toContain('取消')
+  })
   it('lists other parked drafts and opens one at the current conversation version', async () => {
     api.openConversation.mockResolvedValue(view(contactTask))
     api.pendingDrafts.mockResolvedValue([draft('task-contact', '联系人 王敏'), draft('task-invoice', '开票抬头')])

@@ -1,5 +1,5 @@
 """CRM-165: the assistant creates CRM records only from a submitted form, once, with a receipt."""
-# ruff: noqa: RUF001 -- Chinese user-facing copy uses native punctuation.
+# ruff: noqa: RUF001, RUF003 -- Chinese user-facing copy uses native punctuation.
 
 from __future__ import annotations
 
@@ -17,12 +17,13 @@ from app.models.assistant_conversation import AssistantConversation, AssistantCo
 from app.models.assistant_crm_effect import AssistantCRMEffect
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
+from app.models.deployment import DeploymentInfo
 from app.models.team import Team, UserTeam
 from app.models.user import User
 from app.schemas.assistant import SubmitInputRequest
 from app.services.assistant import entity_tasks, turns
-from app.services.assistant.coordinator import AssistantCoordinator
 from app.services.assistant.contracts import EntityCreateReceipt
+from app.services.assistant.coordinator import AssistantCoordinator
 from app.services.assistant.entity_tasks import EntityExtraction
 from app.services.assistant.task_state import load_waiting
 from app.services.assistant.turns import AssistantStateConflict
@@ -48,6 +49,7 @@ def db(tmp_path, monkeypatch):
 
     Base.metadata.create_all(engine, tables=[
         Customer.__table__, CustomerMember.__table__, CustomerProduct.__table__, Contact.__table__,
+        DeploymentInfo.__table__,
         AssistantCRMEffect.__table__,
         AssistantTask.__table__, AssistantConversation.__table__, AssistantConversationEntry.__table__,
         AssistantAction.__table__, AssistantRequest.__table__, AssistantTurn.__table__,
@@ -750,3 +752,254 @@ async def test_a_cancelled_activity_lists_no_profile_items(db, profile_items):
 
     assert outcome.reply.message.endswith("资料可以直接让我单独保存")
     assert session.query(AssistantTask).count() == 1
+
+
+@pytest.mark.asyncio
+async def test_first_deployment_defaults_unchecked_and_collapses_without_hint(db, monkeypatch):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    session, _, _ = db
+    extraction = EntityExtraction.model_validate({
+        "customer_name": {"value": "睿狐科技", "quote": "睿狐科技"},
+        "fields": [
+            {"key": "deployment_name", "value": "生产环境", "quote": "生产环境"},
+            {"key": "server_address", "value": "https://crm.example.com", "quote": "https://crm.example.com"},
+            {"key": "authorized_users", "value": "50", "quote": "50人"},
+        ],
+    })
+    task = await _start(
+        db, monkeypatch, extraction,
+        source="睿狐科技新增部署信息，生产环境，https://crm.example.com，50人",
+        kind="deployment_create", key="deploy-first",
+    )
+    before_view = task_view(task, session)
+    assert before_view.draft.entity is not None
+    before_view.draft.entity.customer_public_id = f"cus_{'a' * 32}"
+    active_msg = ConversationMessage(id="d1", role="assistant", text="", at="2026-01-01T00:00:00", task=before_view)
+    finalize_assistant_ui([active_msg], focused_task=before_view, pending_choice=None)
+    active_block = active_msg.ui.blocks[-1]
+    default_field = next(field for field in active_block.fields if field.key == "is_default")
+    assert default_field.field_type == "boolean"
+    assert default_field.default_value is False
+    assert active_block.subject is not None
+    assert active_block.hint, "active form should carry the authorized_users notice"
+
+    waiting = load_waiting(task)
+    assert waiting is not None
+    values = {field["key"]: field["default_value"] for field in waiting.form_fields}
+    assert values["is_default"] is False
+    await _submit(db, task, "deploy-save", {
+        "kind": "submit_form", "values": values, "form_revision": waiting.form_revision,
+    })
+
+    rows = session.query(DeploymentInfo).all()
+    assert len(rows) == 1
+    assert rows[0].is_default is False, "first deployment must stay non-default unless explicitly checked"
+
+    after_view = task_view(task, session)
+    form_msg = ConversationMessage(id="d1", role="assistant", text="", at="2026-01-01T00:00:00", task=before_view)
+    user_msg = ConversationMessage(id="d2", role="user", text="提交", at="2026-01-01T00:00:01")
+    done_msg = ConversationMessage(id="d3", role="assistant", text="已保存", at="2026-01-01T00:00:02", task=after_view)
+    finalize_assistant_ui([form_msg, user_msg, done_msg], focused_task=None, pending_choice=None)
+
+    collapsed = form_msg.ui.blocks[-1]
+    assert collapsed.state == "READ_ONLY"
+    assert collapsed.prompt == "已提交 · 新建部署信息 · 生产环境 · https://crm.example.com"
+    assert collapsed.hint is None
+    assert collapsed.subject is None
+
+
+@pytest.mark.asyncio
+async def test_submitted_contact_and_invoice_summaries_skip_select_and_boolean_values(db, monkeypatch):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.contracts import EntityDraft, TaskWaiting
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    before_view = task_view(task, session)
+    await _save(
+        db, task, "contact-save",
+        name="王敏", position="采购经理", mobile="13800138000", is_decision_maker=True,
+    )
+    after_view = task_view(task, session)
+
+    form_msg = ConversationMessage(id="c1", role="assistant", text="", at="2026-01-01T00:00:00", task=before_view)
+    user_msg = ConversationMessage(id="c2", role="user", text="提交", at="2026-01-01T00:00:01")
+    done_msg = ConversationMessage(id="c3", role="assistant", text="已保存", at="2026-01-01T00:00:02", task=after_view)
+    finalize_assistant_ui([form_msg, user_msg, done_msg], focused_task=None, pending_choice=None)
+
+    collapsed = form_msg.ui.blocks[-1]
+    assert collapsed.state == "READ_ONLY"
+    assert collapsed.prompt == "已提交 · 新建联系人 · 王敏 · 采购经理"
+    assert collapsed.hint is None
+    assert collapsed.subject is None
+
+    # Empty text fields produce the bare prefix without trailing separators.
+    empty_after = after_view.model_copy(deep=True)
+    assert empty_after.draft.entity is not None
+    empty_after.draft.entity.submitted["contact_create"] = {
+        "gender": "2", "name": "  ", "position": "", "is_decision_maker": True,
+    }
+    empty_form = ConversationMessage(id="e1", role="assistant", text="", at="2026-01-01T00:00:00", task=before_view)
+    empty_done = ConversationMessage(
+        id="e3", role="assistant", text="已保存", at="2026-01-01T00:00:02", task=empty_after,
+    )
+    finalize_assistant_ui([empty_form, user_msg, empty_done], focused_task=None, pending_choice=None)
+    assert empty_form.ui.blocks[-1].prompt == "已提交 · 新建联系人"
+
+    # Select-first forms (invoice_title_create) skip title_type ("COMPANY") and take the first two text fields.
+    inv_before = before_view.model_copy(deep=True)
+    inv_before.public_id = "task_inv_1"
+    inv_before.task_kind = "invoice_title_create"
+    inv_before.draft.entity = EntityDraft(
+        kind="invoice_title_create", customer_public_id="cus_ruihu", customer_name="睿狐科技",
+    )
+    inv_before.waiting = TaskWaiting(
+        type="ENTITY_FORM", field="entity:invoice_title_create", question_id="q_inv", prompt="核对开票抬头",
+        action_id="act_inv", expected_version=1, form_revision=1,
+        form_fields=[
+            {"key": "title_type", "label": "抬头类型", "field_type": "select", "required": True,
+             "default_value": "COMPANY", "options": [{"value": "COMPANY", "label": "单位"}]},
+            {"key": "title", "label": "开票抬头", "field_type": "text", "required": True,
+             "default_value": "睿狐科技", "min_length": 1, "max_length": 100},
+            {"key": "taxpayer_id", "label": "纳税人识别号", "field_type": "text", "required": True,
+             "default_value": "91310000123456789X", "min_length": 1, "max_length": 100},
+        ],
+    )
+    inv_after = inv_before.model_copy(deep=True)
+    inv_after.status = "COMPLETED"
+    inv_after.waiting = None
+    assert inv_after.draft.entity is not None
+    inv_after.draft.entity.submitted["invoice_title_create"] = {
+        "title_type": "COMPANY", "title": "睿狐科技有限公司", "taxpayer_id": "91310000123456789X",
+    }
+    inv_form = ConversationMessage(id="i1", role="assistant", text="", at="2026-01-01T00:00:00", task=inv_before)
+    inv_done = ConversationMessage(id="i3", role="assistant", text="已保存", at="2026-01-01T00:00:02", task=inv_after)
+    finalize_assistant_ui([inv_form, user_msg, inv_done], focused_task=None, pending_choice=None)
+    assert inv_form.ui.blocks[-1].prompt == "已提交 · 新建开票抬头 · 睿狐科技有限公司 · 91310000123456789X"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("echo", "summary"), [
+    ("提交", "已提交 · 新建联系人 · 王敏 · 采购经理"),
+    ("提交表单", "已提交 · 新建联系人 · 王敏 · 采购经理"),
+    ("取消", "已取消 · 新建联系人"),
+    ("稍后补充", "稍后补充 · 新建联系人"),
+])
+async def test_handled_entity_form_collapses_to_one_summary_line(db, monkeypatch, echo, summary):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    view = task_view(task, session)
+    form = ConversationMessage(id="m1", role="assistant", text="", at="2026-01-01T00:00:00", task=view)
+    reply = ConversationMessage(id="m2", role="user", text=echo, at="2026-01-01T00:00:01")
+
+    finalize_assistant_ui([form, reply], focused_task=None, pending_choice=None)
+
+    interaction = form.ui.blocks[-1]
+    assert interaction.state == "READ_ONLY"
+    assert interaction.prompt == summary
+    assert interaction.hint is None
+    assert interaction.subject is None
+
+
+@pytest.mark.asyncio
+async def test_reissued_or_failed_entity_form_is_never_marked_submitted(db, monkeypatch):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    first_view = task_view(task, session)
+    # Re-issued same-field ENTITY_FORM (e.g. validation error or supplement) must not label the earlier card 已提交.
+    second_view = first_view.model_copy(deep=True)
+    assert second_view.waiting is not None
+    second_view.waiting.form_revision = (first_view.waiting.form_revision or 1) + 1
+    m1 = ConversationMessage(id="r1", role="assistant", text="", at="2026-01-01T00:00:00", task=first_view)
+    m2 = ConversationMessage(id="r2", role="user", text="提交", at="2026-01-01T00:00:01")
+    m3 = ConversationMessage(id="r3", role="assistant", text="请补全性别", at="2026-01-01T00:00:02", task=second_view)
+    finalize_assistant_ui([m1, m2, m3], focused_task=second_view, pending_choice=None)
+
+    first_block = m1.ui.blocks[-1]
+    assert first_block.state == "READ_ONLY"
+    assert not first_block.prompt.startswith("已提交")
+    assert first_block.hint is None
+    assert m3.ui.blocks[-1].state == "ACTIVE"
+
+    # Failure outcome on the next same-task message also never claims 已提交.
+    f1 = ConversationMessage(id="f1", role="assistant", text="", at="2026-01-01T00:00:00", task=first_view)
+    f2 = ConversationMessage(id="f2", role="user", text="提交", at="2026-01-01T00:00:01")
+    f3 = ConversationMessage(
+        id="f3", role="assistant", text="保存失败", at="2026-01-01T00:00:02",
+        task=first_view, outcome="failure", error_code="UNKNOWN_COMMIT_RESULT",
+    )
+    finalize_assistant_ui([f1, f2, f3], focused_task=None, pending_choice=None)
+    assert not f1.ui.blocks[-1].prompt.startswith("已提交")
+
+
+def test_submit_form_command_labels_match_button_copy():
+    from app.services.assistant.contracts import TaskWaiting
+    from app.services.assistant.history import command_label
+
+    entity_waiting = TaskWaiting(
+        type="ENTITY_FORM", field="entity:contact_create", question_id="q_entity",
+        prompt="核对联系人", form_revision=1,
+    )
+    proposal_waiting = TaskWaiting(
+        type="PROPOSAL_FORM", field="proposal:opportunity_create", question_id="q_proposal",
+        prompt="补全商机", form_revision=1,
+    )
+    edit_waiting = TaskWaiting(
+        type="CONFIRMATION_EDIT", field="activity_write", question_id="q_edit",
+        prompt="修改活动", form_revision=1,
+    )
+
+    assert command_label(
+        SubmitInputRequest(
+            kind="submit_form", values={"name": "王敏"}, form_revision=1, client_request_id="req-label-1",
+        ),
+        entity_waiting,
+    ) == "提交"
+    assert command_label(
+        SubmitInputRequest(kind="submit_form", choice="defer", form_revision=1, client_request_id="req-label-2"),
+        entity_waiting,
+    ) == "稍后补充"
+    assert command_label(
+        SubmitInputRequest(kind="submit_form", choice="cancel", form_revision=1, client_request_id="req-label-3"),
+        entity_waiting,
+    ) == "取消"
+    assert command_label(
+        SubmitInputRequest(kind="submit_form", choice="cancel", form_revision=1, client_request_id="req-label-4"),
+        proposal_waiting,
+    ) == "取消"
+    assert command_label(
+        SubmitInputRequest(kind="submit_form", choice="cancel", form_revision=1, client_request_id="req-label-5"),
+        edit_waiting,
+    ) == "取消修改"
+
+
+@pytest.mark.asyncio
+async def test_unanswered_entity_form_keeps_its_fields_and_boolean_starts_unchecked(db, monkeypatch):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import finalize_assistant_ui
+
+    session, _, _ = db
+    task = await _start(db, monkeypatch, _extraction())
+    view = task_view(task, session)
+    form = ConversationMessage(id="m1", role="assistant", text="", at="2026-01-01T00:00:00", task=view)
+
+    finalize_assistant_ui([form], focused_task=view, pending_choice=None)
+
+    interaction = form.ui.blocks[-1]
+    assert interaction.state == "ACTIVE" and "已提交" not in interaction.prompt
+    decision = next(field for field in interaction.fields if field.key == "is_decision_maker")
+    assert decision.default_value is False

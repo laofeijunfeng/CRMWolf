@@ -8,11 +8,15 @@ import { cn, omitUndefined } from "@/lib/utils"
 
 type CheckedValue = boolean | "indeterminate"
 
-const props = defineProps<CheckboxRootProps & {
+const props = withDefaults(defineProps<Omit<CheckboxRootProps, "modelValue"> & {
   class?: HTMLAttributes["class"]
-  checked?: CheckedValue | null
+  checked?: CheckedValue | null | undefined
+  modelValue?: CheckedValue | null | undefined
   indeterminate?: boolean
-}>()
+}>(), {
+  checked: undefined,
+  modelValue: undefined,
+})
 
 const emits = defineEmits<{
   "update:modelValue": CheckboxRootEmits["update:modelValue"]

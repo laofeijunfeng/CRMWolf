@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, TypeGuard, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard, cast
 
 from pydantic import ValidationError
 
@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     from app.schemas.assistant import AssistantTaskView, ProfileProposalRowView
     from app.services.assistant.contracts import (
         ActivityPreview,
-        EntityKind,
         ProposalCandidate,
         TaskDraft,
         TaskWaiting,
@@ -157,6 +156,7 @@ def finalize_assistant_ui(
     live_id = _live_waiting_message_id(messages, focused_task)
     submitted_kind = _resolved_activity_kind(focused_task)
     _project_coverage(messages, live_id)
+    handled = _handled_forms(messages)
     for message in messages:
         if message.role != "assistant":
             message.ui = None
@@ -176,6 +176,7 @@ def finalize_assistant_ui(
                 active_waiting=active_waiting,
                 active_boundary=active_boundary,
                 submitted_kind=submitted_kind if same_task else None,
+                handled=handled.get(message.id),
             )
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
@@ -493,6 +494,7 @@ def project_assistant_message(
     active_waiting: bool,
     active_boundary: bool,
     submitted_kind: str | None = None,
+    handled: HandledForm | None = None,
 ) -> AgentUIEnvelope | None:
     """Build Web-visible blocks, or leave a normal completion to the host."""
 
@@ -504,7 +506,7 @@ def project_assistant_message(
     try:
         return _project_message_blocks(
             message, result=result, active_waiting=active_waiting, active_boundary=active_boundary,
-            submitted_kind=submitted_kind,
+            submitted_kind=submitted_kind, handled=handled,
         )
     except (ValidationError, ValueError):
         return _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE, result=result)
@@ -517,6 +519,7 @@ def _project_message_blocks(
     active_waiting: bool,
     active_boundary: bool,
     submitted_kind: str | None,
+    handled: HandledForm | None = None,
 ) -> AgentUIEnvelope:
     prefix = (result,) if result is not None else ()
     if message.outcome == "proposal_unavailable":
@@ -540,7 +543,7 @@ def _project_message_blocks(
         return _envelope(message, (*prefix, _boundary_block(message, active=active_boundary)), route="CLARIFY")
     if waiting is not None:
         blocks = _waiting_blocks(message, waiting, active=active_waiting, submitted_kind=submitted_kind,
-                                 include_prose=result is None)
+                                 include_prose=result is None, handled=handled)
         return _envelope(message, (*prefix, *blocks), route="WORKFLOW")
     if prefix:
         return _envelope(message, prefix, route="WORKFLOW")
@@ -776,9 +779,11 @@ def _waiting_blocks(
     active: bool,
     submitted_kind: str | None = None,
     include_prose: bool = True,
+    handled: HandledForm | None = None,
 ) -> tuple[TextBlock | NoticeBlock | InteractionBlock, ...]:
     prompt = _plain(waiting.prompt) or _plain(message.text) or _UNAVAILABLE
-    interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind)
+    interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind,
+                                       handled=handled)
     blocks: list[TextBlock | NoticeBlock | InteractionBlock] = []
     prose = _plain(message.text)
     # An entity form's title already says what is being created; the prose would repeat it.
@@ -799,18 +804,22 @@ def _form_interaction(
     prompt: str,
     active: bool,
     action_id: str,
+    handled: HandledForm | None = None,
 ) -> InteractionBlock:
     allowed: frozenset[str]
     subject: EntityRef | None = None
+    summary: str | None = None
     if waiting.type == "ENTITY_FORM":
         kind = (waiting.field or "").removeprefix("entity:")
         if kind not in ENTITY_ACTIONS:
             raise ValueError("missing frozen form")
-        business_action = ENTITY_ACTIONS[cast("EntityKind", kind)]
+        if not active and handled is not None:
+            summary = _entity_form_summary(entity_module_for(kind).LABEL, handled)
+        business_action = ENTITY_ACTIONS[kind]
         expected_field = waiting.field
         allowed = entity_module_for(kind).FIELD_KEYS
         entity_draft = message.task.draft.entity if message.task is not None else None
-        if kind != "customer_create" and entity_draft is not None:
+        if active and kind != "customer_create" and entity_draft is not None:
             subject = _receipt_entity(entity_draft.customer_public_id,
                                       customer_name=_plain(entity_draft.customer_name or ""))
     else:
@@ -839,10 +848,11 @@ def _form_interaction(
         interaction_type="form",
         business_action=business_action,
         state="ACTIVE" if active else "READ_ONLY",
-        prompt=prompt,
+        # A handled entity form keeps only what still holds: the outcome and the record's name.
+        prompt=summary or prompt,
         subject=subject,
         fields=fields,
-        hint=_clip(_plain(waiting.hint), 400) or None,
+        hint=None if (waiting.type == "ENTITY_FORM" and not active) else _clip(_plain(waiting.hint), 400) or None,
         allow_cancel=active,
         submit_action_id=action_id if active else None,
     )
@@ -855,10 +865,12 @@ def _waiting_interaction(
     prompt: str,
     active: bool,
     submitted_kind: str | None = None,
+    handled: HandledForm | None = None,
 ) -> InteractionBlock:
     action_id = _action_id(waiting)
     if waiting.type in {"PROPOSAL_FORM", "CONFIRMATION_EDIT", "ENTITY_FORM"}:
-        return _form_interaction(message, waiting, prompt=prompt, active=active, action_id=action_id)
+        return _form_interaction(message, waiting, prompt=prompt, active=active, action_id=action_id,
+                                 handled=handled)
     if waiting.type == "FOLLOW_UP_DISPOSITION":
         raise ValueError("missing frozen disposition batch")
     if waiting.type in {"ENTITY_DEFERRED", "PROFILE_PROPOSALS"}:
@@ -1655,6 +1667,88 @@ def _action_id(waiting: TaskWaiting) -> str:
 
 def _interaction_id(message: ConversationMessage) -> str:
     return _clip(f"ix:{message.id}", 128)
+
+
+class HandledForm(NamedTuple):
+    """The outcome that closed a historical entity form, and the text values it carried."""
+
+    outcome: Literal["submitted", "cancelled", "deferred"]
+    values: dict[str, object]
+
+
+def _handled_forms(messages: list[ConversationMessage]) -> dict[str, HandledForm]:
+    """Map each closed entity-form message to its outcome and submitted text values."""
+
+    handled: dict[str, HandledForm] = {}
+    for index, message in enumerate(messages):
+        waiting = message.task.waiting if message.role == "assistant" and message.task is not None else None
+        if waiting is None or waiting.type != "ENTITY_FORM" or message.task is None:
+            continue
+        later = messages[index + 1:]
+        task_id = message.task.public_id
+        kind = (waiting.field or "").removeprefix("entity:")
+        next_task_idx, next_task_msg = next(
+            (
+                (offset, item)
+                for offset, item in enumerate(later)
+                if item.role == "assistant" and item.task is not None and item.task.public_id == task_id
+            ),
+            (None, None),
+        )
+        echo_slice = later[:next_task_idx] if next_task_idx is not None else later
+        echo_msg = next((item for item in reversed(echo_slice) if item.role == "user"), None)
+        echo = _plain(echo_msg.text) if echo_msg is not None else ""
+        if not echo and next_task_msg is None:
+            continue
+        next_task = next_task_msg.task if next_task_msg is not None else None
+        next_waiting = next_task.waiting if next_task is not None else None
+        if (next_task is not None and next_task.status == "CANCELLED") or echo in {"取消", "算了，不记了"}:
+            handled[message.id] = HandledForm(outcome="cancelled", values={})
+            continue
+        if (next_waiting is not None and next_waiting.type == "ENTITY_DEFERRED") or echo == "稍后补充":
+            handled[message.id] = HandledForm(outcome="deferred", values={})
+            continue
+        if next_task_msg is not None:
+            if next_task_msg.outcome == "failure" or next_task_msg.error_code is not None:
+                continue
+            if next_waiting is not None and next_waiting.type == "ENTITY_FORM" and next_waiting.field == waiting.field:
+                continue
+            next_entity = next_task.draft.entity if next_task is not None else None
+            progressed = (
+                next_task_msg.entity_receipt is not None
+                or (next_task is not None and next_task.status == "COMPLETED")
+                or (next_entity is not None and kind in next_entity.submitted)
+            )
+            if not progressed:
+                continue
+        elif echo not in {"提交", "提交表单"}:
+            continue
+        text_fields = [
+            (key, raw.get("default_value"))
+            for raw in waiting.form_fields or []
+            if isinstance(key := raw.get("key"), str) and raw.get("field_type") in {"text", "textarea"}
+        ]
+        submitted: dict[str, object] | None = None
+        for item in later:
+            entity = item.task.draft.entity if item.task is not None and item.task.public_id == task_id else None
+            if entity is not None and kind in entity.submitted:
+                submitted = dict(entity.submitted[kind])
+                break
+        if submitted is None:
+            submitted = dict(text_fields)
+        # Form order, so the summary leads with the record's name.
+        values = {key: submitted[key] for key, _ in text_fields if key in submitted}
+        handled[message.id] = HandledForm(outcome="submitted", values=values)
+    return handled
+
+
+def _entity_form_summary(label: str, handled: HandledForm) -> str:
+    if handled.outcome == "cancelled":
+        return f"已取消 · 新建{label}"
+    if handled.outcome == "deferred":
+        return f"稍后补充 · 新建{label}"
+    texts = [_clip(_plain(value), 80) for value in handled.values.values() if isinstance(value, str) and value.strip()]
+    return " · ".join(["已提交", f"新建{label}", *texts[:2]])
 
 
 def _live_waiting_message_id(
