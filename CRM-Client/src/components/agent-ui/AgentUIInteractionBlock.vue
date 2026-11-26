@@ -486,6 +486,15 @@ const selectedFieldValues = (field: InteractionField): string[] => {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
+// 桌面端多字段表单排两列；长文本、多行与多选独占一行，DOM 顺序即视觉顺序。
+const SHORT_TEXT_MAX_LENGTH = 100
+const isWideField = (field: InteractionField): boolean => {
+  if (field.field_type === 'textarea' || field.field_type === 'multi_select') return true
+  if (field.field_type !== 'text') return false
+  return field.max_length == null || field.max_length > SHORT_TEXT_MAX_LENGTH
+}
+const formColumns = computed(() => props.block.interaction_type === 'form' && props.block.fields.length > 1)
+
 const fieldError = (field: InteractionField): string | null => {
   const value = fieldValues.value[field.key]
   const blankText = typeof value === 'string' && value.trim().length === 0
@@ -1141,8 +1150,14 @@ const submit = async (): Promise<void> => {
 
       <div v-else-if="block.interaction_type === 'choice' || block.interaction_type === 'confirmation'" class="hidden"></div>
 
-      <form v-else-if="!(readonly && (block.interaction_type === 'text_input' || block.interaction_type === 'form'))" class="grid gap-space-3" novalidate @submit.prevent="submit">
-        <template v-for="field in block.fields" :key="field.key">
+      <form v-else-if="!(readonly && (block.interaction_type === 'text_input' || block.interaction_type === 'form'))" class="grid gap-space-3" :class="formColumns && 'sm:grid-cols-2 sm:items-start'" novalidate @submit.prevent="submit">
+        <div
+          v-for="field in block.fields"
+          :key="field.key"
+          class="grid min-w-0 gap-space-2"
+          :class="formColumns && isWideField(field) && 'sm:col-span-2'"
+          data-agent-ui-field
+        >
           <TextareaField
             v-if="field.field_type === 'textarea'"
             :id="`${block.id}-${field.key}`"
@@ -1233,7 +1248,7 @@ const submit = async (): Promise<void> => {
           />
           <div
             v-if="(field.field_type === 'text' || field.field_type === 'textarea') && field.suggestions.length > 0 && !readonly"
-            class="-mt-space-1 flex flex-wrap gap-space-2"
+            class="flex flex-wrap gap-space-2"
             role="group"
             :aria-label="`${field.label}候选`"
             data-agent-ui-suggestions
@@ -1252,7 +1267,7 @@ const submit = async (): Promise<void> => {
               {{ suggestion }}
             </Button>
           </div>
-        </template>
+        </div>
       </form>
       <!-- 表单级校验原因由服务端给出；字段级错误仍贴在各自输入框下。 -->
       <p
