@@ -18,11 +18,30 @@ export const StageNameSchema = z.enum([
 export type StageName = z.infer<typeof StageNameSchema>
 export const StagePhaseSchema = z.enum(['start', 'done', 'failed'])
 
+const StageSegmentSchema = z.object({ index: z.number().int().positive(), total: z.number().int().positive() })
+export type StageSegment = z.infer<typeof StageSegmentSchema>
+
 export interface StageEvent {
   stage: StageName
   phase: z.infer<typeof StagePhaseSchema>
   ms?: number | undefined
   score?: number | undefined
+  segment?: StageSegment | undefined
+}
+
+// Stage events are progress only: a malformed one is dropped, never fatal.
+export const parseStageEvent = (data: Record<string, unknown>): StageEvent | null => {
+  const stage = StageNameSchema.safeParse(data['stage'])
+  const phase = StagePhaseSchema.safeParse(data['phase'])
+  if (!stage.success || !phase.success) return null
+  const segment = StageSegmentSchema.safeParse(data['segment'])
+  return {
+    stage: stage.data,
+    phase: phase.data,
+    ms: typeof data['ms'] === 'number' ? data['ms'] : undefined,
+    score: typeof data['score'] === 'number' ? data['score'] : undefined,
+    segment: segment.success ? segment.data : undefined
+  }
 }
 
 export interface SubmitStreamError {
@@ -154,17 +173,8 @@ export async function submitInputStream(
       return false
     }
     if (parsed.event === 'stage') {
-      const stage = StageNameSchema.safeParse(payload['stage'])
-      const phase = StagePhaseSchema.safeParse(payload['phase'])
-      if (stage.success && phase.success) {
-        handlers.onStage({
-          stage: stage.data,
-          phase: phase.data,
-          ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
-          score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
-          seq: sequence
-        })
-      }
+      const stageEvent = parseStageEvent(payload)
+      if (stageEvent !== null) handlers.onStage({ ...stageEvent, seq: sequence })
       return false
     }
     if (parsed.event === 'waiting') {

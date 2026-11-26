@@ -25,7 +25,7 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.contracts import FORM_WAITING_TYPES
 from app.services.assistant.coordinator import AssistantInput
-from app.services.assistant.events import ProgressReporter, TurnStage, is_stage_name
+from app.services.assistant.events import ProgressReporter, Segment, TurnStage, is_stage_name, stage_payload
 from app.services.assistant.failure_contract import (
     ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
     ATTEMPT_DEADLINE_SECONDS,
@@ -943,23 +943,19 @@ class DurableProgressReporter(ProgressReporter):
         except Exception:
             logger.exception("assistant stage persistence failed: turn=%s", self.turn_id)
 
-    def stage_start(self, stage: TurnStage | None) -> None:
-        if stage is None:
-            return
-        self._record({"stage": stage.name, "phase": "start"})
+    def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "start", segment=segment))
 
-    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
-        if stage is None:
-            return
-        payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
-        if score is not None:
-            payload["score"] = score
-        self._record(payload)
+    def stage_done(
+        self, stage: TurnStage | None, *, ms: int, score: int | None = None, segment: Segment | None = None
+    ) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "done", ms=ms, score=score, segment=segment))
 
-    def stage_failed(self, stage: TurnStage | None) -> None:
-        if stage is None:
-            return
-        self._record({"stage": stage.name, "phase": "failed"})
+    def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        if stage is not None:
+            self._record(stage_payload(stage, "failed", segment=segment))
 
 
 def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEvent]:

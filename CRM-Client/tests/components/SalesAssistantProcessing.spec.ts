@@ -27,7 +27,7 @@ const expectContextFailureWhileJudging = (wrapper: VueWrapper): void => {
   expect(context?.textContent).toContain('失败')
   expect(context?.textContent).not.toContain('进行中')
   expect(context?.querySelector('.text-tone-success')).toBeNull()
-  expect(context?.textContent).not.toMatch(/91 分|1\.2s/)
+  expect(context?.textContent).not.toMatch(/91 分|1\.2 秒/)
   expect(stageRow(wrapper, '正在比对未完成任务')?.textContent).toContain('进行中')
 }
 
@@ -65,27 +65,32 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(wrapper.text()).not.toContain('内容已保存，可以离开本页，完成后会通知你。')
   })
 
-  it('shows the long organize hint only after thirty seconds of structuring', async () => {
-    vi.useFakeTimers()
+  it('shows which segment of a long transcript is being organized', async () => {
     const running = makeTask()
     mocks.text.mockResolvedValue(reply(view({ focused_task: running, version: 1 }), prepared(running)))
     let finish: (() => void) | undefined
     drive(async (handlers) => {
       handlers.onAccepted('atn_one', 1)
-      handlers.onStage({ stage: 'structure', phase: 'start' })
+      handlers.onStage({ stage: 'structure', phase: 'start', segment: { index: 1, total: 3 } })
+      handlers.onStage({ stage: 'structure', phase: 'done', ms: 40_000, segment: { index: 1, total: 3 } })
+      handlers.onStage({ stage: 'structure', phase: 'start', segment: { index: 2, total: 3 } })
       await new Promise<void>((resolve) => { finish = resolve })
+      handlers.onStage({ stage: 'structure', phase: 'done', ms: 30_000, segment: { index: 2, total: 3 } })
+      handlers.onStage({ stage: 'structure', phase: 'start', segment: { index: 3, total: 3 } })
+      handlers.onStage({ stage: 'structure', phase: 'done', ms: 2_000, segment: { index: 3, total: 3 } })
+      handlers.onWaiting({ task: running, message: '请补充客户名称' })
     })
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper)
-    expect(wrapper.text()).not.toContain('正在整理，内容较长，预计需要约 1 分钟')
-    await vi.advanceTimersByTimeAsync(30_000)
-    await flushPromises()
-    expect(wrapper.text()).toContain('正在整理，内容较长，预计需要约 1 分钟')
+    const row = (): string | null | undefined => stageRow(wrapper, '正在整理活动内容')?.textContent
+    expect(row()).toContain('第 2/3 段 · 进行中…')
     expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
     finish?.()
+    await flushPromises()
+    // Segment durations add up to the stage total.
+    expect(row()).toContain('已完成 3/3 段 · 1 分 12 秒')
     wrapper.unmount()
-    vi.useRealTimers()
   })
 
   it('gets a completed result if the accepted stream ended without a waiting frame', async () => {

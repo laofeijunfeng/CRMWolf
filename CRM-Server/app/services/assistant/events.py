@@ -54,6 +54,23 @@ def stage(name: str) -> TurnStage | None:
     return TurnStage(name=name)  # type: ignore[arg-type]
 
 
+Segment = tuple[int, int]
+"""(1-based index, total) of one segment of a stage that runs in segments."""
+
+
+def stage_payload(
+    stage: TurnStage, phase: str, *, ms: int | None = None, score: int | None = None, segment: Segment | None = None
+) -> dict[str, object]:
+    payload: dict[str, object] = {"stage": stage.name, "phase": phase}
+    if ms is not None:
+        payload["ms"] = ms
+    if score is not None:
+        payload["score"] = score
+    if segment is not None:
+        payload["segment"] = {"index": segment[0], "total": segment[1]}
+    return payload
+
+
 def encode_sse(event: str, data: dict[str, object]) -> str:
     """One SSE frame: named event + single-line JSON payload."""
 
@@ -64,24 +81,28 @@ def encode_sse(event: str, data: dict[str, object]) -> str:
 class ProgressReporter(Protocol):
     """Stage sink; every implementation emits nothing for a ``None`` stage."""
 
-    def stage_start(self, stage: TurnStage | None) -> None: ...
+    def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None: ...
 
-    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None: ...
+    def stage_done(
+        self, stage: TurnStage | None, *, ms: int, score: int | None = None, segment: Segment | None = None
+    ) -> None: ...
 
-    def stage_failed(self, stage: TurnStage | None) -> None: ...
+    def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None: ...
 
 
 class NullProgressReporter:
     """Drop events; default for unit tests and in-process callers."""
 
-    def stage_start(self, stage: TurnStage | None) -> None:
-        _ = stage
+    def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        _ = stage, segment
 
-    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
-        _ = stage, ms, score
+    def stage_done(
+        self, stage: TurnStage | None, *, ms: int, score: int | None = None, segment: Segment | None = None
+    ) -> None:
+        _ = stage, ms, score, segment
 
-    def stage_failed(self, stage: TurnStage | None) -> None:
-        _ = stage
+    def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
+        _ = stage, segment
 
 
 class SSEProgressReporter:
@@ -97,35 +118,32 @@ class SSEProgressReporter:
         self._queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = asyncio.Queue()
         self._started_at: dict[str, float] = {}
 
-    def stage_start(self, stage: TurnStage | None) -> None:
+    def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         if stage is None:
             return
         try:
             self._started_at[stage.name] = time.monotonic()
-            self._queue.put_nowait(
-                ("stage", {"stage": stage.name, "phase": "start"})
-            )
+            self._queue.put_nowait(("stage", stage_payload(stage, "start", segment=segment)))
         except Exception:
             logger.exception("stage_start reporting failed for %s", stage.name)
 
-    def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
+    def stage_done(
+        self, stage: TurnStage | None, *, ms: int, score: int | None = None, segment: Segment | None = None
+    ) -> None:
         if stage is None:
             return
         try:
             self._started_at.pop(stage.name, None)
-            payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
-            if score is not None:
-                payload["score"] = score
-            self._queue.put_nowait(("stage", payload))
+            self._queue.put_nowait(("stage", stage_payload(stage, "done", ms=ms, score=score, segment=segment)))
         except Exception:
             logger.exception("stage_done reporting failed for %s", stage.name)
 
-    def stage_failed(self, stage: TurnStage | None) -> None:
+    def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         if stage is None:
             return
         try:
             self._started_at.pop(stage.name, None)
-            self._queue.put_nowait(("stage", {"stage": stage.name, "phase": "failed"}))
+            self._queue.put_nowait(("stage", stage_payload(stage, "failed", segment=segment)))
         except Exception:
             logger.exception("stage_failed reporting failed for %s", stage.name)
 

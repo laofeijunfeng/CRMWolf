@@ -3,8 +3,8 @@ import { computed, nextTick, onActivated, onDeactivated, onUnmounted, ref, shall
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
-import { assistantApi, StageNameSchema, StagePhaseSchema, submitInputStream } from '@/api/assistant'
-import type { AssistantTurn, StageEvent, StageName, SubmitAssistantInput } from '@/api/assistant'
+import { assistantApi, parseStageEvent, StageNameSchema, submitInputStream } from '@/api/assistant'
+import type { AssistantTurn, StageEvent, StageName, StageSegment, SubmitAssistantInput } from '@/api/assistant'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -22,7 +22,7 @@ import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
 import { AssistantRejectReasonSchema } from '@/schemas/assistant-contracts'
 import type {
   AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationRequestStatus, ConversationBoundary, ConversationProjection,
-  ConversationLink, PendingEntityDraft
+  ConversationLink, EntityKind, PendingEntityDraft
 } from '@/schemas/assistant-contracts'
 import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
 import { handOffAssistantTurn, reclaimAssistantTurn } from '@/components/sales-assistant/assistantBackgroundTurn'
@@ -52,7 +52,7 @@ let navigationVersion = 0
 let viewRequestSequence = 0
 let appliedViewRequest = 0
 let historyExtended = false
-onUnmounted(() => { disposed = true; if (elapsedTimer !== null) clearInterval(elapsedTimer) })
+onUnmounted(() => { disposed = true })
 defineProps<{ optionalMarker?: boolean }>()
 const emit = defineEmits<{
   (e: 'task-updated', task: AssistantTaskView, replyMessage: string): void
@@ -217,8 +217,10 @@ onActivated(() => scrollToBottom(true))
 interface LiveStage {
   name: StageName
   status: 'pending' | 'running' | 'done' | 'failed' | 'awaiting'
+  // Summed over segments when the stage runs in segments.
   ms?: number | undefined
   score?: number | undefined
+  segment?: StageSegment & { done: boolean } | undefined
 }
 
 const STAGE_LABELS: Record<StageName, string> = {
@@ -231,6 +233,20 @@ const STAGE_LABELS: Record<StageName, string> = {
   structure: '正在整理活动内容',
   quality_gate: '正在评估记录质量',
   write: '写入客户活动'
+}
+const ENTITY_STAGE_LABELS: Record<EntityKind, Partial<Record<StageName, string>>> = {
+  contact_create: { structure: '正在整理联系人信息', write: '写入联系人' },
+  invoice_title_create: { structure: '正在整理开票抬头', write: '写入开票抬头' },
+  deployment_create: { structure: '正在整理部署信息', write: '写入部署信息' },
+  customer_create: { structure: '正在整理客户信息', write: '写入客户' },
+  opportunity_create: { structure: '正在整理商机信息', write: '写入商机' },
+}
+const stageLabel = (name: StageName, kind: AssistantTaskView['task_kind']): string =>
+  (kind === undefined || kind === 'customer_activity' ? undefined : ENTITY_STAGE_LABELS[kind][name]) ?? STAGE_LABELS[name]
+const formatDuration = (ms: number): string => {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} 秒`
+  const seconds = Math.round(ms / 1000)
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
 
 type EpisodeSettlement = 'none' | 'failed' | 'unknown'
@@ -270,18 +286,12 @@ const noteEpisodeFailure = (code: string | undefined): void => {
   if (processing.value.episode === 0 || processing.value.authoritativeWrite) return
   processing.value.settlement = code === 'UNKNOWN_COMMIT_RESULT' ? 'unknown' : 'failed'
 }
-const elapsedSeconds = ref(0)
-let elapsedTimer: number | null = null
-
 
 const beginProcessing = (): void => {
   startEpisode()
   processing.value.active = true
   processing.value.stages = []
   processing.value.startedAt = Date.now()
-  elapsedSeconds.value = 0
-  if (elapsedTimer !== null) clearInterval(elapsedTimer)
-  elapsedTimer = window.setInterval(() => { elapsedSeconds.value += 1 }, 1000)
 }
 const applyStageEvent = (event: StageEvent): void => {
   if (event.phase !== 'start' && event.phase !== 'done' && event.phase !== 'failed') return
@@ -291,16 +301,26 @@ const applyStageEvent = (event: StageEvent): void => {
     target = { name: event.stage, status: 'pending' }
     stages.push(target)
   }
+  const segment = event.segment
   if (event.phase === 'start') {
     target.status = 'running'
-    target.ms = undefined
+    if (segment === undefined || segment.index === 1) target.ms = undefined
     target.score = undefined
+    target.segment = segment === undefined ? undefined : { ...segment, done: false }
   } else if (event.phase === 'failed') {
     target.status = 'failed'
-  } else {
+    target.segment = segment === undefined ? undefined : { ...segment, done: false }
+  } else if (segment === undefined) {
     target.status = 'done'
     target.ms = event.ms
     target.score = event.score
+    target.segment = undefined
+  } else {
+    // A finished segment before the last keeps the stage running.
+    target.status = segment.index < segment.total ? 'running' : 'done'
+    target.ms = (target.ms ?? 0) + (event.ms ?? 0)
+    target.score = event.score
+    target.segment = { ...segment, done: true }
   }
 }
 // Without a server-attributed stage, the stage still running is the one that stopped.
@@ -317,15 +337,9 @@ const markRunningStagesAwaiting = (): void => {
 }
 
 const endProcessing = (): void => {
-  if (elapsedTimer !== null) {
-    clearInterval(elapsedTimer)
-    elapsedTimer = null
-  }
   // Keep stages. This also runs while recovery is still reading the turn.
   processing.value.active = false
 }
-const longOrganize = computed(() => elapsedSeconds.value >= 30
-  && processing.value.stages.some((item) => (item.name === 'structure' || item.name === 'quality_gate') && item.status === 'running'))
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
   return '内容已保存，可以离开本页，完成后会通知你。'
@@ -392,7 +406,8 @@ const processChipStatus = computed((): 'processing' | 'updated' | null => {
   return 'updated'
 })
 const seenEventKeys = new Set<string>()
-const RECOVERY_POLLS = 90
+// Polls without new progress; matches the server attempt deadline (180 s), after which a dead turn is closed on read.
+const RECOVERY_POLLS = 180
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null
 let recoveryToken = 0
 let recoveryStarted = false
@@ -457,16 +472,8 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events'], snapsh
   for (const event of events) {
     if (!rememberEvent(turnId, event.seq)) continue
     if (event.event === 'stage') {
-      const stage = StageNameSchema.safeParse(event.data['stage'])
-      const phase = StagePhaseSchema.safeParse(event.data['phase'])
-      if (stage.success && phase.success) {
-        applyStageEvent({
-          stage: stage.data,
-          phase: phase.data,
-          ms: typeof event.data['ms'] === 'number' ? event.data['ms'] : undefined,
-          score: typeof event.data['score'] === 'number' ? event.data['score'] : undefined
-        })
-      }
+      const stageEvent = parseStageEvent(event.data)
+      if (stageEvent !== null) applyStageEvent(stageEvent)
     } else if (event.event === 'waiting' && typeof event.data['message'] === 'string') {
       reply = event.data['message']
     } else if (event.event === 'error') {
@@ -535,7 +542,10 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
     void (async (): Promise<void> => {
       if (disposed || token !== recoveryToken || processingRecovery.value?.turnId !== pending.turnId) return
       try {
+        const cursorBefore = pending.cursor
         const done = await readKnownTurn(pending)
+        // Any new event is progress: a long segmented turn keeps polling while it advances.
+        const nextPolls = pending.cursor > cursorBefore ? RECOVERY_POLLS : pollsLeft - 1
         if (token === recoveryToken) await refreshConversation()
         if (disposed || token !== recoveryToken) return
         const successor = processingRecovery.value
@@ -548,7 +558,7 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
           return
         }
         if (done) return
-        if (pollsLeft <= 1) {
+        if (nextPolls <= 0) {
           stopAutoRecovery()
           recoveryNotice.value = '处理结果待确认，请刷新状态。'
           markRunningStagesAwaiting()
@@ -556,7 +566,7 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
           logRecovery('recovery_timeout', { task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'timeout' })
           return
         }
-        scheduleRecovery(pending, pollsLeft - 1)
+        scheduleRecovery(pending, nextPolls)
       } catch (error) {
         if (disposed || token !== recoveryToken) return
         if (!(error instanceof ZodError) && pollsLeft > 1) {
@@ -1232,15 +1242,25 @@ const liveProcess = computed<ProcessBlock | null>(() => {
     id: 'live-process',
     type: 'process',
     title: '执行过程',
-    items: stages.map((stage) => ({ key: stage.name, title: STAGE_LABELS[stage.name], status: LIVE_STAGE_STATUS[stage.status] })),
+    items: stages.map((stage) => ({
+      key: stage.name, title: stageLabel(stage.name, task.value?.task_kind), status: LIVE_STAGE_STATUS[stage.status]
+    })),
   }
 })
 const liveStageMeta = (stage: LiveStage): ProcessItemMeta => {
+  const segment = stage.segment
   if (stage.status === 'done') {
-    return { text: [stage.ms === undefined ? '' : `${(stage.ms / 1000).toFixed(1)}s`, stage.score === undefined ? '' : `${stage.score} 分`].filter((part) => part !== '').join(' · ') }
+    return { text: [
+      segment === undefined ? '' : `已完成 ${segment.total}/${segment.total} 段`,
+      stage.ms === undefined ? '' : formatDuration(stage.ms),
+      stage.score === undefined ? '' : `${stage.score} 分`
+    ].filter((part) => part !== '').join(' · ') }
   }
-  if (stage.status === 'running') return { text: '进行中…' }
-  if (stage.status === 'failed') return { text: '失败', tone: 'danger' }
+  if (stage.status === 'running') {
+    if (segment === undefined) return { text: '进行中…' }
+    return { text: segment.done ? `已完成 ${segment.index}/${segment.total} 段` : `第 ${segment.index}/${segment.total} 段 · 进行中…` }
+  }
+  if (stage.status === 'failed') return { text: segment === undefined ? '失败' : `第 ${segment.index}/${segment.total} 段失败`, tone: 'danger' }
   if (stage.status === 'awaiting') return { text: '待确认' }
   return { text: '' }
 }
@@ -1802,7 +1822,6 @@ void loadConversation()
         :meta="liveStageMetaByKey"
       />
       <AgentUIBanner tone="info" :icon="Info" title="原始内容已保存" role="status" />
-      <AgentUIBanner v-if="longOrganize" tone="info" :icon="Info" title="正在整理，内容较长，预计需要约 1 分钟" role="status" />
     </section>
 
     <nav v-if="visiblePendingDrafts.length > 0" class="mt-space-4 flex flex-wrap items-center gap-space-2" aria-label="待补充" data-assistant-pending-drafts>

@@ -71,7 +71,6 @@ const failedStage = (wrapper: VueWrapper): void => {
   expect(stageRow(wrapper, '正在整理活动内容')?.textContent).not.toContain('进行中')
   expect(stageIconTone(wrapper, '正在整理活动内容')).toContain('text-tone-danger')
   expect(stageIconTone(wrapper, '正在评估记录质量')).not.toContain('text-tone-success')
-  expect(wrapper.text()).not.toContain('正在整理，内容较长')
 }
 let wrapper: VueWrapper | undefined
 const open = async (focusedTask = runningTask()): Promise<VueWrapper> => {
@@ -183,12 +182,33 @@ describe('SalesAssistant failure recovery', () => {
     api.getTurn.mockResolvedValueOnce(runningTurn(stageEvents)).mockRejectedValue(new Error('offline'))
     api.getConversation.mockResolvedValue(conversation(runningTask()))
     const mounted = await open()
-    await vi.advanceTimersByTimeAsync(91_000)
+    await vi.advanceTimersByTimeAsync(181_000)
     await flushPromises()
     expect(mounted.text()).not.toContain('进行中…')
-    expect(mounted.text()).not.toContain('正在整理，内容较长')
     expect(mounted.text()).toContain('待确认')
     expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(true)
+  })
+
+  it('keeps following a long turn while it reports progress, and stops waiting once progress stalls', async () => {
+    let seq = 3
+    let advancing = true
+    api.getTurn.mockImplementation(() => {
+      if (advancing) seq += 1
+      const index = Math.min(seq - 3, 9)
+      return Promise.resolve(runningTurn([...stageEvents, {
+        seq, event: 'stage', data: { stage: 'structure', phase: 'start', segment: { index, total: 9 } },
+      }]))
+    })
+    api.getConversation.mockResolvedValue(conversation(runningTask()))
+    const mounted = await open()
+    await vi.advanceTimersByTimeAsync(240_000)
+    await flushPromises()
+    expect(mounted.text()).not.toContain('处理结果待确认')
+    expect(stageRow(mounted, '正在整理活动内容')?.textContent).toContain('第 9/9 段 · 进行中…')
+    advancing = false
+    await vi.advanceTimersByTimeAsync(181_000)
+    await flushPromises()
+    expect(mounted.text()).toContain('处理结果待确认')
   })
 
   it('never exposes safe reprocessing for UNKNOWN_COMMIT_RESULT even if retryable or stale authorization is present', async () => {
