@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 
 from sqlalchemy import or_, select, update
@@ -23,6 +24,7 @@ from app.core.database import SessionLocal
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
 from app.services.assistant.activity_channel import CANONICAL_KINDS
+from app.services.assistant.app_loop import run_on_app_loop
 from app.services.assistant.contracts import FORM_WAITING_TYPES
 from app.services.assistant.coordinator import AssistantInput
 from app.services.assistant.events import ProgressReporter, Segment, TurnStage, is_stage_name, stage_payload
@@ -1182,7 +1184,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                         )
             db.commit()
             if projection_request is not None:
-                assistant_follow_up_projection_job_service.kick(projection_request)
+                run_on_app_loop(
+                    partial(assistant_follow_up_projection_job_service.kick, projection_request),
+                    f"follow-up projection turn={turn.public_id}",
+                )
             logger.info(
                 "assistant_turn_terminal result=succeeded task=%s turn=%s lease_version=%s attempts=%s "
                 "last_seq=%s event_name=waiting",
@@ -1456,17 +1461,9 @@ def _close_unknown_activity(
     db.commit()
 
 
-async def _drain_turn(turn_id: int, factory: sessionmaker[Session] | None) -> None:
-    await execute_turn(turn_id, factory=factory)
-    # Post-commit kicks started by the turn live on this loop; let them finish before it closes.
-    pending = asyncio.all_tasks() - {asyncio.current_task()}
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-
-
 def _run_turn(turn_id: int, factory: sessionmaker[Session] | None) -> None:
     try:
-        asyncio.run(_drain_turn(turn_id, factory))
+        asyncio.run(execute_turn(turn_id, factory=factory))
     except Exception:
         logger.exception("Assistant turn %s runner failed", turn_id)
 
