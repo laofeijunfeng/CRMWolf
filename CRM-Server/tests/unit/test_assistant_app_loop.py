@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from app.services.assistant import app_loop
+from app.core import app_loop
 
 
 @pytest.fixture
@@ -47,3 +47,30 @@ def test_kick_from_a_turn_loop_lands_on_the_app_loop(running_app_loop):
     assert done.wait(timeout=5)
     assert seen == [running_app_loop]
     assert result and result[0] is not running_app_loop
+
+
+def test_job_kicked_inside_a_turn_outlives_the_turn_loop(running_app_loop):
+    from types import SimpleNamespace
+
+    from app.services.customer_activity_ai_job_service import CustomerActivityAIJobService
+
+    service = CustomerActivityAIJobService()
+    ran_on: list[asyncio.AbstractEventLoop] = []
+    finished = threading.Event()
+
+    async def run_guarded(request: object) -> None:
+        await asyncio.sleep(0.05)
+        ran_on.append(asyncio.get_running_loop())
+        finished.set()
+
+    service._run_guarded = run_guarded  # type: ignore[method-assign]
+
+    async def turn() -> None:
+        service.kick(SimpleNamespace(job_public_id="job-1"))  # type: ignore[arg-type]
+
+    worker = threading.Thread(target=lambda: asyncio.run(turn()))
+    worker.start()
+    worker.join(timeout=5)
+
+    assert finished.wait(timeout=5)
+    assert ran_on == [running_app_loop]

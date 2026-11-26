@@ -6,11 +6,13 @@ import asyncio
 import json
 import logging
 from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
+from app.core.app_loop import run_on_app_loop
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.customer_activity import customer_activity_crud
@@ -248,6 +250,9 @@ class CustomerActivityAIJobService:
         except RuntimeError:
             logger.debug("当前线程没有运行中的事件循环, 客户活动 AI 任务交由恢复器执行")
             return
+        run_on_app_loop(partial(self._start, request), f"{type(self).__name__} job={request.job_public_id}")
+
+    def _start(self, request: CustomerActivityAIJobRequest) -> None:
         task = asyncio.create_task(self._run_guarded(request))
         task.add_done_callback(self._consume_task_exception)
 

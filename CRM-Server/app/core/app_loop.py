@@ -1,9 +1,10 @@
-"""Post-commit kicks made inside an Assistant turn run on the app's event loop.
+"""Low-latency background kicks always start on the app's event loop.
 
-A turn runs on its own short-lived loop in a worker thread (``turns.schedule_turn``).
-Background job kicks started there would bind shared asyncio primitives such as
-``ai_generation_semaphore`` to that loop and die with it, so they are handed to the
-loop the app started on. Kicks stay best-effort: durable recovery remains authoritative.
+An Assistant turn runs on its own short-lived loop in a worker thread
+(``assistant.turns.schedule_turn``). A task created there would bind shared asyncio
+primitives such as ``ai_generation_semaphore`` to that loop and be cancelled when it
+closes, so kicks hand only their ``create_task`` to the loop the app started on.
+Kicks stay best-effort: durable recovery remains authoritative.
 """
 
 from __future__ import annotations
@@ -33,7 +34,10 @@ def _run_guarded(work: Callable[[], object], label: str) -> None:
 
 
 def run_on_app_loop(work: Callable[[], object], label: str) -> None:
-    """Run ``work`` where any task it starts is owned by the app loop."""
+    """Run ``work`` where any task it starts is owned by the app loop.
+
+    ``work`` must not touch the caller's DB session: it may run on another thread.
+    """
     loop = _app_loop
     try:
         current: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()

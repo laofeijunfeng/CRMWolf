@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
+from app.core.app_loop import run_on_app_loop
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.crud.customer_enrichment_job import CustomerEnrichmentJobCRUD, customer_enrichment_job_crud
@@ -271,6 +273,9 @@ class CustomerEnrichmentJobService:
         except RuntimeError:
             logger.debug("当前线程没有运行中的事件循环, 客户补全任务交由恢复器执行")
             return
+        run_on_app_loop(partial(self._start, request), f"{type(self).__name__} job={request.job_public_id}")
+
+    def _start(self, request: CustomerEnrichmentJobRequest) -> None:
         task = asyncio.create_task(self._run_guarded(request))
         task.add_done_callback(self._consume_task_exception)
 

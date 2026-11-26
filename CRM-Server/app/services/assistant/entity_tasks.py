@@ -19,7 +19,6 @@ from sqlalchemy import update as sql_update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
-from app.services.assistant.app_loop import run_on_app_loop
 from app.services.assistant.contracts import (
     EntityCreateReceipt,
     EntityDraft,
@@ -779,7 +778,10 @@ def _write(
     except SQLAlchemyError:
         _publish_unknown(db, task, kind, form.LABEL)
     reporter.stage_done(stage("write"), ms=int((monotonic() - started) * 1000))
-    run_on_app_loop(result.after_commit, f"entity after-commit task={task.public_id} kind={kind}")
+    try:
+        result.after_commit()
+    except Exception:
+        logger.exception("assistant entity after-commit work failed task=%s kind=%s", task.public_id, kind)
     if inline:
         customer = _customer(db, task, result.customer_public_id)
         if customer is None:

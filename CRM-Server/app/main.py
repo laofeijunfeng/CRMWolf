@@ -174,7 +174,7 @@ app.include_router(api_router, prefix="/api")
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化角色权限和定时任务"""
-    from app.services.assistant.app_loop import bind_app_loop
+    from app.core.app_loop import bind_app_loop
 
     bind_app_loop(asyncio.get_running_loop())
     logger.info("应用启动，开始初始化角色权限...")
