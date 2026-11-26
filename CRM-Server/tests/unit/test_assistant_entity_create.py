@@ -19,6 +19,7 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.models.customer import Contact, Customer, CustomerMember, CustomerProduct
 from app.models.team import Team, UserTeam
 from app.models.user import User
+from app.schemas.assistant import SubmitInputRequest
 from app.services.assistant import entity_tasks, turns
 from app.services.assistant.coordinator import AssistantCoordinator
 from app.services.assistant.entity_tasks import EntityExtraction
@@ -123,6 +124,8 @@ async def _submit(db, task: AssistantTask, key: str, input_data: dict[str, objec
     session, factory, _ = db
     waiting = load_waiting(task)
     assert waiting is not None
+    # Every payload must pass the HTTP request contract the client actually hits.
+    SubmitInputRequest.model_validate({"client_request_id": f"request-{key}", **input_data})
     turn, accepted = turns.accept_submit(
         session, task=task, key=key, input_data={"text": None, "choice": None, **input_data},
         action_id=waiting.action_id, expected_version=waiting.expected_version,

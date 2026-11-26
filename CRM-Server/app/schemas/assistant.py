@@ -154,7 +154,7 @@ class SubmitInputRequest(BaseModel):
     action_id: str | None = Field(default=None, max_length=128)
     expected_version: int | None = Field(default=None, ge=0)
     # submit_form: values keyed by InteractionField.key plus the form revision they were edited against;
-    # choice="cancel" without values backs out of the form.
+    # choice="cancel" without values backs out of the form; choice="defer" parks an entity form.
     values: dict[str, JsonValue] | None = None
     form_revision: int | None = Field(default=None, ge=0)
     # FOLLOW_UP_DISPOSITION multi-select: checked task ids are completed, unchecked are kept.
@@ -168,12 +168,12 @@ class SubmitInputRequest(BaseModel):
         if (self.values is not None or self.form_revision is not None) and self.kind != "submit_form":
             raise ValueError("values/form_revision are only valid for submit_form")
         if self.kind == "submit_form":
-            if self.text is not None or self.choice not in {None, "cancel"}:
-                raise ValueError("submit_form accepts values or choice='cancel' only")
+            if self.text is not None or self.choice not in {None, "cancel", "defer"}:
+                raise ValueError("submit_form accepts values or choice='cancel'|'defer' only")
             if self.form_revision is None or (self.choice is None and self.values is None):
                 raise ValueError("submit_form requires values and form_revision")
-            if self.choice == "cancel" and self.values is not None:
-                raise ValueError("cancelling a form carries no values")
+            if self.choice is not None and self.values is not None:
+                raise ValueError("cancelling or deferring a form carries no values")
         if self.kind == "request_edit" and (self.choice is not None or self.text is not None):
             raise ValueError("request_edit takes no choice or text")
         if (self.choices is not None or self.suppress_week) and self.kind != "submit_field":
