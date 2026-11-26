@@ -1265,7 +1265,9 @@ def _profile_options(message: ConversationMessage, waiting: TaskWaiting) -> list
     issued = {str(candidate.get("id")) for candidate in waiting.candidates}
     options: list[InteractionOption] = []
     for row in rows or []:
-        group = _clip(f"{row.label}：{row.summary}", 40)
+        # The model's summary may already open with the kind (e.g. "开票抬头 + colon"); name it once.
+        summary = row.summary.removeprefix(f"{row.label}：").removeprefix(f"{row.label}:").strip()
+        group = _clip(f"{row.label}：{summary or row.summary}", 40)
         if row.decision == "pending":
             go, skip = f"go:{row.index}", f"skip:{row.index}"
             if go not in issued or skip not in issued:

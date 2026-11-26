@@ -670,7 +670,8 @@ async def test_profile_items_follow_the_activity_and_each_opens_its_own_child(db
         ("row:0", "表单填写中", True), ("go:1", "去补充", False), ("skip:1", "不保存", False),
         ("none", "都不需要", False),
     ], "a settled row shows its child's state and cannot be chosen again"
-    assert card[0][0].startswith("联系人：") and card[1][0].startswith("开票抬头：")
+    assert (card[0][0], card[2][0]) == ("联系人：新联系人王敏", "开票抬头：睿狐科技有限公司"), \
+        "the kind is not repeated"
 
     finished = await _answer(session, activity, {"kind": "submit_field", "choice": "skip:1"})
 
