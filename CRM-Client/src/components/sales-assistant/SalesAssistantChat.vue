@@ -196,18 +196,20 @@ interface LiveStage {
   status: 'pending' | 'running' | 'done' | 'failed' | 'awaiting'
   ms?: number | undefined
   score?: number | undefined
+  subject?: string | undefined
 }
 
-const STAGE_LABELS: Record<StageName, string> = {
-  route: '正在理解输入',
-  locate: '正在定位客户',
-  context: '正在读取客户记录',
-  judge: '正在比对未完成任务',
-  propose: '正在生成后续建议',
-  classify: '正在判断活动类型',
-  structure: '正在整理活动内容',
-  quality_gate: '正在评估记录质量',
-  write: '写入客户活动'
+// 步骤状态由右侧元信息表达，标题只说做什么；服务端给出 subject 时按实际对象命名。
+const STAGE_LABELS: Record<StageName, (subject: string | undefined) => string> = {
+  route: () => '理解输入',
+  locate: () => '定位客户',
+  context: () => '读取客户记录',
+  judge: () => '比对未完成任务',
+  propose: () => '生成后续建议',
+  classify: () => '判断活动类型',
+  structure: (subject) => `整理${subject ?? '活动内容'}`,
+  quality_gate: () => '评估记录质量',
+  write: (subject) => (subject === undefined ? '写入客户活动' : `保存${subject}`)
 }
 
 type EpisodeSettlement = 'none' | 'failed' | 'unknown'
@@ -268,6 +270,7 @@ const applyStageEvent = (event: StageEvent): void => {
     target = { name: event.stage, status: 'pending' }
     stages.push(target)
   }
+  if (event.subject !== undefined) target.subject = event.subject
   if (event.phase === 'start') {
     target.status = 'running'
     target.ms = undefined
@@ -443,7 +446,8 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events'], snapsh
           stage: stage.data,
           phase: phase.data,
           ms: typeof event.data['ms'] === 'number' ? event.data['ms'] : undefined,
-          score: typeof event.data['score'] === 'number' ? event.data['score'] : undefined
+          score: typeof event.data['score'] === 'number' ? event.data['score'] : undefined,
+          subject: typeof event.data['subject'] === 'string' ? event.data['subject'] : undefined
         })
       }
     } else if (event.event === 'waiting' && typeof event.data['message'] === 'string') {
@@ -1136,12 +1140,12 @@ const liveProcess = computed<ProcessBlock | null>(() => {
     id: 'live-process',
     type: 'process',
     title: '执行过程',
-    items: stages.map((stage) => ({ key: stage.name, title: STAGE_LABELS[stage.name], status: LIVE_STAGE_STATUS[stage.status] })),
+    items: stages.map((stage) => ({ key: stage.name, title: STAGE_LABELS[stage.name](stage.subject), status: LIVE_STAGE_STATUS[stage.status] })),
   }
 })
 const liveStageMeta = (stage: LiveStage): ProcessItemMeta => {
   if (stage.status === 'done') {
-    return { text: [stage.ms === undefined ? '' : `${(stage.ms / 1000).toFixed(1)}s`, stage.score === undefined ? '' : `${stage.score} 分`].filter((part) => part !== '').join(' · ') }
+    return { text: [stage.ms === undefined ? '' : `${Math.max(1, Math.round(stage.ms / 1000))} 秒`, stage.score === undefined ? '' : `${stage.score} 分`].filter((part) => part !== '').join(' · ') }
   }
   if (stage.status === 'running') return { text: '进行中…' }
   if (stage.status === 'failed') return { text: '失败', tone: 'danger' }

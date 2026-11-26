@@ -21,14 +21,14 @@ const stageRow = (wrapper: VueWrapper, label: string) =>
   wrapper.findAll('span').find((item) => item.text() === label)?.element.closest('li')
 
 const expectContextFailureWhileJudging = (wrapper: VueWrapper): void => {
-  const context = stageRow(wrapper, '正在读取客户记录')
+  const context = stageRow(wrapper, '读取客户记录')
   // Status color is carried by the design-system tone token, never by a raw text class.
   expect(context?.querySelector('.text-tone-danger') !== null).toBe(true)
   expect(context?.textContent).toContain('失败')
   expect(context?.textContent).not.toContain('进行中')
   expect(context?.querySelector('.text-tone-success')).toBeNull()
   expect(context?.textContent).not.toMatch(/91 分|1\.2s/)
-  expect(stageRow(wrapper, '正在比对未完成任务')?.textContent).toContain('进行中')
+  expect(stageRow(wrapper, '比对未完成任务')?.textContent).toContain('进行中')
 }
 
 describe('durable processing and recovery in a continuous conversation', () => {
@@ -57,12 +57,34 @@ describe('durable processing and recovery in a continuous conversation', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     await send(wrapper)
-    expect(wrapper.text()).toContain('正在整理活动内容')
+    expect(wrapper.text()).toContain('整理活动内容')
     expect(wrapper.text()).toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
     finish?.()
     await flushPromises()
     expect(wrapper.text()).toContain('请补充客户名称')
     expect(wrapper.text()).not.toContain('内容已保存，处理仍在后台继续；关闭或刷新不会取消')
+  })
+
+  it('names entity stages by the record they work on and rounds durations to seconds', async () => {
+    const running = makeTask()
+    mocks.text.mockResolvedValue(reply(view({ focused_task: running, version: 1 }), prepared(running)))
+    let finish: (() => void) | undefined
+    drive(async (handlers) => {
+      handlers.onAccepted('atn_one', 1)
+      handlers.onStage({ stage: 'structure', phase: 'start', subject: '部署信息' })
+      handlers.onStage({ stage: 'structure', phase: 'done', ms: 1200 })
+      handlers.onStage({ stage: 'write', phase: 'start', subject: '部署信息' })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    const wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await send(wrapper, '给睿狐科技加一条部署信息')
+    expect(stageRow(wrapper, '整理部署信息')?.textContent).toContain('1 秒')
+    expect(stageRow(wrapper, '保存部署信息')?.textContent).toContain('进行中')
+    expect(wrapper.text()).not.toContain('整理活动内容')
+    expect(wrapper.text()).not.toContain('写入客户活动')
+    finish?.()
+    wrapper.unmount()
   })
 
   it('shows the long organize hint only after thirty seconds of structuring', async () => {
@@ -595,7 +617,7 @@ describe('local process card after an authoritative result', () => {
     await send(wrapper, '今天又沟通了一次')
     expect(wrapper.text()).toContain('已写入')
     expect(wrapper.text()).toContain('执行过程')
-    expect(wrapper.text()).toContain('正在整理活动内容')
+    expect(wrapper.text()).toContain('整理活动内容')
     expect(wrapper.text()).toContain('处理中')
     finish?.()
     await flushPromises()
@@ -879,7 +901,7 @@ describe('local process card after an authoritative result', () => {
     try {
       await flushPromises()
       expectContextFailureWhileJudging(wrapper)
-      expect(stageRow(wrapper, '正在生成后续建议')).toBeUndefined()
+      expect(stageRow(wrapper, '生成后续建议')).toBeUndefined()
       expect(wrapper.text()).toContain('处理中')
       expect(mocks.retry).not.toHaveBeenCalled()
       expect(mocks.stream).not.toHaveBeenCalled()

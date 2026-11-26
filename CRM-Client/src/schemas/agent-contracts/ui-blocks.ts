@@ -144,7 +144,8 @@ const ActionResultBlockObjectSchema = z.object({
   status: z.enum(['SUCCESS', 'FAILED', 'CANCELLED']),
   title: z.string().min(1).max(200),
   message: z.string().min(1).max(10000),
-  entity_ref: EntityRefSchema.nullable().optional()
+  entity_ref: EntityRefSchema.nullable().optional(),
+  subject: EntityRefSchema.nullable().optional()
 }).strict()
 
 const PaginationBlockObjectSchema = z.object({

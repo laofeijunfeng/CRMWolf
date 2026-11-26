@@ -22,6 +22,7 @@ from app.models.user import User
 from app.schemas.assistant import SubmitInputRequest
 from app.services.assistant import entity_tasks, turns
 from app.services.assistant.coordinator import AssistantCoordinator
+from app.services.assistant.contracts import EntityCreateReceipt
 from app.services.assistant.entity_tasks import EntityExtraction
 from app.services.assistant.task_state import load_waiting
 from app.services.assistant.turns import AssistantStateConflict
@@ -188,6 +189,50 @@ async def test_submitted_form_writes_one_contact_with_effect_claim_and_receipt(d
     assert receipt["kind"] == "contact_create" and receipt["customer_public_id"] == "cus_ruihu"
     waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
     assert waited.data_json["entity_receipt"]["public_id"] == f"contact:{contact.id}"
+
+
+def _project(session, task: AssistantTask, text: str, **extra: object):
+    from app.schemas.assistant_conversation import ConversationMessage
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.ui_projection import project_assistant_message
+
+    message = ConversationMessage(
+        id="m1", role="assistant", text=text, at="2026-01-01T00:00:00", task=task_view(task, session), **extra,
+    )
+    return project_assistant_message(message, active_waiting=True, active_boundary=False)
+
+
+@pytest.mark.asyncio
+async def test_form_and_result_name_the_customer_once_as_a_link(db, monkeypatch):
+    session, _, _ = db
+    ruihu = "cus_" + "a" * 32  # links only exist for well-formed public ids
+    session.query(Customer).filter_by(public_id="cus_ruihu").update({"public_id": ruihu})
+    session.commit()
+    stages: list[dict[str, object]] = []
+    monkeypatch.setattr(turns.DurableProgressReporter, "_record", lambda _self, payload: stages.append(payload))
+    task = await _start(db, monkeypatch, _extraction())
+
+    # Old history stored a 「为X新建…，核对后保存」 sentence; the card title already says it.
+    form = _project(session, task, "为睿狐科技新建联系人，核对后保存")
+    assert [block.type for block in form.blocks] == ["interaction"]
+    card = form.blocks[0]
+    assert card.prompt == "新建联系人"
+    assert (card.subject.resource, card.subject.public_id, card.subject.display_name) == (
+        "customer", ruihu, "睿狐科技")
+    # The process line names the record being created, never a generic activity step.
+    assert {(s["stage"], s.get("subject")) for s in stages} == {("structure", "联系人")}
+    stages.clear()
+
+    await _save(db, task)
+    assert {(s["stage"], s.get("subject")) for s in stages} == {("write", "联系人")}
+
+    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
+    receipt = EntityCreateReceipt.model_validate(waited.data_json["entity_receipt"])
+    result = next(block for block in _project(
+        session, task, waited.data_json["message"], entity_receipt=receipt,
+    ).blocks if block.type == "action_result")
+    assert "客户：睿狐科技" in result.message.split("\n")
+    assert (result.subject.resource, result.subject.public_id) == ("customer", ruihu)
 
 
 @pytest.mark.asyncio
@@ -393,8 +438,7 @@ async def test_missing_approval_flow_is_relayed_and_the_form_stays_open(db, monk
     assert task.status == AssistantTaskStatus.ACTIVE
     assert _form(task)["user_count"]["default_value"] == 200
     assert load_waiting(task).form_fields and _claims(session) == ["NO_EFFECT"]
-    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
-    assert waited.data_json["message"] == "请先配置审批流程"
+    assert load_waiting(task).hint.startswith("请先配置审批流程")
     assert session.query(AssistantCRMEffect).count() == 0
 
     approval["flow"] = True
@@ -417,8 +461,7 @@ async def test_indistinguishable_opportunity_is_never_created_twice(db, monkeypa
 
     assert not created and _claims(session) == ["NO_EFFECT"]
     assert task.status == AssistantTaskStatus.ACTIVE
-    waited = session.query(AssistantTurnEvent).order_by(AssistantTurnEvent.id.desc()).first()
-    assert waited.data_json["message"].startswith("已存在相同或无法区分的商机")
+    assert load_waiting(task).hint.startswith("已存在相同或无法区分的商机")
 
 
 # ---------------------------------------------------------------------------

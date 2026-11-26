@@ -328,7 +328,7 @@ test('s9 processing and s2 kind card', async ({ page }) => {
   await page.waitForTimeout(800)
   const earlyShot = await appShot(page, 'actual-s9-processing.png')
   const sawProcessing = await page.getByText(/内容已保存，处理仍在后台继续/).first().isVisible({ timeout: 8_000 }).catch(() => false)
-  const sawStage = await page.getByText('正在判断活动类型').first().isVisible({ timeout: 3_000 }).catch(() => false)
+  const sawStage = await page.getByText('判断活动类型').first().isVisible({ timeout: 3_000 }).catch(() => false)
   let sawElapsed = false
   const watchUntil = Date.now() + 20_000
   while (Date.now() < watchUntil) {
@@ -360,7 +360,7 @@ test('s9 processing and s2 kind card', async ({ page }) => {
     id: 's9',
     scene: '执行过程可见（处理提示 + 阶段清单）',
     expected: '发送后立刻锁定并显示后台继续提示与阶段清单。',
-    actual: `处理提示=${sawProcessing} 正在判断活动类型阶段=${sawStage} 已耗时=${sawElapsed}`,
+    actual: `处理提示=${sawProcessing} 判断活动类型阶段=${sawStage} 已耗时=${sawElapsed}`,
     verdict: sawProcessing && sawStage ? 'pass' : 'gap',
     expectedShot: 'screenshots/expected-s9.png',
     actualShot: sawElapsed ? 'screenshots/actual-s9-elapsed.png' : 'screenshots/actual-s9-processing.png'

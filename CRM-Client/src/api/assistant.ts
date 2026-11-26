@@ -23,6 +23,8 @@ export interface StageEvent {
   phase: z.infer<typeof StagePhaseSchema>
   ms?: number | undefined
   score?: number | undefined
+  /** What the stage works on (e.g. 部署信息); absent for generic stages. */
+  subject?: string | undefined
 }
 
 export interface SubmitStreamError {
@@ -162,6 +164,7 @@ export async function submitInputStream(
           phase: phase.data,
           ms: typeof payload['ms'] === 'number' ? payload['ms'] : undefined,
           score: typeof payload['score'] === 'number' ? payload['score'] : undefined,
+          subject: typeof payload['subject'] === 'string' && payload['subject'] !== '' ? payload['subject'] : undefined,
           seq: sequence
         })
       }

@@ -35,16 +35,6 @@ def clean_address(raw: str) -> str:
     return re.sub(r"\s+", "", raw).rstrip("/")
 
 
-def _deployment_count(ctx: FormContext) -> int:
-    from app.models.deployment import DeploymentInfo
-
-    if ctx.customer is None:
-        return 0
-    return ctx.db.query(DeploymentInfo.id).filter(
-        DeploymentInfo.team_id == ctx.team_id, DeploymentInfo.customer_id == ctx.customer.id,
-    ).count()
-
-
 class DeploymentForm:
     KIND = "deployment_create"
     LABEL = "部署信息"
@@ -94,13 +84,8 @@ class DeploymentForm:
             DEFAULT.render(values, submitted, errors),
         ]
 
-    def notices(self, ctx: FormContext, values: Mapping[str, EntityFieldValue]) -> list[str]:
-        notes: list[str] = []
-        if _deployment_count(ctx) == 0:
-            notes.append("该客户还没有部署信息，将作为第一条")
-        if "_authorized_users" in values:
-            notes.append("授权人数不在这里保存，请到 License 申请")
-        return notes
+    def notices(self, ctx: FormContext, values: Mapping[str, EntityFieldValue]) -> list[str]:  # noqa: ARG002
+        return ["授权人数不在这里保存，请到 License 申请"] if "_authorized_users" in values else []
 
     def validate(self, ctx: FormContext, submitted: Submitted) -> tuple[Canonical, dict[str, str]]:  # noqa: ARG002
         errors: dict[str, str] = {}

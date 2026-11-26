@@ -313,14 +313,15 @@ async def _intake(
 
     source = text[:20000]
     started = monotonic()
-    reporter.stage_start(stage("structure"))
+    step = stage("structure", module.LABEL)
+    reporter.stage_start(step)
     hint: str | None = None
     try:
         extraction = await extract_entity(db, task, module, source)
-        reporter.stage_done(stage("structure"), ms=int((monotonic() - started) * 1000))
+        reporter.stage_done(step, ms=int((monotonic() - started) * 1000))
     except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError):
         logger.warning("assistant entity extraction failed task=%s", task.public_id, exc_info=True)
-        reporter.stage_failed(stage("structure"))
+        reporter.stage_failed(step)
         extraction = EntityExtraction()
         hint = "没能自动整理，请直接填写"
     quotes, customer_name = _verified(module, source, extraction)
@@ -441,10 +442,13 @@ def _issue_form(
     values = entity.customer_fields if inline else entity.fields
     ctx = FormContext(db, task, user, customer, entity)
     notes = [hint] if hint else []
+    if errors:
+        notes.insert(0, errors.get("form") or "有字段需要修改，改好再保存")
     notes += form.notices(ctx, values)
     if entity.credentials_mentioned and not inline:
         notes.append("账号密码不会保存")
-    prompt = f"为{customer.account_name}新建{form.LABEL}" if customer is not None else f"新建{form.LABEL}"
+    # The title only names the action; the customer is the form's subject line, linked to its page.
+    prompt = f"新建{form.LABEL}"
     revision = task.version
     submitted = entity.submitted.get(form.KIND)
     form_fields = form.fields(ctx, values, submitted, errors or {})[:20]
@@ -466,9 +470,7 @@ def _issue_form(
         action_actor="SYSTEM", action_name=action_name,
         action_result={"errors": sorted(errors)} if errors else {},
     ))
-    fallback = "有字段需要修改，改好再保存" if errors else f"{prompt}，核对后保存"
-    message = (errors or {}).get("form") or hint or fallback
-    return _outcome(result.task, message)
+    return _outcome(result.task, prompt)
 
 
 def _submitted(module: EntityFormModule, values: dict[str, JsonValue] | None) -> dict[str, JsonValue]:
@@ -554,13 +556,14 @@ async def _supplement(
     entity = _entity(task)
     source = text[:20000]
     started = monotonic()
-    reporter.stage_start(stage("structure"))
+    step = stage("structure", form.LABEL)
+    reporter.stage_start(step)
     try:
         extraction = await extract_entity(db, task, form, source)
-        reporter.stage_done(stage("structure"), ms=int((monotonic() - started) * 1000))
+        reporter.stage_done(step, ms=int((monotonic() - started) * 1000))
     except (AssistantLLMError, TimeoutError, ValueError, TypeError, ValidationError):
         logger.warning("assistant entity supplement failed task=%s", task.public_id, exc_info=True)
-        reporter.stage_failed(stage("structure"))
+        reporter.stage_failed(step)
         return _issue_form(db, task, module, user, entity, inline=inline, hint="没能整理这段补充，请直接填写",
                            action_name="supplement_entity_form")
     quotes, _ = _verified(form, source, extraction)
@@ -591,7 +594,7 @@ async def _supplement(
     labels = {field.get("key"): field.get("label") for field in waiting.form_fields or []}
     names = "、".join(str(labels.get(key) or key) for key in applied)
     return _issue_form(db, task, module, user, entity.model_copy(update=update), inline=inline,
-                       hint=f"刚补充：{names}，核对后保存", action_name="supplement_entity_form")
+                       hint=f"刚补充：{names}", action_name="supplement_entity_form")
 
 
 async def _submit_form(
@@ -731,19 +734,20 @@ def _write(
     kind = form.KIND
     task, claim, command = _claim(db, task, form, ctx, canonical)
     started = monotonic()
-    reporter.stage_start(stage("write"))
+    step = stage("write", form.LABEL)
+    reporter.stage_start(step)
     try:
         result = form.write(ctx, canonical)
         record_effect(db, command, kind, target_public_id=result.target_public_id)
     except DuplicateRecordError as exc:
         db.rollback()
-        reporter.stage_failed(stage("write"))
+        reporter.stage_failed(step)
         assert_owned_execution_lease(db, task)
         _mark_claim_status(db, claim, "NO_EFFECT")
         return _settle_duplicate(db, task, module, form, user, canonical, exc, inline=inline)
     except EntityFormError as exc:
         db.rollback()
-        reporter.stage_failed(stage("write"))
+        reporter.stage_failed(step)
         assert_owned_execution_lease(db, task)
         _mark_claim_status(db, claim, "NO_EFFECT")
         return _issue_form(db, task, module, user, _entity(task), inline=inline, errors=exc.errors,
@@ -751,7 +755,7 @@ def _write(
     except SQLAlchemyError:
         logger.exception("assistant entity write failed task=%s kind=%s", task.public_id, kind)
         db.rollback()
-        reporter.stage_failed(stage("write"))
+        reporter.stage_failed(step)
         try:
             effect = checked_effect(db, command, kind)
         except Exception:
@@ -777,7 +781,7 @@ def _write(
         db.commit()
     except SQLAlchemyError:
         _publish_unknown(db, task, kind, form.LABEL)
-    reporter.stage_done(stage("write"), ms=int((monotonic() - started) * 1000))
+    reporter.stage_done(step, ms=int((monotonic() - started) * 1000))
     try:
         result.after_commit()
     except Exception:
@@ -812,11 +816,12 @@ async def _write_opportunity(
     kind = module.KIND
     task, claim, command = _claim(db, task, module, ctx, canonical)
     started = monotonic()
-    reporter.stage_start(stage("write"))
+    step = stage("write", module.LABEL)
+    reporter.stage_start(step)
 
     def refuse(message: str) -> CoordinatorOutcome:
         db.rollback()
-        reporter.stage_failed(stage("write"))
+        reporter.stage_failed(step)
         assert_owned_execution_lease(db, task)
         _mark_claim_status(db, claim, "NO_EFFECT")
         return _issue_form(db, task, module, user, _entity(task), errors={"form": message[:400]},
@@ -849,7 +854,7 @@ async def _write_opportunity(
     except SQLAlchemyError:
         logger.exception("assistant opportunity write failed task=%s", task.public_id)
         db.rollback()
-        reporter.stage_failed(stage("write"))
+        reporter.stage_failed(step)
         try:
             effect = checked_effect(db, command, kind)
         except Exception:
@@ -878,7 +883,7 @@ async def _write_opportunity(
         db.commit()
     except SQLAlchemyError:
         _publish_unknown(db, task, kind, module.LABEL)
-    reporter.stage_done(stage("write"), ms=int((monotonic() - started) * 1000))
+    reporter.stage_done(step, ms=int((monotonic() - started) * 1000))
     return _outcome(task, f"商机已创建，待审批：{name}")
 
 

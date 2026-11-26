@@ -12,7 +12,8 @@ import MultiSelectField from '@/components/crmwolf/MultiSelectField.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import type { AgentUIBlock, JsonObject, JsonValue } from '@/schemas/agent-contracts'
+import type { AgentUIBlock, EntityRef, JsonObject, JsonValue } from '@/schemas/agent-contracts'
+import { isAgentEntityOpenable } from '@/components/agent/agentEntityNavigation'
 import { ENTITY_FORM_ACTIONS } from '@/schemas/agent-contracts/ui-interactions'
 
 import AgentUIBanner from './AgentUIBanner.vue'
@@ -42,7 +43,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   submit: [actionId: string, values: JsonObject]
+  'open-entity': [entityRef: EntityRef]
 }>()
+
+const subject = computed(() => props.block.subject ?? null)
+const openableSubject = computed<EntityRef | null>(() => (
+  subject.value && isAgentEntityOpenable(subject.value) ? subject.value : null
+))
 
 const interactionRef = ref<HTMLElement | null>(null)
 const selectedValues = ref<string[]>([])
@@ -779,12 +786,23 @@ const submit = async (): Promise<void> => {
         class="m-0 min-w-0 text-body [overflow-wrap:anywhere]"
         :class="readonly ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'"
       >{{ activityHistory ? '客户活动' : '确认写入客户活动' }}</h2>
-      <p
-        v-else
-        :id="`${block.id}-prompt`"
-        class="m-0 min-w-0 text-body [overflow-wrap:anywhere]"
-        :class="readonly ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'"
-      >{{ block.prompt }}</p>
+      <div v-else class="grid min-w-0 gap-space-1">
+        <p
+          :id="`${block.id}-prompt`"
+          class="m-0 min-w-0 text-body [overflow-wrap:anywhere]"
+          :class="readonly ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'"
+        >{{ block.prompt }}</p>
+        <p v-if="subject" class="m-0 min-w-0 text-body text-muted-foreground [overflow-wrap:anywhere]" data-agent-ui-subject>
+          客户：<Button
+            v-if="openableSubject"
+            type="button"
+            variant="link"
+            class="h-auto p-0 align-baseline"
+            :aria-label="`打开${openableSubject.display_name}详情`"
+            @click="emit('open-entity', openableSubject)"
+          >{{ openableSubject.display_name }}</Button><span v-else class="text-foreground">{{ subject.display_name }}</span>
+        </p>
+      </div>
       <StatusBadge
         class="shrink-0"
         :status="isActivityConfirmation ? (activityHistory ? 'history' : 'pending') : stateStatus"

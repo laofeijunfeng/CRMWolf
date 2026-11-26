@@ -66,11 +66,11 @@ const stageIconTone = (wrapper: VueWrapper, label: string): string => (
   stageRow(wrapper, label)?.querySelector('svg')?.getAttribute('class') ?? ''
 )
 const failedStage = (wrapper: VueWrapper): void => {
-  expect(stageIconTone(wrapper, '正在判断活动类型')).toContain('text-tone-success')
-  expect(stageRow(wrapper, '正在整理活动内容')?.textContent).toContain('失败')
-  expect(stageRow(wrapper, '正在整理活动内容')?.textContent).not.toContain('进行中')
-  expect(stageIconTone(wrapper, '正在整理活动内容')).toContain('text-tone-danger')
-  expect(stageIconTone(wrapper, '正在评估记录质量')).not.toContain('text-tone-success')
+  expect(stageIconTone(wrapper, '判断活动类型')).toContain('text-tone-success')
+  expect(stageRow(wrapper, '整理活动内容')?.textContent).toContain('失败')
+  expect(stageRow(wrapper, '整理活动内容')?.textContent).not.toContain('进行中')
+  expect(stageIconTone(wrapper, '整理活动内容')).toContain('text-tone-danger')
+  expect(stageIconTone(wrapper, '评估记录质量')).not.toContain('text-tone-success')
   expect(wrapper.text()).not.toContain('正在整理，内容较长')
 }
 let wrapper: VueWrapper | undefined
@@ -220,7 +220,7 @@ describe('SalesAssistant failure recovery', () => {
     expect(api.conversationText).not.toHaveBeenCalled()
     expect(stream).not.toHaveBeenCalled()
     expect(mounted.findAll('.justify-end')).toHaveLength(userBubbles)
-    expect(stageRow(mounted, '正在整理活动内容')?.textContent).not.toContain('失败')
+    expect(stageRow(mounted, '整理活动内容')?.textContent).not.toContain('失败')
   })
 })
 

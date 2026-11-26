@@ -92,6 +92,7 @@ const isCompactTaskMessage = computed(() => (
         :locked="isInteractionLocked(block.submit_action_id)"
         :notice="(notices ?? EMPTY_NOTICES)[block.submit_action_id ?? block.interaction_id] ?? null"
         @submit="forwardInteraction"
+        @open-entity="emit('open-entity', $event)"
       />
       <AgentUIActionResultBlock
         v-else-if="block.type === 'action_result'"

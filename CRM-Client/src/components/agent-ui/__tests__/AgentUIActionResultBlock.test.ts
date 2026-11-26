@@ -57,3 +57,37 @@ describe('AgentUIActionResultBlock', () => {
     expect(wrapper.text()).toContain('活动类型：微信跟进')
     expect(wrapper.text()).toContain('下一步：11 月 15 日跟进付款')
   })
+
+describe('AgentUIActionResultBlock customer line', () => {
+  const customer = { ref_id: 'ref-cus', resource: 'customer' as const, public_id: 'cus_1', display_name: '睿狐科技', result_set_id: null }
+  const created = (subject: typeof customer | { ref_id: string, resource: 'payment', public_id: string, display_name: string, result_set_id: null }): Extract<AgentUIBlock, { type: 'action_result' }> => ({
+    id: 'result-deployment',
+    type: 'action_result',
+    action_id: 'action-deployment',
+    status: 'SUCCESS',
+    title: '部署信息已创建',
+    message: '客户：睿狐科技\n部署方式：私有化',
+    entity_ref: { ref_id: 'ref-dep', resource: 'opportunity', public_id: 'opp_1', display_name: '部署信息', result_set_id: null },
+    subject
+  })
+
+  it('makes the customer name itself the only link', async () => {
+    const wrapper = mount(AgentUIActionResultBlock, { props: { block: created(customer) } })
+
+    const buttons = wrapper.findAll('button')
+    expect(buttons.map(button => button.text())).toEqual(['睿狐科技'])
+    expect(buttons[0]?.element.closest('p')?.textContent?.trim()).toBe('客户：睿狐科技')
+    await buttons[0]?.trigger('click')
+    expect(wrapper.emitted('open-entity')).toEqual([[customer]])
+  })
+
+  it('keeps an unopenable customer as plain text without a second row', () => {
+    const wrapper = mount(AgentUIActionResultBlock, {
+      props: { block: created({ ...customer, resource: 'payment' }) }
+    })
+
+    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.text().match(/睿狐科技/g)).toEqual(['睿狐科技'])
+    expect(wrapper.text()).not.toContain('部署信息部署')
+  })
+})

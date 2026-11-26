@@ -124,6 +124,17 @@
           "title": "Status",
           "type": "string"
         },
+        "subject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "title": {
           "maxLength": 200,
           "minLength": 1,
@@ -772,6 +783,17 @@
               ],
               "title": "Status",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "title": {
               "maxLength": 200,
@@ -1543,6 +1565,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -2850,6 +2883,17 @@
               "title": "Status",
               "type": "string"
             },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "maxLength": 200,
               "minLength": 1,
@@ -3652,6 +3696,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -5057,6 +5112,17 @@
               "title": "Status",
               "type": "string"
             },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "maxLength": 200,
               "minLength": 1,
@@ -5888,6 +5954,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -7290,6 +7367,17 @@
               "title": "Status",
               "type": "string"
             },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "maxLength": 200,
               "minLength": 1,
@@ -8273,6 +8361,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -9634,6 +9733,17 @@
               "title": "Status",
               "type": "string"
             },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "maxLength": 200,
               "minLength": 1,
@@ -10776,6 +10886,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -12121,6 +12242,17 @@
               "title": "Status",
               "type": "string"
             },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "title": {
               "maxLength": 200,
               "minLength": 1,
@@ -12923,6 +13055,17 @@
               ],
               "title": "State",
               "type": "string"
+            },
+            "subject": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/EntityRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "submit_action_id": {
               "anyOf": [
@@ -18408,6 +18551,85 @@
     },
     "InteractionBlock": {
       "$defs": {
+        "EntityRef": {
+          "additionalProperties": false,
+          "description": "Server-issued reference to a CRM entity visible in a result set.",
+          "properties": {
+            "attributes": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "$ref": "#/$defs/JsonValue"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Attributes"
+            },
+            "display_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Display Name",
+              "type": "string"
+            },
+            "public_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Public Id",
+              "type": "string"
+            },
+            "ref_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Ref Id",
+              "type": "string"
+            },
+            "resource": {
+              "enum": [
+                "customer",
+                "contact",
+                "customer_activity",
+                "deployment_info",
+                "follow_up_task",
+                "completed_work",
+                "opportunity",
+                "contract",
+                "payment_plan",
+                "payment",
+                "invoice",
+                "license"
+              ],
+              "title": "Resource",
+              "type": "string"
+            },
+            "result_set_id": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Result Set Id"
+            }
+          },
+          "required": [
+            "ref_id",
+            "resource",
+            "public_id",
+            "display_name"
+          ],
+          "title": "EntityRef",
+          "type": "object"
+        },
         "InteractionConfirmationFact": {
           "additionalProperties": false,
           "properties": {
@@ -19040,6 +19262,17 @@
           ],
           "title": "State",
           "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "submit_action_id": {
           "anyOf": [

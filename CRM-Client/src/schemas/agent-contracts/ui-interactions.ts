@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { JsonValueSchema } from './common'
+import { EntityRefSchema, JsonValueSchema } from './common'
 
 export const InteractionOptionSchema = z.object({
   value: z.string().min(1).max(500),
@@ -102,6 +102,7 @@ export const InteractionBlockObjectSchema = z.object({
   disposition_visible_count: z.number().int().min(1).max(100).nullable().optional(),
   state: z.enum(['ACTIVE', 'SUBMITTED', 'EXPIRED', 'CANCELLED', 'READ_ONLY']),
   prompt: z.string().min(1).max(10000),
+  subject: EntityRefSchema.nullable().optional(),
   hint: z.string().max(400).nullable().optional(),
   fields: z.array(InteractionFieldSchema).max(20).default([]),
   facts: z.array(InteractionConfirmationFactSchema).max(20).default([]),

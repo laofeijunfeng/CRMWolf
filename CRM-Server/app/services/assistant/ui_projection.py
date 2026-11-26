@@ -781,7 +781,8 @@ def _waiting_blocks(
     interaction = _waiting_interaction(message, waiting, prompt=prompt, active=active, submitted_kind=submitted_kind)
     blocks: list[TextBlock | NoticeBlock | InteractionBlock] = []
     prose = _plain(message.text)
-    if include_prose and prose and prose != prompt:
+    # An entity form's title already says what is being created; the prose would repeat it.
+    if include_prose and prose and prose != prompt and waiting.type != "ENTITY_FORM":
         blocks.append(_text_block(prose))
     if message.task is not None and waiting.type == "FIELD":
         notice = _accepted_notice(message.task.draft)
@@ -800,6 +801,7 @@ def _form_interaction(
     action_id: str,
 ) -> InteractionBlock:
     allowed: frozenset[str]
+    subject: EntityRef | None = None
     if waiting.type == "ENTITY_FORM":
         kind = (waiting.field or "").removeprefix("entity:")
         if kind not in ENTITY_ACTIONS:
@@ -807,6 +809,10 @@ def _form_interaction(
         business_action = ENTITY_ACTIONS[cast("EntityKind", kind)]
         expected_field = waiting.field
         allowed = entity_module_for(kind).FIELD_KEYS
+        entity_draft = message.task.draft.entity if message.task is not None else None
+        if kind != "customer_create" and entity_draft is not None:
+            subject = _receipt_entity(entity_draft.customer_public_id,
+                                      customer_name=_plain(entity_draft.customer_name or ""))
     else:
         proposal = waiting.type == "PROPOSAL_FORM"
         business_action = "create_opportunity_proposal" if proposal else "edit_confirmation"
@@ -834,6 +840,7 @@ def _form_interaction(
         business_action=business_action,
         state="ACTIVE" if active else "READ_ONLY",
         prompt=prompt,
+        subject=subject,
         fields=fields,
         hint=_clip(_plain(waiting.hint), 400) or None,
         allow_cancel=active,
@@ -1421,8 +1428,9 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             task_id=proposal.public_id if proposal.kind == "follow_up_task_create" else None,
             name=proposal.name,
         )
+        subject = _receipt_entity(proposal.customer_public_id, customer_name=customer_name)
     elif message.entity_receipt is not None:
-        title, detail, entity = _entity_result(message)
+        title, detail, entity, subject = _entity_result(message)
     elif message.outcome == "activity_written":
         title, detail = "活动已写入", _result_message(message)
         activity_id = message.projection.activity_public_id if message.projection else None
@@ -1434,6 +1442,7 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
             _receipt_entity(activity.customer_public_id, customer_name=customer_name, tab="activities")
             if activity else None
         )
+        subject = entity
     else:
         return None
     return ActionResultBlock(
@@ -1444,6 +1453,7 @@ def _result_block(message: ConversationMessage) -> ActionResultBlock | None:
         title=title,
         message=_clip(detail, 10000),
         entity_ref=entity,
+        subject=subject,
     )
 
 
@@ -1483,8 +1493,11 @@ _ENTITY_RESULTS: dict[str, tuple[str, str, str | None]] = {
 }
 
 
-def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | None]:
-    """One directly created (or already existing) CRM record, linked on its customer page."""
+def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | None, EntityRef | None]:
+    """One directly created (or already existing) CRM record, linked on its customer page.
+
+    Returns ``(title, detail, entity_ref, subject)``; ``subject`` is the owning customer.
+    """
 
     receipt = message.entity_receipt
     assert receipt is not None
@@ -1504,12 +1517,13 @@ def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | 
         title = f"{title}，待审批"
     if receipt.kind == "invoice_title_create":
         lines.append("申请开票去发票管理")
+    subject = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
     if receipt.kind == "opportunity_create" and receipt.outcome == "created":
         entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name,
                                  opportunity_id=receipt.public_id, name=name)
     else:
-        entity = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
-    return title, "\n".join(lines), entity
+        entity = subject
+    return title, "\n".join(lines), entity, subject
 
 
 def _accepted_value(field: object) -> str:

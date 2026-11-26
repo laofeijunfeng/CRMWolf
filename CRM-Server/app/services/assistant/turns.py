@@ -938,12 +938,12 @@ class DurableProgressReporter(ProgressReporter):
     def stage_start(self, stage: TurnStage | None) -> None:
         if stage is None:
             return
-        self._record({"stage": stage.name, "phase": "start"})
+        self._record(stage.payload("start"))
 
     def stage_done(self, stage: TurnStage | None, *, ms: int, score: int | None = None) -> None:
         if stage is None:
             return
-        payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
+        payload = {**stage.payload("done"), "ms": ms}
         if score is not None:
             payload["score"] = score
         self._record(payload)
@@ -951,7 +951,7 @@ class DurableProgressReporter(ProgressReporter):
     def stage_failed(self, stage: TurnStage | None) -> None:
         if stage is None:
             return
-        self._record({"stage": stage.name, "phase": "failed"})
+        self._record(stage.payload("failed"))
 
 
 def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEvent]:

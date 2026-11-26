@@ -386,6 +386,7 @@ class InteractionBlock(AgentUIBlockBase):
         "secondary_action": None,
         "cancel_reasons": [],
         "disposition_visible_count": None,
+        "subject": None,
     }
 
     type: Literal["interaction"]
@@ -397,6 +398,8 @@ class InteractionBlock(AgentUIBlockBase):
     disposition_items: list[OpenFollowUpDispositionCardItem] = Field(default_factory=list, max_length=100)
     state: Literal["ACTIVE", "SUBMITTED", "EXPIRED", "CANCELLED", "READ_ONLY"]
     prompt: str = Field(min_length=1, max_length=10000)
+    # The customer an entity form saves into, rendered as the customer line under the title.
+    subject: EntityRef | None = None
     hint: str | None = Field(default=None, max_length=400)
     fields: list[InteractionField] = Field(default_factory=list, max_length=20)
     facts: list[InteractionConfirmationFact] = Field(default_factory=list, max_length=20)
@@ -564,12 +567,16 @@ class InteractionBlock(AgentUIBlockBase):
 
 
 class ActionResultBlock(AgentUIBlockBase):
+    _omit_unused_extensions: ClassVar[dict[str, object]] = {"subject": None}
+
     type: Literal["action_result"]
     action_id: str = Field(min_length=1, max_length=128)
     status: Literal["SUCCESS", "FAILED", "CANCELLED"]
     title: str = Field(min_length=1, max_length=200)
     message: str = Field(min_length=1, max_length=10000)
     entity_ref: EntityRef | None = None
+    # The owning customer; its name on the customer line links to the customer page.
+    subject: EntityRef | None = None
 
 
 class PaginationBlock(AgentUIBlockBase):

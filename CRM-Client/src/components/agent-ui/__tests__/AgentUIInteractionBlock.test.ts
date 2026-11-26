@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
-import { InteractionBlockSchema } from '@/schemas/agent-contracts'
+import { InteractionBlockSchema, type AgentUIBlock } from '@/schemas/agent-contracts'
 
 import AgentUIInteractionBlock from '../AgentUIInteractionBlock.vue'
 
@@ -1102,4 +1102,26 @@ it('parks a direct-create form with a defer choice and keeps one primary action'
   expect(defer).toBeDefined()
   await defer?.trigger('click')
   expect(wrapper.emitted('submit')).toEqual([['act_contact', { choice: 'defer' }]])
+})
+
+const entityFormWithSubject = (resource: 'customer' | 'payment'): Extract<AgentUIBlock, { type: 'interaction' }> => InteractionBlockSchema.parse({
+  ...contactFormBlock(),
+  prompt: '新建联系人',
+  subject: { ref_id: 'ref-cus', resource, public_id: 'cus_1', display_name: '睿狐科技', result_set_id: null }
+})
+
+it('names the customer under the card title as a link to its detail', async () => {
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block: entityFormWithSubject('customer') } })
+
+  expect(wrapper.get('[data-agent-ui-subject]').text()).toBe('客户：睿狐科技')
+  await wrapper.get('[data-agent-ui-subject] button').trigger('click')
+  expect(wrapper.emitted('open-entity')?.[0]?.[0]).toMatchObject({ resource: 'customer', public_id: 'cus_1' })
+  expect(wrapper.emitted('submit')).toBeUndefined()
+})
+
+it('shows an unopenable subject as plain text', () => {
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block: entityFormWithSubject('payment') } })
+
+  expect(wrapper.get('[data-agent-ui-subject]').text()).toBe('客户：睿狐科技')
+  expect(wrapper.find('[data-agent-ui-subject] button').exists()).toBe(false)
 })

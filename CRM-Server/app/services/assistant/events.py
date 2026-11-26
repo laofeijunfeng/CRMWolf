@@ -39,9 +39,17 @@ def is_stage_name(name: str) -> bool:
 @dataclass(frozen=True)
 class TurnStage:
     name: StageName
+    # What the stage works on (e.g. 部署信息), so the process line names the real object.
+    subject: str | None = None
+
+    def payload(self, phase: Literal["start", "done", "failed"]) -> dict[str, object]:
+        data: dict[str, object] = {"stage": self.name, "phase": phase}
+        if self.subject:
+            data["subject"] = self.subject
+        return data
 
 
-def stage(name: str) -> TurnStage | None:
+def stage(name: str, subject: str | None = None) -> TurnStage | None:
     """Typed stage handle; an unknown name logs a warning and yields ``None``.
 
     Progress reporting must never break a turn, so callers treat ``None`` as
@@ -51,7 +59,7 @@ def stage(name: str) -> TurnStage | None:
     if not is_stage_name(name):
         logger.warning("unknown assistant stage name skipped: %r", name)
         return None
-    return TurnStage(name=name)  # type: ignore[arg-type]
+    return TurnStage(name=name, subject=subject)  # type: ignore[arg-type]
 
 
 def encode_sse(event: str, data: dict[str, object]) -> str:
@@ -102,9 +110,7 @@ class SSEProgressReporter:
             return
         try:
             self._started_at[stage.name] = time.monotonic()
-            self._queue.put_nowait(
-                ("stage", {"stage": stage.name, "phase": "start"})
-            )
+            self._queue.put_nowait(("stage", stage.payload("start")))
         except Exception:
             logger.exception("stage_start reporting failed for %s", stage.name)
 
@@ -113,7 +119,7 @@ class SSEProgressReporter:
             return
         try:
             self._started_at.pop(stage.name, None)
-            payload: dict[str, object] = {"stage": stage.name, "phase": "done", "ms": ms}
+            payload = {**stage.payload("done"), "ms": ms}
             if score is not None:
                 payload["score"] = score
             self._queue.put_nowait(("stage", payload))
@@ -125,7 +131,7 @@ class SSEProgressReporter:
             return
         try:
             self._started_at.pop(stage.name, None)
-            self._queue.put_nowait(("stage", {"stage": stage.name, "phase": "failed"}))
+            self._queue.put_nowait(("stage", stage.payload("failed")))
         except Exception:
             logger.exception("stage_failed reporting failed for %s", stage.name)
 
