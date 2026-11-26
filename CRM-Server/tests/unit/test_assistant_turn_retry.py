@@ -911,3 +911,43 @@ async def test_failed_date_correction_retry_cannot_replace_newer_frozen_confirma
         assert activity.next_follow_time == datetime(2026, 12, 7, 9)
         assert activity.source_content == "\n".join(command["source_segments"])
         assert activity.submission_fingerprint == command["fingerprint"]
+
+
+def test_blocked_turn_runs_off_the_request_loop_and_finishes_its_kicks(monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    import time
+
+    started = threading.Event()
+    release = threading.Event()
+    seen: dict[str, object] = {}
+
+    async def blocked_turn(turn_id: int, *, factory: object = None) -> None:
+        seen["thread"] = threading.current_thread().name
+        started.set()
+        release.wait(5)  # a sync DB call stuck on a lock or an exhausted pool
+
+        async def kick() -> None:
+            seen["kick"] = True
+
+        asyncio.get_running_loop().create_task(kick())
+
+    monkeypatch.setattr(turns, "execute_turn", blocked_turn)
+
+    async def request_loop() -> int:
+        turns.schedule_turn(1)
+        assert await asyncio.to_thread(started.wait, 5)
+        ticks = 0
+        for _ in range(3):
+            await asyncio.sleep(0.01)
+            ticks += 1
+        return ticks
+
+    try:
+        assert asyncio.run(request_loop()) == 3
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while "kick" not in seen and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert str(seen["thread"]).startswith("assistant-turn")
+    assert seen.get("kick") is True

@@ -7,7 +7,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -16,6 +18,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
@@ -51,8 +54,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 LEASE_SECONDS = 300
-_active: set[asyncio.Task[None]] = set()
+# Turns run on their own threads and event loops, so a turn blocked on the model, a row lock or the
+# connection pool stalls only itself, never requests or other users' turns.
+_runner: ThreadPoolExecutor | None = None
+_runner_lock = threading.Lock()
 _workers: dict[int, tuple[int, asyncio.Task[None]]] = {}
+_workers_lock = threading.Lock()
 _execution_lease: ContextVar[tuple[int, str, int] | None] = ContextVar("assistant_execution_lease", default=None)
 
 
@@ -654,7 +661,8 @@ def task_has_customer_activity(task: AssistantTask) -> bool:
 
 
 def live_worker(turn_id: int, lease_version: int) -> bool:
-    worker = _workers.get(turn_id)
+    with _workers_lock:
+        worker = _workers.get(turn_id)
     return worker is not None and worker[0] == lease_version and not worker[1].done()
 
 
@@ -986,7 +994,8 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             return
         worker = asyncio.current_task()
         if worker is not None:
-            _workers[turn_id] = (version, worker)
+            with _workers_lock:
+                _workers[turn_id] = (version, worker)
         lease_token = _execution_lease.set((turn_id, owner, version))
         attempt_started = business_now()
         metadata = turn.input_json.get("prepared_metadata") or {}
@@ -1347,9 +1356,10 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             reset_attempt_deadline(deadline_token)
         if lease_token is not None:
             _execution_lease.reset(lease_token)
-        registered = _workers.get(turn_id)
-        if registered is not None and registered[1] is asyncio.current_task():
-            del _workers[turn_id]
+        with _workers_lock:
+            registered = _workers.get(turn_id)
+            if registered is not None and registered[1] is asyncio.current_task():
+                del _workers[turn_id]
         if heartbeat is not None:
             heartbeat.cancel()
             with suppress(asyncio.CancelledError):
@@ -1434,10 +1444,43 @@ def _close_unknown_activity(
     db.commit()
 
 
+async def _drain_turn(turn_id: int, factory: sessionmaker[Session] | None) -> None:
+    await execute_turn(turn_id, factory=factory)
+    # Post-commit kicks started by the turn live on this loop; let them finish before it closes.
+    pending = asyncio.all_tasks() - {asyncio.current_task()}
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _run_turn(turn_id: int, factory: sessionmaker[Session] | None) -> None:
+    try:
+        asyncio.run(_drain_turn(turn_id, factory))
+    except Exception:
+        logger.exception("Assistant turn %s runner failed", turn_id)
+
+
 def schedule_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:
-    runner = asyncio.create_task(execute_turn(turn_id, factory=factory))
-    _active.add(runner)
-    runner.add_done_callback(_active.discard)
+    global _runner
+    with _runner_lock:
+        if _runner is None:
+            _runner = ThreadPoolExecutor(
+                max_workers=max(1, get_settings().ASSISTANT_TURN_WORKERS), thread_name_prefix="assistant-turn"
+            )
+        runner = _runner
+    try:
+        runner.submit(_run_turn, turn_id, factory)
+    except RuntimeError:
+        # Shutting down: the turn stays PENDING and recovery claims it after restart.
+        logger.info("Assistant turn %s left for recovery during shutdown", turn_id)
+
+
+def stop_turn_runner() -> None:
+    """Stop taking turns; queued ones stay PENDING for recovery, running ones finish on their own."""
+
+    with _runner_lock:
+        runner = _runner
+    if runner is not None:
+        runner.shutdown(wait=False, cancel_futures=True)
 
 
 async def recover_turns(*, limit: int = 30) -> int:

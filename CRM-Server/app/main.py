@@ -294,6 +294,8 @@ async def shutdown_event():
     stop_agent_turn_execution_recovery_scheduler()
     from app.tasks.assistant_turn_recovery import stop_assistant_turn_recovery
     stop_assistant_turn_recovery()
+    from app.services.assistant.turns import stop_turn_runner
+    stop_turn_runner()
     stop_customer_evidence_sync_scheduler()
 
 
