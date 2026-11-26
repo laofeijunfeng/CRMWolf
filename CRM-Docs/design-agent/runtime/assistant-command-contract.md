@@ -18,9 +18,17 @@
 | --- | --- |
 | `opportunity_create` | 商机 public ID 和审批实例随创建提交。已创建待审批不等于审批通过。 |
 | `opportunity_stage` | 商机 public ID、原快照/版本、新阶段快照及递增版本随阶段推进提交。 |
+| `contact_create` / `invoice_title_create` / `deployment_create` / `customer_create` | 助手直接新建的记录标识与效果同事务提交；重复记录不写效果，claim 记 `NO_EFFECT`（ADR 0005）。 |
 | `opportunity_auto_won` | 自动赢单的独立后续提交；同一命令的阶段回执不证明赢单。不确定时保留已确认的阶段效果，不重推阶段。 |
 
 正常执行只有核实目标效果后才记录 `SUCCEEDED`；有精确效果但缺助手回执时，以原命令补一次回执，claim 标为 `RECONCILED` 并退役旧等待。无归因标识的历史 claim 不补造成功。
+
+## 直接新建资料与待补充
+
+- 实体任务只接受 `ENTITY_FORM` 的 `submit_form{form_revision, values}` 写入；`choice=cancel|defer` 取消或搁置，文字只合并进表单。提交时服务端重新校验权限、字段与重复。
+- 数据库异常后只读一次效果：确定无效果则 `NO_EFFECT` 并重开表单，否则 `UNKNOWN`，交给命令核对。
+- `GET /v1/assistant/pending-drafts`：本人本团队 ACTIVE 的实体任务，最近修改优先，最多 50 条。
+- `POST /v1/assistant/conversation/focus`：带 `expected_version` 切换会话焦点到该任务；版本不符、有进行中的轮次或待选项、任务已结束时返回 409，不签发写入。
 
 ## 错误分类与恢复
 
