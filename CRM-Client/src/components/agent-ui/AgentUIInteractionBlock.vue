@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import type { AgentUIBlock, JsonObject, JsonValue } from '@/schemas/agent-contracts'
+import { ENTITY_FORM_ACTIONS } from '@/schemas/agent-contracts/ui-interactions'
 
 import AgentUIBanner from './AgentUIBanner.vue'
 import type { InteractionNotice } from './interactionNotice'
@@ -123,6 +124,10 @@ const canCancel = computed(() => (
   && (props.block.interaction_type === 'form' || (
     props.block.interaction_type === 'text_input' && props.block.business_action === 'provide_follow_up_content'
   ))
+))
+// A direct-create form can be parked in 「待补充」 and reopened later with its values.
+const canDefer = computed(() => (
+  isActive.value && props.block.interaction_type === 'form' && ENTITY_FORM_ACTIONS.includes(props.block.business_action ?? '')
 ))
 const readonly = computed(() => props.block.state === 'READ_ONLY')
 const isCompactTaskCompletion = computed(() => (
@@ -552,6 +557,13 @@ const cancel = (): void => {
   submitting.value = true
   // The legacy signed follow-up prompt still uses its original resolver.
   emit('submit', actionId, props.block.business_action === 'provide_follow_up_content' ? { cancel: true } : { choice: 'cancel' })
+}
+
+const defer = (): void => {
+  const actionId = props.block.submit_action_id
+  if (!canDefer.value || controlsDisabled.value || actionId === null) return
+  submitting.value = true
+  emit('submit', actionId, { choice: 'defer' })
 }
 
 const submit = async (): Promise<void> => {
@@ -1219,6 +1231,27 @@ const submit = async (): Promise<void> => {
             :data-agent-ui-error-focus="visibleFieldError(field) !== null ? 'true' : undefined"
             @update:model-value="updateBooleanValue(field, $event)"
           />
+          <div
+            v-if="(field.field_type === 'text' || field.field_type === 'textarea') && field.suggestions.length > 0 && !readonly"
+            class="-mt-space-1 flex flex-wrap gap-space-2"
+            role="group"
+            :aria-label="`${field.label}候选`"
+            data-agent-ui-suggestions
+          >
+            <Button
+              v-for="suggestion in field.suggestions"
+              :key="suggestion"
+              type="button"
+              variant="outline"
+              size="sm"
+              class="min-h-11"
+              :aria-pressed="textValue(field) === suggestion"
+              :disabled="controlsDisabled"
+              @click="updateTextValue(field, suggestion)"
+            >
+              {{ suggestion }}
+            </Button>
+          </div>
         </template>
       </form>
       <!-- 表单级校验原因由服务端给出；字段级错误仍贴在各自输入框下。 -->
@@ -1259,7 +1292,7 @@ const submit = async (): Promise<void> => {
     </div>
 
     <footer
-      v-if="(isActivityConfirmation && showsChoiceOptions) || isGenericConfirmation || canCancel || (!isActivityConfirmation && isActive && !submitsOnOptionClick)"
+      v-if="(isActivityConfirmation && showsChoiceOptions) || isGenericConfirmation || canCancel || canDefer || (!isActivityConfirmation && isActive && !submitsOnOptionClick)"
       class="flex flex-wrap items-center justify-end gap-space-2 px-space-4 py-space-3"
       :class="cancelReasonsOpen ? '' : 'border-t border-border'"
     >
@@ -1311,6 +1344,15 @@ const submit = async (): Promise<void> => {
           @click="cancel"
         >
           取消
+        </Button>
+        <Button
+          v-if="canDefer"
+          type="button"
+          variant="outline"
+          :disabled="controlsDisabled"
+          @click="defer"
+        >
+          稍后补充
         </Button>
         <Button
           v-if="isActive && !submitsOnOptionClick"

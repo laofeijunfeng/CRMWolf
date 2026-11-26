@@ -1077,3 +1077,29 @@ it('shows the chosen kind with its origin and only same-category revisions', asy
   await revisions[0]?.trigger('click')
   expect(wrapper.emitted('submit')?.[0]).toEqual(['act_kind_confirm', { revise_activity_kind: 'PHONE_FOLLOW_UP' }])
 })
+
+const contactFormBlock = (): ReturnType<typeof InteractionBlockSchema.parse> =>
+  InteractionBlockSchema.parse({
+    id: 'contact', type: 'interaction', interaction_id: 'contact', interaction_type: 'form',
+    business_action: 'create_contact', allow_cancel: true, state: 'ACTIVE', prompt: '补全联系人',
+    submit_label: '创建联系人', submit_action_id: 'act_contact', options: [],
+    fields: [{ key: 'title', label: '职位', field_type: 'text', required: false, default_value: '',
+      min_length: 0, max_length: 50, suggestions: ['技术总监', 'CTO'], options: [] }],
+  })
+
+it('fills a field from a suggestion without submitting it', async () => {
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block: contactFormBlock() } })
+  await wrapper.findAll('button').find(button => button.text() === 'CTO')?.trigger('click')
+  expect(wrapper.emitted('submit')).toBeUndefined()
+  expect((wrapper.get('input').element as HTMLInputElement).value).toBe('CTO')
+  await wrapper.findAll('button').find(button => button.text() === '创建联系人')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_contact', { title: 'CTO' }]])
+})
+
+it('parks a direct-create form with a defer choice and keeps one primary action', async () => {
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block: contactFormBlock() } })
+  const defer = wrapper.findAll('button').find(button => button.text() === '稍后补充')
+  expect(defer).toBeDefined()
+  await defer?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([['act_contact', { choice: 'defer' }]])
+})

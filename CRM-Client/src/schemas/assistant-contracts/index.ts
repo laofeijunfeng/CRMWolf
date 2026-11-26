@@ -13,6 +13,33 @@ export const DraftFieldSchema = z.object({
 }).strict()
 export type DraftField = z.infer<typeof DraftFieldSchema>
 
+export const EntityKindSchema = z.enum([
+  'contact_create', 'invoice_title_create', 'deployment_create', 'customer_create', 'opportunity_create'
+])
+export type EntityKind = z.infer<typeof EntityKindSchema>
+export const TaskKindSchema = z.enum(['customer_activity', ...EntityKindSchema.options])
+
+const EntityFieldValueSchema = z.object({
+  value: z.union([z.string().max(2000), z.number(), z.array(z.string().max(64))]).nullable().optional(),
+  source: z.enum(['ORIGINAL', 'DERIVED', 'DEFAULT', 'USER_CHOICE', 'SUPPLEMENT', 'NORMALIZED', 'AUTO_NAME', 'CUSTOMER_DEFAULT']),
+  phrase: z.string().max(200).nullable().optional(),
+  choices: z.array(z.string()).max(8).optional(),
+  warning: z.string().max(200).nullable().optional()
+}).strict()
+
+export const EntityDraftSchema = z.object({
+  kind: EntityKindSchema,
+  customer_public_id: z.string().max(64).nullable().optional(),
+  customer_name: z.string().max(200).nullable().optional(),
+  fields: z.record(EntityFieldValueSchema).optional(),
+  customer_fields: z.record(EntityFieldValueSchema).optional(),
+  extracted: z.array(z.object({ key: z.string(), value: z.string(), quote: z.string() }).strict()).max(40).optional(),
+  submitted: z.record(JsonObjectSchema).optional(),
+  source_text: z.string().max(20000).optional(),
+  credentials_mentioned: z.boolean().optional()
+}).strict()
+export type EntityDraft = z.infer<typeof EntityDraftSchema>
+
 export const TaskDraftSchema = z.object({
   customer: DraftFieldSchema,
   content: DraftFieldSchema,
@@ -45,7 +72,8 @@ export const TaskDraftSchema = z.object({
     start: z.number().int(),
     end: z.number().int(),
     raw_text: z.string()
-  }).strict()).optional()
+  }).strict()).optional(),
+  entity: EntityDraftSchema.nullable().optional()
 }).strict()
 export type TaskDraft = z.infer<typeof TaskDraftSchema>
 export const ActivityPreviewSchema = z.object({
@@ -142,7 +170,10 @@ export type ProposalConfirmation = Extract<ConfirmationPayload, { kind: 'proposa
 
 
 export const TaskWaitingSchema = z.object({
-  type: z.enum(['FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION', 'FOLLOW_UP_DISPOSITION', 'PROPOSAL_FORM', 'CONFIRMATION_EDIT']),
+  type: z.enum([
+    'FIELD', 'CONFIRMATION', 'ACTIVITY_KIND', 'OBJECT_SELECTION', 'FOLLOW_UP_DISPOSITION', 'PROPOSAL_FORM',
+    'CONFIRMATION_EDIT', 'ENTITY_FORM', 'ENTITY_DEFERRED', 'PROFILE_PROPOSALS'
+  ]),
   field: z.string().nullable().optional(),
   question_id: z.string().min(1),
   prompt: z.string().min(1),
@@ -164,7 +195,7 @@ export const TaskWaitingSchema = z.object({
   form_revision: z.number().int().nonnegative().nullable().optional(),
   form_fields: z.array(InteractionFieldSchema).max(20).nullable().optional()
 }).strict().superRefine((waiting, ctx) => {
-  const isForm = waiting.type === 'PROPOSAL_FORM' || waiting.type === 'CONFIRMATION_EDIT'
+  const isForm = waiting.type === 'PROPOSAL_FORM' || waiting.type === 'CONFIRMATION_EDIT' || waiting.type === 'ENTITY_FORM'
   if (isForm !== (waiting.form_revision != null)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['form_revision'], message: '仅表单等待需要表单版本' })
   }
@@ -210,13 +241,24 @@ const AcceptedProposalReceiptSchema = z.object({
 const RefusedProposalReceiptSchema = z.object({
   kind: z.enum([
     'refused:customer_fact', 'refused:follow_up_task_create', 'refused:follow_up_task',
-    'refused:opportunity_stage', 'refused:opportunity_create', 'refused:opportunity'
+    'refused:opportunity_stage', 'refused:opportunity_create', 'refused:opportunity',
+    'refused:contact_create', 'refused:invoice_title_create', 'refused:deployment_create', 'refused:customer_create'
   ]),
   proposal_key: z.string().min(1).optional()
 }).strict()
 
+export const EntityCreateReceiptSchema = z.object({
+  kind: EntityKindSchema,
+  public_id: z.string().min(1).max(64),
+  outcome: z.enum(['created', 'existing']),
+  customer_public_id: z.string().nullable().optional(),
+  name: z.string().min(1).max(200).nullable().optional(),
+  approval_phase: z.literal('pending_review').nullable().optional()
+}).strict()
+export type EntityCreateReceipt = z.infer<typeof EntityCreateReceiptSchema>
+
 export const CommittedReceiptSchema = z.union([
-  CustomerActivityReceiptSchema, AcceptedProposalReceiptSchema, RefusedProposalReceiptSchema
+  CustomerActivityReceiptSchema, AcceptedProposalReceiptSchema, RefusedProposalReceiptSchema, EntityCreateReceiptSchema
 ])
 export type CommittedReceipt = z.infer<typeof CommittedReceiptSchema>
 
@@ -224,10 +266,7 @@ export const AssistantTaskViewSchema = z.object({
   public_id: z.string().min(1),
   status: AssistantTaskStatusSchema,
   goal: z.string().min(1),
-  task_kind: z.enum([
-    'customer_activity', 'opportunity_create', 'contact_create',
-    'invoice_title_create', 'deployment_create', 'customer_create'
-  ]).optional(),
+  task_kind: TaskKindSchema.optional(),
   activity_kind: z.string().nullable().optional(),
   draft: TaskDraftSchema,
   waiting: TaskWaitingSchema.nullable().optional(),
@@ -267,12 +306,36 @@ export const AssistantTaskViewSchema = z.object({
       failure_code: z.string().nullable().optional()
     }).strict()).max(100)
   }).strict().nullable().optional(),
+  profile_proposals: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    kind: z.enum(['contact_create', 'invoice_title_create', 'deployment_create']),
+    label: z.string(),
+    summary: z.string(),
+    quote: z.string(),
+    decision: z.enum(['pending', 'go', 'skip', 'failed']),
+    child_task_public_id: z.string().nullable().optional(),
+    child_status: AssistantTaskStatusSchema.nullable().optional(),
+    child_waiting_type: z.string().nullable().optional(),
+    child_receipt: EntityCreateReceiptSchema.nullable().optional()
+  }).strict()).nullable().optional(),
 }).strict().superRefine((task, ctx) => {
   if ((task.processing_turn_id == null) !== (task.processing_turn_status == null)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['processing_turn_id'], message: '处理轮次 ID 和状态必须同时提供' })
   }
 })
 export type AssistantTaskView = z.infer<typeof AssistantTaskViewSchema>
+
+/** One unfinished direct-create draft listed in 「待补充」. */
+export const PendingEntityDraftSchema = z.object({
+  public_id: z.string().min(1),
+  task_kind: TaskKindSchema,
+  label: z.string().min(1),
+  customer_name: z.string().nullable(),
+  waiting_type: z.string().nullable(),
+  prompt: z.string().nullable(),
+  last_modified_time: z.string()
+}).strict()
+export type PendingEntityDraft = z.infer<typeof PendingEntityDraftSchema>
 
 export const AssistantInputKindSchema = z.enum(['text', 'submit_field', 'confirm', 'cancel', 'revise_activity_kind', 'submit_form', 'request_edit'])
 export type AssistantInputKind = z.infer<typeof AssistantInputKindSchema>

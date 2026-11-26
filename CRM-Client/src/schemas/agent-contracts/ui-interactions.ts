@@ -11,6 +11,12 @@ export const InteractionOptionSchema = z.object({
   depends_on_value: z.string().min(1).max(500).nullable().optional(),
 }).strict()
 
+/** Server-issued direct-create forms (CRM-165); they can also be parked in 「待补充」. */
+export const ENTITY_FORM_ACTIONS: readonly string[] = [
+  'create_contact', 'create_invoice_title', 'create_deployment', 'create_customer', 'create_opportunity'
+]
+const CANCELLABLE_FORM_ACTIONS: readonly string[] = ['create_opportunity_proposal', 'edit_confirmation', ...ENTITY_FORM_ACTIONS]
+
 export const InteractionFieldSchema = z.object({
   key: z.string().min(1).max(128).regex(/^[a-z][a-z0-9_]*$/),
   label: z.string().min(1).max(200),
@@ -26,6 +32,7 @@ export const InteractionFieldSchema = z.object({
   source_label: z.string().max(40).nullable().optional(),
   depends_on_key: z.string().max(128).regex(/^[a-z][a-z0-9_]*$/).nullable().optional(),
   error_message: z.string().min(1).max(500).nullable().optional(),
+  suggestions: z.array(z.string().min(1).max(200)).max(8).default([]),
 }).strict().superRefine((field, context) => {
   if (field.min_length != null && field.max_length != null && field.min_length > field.max_length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'min_length cannot exceed max_length', path: ['min_length'] })
@@ -124,7 +131,7 @@ export function validateInteractionBlock(
   }
   if (block.allow_cancel && !(
     (block.business_action === 'provide_follow_up_content' && ['text_input', 'form'].includes(block.interaction_type)) ||
-    (block.interaction_type === 'form' && ['create_opportunity_proposal', 'edit_confirmation'].includes(block.business_action ?? ''))
+    (block.interaction_type === 'form' && CANCELLABLE_FORM_ACTIONS.includes(block.business_action ?? ''))
   )) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'cancellation is only available for follow-up content input and assistant forms', path: ['allow_cancel'] })
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onUnmounted, ref, shallowReactive, shallowRef } from 'vue'
+import { computed, nextTick, onActivated, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
 import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
@@ -20,7 +20,10 @@ import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
 import type { EntityRef, JsonObject } from '@/schemas/agent-contracts/common'
 import type { AgentUIEnvelope } from '@/schemas/agent-contracts/ui-envelope'
 import { AssistantRejectReasonSchema } from '@/schemas/assistant-contracts'
-import type { AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection, ConversationLink } from '@/schemas/assistant-contracts'
+import type {
+  AssistantTaskView, TaskWaiting, ConversationView, ConversationReply, ConversationBoundary, ConversationProjection,
+  ConversationLink, PendingEntityDraft
+} from '@/schemas/assistant-contracts'
 import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
 
 interface ChatEntry {
@@ -958,6 +961,27 @@ const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<v
   await submit({ kind: 'cancel' }, '算了，不记了', source)
 }
 
+// 「待补充」: parked direct-create drafts other than the one on screen.
+const pendingDrafts = ref<PendingEntityDraft[]>([])
+const visiblePendingDrafts = computed(() => pendingDrafts.value.filter((draft) => draft.public_id !== task.value?.public_id))
+let pendingDraftsRequest = 0
+const loadPendingDrafts = async (): Promise<void> => {
+  const order = ++pendingDraftsRequest
+  try {
+    const drafts = await assistantApi.pendingDrafts()
+    if (!disposed && order === pendingDraftsRequest) pendingDrafts.value = drafts
+  } catch {
+    // The list is a shortcut; the conversation itself stays usable without it.
+  }
+}
+watch(() => conversation.value?.version, (version) => { if (version !== undefined) void loadPendingDrafts() })
+
+const openPendingDraft = async (draft: PendingEntityDraft): Promise<void> => {
+  const view = conversation.value
+  if (busy.value || view === null || view.pending_choice !== null) return
+  await dispatchConversation(() => assistantApi.focusConversation(draft.public_id, view.version), draft.label)
+}
+
 const showConversationRetry = computed(() => !reconciliationRequired.value && resultPending.value && !autoRecovering.value && processingRecovery.value === null
   && (pendingConversation.value !== null || canResumeConversation.value))
 const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showConversationRetry.value
@@ -1215,6 +1239,16 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
   }
   if (block.business_action === 'provide_follow_up_content' && values['cancel'] === true) {
     void submit({ kind: 'cancel' }, '取消', entry.waiting)
+    return
+  }
+  if (source.type === 'ENTITY_FORM') {
+    const formRevision = source.form_revision
+    if (formRevision == null) return
+    const onlyChoice = Object.keys(values).length === 1 && (choice === 'cancel' || choice === 'defer')
+    void submit(onlyChoice
+      ? { kind: 'submit_form', form_revision: formRevision, choice }
+      : { kind: 'submit_form', form_revision: formRevision, values },
+    onlyChoice ? (choice === 'cancel' ? '取消' : '稍后补充') : '提交表单', source)
     return
   }
   if (source.type === 'PROPOSAL_FORM' || source.type === 'CONFIRMATION_EDIT') {
@@ -1648,6 +1682,22 @@ void loadConversation()
       <AgentUIBanner tone="info" :icon="Info" title="原始内容已保存" role="status" />
       <AgentUIBanner v-if="longOrganize" tone="info" :icon="Info" title="正在整理，内容较长，预计需要约 1 分钟" role="status" />
     </section>
+
+    <nav v-if="visiblePendingDrafts.length > 0" class="mt-space-4 flex flex-wrap items-center gap-space-2" aria-label="待补充" data-assistant-pending-drafts>
+      <span class="text-caption text-muted-foreground">待补充</span>
+      <Button
+        v-for="draft in visiblePendingDrafts"
+        :key="draft.public_id"
+        type="button"
+        variant="outline"
+        size="sm"
+        class="min-h-11"
+        :disabled="busy || conversation?.pending_choice != null"
+        @click="() => { void openPendingDraft(draft) }"
+      >
+        {{ draft.customer_name ? `${draft.label} · ${draft.customer_name}` : draft.label }}
+      </Button>
+    </nav>
 
     <div class="mt-space-4 rounded-lg border border-input bg-card p-space-3 transition-colors hover:border-ring-input focus-within:border-ring-input">
       <p v-if="cardLocked" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground">

@@ -3,9 +3,11 @@ import { z } from 'zod'
 import {
   AssistantTaskViewSchema,
   ConversationViewSchema, ConversationReplySchema,
-  AssistantTurnStatusSchema,
+  AssistantTurnStatusSchema, PendingEntityDraftSchema,
 } from '@/schemas/assistant-contracts'
-import type { AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationView } from '@/schemas/assistant-contracts'
+import type {
+  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationView, PendingEntityDraft
+} from '@/schemas/assistant-contracts'
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import { useUserStore } from '@/stores/user'
 import request from '@/utils/request'
@@ -312,6 +314,19 @@ export const assistantApi = {
   async resumeConversation(): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
     const payload: unknown = await request.post('/v1/assistant/conversation/resume', undefined, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
+    return ConversationReplySchema.parse(payload)
+  },
+  async pendingDrafts(): Promise<PendingEntityDraft[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.get('/v1/assistant/pending-drafts')
+    return z.array(PendingEntityDraftSchema).parse(payload)
+  },
+  /** Open one 「待补充」 draft as the conversation's live card. */
+  async focusConversation(taskPublicId: string, expectedVersion: number): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/focus', {
+      task_public_id: taskPublicId, expected_version: expectedVersion
+    })
     return ConversationReplySchema.parse(payload)
   },
   async getTask(publicId: string): Promise<AssistantTaskView> {
