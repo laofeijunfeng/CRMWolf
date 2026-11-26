@@ -111,6 +111,8 @@ interface LostSend {
   /** The card shows its own not-saved banner, so the composer stays quiet. */
   cardNotice: boolean
   onNotSaved: () => void
+  /** The server confirmed it landed after the response was lost. */
+  onAccepted?: (() => void) | undefined
 }
 type KeyedSend = Omit<LostSend, 'phase'>
 interface CommandDispatch {
@@ -862,7 +864,8 @@ const submit = async (
     if (noticeKey !== null && choice !== null) interactionNotices.value[noticeKey] = { kind: 'failed', choice, clientRequestId }
   }
   const dispatched = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText, {
-    key: clientRequestId, fingerprint, cardNotice: noticeKey !== null && choice !== null, onNotSaved
+    key: clientRequestId, fingerprint, cardNotice: noticeKey !== null && choice !== null, onNotSaved,
+    onAccepted: () => { releaseAction(actionId) }
   })
   const outcome = dispatched.outcome
   // An unconfirmed send keeps its card held until 「查看结果」 settles it.
@@ -942,6 +945,7 @@ const readLostSend = async (lost: LostSend): Promise<CommandOutcome | null> => {
   // Still routing with no turn to follow yet: keep asking.
   if (status.state === 'running' && processingRecovery.value === null) return null
   lostSend.value = null
+  lost.onAccepted?.()
   if (processingRecovery.value !== null) void recoverProcessingTurn()
   else if (!canResumeConversation.value) resultPending.value = false
   return 'accepted'

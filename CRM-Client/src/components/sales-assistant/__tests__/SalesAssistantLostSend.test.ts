@@ -183,4 +183,43 @@ describe('SalesAssistant lost send response', () => {
     expect(button(wrapper, '查看结果')).toBeUndefined()
     expect(api.conversationCommand).toHaveBeenCalledTimes(1)
   })
+
+  it('releases a held text card once 查看结果 confirms the send landed', async () => {
+    const textWaiting: TaskWaiting = {
+      type: 'FIELD', field: 'content', question_id: 'q-text', prompt: '请补充内容', action_id: 'act-text', expected_version: 3,
+    }
+    const textTask: AssistantTaskView = { ...task, task_kind: 'customer_activity', waiting: textWaiting }
+    const textBlock = InteractionBlockSchema.parse({
+      id: 'b-text', type: 'interaction', interaction_id: 'q-text', interaction_type: 'text_input', state: 'ACTIVE',
+      prompt: '请补充内容', allow_blank: false, submit_label: '提交', submit_action_id: 'act-text', options: [],
+      fields: [{ key: 'text', label: '内容', field_type: 'textarea', required: true, default_value: '已沟通部署', min_length: 1, max_length: 10000, options: [] }],
+    })
+    const [reply] = formView.messages
+    if (reply?.ui === null || reply?.ui === undefined) throw new Error('missing reply ui')
+    const textView: ConversationView = {
+      ...formView, focused_task: textTask,
+      messages: [{ ...reply, text: '请补充内容', task: textTask, ui: { ...reply.ui, blocks: [textBlock] } }],
+    }
+    api.openConversation.mockResolvedValue(textView)
+    api.getConversation.mockResolvedValue(textView)
+    api.conversationCommand.mockRejectedValue(timeout())
+    api.conversationRequestStatus.mockRejectedValue(new Error('Network Error'))
+    wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await clickSubmit(wrapper)
+    await vi.advanceTimersByTimeAsync(LOST_SEND_WINDOW_MS)
+    await flushPromises()
+    expect(wrapper.find('[data-assistant-lost-send="unconfirmed"]').exists()).toBe(true)
+
+    // Saved, and the server still waits on the same card (it asks again).
+    api.conversationRequestStatus.mockResolvedValue(status('saved', textView))
+    const check = button(wrapper, '查看结果')
+    if (check === undefined) throw new Error('missing 查看结果')
+    await check.trigger('click')
+    await flushPromises()
+
+    expect(button(wrapper, '查看结果')).toBeUndefined()
+    expect(button(wrapper, '提交')?.attributes('disabled')).toBeUndefined()
+    expect(api.conversationCommand).toHaveBeenCalledTimes(1)
+  })
 })
