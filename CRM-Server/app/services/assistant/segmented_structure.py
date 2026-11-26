@@ -211,7 +211,15 @@ def _extend_attempt_deadline() -> None:
 
 
 async def _structure_segment(
-    db: Session, task: AssistantTask, structurer: KindStructurer, *, kind: str, chunk: str
+    db: Session,
+    task: AssistantTask,
+    structurer: KindStructurer,
+    *,
+    kind: str,
+    chunk: str,
+    reporter: ProgressReporter,
+    stage: TurnStage | None,
+    segment: tuple[int, int],
 ) -> StructureDraftResult:
     """Read one segment; a timeout gets one more full window, since a slow reply is not a wrong one."""
 
@@ -221,6 +229,8 @@ async def _structure_segment(
     except AssistantLLMError as exc:
         if exc.code is not AssistantFailureCode.UPSTREAM_TIMEOUT:
             raise
+    # A fresh report moves the overdue-turn sweeper's anchor (turns.close_overdue_turn) with the new window.
+    reporter.stage_start(stage, segment=segment)
     _extend_attempt_deadline()
     return await structurer.structure(db, team_id=task.team_id, kind=kind, user_text=chunk)
 
@@ -249,7 +259,9 @@ async def structure_in_segments(
             reporter.stage_start(stage, segment=segment)
             started = time.monotonic()
             try:
-                part = await _structure_segment(db, task, structurer, kind=kind, chunk=chunk)
+                part = await _structure_segment(
+                    db, task, structurer, kind=kind, chunk=chunk, reporter=reporter, stage=stage, segment=segment
+                )
             except Exception:
                 reporter.stage_failed(stage, segment=segment)
                 raise

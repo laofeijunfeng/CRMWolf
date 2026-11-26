@@ -166,15 +166,29 @@ async def test_a_timed_out_segment_is_read_once_more_before_the_turn_fails(db_se
 
     assert len(structurer.chunks) == total + 1
     assert structurer.chunks[2] == structurer.chunks[3]
-    assert "failed" not in [data["phase"] for _, data in reporter.drain() if data.get("stage") == "structure"]
+    events = [
+        (data["phase"], data["segment"]["index"]) for _, data in reporter.drain() if data.get("stage") == "structure"
+    ]
+    assert "failed" not in [phase for phase, _ in events]
+    # The retry reports again so the overdue-turn sweeper measures its window from the retry.
+    assert [phase for phase, index in events if index == 3] == ["start", "start", "done"]
     assert task.draft_json["content"]["status"] != "MISSING"
 
-    # A second timeout on the same segment ends the turn; saved segments stay for reprocessing.
+    # A second timeout on the same segment ends the turn; reprocessing resumes at that segment.
     structurer = SegmentStructurer(timeouts=frozenset({3, 4}))
     coordinator = AssistantCoordinator(Chooser(), structurer=structurer, quality_gate=PassGate())
+    task = _task(db_session)
     with pytest.raises(AssistantStageFailure):
-        await coordinator.handle_task(db_session, _task(db_session), AssistantInput(kind="text", text=text))
+        await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text=text))
     assert len(structurer.chunks) == 4
+    db_session.rollback()
+    task = db_session.get(AssistantTask, task.id)
+
+    task = (await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text=text))).task
+
+    assert structurer.chunks[4] == structurer.chunks[2]
+    assert len(structurer.chunks) == 4 + total - 2
+    assert task.draft_json["content"]["status"] != "MISSING"
 
 
 async def test_input_within_one_call_is_organized_once(db_session):  # noqa: F811
