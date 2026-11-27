@@ -184,7 +184,7 @@ def editable_activity_fields(draft: TaskDraft) -> dict[str, JsonValue]:
     if summary is None:
         minutes = draft.content_json.get("key_minutes")
         head = minutes[0] if isinstance(minutes, list) and minutes else draft.content_json.get("content")
-        summary = head[:300] if isinstance(head, str) and head else draft.content.value
+        summary = head[:4000] if isinstance(head, str) and head else draft.content.value
     channel = draft.channel_kind
     return {
         "communication_time": _time_value(draft, "communication_time"),
@@ -294,7 +294,7 @@ def apply_activity_edits(
                 ) if contacts[group]) if contacts is not None else None
             )
         else:
-            limit = {"summary": 300, "next_action": 4000, "channel_kind": 32}[field]
+            limit = {"summary": 4000, "next_action": 4000, "channel_kind": 32}[field]
             text = _text(field, raw, limit, optional=field in {"channel_kind", "next_action"})
             if text == old:
                 continue

@@ -91,6 +91,11 @@ const customerActivityApi = {
     return request.delete<{ message: string }>(`/v1/customer-activities/${activityId}`)
   },
 
+  retryActivityAI: (activityId: number): Promise<CustomerActivityResponse> => {
+    return request.post<CustomerActivityResponse>(`/v1/customer-activities/${activityId}/retry-ai`)
+      .then(normalizeActivity)
+  },
+
   getKinds: (): Promise<{ value: string; category: string; label: string; agent_schema: string; score_rule: string }[]> => {
     return request.get<{ value: string; category: string; label: string; agent_schema: string; score_rule: string }[]>('/v1/customer-activities/kinds')
   }

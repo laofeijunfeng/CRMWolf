@@ -98,6 +98,26 @@ class FakeProfileService:
             raise self.kick_error
 
 
+class FakeActivityAIJobService:
+    def __init__(self, *, requests=(), enqueue_error=None, kick_error=None) -> None:
+        self.requests = tuple(requests)
+        self.enqueue_error = enqueue_error
+        self.kick_error = kick_error
+        self.enqueue_calls: list[dict[str, int]] = []
+        self.kick_calls: list[str] = []
+
+    def enqueue_pending_migrated_for_customer(self, db, *, team_id: int, customer_id: int):
+        self.enqueue_calls.append({"team_id": team_id, "customer_id": customer_id})
+        if self.enqueue_error is not None:
+            raise self.enqueue_error
+        return self.requests
+
+    def kick(self, request) -> None:
+        self.kick_calls.append(request.job_public_id)
+        if self.kick_error is not None:
+            raise self.kick_error
+
+
 def _customer(*, industry):
     return SimpleNamespace(id=101, team_id=2, industry=industry, version=1)
 
@@ -108,6 +128,9 @@ def _coordinator(
     profile_error=None,
     enrichment_kick_error=None,
     profile_kick_error=None,
+    migrated_ai_requests=(),
+    migrated_ai_enqueue_error=None,
+    migrated_ai_kick_error=None,
     session_factory=None,
 ):
     job_service = FakeJobService(ensure_error=job_error, kick_error=enrichment_kick_error)
@@ -116,10 +139,16 @@ def _coordinator(
         prepare_error=profile_error,
         after_commit_profile_service=profile_service,
     )
+    activity_ai_job_service = FakeActivityAIJobService(
+        requests=migrated_ai_requests,
+        enqueue_error=migrated_ai_enqueue_error,
+        kick_error=migrated_ai_kick_error,
+    )
     coordinator = CustomerLifecyclePostCommitCoordinator(
         job_service=job_service,
         intelligence_service=intelligence,
         profile_refresh_service=profile_service,
+        activity_ai_job_service=activity_ai_job_service,
         session_factory=session_factory or FakeDb,
         settle_seconds=5,
         profile_gate_max_seconds=30,
@@ -129,6 +158,7 @@ def _coordinator(
         job_service=job_service,
         intelligence=intelligence,
         profile_service=profile_service,
+        activity_ai_job_service=activity_ai_job_service,
     )
 
 
@@ -370,3 +400,25 @@ def test_kick_never_raises_when_both_workers_fail():
 
     assert any("enrichment down" in item for item in warnings)
     assert any("profile down" in item for item in warnings)
+
+
+def test_prepare_and_kick_enqueues_migrated_activity_ai_jobs_for_lead_conversion():
+    from app.services.customer_activity_ai_job_service import CustomerActivityAIJobRequest
+
+    ai_req = CustomerActivityAIJobRequest(job_public_id="aaj_1", team_id=2)
+    coordinator, fakes = _coordinator(migrated_ai_requests=(ai_req,))
+
+    work = coordinator.prepare_in_transaction(
+        FakeDb(),
+        customer=_customer(industry="finance"),
+        actor_id="9",
+        trigger_type="customer_converted_from_lead",
+        source_lead_id=44,
+    )
+
+    assert work.migrated_activity_ai_jobs == (ai_req,)
+    assert fakes.activity_ai_job_service.enqueue_calls == [{"team_id": 2, "customer_id": 101}]
+
+    warnings = coordinator.kick(work)
+    assert warnings == ()
+    assert fakes.activity_ai_job_service.kick_calls == ["aaj_1"]

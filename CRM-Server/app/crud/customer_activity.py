@@ -320,8 +320,11 @@ class CustomerActivityCRUD:
                 source_content=lead_follow_up.content,
                 content_json=_json_dumps(content_json),
                 summary=self.build_summary(kind, content_json, lead_follow_up.content),
-                processing_status="COMPLETED",
-                processed_at=lead_follow_up.created_time,
+                processing_status="PENDING",
+                processing_error=None,
+                processed_at=None,
+                effectiveness_status="PENDING",
+                effectiveness_error_message=None,
                 next_follow_time=lead_follow_up.next_follow_time,
                 next_follow_time_source="MIGRATED" if lead_follow_up.next_follow_time else None,
                 next_action=lead_follow_up.next_action,
@@ -384,6 +387,11 @@ class CustomerActivityCRUD:
         """Persist one canonical structured-and-scored activity result."""
 
         activity = self._lock_current_activity(db, activity)
+        if activity.submission_source == CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value:
+            next_action = None
+            next_action_source = None
+            next_follow_time = None
+            next_follow_time_source = None
         resolved_summary = summary or self.build_summary(
             activity.activity_kind,
             content_json,
@@ -481,9 +489,9 @@ class CustomerActivityCRUD:
         if meta["category"] == "MEETING":
             minutes = content_json.get("key_minutes")
             if isinstance(minutes, list) and minutes:
-                return str(minutes[0])[:300]
+                return str(minutes[0])[:4000]
         content = content_json.get("content") if isinstance(content_json, dict) else None
-        return str(content or source_content or "")[:300]
+        return str(content or source_content or "")[:4000]
 
 
 customer_activity_crud = CustomerActivityCRUD()

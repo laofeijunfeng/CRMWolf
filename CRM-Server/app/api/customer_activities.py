@@ -33,7 +33,9 @@ from app.schemas.customer_activity import (
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.services.customer_activity_write_service import (
     CustomerActivityFinalization,
+    CustomerActivitySourceDeletedError,
     CustomerActivitySubmissionConflictError,
+    CustomerActivitySubmissionSourceError,
     CustomerActivityWriteResult,
     customer_activity_write_service,
 )
@@ -482,3 +484,32 @@ def delete_activity(
     )
     customer_activity_write_service.kick_delete(result)
     return MessageResponse(message="删除成功")
+
+
+@router.post(
+    "/{activity_id}/retry-ai",
+    response_model=CustomerActivityResponse,
+    summary="重新触发客户活动 AI 整理与评分",
+)
+def retry_activity_ai(
+    activity_id: int,
+    team_id: int = Depends(get_current_user_team),
+    current_user=Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    activity = customer_activity_crud.get_by_id(db, activity_id, team_id)
+    if not activity:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户活动不存在")
+    check_customer_activity_permission(activity.customer_id, team_id, current_user, db)
+    try:
+        result = customer_activity_write_service.retry_ai_processing(
+            db,
+            activity_id=activity_id,
+            team_id=team_id,
+        )
+    except CustomerActivitySourceDeletedError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (CustomerActivitySubmissionSourceError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    customer_activity_write_service.kick(result)
+    return _build_activity_response(db, result.activity, write_result=result)

@@ -158,6 +158,42 @@ let latestLoadRequestId = 0
 const detailScrollAreaRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
 let followUpScrollPending = false
 let followUpPollingTimer: number | null = null
+const FOLLOW_UP_POLL_INTERVAL_MS = 3000
+const FOLLOW_UP_POLL_MAX_ATTEMPTS = 20
+const retryingActivityIds = ref<number[]>([])
+
+const hasPendingFollowUpAI = (items: CustomerActivityResponse[]): boolean => {
+  return items.some((item) =>
+    item.processing_status === 'PENDING' ||
+    item.processing_status === 'PROCESSING' ||
+    item.effectiveness_status === 'PENDING' ||
+    item.effectiveness_status === 'GENERATING'
+  )
+}
+
+const scheduleFollowUpPolling = (customerId: string, attempt = 0): void => {
+  clearFollowUpPollingTimer()
+  if (
+    !props.visible ||
+    props.customerId !== customerId ||
+    attempt >= FOLLOW_UP_POLL_MAX_ATTEMPTS ||
+    !hasPendingFollowUpAI(followUps.value)
+  ) {
+    return
+  }
+  followUpPollingTimer = window.setTimeout(async () => {
+    followUpPollingTimer = null
+    if (!props.visible || props.customerId !== customerId) return
+    try {
+      const latest = await customerActivityApi.getActivities(customerId)
+      if (!props.visible || props.customerId !== customerId) return
+      followUps.value = latest
+    } catch {
+      // Ignore transient poll errors; next tick or manual refresh will recover
+    }
+    scheduleFollowUpPolling(customerId, attempt + 1)
+  }, FOLLOW_UP_POLL_INTERVAL_MS)
+}
 
 const clearFollowUpPollingTimer = (): void => {
   if (followUpPollingTimer !== null) {
@@ -484,6 +520,9 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       if (isCurrentPanelLoad(panel)) setPanelLoading(panel, false)
     })
 
+    if (isCurrentPanelLoad('followUps')) {
+      scheduleFollowUpPolling(customerId, 0)
+    }
     return Object.values(panelLoadSucceeded).every(Boolean)
   } catch (error) {
     if (loadRequestId !== latestLoadRequestId) return false
@@ -565,12 +604,7 @@ const handleFollowUpSuccess = async (): Promise<void> => {
     }
     const refreshed = await loadAllData(props.customerId)
     warnIfCustomerDetailRefreshFailed(refreshed, '客户活动更新')
-    followUpPollingTimer = window.setTimeout(() => {
-      followUpPollingTimer = null
-      if (props.visible && props.customerId !== null) {
-        void loadAllData(props.customerId)
-      }
-    }, 3000)
+    scheduleFollowUpPolling(props.customerId, 0)
   }
   emit('refresh')
 }
@@ -586,6 +620,23 @@ const handleFollowUpDelete = async (followUp: { id: number }): Promise<void> => 
     emit('refresh')
   } catch (error) {
     handleApiError(error, '删除客户活动')
+  }
+}
+
+const handleFollowUpProcess = async (followUp: { id: number }): Promise<void> => {
+  if (retryingActivityIds.value.includes(followUp.id)) return
+  retryingActivityIds.value = [...retryingActivityIds.value, followUp.id]
+  try {
+    const updated = await customerActivityApi.retryActivityAI(followUp.id)
+    followUps.value = followUps.value.map((item) => (item.id === updated.id ? updated : item))
+    toast.success('已重新提交 AI 整理')
+    if (props.customerId !== null) {
+      scheduleFollowUpPolling(props.customerId, 0)
+    }
+  } catch (error) {
+    handleApiError(error, '重新整理客户活动')
+  } finally {
+    retryingActivityIds.value = retryingActivityIds.value.filter((id) => id !== followUp.id)
   }
 }
 
@@ -1178,6 +1229,9 @@ onBeforeUnmount(() => {
               :current-user-id="String(userStore.userInfo?.id)"
               :show-header="false"
               :show-add="canCreateActivity"
+              render-markdown
+              :retrying-ids="retryingActivityIds"
+              @process="handleFollowUpProcess"
               @add="handleCreateFollowUp"
               @delete="handleFollowUpDelete"
             />

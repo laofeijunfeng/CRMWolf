@@ -1310,3 +1310,37 @@ it('renders read_only fields as non-editable reference blocks and excludes them 
     ['act_supplement', { remark_append: '下周三技术评审', email: 'sun@ruihu.example' }],
   ])
 })
+
+it('renders structured Markdown in confirm_activity_write summary fact safely', () => {
+  const block = InteractionBlockSchema.parse({
+    id: 'b_interaction_activity_md',
+    type: 'interaction',
+    interaction_id: 'int_activity_md',
+    interaction_type: 'confirmation',
+    business_action: 'confirm_activity_write',
+    selection_mode: 'single',
+    state: 'ACTIVE',
+    prompt: '确认后写入这条客户活动？',
+    fields: [],
+    options: [
+      { value: 'confirm', label: '确认写入' },
+      { value: 'cancel', label: '取消' },
+    ],
+    submit_label: '确认写入',
+    submit_action_id: 'act_confirm_activity',
+    facts: [
+      { key: 'customer', label: '客户', value: '星辰科技', group: 'write' },
+      {
+        key: 'summary',
+        label: '沟通内容',
+        value: '### 沟通要点\n- **预算确认**：50 万\n<script>alert(1)</script>',
+        group: 'write',
+      },
+    ],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+  const summary = wrapper.get('[data-activity-summary]')
+  expect(summary.find('h3').text()).toBe('沟通要点')
+  expect(summary.find('strong').text()).toBe('预算确认')
+  expect(summary.html()).not.toContain('<script>')
+})

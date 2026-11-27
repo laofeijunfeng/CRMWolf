@@ -3,6 +3,7 @@ import { AlertCircle, Check, ChevronRight, Circle, Info, LoaderCircle } from 'lu
 import { computed, nextTick, ref, watch } from 'vue'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
+import ActivityMarkdownContent from '@/components/ActivityMarkdownContent.vue'
 import SegmentedChoiceControl from '@/components/crmwolf/SegmentedChoiceControl.vue'
 import InputField from '@/components/crmwolf/InputField.vue'
 import TextareaField from '@/components/crmwolf/TextareaField.vue'
@@ -854,7 +855,9 @@ const submit = async (): Promise<void> => {
         <span class="text-muted-foreground" aria-hidden="true">/</span>
         <span class="text-muted-foreground">客户活动</span>
       </p>
-      <p v-if="activityFact('summary')" class="m-0 text-body text-foreground" data-activity-summary>{{ activityFact('summary')?.value }}</p>
+      <div v-if="activityFact('summary')" data-activity-summary>
+        <ActivityMarkdownContent :content="activityFact('summary')?.value ?? ''" />
+      </div>
       <dl
         v-if="activityFact('next_action') || activityFact('customer_commitment') || activityFact('next_follow_time') || activityKindFact"
         class="m-0 grid gap-space-1 border-t border-border pt-space-3"

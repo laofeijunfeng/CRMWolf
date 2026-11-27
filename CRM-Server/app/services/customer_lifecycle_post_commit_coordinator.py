@@ -10,6 +10,11 @@ from typing import TYPE_CHECKING, Literal
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.services.customer_activity_ai_job_service import (
+    CustomerActivityAIJobRequest,
+    CustomerActivityAIJobService,
+    customer_activity_ai_job_service,
+)
 from app.services.customer_business_object_intelligence_service import (
     CustomerBusinessObjectIntelligenceService,
     customer_business_object_intelligence_service,
@@ -49,7 +54,7 @@ class CustomerLifecyclePostCommitWork:
     profile_request: CustomerIntelligenceCommittedEventRequest | None
     warnings: tuple[str, ...] = ()
     profile_kick_pending: bool = True
-
+    migrated_activity_ai_jobs: tuple[CustomerActivityAIJobRequest, ...] = ()
 
 class CustomerLifecyclePostCommitCoordinator:
     """Register independent durable receipts before or immediately after commit."""
@@ -60,6 +65,7 @@ class CustomerLifecyclePostCommitCoordinator:
         job_service: CustomerEnrichmentJobService | object | None = None,
         intelligence_service: CustomerBusinessObjectIntelligenceService | object | None = None,
         profile_refresh_service: CustomerIntelligenceRefreshService | object | None = None,
+        activity_ai_job_service: CustomerActivityAIJobService | object | None = None,
         session_factory: Callable[[], Session] = SessionLocal,
         settle_seconds: int | None = None,
         profile_gate_max_seconds: int | None = None,
@@ -70,6 +76,7 @@ class CustomerLifecyclePostCommitCoordinator:
         self.job_service = job_service or customer_enrichment_job_service
         self.intelligence_service = intelligence_service or customer_business_object_intelligence_service
         self.profile_refresh_service = profile_refresh_service or customer_intelligence_refresh_service
+        self.activity_ai_job_service = activity_ai_job_service or customer_activity_ai_job_service
         self.field_registry = field_registry or CustomerEnrichmentFieldRegistry()
         self._session_factory = session_factory
         self.settle_seconds = max(
@@ -109,7 +116,7 @@ class CustomerLifecyclePostCommitCoordinator:
         warnings: list[str] = []
         enrichment_request = None
         profile_request = None
-
+        migrated_activity_ai_jobs: tuple[CustomerActivityAIJobRequest, ...] = ()
         if self._fields_missing(customer):
             try:
                 with self._savepoint(db):
@@ -137,9 +144,18 @@ class CustomerLifecyclePostCommitCoordinator:
             warnings.append(self._warning("客户档案刷新登记失败", exc))
             logger.exception("客户档案刷新登记失败\uff0c将由对账任务补偿")
 
+        if trigger_type == "customer_converted_from_lead":
+            try:
+                with self._savepoint(db):
+                    migrated_activity_ai_jobs = self._enqueue_migrated_activity_ai_jobs(db, customer=customer)
+            except Exception as exc:
+                warnings.append(self._warning("迁移客户活动 AI 整理登记失败", exc))
+                logger.exception("迁移客户活动 AI 整理登记失败，将由恢复任务补偿")
+
         return CustomerLifecyclePostCommitWork(
             enrichment_request=enrichment_request,
             profile_request=profile_request,
+            migrated_activity_ai_jobs=migrated_activity_ai_jobs,
             warnings=tuple(warnings),
         )
 
@@ -154,7 +170,7 @@ class CustomerLifecyclePostCommitCoordinator:
         warnings: list[str] = []
         enrichment_request = None
         profile_request = None
-
+        migrated_activity_ai_jobs: tuple[CustomerActivityAIJobRequest, ...] = ()
         if self._fields_missing(customer):
             db = None
             try:
@@ -187,9 +203,25 @@ class CustomerLifecyclePostCommitCoordinator:
             warnings.append(self._warning("客户档案刷新登记失败", exc))
             logger.exception("提交后客户档案刷新登记失败\uff0c将由对账任务补偿")
 
+        if trigger_type == "customer_converted_from_lead":
+            db = None
+            try:
+                db = self._session_factory()
+                migrated_activity_ai_jobs = self._enqueue_migrated_activity_ai_jobs(db, customer=customer)
+                db.commit()
+            except Exception as exc:
+                if db is not None:
+                    db.rollback()
+                warnings.append(self._warning("迁移客户活动 AI 整理登记失败", exc))
+                logger.exception("提交后迁移客户活动 AI 整理登记失败，将由恢复任务补偿")
+            finally:
+                if db is not None:
+                    db.close()
+
         return CustomerLifecyclePostCommitWork(
             enrichment_request=enrichment_request,
             profile_request=profile_request,
+            migrated_activity_ai_jobs=migrated_activity_ai_jobs,
             profile_kick_pending=False,
             warnings=tuple(warnings),
         )
@@ -217,7 +249,30 @@ class CustomerLifecyclePostCommitCoordinator:
                     "客户档案刷新唤醒失败\uff0c将由恢复任务执行: request=%s",
                     work.profile_request.request_id,
                 )
+        for ai_job_request in work.migrated_activity_ai_jobs:
+            try:
+                self.activity_ai_job_service.kick(ai_job_request)
+            except Exception as exc:
+                warnings.append(self._warning("迁移客户活动 AI 整理唤醒失败", exc))
+                logger.exception(
+                    "迁移客户活动 AI 整理唤醒失败，将由恢复任务执行: job=%s",
+                    ai_job_request.job_public_id,
+                )
         return tuple(warnings)
+
+    def _enqueue_migrated_activity_ai_jobs(
+        self,
+        db: Session,
+        *,
+        customer: object,
+    ) -> tuple[CustomerActivityAIJobRequest, ...]:
+        team_id = self._required_positive_int(customer, "team_id")
+        customer_id = self._required_positive_int(customer, "id")
+        return self.activity_ai_job_service.enqueue_pending_migrated_for_customer(
+            db,
+            team_id=team_id,
+            customer_id=customer_id,
+        )
 
     def _ensure_enrichment(
         self,

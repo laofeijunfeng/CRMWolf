@@ -476,6 +476,9 @@ class CustomerActivityWriteService:
                 },
             )
 
+        is_cutover_migration = (
+            current.submission_source == CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value
+        )
         result = self._write(
             db,
             mutate=mutate,
@@ -484,9 +487,81 @@ class CustomerActivityWriteService:
             actor_id=actor_id,
             durable_work_policy=CustomerActivityDurableWorkPolicy.ALWAYS,
             previous_revision=expected_activity_revision,
+            enqueue_post_commit=not is_cutover_migration,
             before_commit=complete_ai_job,
         )
         return replace(result, ai_job=request)
+
+    def retry_ai_processing(
+        self,
+        db: Session,
+        *,
+        activity_id: int,
+        team_id: int,
+    ) -> CustomerActivityWriteResult:
+        """Re-enqueue AI structuring and evaluation for one failed form or migrated activity."""
+
+        try:
+            current = self.activity_crud.get_by_id(db, activity_id, team_id)
+            if current is None:
+                raise CustomerActivitySourceDeletedError("客户活动不存在")
+            current = self.activity_crud._lock_current_activity(db, current)
+            if current.submission_source not in {
+                CustomerActivitySubmissionSource.FORM.value,
+                CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value,
+            }:
+                raise CustomerActivitySubmissionSourceError(
+                    "仅手动录入或线索转化迁移的客户活动支持重新整理"
+                )
+
+            processing_status = str(current.processing_status or "")
+            effectiveness_status = str(current.effectiveness_status or "")
+            is_failed = (
+                processing_status == CustomerActivityProcessingStatus.FAILED.value
+                or effectiveness_status == CustomerActivityEffectivenessStatus.FAILED.value
+            )
+            if not is_failed:
+                if processing_status in {
+                    CustomerActivityProcessingStatus.PENDING.value,
+                    CustomerActivityProcessingStatus.PROCESSING.value,
+                } or effectiveness_status in {
+                    CustomerActivityEffectivenessStatus.PENDING.value,
+                    CustomerActivityEffectivenessStatus.GENERATING.value,
+                }:
+                    return CustomerActivityWriteResult(
+                        activity=current,
+                        activity_revision=int(current.activity_revision or 1),
+                        post_commit_job=None,
+                        customer_intelligence_request=None,
+                    )
+                raise ValueError("当前客户活动已完成整理，无需重新整理")
+
+            self.ai_job_crud.mark_unfinished_skipped_for_activity(
+                db,
+                team_id=team_id,
+                activity_id=int(current.id),
+                reason="SUPERSEDED_BY_RETRY",
+                commit=False,
+            )
+            current.activity_revision = int(current.activity_revision or 1) + 1
+            current.processing_status = CustomerActivityProcessingStatus.PENDING.value
+            current.processing_error = None
+            current.effectiveness_status = CustomerActivityEffectivenessStatus.PENDING.value
+            current.effectiveness_error_message = None
+            db.flush()
+            ai_job = self.ai_job_service.enqueue_in_transaction(db, activity=current)
+            db.commit()
+            db.refresh(current)
+            return CustomerActivityWriteResult(
+                activity=current,
+                activity_revision=int(current.activity_revision or 1),
+                post_commit_job=None,
+                customer_intelligence_request=None,
+                ai_job=ai_job,
+            )
+        except Exception:
+            db.rollback()
+            raise
 
 
     def _apply_finalization(
@@ -497,24 +572,29 @@ class CustomerActivityWriteService:
         finalization: CustomerActivityFinalization,
         increment_revision: bool,
     ) -> CustomerActivity:
-        next_action = finalization.next_action
-        next_action_source = finalization.next_action_source
-        if next_action is not None and not can_apply_ai_extracted_value(
-            current_value=activity.next_action,
-            current_source=getattr(activity, "next_action_source", None),
-        ):
+        if activity.submission_source == CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value:
             next_action = None
             next_action_source = None
-
-        next_follow_time = finalization.next_follow_time
-        next_follow_time_source = finalization.next_follow_time_source
-        if next_follow_time is not None and not can_apply_ai_extracted_value(
-            current_value=activity.next_follow_time,
-            current_source=getattr(activity, "next_follow_time_source", None),
-        ):
             next_follow_time = None
             next_follow_time_source = None
+        else:
+            next_action = finalization.next_action
+            next_action_source = finalization.next_action_source
+            if next_action is not None and not can_apply_ai_extracted_value(
+                current_value=activity.next_action,
+                current_source=getattr(activity, "next_action_source", None),
+            ):
+                next_action = None
+                next_action_source = None
 
+            next_follow_time = finalization.next_follow_time
+            next_follow_time_source = finalization.next_follow_time_source
+            if next_follow_time is not None and not can_apply_ai_extracted_value(
+                current_value=activity.next_follow_time,
+                current_source=getattr(activity, "next_follow_time_source", None),
+            ):
+                next_follow_time = None
+                next_follow_time_source = None
         return self.activity_crud.apply_finalization(
             db,
             activity,
@@ -650,6 +730,7 @@ class CustomerActivityWriteService:
         actor_id: str | None,
         durable_work_policy: CustomerActivityDurableWorkPolicy,
         previous_revision: int | None = None,
+        enqueue_post_commit: bool = True,
         enqueue_opportunity_suggestion: bool = False,
         before_commit: CustomerActivityBeforeCommit | None = None,
     ) -> CustomerActivityWriteResult:
@@ -674,12 +755,13 @@ class CustomerActivityWriteService:
             intelligence_request = None
             opportunity_suggestion_job = None
             if should_enqueue:
-                post_commit_job = self.post_commit_job_service.enqueue_in_transaction(
-                    db,
-                    activity=activity,
-                    trigger_type=post_commit_trigger_type,
-                    actor_id=actor_id,
-                )
+                if enqueue_post_commit:
+                    post_commit_job = self.post_commit_job_service.enqueue_in_transaction(
+                        db,
+                        activity=activity,
+                        trigger_type=post_commit_trigger_type,
+                        actor_id=actor_id,
+                    )
                 intelligence_request = self._enqueue_customer_intelligence(
                     db,
                     activity=activity,

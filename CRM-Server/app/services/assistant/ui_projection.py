@@ -987,7 +987,7 @@ def _activity_facts(preview: ActivityPreview, *, editable: bool) -> list[Interac
     _add_fact(facts, "customer", "客户", preview.customer_name, group="write")
     if preview.title and preview.title != kind_label:
         _add_fact(facts, "title", "标题", preview.title, group="write")
-    _add_fact(facts, "summary", "摘要", preview.summary, group="write")
+    _add_fact(facts, "summary", "摘要", preview.summary, group="write", preserve_markdown=True)
     participants = _participants(preview.content_json)
     _add_fact(facts, "participants", "参会角色", participants, group="write")
     _add_communication_time_fact(facts, preview.content_json)
@@ -1689,10 +1689,11 @@ def _add_fact(
     status_label: str | None = None,
     source: str | None = None,
     options: list[InteractionOption] | None = None,
+    preserve_markdown: bool = False,
 ) -> None:
     if value is None:
         return
-    text = _plain(value)
+    text = value.strip() if preserve_markdown else _plain(value)
     if not text:
         return
     facts.append(

@@ -24,6 +24,16 @@
         <div class="follow-up-body">
           <div class="follow-up-content-row">
             <div
+              v-if="props.renderMarkdown"
+              class="follow-up-content-cell follow-up-content-cell--markdown"
+            >
+              <ActivityMarkdownContent
+                :content="getPrimaryContent(followUp)"
+                :collapsible="true"
+              />
+            </div>
+            <div
+              v-else
               class="follow-up-content-cell"
               :class="{
                 'is-expandable': hasContentOverflow(followUp.id),
@@ -117,11 +127,13 @@
                 variant="ghost"
                 size="icon-sm"
                 class="process-btn"
+                :disabled="isRetrying(followUp.id)"
                 :aria-label="`重新整理 ${formatTime(followUp.created_time)} 的${recordLabel}`"
                 title="重新整理"
                 @click.stop="handleProcess(followUp)"
               >
-                <RefreshCw class="process-icon" />
+                <Loader2 v-if="isRetrying(followUp.id)" class="process-icon effectiveness-icon-loading" />
+                <RefreshCw v-else class="process-icon" />
               </Button>
               <Button
                 v-if="canDelete(followUp)"
@@ -144,8 +156,36 @@
             </div>
           </div>
 
-          <div v-if="followUp.processing_status === 'FAILED'" class="processing-error">
-            整理失败，已保留原文
+          <div
+            v-if="isProcessing(followUp)"
+            class="processing-status"
+            data-activity-processing-status="pending"
+          >
+            <Loader2 class="processing-spinner" aria-hidden="true" />
+            <span>AI 正在整理与评分…</span>
+          </div>
+          <div
+            v-else-if="isFailed(followUp)"
+            class="processing-error-row"
+            data-activity-processing-status="failed"
+          >
+            <span class="processing-error">
+              {{ followUp.processing_status === 'FAILED' ? '整理失败，已保留原文' : 'AI 评分失败，可重新整理' }}
+            </span>
+            <Button
+              v-if="canProcess(followUp)"
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="processing-retry-btn"
+              :disabled="isRetrying(followUp.id)"
+              data-activity-retry-btn
+              @click.stop="handleProcess(followUp)"
+            >
+              <Loader2 v-if="isRetrying(followUp.id)" class="processing-spinner" aria-hidden="true" />
+              <RefreshCw v-else class="processing-retry-icon" aria-hidden="true" />
+              <span>{{ isRetrying(followUp.id) ? '正在重新整理…' : '重新整理' }}</span>
+            </Button>
           </div>
 
           <HoverInfo side="bottom" align="start" content-class="follow-up-meta-hover-card">
@@ -193,6 +233,7 @@ import { CalendarClock, ChevronDown, ChevronUp, Loader2, Mail, MessageCircle, Me
 import { Button } from '@/components/ui/button'
 import { DataViewStatePanel, HoverInfo, type DataViewState } from '@/components/crmwolf'
 import { confirmDialog } from '@/utils/confirmDialog'
+import ActivityMarkdownContent from '@/components/ActivityMarkdownContent.vue'
 
 interface FollowUp {
   id: number
@@ -232,6 +273,8 @@ interface Props {
   currentUserId?: string
   recordLabel?: string
   allowProcess?: boolean
+  renderMarkdown?: boolean
+  retryingIds?: number[]
 }
 
 interface Emits {
@@ -242,7 +285,9 @@ interface Emits {
 const props = withDefaults(defineProps<Props>(), {
   currentUserId: '',
   recordLabel: '跟进记录',
-  allowProcess: false
+  allowProcess: false,
+  renderMarkdown: false,
+  retryingIds: () => []
 })
 const emit = defineEmits<Emits>()
 const recordLabel = props.recordLabel
@@ -358,11 +403,23 @@ const canDelete = (followUp: FollowUp): boolean => {
   return props.currentUserId !== undefined && props.currentUserId !== '' && creatorIdStr === currentUserIdStr
 }
 
+const isProcessing = (followUp: FollowUp): boolean => {
+  return followUp.processing_status === 'PENDING' || followUp.processing_status === 'PROCESSING'
+}
+
+const isFailed = (followUp: FollowUp): boolean => {
+  return followUp.processing_status === 'FAILED' || followUp.effectiveness_status === 'FAILED'
+}
+
+const isRetrying = (id: number): boolean => {
+  return props.retryingIds.includes(id)
+}
+
 const canProcess = (followUp: FollowUp): boolean => {
   return props.allowProcess === true &&
     followUp.customer_id !== undefined &&
     followUp.customer_id !== null &&
-    (followUp.processing_status === 'FAILED' || followUp.processing_status === 'PENDING')
+    isFailed(followUp)
 }
 
 const handleDelete = async (followUp: FollowUp): Promise<void> => {
@@ -380,6 +437,7 @@ const handleDelete = async (followUp: FollowUp): Promise<void> => {
 }
 
 const handleProcess = (followUp: FollowUp): void => {
+  if (isRetrying(followUp.id)) return
   emit('process', followUp)
 }
 
@@ -984,5 +1042,47 @@ const getMetaRows = (followUp: FollowUp): { label: string; value: string }[] => 
   to {
     transform: rotate(360deg);
   }
+}
+
+.follow-up-content-cell--markdown {
+  display: block;
+}
+
+.processing-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: var(--font-size-caption);
+  color: hsl(var(--muted-foreground));
+}
+
+.processing-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  animation: spin 1s linear infinite;
+}
+
+.processing-error-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.processing-retry-btn {
+  height: 24px !important;
+  padding: 0 8px !important;
+  font-size: var(--font-size-caption) !important;
+  color: hsl(var(--primary)) !important;
+  gap: 4px;
+}
+
+.processing-retry-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 </style>

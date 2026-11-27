@@ -65,7 +65,7 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
 - 顶层 content、next_action、next_follow_time_text 一律留空 ""，
   所有正文与下一步统一填写在 content_json 中，不要重复输出。
 - customer_name 只填原文明确出现的客户名称，没有则留空。
-- content_json 必须完整填写：content（覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实）、
+- content_json 必须完整填写：content（覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实；使用简洁清晰的结构化 Markdown：多要点时可用小标题、无序列表、加粗重点，简短 1-2 句输入保持简洁不强行扩写，若原文含 Markdown 则保留并优化其结构，禁止原始 HTML 标签）、
   customer_feedback、current_progress、risks、next_action（忠于原文，没有则留空）、
   next_action_absence_reason、next_follow_time_text；没有对应事实的字段也必须返回空值，不得省略。
 - next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，
@@ -105,7 +105,7 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
 
 规则：
 - customer_name 只填原文明确出现的客户（公司）名称，没有则留空。
-- meeting_subject 填会议主题；content 按发言人分组整理关键讨论、客户诉求、决策和承诺。
+- meeting_subject 填会议主题；content 按发言人或主题分组整理关键讨论、客户诉求、决策和承诺，使用简洁清晰的结构化 Markdown（如小标题、列表、加粗重点；简短记录保持简洁不强行扩写；禁止原始 HTML 标签）。
 - content_json 必须完整填写 meeting_subject、meeting_background、
   communication_context、participants（internal/customer）、key_minutes、
   qa_items、requirements、concerns_or_objections、risks、

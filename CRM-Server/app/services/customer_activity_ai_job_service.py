@@ -115,6 +115,28 @@ class CustomerActivityAIJobService:
         )
         return CustomerActivityAIJobRequest(job_public_id=str(job.public_id), team_id=int(job.team_id))
 
+    def enqueue_pending_migrated_for_customer(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        customer_id: int,
+    ) -> tuple[CustomerActivityAIJobRequest, ...]:
+        from app.models.customer_activity import CustomerActivity
+
+        activities = (
+            db.query(CustomerActivity)
+            .filter(
+                CustomerActivity.team_id == team_id,
+                CustomerActivity.customer_id == customer_id,
+                CustomerActivity.submission_source == CustomerActivitySubmissionSource.CUTOVER_MIGRATION.value,
+                CustomerActivity.processing_status == CustomerActivityProcessingStatus.PENDING.value,
+            )
+            .order_by(CustomerActivity.id.asc())
+            .all()
+        )
+        return tuple(self.enqueue_in_transaction(db, activity=activity) for activity in activities)
+
     async def run(self, request: CustomerActivityAIJobRequest) -> CustomerActivityAIJobRunResult:
         settings = get_settings()
         max_attempts = max(1, settings.CUSTOMER_ACTIVITY_AI_JOB_MAX_ATTEMPTS)

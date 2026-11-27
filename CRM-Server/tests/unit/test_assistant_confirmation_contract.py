@@ -1701,7 +1701,7 @@ def test_activity_edit_changes_only_typed_business_fields(db):
         ("communication_time", 20261120),
         ("participants", {"customer": [True]}),
         ("channel_kind", "ONLINE_MEETING"),
-        ("summary", "x" * 301),
+        ("summary", "x" * 4001),
     ],
 )
 def test_activity_edit_rejects_invalid_or_frozen_fields_atomically(db, field, value):

@@ -49,7 +49,7 @@ class ActivityStructuringAgent:
             payload = result.model_dump(mode="json")
         except AgentLangChainStructuredOutputError as exc:
             raise ActivityStructuringError(str(exc)) from exc
-        payload["summary"] = (payload.get("summary") or "")[:300] or None
+        payload["summary"] = (payload.get("summary") or "")[:4000] or None
         payload["title"] = (payload.get("title") or "").strip() or None
         payload["next_action"] = (payload.get("next_action") or "").strip() or None
         if category != "MEETING":
@@ -66,20 +66,25 @@ class ActivityStructuringAgent:
 - 必须保留所有有效事实和细节\uff0c不要为了简洁删除信息。
 - 可以去重、纠错、归类、补全字段名\uff0c但不能编造原文没有的信息。
 - 不确定的信息用空字符串、空数组或 null。
-- 输出必须符合结构化 schema\uff0c不要输出 Markdown 或解释文字。"""
+- summary 可使用简洁清晰的结构化 Markdown（如小标题、无序列表、加粗重点）组织多要点纪要；简短记录保持简洁，不要强行拆成冗长模板；禁止输出原始 HTML 标签。
+- 整体输出必须严格符合结构化 JSON schema，不要在 JSON 外包裹代码块或解释文字。"""
         return """你是 CRM 系统中的客户活动整理 Agent。
 
 任务\uff1a把用户原始客户活动内容整理成固定结构化数据。
 
 要求\uff1a
 - 忠于原意\uff0c不要编造。
-- content 是给 CRM 列表展示的业务正文\uff0c只写客户活动本身\uff0c不要写“活动类型、发生时间、已有下一步”等系统元信息。
-- content 要简洁但不能丢关键事实\uff1b不要只写“沟通了项目进展”这种空泛句子。
-- 可以去重、纠错、归类、调整语序\uff0c但不能删除客户反馈、当前进展、风险、承诺、下一步和时间。
-- 示例\uff1a原文“今天和睿狐科技的王总沟通了下项目进展\uff0c客户反馈还在立项评估阶段\uff0c先持续跟进\uff0c下周三再找王总确认进展”\uff0ccontent 应类似“客户反馈项目还在立项评估阶段\
-\uff0c先持续跟进。”\uff0cnext_action 应为“下周三找王总确认进展”。
+- content 与 summary 是给 CRM 列表展示的业务正文，只写客户活动本身，不要写“活动类型、发生时间、已有下一步”等系统元信息。
+- content 与 summary 使用简洁清晰的结构化 Markdown：
+  - 若原文较长或包含多个要点（如进展、反馈、风险、承诺），可使用小标题、无序列表或加粗重点提升可读性。
+  - 若原文简短（1-2 句话），保持简洁自然，不要为了套用格式而过度拆分或扩写。
+  - 若原文已经包含用户手写的 Markdown（如标题、列表、加粗、引用、代码块），保留并优化其 Markdown 结构，不要压平为纯文本。
+  - 禁止输出原始 HTML 标签（如 <script>、<div> 等）。
+- content 要简洁但不能丢关键事实；不要只写“沟通了项目进展”这种空泛句子。
+- 可以去重、纠错、归类、调整语序，但不能删除客户反馈、当前进展、风险、承诺、下一步和时间。
+- 示例：原文“今天和睿狐科技的王总沟通了下项目进展，客户反馈还在立项评估阶段，先持续跟进，下周三再找王总确认进展”，content 应类似“客户反馈项目还在立项评估阶段，先持续跟进。”，next_action 应为“下周三找王总确认进展”。
 - 不确定的信息用空字符串、空数组或 null。
-- 输出必须符合结构化 schema\uff0c不要输出 Markdown 或解释文字。"""
+- 整体输出必须严格符合结构化 JSON schema，不要在 JSON 外包裹代码块或解释文字。"""
 
     def _user_prompt(self, context: dict[str, Any]) -> str:
         activity = context["current_activity"]
@@ -101,11 +106,11 @@ class ActivityStructuringAgent:
             payload["content_json"] = {"content": ""}
             return
 
-        content = str(content_json.get("content") or "").strip()
-        content = re.sub("活动类型\uff1a[^。\uff1b;\\n]*[。\uff1b;\\n]?", "", content)
-        content = re.sub("发生时间\uff1a[^。\uff1b;\\n]*[。\uff1b;\\n]?", "", content)
-        content = re.sub("已有下一步[^。\uff1b;\\n]*[。\uff1b;\\n]?", "", content)
-        content_json["content"] = content.strip("\uff1b;。 \n\t")
+        content = str(content_json.get("content") or "").replace("\r\n", "\n").strip()
+        content = re.sub(r"活动类型：[^。\n]*[。\n]?", "", content)
+        content = re.sub(r"发生时间：[^。\n]*[。\n]?", "", content)
+        content = re.sub(r"。?已有下一步[^。\n]*[。\n]?", "", content)
+        content_json["content"] = content.strip(" \n\t")
 
 
 activity_structuring_agent = ActivityStructuringAgent()

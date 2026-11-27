@@ -41,13 +41,17 @@ interface Props {
   currentUserId?: string | undefined
   showHeader?: boolean
   showAdd?: boolean
+  renderMarkdown?: boolean
+  retryingIds?: number[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   currentUserId: undefined,
   showHeader: true,
-  showAdd: true
+  showAdd: true,
+  renderMarkdown: true,
+  retryingIds: () => []
 })
 
 const emit = defineEmits<{
@@ -113,6 +117,8 @@ const handleProcess = (followUp: FollowUp): void => {
         v-bind="props.currentUserId !== undefined ? { currentUserId: props.currentUserId } : {}"
         record-label="客户活动"
         allow-process
+        :render-markdown="props.renderMarkdown"
+        :retrying-ids="props.retryingIds"
         @delete="handleDelete"
         @process="handleProcess"
       />
