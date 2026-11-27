@@ -105,6 +105,30 @@ class ConversationService:
         conversation, created = crud.open_conversation(db, team_id=team_id, user_id=user_id)
         if created:
             crud.bootstrap_active(db, conversation)
+        focused = crud.owned_task(db, conversation, conversation.focused_task_public_id)
+        if focused is not None and activity_commit_is_unknown(focused) and focused.active_turn_id is None:
+            from sqlalchemy.orm import sessionmaker
+
+            from app.services.assistant.confirmation import reconcile_unknown_activity
+            from app.services.assistant.task_state import TaskStateConflictError
+
+            try:
+                reconciled = reconcile_unknown_activity(
+                    db,
+                    focused,
+                    actor_type="SYSTEM",
+                    actor_id=user_id,
+                    reason="conversation_open",
+                )
+                if reconciled.outcome in {"WRITTEN", "NOT_WRITTEN"}:
+                    db.commit()
+                    if reconciled.followup_turn_id is not None:
+                        schedule_turn(
+                            reconciled.followup_turn_id,
+                            factory=sessionmaker(bind=db.get_bind(), autoflush=False),
+                        )
+            except TaskStateConflictError:
+                db.rollback()
         return self.read(db, team_id=team_id, user_id=user_id)
 
     def read(self, db: Session, *, team_id: int, user_id: int, before: int | None = None) -> ConversationView:
@@ -188,7 +212,9 @@ class ConversationService:
         self, db: Session, conversation: AssistantConversation, row: AssistantConversationEntry
     ) -> list[ConversationMessage]:
         at = row.created_time.isoformat()
-        result = [ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at)]
+        result: list[ConversationMessage] = []
+        if row.user_text:
+            result.append(ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at))
         owned = crud.owned_task(db, conversation, row.task_public_id)
         if row.command_json.get("operation") == "legacy" and owned:
             result.extend(self._legacy_messages(db, conversation, row, owned))
@@ -198,6 +224,12 @@ class ConversationService:
             except ValidationError:
                 snapshot = None
             root_failure = is_root_failure_code(row.error_code)
+            reconcile_activity = (
+                not root_failure
+                and row.command_json.get("operation") == "reconcile_activity"
+                and snapshot is not None
+                and any(r.kind == "customer_activity" for r in snapshot.committed)
+            )
             result.append(
                 ConversationMessage(
                     id=f"{row.public_id}:reply",
@@ -209,9 +241,10 @@ class ConversationService:
                     boundary=ConversationBoundary(entry_id=row.public_id, prompt=row.reply_text)
                     if row.state == "CHOICE"
                     else None,
-                    outcome="failure" if root_failure else None,
+                    outcome="failure" if root_failure else "activity_written" if reconcile_activity else None,
                     error_code=row.error_code if root_failure else None,
                     retryable=bool(row.error_retryable) if root_failure else None,
+                    projection=self._activity_projection(snapshot) if reconcile_activity else None,
                 )
             )
         next_id = row.turn_public_id
@@ -350,8 +383,10 @@ class ConversationService:
     @staticmethod
     def _unavailable_messages(row: AssistantConversationEntry) -> list[ConversationMessage]:
         at = row.created_time.isoformat()
-        return [
-            ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at),
+        messages: list[ConversationMessage] = []
+        if row.user_text:
+            messages.append(ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at))
+        messages.append(
             ConversationMessage(
                 id=f"{row.public_id}:unavailable",
                 role="assistant",
@@ -360,8 +395,9 @@ class ConversationService:
                 outcome="failure",
                 error_code="INTERNAL_ERROR",
                 retryable=False,
-            ),
-        ]
+            )
+        )
+        return messages
 
     def _legacy_messages(
         self, db: Session, conversation: AssistantConversation, row: AssistantConversationEntry, task: AssistantTask

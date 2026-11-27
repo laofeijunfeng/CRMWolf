@@ -7,7 +7,7 @@ import type { AssistantTaskView, ConversationView } from '@/schemas/assistant-co
 
 const api = vi.hoisted(() => ({
   openConversation: vi.fn(), getConversation: vi.fn(), getTurn: vi.fn(),
-  conversationText: vi.fn(), retryTurn: vi.fn(), getTask: vi.fn(),
+  conversationText: vi.fn(), retryTurn: vi.fn(), getTask: vi.fn(), reconcileTask: vi.fn(),
 }))
 const stream = vi.hoisted(() => vi.fn())
 
@@ -242,6 +242,126 @@ describe('SalesAssistant failure recovery', () => {
     expect(stream).not.toHaveBeenCalled()
     expect(mounted.findAll('.justify-end')).toHaveLength(userBubbles)
     expect(stageRow(mounted, '整理活动内容')?.textContent).not.toContain('失败')
+  })
+
+  it('reconciles UNKNOWN_COMMIT_RESULT via reconcileTask when clicking 刷新状态 and restores confirmation on NOT_WRITTEN', async () => {
+    const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
+    const restoredWaiting: AssistantTaskView['waiting'] = {
+      type: 'CONFIRMATION',
+      field: 'activity_write',
+      question_id: 'q_confirm_task-1_3',
+      action_id: 'awa_restored',
+      expected_version: 3,
+      prompt: '请确认写入客户活动。',
+      confirmation_payload: {
+        kind: 'activity_write',
+        preview: {
+          customer_name: '测试客户',
+          activity_kind: 'PHONE_FOLLOW_UP',
+          summary: '讨论项目推进',
+          content_json: {},
+          source_content: '今天和客户讨论了项目',
+          score: 80,
+          score_reason: '记录完整',
+          next_action: '周三回访',
+        },
+      },
+    }
+    const restoredTask = task({ version: 3, reconciliation_required: false, waiting: restoredWaiting })
+    api.reconcileTask.mockResolvedValue({
+      outcome: 'NOT_WRITTEN',
+      task: restoredTask,
+      message: '已核对：上次确认未写入客户活动，已恢复确认卡片，可继续确认、修改或取消。',
+      followup_turn_id: null,
+    })
+    api.getConversation.mockResolvedValue(conversation(restoredTask))
+
+    const mounted = await open(lockedTask)
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
+    await click(mounted, '刷新状态')
+
+    expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
+    expect(api.getTurn).not.toHaveBeenCalled()
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
+  })
+
+  it('follows the spawned followup turn when reconcileTask proves WRITTEN', async () => {
+    const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
+    const followupTask = task({
+      version: 3,
+      reconciliation_required: false,
+      committed: [{ kind: 'customer_activity', public_id: '9001', customer_id: 1, customer_public_id: 'cus_1' }],
+      processing_turn_id: 'turn-followup',
+      processing_turn_status: 'RUNNING',
+    })
+    const settledTask = task({
+      version: 4,
+      status: 'COMPLETED',
+      reconciliation_required: false,
+      committed: [{ kind: 'customer_activity', public_id: '9001', customer_id: 1, customer_public_id: 'cus_1' }],
+    })
+    api.reconcileTask.mockResolvedValue({
+      outcome: 'WRITTEN',
+      task: followupTask,
+      message: '已核对：客户活动已写入，正在继续后续整理。',
+      followup_turn_id: 'turn-followup',
+    })
+    api.getConversation
+      .mockResolvedValueOnce(conversation(followupTask))
+      .mockResolvedValue(conversation(settledTask))
+    api.getTurn.mockResolvedValue({
+      turn_id: 'turn-followup',
+      status: 'SUCCEEDED',
+      lease_version: 1,
+      reprocess_allowed: false,
+      events: [{ seq: 1, event: 'stage', data: { stage: 'propose', phase: 'done', ms: 50 } }],
+      task: settledTask,
+    })
+
+    const mounted = await open(lockedTask)
+    await click(mounted, '刷新状态')
+
+    expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
+    expect(api.getTurn).toHaveBeenCalledWith('task-1', 'turn-followup', 0)
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('stays fail-closed and shows notice when reconcileTask returns STILL_UNKNOWN or errors', async () => {
+    const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
+    api.reconcileTask
+      .mockResolvedValueOnce({
+        outcome: 'STILL_UNKNOWN',
+        task: lockedTask,
+        message: '客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。',
+        followup_turn_id: null,
+      })
+      .mockRejectedValueOnce(new Error('network down'))
+    api.getConversation.mockResolvedValue(conversation(lockedTask))
+
+    const mounted = await open(lockedTask)
+    await click(mounted, '刷新状态')
+    expect(mounted.text()).toContain('客户活动写入结果待核对')
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
+    expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
+
+    await click(mounted, '刷新状态')
+    expect(mounted.text()).toContain('核对请求暂时失败，请稍后再点刷新状态。')
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('does not re-lock a reconciled task when replaying a historical UNKNOWN_COMMIT_RESULT turn', async () => {
+    const reconciledTask = task({ version: 3, reconciliation_required: false, waiting: null })
+    api.getTurn.mockResolvedValue(failedTurn({
+      events: [{ seq: 1, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '结果待核对', retryable: false } }],
+      reprocess_allowed: false,
+      task: reconciledTask,
+    }))
+    api.getConversation.mockResolvedValue(conversation(reconciledTask))
+
+    const mounted = await open(task({ version: 2, processing_turn_id: 'turn-1', processing_turn_status: 'RUNNING', reconciliation_required: false }))
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
   })
 })
 

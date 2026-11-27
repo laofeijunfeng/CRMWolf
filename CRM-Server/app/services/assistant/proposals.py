@@ -809,7 +809,7 @@ def list_unresolved_command_claims(
         .join(AssistantTask, AssistantTask.id == AssistantAction.task_id)
         .filter(
             AssistantAction.team_id == team_id,
-            AssistantAction.action == "proposal_command_claim",
+            AssistantAction.action.in_(("proposal_command_claim", "activity_commit_unknown")),
         )
     )
     if owner_user_id is not None:
@@ -818,9 +818,36 @@ def list_unresolved_command_claims(
     unresolved: list[dict[str, object]] = []
     for row in query.all():
         result = row.result_json or {}
+        task = db.get(AssistantTask, row.task_id)
+        if row.action == "activity_commit_unknown":
+            if (
+                task is None
+                or task.status != AssistantTaskStatus.ACTIVE
+                or task.last_error_code != "UNKNOWN_COMMIT_RESULT"
+                or result.get("status") in {"RECONCILED", "RECONCILED_NOT_WRITTEN"}
+            ):
+                continue
+            frozen = (task.authority_json or {}).get("frozen_activity_command")
+            submission_id = result.get("submission_id") or (
+                frozen.get("submission_id") if isinstance(frozen, dict) else None
+            )
+            updated_at = getattr(row, "updated_time", None)
+            unresolved.append(
+                {
+                    "proposal_key": None,
+                    "kind": "customer_activity",
+                    "status": "UNKNOWN",
+                    "submission_id": submission_id,
+                    "task_public_id": task.public_id,
+                    "action_public_id": row.public_id,
+                    "created_time": row.created_time.isoformat() if row.created_time else None,
+                    "last_checked_at": updated_at.isoformat() if updated_at else None,
+                }
+            )
+            continue
         if result.get("status") not in statuses:
             continue
-        task = db.get(AssistantTask, row.task_id)
+        updated_at = getattr(row, "updated_time", None)
         unresolved.append(
             {
                 "proposal_key": result.get("proposal_key"),
@@ -829,7 +856,7 @@ def list_unresolved_command_claims(
                 "task_public_id": task.public_id if task is not None else None,
                 "action_public_id": row.public_id,
                 "created_time": row.created_time.isoformat() if row.created_time else None,
-                "last_checked_at": row.updated_time.isoformat() if getattr(row, "updated_time", None) else None,
+                "last_checked_at": updated_at.isoformat() if updated_at else None,
             }
         )
     return unresolved

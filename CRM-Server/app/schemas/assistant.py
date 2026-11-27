@@ -202,3 +202,12 @@ class SubmitInputResponse(BaseModel):
 
     task: AssistantTaskView
     message: str = Field(min_length=1, max_length=2000)
+
+
+class AssistantTaskReconcileResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["WRITTEN", "NOT_WRITTEN", "STILL_UNKNOWN", "NOOP"]
+    task: AssistantTaskView
+    message: str = Field(min_length=1, max_length=2000)
+    followup_turn_id: str | None = None

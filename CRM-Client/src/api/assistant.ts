@@ -81,6 +81,18 @@ const AssistantTurnSchema = z.object({
 
 export type AssistantTurn = z.infer<typeof AssistantTurnSchema>
 
+const AssistantTaskReconcileOutcomeSchema = z.enum(['WRITTEN', 'NOT_WRITTEN', 'STILL_UNKNOWN', 'NOOP'])
+
+const AssistantTaskReconcileResponseSchema = z.object({
+  outcome: AssistantTaskReconcileOutcomeSchema,
+  task: AssistantTaskViewSchema,
+  message: z.string().min(1).max(2000),
+  followup_turn_id: z.string().nullable().optional().default(null),
+}).strict()
+
+export type AssistantTaskReconcileOutcome = z.infer<typeof AssistantTaskReconcileOutcomeSchema>
+export type AssistantTaskReconcileResponse = z.infer<typeof AssistantTaskReconcileResponseSchema>
+
 export type SseSplitter = ((chunk: string) => string[]) & { flush(): string[] }
 
 /** Empty build args must follow the axios rule and stay on the `/api` proxy. */
@@ -372,5 +384,12 @@ export const assistantApi = {
       { expected_lease_version: expectedLeaseVersion, after_seq: afterSeq }
     )
     return AssistantTurnSchema.parse(payload)
+  },
+  async reconcileTask(publicId: string): Promise<AssistantTaskReconcileResponse> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
+    const payload: unknown = await request.post(
+      `/v1/assistant/tasks/${encodeURIComponent(publicId)}/reconcile`
+    )
+    return AssistantTaskReconcileResponseSchema.parse(payload)
   },
 }

@@ -20,6 +20,7 @@ from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_turn import AssistantTurn
 from app.models.team import UserTeam
 from app.schemas.assistant import (
+    AssistantTaskReconcileResponse,
     AssistantTaskView,
     AssistantTurnEventView,
     AssistantTurnView,
@@ -273,6 +274,62 @@ async def change_kind(
     return task_view(updated, db)
 
 
+@router.post("/tasks/{public_id}/reconcile", response_model=AssistantTaskReconcileResponse)
+def reconcile_task(
+    public_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> AssistantTaskReconcileResponse:
+    """Deterministically reconcile an UNKNOWN_COMMIT_RESULT task via read-only readback."""
+    from sqlalchemy.orm import sessionmaker
+
+    from app.services.assistant.confirmation import RECONCILE_NOOP_MESSAGE, reconcile_unknown_activity
+    from app.services.assistant.task_operations import activity_commit_is_unknown
+    from app.services.assistant.task_state import TaskStateConflictError
+
+    task = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
+    try:
+        result = reconcile_unknown_activity(
+            db,
+            task,
+            actor_type="USER",
+            actor_id=int(current_user.id),
+            reason="user_refresh",
+        )
+        if result.outcome in {"WRITTEN", "NOT_WRITTEN"}:
+            db.commit()
+            if result.followup_turn_id is not None:
+                schedule_turn(
+                    result.followup_turn_id,
+                    factory=sessionmaker(bind=db.get_bind(), autoflush=False),
+                )
+    except TaskStateConflictError as exc:
+        db.rollback()
+        db.expire_all()
+        latest = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
+        if not activity_commit_is_unknown(latest):
+            return AssistantTaskReconcileResponse(
+                outcome="NOOP",
+                task=task_view(latest, db),
+                message=RECONCILE_NOOP_MESSAGE,
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "STATE_CONFLICT",
+                "message": str(exc),
+                "task": task_view(latest, db).model_dump(mode="json"),
+            },
+        ) from exc
+    return AssistantTaskReconcileResponse(
+        outcome=result.outcome,
+        task=task_view(result.task, db),
+        message=result.message,
+        followup_turn_id=result.followup_turn_public_id,
+    )
+
+
 @router.get("/tasks/{public_id}/actions", response_model=list[dict[str, object]])
 async def list_task_actions(
     public_id: str,
@@ -362,12 +419,48 @@ async def adjudicate_unknown_command(
         .filter(
             AssistantAction.public_id == action_public_id,
             AssistantAction.team_id == team_id,
-            AssistantAction.action == "proposal_command_claim",
+            AssistantAction.action.in_(("proposal_command_claim", "activity_commit_unknown")),
         )
         .one_or_none()
     )
     if action is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="命令记录不存在")
+
+    if action.action == "activity_commit_unknown":
+        from sqlalchemy.orm import sessionmaker
+
+        from app.services.assistant.confirmation import reconcile_unknown_activity
+
+        if (action.result_json or {}).get("status") in {"RECONCILED", "RECONCILED_NOT_WRITTEN"}:
+            raise HTTPException(status_code=409, detail="该命令已结算，不可裁决。")
+        task = db.query(AssistantTask).filter_by(id=action.task_id, team_id=team_id).one_or_none()
+        if task is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="任务不存在")
+        try:
+            result = reconcile_unknown_activity(
+                db,
+                task,
+                actor_type="OPERATOR",
+                actor_id=int(current_user.id),
+                reason=payload.reason,
+                expected_decision=payload.decision,
+            )
+            db.commit()
+            if result.followup_turn_id is not None:
+                schedule_turn(
+                    result.followup_turn_id,
+                    factory=sessionmaker(bind=db.get_bind(), autoflush=False),
+                )
+        except (TaskStateConflictError, ValueError) as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc) or "无法核对当前命令，结果仍待核对。") from exc
+        return {
+            "action_public_id": action_public_id,
+            "status": payload.decision,
+            "outcome": result.outcome,
+            "task_public_id": result.task.public_id,
+            "followup_turn_id": result.followup_turn_public_id,
+        }
 
     if payload.decision == "REJECTED":
         # No durable producer can prove that an unresolved claim never entered CRM.

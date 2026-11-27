@@ -372,10 +372,18 @@ const captureUnknownResult = (targetId: string, turnId: string, cursor: number, 
   reprocessTarget.value = null
 }
 
+const clearUnknownResult = (targetId?: string): void => {
+  if (targetId !== undefined && unknownResult.value !== null && unknownResult.value.targetId !== targetId) return
+  unknownResult.value = null
+  suppressConversationResume.value = false
+  if (targetId !== undefined && pendingRequest.value?.targetId === targetId) pendingRequest.value = null
+  if (processingRecovery.value === null) resultPending.value = false
+}
+
 const reconcileUnknownResult = (updated: AssistantTaskView | null): void => {
   const unresolved = unknownResult.value
   if (unresolved !== null && (updated?.public_id !== unresolved.targetId || updated.status !== 'ACTIVE')) {
-    unknownResult.value = null
+    clearUnknownResult()
   }
   if (updated?.status !== 'ACTIVE') return
   if (updated.reconciliation_required === true) {
@@ -385,12 +393,14 @@ const reconcileUnknownResult = (updated: AssistantTaskView | null): void => {
   }
   if (unresolved === null || updated.public_id !== unresolved.targetId) return
   const wait = updated.waiting
+  const restoredWait = typeof wait?.action_id === 'string' && wait.action_id.trim() !== ''
+    && wait.expected_version === updated.version && unresolved.waiting?.action_id !== wait.action_id
+  const followupTurn = typeof updated.processing_turn_id === 'string' && updated.processing_turn_id !== ''
+    && updated.processing_turn_id !== unresolved.turnId
+  const activityCommitted = updated.committed.some((receipt) => receipt.kind === 'customer_activity')
   if (updated.version > unresolved.version && updated.reconciliation_required === false
-    && typeof wait?.action_id === 'string' && wait.action_id.trim() !== '' && wait.expected_version === updated.version
-    && unresolved.waiting?.action_id !== wait.action_id) {
-    if (pendingRequest.value?.targetId === updated.public_id) pendingRequest.value = null
-    if (processingRecovery.value === null) resultPending.value = false
-    unknownResult.value = null
+    && (restoredWait || followupTurn || activityCommitted)) {
+    clearUnknownResult(updated.public_id)
   }
 }
 const processingInFlight = computed(() => processing.value.active || autoRecovering.value || processingRecovery.value !== null)
@@ -481,7 +491,9 @@ const applyTurnEvents = (turnId: string, events: AssistantTurn['events'], snapsh
       if (entry !== undefined) entry.outcome = 'failure'
       const code = typeof event.data['code'] === 'string' ? event.data['code'] : undefined
       noteEpisodeFailure(code)
-      if (code === 'UNKNOWN_COMMIT_RESULT') captureUnknownResult(snapshot.public_id, turnId, event.seq, snapshot)
+      if (code === 'UNKNOWN_COMMIT_RESULT' && snapshot.reconciliation_required !== false) {
+        captureUnknownResult(snapshot.public_id, turnId, event.seq, snapshot)
+      }
       processing.value.active = false
     }
   }
@@ -1109,14 +1121,49 @@ const showRefreshStatus = computed(() => {
 })
 
 const syncResult = async (): Promise<void> => {
+  const currentTask = task.value
+  const shouldReconcile = reconciliationRequired.value
+    && currentTask !== null
+    && currentTask.status === 'ACTIVE'
+    && currentTask.processing_turn_id == null
   const unresolved = unknownResult.value
-  const pending = (unresolved !== null && unresolved.turnId !== '' ? unresolved : null) ?? processingRecovery.value ?? pendingRequest.value
-  if (submitting.value || (pending === null && !reconciliationRequired.value)) return
+  const pending = shouldReconcile
+    ? null
+    : (unresolved !== null && unresolved.turnId !== '' ? unresolved : null) ?? processingRecovery.value ?? pendingRequest.value
+  if (submitting.value || (!shouldReconcile && pending === null && !reconciliationRequired.value)) return
   const navigation = navigationVersion
   submitting.value = true
   recoveryToken += 1
   stopAutoRecovery()
   try {
+    if (shouldReconcile) {
+      const reconciled = await assistantApi.reconcileTask(currentTask.public_id)
+      if (disposed || navigation !== navigationVersion) return
+      if (task.value?.public_id === reconciled.task.public_id && reconciled.task.version >= task.value.version) {
+        task.value = reconciled.task
+      }
+      if (reconciled.outcome === 'WRITTEN' || reconciled.outcome === 'NOT_WRITTEN'
+        || (reconciled.outcome === 'NOOP' && reconciled.task.reconciliation_required !== true)) {
+        clearUnknownResult(reconciled.task.public_id)
+        reprocessAllowed.value = false
+        reprocessTarget.value = null
+        recoveryNotice.value = ''
+        if (reconciled.outcome === 'NOT_WRITTEN') resetProcessingEpisode()
+      } else {
+        reconcileUnknownResult(reconciled.task)
+        recoveryNotice.value = reconciled.outcome === 'STILL_UNKNOWN' ? reconciled.message : ''
+      }
+      await refreshConversation()
+      if (disposed || navigation !== navigationVersion) return
+      if (reconciled.outcome === 'WRITTEN' && reconciled.followup_turn_id !== null
+        && processingRecovery.value === null && task.value?.public_id === reconciled.task.public_id
+        && task.value.status === 'ACTIVE' && task.value.processing_turn_id === reconciled.followup_turn_id) {
+        processingRecovery.value = { targetId: reconciled.task.public_id, turnId: reconciled.followup_turn_id, cursor: 0 }
+      }
+      const successor = processingRecovery.value
+      if (navigation === navigationVersion && successor !== null) await recoverProcessingTurn()
+      return
+    }
     if (pending !== null) await readKnownTurn(pending)
     if (disposed || navigation !== navigationVersion) return
     await refreshConversation()
@@ -1124,9 +1171,15 @@ const syncResult = async (): Promise<void> => {
     if (navigation === navigationVersion && successor !== null) await recoverProcessingTurn()
   } catch {
     if (disposed || navigation !== navigationVersion) return
-    resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
-    if (reconciliationRequired.value) await refreshConversation()
+    resultPending.value = !reconciliationRequired.value
+    if (shouldReconcile) {
+      recoveryNotice.value = '核对请求暂时失败，请稍后再点刷新状态。'
+      await refreshConversation()
+      if (!disposed && navigation === navigationVersion && !reconciliationRequired.value) recoveryNotice.value = ''
+    } else {
+      pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
+      if (reconciliationRequired.value) await refreshConversation()
+    }
   } finally {
     if (!disposed && navigation === navigationVersion) submitting.value = false
   }
@@ -1185,12 +1238,8 @@ const reprocessTurn = async (): Promise<void> => {
 }
 
 const retryPending = async (): Promise<void> => {
-  if (unknownResult.value !== null) {
-    await syncResult()
-    return
-  }
   if (reconciliationRequired.value) {
-    await refreshConversation()
+    await syncResult()
     return
   }
   if (submitting.value) return
@@ -1869,7 +1918,7 @@ void loadConversation()
           <span class="text-caption text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex flex-wrap items-center gap-space-2">
-          <Button v-if="showRefreshStatus" variant="outline" :disabled="submitting" @click="unknownResult !== null || showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
+          <Button v-if="showRefreshStatus" variant="outline" :disabled="submitting" @click="reconciliationRequired || showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
           <p v-if="showReprocess" class="m-0 text-caption text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
           <Button v-if="showReprocess" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
           <Button v-if="lostSend?.phase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="checkLostSend">查看结果</Button>

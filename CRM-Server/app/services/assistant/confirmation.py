@@ -7,7 +7,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from app.models.assistant import AssistantTask, AssistantWaitingType
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.models.assistant import AssistantAction, AssistantTask, AssistantTaskStatus, AssistantWaitingType
 from app.services.assistant.contracts import (
     ActivityWriteConfirmation,
     DraftField,
@@ -15,7 +17,14 @@ from app.services.assistant.contracts import (
     TaskDraft,
     TaskWaiting,
 )
-from app.services.assistant.task_state import TaskUpdate, apply_task_update, load_authority
+from app.services.assistant.failure_contract import ACTIVITY_COMMIT_UNKNOWN_MESSAGE
+from app.services.assistant.task_operations import activity_commit_is_unknown
+from app.services.assistant.task_state import (
+    TaskStateConflictError,
+    TaskUpdate,
+    apply_task_update,
+    load_authority,
+)
 from app.utils.public_id import generate_public_id
 
 if TYPE_CHECKING:
@@ -26,6 +35,40 @@ if TYPE_CHECKING:
 # ruff: noqa: RUF001
 
 CONFIRM_PROMPT = "确认后写入这条客户活动？"
+RECONCILE_WRITTEN_MESSAGE = "已核对：客户活动已写入，正在继续后续整理。"
+RECONCILE_NOT_WRITTEN_MESSAGE = "已核对：上次确认未写入客户活动，已恢复确认卡片，可继续确认、修改或取消。"
+RECONCILE_NOOP_MESSAGE = "当前任务无需核对。"
+ActivityReconcileOutcome = Literal["WRITTEN", "NOT_WRITTEN", "STILL_UNKNOWN", "NOOP"]
+
+
+@dataclass(frozen=True)
+class ActivityReconcileResult:
+    outcome: ActivityReconcileOutcome
+    task: AssistantTask
+    message: str
+    followup_turn_id: int | None = None
+    followup_turn_public_id: str | None = None
+
+
+def build_confirmation_waiting_from_command(
+    task: AssistantTask,
+    command: dict[str, object],
+) -> TaskWaiting:
+    """Build a fresh CONFIRMATION waiting envelope for an existing frozen command."""
+    return TaskWaiting(
+        type=AssistantWaitingType.CONFIRMATION,
+        field="activity_write",
+        action_id=generate_public_id("awa"),
+        question_id=f"q_confirm_{task.public_id}_{task.version}",
+        prompt=CONFIRM_PROMPT,
+        fingerprint=str(command["fingerprint"]),
+        confirmation_payload=ActivityWriteConfirmation.model_validate(
+            {
+                "kind": "activity_write",
+                "preview": _activity_preview(command),
+            }
+        ),
+    )
 _ACTIVITY_PREVIEW_KEYS = (
     "customer_name",
     "activity_kind",
@@ -62,6 +105,19 @@ class FollowUpProjectionReceipt:
     skip_reason: str | None = None
     error_message: str | None = None
 
+
+_PROJECTION_STATUS_MAP: dict[str, Literal["QUEUED", "COMPLETED", "SKIPPED", "FAILED", "EXHAUSTED"]] = {
+    "QUEUED": "QUEUED",
+    "RUNNING": "QUEUED",
+    "COMPLETED": "COMPLETED",
+    "SKIPPED": "SKIPPED",
+    "FAILED": "FAILED",
+    "EXHAUSTED": "EXHAUSTED",
+}
+
+
+def normalize_projection_status(raw: str) -> Literal["QUEUED", "COMPLETED", "SKIPPED", "FAILED", "EXHAUSTED"]:
+    return _PROJECTION_STATUS_MAP.get(raw, "QUEUED")
 
 @dataclass(frozen=True)
 class WriteActivityResult:
@@ -160,18 +216,7 @@ def build_activity_confirmation(
                 command[key] = context_card[key]
     command["fingerprint"] = command_fingerprint(command)
     command["execution_status"] = "PENDING"
-    waiting = TaskWaiting(
-        type=AssistantWaitingType.CONFIRMATION,
-        field="activity_write",
-        action_id=generate_public_id("awa"),
-        question_id=f"q_confirm_{task.public_id}_{task.version}",
-        prompt=CONFIRM_PROMPT,
-        fingerprint=command["fingerprint"],
-        confirmation_payload={
-            "kind": "activity_write",
-            "preview": _activity_preview(command),
-        },
-    )
+    waiting = build_confirmation_waiting_from_command(task, command)
     return command, waiting
 
 
@@ -306,61 +351,127 @@ async def execute_confirmation(
             ),
         )
         return result.task, "本次确认未写入客户活动；请检查客户权限或重新整理稿件。"
+    settled, receipt_message = settle_activity_confirmation_receipt(
+        db,
+        task,
+        command=command,
+        activity_public_id=str(write.activity_public_id),
+        customer_id=write.customer_id,
+        projection=write.follow_up_projection,
+        action_actor="USER",
+        action_name="confirm_write",
+        action_result={
+            "label": "确认",
+            "activity_public_id": write.activity_public_id,
+            "submission_id": command["submission_id"],
+            "confirmation": waiting,
+            "draft": task.draft_json or {},
+            "activity_kind": task.activity_kind,
+            **_projection_receipt_fields(write.follow_up_projection),
+        },
+        event_type="user_choice",
+        event_key=f"choice:{command['submission_id']}",
+        correlation_id=str(waiting.get("action_id") or ""),
+        require_no_active_turn=False,
+        clear_error_code=False,
+    )
+    return settled, receipt_message
+
+
+def settle_activity_confirmation_receipt(
+    db: Session,
+    task: AssistantTask,
+    *,
+    command: dict[str, object],
+    activity_public_id: str,
+    customer_id: int | None,
+    projection: FollowUpProjectionReceipt | None,
+    action_actor: Literal["USER", "SYSTEM"],
+    action_name: str,
+    action_result: dict[str, object],
+    event_type: str | None = None,
+    event_key: str | None = None,
+    correlation_id: str | None = None,
+    require_no_active_turn: bool = False,
+    clear_error_code: bool = False,
+) -> tuple[AssistantTask, str]:
+    """Persist authoritative activity receipt and show_write_receipt in caller's transaction."""
+    submission_id = str(command["submission_id"])
+    already_committed = any(item.get("kind") == "customer_activity" for item in task.committed_json or [])
+    draft_update = None
+    if not already_committed:
+        current_draft = TaskDraft.model_validate(task.draft_json or {})
+        draft_update = current_draft.model_copy(
+            update={
+                "content": DraftField(
+                    status="ACCEPTED",
+                    value=current_draft.content.value,
+                ),
+            }
+        )
+    committed_entries: list[dict[str, object]] | None = (
+        None
+        if already_committed
+        else [
+            {
+                "kind": "customer_activity",
+                "public_id": activity_public_id,
+                "customer_id": customer_id,
+                "customer_public_id": str(command["customer_public_id"]),
+            }
+        ]
+    )
     result = apply_task_update(
         db,
         task,
         TaskUpdate(
+            require_no_active_turn=require_no_active_turn,
             clear_waiting=True,
-            draft=TaskDraft.model_validate(task.draft_json or {}).model_copy(
-                update={
-                    "content": DraftField(
-                        status="ACCEPTED", value=TaskDraft.model_validate(task.draft_json or {}).content.value
-                    ),
-                }
-            ),
+            clear_error_code=clear_error_code,
+            draft=draft_update,
             authority=TaskAuthority(
                 customer_public_id=str(command["customer_public_id"]),
-                activity_public_id=write.activity_public_id,
-                confirmation_receipt=str(command["submission_id"]),
+                activity_public_id=activity_public_id,
+                confirmation_receipt=submission_id,
                 frozen_activity_command={**command, "execution_status": "SUCCEEDED"},
             ),
-            append_committed=[
-                {"kind": "customer_activity", "public_id": write.activity_public_id,
-                 "customer_id": write.customer_id, "customer_public_id": str(command["customer_public_id"])}
-            ],
-            action_actor="USER",
-            action_name="confirm_write",
-            action_result={
-                "label": "确认",
-                "activity_public_id": write.activity_public_id,
-                "submission_id": command["submission_id"],
-                "confirmation": waiting,
-                "draft": task.draft_json or {},
-                "activity_kind": task.activity_kind,
-                **_projection_receipt_fields(write.follow_up_projection),
-            },
-            event_type="user_choice",
-            event_key=f"choice:{command['submission_id']}",
-            correlation_id=str(waiting.get("action_id") or ""),
+            append_committed=committed_entries,
+            action_actor=action_actor,
+            action_name=action_name,
+            action_result=action_result,
+            event_type=event_type,
+            event_key=event_key,
+            correlation_id=correlation_id,
         ),
     )
-    receipt_message = _confirmation_receipt_message(write.follow_up_projection)
-    apply_task_update(
-        db,
-        result.task,
-        TaskUpdate(
-            action_actor="SYSTEM",
-            action_name="show_write_receipt",
-            action_result={
-                "label": receipt_message,
-                "activity_public_id": write.activity_public_id,
-                **_projection_receipt_fields(write.follow_up_projection),
-            },
-            event_type="receipt",
-            event_key=f"receipt:{command['submission_id']}",
-            correlation_id=str(waiting.get("action_id") or ""),
-        ),
+    receipt_message = _confirmation_receipt_message(projection)
+    existing_receipt = (
+        db.query(AssistantAction.id)
+        .filter_by(
+            team_id=result.task.team_id,
+            task_id=result.task.id,
+            event_key=f"receipt:{submission_id}",
+        )
+        .first()
     )
+    if existing_receipt is None:
+        result = apply_task_update(
+            db,
+            result.task,
+            TaskUpdate(
+                require_no_active_turn=require_no_active_turn,
+                action_actor="SYSTEM",
+                action_name="show_write_receipt",
+                action_result={
+                    "label": receipt_message,
+                    "activity_public_id": activity_public_id,
+                    **_projection_receipt_fields(projection),
+                },
+                event_type="receipt",
+                event_key=f"receipt:{submission_id}",
+                correlation_id=correlation_id,
+            ),
+        )
     return result.task, receipt_message
 
 
@@ -479,18 +590,7 @@ def restore_activity_confirmation(
         task.waiting_type == AssistantWaitingType.CONFIRMATION or waiting_fingerprint is not None
     ):
         raise ValueError("confirmation does not match the frozen activity")
-    waiting = TaskWaiting(
-        type="CONFIRMATION",
-        field="activity_write",
-        action_id=generate_public_id("awa"),
-        question_id=f"q_confirm_{task.public_id}_{task.version}",
-        prompt=CONFIRM_PROMPT,
-        fingerprint=fingerprint,
-        confirmation_payload=ActivityWriteConfirmation.model_validate({
-            "kind": "activity_write",
-            "preview": _activity_preview(command),
-        }),
-    )
+    waiting = build_confirmation_waiting_from_command(task, command)
     result = apply_task_update(
         db,
         task,
@@ -517,4 +617,353 @@ def restore_activity_confirmation(
             "action_id": result.task.waiting_json["action_id"],
             "expected_version": result.task.version,
         }
+    )
+
+
+def _read_existing_projection_receipt(
+    db: Session,
+    *,
+    team_id: int,
+    activity_id: int,
+    activity_revision: int,
+) -> FollowUpProjectionReceipt | None:
+    """Read existing follow-up projection job status without triggering any write."""
+    from app.crud.assistant_follow_up_projection_job import assistant_follow_up_projection_job_crud
+    from app.crud.sales_commitment import follow_up_task_crud
+    from app.models.sales_commitment import FollowUpTaskProjectionTrigger
+
+    try:
+        job = assistant_follow_up_projection_job_crud.get_by_identity(
+            db,
+            team_id=team_id,
+            activity_id=activity_id,
+            activity_revision=activity_revision,
+            trigger_type=FollowUpTaskProjectionTrigger.ACTIVITY_CREATED_DETERMINISTIC,
+        )
+    except SQLAlchemyError:
+        return None
+    if job is None:
+        return None
+    raw_details = job.result_json
+    details: dict[str, object] = raw_details if isinstance(raw_details, dict) else {}
+    task_ids: list[int] = []
+    for key in ("created_task_ids", "updated_task_ids"):
+        raw_ids = details.get(key)
+        if isinstance(raw_ids, list):
+            task_ids.extend(value for value in raw_ids if isinstance(value, int))
+    try:
+        public_task_ids = (
+            follow_up_task_crud.list_public_ids_by_ids(db, team_id=team_id, task_ids=task_ids)
+            if task_ids
+            else []
+        )
+    except SQLAlchemyError:
+        public_task_ids = []
+    receipt_status = normalize_projection_status(str(job.status))
+    raw_run_id = details.get("projection_run_id")
+    raw_skip_reason = details.get("skip_reason")
+    error_text = details.get("error")
+    fallback_error = job.error_message
+    return FollowUpProjectionReceipt(
+        status=receipt_status,
+        job_public_id=str(job.public_id),
+        projection_run_id=raw_run_id if isinstance(raw_run_id, int) else None,
+        task_public_id=public_task_ids[0] if public_task_ids else None,
+        skip_reason=raw_skip_reason if isinstance(raw_skip_reason, str) else None,
+        error_message=(
+            error_text
+            if isinstance(error_text, str)
+            else (str(fallback_error) if fallback_error is not None else None)
+        ),
+    )
+
+
+def _mark_unknown_activity_actions_resolved(
+    db: Session,
+    *,
+    task: AssistantTask,
+    status: Literal["RECONCILED", "RECONCILED_NOT_WRITTEN"],
+    actor_type: str,
+    actor_id: int | str | None,
+    reason: str | None,
+    activity_public_id: str | None = None,
+) -> None:
+    """Resolve open `activity_commit_unknown` actions for this task; tolerates historical tasks with none."""
+    rows = (
+        db.query(AssistantAction)
+        .filter(
+            AssistantAction.team_id == task.team_id,
+            AssistantAction.task_id == task.id,
+            AssistantAction.action == "activity_commit_unknown",
+        )
+        .all()
+    )
+    for row in rows:
+        result = dict(row.result_json or {})
+        if result.get("status") in {"RECONCILED", "RECONCILED_NOT_WRITTEN"}:
+            continue
+        result["status"] = status
+        result["reconciled_by_type"] = actor_type
+        if actor_id is not None:
+            result["reconciled_by"] = actor_id
+        if reason:
+            result["reconcile_reason"] = reason
+        if activity_public_id is not None:
+            result["activity_public_id"] = activity_public_id
+        row.result_json = result
+    db.flush()
+
+
+def reconcile_unknown_activity(
+    db: Session,
+    task: AssistantTask,
+    *,
+    actor_type: Literal["USER", "OPERATOR", "SYSTEM"],
+    actor_id: int | str | None = None,
+    reason: str | None = None,
+    expected_decision: Literal["SUCCEEDED", "REJECTED"] | None = None,
+) -> ActivityReconcileResult:
+    """Deterministically reconcile an UNKNOWN_COMMIT_RESULT customer-activity task via read-only readback.
+
+    The caller owns `db.commit()` and MUST call `schedule_turn(result.followup_turn_id)`
+    only after committing when `result.followup_turn_id is not None`.
+    """
+    from app.models.customer import Customer
+    from app.services.assistant.turns import create_continue_proposals_followup_turn
+    from app.services.customer_activity_write_service import customer_activity_write_service
+
+    if (
+        task.status != AssistantTaskStatus.ACTIVE
+        or not activity_commit_is_unknown(task)
+        or task.active_turn_id is not None
+    ):
+        if expected_decision is not None:
+            raise TaskStateConflictError("当前任务不能裁决此命令。")
+        return ActivityReconcileResult(outcome="NOOP", task=task, message=RECONCILE_NOOP_MESSAGE)
+
+    command = load_authority(task).frozen_activity_command
+    if (
+        not isinstance(command, dict)
+        or command.get("team_id") != task.team_id
+        or command.get("user_id") != task.user_id
+        or not isinstance(command.get("submission_id"), str)
+        or not str(command["submission_id"]).strip()
+        or not isinstance(command.get("fingerprint"), str)
+        or command.get("fingerprint") != command_fingerprint(command)
+        or not isinstance(command.get("customer_public_id"), str)
+        or not str(command["customer_public_id"]).strip()
+    ):
+        if expected_decision is not None:
+            raise TaskStateConflictError("缺少可核对的冻结活动命令，结果仍待核对。")
+        return ActivityReconcileResult(
+            outcome="STILL_UNKNOWN",
+            task=task,
+            message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+        )
+
+    submission_id = str(command["submission_id"])
+    expected_fingerprint = str(command["fingerprint"])
+    customer_public_id = str(command["customer_public_id"])
+    try:
+        existing = customer_activity_write_service.activity_crud.get_by_submission_id(
+            db,
+            team_id=int(task.team_id),
+            submission_id=submission_id,
+        )
+    except SQLAlchemyError as exc:
+        if expected_decision is not None:
+            raise TaskStateConflictError("核对查询失败，结果仍待核对。") from exc
+        return ActivityReconcileResult(
+            outcome="STILL_UNKNOWN",
+            task=task,
+            message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+        )
+
+    if existing is not None:
+        if (
+            existing.submission_source != "ASSISTANT_2"
+            or existing.submission_fingerprint != expected_fingerprint
+        ):
+            if expected_decision is not None:
+                raise TaskStateConflictError("活动记录指纹不匹配，结果仍待核对。")
+            return ActivityReconcileResult(
+                outcome="STILL_UNKNOWN",
+                task=task,
+                message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+            )
+        if existing.customer_id is None:
+            if expected_decision is not None:
+                raise TaskStateConflictError("活动记录归属客户缺失，结果仍待核对。")
+            return ActivityReconcileResult(
+                outcome="STILL_UNKNOWN",
+                task=task,
+                message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+            )
+        try:
+            customer_row = (
+                db.query(Customer.id)
+                .filter(
+                    Customer.team_id == task.team_id,
+                    Customer.public_id == customer_public_id,
+                )
+                .one_or_none()
+            )
+        except SQLAlchemyError as exc:
+            if expected_decision is not None:
+                raise TaskStateConflictError("核对客户归属失败，结果仍待核对。") from exc
+            return ActivityReconcileResult(
+                outcome="STILL_UNKNOWN",
+                task=task,
+                message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+            )
+        if customer_row is None or int(existing.customer_id) != int(customer_row[0]):
+            if expected_decision is not None:
+                raise TaskStateConflictError("活动记录归属客户不匹配，结果仍待核对。")
+            return ActivityReconcileResult(
+                outcome="STILL_UNKNOWN",
+                task=task,
+                message=ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
+            )
+        if expected_decision == "REJECTED":
+            raise TaskStateConflictError("目标系统已存在该客户活动记录，不能裁决为未写入。")
+
+        projection = _read_existing_projection_receipt(
+            db,
+            team_id=int(task.team_id),
+            activity_id=int(existing.id),
+            activity_revision=int(existing.activity_revision or 1),
+        )
+        try:
+            settled, _ = settle_activity_confirmation_receipt(
+                db,
+                task,
+                command=command,
+                activity_public_id=str(existing.id),
+                customer_id=int(existing.customer_id) if existing.customer_id is not None else None,
+                projection=projection,
+                action_actor="SYSTEM",
+                action_name="reconcile_activity_commit",
+                action_result={
+                    "outcome": "WRITTEN",
+                    "activity_public_id": str(existing.id),
+                    "submission_id": submission_id,
+                    "actor_type": actor_type,
+                    "actor_id": actor_id,
+                    "reason": reason,
+                    **_projection_receipt_fields(projection),
+                },
+                require_no_active_turn=True,
+                clear_error_code=True,
+            )
+        except TaskStateConflictError:
+            if expected_decision is not None:
+                raise
+            db.refresh(task)
+            if not activity_commit_is_unknown(task):
+                return ActivityReconcileResult(outcome="NOOP", task=task, message=RECONCILE_NOOP_MESSAGE)
+            raise
+        _mark_unknown_activity_actions_resolved(
+            db,
+            task=settled,
+            status="RECONCILED",
+            actor_type=actor_type,
+            actor_id=actor_id,
+            reason=reason,
+            activity_public_id=str(existing.id),
+        )
+        followup = create_continue_proposals_followup_turn(db, settled)
+        db.refresh(settled)
+        from app.crud.assistant_conversation import owned_conversation
+        from app.models.assistant_conversation import AssistantConversationEntry
+        from app.services.assistant.presentation import task_view
+        from app.services.assistant.turns import fingerprint as conversation_fingerprint
+
+        conversation = owned_conversation(db, team_id=int(settled.team_id), user_id=int(settled.user_id))
+        if conversation is not None:
+            reconcile_command: dict[str, object] = {
+                "operation": "reconcile_activity",
+                "waiting_field": "activity_write",
+                "submission_id": submission_id,
+                "activity_public_id": str(existing.id),
+                "actor_type": actor_type,
+            }
+            db.add(
+                AssistantConversationEntry(
+                    conversation_id=conversation.id,
+                    team_id=settled.team_id,
+                    user_id=settled.user_id,
+                    client_request_id=f"reconcile-{settled.public_id}-{followup.public_id}",
+                    input_fingerprint=conversation_fingerprint(reconcile_command),
+                    user_text="",
+                    command_json=reconcile_command,
+                    decision_json={},
+                    state="READY",
+                    task_public_id=settled.public_id,
+                    turn_public_id=followup.public_id,
+                    reply_text=RECONCILE_WRITTEN_MESSAGE,
+                    task_snapshot_json=task_view(settled, db).model_dump(mode="json"),
+                )
+            )
+            db.flush()
+        return ActivityReconcileResult(
+            outcome="WRITTEN",
+            task=settled,
+            message=RECONCILE_WRITTEN_MESSAGE,
+            followup_turn_id=followup.id,
+            followup_turn_public_id=followup.public_id,
+        )
+
+    if expected_decision == "SUCCEEDED":
+        raise TaskStateConflictError("未查到该客户活动写入记录，不能裁决为已写入。")
+
+    restored_command = {**command, "execution_status": "PENDING"}
+    rebuilt_waiting = build_confirmation_waiting_from_command(task, restored_command)
+    try:
+        updated = apply_task_update(
+            db,
+            task,
+            TaskUpdate(
+                require_no_active_turn=True,
+                clear_error_code=True,
+                waiting=rebuilt_waiting,
+                authority=TaskAuthority(frozen_activity_command=restored_command),
+                action_actor="SYSTEM",
+                action_name="reconcile_activity_commit",
+                action_result={
+                    "outcome": "NOT_WRITTEN",
+                    "submission_id": submission_id,
+                    "fingerprint": expected_fingerprint,
+                    "actor_type": actor_type,
+                    "actor_id": actor_id,
+                    "reason": reason,
+                    "confirmation": rebuilt_waiting.model_dump(mode="json"),
+                },
+                event_type=(
+                    "meeting_card"
+                    if task.activity_kind in {"ONLINE_MEETING", "OFFLINE_MEETING"}
+                    else "follow_up_card"
+                ),
+                event_key=f"card:{rebuilt_waiting.action_id}",
+                correlation_id=rebuilt_waiting.action_id,
+            ),
+        ).task
+    except TaskStateConflictError:
+        if expected_decision is not None:
+            raise
+        db.refresh(task)
+        if not activity_commit_is_unknown(task):
+            return ActivityReconcileResult(outcome="NOOP", task=task, message=RECONCILE_NOOP_MESSAGE)
+        raise
+    _mark_unknown_activity_actions_resolved(
+        db,
+        task=updated,
+        status="RECONCILED_NOT_WRITTEN",
+        actor_type=actor_type,
+        actor_id=actor_id,
+        reason=reason,
+    )
+    return ActivityReconcileResult(
+        outcome="NOT_WRITTEN",
+        task=updated,
+        message=RECONCILE_NOT_WRITTEN_MESSAGE,
     )

@@ -986,6 +986,53 @@ def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEv
     )
 
 
+def create_continue_proposals_followup_turn(db: Session, task: AssistantTask) -> AssistantTurn:
+    """Create a durable internal `continue_proposals` turn and claim `task.active_turn_id`."""
+    if (
+        task.status != AssistantTaskStatus.ACTIVE
+        or load_waiting(task) is not None
+        or not any(item.get("kind") == "customer_activity" for item in task.committed_json or [])
+    ):
+        raise AssistantStateConflict("活动后续轮次只能在已提交活动后创建")
+    internal_input = {"kind": "continue_proposals", "text": None, "choice": None}
+    request = AssistantRequest(
+        team_id=task.team_id,
+        user_id=task.user_id,
+        client_request_id=f"internal-followup-{uuid.uuid4().hex}",
+        input_fingerprint=fingerprint(
+            {"operation": "internal_followup", "task_id": task.public_id, **internal_input}
+        ),
+        task_id=task.id,
+    )
+    db.add(request)
+    db.flush()
+    followup = AssistantTurn(
+        team_id=task.team_id,
+        user_id=task.user_id,
+        task_id=task.id,
+        request_id=request.id,
+        input_json=internal_input,
+        status="PENDING",
+    )
+    db.add(followup)
+    db.flush()
+    request.turn_id = followup.id
+    add_event(db, followup, "accepted", {"turn_id": followup.public_id})
+    claimed = db.execute(
+        update(AssistantTask)
+        .where(
+            AssistantTask.id == task.id,
+            AssistantTask.active_turn_id.is_(None),
+            AssistantTask.status == AssistantTaskStatus.ACTIVE,
+        )
+        .values(active_turn_id=followup.id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        raise AssistantStateConflict("活动后续轮次无法领取任务")
+    return followup
+
+
 async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:
     from app.api.assistant import _coordinator
     from app.services.assistant.presentation import task_view
@@ -1036,6 +1083,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
             bind_absolute_attempt_deadline(deadline)
             if deadline is not None else bind_attempt_deadline(attempt_started)
         )
+        activity_write_staged = False
         try:
             task = db.get(AssistantTask, turn.task_id)
             if task is None or task.team_id != turn.team_id or task.user_id != turn.user_id:
@@ -1100,48 +1148,7 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 raise AssistantStateConflict("任务轮次归属已变化")
             followup = None
             if getattr(outcome, "start_followup", False):
-                if (
-                    outcome.task.status != AssistantTaskStatus.ACTIVE
-                    or load_waiting(outcome.task) is not None
-                    or not any(item.get("kind") == "customer_activity" for item in outcome.task.committed_json or [])
-                ):
-                    raise AssistantStateConflict("活动后续轮次只能在已提交活动后创建")
-                internal_input = {"kind": "continue_proposals", "text": None, "choice": None}
-                request = AssistantRequest(
-                    team_id=turn.team_id,
-                    user_id=turn.user_id,
-                    client_request_id=f"internal-followup-{uuid.uuid4().hex}",
-                    input_fingerprint=fingerprint(
-                        {"operation": "internal_followup", "task_id": outcome.task.public_id, **internal_input}
-                    ),
-                    task_id=turn.task_id,
-                )
-                db.add(request)
-                db.flush()
-                followup = AssistantTurn(
-                    team_id=turn.team_id,
-                    user_id=turn.user_id,
-                    task_id=turn.task_id,
-                    request_id=request.id,
-                    input_json=internal_input,
-                    status="PENDING",
-                )
-                db.add(followup)
-                db.flush()
-                request.turn_id = followup.id
-                add_event(db, followup, "accepted", {"turn_id": followup.public_id})
-                claimed = db.execute(
-                    update(AssistantTask)
-                    .where(
-                        AssistantTask.id == turn.task_id,
-                        AssistantTask.active_turn_id.is_(None),
-                        AssistantTask.status == AssistantTaskStatus.ACTIVE,
-                    )
-                    .values(active_turn_id=followup.id)
-                    .execution_options(synchronize_session=False)
-                )
-                if claimed.rowcount != 1:
-                    raise AssistantStateConflict("活动后续轮次无法领取任务")
+                followup = create_continue_proposals_followup_turn(db, outcome.task)
             db.refresh(turn)
             db.refresh(outcome.task)
             data = {"task": task_view(outcome.task, db).model_dump(mode="json"), "message": outcome.reply.message}
@@ -1183,6 +1190,15 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                         projection_request = AssistantFollowUpProjectionJobRequest(
                             job_public_id=job_id, team_id=turn.team_id
                         )
+            activity_write_staged = (
+                turn.input_json.get("kind") == "confirm"
+                and turn.input_json.get("choice") == "confirm"
+                and outcome.task.task_kind == "customer_activity"
+                and any(
+                    item.get("kind") == "customer_activity"
+                    for item in (outcome.task.committed_json or [])[prior_receipts:]
+                )
+            )
             db.commit()
             if projection_request is not None:
                 assistant_follow_up_projection_job_service.kick(projection_request)
@@ -1285,6 +1301,19 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                 and _is_disposition_settlement(current_task, turn)
             ):
                 # Leave the durable turn and its lease intact; recovery can only resume this binding.
+                return
+            if (
+                isinstance(exc, SQLAlchemyError)
+                and activity_write_staged
+                and current_task is not None
+            ):
+                _close_unknown_activity(
+                    db,
+                    turn_id=turn_id,
+                    owner=owner,
+                    version=version,
+                    started_at=attempt_started,
+                )
                 return
             from app.services.assistant.proposals import has_unresolved_proposal_claim
 
@@ -1400,6 +1429,16 @@ def _close_unknown_activity(
         return
     from app.services.assistant.task_state import TaskUpdate, apply_task_update
 
+    frozen = (task.authority_json or {}).get("frozen_activity_command")
+    submission_id = frozen.get("submission_id") if isinstance(frozen, dict) else None
+    action_result: dict[str, object] = {
+        "stage": "write",
+        "retryable": False,
+        "code": "UNKNOWN_COMMIT_RESULT",
+        "status": "UNKNOWN",
+    }
+    if isinstance(submission_id, str) and submission_id:
+        action_result["submission_id"] = submission_id
     apply_task_update(
         db,
         task,
@@ -1408,7 +1447,7 @@ def _close_unknown_activity(
             error_code="UNKNOWN_COMMIT_RESULT",
             action_actor="SYSTEM",
             action_name="activity_commit_unknown",
-            action_result={"stage": "write", "retryable": False, "code": "UNKNOWN_COMMIT_RESULT"},
+            action_result=action_result,
         ),
     )
     now = business_now()
