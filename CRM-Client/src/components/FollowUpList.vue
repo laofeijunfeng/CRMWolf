@@ -504,6 +504,11 @@ const getStructuredPrimaryContent = (followUp: FollowUp): string => {
 }
 
 const getPrimaryContent = (followUp: FollowUp): string => {
+  if (props.renderMarkdown && followUp.activity_category === 'MEETING') {
+    const summary = getText(followUp.summary)
+    if (summary !== '') return summary
+  }
+
   const structuredContent = getStructuredPrimaryContent(followUp)
   if (structuredContent !== '') return structuredContent
 

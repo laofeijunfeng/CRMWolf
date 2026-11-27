@@ -43,6 +43,32 @@ describe('FollowUpList Markdown & 3-state AI lifecycle', () => {
     expect(wrapper.find('strong').text()).toBe('已确认预算')
   })
 
+  it('renders structured Markdown summary for MEETING activities instead of shadowing it with meeting_subject', () => {
+    const meetingActivity = {
+      ...baseActivity,
+      id: 4,
+      activity_category: 'MEETING',
+      activity_kind: 'ONLINE_MEETING',
+      method: '线上会议',
+      summary: '### 会议要点\n- **POC部署**：确认可行。\n\n### 核心结论\n- 下周三反馈批复。',
+      content_json: {
+        meeting_subject: 'POC部署评审会',
+        key_minutes: ['确认POC可行'],
+        markdown_format_version: 1,
+      },
+    }
+    const wrapper = mount(FollowUpList, {
+      props: {
+        followUps: [meetingActivity],
+        loading: false,
+        renderMarkdown: true,
+      },
+    })
+    expect(wrapper.find('[data-activity-markdown]').exists()).toBe(true)
+    expect(wrapper.findAll('h3').map((el) => el.text())).toEqual(['会议要点', '核心结论'])
+    expect(wrapper.find('strong').text()).toBe('POC部署')
+  })
+
   it('shows pending loading state and failed retry action with double-click guard', async () => {
     const pendingItem = {
       ...baseActivity,
