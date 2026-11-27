@@ -12,8 +12,11 @@ from app.schemas.assistant_conversation import ConversationMessage, Conversation
 from app.services.assistant.contracts import TaskDraft, TaskWaiting
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from app.models.assistant import AssistantAction, AssistantTask
     from app.schemas.assistant import SubmitInputRequest
+    from app.services.assistant.contracts import ProfileProposalItem
 
 KIND_LABELS = {
     "FOLLOW_UP": "普通跟进",
@@ -33,15 +36,91 @@ FIELD_LABELS = {
     "meeting_subject": "会议主题",
     "participants": "参会人",
 }
+REJECT_REASON_LABELS = {
+    "wrong_customer": "客户不对",
+    "wrong_content": "内容不对",
+    "should_not_record": "不该记录",
+    "other": "其他",
+}
 
 
-def command_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> str:
+def _candidate_label(waiting: TaskWaiting | None, choice: str | None) -> str | None:
+    if waiting is None or not choice:
+        return None
+    for candidate in waiting.candidates:
+        if candidate.get("id") != choice:
+            continue
+        label = candidate.get("label")
+        if isinstance(label, str) and label.strip():
+            return label.strip()
+        account_name = candidate.get("account_name")
+        if isinstance(account_name, str) and account_name.strip():
+            return account_name.strip()
+    return None
+
+
+def _profile_proposal_label(
+    choice: str | None,
+    waiting: TaskWaiting,
+    profile_proposals: Sequence[ProfileProposalItem] | None,
+) -> str:
+    if choice == "none":
+        return _candidate_label(waiting, choice) or "都不需要"
+    if isinstance(choice, str) and ":" in choice:
+        action, raw_index = choice.split(":", 1)
+        if action in {"go", "skip"} and raw_index.isdigit():
+            action_label = _candidate_label(waiting, choice) or ("去补充" if action == "go" else "不保存")
+            idx = int(raw_index)
+            if profile_proposals is not None and 0 <= idx < len(profile_proposals):
+                from app.services.assistant.entity_forms import module_for
+
+                item = profile_proposals[idx]
+                row_label = module_for(item.kind).LABEL
+                summary = item.summary.removeprefix(f"{row_label}：").removeprefix(f"{row_label}:").strip()
+                group = f"{row_label}：{summary or item.summary}"
+                if len(group) > 40:
+                    group = group[:40]
+                return f"{action_label}：{group}"
+            return action_label
+    return _candidate_label(waiting, choice) or "选择"
+
+
+def _disposition_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> str:
+    choices = payload.choices or []
+    if not choices:
+        return "本周不再提示" if payload.suppress_week else "暂不标记完成"
+    titles = [label for item_id in choices if (label := _candidate_label(waiting, item_id))]
+    if len(choices) == 1 and len(titles) == 1:
+        base = f"标记完成：{titles[0]}"
+    elif titles:
+        base = f"标记完成 {len(choices)} 项：{titles[0]} 等"
+    else:
+        base = f"标记完成 {len(choices)} 项"
+    return f"{base} · 本周不再提示" if payload.suppress_week else base
+
+
+def command_label(
+    payload: SubmitInputRequest,
+    waiting: TaskWaiting | None,
+    *,
+    profile_proposals: Sequence[ProfileProposalItem] | None = None,
+) -> str:
     if payload.kind == "cancel":
         return "算了，不记了"
     if payload.kind == "revise_activity_kind":
-        return KIND_LABELS.get(payload.choice or "", "修改活动类型")
+        label = KIND_LABELS.get(payload.choice or "")
+        return f"改为{label}" if label else "修改活动类型"
     if payload.kind == "confirm":
-        return "确认" if payload.choice == "confirm" else "取消"
+        if payload.choice == "confirm":
+            if (
+                waiting is not None
+                and waiting.confirmation_payload is not None
+                and waiting.confirmation_payload.kind == "activity_write"
+            ):
+                return "确认写入"
+            return "确认"
+        reason = REJECT_REASON_LABELS.get(payload.reason or "")
+        return f"取消（{reason}）" if reason else "取消"
     if payload.kind == "request_edit":
         return "修改内容"
     if payload.kind == "submit_form":
@@ -50,24 +129,49 @@ def command_label(payload: SubmitInputRequest, waiting: TaskWaiting | None) -> s
         if payload.choice == "defer":
             return "稍后补充"
         return "提交"
-    if waiting and waiting.type == "OBJECT_SELECTION":
-        for candidate in waiting.candidates:
-            if candidate.get("id") == payload.choice and isinstance(candidate.get("account_name"), str):
-                return str(candidate["account_name"])
-        return "选择客户"
-    if waiting and waiting.type == "ACTIVITY_KIND":
-        return KIND_LABELS.get(payload.choice or "", "选择活动类型")
-    if waiting and waiting.field == "temporal_choice":
-        for candidate in waiting.candidates:
-            label = candidate.get("label")
-            if candidate.get("id") == payload.choice and isinstance(label, str) and label.strip():
-                return label
+    if (waiting is not None and waiting.type == "FOLLOW_UP_DISPOSITION") or payload.choices is not None:
+        return _disposition_label(payload, waiting)
+    if waiting is not None and waiting.type == "PROFILE_PROPOSALS":
+        return _profile_proposal_label(payload.choice, waiting, profile_proposals)
+    if waiting is not None and waiting.type == "ENTITY_DEFERRED":
+        matched = _candidate_label(waiting, payload.choice)
+        if matched:
+            return matched
+        if payload.choice == "resume":
+            return "继续填写"
+        if payload.choice == "cancel":
+            return "不要了"
+        return "选择"
+    if waiting is not None and waiting.type == "OBJECT_SELECTION":
+        matched = _candidate_label(waiting, payload.choice)
+        if matched:
+            return matched
         if isinstance(payload.text, str) and payload.text.strip():
             return payload.text.strip()
-        return "选择"
+        if waiting.field == "opportunity":
+            return "选择商机"
+        if waiting.field == "intent":
+            return "选择意图"
+        return "选择客户"
+    if waiting is not None and waiting.type == "ACTIVITY_KIND":
+        return KIND_LABELS.get(payload.choice or "") or _candidate_label(waiting, payload.choice) or "选择活动类型"
+    if waiting is not None and waiting.field == "temporal_choice":
+        matched = _candidate_label(waiting, payload.choice)
+        if matched:
+            return matched
+        if isinstance(payload.text, str) and payload.text.strip():
+            return payload.text.strip()
+        return "选择时间"
     if payload.choice == "EXPLICITLY_NONE":
-        return payload.text or "暂无下一步行动"
-    return payload.text or "选择"
+        text = payload.text.strip() if isinstance(payload.text, str) else ""
+        return text or "暂无下一步行动"
+    text = payload.text.strip() if isinstance(payload.text, str) else ""
+    if text:
+        return text
+    matched = _candidate_label(waiting, payload.choice)
+    if matched:
+        return matched
+    return "选择"
 
 
 def legacy_messages(task: AssistantTask, actions: list[AssistantAction], prefix: str) -> list[ConversationMessage]:

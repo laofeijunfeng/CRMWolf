@@ -1176,7 +1176,11 @@ class ConversationService:
             raise crud.ConversationConflict("这次沟通不存在。")
         from app.services.assistant.history import command_label
 
-        label = command_label(payload, load_waiting(task))
+        label = command_label(
+            payload,
+            load_waiting(task),
+            profile_proposals=load_authority(task).profile_proposals,
+        )
         entry, execute, lease_version = crud.claim(
             db,
             conversation,

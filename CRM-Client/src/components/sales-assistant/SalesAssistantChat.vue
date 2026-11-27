@@ -26,6 +26,8 @@ import type {
 } from '@/schemas/assistant-contracts'
 import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/agent/agentEntityNavigation'
 import { handOffAssistantTurn, reclaimAssistantTurn } from '@/components/sales-assistant/assistantBackgroundTurn'
+import { assistantCommandReplyLabel } from '@/components/sales-assistant/replyLabel'
+import type { InteractionBlock } from '@/components/sales-assistant/replyLabel'
 
 interface ChatEntry {
   id: number
@@ -811,7 +813,7 @@ const submitText = async (): Promise<void> => {
   try {
     if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
       explicitNone.value = false
-      await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, text, waiting.value)
+      await submit({ kind: 'submit_field', choice: 'EXPLICITLY_NONE', text }, waiting.value)
       return
     }
     explicitNone.value = false
@@ -846,17 +848,25 @@ const isSameWait = (source: TaskWaiting, current?: TaskWaiting | null): boolean 
   && source.action_id === current.action_id && source.expected_version === current.expected_version
   && source.field === current.field && source.form_revision === current.form_revision
 
+interface SubmitOptions {
+  reuseClientRequestId?: string | null | undefined
+  block?: InteractionBlock | undefined
+}
+
 const submit = async (
   input: SubmitAssistantInput,
-  displayText: string,
   source: TaskWaiting | null = null,
-  reuseClientRequestId: string | null = null
+  options: SubmitOptions = {}
 ): Promise<boolean> => {
   if (busy.value || task.value === null || conversation.value === null) return false
   if (source !== null && !isSameWait(source, task.value.waiting)) return false
   const actionId = source?.action_id ?? null
   const fingerprint = `command:${task.value.public_id}:${actionId ?? ''}:${JSON.stringify(input)}`
-  const clientRequestId = reuseClientRequestId ?? requestKey(fingerprint)
+  const clientRequestId = options.reuseClientRequestId ?? requestKey(fingerprint)
+  const displayText = assistantCommandReplyLabel(input, source, {
+    block: options.block,
+    profileProposals: task.value.profile_proposals
+  })
   const choice = typeof input.choice === 'string' ? input.choice : null
   const noticeKey = choice === null ? null : cardNoticeKey(source)
   const payload: SubmitAssistantInput = { ...input, client_request_id: clientRequestId,
@@ -1049,23 +1059,17 @@ const chooseBoundary = async (entry: ChatEntry, choice: 'CONTINUE' | 'NEW'): Pro
   })
 }
 
-const choiceLabel = (choice: string, source: TaskWaiting | null): string => {
-  const candidate = source?.candidates?.find((item) => item.id === choice)
-  if (candidate === undefined) return ACTIVITY_BADGES[choice] ?? '选择'
-  return 'account_name' in candidate ? candidate.account_name : candidate.label
-}
-
-const pickKind = (choice: string, source: TaskWaiting | null, reuseClientRequestId: string | null = null): Promise<boolean> =>
-  submit({ kind: 'submit_field', choice }, choiceLabel(choice, source), source, reuseClientRequestId)
+const pickKind = (choice: string, source: TaskWaiting | null, options: SubmitOptions = {}): Promise<boolean> =>
+  submit({ kind: 'submit_field', choice }, source, options)
 
 const confirmWrite = (source: TaskWaiting | null): Promise<boolean> =>
-  submit({ kind: 'confirm', choice: 'confirm' }, '确认', source)
+  submit({ kind: 'confirm', choice: 'confirm' }, source)
 
 const rejectWrite = (source: TaskWaiting | null, reason?: SubmitAssistantInput['reason']): Promise<boolean> =>
-  submit({ kind: 'confirm', choice: 'reject', ...(reason === undefined ? {} : { reason }) }, '取消', source)
+  submit({ kind: 'confirm', choice: 'reject', ...(reason === undefined ? {} : { reason }) }, source)
 
 const requestEdit = (source: TaskWaiting | null): Promise<boolean> =>
-  submit({ kind: 'request_edit' }, '修改活动内容', source)
+  submit({ kind: 'request_edit' }, source)
 const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<void> => {
   if (busy.value) return
   const pending = conversation.value?.pending_choice
@@ -1077,7 +1081,7 @@ const cancelTask = async (source: TaskWaiting | null = waiting.value): Promise<v
     })
     return
   }
-  await submit({ kind: 'cancel' }, '算了，不记了', source)
+  await submit({ kind: 'cancel' }, source)
 }
 
 // 「待补充」: parked direct-create drafts other than the one on screen.
@@ -1336,8 +1340,8 @@ const activityBadge = computed((): string => {
   return ACTIVITY_BADGES[kind] ?? ''
 })
 
-const interactionBlock = (entry: ChatEntry): Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> | undefined =>
-  entry.ui?.blocks.find((block): block is Extract<NonNullable<ChatEntry['ui']>['blocks'][number], { type: 'interaction' }> => block.type === 'interaction')
+const interactionBlock = (entry: ChatEntry): InteractionBlock | undefined =>
+  entry.ui?.blocks.find((block): block is InteractionBlock => block.type === 'interaction')
 
 const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: JsonObject): void => {
   const block = interactionBlock(entry)
@@ -1357,8 +1361,7 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
     if (!Array.isArray(choices) || !choices.every((item): item is string => typeof item === 'string')) return
     const suppressWeek = values['suppress_week']
     if (suppressWeek !== undefined && typeof suppressWeek !== 'boolean') return
-    void submit({ kind: 'submit_field', choices, ...(suppressWeek !== undefined ? { suppress_week: suppressWeek } : {}) },
-      '提交跟进处理', source)
+    void submit({ kind: 'submit_field', choices, ...(suppressWeek !== undefined ? { suppress_week: suppressWeek } : {}) }, source)
     return
   }
   if (block.secondary_action?.value === 'request_edit' && choice === 'request_edit') {
@@ -1367,7 +1370,7 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
   }
   if (choice === 'request_edit') return
   if (typeof values['revise_activity_kind'] === 'string') {
-    void submit({ kind: 'revise_activity_kind', choice: values['revise_activity_kind'] }, '修改活动类型', entry.waiting)
+    void submit({ kind: 'revise_activity_kind', choice: values['revise_activity_kind'] }, entry.waiting)
     return
   }
   if (block.interaction_type === 'confirmation') {
@@ -1383,24 +1386,24 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
     if (choice !== '') {
       const notice = interactionNotices.value[block.submit_action_id ?? block.interaction_id]
       const reuse = notice?.kind === 'failed' && notice.choice === choice ? notice.clientRequestId : null
-      void pickKind(choice, entry.waiting, reuse)
+      void pickKind(choice, entry.waiting, { reuseClientRequestId: reuse, block })
       return
     }
     const typed = typeof values['text'] === 'string' ? values['text'].trim() : ''
-    if (typed !== '') void submit({ kind: 'submit_field', text: typed }, typed, entry.waiting)
+    if (typed !== '') void submit({ kind: 'submit_field', text: typed }, entry.waiting)
     return
   }
   if (block.interaction_type === 'text_input') {
     const answer = typeof values['text'] === 'string' ? values['text'].trim() : ''
     if (answer === '') return
     holdAction(actionId)
-    void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting).then((started) => {
+    void submit({ kind: 'submit_field', text: answer }, entry.waiting).then((started) => {
       if (!started) releaseAction(actionId)
     })
     return
   }
   if (block.business_action === 'provide_follow_up_content' && values['cancel'] === true) {
-    void submit({ kind: 'cancel' }, '取消', entry.waiting)
+    void submit({ kind: 'cancel' }, entry.waiting)
     return
   }
   if (source.type === 'ENTITY_FORM') {
@@ -1410,7 +1413,7 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
     void submit(onlyChoice
       ? { kind: 'submit_form', form_revision: formRevision, choice }
       : { kind: 'submit_form', form_revision: formRevision, values },
-    onlyChoice ? (choice === 'cancel' ? '取消' : '稍后补充') : '提交', source)
+    source)
     return
   }
   if (source.type === 'PROPOSAL_FORM' || source.type === 'CONFIRMATION_EDIT') {
@@ -1434,14 +1437,14 @@ const onAssistantInteraction = (entry: ChatEntry, actionId: string, values: Json
       input.values = values
     }
     // Cancelling a proposal form backs out of the form; it does not edit the activity.
-    void submit(input, canceled ? (source.type === 'CONFIRMATION_EDIT' ? '取消修改' : '取消') : '提交', source)
+    void submit(input, source)
     return
   }
   const fieldKey = block.fields[0]?.key
   const raw = fieldKey === undefined ? values['text'] : values[fieldKey]
   const answer = typeof raw === 'string' ? raw.trim() : ''
   if (answer === '') return
-  void submit({ kind: 'submit_field', text: answer }, answer, entry.waiting)
+  void submit({ kind: 'submit_field', text: answer }, entry.waiting)
 }
 
 const openAssistantEntity = (entity: EntityRef): void => {
