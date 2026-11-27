@@ -814,7 +814,7 @@ def _form_interaction(
         if kind not in ENTITY_ACTIONS:
             raise ValueError("missing frozen form")
         if not active and handled is not None:
-            summary = _entity_form_summary(entity_module_for(kind).LABEL, handled)
+            summary = _entity_form_summary(entity_module_for(kind).LABEL, handled, kind=kind)
         business_action = ENTITY_ACTIONS[kind]
         expected_field = waiting.field
         allowed = entity_module_for(kind).FIELD_KEYS
@@ -910,6 +910,10 @@ def _waiting_interaction(
                 if waiting.field == "opportunity"
                 else "select_intent"
                 if waiting.field == "intent"
+                else "select_contact"
+                if waiting.field == "contact_select"
+                else "resolve_contact_conflict"
+                if waiting.field == "contact_mobile_conflict"
                 else "select_customer"
             )
             return _choice(
@@ -919,6 +923,7 @@ def _waiting_interaction(
                 action_id=action_id,
                 business_action=business_action,
                 options=options,
+                hint=waiting.hint,
             )
     return _text_input(message, waiting, prompt=prompt, active=active, action_id=action_id)
 
@@ -1498,6 +1503,7 @@ def _receipt_entity(
 
 _ENTITY_RESULTS: dict[str, tuple[str, str, str | None]] = {
     "contact_create": ("联系人已保存", "联系人", "contacts"),
+    "contact_supplement": ("联系人资料已补充", "联系人", "contacts"),
     "invoice_title_create": ("开票抬头已保存", "开票抬头", "invoice_titles"),
     "deployment_create": ("部署信息已保存", "部署信息", "deployments"),
     "customer_create": ("客户已创建", "客户", None),
@@ -1524,9 +1530,15 @@ def _entity_result(message: ConversationMessage) -> tuple[str, str, EntityRef | 
     if receipt.kind != "customer_create" and customer_name:
         lines.append(f"客户：{customer_name}")
     if receipt.outcome == "existing":
-        title = f"{label}已存在，未重复创建"
+        title = (
+            "联系人资料已存在，未重复写入"
+            if receipt.kind == "contact_supplement"
+            else f"{label}已存在，未重复创建"
+        )
     elif receipt.approval_phase == "pending_review":
         title = f"{title}，待审批"
+    if receipt.kind == "contact_supplement" and receipt.summary:
+        lines.append(f"补充内容：{_clip(_plain(receipt.summary), 400)}")
     if receipt.kind == "invoice_title_create":
         lines.append("申请开票去发票管理")
     subject = _receipt_entity(receipt.customer_public_id, customer_name=customer_name, tab=tab)
@@ -1624,7 +1636,9 @@ def _candidate_options(candidates: list[dict[str, object]]) -> list[InteractionO
         if not isinstance(label, str) or not label.strip():
             continue
         seen.add(raw_id)
-        options.append(InteractionOption(value=raw_id, label=_clip(label.strip(), 200)))
+        raw_desc = candidate.get("description")
+        description = _clip(_plain(raw_desc), 1000) if isinstance(raw_desc, str) and raw_desc.strip() else None
+        options.append(InteractionOption(value=raw_id, label=_clip(label.strip(), 200), description=description))
         if len(options) == 50:
             break
     return options
@@ -1742,14 +1756,14 @@ def _handled_forms(messages: list[ConversationMessage]) -> dict[str, HandledForm
     return handled
 
 
-def _entity_form_summary(label: str, handled: HandledForm) -> str:
+def _entity_form_summary(label: str, handled: HandledForm, *, kind: str = "") -> str:
+    action = f"补充{label}" if kind == "contact_supplement" else f"新建{label}"
     if handled.outcome == "cancelled":
-        return f"已取消 · 新建{label}"
+        return f"已取消 · {action}"
     if handled.outcome == "deferred":
-        return f"稍后补充 · 新建{label}"
+        return f"稍后补充 · {action}"
     texts = [_clip(_plain(value), 80) for value in handled.values.values() if isinstance(value, str) and value.strip()]
-    return " · ".join(["已提交", f"新建{label}", *texts[:2]])
-
+    return " · ".join(["已提交", action, *texts[:2]])
 
 def _live_waiting_message_id(
     messages: list[ConversationMessage],

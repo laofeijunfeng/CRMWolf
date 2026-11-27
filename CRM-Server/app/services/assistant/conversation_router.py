@@ -33,11 +33,13 @@ quote 必须是本轮 text 中逐字一致的连续片段，且支持对该字�
 要新建一条CRM资料时，按资料提名业务对象 + CREATE（只提名，是否允许由服务端判定）：\
 联系人=CONTACT，开票抬头=INVOICE_TITLE，部署信息=DEPLOYMENT_INFO，商机=OPPORTUNITY，客户=CUSTOMER；\
 线索=LEAD，回款=PAYMENT_RECORD，合同=CONTRACT，指定客户负责人或成员=CUSTOMER_MEMBER。
-申请开票是 INVOICE_TITLE + TRANSITION；修改或删除已有记录是对应对象 + TRANSITION/DELETE。\
+申请开票是 INVOICE_TITLE + TRANSITION；给已有联系人追加备注或补全空白字段（如邮箱、微信、汇报对象）是 CONTACT + TRANSITION；\
+其他修改或删除已有记录是对应对象 + TRANSITION/DELETE。\
 这些写入都不能伪装成活动，route=WORKFLOW，boundary=NEW，task_relation=NEW_TASK。
 按语义区分“记下发生的沟通”和“存一条资料”，不按关键词：
 - “王敏说预算下来了”是客户沟通：ASSERT_EVENT + CUSTOMER_ACTIVITY + CREATE。
 - “换了对接人，新的是陈涛13712345678”是新建联系人：ASSERT_EVENT + CONTACT + CREATE。
+- “给瑞众人寿的孙自豪加一条备注：下周要方案”或“补一下瑞众人寿孙自豪的邮箱”是补充已有联系人：REQUEST_ACTION + CONTACT + TRANSITION。
 - “客户说想要发票”是客户沟通：ASSERT_EVENT + CUSTOMER_ACTIVITY + CREATE，不是开票抬头。
 - “把睿狐科技的开票抬头存一下，税号91…”是新建开票抬头：REQUEST_ACTION + INVOICE_TITLE + CREATE。
 拿不准是沟通还是资料时如实降低confidence，不要硬选。请求改变状态与询问已有事实必须区分。

@@ -499,13 +499,14 @@ const selectedFieldValues = (field: InteractionField): string[] => {
 // 桌面端多字段表单排两列；长文本、多行与多选独占一行，DOM 顺序即视觉顺序。
 const SHORT_TEXT_MAX_LENGTH = 100
 const isWideField = (field: InteractionField): boolean => {
-  if (field.field_type === 'textarea' || field.field_type === 'multi_select' || field.field_type === 'boolean') return true
+  if (field.read_only || field.field_type === 'textarea' || field.field_type === 'multi_select' || field.field_type === 'boolean') return true
   if (field.field_type !== 'text') return false
   return field.max_length == null || field.max_length > SHORT_TEXT_MAX_LENGTH
 }
 const formColumns = computed(() => props.block.interaction_type === 'form' && props.block.fields.length > 1)
 
 const fieldError = (field: InteractionField): string | null => {
+  if (field.read_only) return null
   const value = fieldValues.value[field.key]
   const blankText = typeof value === 'string' && value.trim().length === 0
   const empty = value === null || value === undefined || blankText || (Array.isArray(value) && value.length === 0)
@@ -615,7 +616,12 @@ const submit = async (): Promise<void> => {
     return
   }
   submitting.value = true
-  emit('submit', actionId, fieldValues.value)
+  const editableValues: JsonObject = Object.fromEntries(
+    props.block.fields
+      .filter(field => !field.read_only)
+      .map(field => [field.key, fieldValues.value[field.key] ?? null] as const)
+  )
+  emit('submit', actionId, editableValues)
 }
 </script>
 
@@ -1203,8 +1209,24 @@ const submit = async (): Promise<void> => {
           :class="formColumns && isWideField(field) && 'sm:col-span-2'"
           data-agent-ui-field
         >
+          <div
+            v-if="field.read_only"
+            class="grid gap-space-1.5"
+            data-agent-ui-readonly-field
+          >
+            <div class="flex items-center justify-between gap-space-2">
+              <span class="text-caption font-medium text-muted-foreground">{{ field.label }}</span>
+              <Badge variant="outline" class="text-[11px] font-normal text-muted-foreground">只读</Badge>
+            </div>
+            <div
+              class="rounded-md border border-border bg-muted/40 px-space-3 py-space-2 text-body text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]"
+              role="textbox"
+              aria-readonly="true"
+              :aria-label="field.label"
+            >{{ textValue(field) }}</div>
+          </div>
           <TextareaField
-            v-if="field.field_type === 'textarea'"
+            v-else-if="field.field_type === 'textarea'"
             :id="`${block.id}-${field.key}`"
             :label="field.label"
             :model-value="textValue(field)"
@@ -1292,7 +1314,7 @@ const submit = async (): Promise<void> => {
             @update:model-value="updateBooleanValue(field, $event)"
           />
           <div
-            v-if="(field.field_type === 'text' || field.field_type === 'textarea') && field.suggestions.length > 0 && !readonly"
+            v-if="!field.read_only && (field.field_type === 'text' || field.field_type === 'textarea') && field.suggestions.length > 0 && !readonly"
             class="flex flex-wrap gap-space-2"
             role="group"
             :aria-label="`${field.label}候选`"

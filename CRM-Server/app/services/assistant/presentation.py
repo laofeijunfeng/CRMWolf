@@ -96,8 +96,9 @@ def _profile_rows(task: AssistantTask, db: Session) -> list[dict[str, object]] |
         child = children.get(item.child_task_public_id or "")
         waiting = load_waiting(child) if child is not None else None
         receipt = (child.committed_json or [None])[0] if child is not None else None
+        label = "补充已有联系人" if item.kind == "contact_supplement" else module_for(item.kind).LABEL
         rows.append({
-            "index": index, "kind": item.kind, "label": module_for(item.kind).LABEL, "summary": item.summary,
+            "index": index, "kind": item.kind, "label": label, "summary": item.summary,
             "quote": item.quote, "decision": item.decision, "child_task_public_id": item.child_task_public_id,
             "child_status": child.status if child is not None else None,
             "child_waiting_type": waiting.type if waiting is not None else None,

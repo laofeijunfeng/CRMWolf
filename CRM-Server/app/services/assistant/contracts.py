@@ -31,7 +31,12 @@ ProposalKind = Literal["follow_up_task_create", "opportunity_stage", "opportunit
 # `follow_up_task` waits). They stay readable; the disposition still writes `follow_up_task` receipts.
 StoredProposalKind = ProposalKind | Literal["customer_fact", "follow_up_task"]
 EntityKind = Literal[
-    "contact_create", "invoice_title_create", "deployment_create", "customer_create", "opportunity_create",
+    "contact_create",
+    "contact_supplement",
+    "invoice_title_create",
+    "deployment_create",
+    "customer_create",
+    "opportunity_create",
 ]
 ENTITY_KINDS: frozenset[str] = frozenset(get_args(EntityKind))
 # One task per record: a follow-up activity, or one directly created entity (opportunities included).
@@ -236,6 +241,7 @@ class RefusedProposalReceipt(BaseModel):
         "refused:opportunity_lose",
         "refused:opportunity",
         "refused:contact_create",
+        "refused:contact_supplement",
         "refused:invoice_title_create",
         "refused:deployment_create",
         "refused:customer_create",
@@ -250,9 +256,10 @@ class EntityCreateReceipt(BaseModel):
 
     kind: EntityKind
     public_id: str = Field(min_length=1, max_length=64)
-    outcome: Literal["created", "existing"] = "created"
+    outcome: Literal["created", "existing", "supplemented"] = "created"
     customer_public_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=400)
     # Only a created opportunity whose effect carries an approval id is pending review (D26).
     approval_phase: Literal["pending_review"] | None = None
 
@@ -326,6 +333,13 @@ class EntityDraft(BaseModel):
     submitted: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     source_text: str = Field(default="", max_length=100_000)
     credentials_mentioned: bool = False
+    # Target existing contact metadata for controlled incremental supplement (CRM-176).
+    target_contact_id: int | None = None
+    target_contact_revision: int | None = None
+    target_contact_name: str | None = Field(default=None, max_length=100)
+    target_contact_mobile: str | None = Field(default=None, max_length=20)
+    target_existing_remark: str | None = Field(default=None, max_length=10_000)
+    conflict_mobile: str | None = Field(default=None, max_length=20)
 
 
 class TaskDraft(BaseModel):
@@ -420,7 +434,7 @@ class TaskWaiting(BaseModel):
         return payload.model_dump(mode="json", exclude_unset=True) if payload is not None else None
 
 
-ProfileKind = Literal["contact_create", "invoice_title_create", "deployment_create"]
+ProfileKind = Literal["contact_create", "contact_supplement", "invoice_title_create", "deployment_create"]
 
 
 class ProfileProposalItem(BaseModel):
@@ -434,6 +448,9 @@ class ProfileProposalItem(BaseModel):
     extracted: list[EntityQuote] = Field(default_factory=list, max_length=40)
     decision: Literal["pending", "go", "skip", "failed"] = "pending"
     child_task_public_id: str | None = Field(default=None, max_length=64)
+    target_contact_id: int | None = None
+    match_status: Literal["MATCHED", "AMBIGUOUS_NAME", "MOBILE_CONFLICT"] | None = None
+    conflict_mobile: str | None = Field(default=None, max_length=20)
 
 
 class TaskAuthority(BaseModel):

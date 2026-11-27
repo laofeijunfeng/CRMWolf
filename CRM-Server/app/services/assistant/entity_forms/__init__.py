@@ -38,6 +38,7 @@ SOURCE_LABELS: dict[FieldSource, str] = {
 }
 ACTIONS: dict[EntityKind, str] = {
     "contact_create": "create_contact",
+    "contact_supplement": "supplement_contact",
     "invoice_title_create": "create_invoice_title",
     "deployment_create": "create_deployment",
     "customer_create": "create_customer",
@@ -85,6 +86,7 @@ class FieldSpec:
     maximum: float | None = None
     # Select options filtered by another field's value (option ``depends_on_value``).
     depends_on_key: str | None = None
+    read_only: bool = False
 
     def render(
         self,
@@ -102,7 +104,10 @@ class FieldSpec:
         drafted = values.get(self.key)
         label: str | None = None
         value: JsonValue
-        if submitted is not None and self.key in submitted:
+        if self.read_only:
+            value = drafted.value if drafted is not None else None
+            label = None
+        elif submitted is not None and self.key in submitted:
             value = submitted[self.key]
             if drafted is not None and drafted.value is not None and _same(value, drafted.value):
                 label = source_label(drafted)
@@ -126,6 +131,7 @@ class FieldSpec:
             "label": self.label,
             "field_type": self.field_type,
             "required": self.required,
+            "read_only": self.read_only,
             "placeholder": self.placeholder,
             "default_value": value,
             "min_length": (1 if self.required else 0) if text else None,
@@ -176,6 +182,8 @@ class WriteResult:
     target_public_id: str
     name: str
     customer_public_id: str
+    outcome: Literal["created", "existing", "supplemented"] = "created"
+    summary: str | None = None
     after_commit: Callable[[], list[str]] = field(default=lambda: [])
 
 
@@ -213,10 +221,18 @@ class EntityFormModule(Protocol):
 
 
 def module_for(kind: str) -> EntityFormModule:
-    from app.services.assistant.entity_forms import contact, customer, deployment, invoice_title, opportunity
+    from app.services.assistant.entity_forms import (
+        contact,
+        contact_supplement,
+        customer,
+        deployment,
+        invoice_title,
+        opportunity,
+    )
 
     modules: dict[str, EntityFormModule] = {
         "contact_create": contact.FORM,
+        "contact_supplement": contact_supplement.FORM,
         "invoice_title_create": invoice_title.FORM,
         "deployment_create": deployment.FORM,
         "customer_create": customer.FORM,
@@ -226,7 +242,11 @@ def module_for(kind: str) -> EntityFormModule:
 
 
 def refresh_after_commit(
-    source_type: CustomerBusinessObjectSourceType, obj: object, actor_id: str,
+    source_type: CustomerBusinessObjectSourceType,
+    obj: object,
+    actor_id: str,
+    *,
+    change_type: Literal["created", "updated"] = "created",
 ) -> Callable[[], list[str]]:
     """Customer intelligence refresh through the same seam the CRM child-record endpoints use."""
 
@@ -237,7 +257,7 @@ def refresh_after_commit(
 
         try:
             service.enqueue_object_change_refresh_after_commit(
-                source_type=source_type, business_object=obj, change_type="created", actor_id=actor_id,
+                source_type=source_type, business_object=obj, change_type=change_type, actor_id=actor_id,
             )
         except Exception:
             logger.exception("assistant entity intelligence refresh failed source=%s", source_type)

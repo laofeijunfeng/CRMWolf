@@ -11,12 +11,19 @@ from __future__ import annotations
 import json
 import logging
 from time import monotonic
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.assistant import AssistantTask, AssistantWaitingType
+from app.services.assistant.contact_matching import (
+    compute_contact_delta,
+    extract_contact_signals,
+    list_customer_contacts,
+    match_existing_contact,
+)
 from app.services.assistant.contracts import EntityQuote, ProfileProposalItem, TaskAuthority, TaskWaiting
 from app.services.assistant.entity_forms import module_for
 from app.services.assistant.events import stage
@@ -126,6 +133,87 @@ def _verified(text: str, extraction: ProfileExtraction) -> list[ProfileProposalI
     return [item for _, item in found][:_MAX_ITEMS]
 
 
+def _pre_match_contact(
+    db: Session, task: AssistantTask, item: ProfileProposalItem,
+) -> ProfileProposalItem | None:
+    from app.models.customer import Customer
+
+    customer_public_id = load_authority(task).customer_public_id
+    if not customer_public_id:
+        return item
+    customer = (
+        db.query(Customer)
+        .filter(Customer.team_id == task.team_id, Customer.public_id == customer_public_id)
+        .first()
+    )
+    if customer is None:
+        return item
+    contacts = list_customer_contacts(db, team_id=task.team_id, customer_id=customer.id)
+    if not contacts:
+        return item
+
+    signals = extract_contact_signals(item.extracted)
+    match = match_existing_contact(contacts, signals)
+    if match.status == "NO_MATCH":
+        return item
+    if match.status == "MATCHED" and match.contact is not None:
+        delta = compute_contact_delta(match.contact, signals, contacts=contacts)
+        if not delta.has_delta:
+            return None
+        parts = "、".join(delta.summary_parts())
+        summary = f"补充 {match.contact.name}（{parts}）"[:120]
+        return item.model_copy(
+            update={
+                "kind": "contact_supplement",
+                "summary": summary,
+                "target_contact_id": match.contact.id,
+                "match_status": "MATCHED",
+            }
+        )
+    if match.status == "AMBIGUOUS_NAME":
+        name = signals.name or item.summary
+        summary = f"补充 {name}（有 {len(match.candidates)} 位同名，需选择）"[:120]
+        return item.model_copy(
+            update={
+                "kind": "contact_supplement",
+                "summary": summary,
+                "match_status": "AMBIGUOUS_NAME",
+            }
+        )
+    if match.status == "MOBILE_CONFLICT" and match.contact is not None:
+        summary = f"补充 {match.contact.name}（手机号不一致，需确认）"[:120]
+        return item.model_copy(
+            update={
+                "kind": "contact_supplement",
+                "summary": summary,
+                "target_contact_id": match.contact.id,
+                "match_status": "MOBILE_CONFLICT",
+                "conflict_mobile": match.conflict_mobile,
+            }
+        )
+    return item
+
+
+_PRE_MATCH_HOOKS: dict[str, Callable[[Session, AssistantTask, ProfileProposalItem], ProfileProposalItem | None]] = {
+    "contact_create": _pre_match_contact,
+}
+
+
+def _apply_pre_match_hooks(
+    db: Session, task: AssistantTask, items: list[ProfileProposalItem],
+) -> list[ProfileProposalItem]:
+    matched: list[ProfileProposalItem] = []
+    for item in items:
+        hook = _PRE_MATCH_HOOKS.get(item.kind)
+        if hook is None:
+            matched.append(item)
+            continue
+        resolved = hook(db, task, item)
+        if resolved is not None:
+            matched.append(resolved)
+    return matched
+
+
 def _waiting(task: AssistantTask, items: list[ProfileProposalItem]) -> TaskWaiting:
     candidates: list[dict[str, object]] = []
     for index, item in enumerate(items):
@@ -152,6 +240,7 @@ async def offer_profile_proposals(
         started = monotonic()
         try:
             items = _verified(text, await extract_profile_items(db, task, text))
+            items = _apply_pre_match_hooks(db, task, items)
             reporter.stage_done(stage("propose"), ms=int((monotonic() - started) * 1000))
         except Exception:  # the activity is already written; a profile miss must never affect it.
             logger.warning("assistant profile extraction failed task=%s", task.public_id, exc_info=True)
@@ -191,7 +280,10 @@ def answer_profile_proposals(db: Session, task: AssistantTask, choice: str) -> t
                 with db.begin_nested():
                     child = open_profile_child(db, task, item)
                 items[index] = item.model_copy(update={"decision": "go", "child_task_public_id": child.public_id})
-                message = f"已打开「{item.summary}」的{module_for(item.kind).LABEL}表单，核对后保存"
+                if child.waiting_type == AssistantWaitingType.OBJECT_SELECTION:
+                    message = f"已打开「{item.summary}」的确认卡片，请先选择处理方式"
+                else:
+                    message = f"已打开「{item.summary}」的{module_for(item.kind).LABEL}表单，核对后保存"
             except (SQLAlchemyError, InvalidTaskTransitionError, TaskStateConflictError, ValueError):
                 logger.warning("assistant profile child failed task=%s item=%s", task.public_id, index, exc_info=True)
                 items[index] = item.model_copy(update={"decision": "failed"})

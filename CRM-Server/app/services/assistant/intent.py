@@ -35,6 +35,7 @@ ENTITY_TASK_KINDS: dict[str, TaskKind] = {
 }
 ENTITY_LABELS: dict[TaskKind, str] = {
     "contact_create": "联系人",
+    "contact_supplement": "联系人资料",
     "invoice_title_create": "开票抬头",
     "deployment_create": "部署信息",
     "opportunity_create": "商机",
@@ -96,7 +97,11 @@ def judge_intent(plan: AgentSemanticPlan, confidence: float) -> IntentVerdict:
 
     sure = min(confidence, plan.confidence)
     obj, operation = plan.business_object, plan.operation
-    entity_kind = ENTITY_TASK_KINDS.get(obj) if operation == "CREATE" else None
+    entity_kind: TaskKind | None = None
+    if operation == "CREATE":
+        entity_kind = ENTITY_TASK_KINDS.get(obj)
+    elif obj == "CONTACT" and operation == "TRANSITION":
+        entity_kind = "contact_supplement"
     if sure < CONFIDENT:
         if entity_kind is not None and plan.speech_act in _WRITE_ACTS and sure >= INTENT_QUESTION_FLOOR:
             return IntentVerdict(route="intent_question", task_kind=entity_kind)
@@ -107,6 +112,8 @@ def judge_intent(plan: AgentSemanticPlan, confidence: float) -> IntentVerdict:
         return _refuse("设置客户负责人或成员请到客户详情处理", _CUSTOMERS)
     if obj == "INVOICE_TITLE" and operation == "TRANSITION":
         return _refuse("申请开票请到发票管理", _INVOICES)
+    if obj == "CONTACT" and operation == "TRANSITION" and plan.speech_act in _WRITE_ACTS:
+        return IntentVerdict(route="entity", task_kind="contact_supplement")
     if operation in {"TRANSITION", "DELETE"}:
         return _refuse("这里不修改或删除已有记录，请到对应业务页面处理", _EXISTING_RECORD_PAGES.get(obj, _CUSTOMERS))
     if operation == "CREATE" and obj in _UNSUPPORTED_CREATES:

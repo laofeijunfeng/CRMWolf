@@ -1203,3 +1203,60 @@ it('does not collapse non-entity forms such as proposal or confirmation edit', (
     expect(wrapper.find('[data-agent-ui-collapsed-form]').exists()).toBe(false)
   }
 })
+
+it('renders read_only fields as non-editable reference blocks and excludes them from submit payload', async () => {
+  const block = InteractionBlockSchema.parse({
+    ...contactFormBlock(),
+    id: 'blk_supplement_contact',
+    business_action: 'supplement_contact',
+    prompt: '补充联系人资料 · 孙自豪（138****8000）',
+    submit_action_id: 'act_supplement',
+    submit_label: '确认补充',
+    fields: [
+      {
+        key: 'existing_remark',
+        label: '已有备注',
+        field_type: 'textarea',
+        required: false,
+        default_value: '偏好线下沟通\n已签保密协议',
+        read_only: true,
+        min_length: 0,
+        max_length: 2000,
+        options: [],
+      },
+      {
+        key: 'remark_append',
+        label: '追加备注',
+        field_type: 'textarea',
+        required: false,
+        default_value: '下周三技术评审',
+        min_length: 0,
+        max_length: 2000,
+        options: [],
+      },
+      {
+        key: 'email',
+        label: '邮箱',
+        field_type: 'text',
+        required: false,
+        default_value: 'sun@ruihu.example',
+        min_length: 0,
+        max_length: 120,
+        options: [],
+      },
+    ],
+  })
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  const readonlyField = wrapper.get('[data-agent-ui-readonly-field]')
+  expect(readonlyField.text()).toContain('已有备注')
+  expect(readonlyField.text()).toContain('只读')
+  expect(readonlyField.get('[role="textbox"][aria-readonly="true"]').text()).toBe('偏好线下沟通\n已签保密协议')
+  // Only the editable remark_append textarea renders as a <textarea>
+  expect(wrapper.findAll('textarea')).toHaveLength(1)
+
+  await wrapper.findAll('button').find(button => button.text() === '确认补充')?.trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([
+    ['act_supplement', { remark_append: '下周三技术评审', email: 'sun@ruihu.example' }],
+  ])
+})

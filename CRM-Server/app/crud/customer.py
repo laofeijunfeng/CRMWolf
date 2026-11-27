@@ -1498,7 +1498,7 @@ class ContactCRUD:
             db.refresh(db_obj)
         return db_obj
 
-    def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate) -> Contact:
+    def update(self, db: Session, db_obj: Contact, obj_in: ContactUpdate, *, commit: bool = True) -> Contact:
         update_data = obj_in.model_dump(exclude_unset=True)
         if not update_data:
             return db_obj
@@ -1507,8 +1507,9 @@ class ContactCRUD:
         db_obj = self._locked_contact(db, db_obj)
         changed_fields = {field for field, value in update_data.items() if getattr(db_obj, field, None) != value}
         if not changed_fields:
-            db.commit()
-            db.refresh(db_obj)
+            if commit:
+                db.commit()
+                db.refresh(db_obj)
             return db_obj
         contact_id, customer_id, team_id = db_obj.id, db_obj.customer_id, db_obj.team_id
         mobile = update_data.get("mobile")
@@ -1528,8 +1529,9 @@ class ContactCRUD:
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         db_obj.post_commit_revision = int(getattr(db_obj, "post_commit_revision", None) or 1) + 1
-        persist_guarding_duplicate(db, commit=True, find_duplicate=find_duplicate)
-        db.refresh(db_obj)
+        persist_guarding_duplicate(db, commit=commit, find_duplicate=find_duplicate)
+        if commit:
+            db.refresh(db_obj)
         return db_obj
 
     def set_primary(self, db: Session, contact: Contact, team_id: int | None = None) -> Contact:

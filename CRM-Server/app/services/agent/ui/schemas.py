@@ -306,8 +306,8 @@ class InteractionField(AgentUIContractModel):
         "depends_on_key": None,
         "error_message": None,
         "suggestions": [],
+        "read_only": False,
     }
-
     key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1, max_length=200)
     field_type: Literal["text", "textarea", "number", "date", "datetime", "select", "multi_select", "boolean"]
@@ -325,6 +325,7 @@ class InteractionField(AgentUIContractModel):
     error_message: str | None = Field(default=None, min_length=1, max_length=500)
     # Server-offered one-tap values for a text field (e.g. 生产环境 / 测试环境); tapping only fills the field.
     suggestions: list[str] = Field(default_factory=list, max_length=8)
+    read_only: bool = False
 
     @model_validator(mode="after")
     def validate_field_constraints(self) -> Self:
@@ -377,7 +378,8 @@ _DISPOSITION_SECONDARY_ACTION = "suppress_week"
 _CANCEL_REASON_VALUES = frozenset({"wrong_customer", "wrong_content", "should_not_record", "other"})
 _CANCELLABLE_FORM_ACTIONS = frozenset({
     "create_opportunity_proposal", "edit_confirmation",
-    "create_contact", "create_invoice_title", "create_deployment", "create_customer", "create_opportunity",
+    "create_contact", "supplement_contact", "create_invoice_title", "create_deployment", "create_customer",
+    "create_opportunity",
 })
 
 

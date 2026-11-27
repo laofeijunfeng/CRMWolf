@@ -14,7 +14,7 @@ export const DraftFieldSchema = z.object({
 export type DraftField = z.infer<typeof DraftFieldSchema>
 
 export const EntityKindSchema = z.enum([
-  'contact_create', 'invoice_title_create', 'deployment_create', 'customer_create', 'opportunity_create'
+  'contact_create', 'contact_supplement', 'invoice_title_create', 'deployment_create', 'customer_create', 'opportunity_create'
 ])
 export type EntityKind = z.infer<typeof EntityKindSchema>
 export const TaskKindSchema = z.enum(['customer_activity', ...EntityKindSchema.options])
@@ -36,7 +36,13 @@ export const EntityDraftSchema = z.object({
   extracted: z.array(z.object({ key: z.string(), value: z.string(), quote: z.string() }).strict()).max(40).optional(),
   submitted: z.record(JsonObjectSchema).optional(),
   source_text: z.string().max(100_000).optional(),
-  credentials_mentioned: z.boolean().optional()
+  credentials_mentioned: z.boolean().optional(),
+  target_contact_id: z.number().int().nullable().optional(),
+  target_contact_revision: z.number().int().nullable().optional(),
+  target_contact_name: z.string().max(100).nullable().optional(),
+  target_contact_mobile: z.string().max(20).nullable().optional(),
+  target_existing_remark: z.string().max(10_000).nullable().optional(),
+  conflict_mobile: z.string().max(20).nullable().optional()
 }).strict()
 export type EntityDraft = z.infer<typeof EntityDraftSchema>
 
@@ -242,7 +248,7 @@ const RefusedProposalReceiptSchema = z.object({
   kind: z.enum([
     'refused:customer_fact', 'refused:follow_up_task_create', 'refused:follow_up_task',
     'refused:opportunity_stage', 'refused:opportunity_create', 'refused:opportunity',
-    'refused:contact_create', 'refused:invoice_title_create', 'refused:deployment_create', 'refused:customer_create'
+    'refused:contact_create', 'refused:contact_supplement', 'refused:invoice_title_create', 'refused:deployment_create', 'refused:customer_create'
   ]),
   proposal_key: z.string().min(1).optional()
 }).strict()
@@ -250,9 +256,10 @@ const RefusedProposalReceiptSchema = z.object({
 export const EntityCreateReceiptSchema = z.object({
   kind: EntityKindSchema,
   public_id: z.string().min(1).max(64),
-  outcome: z.enum(['created', 'existing']),
+  outcome: z.enum(['created', 'existing', 'supplemented']),
   customer_public_id: z.string().nullable().optional(),
   name: z.string().min(1).max(200).nullable().optional(),
+  summary: z.string().max(400).nullable().optional(),
   approval_phase: z.literal('pending_review').nullable().optional()
 }).strict()
 export type EntityCreateReceipt = z.infer<typeof EntityCreateReceiptSchema>
@@ -308,7 +315,7 @@ export const AssistantTaskViewSchema = z.object({
   }).strict().nullable().optional(),
   profile_proposals: z.array(z.object({
     index: z.number().int().nonnegative(),
-    kind: z.enum(['contact_create', 'invoice_title_create', 'deployment_create']),
+    kind: z.enum(['contact_create', 'contact_supplement', 'invoice_title_create', 'deployment_create']),
     label: z.string(),
     summary: z.string(),
     quote: z.string(),

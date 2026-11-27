@@ -26,6 +26,12 @@ from app.services.assistant.contracts import (
     EntityQuote,
     TaskWaiting,
 )
+from app.services.assistant.contact_matching import (
+    extract_contact_signals,
+    list_customer_contacts,
+    mask_mobile,
+    match_existing_contact,
+)
 from app.services.assistant.crm_effects import AssistantCRMCommand, checked_effect, record_effect
 from app.services.assistant.entity_forms import (
     ACTIONS,
@@ -62,11 +68,18 @@ logger = logging.getLogger(__name__)
 
 CUSTOMER_FIELD = "customer"
 NEW_CUSTOMER = "new_customer"
+CONTACT_FIELD = "contact_select"
+CONTACT_CONFLICT_FIELD = "contact_mobile_conflict"
+CREATE_NEW_CONTACT = "create_new_contact"
+KEEP_EXISTING_CONTACT = "keep_existing_contact"
 _CUSTOMER_KIND = "customer_create"
+_CONTACT_CREATE_KIND = "contact_create"
+_CONTACT_SUPPLEMENT_KIND = "contact_supplement"
 _CLAIM = "proposal_command_claim"
 # Frozen form key that names the record on a reconciled receipt.
 _NAME_KEYS = {
     "contact_create": "name",
+    "contact_supplement": "name",
     "invoice_title_create": "title",
     "deployment_create": "deployment_name",
     "customer_create": "account_name",
@@ -105,8 +118,9 @@ def pending_drafts(db: Session, *, team_id: int, user_id: int) -> list[PendingEn
     for task in tasks:
         waiting = load_waiting(task)
         entity = load_draft(task).entity
+        draft_label = "补充联系人资料" if task.task_kind == _CONTACT_SUPPLEMENT_KIND else module_for(task.task_kind).LABEL
         views.append(PendingEntityDraftView(
-            public_id=task.public_id, task_kind=task.task_kind, label=module_for(task.task_kind).LABEL,
+            public_id=task.public_id, task_kind=task.task_kind, label=draft_label,
             customer_name=entity.customer_name if entity is not None else None,
             waiting_type=waiting.type if waiting is not None else None,
             prompt=waiting.prompt if waiting is not None else None,
@@ -303,6 +317,10 @@ async def handle_entity_task(
     if waiting.field == CUSTOMER_FIELD and waiting.type == AssistantWaitingType.FIELD and user_input.text:
         entity = _entity(task).model_copy(update={"customer_name": user_input.text.strip()[:200]})
         return _resolve_customer(db, task, module, user, entity)
+    if waiting.field == CONTACT_FIELD and waiting.type == AssistantWaitingType.OBJECT_SELECTION:
+        return _select_contact(db, task, module, user, user_input.choice)
+    if waiting.field == CONTACT_CONFLICT_FIELD and waiting.type == AssistantWaitingType.OBJECT_SELECTION:
+        return _resolve_contact_conflict(db, task, module, user, user_input.choice)
     raise InvalidTaskTransitionError("当前输入不符合等待动作")
 
 
@@ -410,6 +428,181 @@ def _select_customer(
     return _bind_and_issue(db, task, module, user, entity, customer)
 
 
+def _contact_option(contact: object) -> dict[str, object]:
+    position = getattr(contact, "position", None) or ""
+    masked = mask_mobile(getattr(contact, "mobile", None))
+    desc_parts = [part for part in (position.strip(), masked) if part]
+    option: dict[str, object] = {"id": str(contact.id), "label": str(contact.name)}
+    if desc_parts:
+        option["description"] = " · ".join(desc_parts)
+    return option
+
+
+def _offer_contacts(
+    db: Session,
+    task: AssistantTask,
+    entity: EntityDraft,
+    prompt: str,
+    contacts: list[object],
+    *,
+    hint: str | None = None,
+    fence: bool = False,
+) -> CoordinatorOutcome:
+    candidates: list[dict[str, object]] = [_contact_option(c) for c in contacts[:49]]
+    candidates.append({"id": CREATE_NEW_CONTACT, "label": "+ 按新联系人创建"})
+    waiting = TaskWaiting(
+        type=AssistantWaitingType.OBJECT_SELECTION,
+        field=CONTACT_FIELD,
+        question_id=f"q_contact_{task.public_id}_{task.version}",
+        prompt=prompt[:2000],
+        hint=hint[:400] if hint else None,
+        candidates=candidates,
+    )
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            require_no_active_turn=fence,
+            draft=_with_entity(task, entity),
+            waiting=waiting,
+            action_actor="SYSTEM",
+            action_name="offer_contacts",
+        ),
+    )
+    return _outcome(result.task, prompt)
+
+
+def _offer_mobile_conflict(
+    db: Session,
+    task: AssistantTask,
+    entity: EntityDraft,
+    target: object,
+    conflict_mobile: str,
+    *,
+    fence: bool = False,
+) -> CoordinatorOutcome:
+    masked = mask_mobile(getattr(target, "mobile", None))
+    name = str(getattr(target, "name", "") or "该联系人")
+    prompt = "手机号与已有联系人不一致，请确认处理方式"
+    hint = f"库内已有「{name}（{masked}）」，但本次提到手机号 {conflict_mobile}。不会自动修改已有手机号。"
+    candidates: list[dict[str, object]] = [
+        {
+            "id": KEEP_EXISTING_CONTACT,
+            "label": f"补充已有「{name}」",
+            "description": "保留原手机号，新号记入备注",
+        },
+        {
+            "id": CREATE_NEW_CONTACT,
+            "label": f"+ 按新联系人创建（{conflict_mobile}）",
+        },
+    ]
+    updated_entity = entity.model_copy(
+        update={
+            "target_contact_id": int(target.id),
+            "target_contact_name": name[:100],
+            "target_contact_mobile": str(getattr(target, "mobile", "") or "")[:20] or None,
+            "conflict_mobile": conflict_mobile[:20],
+        }
+    )
+    waiting = TaskWaiting(
+        type=AssistantWaitingType.OBJECT_SELECTION,
+        field=CONTACT_CONFLICT_FIELD,
+        question_id=f"q_contact_conflict_{task.public_id}_{task.version}",
+        prompt=prompt,
+        hint=hint[:400],
+        candidates=candidates,
+    )
+    result = apply_task_update(
+        db,
+        task,
+        TaskUpdate(
+            require_no_active_turn=fence,
+            draft=_with_entity(task, updated_entity),
+            waiting=waiting,
+            action_actor="SYSTEM",
+            action_name="offer_contact_mobile_conflict",
+        ),
+    )
+    return _outcome(result.task, prompt)
+
+
+def _switch_to_contact_create(
+    db: Session,
+    task: AssistantTask,
+    user: User,
+    entity: EntityDraft,
+    customer: Customer,
+) -> CoordinatorOutcome:
+    task.task_kind = _CONTACT_CREATE_KIND
+    create_module = module_for(_CONTACT_CREATE_KIND)
+    switched = entity.model_copy(
+        update={
+            "kind": _CONTACT_CREATE_KIND,
+            "target_contact_id": None,
+            "target_contact_revision": None,
+            "target_contact_name": None,
+            "target_contact_mobile": None,
+            "target_existing_remark": None,
+            "conflict_mobile": None,
+        }
+    )
+    ctx = FormContext(db, task, user, customer, switched)
+    switched = switched.model_copy(update={"fields": create_module.prepare(ctx, switched.extracted)})
+    return _issue_form(db, task, create_module, user, switched, action_name="issue_entity_form")
+
+
+def _select_contact(
+    db: Session,
+    task: AssistantTask,
+    module: EntityFormModule,
+    user: User,
+    choice: str | None,
+) -> CoordinatorOutcome:
+    entity = _entity(task)
+    customer = _customer(db, task, entity.customer_public_id)
+    if customer is None:
+        return _ask_customer(db, task, entity.model_copy(update={"customer_public_id": None}), "存到哪个客户？")
+    if choice == CREATE_NEW_CONTACT:
+        return _switch_to_contact_create(db, task, user, entity, customer)
+    if not choice or not choice.isdigit():
+        raise InvalidTaskTransitionError("请选择一个联系人或按新联系人创建")
+    target_id = int(choice)
+    contacts = list_customer_contacts(db, team_id=task.team_id, customer_id=customer.id)
+    target = next((c for c in contacts if c.id == target_id), None)
+    if target is None:
+        return _offer_contacts(
+            db,
+            task,
+            entity,
+            f"所选联系人已不可用，请重新选择{customer.account_name}下的联系人",
+            contacts,
+        )
+    bound = entity.model_copy(update={"target_contact_id": target.id, "conflict_mobile": None})
+    ctx = FormContext(db, task, user, customer, bound)
+    bound = bound.model_copy(update={"fields": module.prepare(ctx, bound.extracted)})
+    return _issue_form(db, task, module, user, bound, action_name="issue_entity_form")
+
+
+def _resolve_contact_conflict(
+    db: Session,
+    task: AssistantTask,
+    module: EntityFormModule,
+    user: User,
+    choice: str | None,
+) -> CoordinatorOutcome:
+    entity = _entity(task)
+    customer = _customer(db, task, entity.customer_public_id)
+    if customer is None:
+        return _ask_customer(db, task, entity.model_copy(update={"customer_public_id": None}), "存到哪个客户？")
+    if choice == CREATE_NEW_CONTACT:
+        return _switch_to_contact_create(db, task, user, entity, customer)
+    if choice != KEEP_EXISTING_CONTACT or entity.target_contact_id is None:
+        raise InvalidTaskTransitionError("请选择处理方式")
+    ctx = FormContext(db, task, user, customer, entity)
+    bound = entity.model_copy(update={"fields": module.prepare(ctx, entity.extracted)})
+    return _issue_form(db, task, module, user, bound, action_name="issue_entity_form")
+
+
 def _bind_and_issue(
     db: Session, task: AssistantTask, module: EntityFormModule, user: User, entity: EntityDraft,
     customer: Customer, *, fence: bool = False,
@@ -420,10 +613,41 @@ def _bind_and_issue(
     entity = entity.model_copy(update={
         "customer_public_id": customer.public_id, "customer_name": customer.account_name[:200],
     })
+    if module.KIND == _CONTACT_SUPPLEMENT_KIND:
+        contacts = list_customer_contacts(db, team_id=task.team_id, customer_id=customer.id)
+        if entity.target_contact_id is not None:
+            target = next((c for c in contacts if c.id == entity.target_contact_id), None)
+            if target is not None:
+                if entity.conflict_mobile:
+                    return _offer_mobile_conflict(db, task, entity, target, entity.conflict_mobile, fence=fence)
+                ctx = FormContext(db, task, user, customer, entity)
+                entity = entity.model_copy(update={"fields": module.prepare(ctx, entity.extracted)})
+                return _issue_form(db, task, module, user, entity, action_name="issue_entity_form", fence=fence)
+        signals = extract_contact_signals(entity.extracted)
+        match = match_existing_contact(contacts, signals)
+        if match.status == "MATCHED" and match.contact is not None:
+            entity = entity.model_copy(update={"target_contact_id": match.contact.id, "conflict_mobile": None})
+            ctx = FormContext(db, task, user, customer, entity)
+            entity = entity.model_copy(update={"fields": module.prepare(ctx, entity.extracted)})
+            return _issue_form(db, task, module, user, entity, action_name="issue_entity_form", fence=fence)
+        if match.status == "AMBIGUOUS_NAME":
+            name = signals.name or "该联系人"
+            prompt = f"{customer.account_name}下有 {len(match.candidates)} 位“{name}”，要补充到哪一位？"
+            return _offer_contacts(db, task, entity, prompt, list(match.candidates), fence=fence)
+        if match.status == "MOBILE_CONFLICT" and match.contact is not None and match.conflict_mobile:
+            return _offer_mobile_conflict(db, task, entity, match.contact, match.conflict_mobile, fence=fence)
+        if contacts:
+            prompt = (
+                f"{customer.account_name}下未精确匹配到“{signals.name}”，请选择要补充的联系人或按新联系人创建"
+                if signals.name
+                else f"请选择{customer.account_name}下要补充的联系人"
+            )
+            return _offer_contacts(db, task, entity, prompt, contacts, fence=fence)
+        prompt = f"{customer.account_name}下还没有联系人，要按新联系人创建吗？"
+        return _offer_contacts(db, task, entity, prompt, [], fence=fence)
     ctx = FormContext(db, task, user, customer, entity)
     entity = entity.model_copy(update={"fields": module.prepare(ctx, entity.extracted)})
     return _issue_form(db, task, module, user, entity, action_name="issue_entity_form", fence=fence)
-
 
 # ---------------------------------------------------------------------------
 # Form
@@ -448,7 +672,17 @@ def _issue_form(
     if entity.credentials_mentioned and not inline:
         notes.append("账号密码不会保存")
     # The title only names the action; the customer is the form's subject line, linked to its page.
-    prompt = f"新建{form.LABEL}"
+    if form.KIND == _CONTACT_SUPPLEMENT_KIND:
+        target_bits = [part for part in (entity.target_contact_name, mask_mobile(entity.target_contact_mobile)) if part]
+        prompt = (
+            f"补充联系人资料 · {target_bits[0]}（{target_bits[1]}）"
+            if len(target_bits) > 1
+            else f"补充联系人资料 · {target_bits[0]}"
+            if target_bits
+            else "补充联系人资料"
+        )
+    else:
+        prompt = f"新建{form.LABEL}"
     revision = task.version
     submitted = entity.submitted.get(form.KIND)
     form_fields = form.fields(ctx, values, submitted, errors or {})[:20]
@@ -638,6 +872,8 @@ def cancel_entity_task(db: Session, task: AssistantTask) -> CoordinatorOutcome:
         status=AssistantTaskStatus.CANCELLED, clear_waiting=True, action_actor="USER", action_name="cancel_task",
         action_input={"source": "explicit_user_cancel", "input_kind": "submit_form"},
     ))
+    if task.task_kind == _CONTACT_SUPPLEMENT_KIND:
+        return _outcome(result.task, not_written("已取消补充联系人资料"))
     label = module_for(task.task_kind).LABEL if task.task_kind in ACTIONS else "资料"
     return _outcome(result.task, not_written(f"已取消新建{label}"))
 
@@ -684,14 +920,21 @@ def _publish_unknown(db: Session, task: AssistantTask, kind: str, label: str) ->
 
 
 def _receipt(kind: str, public_id: str, name: str, customer_public_id: str | None,
-             outcome: str = "created", *, pending_review: bool = False) -> dict[str, object]:
+             outcome: str = "created", *, pending_review: bool = False,
+             summary: str | None = None) -> dict[str, object]:
     return EntityCreateReceipt(
         kind=kind, public_id=public_id[:64], outcome=outcome, customer_public_id=customer_public_id,
-        name=(name.strip() or "未命名")[:200], approval_phase="pending_review" if pending_review else None,
+        name=(name.strip() or "未命名")[:200],
+        summary=summary[:400] if summary else None,
+        approval_phase="pending_review" if pending_review else None,
     ).model_dump(mode="json", exclude_none=True)
 
 
-def _saved_message(kind: str, label: str, name: str) -> str:
+def _saved_message(kind: str, label: str, name: str, *, outcome: str = "created", summary: str | None = None) -> str:
+    if kind == _CONTACT_SUPPLEMENT_KIND:
+        if outcome == "existing":
+            return f"{name}：{summary or '所填内容已存在，未重复写入'}"
+        return f"联系人资料已补充：{name}" + (f"（{summary}）" if summary else "")
     return f"客户已创建：{name}" if kind == _CUSTOMER_KIND else f"{label}已保存：{name}"
 
 
@@ -750,7 +993,15 @@ def _write(
         reporter.stage_failed(step)
         assert_owned_execution_lease(db, task)
         _mark_claim_status(db, claim, "NO_EFFECT")
-        return _issue_form(db, task, module, user, _entity(task), inline=inline, errors=exc.errors,
+        refreshed_entity = _entity(task)
+        if kind == _CONTACT_SUPPLEMENT_KIND:
+            refreshed_entity = refreshed_entity.model_copy(
+                update={
+                    "target_contact_revision": ctx.draft.target_contact_revision,
+                    "target_existing_remark": ctx.draft.target_existing_remark,
+                }
+            )
+        return _issue_form(db, task, module, user, refreshed_entity, inline=inline, errors=exc.errors,
                            action_name="entity_write_refused")
     except SQLAlchemyError:
         logger.exception("assistant entity write failed task=%s kind=%s", task.public_id, kind)
@@ -769,7 +1020,10 @@ def _write(
     try:
         assert_owned_execution_lease(db, task)
         _mark_claim_status(db, claim, "SUCCEEDED", public_id=result.target_public_id)
-        receipt = _receipt(kind, result.target_public_id, result.name, result.customer_public_id)
+        receipt = _receipt(
+            kind, result.target_public_id, result.name, result.customer_public_id,
+            outcome=result.outcome, summary=result.summary,
+        )
         if inline:
             _attach_inline_customer(db, task, receipt)
         else:
@@ -791,7 +1045,7 @@ def _write(
         if customer is None:
             raise InvalidTaskTransitionError("inline customer vanished after commit")
         return _bind_and_issue(db, task, module, user, _entity(task), customer)
-    return _outcome(task, _saved_message(kind, form.LABEL, result.name))
+    return _outcome(task, _saved_message(kind, form.LABEL, result.name, outcome=result.outcome, summary=result.summary))
 
 
 _OPPORTUNITY_DUPLICATE = "已存在相同或无法区分的商机，未创建新商机，请到商机页查看"
@@ -922,7 +1176,13 @@ def open_profile_child(db: Session, parent: AssistantTask, item: ProfileProposal
     db.add(child)
     db.flush()
     module = module_for(item.kind)
-    entity = EntityDraft(kind=item.kind, extracted=item.extracted, source_text=item.quote[:20000])
+    entity = EntityDraft(
+        kind=item.kind,
+        extracted=item.extracted,
+        source_text=item.quote[:20000],
+        target_contact_id=item.target_contact_id,
+        conflict_mobile=item.conflict_mobile,
+    )
     user = _user(db, child)
     if user is None:
         _refuse(db, child, "你的账号已不在当前团队或已停用")
