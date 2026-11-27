@@ -97,9 +97,20 @@ const SESSION_UPDATED_MESSAGE = '会话已更新，请查看当前提示；未�
 const LOGIN_EXPIRED_MESSAGE = '登录状态已失效，请重新登录后重试；不会自动开始新的记录。'
 const REJECTED_SUBMIT_MESSAGE = '这次提交没有被接受，请按当前提示修改后再提交。'
 const NOT_SAVED_MESSAGE = '刚才网络不稳定，这条还没有保存。内容都在，可以直接再提交。'
-const UNCONFIRMED_MESSAGE = '网络较慢，还没确认是否已保存。为避免重复，先不要再次提交。'
+const UNCONFIRMED_MESSAGE = '结果暂时未确认，为避免重复，先不要再次提交。'
+const OFFLINE_BANNER_MESSAGE = '网络已断开，已有内容都还在。网络恢复后会自动同步。'
+const WEAK_NETWORK_NOTICE = '网络波动，正在自动恢复进度…'
+const RECONCILE_LOCKED_HINT = '正在核对上一条保存结果，暂不可输入'
+const RECONCILE_CHECKING_STATUS = '正在自动核对是否已保存到 CRM…'
+const RECONCILE_BANNER_TITLE = '正在核对保存结果'
+const RECONCILE_BANNER_BODY = '刚才提交后未立即收到确认，系统正在自动核对是否已保存到 CRM，期间不会重复写入。'
+const RECONCILE_NOT_WRITTEN_NOTICE = '刚才未能完成保存，内容都在，可以重新确认。'
+const PENDING_RESUME_FALLBACK_NOTICE = '上一条发送尚未完成'
 // Lost-response checks back off 2/4/8/16/30 s (about one minute) before handing over to 「查看结果」.
 const LOST_SEND_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000]
+const RECONCILE_DELAYS_MS = [2_000, 4_000, 8_000, 16_000]
+const RECOVERY_POLL_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 15_000]
+const WEAK_NETWORK_DELAYS_MS = [2_000, 4_000, 8_000, 15_000, 30_000]
 type CommandFailure = 'conflict' | 'auth' | 'rejected'
 type CommandOutcome = 'accepted' | 'explicit' | 'not_saved' | 'unconfirmed' | 'conflict'
 /**
@@ -155,17 +166,28 @@ const explicitCommandFailure = (error: unknown): CommandFailure | null => {
   return null
 }
 
+const isExplicitNonNetworkLoadError = (error: unknown): boolean => {
+  if (!isAxiosError(error)) return false
+  const status = error.response?.status
+  const responseData = error.response?.data as { error_code?: unknown } | undefined
+  return responseData?.error_code === 'DATABASE_SCHEMA_MISMATCH'
+    || status === 400 || status === 401 || status === 403 || status === 404 || status === 409 || status === 422
+}
+
 const conversationLoadErrorMessage = (error: unknown): string => {
   const noNewRecord = '；不会自动开始新的记录。'
-  if (!isAxiosError(error)) return `对话加载失败，请重试${noNewRecord}`
-  const responseData = error.response?.data as { error_code?: unknown } | undefined
-  if (responseData?.error_code === 'DATABASE_SCHEMA_MISMATCH') {
-    return `数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试${noNewRecord}`
+  if (isAxiosError(error)) {
+    const responseData = error.response?.data as { error_code?: unknown } | undefined
+    if (responseData?.error_code === 'DATABASE_SCHEMA_MISMATCH') {
+      return `数据库结构与当前版本不一致，请联系管理员执行数据库迁移后重试${noNewRecord}`
+    }
+    if (error.response?.status === 401) return LOGIN_EXPIRED_MESSAGE
+    const status = error.response?.status
+    if (status === 400 || status === 403 || status === 404 || status === 409 || status === 422) {
+      return `无法加载当前对话${noNewRecord}`
+    }
   }
-  if (error.response?.status === 401) return LOGIN_EXPIRED_MESSAGE
-  if (error.response === undefined) return `服务或网络暂时不可用，请检查网络后重试${noNewRecord}`
-  if (error.response.status >= 500) return `服务暂时不可用，请稍后重试${noNewRecord}`
-  return `对话加载失败，请重试${noNewRecord}`
+  return OFFLINE_BANNER_MESSAGE
 }
 
 const waiting = computed<TaskWaiting | null>(() => task.value?.waiting ?? null)
@@ -328,13 +350,6 @@ const markStageFailed = (stage: StageName | undefined): void => {
     if (stage === undefined ? item.status === 'running' : item.name === stage && item.status !== 'done') item.status = 'failed'
   }
 }
-const markRunningStagesAwaiting = (): void => {
-  for (const stage of processing.value.stages) {
-    if (stage.status === 'running') stage.status = 'awaiting'
-  }
-  processing.value.active = false
-}
-
 const endProcessing = (): void => {
   // Keep stages. This also runs while recovery is still reading the turn.
   processing.value.active = false
@@ -415,19 +430,53 @@ const processChipStatus = computed((): 'processing' | 'updated' | null => {
   return 'updated'
 })
 const seenEventKeys = new Set<string>()
-// Polls without new progress; matches the server attempt deadline (180 s), after which a dead turn is closed on read.
-const RECOVERY_POLLS = 180
+const nextBackoffDelay = (delays: readonly number[], attempt: number): number =>
+  delays[Math.min(attempt, delays.length - 1)] ?? delays[delays.length - 1] ?? 15_000
+
+const recoveryWeakNetwork = ref(false)
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null
 let recoveryToken = 0
 let recoveryStarted = false
 
 const stopAutoRecovery = (): void => {
   autoRecovering.value = false
+  recoveryWeakNetwork.value = false
   if (recoveryTimer !== null) {
     clearTimeout(recoveryTimer)
     recoveryTimer = null
   }
 }
+
+type ReconcilePhase = 'idle' | 'checking' | 'unconfirmed'
+const reconcilePhase = ref<ReconcilePhase>('idle')
+const reconcileNotWrittenNotice = ref('')
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null
+let reconcileToken = 0
+let reconcileInFlight = false
+
+const stopAutoReconcile = (resetPhase = true): void => {
+  if (reconcileTimer !== null) {
+    clearTimeout(reconcileTimer)
+    reconcileTimer = null
+  }
+  if (resetPhase) reconcilePhase.value = 'idle'
+}
+
+const offlineSyncNeeded = ref(false)
+let offlineSyncTimer: ReturnType<typeof setTimeout> | null = null
+let offlineSyncToken = 0
+
+const stopOfflineSync = (): void => {
+  offlineSyncNeeded.value = false
+  if (offlineSyncTimer !== null) {
+    clearTimeout(offlineSyncTimer)
+    offlineSyncTimer = null
+  }
+}
+
+const autoResumingPending = ref(false)
+const pendingResumeFailed = ref(false)
+let autoResumeAttemptedVersion: number | null = null
 
 const logRecovery = (action: string, data: Record<string, unknown>): void => {
   void import('@/utils/logger').then(({ logger }) => {
@@ -435,7 +484,14 @@ const logRecovery = (action: string, data: Record<string, unknown>): void => {
   }).catch(() => undefined)
 }
 
-onUnmounted(() => { recoveryToken += 1; stopAutoRecovery() })
+onUnmounted(() => {
+  recoveryToken += 1
+  reconcileToken += 1
+  offlineSyncToken += 1
+  stopAutoRecovery()
+  stopAutoReconcile(true)
+  stopOfflineSync()
+})
 
 const adoptProcessingTurn = (updated: AssistantTaskView): void => {
   if (updated.processing_turn_id != null && (updated.processing_turn_status === 'PENDING' || updated.processing_turn_status === 'RUNNING')) {
@@ -546,19 +602,31 @@ const readKnownTurn = async (pending: { targetId: string; turnId: string; cursor
   return false
 }
 
-const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: number }, pollsLeft: number): void => {
+const scheduleRecovery = (
+  pending: { targetId: string; turnId: string; cursor: number },
+  attempt = 0,
+  weakNetwork = false
+): void => {
   const token = recoveryToken
   autoRecovering.value = true
+  recoveryWeakNetwork.value = weakNetwork
+  if (weakNetwork) recoveryNotice.value = WEAK_NETWORK_NOTICE
+  const delay = nextBackoffDelay(weakNetwork ? WEAK_NETWORK_DELAYS_MS : RECOVERY_POLL_DELAYS_MS, attempt)
   recoveryTimer = setTimeout(() => {
     void (async (): Promise<void> => {
       if (disposed || token !== recoveryToken || processingRecovery.value?.turnId !== pending.turnId) return
       try {
         const cursorBefore = pending.cursor
         const done = await readKnownTurn(pending)
-        // Any new event is progress: a long segmented turn keeps polling while it advances.
-        const nextPolls = pending.cursor > cursorBefore ? RECOVERY_POLLS : pollsLeft - 1
-        if (token === recoveryToken) await refreshConversation()
         if (disposed || token !== recoveryToken) return
+        recoveryWeakNetwork.value = false
+        if (recoveryNotice.value === WEAK_NETWORK_NOTICE) recoveryNotice.value = '已受理，正在确认处理结果'
+        await refreshConversation()
+        if (disposed || token !== recoveryToken) return
+        if (reconciliationRequired.value) {
+          stopAutoRecovery()
+          return
+        }
         const successor = processingRecovery.value
         if (successor === null) {
           stopAutoRecovery()
@@ -569,32 +637,17 @@ const scheduleRecovery = (pending: { targetId: string; turnId: string; cursor: n
           return
         }
         if (done) return
-        if (nextPolls <= 0) {
-          stopAutoRecovery()
-          recoveryNotice.value = '处理结果待确认，请刷新状态。'
-          markRunningStagesAwaiting()
-          resultPending.value = true
-          logRecovery('recovery_timeout', { task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'timeout' })
-          return
-        }
-        scheduleRecovery(pending, nextPolls)
+        const nextAttempt = pending.cursor > cursorBefore ? 0 : attempt + 1
+        scheduleRecovery(pending, nextAttempt, false)
       } catch (error) {
         if (disposed || token !== recoveryToken) return
-        if (!(error instanceof ZodError) && pollsLeft > 1) {
-          scheduleRecovery(pending, pollsLeft - 1)
-          return
-        }
-        stopAutoRecovery()
-        recoveryNotice.value = '处理结果待确认，请刷新状态。'
-        markRunningStagesAwaiting()
-        resultPending.value = true
-        pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
         logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
           task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
         })
+        scheduleRecovery(pending, weakNetwork ? attempt + 1 : 0, true)
       }
     })()
-  }, 1000)
+  }, delay)
 }
 
 const startAutoRecovery = async (
@@ -614,22 +667,23 @@ const startAutoRecovery = async (
     if (token !== recoveryToken || disposed) return
     await refreshConversation()
     if (token !== recoveryToken || disposed) return
+    if (reconciliationRequired.value) {
+      stopAutoRecovery()
+      return
+    }
     const successor = processingRecovery.value
     if (successor !== null && successor.turnId !== pending.turnId) {
       await startAutoRecovery(successor, notice)
       return
     }
-    if (!done && successor?.turnId === pending.turnId) scheduleRecovery(pending, RECOVERY_POLLS)
+    if (!done && successor?.turnId === pending.turnId) scheduleRecovery(pending, 0, false)
     else stopAutoRecovery()
   } catch (error) {
     if (token !== recoveryToken || disposed) return
-    stopAutoRecovery()
-    recoveryNotice.value = ''
-    resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
     logRecovery(error instanceof ZodError ? 'recovery_parse_failed' : 'recovery_read_failed', {
       task: pending.targetId, turn_id: pending.turnId, last_seq: pending.cursor, event_name: 'turn'
     })
+    scheduleRecovery(pending, 0, true)
   }
 }
 
@@ -809,6 +863,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
 const submitText = async (): Promise<void> => {
   const text = inputText.value.trim()
   if (!text || loadingConversation.value || busy.value || conversation.value === null || conversation.value.pending_choice !== null) return
+  reconcileNotWrittenNotice.value = ''
   sendingText.value = true
   try {
     if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
@@ -859,6 +914,7 @@ const submit = async (
   options: SubmitOptions = {}
 ): Promise<boolean> => {
   if (busy.value || task.value === null || conversation.value === null) return false
+  reconcileNotWrittenNotice.value = ''
   if (source !== null && !isSameWait(source, task.value.waiting)) return false
   const actionId = source?.action_id ?? null
   const fingerprint = `command:${task.value.public_id}:${actionId ?? ''}:${JSON.stringify(input)}`
@@ -1107,58 +1163,37 @@ const openPendingDraft = async (draft: PendingEntityDraft): Promise<void> => {
 
 // The server already holds this request (its original key); continuing cannot save it twice.
 const showContinuePending = computed(() => !reconciliationRequired.value && resultPending.value && !autoRecovering.value
+  && !autoResumingPending.value && pendingResumeFailed.value
   && processingRecovery.value === null && lostSend.value === null && canResumeConversation.value)
 const lostSendNotice = computed(() => {
   const lost = lostSend.value
   if (lost?.phase === 'unconfirmed') return UNCONFIRMED_MESSAGE
   return lost?.phase === 'not_saved' && !lost.cardNotice ? NOT_SAVED_MESSAGE : ''
 })
-const showSyncResult = computed(() => resultPending.value && !autoRecovering.value && !showContinuePending.value
-  && (processingRecovery.value !== null || (pendingRequest.value?.turnId ?? '') !== ''))
 const showReprocess = computed(() => !reconciliationRequired.value && reprocessAllowed.value && reprocessTarget.value !== null && !autoRecovering.value)
-const showRefreshStatus = computed(() => {
-  if (autoRecovering.value) return false
-  if (reconciliationRequired.value || showSyncResult.value || showReprocess.value) return true
-  const current = task.value
-  if (current == null || current.status !== 'ACTIVE' || current.waiting != null) return false
-  return entries.value.some((entry) => entry.outcome === 'failure')
-})
 
-const syncResult = async (): Promise<void> => {
-  const currentTask = task.value
-  const shouldReconcile = reconciliationRequired.value
-    && currentTask !== null
-    && currentTask.status === 'ACTIVE'
-    && currentTask.processing_turn_id == null
-  const unresolved = unknownResult.value
-  const pending = shouldReconcile
-    ? null
-    : (unresolved !== null && unresolved.turnId !== '' ? unresolved : null) ?? processingRecovery.value ?? pendingRequest.value
-  if (submitting.value || (!shouldReconcile && pending === null && !reconciliationRequired.value)) return
-  const navigation = navigationVersion
-  submitting.value = true
-  recoveryToken += 1
-  stopAutoRecovery()
+const runSingleReconcile = async (targetId: string, token: number, navigation: number): Promise<'settled' | 'unknown'> => {
+  if (reconcileInFlight) return 'unknown'
+  reconcileInFlight = true
   try {
-    if (shouldReconcile) {
-      const reconciled = await assistantApi.reconcileTask(currentTask.public_id)
-      if (disposed || navigation !== navigationVersion) return
-      if (task.value?.public_id === reconciled.task.public_id && reconciled.task.version >= task.value.version) {
-        task.value = reconciled.task
-      }
-      if (reconciled.outcome === 'WRITTEN' || reconciled.outcome === 'NOT_WRITTEN'
-        || (reconciled.outcome === 'NOOP' && reconciled.task.reconciliation_required !== true)) {
-        clearUnknownResult(reconciled.task.public_id)
-        reprocessAllowed.value = false
-        reprocessTarget.value = null
-        recoveryNotice.value = ''
-        if (reconciled.outcome === 'NOT_WRITTEN') resetProcessingEpisode()
-      } else {
-        reconcileUnknownResult(reconciled.task)
-        recoveryNotice.value = reconciled.outcome === 'STILL_UNKNOWN' ? reconciled.message : ''
+    const reconciled = await assistantApi.reconcileTask(targetId)
+    if (disposed || navigation !== navigationVersion || token !== reconcileToken) return 'settled'
+    if (task.value?.public_id === reconciled.task.public_id && reconciled.task.version >= task.value.version) {
+      task.value = reconciled.task
+    }
+    if (reconciled.outcome === 'WRITTEN' || reconciled.outcome === 'NOT_WRITTEN'
+      || (reconciled.outcome === 'NOOP' && reconciled.task.reconciliation_required !== true)) {
+      clearUnknownResult(reconciled.task.public_id)
+      reprocessAllowed.value = false
+      reprocessTarget.value = null
+      recoveryNotice.value = ''
+      stopAutoReconcile(true)
+      if (reconciled.outcome === 'NOT_WRITTEN') {
+        resetProcessingEpisode()
+        reconcileNotWrittenNotice.value = RECONCILE_NOT_WRITTEN_NOTICE
       }
       await refreshConversation()
-      if (disposed || navigation !== navigationVersion) return
+      if (disposed || navigation !== navigationVersion) return 'settled'
       if (reconciled.outcome === 'WRITTEN' && reconciled.followup_turn_id !== null
         && processingRecovery.value === null && task.value?.public_id === reconciled.task.public_id
         && task.value.status === 'ACTIVE' && task.value.processing_turn_id === reconciled.followup_turn_id) {
@@ -1166,28 +1201,73 @@ const syncResult = async (): Promise<void> => {
       }
       const successor = processingRecovery.value
       if (navigation === navigationVersion && successor !== null) await recoverProcessingTurn()
-      return
+      return 'settled'
     }
-    if (pending !== null) await readKnownTurn(pending)
-    if (disposed || navigation !== navigationVersion) return
-    await refreshConversation()
-    const successor = processingRecovery.value
-    if (navigation === navigationVersion && successor !== null) await recoverProcessingTurn()
+    reconcileUnknownResult(reconciled.task)
+    return 'unknown'
   } catch {
-    if (disposed || navigation !== navigationVersion) return
-    resultPending.value = !reconciliationRequired.value
-    if (shouldReconcile) {
-      recoveryNotice.value = '核对请求暂时失败，请稍后再点刷新状态。'
-      await refreshConversation()
-      if (!disposed && navigation === navigationVersion && !reconciliationRequired.value) recoveryNotice.value = ''
-    } else {
-      pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
-      if (reconciliationRequired.value) await refreshConversation()
-    }
+    return 'unknown'
   } finally {
-    if (!disposed && navigation === navigationVersion) submitting.value = false
+    reconcileInFlight = false
   }
 }
+
+const scheduleReconcileAttempt = (taskId: string, token: number, navigation: number, index: number): void => {
+  const delay = RECONCILE_DELAYS_MS[index]
+  if (delay === undefined) {
+    if (!disposed && navigation === navigationVersion && token === reconcileToken && reconciliationRequired.value) {
+      reconcilePhase.value = 'unconfirmed'
+    }
+    return
+  }
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null
+    if (disposed || navigation !== navigationVersion || token !== reconcileToken || !reconciliationRequired.value) return
+    void (async (): Promise<void> => {
+      const result = await runSingleReconcile(taskId, token, navigation)
+      if (result === 'settled') return
+      if (disposed || navigation !== navigationVersion || token !== reconcileToken || !reconciliationRequired.value) return
+      scheduleReconcileAttempt(taskId, token, navigation, index + 1)
+    })()
+  }, delay)
+}
+
+const startAutoReconcile = (targetId?: string): void => {
+  const taskId = targetId ?? task.value?.public_id
+  if (disposed || taskId === undefined || !reconciliationRequired.value) return
+  reconcileToken += 1
+  const token = reconcileToken
+  const navigation = navigationVersion
+  stopAutoReconcile(false)
+  reconcilePhase.value = 'checking'
+  reconcileNotWrittenNotice.value = ''
+  recoveryNotice.value = ''
+  scheduleReconcileAttempt(taskId, token, navigation, 0)
+}
+
+const manualReconcileCheck = async (): Promise<void> => {
+  const currentTask = task.value
+  if (disposed || currentTask === null || !reconciliationRequired.value || reconcileInFlight || submitting.value) return
+  reconcileToken += 1
+  const token = reconcileToken
+  const navigation = navigationVersion
+  stopAutoReconcile(false)
+  reconcilePhase.value = 'checking'
+  const result = await runSingleReconcile(currentTask.public_id, token, navigation)
+  if (result === 'unknown' && !disposed && navigation === navigationVersion && token === reconcileToken && reconciliationRequired.value) {
+    reconcilePhase.value = 'unconfirmed'
+  }
+}
+
+watch([reconciliationRequired, (): string | undefined => task.value?.public_id] as const, ([required, taskId]) => {
+  if (required && taskId !== undefined) {
+    stopAutoRecovery()
+    startAutoReconcile(taskId)
+  } else {
+    reconcileToken += 1
+    stopAutoReconcile(true)
+  }
+})
 
 const reprocessTurn = async (): Promise<void> => {
   const pending = reprocessTarget.value
@@ -1234,24 +1314,41 @@ const reprocessTurn = async (): Promise<void> => {
     }
   } catch {
     if (disposed || navigation !== navigationVersion) return
-    resultPending.value = true
-    pushEntry('assistant', '处理结果暂时无法显示，请点刷新状态。')
+    await refreshConversation()
   } finally {
     if (!disposed && navigation === navigationVersion) submitting.value = false
   }
 }
 
+const tryAutoResumePending = async (forceOnOnline = false): Promise<void> => {
+  if (disposed || autoResumingPending.value || submitting.value || reconciliationRequired.value
+    || processingRecovery.value !== null || lostSend.value !== null || !canResumeConversation.value) return
+  const version = conversation.value?.version ?? null
+  if (!forceOnOnline && version !== null && autoResumeAttemptedVersion === version) return
+  autoResumeAttemptedVersion = version
+  autoResumingPending.value = true
+  pendingResumeFailed.value = false
+  try {
+    await dispatchConversation(() => assistantApi.resumeConversation(), '')
+    if (!disposed && canResumeConversation.value && processingRecovery.value === null && !reconciliationRequired.value) {
+      pendingResumeFailed.value = true
+    }
+  } finally {
+    if (!disposed) autoResumingPending.value = false
+  }
+}
+
 const retryPending = async (): Promise<void> => {
   if (reconciliationRequired.value) {
-    await syncResult()
+    await manualReconcileCheck()
     return
   }
-  if (submitting.value) return
-  if (showContinuePending.value) {
-    await dispatchConversation(() => assistantApi.resumeConversation(), '')
-    return
+  if (submitting.value || !showContinuePending.value) return
+  pendingResumeFailed.value = false
+  await dispatchConversation(() => assistantApi.resumeConversation(), '')
+  if (!disposed && canResumeConversation.value && processingRecovery.value === null && !reconciliationRequired.value) {
+    pendingResumeFailed.value = true
   }
-  await syncResult()
 }
 
 const explicitNone = ref(false)
@@ -1630,14 +1727,20 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     || (task.value?.public_id === view.focused_task?.public_id
       && (view.focused_task?.version ?? 0) < (task.value?.version ?? 0)))) return false
   historyError.value = ''
+  stopOfflineSync()
   if (!older) {
     appliedViewRequest = requestOrder
     if (task.value?.public_id !== view.focused_task?.public_id) {
       suppressConversationResume.value = false
       navigationVersion += 1
       recoveryToken += 1
+      reconcileToken += 1
       stopAutoRecovery()
+      stopAutoReconcile(true)
       recoveryNotice.value = ''
+      reconcileNotWrittenNotice.value = ''
+      pendingResumeFailed.value = false
+      autoResumeAttemptedVersion = null
       unacceptedText.value = ''
       routing.value = false
       pendingRequest.value = null
@@ -1706,16 +1809,48 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   return true
 }
 
-const refreshConversation = async (): Promise<void> => {
+const scheduleOfflineSync = (attempt = 0): void => {
+  if (disposed) return
+  offlineSyncNeeded.value = true
+  if (offlineSyncTimer !== null) {
+    clearTimeout(offlineSyncTimer)
+    offlineSyncTimer = null
+  }
+  offlineSyncToken += 1
+  const token = offlineSyncToken
+  const delay = nextBackoffDelay(WEAK_NETWORK_DELAYS_MS, attempt)
+  offlineSyncTimer = setTimeout(() => {
+    offlineSyncTimer = null
+    if (disposed || token !== offlineSyncToken || !offlineSyncNeeded.value) return
+    void (async (): Promise<void> => {
+      const ok = conversation.value !== null
+        ? await refreshConversation(attempt + 1)
+        : await loadConversation(attempt + 1)
+      if (!ok && !disposed && token === offlineSyncToken && offlineSyncNeeded.value) {
+        scheduleOfflineSync(attempt + 1)
+      }
+    })()
+  }, delay)
+}
+
+const refreshConversation = async (offlineAttempt = 0): Promise<boolean> => {
   const order = ++viewRequestSequence
   const navigation = navigationVersion
   try {
     const view = await assistantApi.getConversation()
     if (navigation === navigationVersion) applyConversation(view, false, order)
-  } catch {
+    return true
+  } catch (error) {
     if (!disposed && navigation === navigationVersion && order >= appliedViewRequest) {
-      historyError.value = '对话暂时没有刷新，已有内容都还在，可以点「刷新」再看一次。'
+      historyError.value = conversationLoadErrorMessage(error)
+      if (isExplicitNonNetworkLoadError(error)) {
+        offlineSyncToken += 1
+        stopOfflineSync()
+      } else {
+        scheduleOfflineSync(offlineAttempt)
+      }
     }
+    return false
   }
 }
 
@@ -1745,14 +1880,30 @@ const inFlightTurn = (): { targetId: string; turnId: string } | null => {
   return pending !== null && pending.turnId !== '' ? { targetId: pending.targetId, turnId: pending.turnId } : null
 }
 const reattachProcessingTurn = (): void => {
-  if (disposed || autoRecovering.value || processingRecovery.value === null) return
-  void recoverProcessingTurn()
+  if (disposed || processingRecovery.value === null) return
+  void startAutoRecovery(
+    processingRecovery.value,
+    recoveryWeakNetwork.value ? WEAK_NETWORK_NOTICE : '已受理，正在确认处理结果'
+  )
 }
 const onVisibilityChange = (): void => {
-  if (document.visibilityState === 'visible') reattachProcessingTurn()
+  if (document.visibilityState !== 'visible') return
+  if (offlineSyncNeeded.value) void (conversation.value !== null ? refreshConversation() : loadConversation())
+  reattachProcessingTurn()
+}
+const onOnline = (): void => {
+  if (disposed) return
+  if (offlineSyncNeeded.value) void (conversation.value !== null ? refreshConversation() : loadConversation())
+  reattachProcessingTurn()
+  if (reconciliationRequired.value && reconcilePhase.value === 'unconfirmed') void manualReconcileCheck()
+  if (lostSend.value?.phase === 'unconfirmed') void checkLostSend()
+  if (canResumeConversation.value && !reconciliationRequired.value && processingRecovery.value === null && lostSend.value === null) {
+    void tryAutoResumePending(true)
+  }
 }
 onActivated(() => {
   reclaimAssistantTurn()
+  if (offlineSyncNeeded.value) void (conversation.value !== null ? refreshConversation() : loadConversation())
   reattachProcessingTurn()
 })
 onDeactivated(() => {
@@ -1760,16 +1911,33 @@ onDeactivated(() => {
   if (turn !== null) handOffAssistantTurn(turn)
 })
 document.addEventListener('visibilitychange', onVisibilityChange)
-onUnmounted(() => { document.removeEventListener('visibilitychange', onVisibilityChange) })
+window.addEventListener('online', onOnline)
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('online', onOnline)
+})
 
-const loadConversation = async (): Promise<void> => {
+const loadConversation = async (offlineAttempt = 0): Promise<boolean> => {
   loadingConversation.value = true
   const order = ++viewRequestSequence
   try {
     applyConversation(await assistantApi.openConversation(), false, order)
     if (processingRecovery.value !== null) await recoverProcessingTurn()
+    else if (canResumeConversation.value && !reconciliationRequired.value && lostSend.value === null) {
+      void tryAutoResumePending(false)
+    }
+    return true
   } catch (error) {
-    if (!disposed) historyError.value = conversationLoadErrorMessage(error)
+    if (!disposed) {
+      historyError.value = conversationLoadErrorMessage(error)
+      if (isExplicitNonNetworkLoadError(error)) {
+        offlineSyncToken += 1
+        stopOfflineSync()
+      } else {
+        scheduleOfflineSync(offlineAttempt)
+      }
+    }
+    return false
   } finally { if (!disposed) loadingConversation.value = false }
 }
 void loadConversation()
@@ -1784,7 +1952,7 @@ void loadConversation()
       :error="historyErrorFeedback"
     >
       <template #actions>
-        <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="reconciliationRequired ? retryPending() : conversation ? refreshConversation() : loadConversation()">刷新</Button>
+        <Button type="button" variant="outline" size="sm" :disabled="submitting" @click="conversation ? refreshConversation() : loadConversation()">重试连接</Button>
       </template>
     </FeedbackAlert>
 
@@ -1889,8 +2057,24 @@ void loadConversation()
       </Button>
     </nav>
 
+    <AgentUIBanner
+      v-if="reconciliationRequired && reconcilePhase === 'checking'"
+      class="mt-space-4"
+      tone="info"
+      :icon="Info"
+      :title="RECONCILE_BANNER_TITLE"
+      role="status"
+      data-assistant-reconcile="checking"
+    >
+      <p class="m-0 text-caption text-muted-foreground">{{ RECONCILE_BANNER_BODY }}</p>
+    </AgentUIBanner>
+
     <div class="mt-space-4 rounded-lg border border-input bg-card p-space-3 transition-colors hover:border-ring-input focus-within:border-ring-input">
-      <p v-if="cardLocked" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground">
+      <p v-if="reconciliationRequired" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" data-assistant-reconcile-lock>
+        <Lock class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ RECONCILE_LOCKED_HINT }}</span>
+      </p>
+      <p v-else-if="cardLocked" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground">
         <Lock class="size-icon-sm shrink-0" aria-hidden="true" />
         <span>{{ INPUT_LOCKED_HINT }}</span>
       </p>
@@ -1898,13 +2082,33 @@ void loadConversation()
         <LoaderCircle class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>保存中…</span>
       </div>
-      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand">
+      <div v-else-if="reconciliationRequired && reconcilePhase === 'checking'" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status" data-assistant-reconcile-status="checking">
+        <LoaderCircle class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span>{{ RECONCILE_CHECKING_STATUS }}</span>
+      </div>
+      <div v-else-if="autoResumingPending && !processing.active && !recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status">
+        <LoaderCircle class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span>正在恢复上一条请求…</span>
+      </div>
+      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status">
         <LoaderCircle v-if="routing || processing.active || autoRecovering" class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>
-      <p v-if="lostSendNotice" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" :data-assistant-lost-send="lostSend?.phase">
+      <p v-if="reconciliationRequired && reconcilePhase === 'unconfirmed'" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" data-assistant-reconcile="unconfirmed">
+        <Info class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ UNCONFIRMED_MESSAGE }}</span>
+      </p>
+      <p v-else-if="lostSendNotice" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" :data-assistant-lost-send="lostSend?.phase">
         <Info class="size-icon-sm shrink-0" aria-hidden="true" />
         <span>{{ lostSendNotice }}</span>
+      </p>
+      <p v-else-if="reconcileNotWrittenNotice" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" data-assistant-reconcile="not_written">
+        <Info class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ reconcileNotWrittenNotice }}</span>
+      </p>
+      <p v-else-if="showContinuePending" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" role="status" data-assistant-pending-resume="failed">
+        <Info class="size-icon-sm shrink-0" aria-hidden="true" />
+        <span>{{ PENDING_RESUME_FALLBACK_NOTICE }}</span>
       </p>
       <Textarea
         aria-label="客户沟通内容"
@@ -1921,10 +2125,10 @@ void loadConversation()
           <span class="text-caption text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex flex-wrap items-center gap-space-2">
-          <Button v-if="showRefreshStatus" variant="outline" :disabled="submitting" @click="reconciliationRequired || showSyncResult ? syncResult() : refreshConversation()">刷新状态</Button>
           <p v-if="showReprocess" class="m-0 text-caption text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
           <Button v-if="showReprocess" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
-          <Button v-if="lostSend?.phase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="checkLostSend">查看结果</Button>
+          <Button v-if="reconciliationRequired && reconcilePhase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="manualReconcileCheck">查看结果</Button>
+          <Button v-else-if="lostSend?.phase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="checkLostSend">查看结果</Button>
           <Button v-if="showContinuePending" variant="outline" :disabled="submitting" @click="retryPending">继续处理</Button>
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X aria-hidden="true" />算了

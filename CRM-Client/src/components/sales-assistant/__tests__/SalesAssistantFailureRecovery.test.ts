@@ -7,7 +7,7 @@ import type { AssistantTaskView, ConversationView } from '@/schemas/assistant-co
 
 const api = vi.hoisted(() => ({
   openConversation: vi.fn(), getConversation: vi.fn(), getTurn: vi.fn(),
-  conversationText: vi.fn(), retryTurn: vi.fn(), getTask: vi.fn(), reconcileTask: vi.fn(),
+  conversationText: vi.fn(), retryTurn: vi.fn(), getTask: vi.fn(), reconcileTask: vi.fn(), resumeConversation: vi.fn(),
 }))
 const stream = vi.hoisted(() => vi.fn())
 
@@ -158,10 +158,13 @@ describe('SalesAssistant failure recovery', () => {
     failedStage(mounted)
   })
 
-  it('replays new failure events when manually syncing a previously unreadable turn', async () => {
+  it('replays new failure events automatically via weak-network backoff when a turn is temporarily unreadable', async () => {
     api.getTurn.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(failedTurn())
     const mounted = await open()
-    await click(mounted, '刷新状态')
+    expect(mounted.text()).toContain('网络波动，正在自动恢复进度…')
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flushPromises()
     failedStage(mounted)
   })
 
@@ -177,20 +180,26 @@ describe('SalesAssistant failure recovery', () => {
     expect(mounted.text()).toContain('正在确认处理结果')
     expect(mounted.text()).not.toContain('处理失败')
     expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
   })
 
-  it('shows awaiting state, not an indefinitely running stage, if recovery is unreadable', async () => {
+  it('keeps tracking through prolonged weak-network outages without a 180s cutoff and recovers on online', async () => {
     api.getTurn.mockResolvedValueOnce(runningTurn(stageEvents)).mockRejectedValue(new Error('offline'))
     api.getConversation.mockResolvedValue(conversation(runningTask()))
     const mounted = await open()
     await vi.advanceTimersByTimeAsync(181_000)
     await flushPromises()
-    expect(mounted.text()).not.toContain('进行中…')
-    expect(mounted.text()).toContain('待确认')
-    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(true)
+    expect(mounted.text()).toContain('网络波动，正在自动恢复进度…')
+    expect(mounted.text()).not.toContain('请点刷新状态')
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
+
+    api.getTurn.mockResolvedValueOnce(failedTurn())
+    window.dispatchEvent(new Event('online'))
+    await flushPromises()
+    failedStage(mounted)
   })
 
-  it('keeps following a long turn while it reports progress, and stops waiting once progress stalls', async () => {
+  it('keeps following a long turn with unbounded backoff even when progress pauses beyond 180s', async () => {
     let seq = 3
     let advancing = true
     api.getTurn.mockImplementation(() => {
@@ -209,7 +218,8 @@ describe('SalesAssistant failure recovery', () => {
     advancing = false
     await vi.advanceTimersByTimeAsync(181_000)
     await flushPromises()
-    expect(mounted.text()).toContain('处理结果待确认')
+    expect(mounted.text()).not.toContain('处理结果待确认')
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
   })
 
   it('never exposes safe reprocessing for UNKNOWN_COMMIT_RESULT even if retryable or stale authorization is present', async () => {
@@ -244,7 +254,7 @@ describe('SalesAssistant failure recovery', () => {
     expect(stageRow(mounted, '整理活动内容')?.textContent).not.toContain('失败')
   })
 
-  it('reconciles UNKNOWN_COMMIT_RESULT via reconcileTask when clicking 刷新状态 and restores confirmation on NOT_WRITTEN', async () => {
+  it('auto-reconciles UNKNOWN_COMMIT_RESULT via reconcileTask without 刷新状态 and restores confirmation on NOT_WRITTEN', async () => {
     const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
     const restoredWaiting: AssistantTaskView['waiting'] = {
       type: 'CONFIRMATION',
@@ -277,16 +287,22 @@ describe('SalesAssistant failure recovery', () => {
     api.getConversation.mockResolvedValue(conversation(restoredTask))
 
     const mounted = await open(lockedTask)
+    expect(mounted.find('[data-assistant-reconcile="checking"]').exists()).toBe(true)
+    expect(mounted.find('[data-assistant-reconcile-lock]').text()).toContain('正在核对上一条保存结果，暂不可输入')
     expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
-    await click(mounted, '刷新状态')
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flushPromises()
 
     expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
     expect(api.getTurn).not.toHaveBeenCalled()
     expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.find('[data-assistant-reconcile="not_written"]').text()).toContain('刚才未能完成保存，内容都在，可以重新确认。')
     expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
   })
 
-  it('follows the spawned followup turn when reconcileTask proves WRITTEN', async () => {
+  it('auto-reconciles UNKNOWN_COMMIT_RESULT and follows the spawned followup turn when WRITTEN', async () => {
     const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
     const followupTask = task({
       version: 3,
@@ -320,34 +336,93 @@ describe('SalesAssistant failure recovery', () => {
     })
 
     const mounted = await open(lockedTask)
-    await click(mounted, '刷新状态')
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flushPromises()
 
     expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
     expect(api.getTurn).toHaveBeenCalledWith('task-1', 'turn-followup', 0)
     expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('stays fail-closed and shows notice when reconcileTask returns STILL_UNKNOWN or errors', async () => {
+  it('falls back to unified unconfirmed copy with 查看结果 after 2/4/8/16s auto-reconcile exhaustion', async () => {
     const lockedTask = task({ version: 2, reconciliation_required: true, waiting: null })
+    const restoredTask = task({ version: 3, reconciliation_required: false, waiting: null })
     api.reconcileTask
       .mockResolvedValueOnce({
         outcome: 'STILL_UNKNOWN',
         task: lockedTask,
-        message: '客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。',
+        message: '客户活动写入结果待核对。',
         followup_turn_id: null,
       })
       .mockRejectedValueOnce(new Error('network down'))
-    api.getConversation.mockResolvedValue(conversation(lockedTask))
+      .mockResolvedValueOnce({
+        outcome: 'STILL_UNKNOWN',
+        task: lockedTask,
+        message: '客户活动写入结果待核对。',
+        followup_turn_id: null,
+      })
+      .mockResolvedValueOnce({
+        outcome: 'STILL_UNKNOWN',
+        task: lockedTask,
+        message: '客户活动写入结果待核对。',
+        followup_turn_id: null,
+      })
+      .mockResolvedValueOnce({
+        outcome: 'NOT_WRITTEN',
+        task: restoredTask,
+        message: '未写入',
+        followup_turn_id: null,
+      })
+    api.getConversation.mockResolvedValue(conversation(restoredTask))
 
     const mounted = await open(lockedTask)
-    await click(mounted, '刷新状态')
-    expect(mounted.text()).toContain('客户活动写入结果待核对')
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+
+    expect(api.reconcileTask).toHaveBeenCalledTimes(4)
+    expect(mounted.find('[data-assistant-reconcile="unconfirmed"]').text()).toContain('结果暂时未确认，为避免重复，先不要再次提交。')
     expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
     expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
 
-    await click(mounted, '刷新状态')
-    expect(mounted.text()).toContain('核对请求暂时失败，请稍后再点刷新状态。')
-    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
+    await click(mounted, '查看结果')
+    expect(api.reconcileTask).toHaveBeenCalledTimes(5)
+    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.findAll('button').some((button) => button.text() === '查看结果')).toBe(false)
+  })
+
+  it('shows offline banner with 重试连接 and auto-recovers via background sync on network disconnect', async () => {
+    api.openConversation
+      .mockRejectedValueOnce(new Error('Network Error'))
+      .mockResolvedValueOnce(conversation(task()))
+    const mounted = mount(SalesAssistantChat)
+    wrapper = mounted
+    await flushPromises()
+
+    expect(mounted.text()).toContain('网络已断开，已有内容都还在。网络恢复后会自动同步。')
+    expect(mounted.findAll('button').some((button) => button.text() === '重试连接')).toBe(true)
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    await flushPromises()
+
+    expect(api.openConversation).toHaveBeenCalledTimes(2)
+    expect(mounted.text()).not.toContain('网络已断开')
+  })
+
+  it('auto-resumes interrupted route once on load and falls back to 继续处理 on failure', async () => {
+    const pendingView: ConversationView = { ...conversation(task()), has_pending_request: true }
+    api.openConversation.mockResolvedValue(pendingView)
+    api.getConversation.mockResolvedValue(pendingView)
+    api.resumeConversation.mockRejectedValueOnce(new Error('Network Error'))
+    const mounted = mount(SalesAssistantChat)
+    wrapper = mounted
+    await flushPromises()
+
+    expect(api.resumeConversation).toHaveBeenCalledTimes(1)
+    expect(mounted.find('[data-assistant-pending-resume="failed"]').text()).toContain('上一条发送尚未完成')
+    expect(mounted.findAll('button').some((button) => button.text() === '继续处理')).toBe(true)
+    expect(mounted.findAll('button').some((button) => button.text() === '刷新状态')).toBe(false)
   })
 
   it('does not re-lock a reconciled task when replaying a historical UNKNOWN_COMMIT_RESULT turn', async () => {

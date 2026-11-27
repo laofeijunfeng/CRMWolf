@@ -169,7 +169,8 @@ describe('SalesAssistant lost send response', () => {
     await flushPromises()
 
     expect(api.conversationRequestStatus).toHaveBeenCalledTimes(5)
-    expect(wrapper.find('[data-assistant-lost-send="unconfirmed"]').text()).toContain('还没确认是否已保存')
+    expect(wrapper.find('[data-assistant-lost-send="unconfirmed"]').text()).toContain('结果暂时未确认，为避免重复，先不要再次提交。')
+    expect(button(wrapper, '刷新状态')).toBeUndefined()
     expect(button(wrapper, '提交')?.attributes('disabled')).toBeDefined()
     expect(wrapper.get('button[aria-label="发送"]').attributes('disabled')).toBeDefined()
     expectNeutral(wrapper)
@@ -221,5 +222,25 @@ describe('SalesAssistant lost send response', () => {
     expect(button(wrapper, '查看结果')).toBeUndefined()
     expect(button(wrapper, '提交')?.attributes('disabled')).toBeUndefined()
     expect(api.conversationCommand).toHaveBeenCalledTimes(1)
+  })
+
+  it('checks request status once on window online when unconfirmed without resending', async () => {
+    api.conversationCommand.mockRejectedValue(timeout())
+    api.conversationRequestStatus.mockRejectedValue(new Error('Network Error'))
+    wrapper = mount(SalesAssistantChat)
+    await flushPromises()
+    await clickSubmit(wrapper)
+    await vi.advanceTimersByTimeAsync(LOST_SEND_WINDOW_MS)
+    await flushPromises()
+
+    expect(api.conversationRequestStatus).toHaveBeenCalledTimes(5)
+    api.conversationRequestStatus.mockResolvedValueOnce(status('saved', savedView))
+    window.dispatchEvent(new Event('online'))
+    await flushPromises()
+
+    expect(api.conversationRequestStatus).toHaveBeenCalledTimes(6)
+    expect(api.conversationCommand).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('部署信息「正式环境」已保存')
+    expect(button(wrapper, '查看结果')).toBeUndefined()
   })
 })

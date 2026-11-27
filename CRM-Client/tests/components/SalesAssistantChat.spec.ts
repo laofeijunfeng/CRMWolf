@@ -157,14 +157,16 @@ describe('conversation load failures', () => {
     expect(text).toContain('登录状态已失效，请重新登录后重试；不会自动开始新的记录。')
   })
 
-  it('keeps a retryable network message when the server cannot be reached', async () => {
+  it('shows the converged offline banner with retry action when the server cannot be reached', async () => {
     const text = await loadError({ isAxiosError: true, response: undefined })
-    expect(text).toContain('服务或网络暂时不可用，请检查网络后重试；不会自动开始新的记录。')
+    expect(text).toContain('网络已断开，已有内容都还在。网络恢复后会自动同步。')
+    expect(text).toContain('重试连接')
   })
 
-  it('keeps the original failure sentence for an unclassified error', async () => {
+  it('falls back to the converged offline banner for an unclassified load error', async () => {
     const text = await loadError(new Error('boom'))
-    expect(text).toContain('对话加载失败，请重试；不会自动开始新的记录。')
+    expect(text).toContain('网络已断开，已有内容都还在。网络恢复后会自动同步。')
+    expect(text).toContain('重试连接')
   })
 })
 
