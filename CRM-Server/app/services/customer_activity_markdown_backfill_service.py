@@ -22,7 +22,10 @@ from app.services.customer_activity_ai.structuring_agent import (
     ActivityStructuringAgent,
     activity_structuring_agent,
 )
-from app.services.customer_activity_contracts import CustomerActivityProcessingStatus
+from app.services.customer_activity_contracts import (
+    CustomerActivityProcessingStatus,
+    CustomerActivitySubmissionSource,
+)
 from app.services.customer_activity_kinds import get_activity_kind_meta
 from app.utils.time import business_now
 
@@ -42,6 +45,7 @@ class CustomerActivityMarkdownBackfillResult:
     candidates: int = 0
     upgraded: int = 0
     skipped_already_upgraded: int = 0
+    skipped_assistant_2: int = 0
     skipped_empty: int = 0
     skipped_no_ai_config: int = 0
     failed: int = 0
@@ -56,6 +60,7 @@ class CustomerActivityMarkdownBackfillResult:
             "candidates": self.candidates,
             "upgraded": self.upgraded,
             "skipped_already_upgraded": self.skipped_already_upgraded,
+            "skipped_assistant_2": self.skipped_assistant_2,
             "skipped_empty": self.skipped_empty,
             "skipped_no_ai_config": self.skipped_no_ai_config,
             "failed": self.failed,
@@ -92,7 +97,10 @@ class CustomerActivityMarkdownBackfillService:
         *,
         team_id: int | None = None,
         days: int | None = None,
+        activity_ids: list[int] | None = None,
         limit: int | None = None,
+        include_assistant_2: bool = False,
+        force: bool = False,
     ) -> tuple[list[CustomerActivity], dict[str, int]]:
         query = db.query(CustomerActivity).filter(
             CustomerActivity.processing_status == CustomerActivityProcessingStatus.COMPLETED.value,
@@ -102,20 +110,29 @@ class CustomerActivityMarkdownBackfillService:
         if days is not None:
             cutoff = business_now() - timedelta(days=max(1, int(days)))
             query = query.filter(CustomerActivity.occurred_at >= cutoff)
+        if activity_ids:
+            query = query.filter(CustomerActivity.id.in_(activity_ids))
 
         rows = query.order_by(CustomerActivity.id.asc()).all()
         candidates: list[CustomerActivity] = []
         counts = {
             "scanned": 0,
             "skipped_already_upgraded": 0,
+            "skipped_assistant_2": 0,
             "skipped_empty": 0,
         }
         for row in rows:
             counts["scanned"] += 1
+            if (
+                not include_assistant_2
+                and row.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+            ):
+                counts["skipped_assistant_2"] += 1
+                continue
             if not (row.source_content or "").strip():
                 counts["skipped_empty"] += 1
                 continue
-            if has_markdown_format_version(row.content_json):
+            if not force and has_markdown_format_version(row.content_json):
                 counts["skipped_already_upgraded"] += 1
                 continue
             candidates.append(row)
@@ -143,6 +160,8 @@ class CustomerActivityMarkdownBackfillService:
         session_factory: Callable[[], Session],
         activity_id: int,
         team_id: int,
+        include_assistant_2: bool = False,
+        force: bool = False,
     ) -> tuple[str, str | None]:
         db = session_factory()
         try:
@@ -151,11 +170,15 @@ class CustomerActivityMarkdownBackfillService:
                 return ("skipped_already_upgraded", None)
             if activity.processing_status != CustomerActivityProcessingStatus.COMPLETED.value:
                 return ("skipped_already_upgraded", None)
+            if (
+                not include_assistant_2
+                and activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+            ):
+                return ("skipped_assistant_2", None)
             if not (activity.source_content or "").strip():
                 return ("skipped_empty", None)
-            if has_markdown_format_version(activity.content_json):
+            if not force and has_markdown_format_version(activity.content_json):
                 return ("skipped_already_upgraded", None)
-
             config = ai_config_crud.get_config(db, team_id)
             api_key = ai_config_crud.get_decrypted_api_key(db, team_id) if config else None
             if not config or not api_key:
@@ -197,8 +220,11 @@ class CustomerActivityMarkdownBackfillService:
         session_factory: Callable[[], Session] = SessionLocal,
         team_id: int | None = None,
         days: int | None = None,
+        activity_ids: list[int] | None = None,
         limit: int | None = 500,
         concurrency: int = 2,
+        include_assistant_2: bool = False,
+        force: bool = False,
         dry_run: bool = True,
     ) -> CustomerActivityMarkdownBackfillResult:
         scan_db = session_factory()
@@ -207,7 +233,10 @@ class CustomerActivityMarkdownBackfillService:
                 scan_db,
                 team_id=team_id,
                 days=days,
+                activity_ids=activity_ids,
                 limit=limit,
+                include_assistant_2=include_assistant_2,
+                force=force,
             )
             targets = [(int(item.id), int(item.team_id)) for item in candidates]
         finally:
@@ -218,6 +247,7 @@ class CustomerActivityMarkdownBackfillService:
             scanned=counts["scanned"],
             candidates=len(targets),
             skipped_already_upgraded=counts["skipped_already_upgraded"],
+            skipped_assistant_2=counts["skipped_assistant_2"],
             skipped_empty=counts["skipped_empty"],
         )
         if dry_run or not targets:
@@ -232,6 +262,8 @@ class CustomerActivityMarkdownBackfillService:
                     session_factory=session_factory,
                     activity_id=activity_id,
                     team_id=item_team_id,
+                    include_assistant_2=include_assistant_2,
+                    force=force,
                 )
                 return (activity_id, status, error)
 
@@ -242,6 +274,8 @@ class CustomerActivityMarkdownBackfillService:
                 result.activity_ids.append(activity_id)
             elif status == "skipped_already_upgraded":
                 result.skipped_already_upgraded += 1
+            elif status == "skipped_assistant_2":
+                result.skipped_assistant_2 += 1
             elif status == "skipped_empty":
                 result.skipped_empty += 1
             elif status == "skipped_no_ai_config":

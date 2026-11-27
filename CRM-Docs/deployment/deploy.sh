@@ -167,9 +167,6 @@ if [ "$BACKEND_HEALTH" = "200" ] && [ "$FRONTEND_HEALTH" = "200" ]; then
     echo "✅ 后端健康检查通过 (HTTP $BACKEND_HEALTH)"
     echo "✅ 前端健康检查通过 (HTTP $FRONTEND_HEALTH)"
     echo ""
-    echo "[回填] 异步触发历史客户活动 Markdown 格式升级（幂等、不阻塞发布）..."
-    docker exec -d crm-backend sh -c "python scripts/backfill_customer_activity_markdown.py --limit 2000 --concurrency 2 --confirm > /tmp/crm180_markdown_backfill.log 2>&1"
-    echo ""
     echo "[检查] 客户智能档案与知识库后台任务..."
     docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'crm-backend|crm-qdrant-dev' || true
     docker exec crm-backend python -c "from app.core.config import get_settings; s=get_settings(); print(f'QDRANT_ENABLED={s.QDRANT_ENABLED} QDRANT_HOST={s.QDRANT_HOST} QDRANT_PORT={s.QDRANT_PORT} QDRANT_VECTOR_SIZE={s.QDRANT_VECTOR_SIZE} CUSTOMER_EVIDENCE_EMBEDDING_MODEL={s.CUSTOMER_EVIDENCE_EMBEDDING_MODEL} CUSTOMER_EVIDENCE_EMBEDDING_DIMENSIONS={s.get_customer_evidence_embedding_dimensions()} CUSTOMER_EVIDENCE_EMBEDDING_BASE_URL={s.get_customer_evidence_embedding_base_url()} CUSTOMER_EVIDENCE_EMBEDDING_API_KEY_CONFIGURED={bool(s.get_customer_evidence_embedding_api_key())} AI_GENERATION_CONCURRENCY={s.AI_GENERATION_CONCURRENCY} CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED={s.CUSTOMER_INTELLIGENCE_BACKFILL_ENABLED} CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_BACKFILL_BATCH_SIZE} CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE={s.CUSTOMER_INTELLIGENCE_RETRY_BATCH_SIZE} CUSTOMER_EVIDENCE_SYNC_ENABLED={s.CUSTOMER_EVIDENCE_SYNC_ENABLED} CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE={s.CUSTOMER_EVIDENCE_SYNC_BATCH_SIZE}')"

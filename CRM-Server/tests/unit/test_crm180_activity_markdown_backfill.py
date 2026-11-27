@@ -190,13 +190,22 @@ async def test_backfill_dry_run_selects_all_legacy_sources_and_writes_nothing(tm
     result = await service.backfill_activities(session_factory=session_factory, dry_run=True)
 
     assert result.dry_run is True
-    assert result.candidates == 4
+    assert result.candidates == 3
     assert result.upgraded == 0
     assert result.skipped_already_upgraded == 1
+    assert result.skipped_assistant_2 == 1
     assert result.skipped_empty == 1
-    assert result.activity_ids == [a_form.id, a_agent.id, a_assistant.id, a_cutover.id]
+    assert result.activity_ids == [a_form.id, a_agent.id, a_cutover.id]
     assert agent.calls == []
 
+    opt_in = await service.backfill_activities(
+        session_factory=session_factory,
+        include_assistant_2=True,
+        dry_run=True,
+    )
+    assert opt_in.candidates == 4
+    assert opt_in.skipped_assistant_2 == 0
+    assert opt_in.activity_ids == [a_form.id, a_agent.id, a_assistant.id, a_cutover.id]
 
 @pytest.mark.asyncio
 async def test_backfill_confirm_locks_historical_fields_is_idempotent_and_skips_post_commit(
@@ -228,7 +237,7 @@ async def test_backfill_confirm_locks_historical_fields_is_idempotent_and_skips_
         activity = _seed_activity(
             db,
             customer_id=customer.id,
-            submission_source=CustomerActivitySubmissionSource.ASSISTANT_2.value,
+            submission_source=CustomerActivitySubmissionSource.FORM.value,
             activity_kind="PHONE_FOLLOW_UP",
             source_content="客户认可方案，等待内部审批，下周三确认。",
             summary="旧纯文本摘要",
@@ -381,3 +390,196 @@ async def test_backfill_respects_team_id_days_limit_and_missing_ai_config(tmp_pa
     assert result.failed == 0
     assert agent.calls == []
     assert recent_id > 0
+
+
+@pytest.mark.asyncio
+async def test_backfill_never_overwrites_non_empty_fields_with_empty_values(tmp_path, fake_ai_config, monkeypatch):
+    from app.crud import customer_activity as crud_mod
+
+    monkeypatch.setattr(crud_mod, "_upsert_customer_activity_evidence", lambda *args, **kwargs: None)
+
+    class _PartialEmptyAgent:
+        async def structure(self, db, *, team_id: int, context: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "title": "微信跟进",
+                "summary": "### 沟通进展\n- 客户确认预算 50 万\n- 下周安排安全评审",
+                "next_action": "",
+                "content_json": {
+                    "content": "### 沟通进展\n- 客户确认预算 50 万\n- 下周安排安全评审",
+                    "customer_feedback": "",
+                    "current_progress": "",
+                    "risks": [],
+                    "next_action": "",
+                    "next_follow_time_text": "",
+                },
+            }
+
+    session_factory = _make_session_factory(tmp_path)
+    db = session_factory()
+    try:
+        customer = _seed_customer(db)
+        activity = _seed_activity(
+            db,
+            customer_id=customer.id,
+            submission_source="FORM",
+            source_content="客户确认预算 50 万，安全团队关注合规，下周安排安全评审",
+            summary="旧摘要",
+            content_json={
+                "content": "旧正文",
+                "customer_feedback": "客户确认预算 50 万",
+                "current_progress": "安全评审准备中",
+                "risks": ["安全团队关注公网回调合规"],
+                "next_action": "下周安排安全评审",
+            },
+        )
+        activity_id = activity.id
+    finally:
+        db.close()
+
+    service = CustomerActivityMarkdownBackfillService(structuring_agent=_PartialEmptyAgent())
+    result = await service.backfill_activities(session_factory=session_factory, dry_run=False)
+    assert result.upgraded == 1
+    assert result.failed == 0
+
+    db = session_factory()
+    try:
+        upgraded = db.query(CustomerActivity).filter(CustomerActivity.id == activity_id).one()
+        parsed = json.loads(upgraded.content_json)
+        assert "### 沟通进展" in upgraded.summary
+        assert "### 沟通进展" in parsed["content"]
+        assert parsed["customer_feedback"] == "客户确认预算 50 万"
+        assert parsed["current_progress"] == "安全评审准备中"
+        assert parsed["risks"] == ["安全团队关注公网回调合规"]
+        assert parsed["next_action"] == "下周安排安全评审"
+        assert parsed["markdown_format_version"] == ACTIVITY_MARKDOWN_FORMAT_VERSION
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_rejects_empty_summary_or_empty_content_without_stamping(tmp_path, fake_ai_config, monkeypatch):
+    from app.crud import customer_activity as crud_mod
+
+    monkeypatch.setattr(crud_mod, "_upsert_customer_activity_evidence", lambda *args, **kwargs: None)
+
+    class _DegradedAgent:
+        async def structure(self, db, *, team_id: int, context: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "title": None,
+                "summary": "",
+                "next_action": None,
+                "content_json": {
+                    "content": "",
+                    "customer_feedback": "",
+                    "current_progress": "",
+                    "risks": [],
+                },
+            }
+
+    session_factory = _make_session_factory(tmp_path)
+    db = session_factory()
+    try:
+        customer = _seed_customer(db)
+        activity = _seed_activity(
+            db,
+            customer_id=customer.id,
+            submission_source="FORM",
+            source_content="原完整历史记录，不能被清空",
+            summary="原历史摘要",
+            content_json={
+                "content": "原完整历史正文",
+                "customer_feedback": "原客户反馈",
+                "current_progress": "原项目进展",
+                "risks": ["原风险点"],
+            },
+        )
+        activity_id = activity.id
+    finally:
+        db.close()
+
+    service = CustomerActivityMarkdownBackfillService(structuring_agent=_DegradedAgent())
+    result = await service.backfill_activities(session_factory=session_factory, dry_run=False)
+    assert result.upgraded == 0
+    assert result.failed == 1
+    assert result.errors[0]["activity_id"] == activity_id
+
+    db = session_factory()
+    try:
+        row = db.query(CustomerActivity).filter(CustomerActivity.id == activity_id).one()
+        parsed = json.loads(row.content_json)
+        assert row.summary == "原历史摘要"
+        assert parsed["content"] == "原完整历史正文"
+        assert parsed["customer_feedback"] == "原客户反馈"
+        assert parsed["current_progress"] == "原项目进展"
+        assert parsed["risks"] == ["原风险点"]
+        assert has_markdown_format_version(parsed) is False
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_backfill_supports_targeted_activity_ids_and_force_rerun(tmp_path, fake_ai_config, monkeypatch):
+    from app.crud import customer_activity as crud_mod
+
+    monkeypatch.setattr(crud_mod, "_upsert_customer_activity_evidence", lambda *args, **kwargs: None)
+
+    session_factory = _make_session_factory(tmp_path)
+    db = session_factory()
+    try:
+        customer = _seed_customer(db)
+        stamped_target = _seed_activity(
+            db,
+            customer_id=customer.id,
+            submission_source="FORM",
+            source_content="需要定向重跑的已打标记录",
+            summary="误打标的截断摘要",
+            content_json={
+                "content": "",
+                "markdown_format_version": ACTIVITY_MARKDOWN_FORMAT_VERSION,
+            },
+        )
+        other_row = _seed_activity(
+            db,
+            customer_id=customer.id,
+            submission_source="FORM",
+            source_content="不在目标 ID 列表中的记录",
+            summary="其他记录摘要",
+        )
+        target_id, other_id = stamped_target.id, other_row.id
+    finally:
+        db.close()
+
+    agent = _StubStructuringAgent()
+    service = CustomerActivityMarkdownBackfillService(structuring_agent=agent)
+
+    # Without force, stamped target is skipped
+    no_force = await service.backfill_activities(
+        session_factory=session_factory,
+        activity_ids=[target_id],
+        force=False,
+        dry_run=False,
+    )
+    assert no_force.candidates == 0
+    assert no_force.skipped_already_upgraded == 1
+    assert no_force.upgraded == 0
+
+    # With force=True and activity_ids, only target_id is re-upgraded
+    forced = await service.backfill_activities(
+        session_factory=session_factory,
+        activity_ids=[target_id],
+        force=True,
+        dry_run=False,
+    )
+    assert forced.candidates == 1
+    assert forced.upgraded == 1
+    assert forced.activity_ids == [target_id]
+
+    db = session_factory()
+    try:
+        repaired = db.query(CustomerActivity).filter(CustomerActivity.id == target_id).one()
+        untouched = db.query(CustomerActivity).filter(CustomerActivity.id == other_id).one()
+        assert "### 沟通要点" in repaired.summary
+        assert untouched.summary == "其他记录摘要"
+        assert has_markdown_format_version(untouched.content_json) is False
+    finally:
+        db.close()

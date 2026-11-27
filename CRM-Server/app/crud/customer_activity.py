@@ -478,6 +478,43 @@ class CustomerActivityCRUD:
             db.flush()
         return activity
 
+    @classmethod
+    def _is_meaningful_content_value(cls, value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, list):
+            return len(value) > 0
+        if isinstance(value, dict):
+            return any(cls._is_meaningful_content_value(v) for v in value.values())
+        return True
+
+    @classmethod
+    def _merge_historical_content_json(
+        cls,
+        existing_content: JSONObject,
+        incoming_content: JSONObject | None,
+    ) -> JSONObject:
+        merged: JSONObject = dict(existing_content)
+        if not isinstance(incoming_content, dict):
+            return merged
+        for key, new_val in incoming_content.items():
+            existing_val = existing_content.get(key)
+            if key in _HISTORICAL_PRESERVED_CONTENT_KEYS and cls._is_meaningful_content_value(existing_val):
+                merged[key] = existing_val
+                continue
+            if isinstance(existing_val, dict) and isinstance(new_val, dict):
+                merged_nested = dict(existing_val)
+                for sub_key, sub_val in new_val.items():
+                    if cls._is_meaningful_content_value(sub_val) or sub_key not in merged_nested:
+                        merged_nested[sub_key] = sub_val
+                merged[key] = merged_nested
+                continue
+            if cls._is_meaningful_content_value(new_val) or key not in merged:
+                merged[key] = new_val
+        return merged
+
     def apply_historical_markdown_upgrade(
         self,
         db: Session,
@@ -490,6 +527,21 @@ class CustomerActivityCRUD:
     ) -> CustomerActivity:
         """Upgrade a legacy activity's Markdown summary while locking all historical facts."""
 
+        resolved_summary = (summary or "").replace("\r\n", "\n").strip()[:4000]
+        if not resolved_summary:
+            raise ValueError("历史活动 Markdown 升级失败：模型未返回有效 summary")
+
+        meta = get_activity_kind_meta(activity.activity_kind)
+        if not isinstance(content_json, dict):
+            raise ValueError("历史活动 Markdown 升级失败：模型未返回有效 content_json")
+        if meta["category"] == "MEETING":
+            if not self._is_meaningful_content_value(content_json):
+                raise ValueError("历史活动 Markdown 升级失败：模型未返回有效会议结构化字段")
+        else:
+            incoming_body = str(content_json.get("content") or "").strip()
+            if not incoming_body:
+                raise ValueError("历史活动 Markdown 升级失败：模型未返回有效 content_json.content")
+
         activity = self._lock_current_activity(db, activity)
         existing_content: JSONObject = {}
         if isinstance(activity.content_json, str) and activity.content_json.strip():
@@ -499,19 +551,8 @@ class CustomerActivityCRUD:
                     existing_content = parsed
             except ValueError:
                 existing_content = {}
-        merged_content = dict(existing_content)
-        if isinstance(content_json, dict):
-            merged_content.update(content_json)
-        for preserved_key in _HISTORICAL_PRESERVED_CONTENT_KEYS:
-            existing_val = existing_content.get(preserved_key)
-            if existing_val not in (None, "", []):
-                merged_content[preserved_key] = existing_val
+        merged_content = self._merge_historical_content_json(existing_content, content_json)
         stamped_content_json = stamp_markdown_format_version(merged_content)
-        resolved_summary = (summary or "").strip()[:4000] or activity.summary or self.build_summary(
-            activity.activity_kind,
-            stamped_content_json,
-            activity.source_content,
-        )
         if not (activity.title or "").strip() and title:
             activity.title = title.strip()[:255]
         activity.content_json = _json_dumps(stamped_content_json)

@@ -5,8 +5,16 @@ from typing import Any
 
 import pytest
 
-from app.services.customer_activity_ai.schemas import FollowUpStructuringResult
-from app.services.customer_activity_ai.structuring_agent import ActivityStructuringAgent
+from pydantic import ValidationError
+
+from app.services.customer_activity_ai.schemas import (
+    FollowUpStructuringResult,
+    MeetingStructuringResult,
+)
+from app.services.customer_activity_ai.structuring_agent import (
+    ActivityStructuringAgent,
+    ActivityStructuringError,
+)
 
 
 class FakeRuntime:
@@ -65,3 +73,78 @@ async def test_follow_up_structuring_strips_prompt_metadata_from_content(monkeyp
     assert result["next_action"] == "下周三找王总确认进展"
     assert "<metadata>" in runtime.user_prompt
     assert "<raw_activity>" in runtime.user_prompt
+
+
+def test_structuring_schemas_require_summary_and_content_json():
+    with pytest.raises(ValidationError):
+        FollowUpStructuringResult.model_validate({"title": "微信跟进", "summary": "只有摘要"})
+    with pytest.raises(ValidationError):
+        FollowUpStructuringResult.model_validate({"title": "微信跟进", "summary": "只有摘要", "content_json": {}})
+    with pytest.raises(ValidationError):
+        MeetingStructuringResult.model_validate({"title": "线上会议", "summary": "只有摘要"})
+
+
+@pytest.mark.asyncio
+async def test_follow_up_structuring_rejects_empty_content(monkeypatch):
+    from app.services.customer_activity_ai import structuring_agent as module
+
+    monkeypatch.setattr(module.ai_config_crud, "get_config", lambda db, team_id: SimpleNamespace(
+        api_host="https://example.com",
+        model_name="test-model",
+        temperature=0.1,
+    ))
+    monkeypatch.setattr(module.ai_config_crud, "get_decrypted_api_key", lambda db, team_id: "test-key")
+
+    class EmptyContentRuntime:
+        async def ainvoke_structured(self, **kwargs: Any):
+            return FollowUpStructuringResult.model_validate({
+                "title": "微信跟进",
+                "summary": "只有摘要",
+                "content_json": {"content": "   "},
+            })
+
+    agent = ActivityStructuringAgent(runtime=EmptyContentRuntime())
+    with pytest.raises(ActivityStructuringError, match="content_json.content"):
+        await agent.structure(None, team_id=1, context={
+            "current_activity": {
+                "activity_category": "FOLLOW_UP",
+                "activity_label": "微信跟进",
+                "activity_kind": "WECHAT_FOLLOW_UP",
+                "source_content": "客户反馈预算 50 万，下周二评审方案。",
+                "next_action": "",
+                "occurred_at": "2026-11-27T10:00:00",
+            },
+        })
+
+
+@pytest.mark.asyncio
+async def test_meeting_structuring_rejects_empty_structured_fields(monkeypatch):
+    from app.services.customer_activity_ai import structuring_agent as module
+
+    monkeypatch.setattr(module.ai_config_crud, "get_config", lambda db, team_id: SimpleNamespace(
+        api_host="https://example.com",
+        model_name="test-model",
+        temperature=0.1,
+    ))
+    monkeypatch.setattr(module.ai_config_crud, "get_decrypted_api_key", lambda db, team_id: "test-key")
+
+    class EmptyMeetingRuntime:
+        async def ainvoke_structured(self, **kwargs: Any):
+            return MeetingStructuringResult.model_validate({
+                "title": "线上会议",
+                "summary": "### 会议要点\n- 讨论私有化部署",
+                "content_json": {},
+            })
+
+    agent = ActivityStructuringAgent(runtime=EmptyMeetingRuntime())
+    with pytest.raises(ActivityStructuringError, match="结构化 content_json"):
+        await agent.structure(None, team_id=1, context={
+            "current_activity": {
+                "activity_category": "MEETING",
+                "activity_label": "线上会议",
+                "activity_kind": "ONLINE_MEETING",
+                "source_content": "讨论了私有化部署架构、安全合规和商务报价。",
+                "next_action": "",
+                "occurred_at": "2026-11-27T10:00:00",
+            },
+        })
