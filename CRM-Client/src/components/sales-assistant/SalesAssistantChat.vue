@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
-import { ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
 import { assistantApi, parseStageEvent, StageNameSchema, submitInputStream } from '@/api/assistant'
 import type { AssistantTurn, StageEvent, StageName, StageSegment, SubmitAssistantInput } from '@/api/assistant'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +28,7 @@ import { assistantEntityDetailRoute, assistantPageRoute } from '@/components/age
 import { handOffAssistantTurn, reclaimAssistantTurn } from '@/components/sales-assistant/assistantBackgroundTurn'
 import { assistantCommandReplyLabel } from '@/components/sales-assistant/replyLabel'
 import type { InteractionBlock } from '@/components/sales-assistant/replyLabel'
+import { useAssistantAutoScroll } from '@/components/sales-assistant/useAssistantAutoScroll'
 
 interface ChatEntry {
   id: number
@@ -63,6 +64,44 @@ const emit = defineEmits<{
 // Wire snapshots are replaced, not deeply mutated. React only to list and entry changes.
 const entries = shallowRef<ChatEntry[]>(shallowReactive([]))
 const inputText = ref('')
+const composerRef = ref<{ el: HTMLTextAreaElement | null } | null>(null)
+const getComposerEl = (): HTMLTextAreaElement | null => composerRef.value?.el ?? null
+const syncComposerHeight = (): void => {
+  const textarea = getComposerEl()
+  if (textarea === null) return
+  textarea.style.height = 'auto'
+  const computedStyle = typeof window !== 'undefined' ? window.getComputedStyle(textarea) : null
+  const parsedLineHeight = computedStyle ? Number.parseFloat(computedStyle.lineHeight) : Number.NaN
+  const lineHeight = Number.isFinite(parsedLineHeight) && parsedLineHeight > 0 ? parsedLineHeight : 22
+  const parsedMinHeight = computedStyle ? Number.parseFloat(computedStyle.minHeight) : Number.NaN
+  const minHeight = Number.isFinite(parsedMinHeight) && parsedMinHeight > 0 ? parsedMinHeight : 60
+  const viewportCap = typeof window !== 'undefined' && window.innerHeight > 0 ? window.innerHeight * 0.3 : lineHeight * 8
+  const maxHeight = Math.max(minHeight, Math.min(lineHeight * 8, viewportCap))
+  if (inputText.value === '') {
+    textarea.style.height = ''
+    textarea.style.overflowY = 'hidden'
+    return
+  }
+  const contentHeight = textarea.scrollHeight
+  if (contentHeight <= minHeight) {
+    textarea.style.height = ''
+    textarea.style.overflowY = 'hidden'
+    return
+  }
+  const nextHeight = Math.min(contentHeight, maxHeight)
+  textarea.style.height = `${nextHeight}px`
+  textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
+}
+watch(inputText, () => {
+  void nextTick(syncComposerHeight)
+})
+onMounted(() => {
+  syncComposerHeight()
+  window.addEventListener('resize', syncComposerHeight)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', syncComposerHeight)
+})
 const submitting = ref(false)
 const sendingText = ref(false)
 const heldActionIds = ref<ReadonlySet<string>>(new Set())
@@ -137,6 +176,11 @@ const OUT_OF_RANGE_KIND = '请从卡片给出的活动类型中选择'
 const EMPTY_CONVERSATION_TITLE = '把一次客户沟通交给我整理'
 const EMPTY_CONVERSATION_HINT = '发送一句话开始，例如「今天下午和睿狐科技开了个线上会议，聊了 POC 部署」。'
 const INPUT_LOCKED_HINT = '请先处理上方的待办卡片，处理完成后可以继续输入。'
+const EMPTY_SUGGESTIONS: readonly string[] = [
+  '今天下午和睿狐科技开了线上会，聊了 POC 部署方案，下周三需要跟进报价',
+  '刚给华东制造的王总打了电话，客户确认下月预算已批，准备安排商务合同评审',
+  '帮我查一下最近 7 天待跟进的重点商机和客户进展',
+]
 const LIVE_STAGE_STATUS: Record<LiveStage['status'], ProcessItemStatus> = {
   pending: 'PENDING',
   running: 'RUNNING',
@@ -216,29 +260,22 @@ const pushEntry = (
   entries.value.push(shallowReactive<ChatEntry>({
     id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value
   }))
-  scrollToBottom()
+  if (role === 'user') scrollToBottomForce()
+  else scrollIfPinned()
 }
 
 const scrollId = ref<HTMLElement | null>(null)
-let scrollSchedule = 0
-const scrollToBottom = (waitForLayout = false): void => {
-  const schedule = ++scrollSchedule
-  void nextTick(() => {
-    const scroller = scrollId.value
-    if (scroller === null || schedule !== scrollSchedule) return
-    const scroll = (): void => {
-      if (schedule === scrollSchedule && !disposed && scrollId.value === scroller) scroller.scrollTo?.({ top: scroller.scrollHeight })
-    }
-    if (!waitForLayout) {
-      scroll()
-      return
-    }
-    requestAnimationFrame(() => requestAnimationFrame(scroll))
-  })
-}
-// 页面在 KeepAlive 里：切走时滚动容器被重置到顶部，回来时只重新定位到最新一条，不重新请求、不改任何状态。
-onActivated(() => scrollToBottom(true))
-
+const {
+  hasUnreadBelow,
+  showScrollToBottom,
+  onScroll,
+  scrollIfPinned,
+  scrollToBottomForce,
+  scrollToLatestTurnOrBottom,
+  preservePositionAcrossPrepend,
+  captureScrollPosition,
+  restoreScrollPosition,
+} = useAssistantAutoScroll(scrollId, { isDisposed: () => disposed })
 
 interface LiveStage {
   name: StageName
@@ -343,6 +380,7 @@ const applyStageEvent = (event: StageEvent): void => {
     target.score = event.score
     target.segment = { ...segment, done: true }
   }
+  scrollIfPinned()
 }
 // Without a server-attributed stage, the stage still running is the one that stopped.
 const markStageFailed = (stage: StageName | undefined): void => {
@@ -885,6 +923,13 @@ const submitText = async (): Promise<void> => {
   }
 }
 
+const onInputEnter = (event: KeyboardEvent): void => {
+  // 中文等 IME 组合态按 Enter 选词时不拦截、不触发发送
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  void submitText()
+}
+
 const clearCardNotice = (key: string): void => {
   if (interactionNotices.value[key] === undefined) return
   const next: Record<string, InteractionNotice> = {}
@@ -1380,6 +1425,29 @@ const entrySpacing = (index: number): string => {
 }
 // 等待待办卡片时输入框被禁用；用一行文字说明原因，不靠边框变色。
 const cardLocked = computed(() => conversation.value?.pending_choice != null)
+const inputDisabled = computed(() => loadingConversation.value || busy.value || conversation.value?.pending_choice != null)
+const sendDisabled = computed(() => inputDisabled.value || inputText.value.trim() === '')
+const applyEmptySuggestion = (suggestion: string): void => {
+  if (inputDisabled.value) return
+  inputText.value = suggestion
+  void nextTick(() => {
+    syncComposerHeight()
+    getComposerEl()?.focus({ preventScroll: true })
+  })
+}
+let pendingUnlockFocus = false
+watch(cardLocked, (locked, prevLocked) => {
+  if (prevLocked && !locked) pendingUnlockFocus = true
+  if (locked) pendingUnlockFocus = false
+})
+watch([cardLocked, inputDisabled], ([locked, disabled]) => {
+  if (!pendingUnlockFocus || locked || disabled || reconciliationRequired.value) return
+  pendingUnlockFocus = false
+  void nextTick(() => {
+    if (inputDisabled.value) return
+    getComposerEl()?.focus({ preventScroll: true })
+  })
+})
 const historyErrorFeedback = computed<FeedbackError | null>(() => (
   historyError.value === '' ? null : { title: historyError.value, description: '' }
 ))
@@ -1726,6 +1794,7 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     || (view.version === conversation.value.version && requestOrder < appliedViewRequest)
     || (task.value?.public_id === view.focused_task?.public_id
       && (view.focused_task?.version ?? 0) < (task.value?.version ?? 0)))) return false
+  const isInitialLoad = conversation.value === null
   historyError.value = ''
   stopOfflineSync()
   if (!older) {
@@ -1805,7 +1874,10 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
     resultPending.value = true
   }
   if (!older) noteEpisodeMessages()
-  if (!older) scrollToBottom(true)
+  if (!older) {
+    if (isInitialLoad) scrollToLatestTurnOrBottom(true)
+    else scrollIfPinned(true)
+  }
   return true
 }
 
@@ -1856,18 +1928,14 @@ const refreshConversation = async (offlineAttempt = 0): Promise<boolean> => {
 
 const loadOlder = async (): Promise<void> => {
   if (olderCursor.value === null || submitting.value) return
-  scrollSchedule += 1
   submitting.value = true
   const cursor = olderCursor.value
-  const scroller = scrollId.value
-  const height = scroller?.scrollHeight ?? 0
-  const top = scroller?.scrollTop ?? 0
   try {
     const page = await assistantApi.getConversation(cursor)
     historyExtended = true
-    applyConversation(page, true)
-    await nextTick()
-    if (scroller) scroller.scrollTop = top + scroller.scrollHeight - height
+    await preservePositionAcrossPrepend(() => {
+      applyConversation(page, true)
+    })
   }
   catch { if (!disposed) historyError.value = '更早的对话暂时无法加载，请重试。' }
   finally { submitting.value = false }
@@ -1902,11 +1970,13 @@ const onOnline = (): void => {
   }
 }
 onActivated(() => {
+  restoreScrollPosition()
   reclaimAssistantTurn()
   if (offlineSyncNeeded.value) void (conversation.value !== null ? refreshConversation() : loadConversation())
   reattachProcessingTurn()
 })
 onDeactivated(() => {
+  captureScrollPosition()
   const turn = inFlightTurn()
   if (turn !== null) handOffAssistantTurn(turn)
 })
@@ -1921,7 +1991,9 @@ const loadConversation = async (offlineAttempt = 0): Promise<boolean> => {
   loadingConversation.value = true
   const order = ++viewRequestSequence
   try {
-    applyConversation(await assistantApi.openConversation(), false, order)
+    const opened = await assistantApi.openConversation()
+    if (!disposed) loadingConversation.value = false
+    applyConversation(opened, false, order)
     if (processingRecovery.value !== null) await recoverProcessingTurn()
     else if (canResumeConversation.value && !reconciliationRequired.value && lostSend.value === null) {
       void tryAutoResumePending(false)
@@ -1958,7 +2030,8 @@ void loadConversation()
 
     <DataViewStatePanel v-if="loadingConversation" class="flex-1" state="loading" loading-type="list" :loading-rows="3" />
 
-    <div v-else ref="scrollId" class="min-h-0 flex-1 overflow-y-auto pr-space-1">
+    <div v-else class="relative flex min-h-0 flex-1 flex-col">
+      <div ref="scrollId" class="min-h-0 flex-1 overflow-y-auto pr-space-1" @scroll="onScroll">
       <div class="flex flex-col py-space-2">
         <Button v-if="olderCursor !== null" variant="ghost" size="sm" class="self-start" :disabled="submitting" @click="loadOlder">查看更早对话</Button>
         <DataViewStatePanel
@@ -1971,9 +2044,25 @@ void loadConversation()
           <template #empty-media>
             <MessageSquare class="size-icon-lg text-muted-foreground" aria-hidden="true" />
           </template>
+          <template #empty-action>
+            <div class="flex flex-wrap justify-center gap-space-2" data-assistant-empty-suggestions>
+              <Button
+                v-for="suggestion in EMPTY_SUGGESTIONS"
+                :key="suggestion"
+                type="button"
+                variant="outline"
+                size="sm"
+                class="h-auto whitespace-normal py-space-2 text-left"
+                :disabled="inputDisabled"
+                @click="applyEmptySuggestion(suggestion)"
+              >
+                {{ suggestion }}
+              </Button>
+            </div>
+          </template>
         </DataViewStatePanel>
         <template v-for="(entry, index) in visibleEntries" :key="entry.id">
-          <div v-if="entry.role === 'user'" class="flex justify-end" :class="entrySpacing(index)">
+          <div v-if="entry.role === 'user'" data-turn-anchor class="flex justify-end" :class="entrySpacing(index)">
             <div class="max-w-[72%] whitespace-pre-wrap rounded-lg bg-secondary px-space-3 py-space-2 text-body text-secondary-foreground [overflow-wrap:anywhere] max-[767px]:max-w-[88%]">
               {{ entry.text }}
             </div>
@@ -2028,17 +2117,38 @@ void loadConversation()
           </div>
         </template>
       </div>
+      </div>
+      <Button
+        v-if="showScrollToBottom"
+        type="button"
+        variant="outline"
+        size="sm"
+        class="absolute bottom-space-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-1"
+        aria-label="回到底部"
+        data-assistant-scroll-bottom
+        @click="scrollToBottomForce(false, true)"
+      >
+        <ArrowDown aria-hidden="true" />
+        <span>{{ hasUnreadBelow ? '有新内容 · 回到底部' : '回到底部' }}</span>
+      </Button>
     </div>
 
     <section v-if="showProcessCard && liveProcess" class="mt-space-4 grid gap-space-2" aria-label="执行过程">
       <AgentUIProcessBlock
         :block="liveProcess"
-        default-open
+        :running="processingInFlight"
+        :episode-key="processing.episode"
         :summary="liveProcessSummary"
         :status="processChipStatus"
         :meta="liveStageMetaByKey"
       />
-      <AgentUIBanner tone="info" :icon="Info" title="原始内容已保存" role="status" />
+      <AgentUIBanner
+        tone="info"
+        :icon="Info"
+        :title="processingInFlight ? '原始内容已保存，处理仍在后台继续；关闭或刷新不会取消' : '原始内容已保存'"
+        role="status"
+        aria-live="polite"
+      />
     </section>
 
     <nav v-if="visiblePendingDrafts.length > 0" class="mt-space-4 flex flex-wrap items-center gap-space-2" aria-label="待补充" data-assistant-pending-drafts>
@@ -2090,7 +2200,7 @@ void loadConversation()
         <LoaderCircle class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>正在恢复上一条请求…</span>
       </div>
-      <div v-else-if="processing.active || routing || recoveryNotice" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status">
+      <div v-else-if="routing || recoveryNotice || (processing.active && !(showProcessCard && liveProcess))" class="mb-space-2 flex items-center gap-space-2 text-caption font-medium text-brand" role="status" aria-live="polite">
         <LoaderCircle v-if="routing || processing.active || autoRecovering" class="size-icon-sm animate-spin motion-reduce:animate-none" aria-hidden="true" />
         <span>{{ routing ? '正在理解这次沟通…' : (recoveryNotice || processingHint) }}</span>
       </div>
@@ -2111,13 +2221,14 @@ void loadConversation()
         <span>{{ PENDING_RESUME_FALLBACK_NOTICE }}</span>
       </p>
       <Textarea
+        ref="composerRef"
         aria-label="客户沟通内容"
         v-model="inputText"
         :rows="2"
-        :disabled="loadingConversation || busy || conversation?.pending_choice != null"
+        :disabled="inputDisabled"
         :placeholder="inputPlaceholder"
         class="resize-none border-0 p-0"
-        @keydown.enter.exact.prevent="submitText"
+        @keydown.enter.exact="onInputEnter"
       />
       <div class="mt-space-2 flex flex-wrap items-center justify-between gap-space-2">
         <div class="flex flex-wrap items-center gap-space-2">
@@ -2133,7 +2244,7 @@ void loadConversation()
           <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
             <X aria-hidden="true" />算了
           </Button>
-          <Button aria-label="发送" :loading="sendingText" :disabled="loadingConversation || busy || conversation?.pending_choice != null" @click="submitText">
+          <Button aria-label="发送" :loading="sendingText" :disabled="sendDisabled" @click="submitText">
             <ArrowUp aria-hidden="true" />发送
           </Button>
         </div>

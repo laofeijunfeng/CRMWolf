@@ -9,7 +9,7 @@ import {
   LoaderCircle,
   XCircle,
 } from 'lucide-vue-next'
-import { computed, type Component } from 'vue'
+import { computed, ref, watch, type Component } from 'vue'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -18,8 +18,12 @@ import { processStatusLabel, type ProcessBlock, type ProcessItem, type ProcessIt
 
 interface Props {
   block: ProcessBlock
-  /** 默认展开；宿主用它展示正在进行的实时阶段。 */
+  /** 默认展开（非运行态时生效）。 */
   defaultOpen?: boolean
+  /** 当前是否处于实时运行中；未手动覆盖时运行中自动展开、完成后自动收起。 */
+  running?: boolean
+  /** 轮次标识；切换新一轮时重置用户的手动展开/收起覆盖。 */
+  episodeKey?: string | number | undefined
   /** 折叠头里的一句摘要；不传时沿用最新步骤的状态。 */
   summary?: string | null | undefined
   /** 折叠头右侧的状态徽标（处理中 / 已更新）。 */
@@ -30,11 +34,21 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   defaultOpen: false,
+  running: false,
+  episodeKey: undefined,
   summary: null,
   status: null,
   meta: undefined,
 })
 
+const userOverride = ref<boolean | null>(null)
+const isOpen = computed(() => userOverride.value ?? (props.running || props.defaultOpen))
+const onOpenChange = (next: boolean): void => {
+  userOverride.value = next
+}
+watch(() => props.episodeKey, () => {
+  userOverride.value = null
+})
 const latestItem = computed(() => props.block.items[props.block.items.length - 1])
 
 const statusIcon = (status: ProcessItem['status']): Component => ({
@@ -61,9 +75,10 @@ const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.t
 
 <template>
   <Collapsible
-    v-slot="{ open }"
-    :default-open="defaultOpen === true"
+    :open="isOpen"
+    :unmount-on-hide="false"
     class="min-w-0 overflow-hidden rounded-lg border border-border bg-card text-foreground"
+    @update:open="onOpenChange"
   >
     <CollapsibleTrigger as-child>
       <button
@@ -71,7 +86,7 @@ const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.t
         class="flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target w-full items-center gap-space-2 px-space-3 text-left transition-colors hover:bg-wash-hover"
       >
         <component
-          :is="open ? ChevronDown : ChevronRight"
+          :is="isOpen ? ChevronDown : ChevronRight"
           class="size-icon-sm shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
@@ -95,26 +110,63 @@ const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.t
         <li
           v-for="item in block.items"
           :key="item.key"
-          class="relative grid min-h-[var(--control-h-lg)] grid-cols-[var(--icon-sm)_minmax(0,1fr)_auto] items-center gap-space-2 before:absolute before:bottom-0 before:left-[calc(var(--icon-sm)/2)] before:top-0 before:w-px before:bg-border before:content-[''] first:before:top-1/2 last:before:bottom-1/2"
+          class="relative before:absolute before:bottom-0 before:left-[calc(var(--icon-sm)/2)] before:top-0 before:w-px before:bg-border before:content-[''] first:before:top-1/2 last:before:bottom-1/2"
         >
-          <span class="relative z-10 grid size-icon-sm place-items-center bg-card">
-            <component
-              :is="statusIcon(item.status)"
-              class="size-icon-sm"
-              :class="[statusClass(item.status), item.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
-              aria-hidden="true"
-            />
-          </span>
-          <div class="grid min-w-0 gap-space-1">
-            <span class="text-body text-foreground">{{ item.title }}</span>
-            <p v-if="item.description" class="m-0 text-caption text-muted-foreground">
-              {{ item.description }}
-            </p>
+          <Collapsible v-if="item.description" v-slot="{ open: stepOpen }" :unmount-on-hide="false" class="min-w-0">
+            <div class="grid min-h-[var(--control-h-lg)] grid-cols-[var(--icon-sm)_minmax(0,1fr)_auto] items-center gap-space-2">
+              <span class="relative z-10 grid size-icon-sm place-items-center bg-card">
+                <component
+                  :is="statusIcon(item.status)"
+                  class="size-icon-sm"
+                  :class="[statusClass(item.status), item.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
+                  aria-hidden="true"
+                />
+              </span>
+              <CollapsibleTrigger as-child>
+                <button
+                  type="button"
+                  class="inline-flex min-w-0 items-center gap-space-1 rounded-sm text-left text-body text-foreground transition-colors hover:bg-wash-hover"
+                >
+                  <span class="truncate" :class="{ 'text-shimmer': item.status === 'RUNNING' }">{{ item.title }}</span>
+                  <component
+                    :is="stepOpen ? ChevronDown : ChevronRight"
+                    class="size-icon-sm shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <span
+                class="shrink-0 text-caption tabular-nums"
+                :class="itemMeta(item).tone === 'danger' ? 'text-tone-danger' : itemMeta(item).tone === 'brand' ? 'text-brand' : 'text-muted-foreground'"
+              >{{ itemMeta(item).text }}</span>
+            </div>
+            <CollapsibleContent>
+              <div class="pb-space-2 pl-[calc(var(--icon-sm)+var(--space-2))] text-caption text-muted-foreground">
+                <p class="m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{{ item.description }}</p>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+          <div
+            v-else
+            class="grid min-h-[var(--control-h-lg)] grid-cols-[var(--icon-sm)_minmax(0,1fr)_auto] items-center gap-space-2"
+          >
+            <span class="relative z-10 grid size-icon-sm place-items-center bg-card">
+              <component
+                :is="statusIcon(item.status)"
+                class="size-icon-sm"
+                :class="[statusClass(item.status), item.status === 'RUNNING' ? 'animate-spin motion-reduce:animate-none' : '']"
+                aria-hidden="true"
+              />
+            </span>
+            <span
+              class="min-w-0 truncate text-body text-foreground"
+              :class="{ 'text-shimmer': item.status === 'RUNNING' }"
+            >{{ item.title }}</span>
+            <span
+              class="shrink-0 text-caption tabular-nums"
+              :class="itemMeta(item).tone === 'danger' ? 'text-tone-danger' : itemMeta(item).tone === 'brand' ? 'text-brand' : 'text-muted-foreground'"
+            >{{ itemMeta(item).text }}</span>
           </div>
-          <span
-            class="shrink-0 text-caption tabular-nums"
-            :class="itemMeta(item).tone === 'danger' ? 'text-tone-danger' : itemMeta(item).tone === 'brand' ? 'text-brand' : 'text-muted-foreground'"
-          >{{ itemMeta(item).text }}</span>
         </li>
       </ol>
     </CollapsibleContent>

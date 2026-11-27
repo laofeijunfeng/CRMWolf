@@ -297,7 +297,7 @@ describe('SalesAssistant failure recovery', () => {
 
     expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
     expect(api.getTurn).not.toHaveBeenCalled()
-    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.get('textarea').attributes('disabled')).toBeUndefined()
     expect(mounted.find('[data-assistant-reconcile="not_written"]').text()).toContain('刚才未能完成保存，内容都在，可以重新确认。')
     expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
   })
@@ -341,7 +341,7 @@ describe('SalesAssistant failure recovery', () => {
 
     expect(api.reconcileTask).toHaveBeenCalledWith('task-1')
     expect(api.getTurn).toHaveBeenCalledWith('task-1', 'turn-followup', 0)
-    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.get('textarea').attributes('disabled')).toBeUndefined()
   })
 
   it('falls back to unified unconfirmed copy with 查看结果 after 2/4/8/16s auto-reconcile exhaustion', async () => {
@@ -387,7 +387,7 @@ describe('SalesAssistant failure recovery', () => {
 
     await click(mounted, '查看结果')
     expect(api.reconcileTask).toHaveBeenCalledTimes(5)
-    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.get('textarea').attributes('disabled')).toBeUndefined()
     expect(mounted.findAll('button').some((button) => button.text() === '查看结果')).toBe(false)
   })
 
@@ -435,7 +435,7 @@ describe('SalesAssistant failure recovery', () => {
     api.getConversation.mockResolvedValue(conversation(reconciledTask))
 
     const mounted = await open(task({ version: 2, processing_turn_id: 'turn-1', processing_turn_status: 'RUNNING', reconciliation_required: false }))
-    expect(mounted.get('button[aria-label="发送"]').attributes('disabled')).toBeUndefined()
+    expect(mounted.get('textarea').attributes('disabled')).toBeUndefined()
     expect(mounted.findAll('button').some((button) => button.text() === '重新处理')).toBe(false)
   })
 })

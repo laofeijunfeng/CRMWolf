@@ -95,10 +95,14 @@ describe('AgentUIMessage', () => {
     expect(wrapper.text()).toContain('已创建跟进任务。')
     expect(wrapper.text()).toContain('整理执行结果')
     expect(wrapper.text()).toContain('4')
-    expect(wrapper.text()).not.toContain('理解业务操作')
+    const trigger = wrapper.get('button')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('ol').element.closest('[data-state]')?.getAttribute('data-state')).toBe('closed')
 
-    await wrapper.get('button').trigger('click')
+    await trigger.trigger('click')
 
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('ol').element.closest('[data-state]')?.getAttribute('data-state')).toBe('open')
     expect(wrapper.text()).toContain('理解业务操作')
     expect(wrapper.text()).toContain('生成执行计划')
     expect(wrapper.text()).toContain('执行 CRM 操作')
