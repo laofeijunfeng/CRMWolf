@@ -710,14 +710,49 @@ async def test_profile_items_follow_the_activity_and_each_opens_its_own_child(db
     assert load_waiting(activity).type == "PROFILE_PROPOSALS", "the other row is still open"
     row = task_view(activity, session).profile_proposals[0]
     assert (row.child_task_public_id, row.child_waiting_type) == (child.public_id, "ENTITY_FORM")
+    from app.services.assistant import profile_proposals
+    from app.services.assistant.ui_projection import _profile_options, finalize_assistant_ui
+
     card = _wait_card(session, activity)
     assert [(value, label, disabled) for _, value, label, disabled in card] == [
-        ("row:0", "表单填写中", True), ("go:1", "去补充", False), ("skip:1", "不保存", False),
-        ("none", "都不需要", False),
+        ("row:0", "表单填写中", True), ("go:1", "打开建档表单", False), ("skip:1", "不保存", False),
+        ("none", "全部不保存", False),
     ], "a settled row shows its child's state and cannot be chosen again"
-    assert (card[0][0], card[2][0]) == ("联系人：新联系人王敏", "开票抬头：睿狐科技有限公司"), \
+    assert (card[0][0], card[2][0]) == ("新建联系人：新联系人王敏", "新建开票抬头：睿狐科技有限公司"), \
         "the kind is not repeated"
-
+    # Verify card carries subtitle hint and extracted_summary + quote in description
+    from app.schemas.assistant_conversation import ConversationMessage
+    msg = ConversationMessage(
+        id="m-profile", role="assistant", at="2026-11-27T10:00:00Z", text=profile_proposals.PROMPT,
+        task=task_view(activity, session),
+    )
+    finalize_assistant_ui([msg], focused_task=msg.task, pending_choice=None)
+    assert msg.ui is not None
+    assert [b.type for b in msg.ui.blocks] == ["interaction"], "single authoritative prompt"
+    interaction = msg.ui.blocks[0]
+    assert interaction.prompt == profile_proposals.PROMPT
+    assert interaction.hint == profile_proposals.HINT
+    go1 = next(opt for opt in interaction.options if opt.value == "go:1")
+    assert "已识别：" in (go1.description or "")
+    assert "｜原话：" in (go1.description or "")
+    # Historical waiting with legacy labels ('去补充' / '都不需要') stays compatible
+    legacy_waiting = load_waiting(activity).model_copy(update={
+        "candidates": [
+            {"id": "go:1", "label": "去补充"},
+            {"id": "skip:1", "label": "不保存"},
+            {"id": "none", "label": "都不需要"},
+        ],
+    })
+    legacy_opts = _profile_options(
+        ConversationMessage(
+            id="m-legacy", role="assistant", at="2026-11-27T10:00:00Z", text="legacy",
+            task=task_view(activity, session),
+        ),
+        legacy_waiting,
+    )
+    assert [(opt.value, opt.label) for opt in legacy_opts if opt.value in {"go:1", "none"}] == [
+        ("go:1", "去补充"), ("none", "都不需要"),
+    ]
     finished = await _answer(session, activity, {"kind": "submit_field", "choice": "skip:1"})
 
     assert finished.reply.message.endswith("没有其他建议"), "the opportunity proposals follow the list"

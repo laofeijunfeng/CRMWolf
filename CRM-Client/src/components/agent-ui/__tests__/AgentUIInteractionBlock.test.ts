@@ -936,6 +936,56 @@ it('keeps a resolved activity kind read-only with its origin', () => {
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
 
+it('renders a plain subtitle hint for non-activity-kind choice cards like settle_profile_proposals', () => {
+  const hint = '每项将单独保存到对应客户资料模块，不影响已保存的客户活动；点「打开表单」后可先核对或补全再保存，不会直接写入。'
+  const block = InteractionBlockSchema.parse({
+    id: 'b_profile_proposals',
+    type: 'interaction',
+    interaction_id: 'ix_profile_proposals',
+    interaction_type: 'choice',
+    business_action: 'settle_profile_proposals',
+    state: 'ACTIVE',
+    prompt: '客户活动已保存；以下提到的客户资料，要分别建档或更新吗？',
+    hint,
+    fields: [],
+    facts: [],
+    options: [
+      {
+        value: 'go:0',
+        label: '打开建档表单',
+        group: '新建联系人：王敏',
+        description: '已识别：姓名 王敏、职位 采购总监｜原话：王敏是采购总监',
+        disabled: false
+      },
+      {
+        value: 'skip:0',
+        label: '不保存',
+        group: '新建联系人：王敏',
+        disabled: false
+      },
+      {
+        value: 'none',
+        label: '全部不保存',
+        group: '全部',
+        disabled: false
+      }
+    ],
+    selection_mode: 'single',
+    min_selections: 1,
+    max_selections: 1,
+    submit_on_select: true,
+    submit_action_id: 'act_profile_proposals'
+  })
+
+  const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
+
+  expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
+  expect(wrapper.get('[data-agent-ui-choice-hint]').text()).toBe(hint)
+  expect(wrapper.text()).not.toContain('请按本次实际发生的沟通来选')
+  expect(wrapper.text()).toContain('打开建档表单')
+  expect(wrapper.text()).toContain('全部不保存')
+})
+
 it('offers a retry with the same choice when the card never reported an outcome', async () => {
   const block = InteractionBlockSchema.parse({
     id: 'b_kind_failed',

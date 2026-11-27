@@ -319,6 +319,7 @@ export const AssistantTaskViewSchema = z.object({
     label: z.string(),
     summary: z.string(),
     quote: z.string(),
+    extracted_summary: z.string().nullable().optional(),
     decision: z.enum(['pending', 'go', 'skip', 'failed']),
     child_task_public_id: z.string().nullable().optional(),
     child_status: AssistantTaskStatusSchema.nullable().optional(),

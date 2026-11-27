@@ -52,6 +52,7 @@ class ProfileProposalRowView(BaseModel):
     label: str
     summary: str
     quote: str
+    extracted_summary: str | None = None
     decision: Literal["pending", "go", "skip", "failed"]
     child_task_public_id: str | None = None
     child_status: TaskStatus | None = None

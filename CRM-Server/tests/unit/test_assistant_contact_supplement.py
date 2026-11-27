@@ -239,10 +239,23 @@ async def test_entry_a_proposes_contact_supplement_and_opens_readonly_remark_for
     rows = task_view(activity, session).profile_proposals
     assert len(rows) == 1
     assert rows[0].kind == "contact_supplement"
-    assert rows[0].label == "补充已有联系人"
+    assert rows[0].label == "更新已有联系人"
     assert "补充 孙自豪" in rows[0].summary
+    assert rows[0].extracted_summary is not None
+    assert "邮箱 sun@ruihu.example" in rows[0].extracted_summary
 
-    # User clicks "去补充" -> opens contact_supplement form without required create fields
+    # Verify PROFILE_PROPOSALS UI projection shows deduplicated group title and 打开补充表单 button
+    from app.services.assistant.ui_projection import _profile_row_state
+
+    projected_proposals = _project(session, activity, profile_proposals.PROMPT)
+    proposal_interaction = next(b for b in projected_proposals.blocks if b.type == "interaction")
+    assert proposal_interaction.hint == profile_proposals.HINT
+    go_opt = next(opt for opt in proposal_interaction.options if opt.value == "go:0")
+    assert go_opt.label == "打开补充表单"
+    assert go_opt.group == "更新已有联系人：孙自豪（新备注、邮箱）"
+    assert "已识别：" in (go_opt.description or "") and "｜原话：" in (go_opt.description or "")
+
+    # User clicks "打开补充表单" -> opens contact_supplement form without required create fields
     await _answer(session, activity, {"kind": "submit_field", "choice": "go:0"})
     child = session.query(AssistantTask).filter_by(task_kind="contact_supplement").one()
     form = _form(child)
@@ -291,7 +304,8 @@ async def test_entry_a_proposes_contact_supplement_and_opens_readonly_remark_for
     assert receipt.kind == "contact_supplement"
     assert receipt.outcome == "supplemented"
     assert receipt.public_id == f"contact:{target.id}"
-
+    settled_row = task_view(activity, session).profile_proposals[0]
+    assert _profile_row_state(settled_row) == "已更新"
 
 # ---------------------------------------------------------------------------
 # AC3: Ambiguous name disambiguation & mobile conflict protection + fallback

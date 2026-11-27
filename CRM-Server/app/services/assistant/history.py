@@ -64,22 +64,23 @@ def _profile_proposal_label(
     waiting: TaskWaiting,
     profile_proposals: Sequence[ProfileProposalItem] | None,
 ) -> str:
+    from app.services.assistant.profile_proposals import (
+        GO_CREATE_LABEL,
+        NONE_LABEL,
+        SKIP_LABEL,
+        format_profile_group,
+    )
+
     if choice == "none":
-        return _candidate_label(waiting, choice) or "都不需要"
+        return _candidate_label(waiting, choice) or NONE_LABEL
     if isinstance(choice, str) and ":" in choice:
         action, raw_index = choice.split(":", 1)
         if action in {"go", "skip"} and raw_index.isdigit():
-            action_label = _candidate_label(waiting, choice) or ("去补充" if action == "go" else "不保存")
+            action_label = _candidate_label(waiting, choice) or (GO_CREATE_LABEL if action == "go" else SKIP_LABEL)
             idx = int(raw_index)
             if profile_proposals is not None and 0 <= idx < len(profile_proposals):
-                from app.services.assistant.entity_forms import module_for
-
                 item = profile_proposals[idx]
-                row_label = module_for(item.kind).LABEL
-                summary = item.summary.removeprefix(f"{row_label}：").removeprefix(f"{row_label}:").strip()
-                group = f"{row_label}：{summary or item.summary}"
-                if len(group) > 40:
-                    group = group[:40]
+                group = format_profile_group(item.kind, item.summary)
                 return f"{action_label}：{group}"
             return action_label
     return _candidate_label(waiting, choice) or "选择"

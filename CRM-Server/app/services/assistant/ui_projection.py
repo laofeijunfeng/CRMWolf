@@ -886,6 +886,7 @@ def _waiting_interaction(
             action_id=action_id,
             business_action="resume_entity_draft" if deferred else "settle_profile_proposals",
             options=options,
+            hint=None if deferred else waiting.hint,
         )
     if waiting.type == "CONFIRMATION" and waiting.confirmation_payload is not None:
         return _confirmation(message, waiting, prompt=prompt, active=active, action_id=action_id)
@@ -1275,37 +1276,71 @@ def _profile_row_state(row: ProfileProposalRowView) -> str:
     if row.decision != "go":
         return _PROFILE_ROW_STATES[row.decision]
     if row.child_receipt is not None:
-        saved = "已存在" if row.child_receipt.outcome == "existing" else "已保存"
+        if row.child_receipt.outcome == "existing":
+            saved = "已存在"
+        elif row.child_receipt.outcome == "supplemented":
+            saved = "已更新"
+        else:
+            saved = "已保存"
         return f"{saved}，待审批" if row.child_receipt.approval_phase == "pending_review" else saved
     if row.child_status == "ACTIVE":
-        return "草稿在「待补充」" if row.child_waiting_type == "ENTITY_DEFERRED" else "表单填写中"
+        if row.child_waiting_type == "ENTITY_DEFERRED":
+            return "草稿在「待补充」"
+        if row.child_waiting_type == "OBJECT_SELECTION":
+            return "待确认联系人"
+        return "表单填写中"
     return "已取消" if row.child_status == "CANCELLED" else "没有保存"
 
 
 def _profile_options(message: ConversationMessage, waiting: TaskWaiting) -> list[InteractionOption]:
-    """One group per profile row in utterance order: pending rows take 去补充/不保存, settled rows show their child."""
+    """One group per profile row in utterance order: pending rows take issued labels; settled rows show child."""
+
+    from app.services.assistant.profile_proposals import (
+        GO_CREATE_LABEL,
+        NONE_LABEL,
+        SKIP_LABEL,
+        format_profile_group,
+    )
 
     rows = message.task.profile_proposals if message.task is not None else None
-    issued = {str(candidate.get("id")) for candidate in waiting.candidates}
+    issued_labels: dict[str, str] = {}
+    for candidate in waiting.candidates:
+        cid = candidate.get("id")
+        if cid is None:
+            continue
+        raw_label = candidate.get("label")
+        issued_labels[str(cid)] = raw_label.strip() if isinstance(raw_label, str) and raw_label.strip() else ""
     options: list[InteractionOption] = []
     for row in rows or []:
-        # The model's summary may already open with the kind (e.g. "开票抬头 + colon"); name it once.
-        summary = row.summary.removeprefix(f"{row.label}：").removeprefix(f"{row.label}:").strip()
-        group = _clip(f"{row.label}：{summary or row.summary}", 40)
+        group = format_profile_group(row.kind, row.summary, row_label=row.label)
         if row.decision == "pending":
             go, skip = f"go:{row.index}", f"skip:{row.index}"
-            if go not in issued or skip not in issued:
+            if go not in issued_labels or skip not in issued_labels:
                 raise ValueError("profile row without issued choices")
+            description = (
+                f"{row.extracted_summary}｜原话：{row.quote}"
+                if row.extracted_summary
+                else f"原话：{row.quote}"
+            )
             options += [
-                InteractionOption(value=go, label="去补充", group=group, description=_clip(f"原话：{row.quote}", 1000)),
-                InteractionOption(value=skip, label="不保存", group=group),
+                InteractionOption(
+                    value=go,
+                    label=issued_labels[go] or GO_CREATE_LABEL,
+                    group=group,
+                    description=_clip(description, 1000),
+                ),
+                InteractionOption(
+                    value=skip,
+                    label=issued_labels[skip] or SKIP_LABEL,
+                    group=group,
+                ),
             ]
         else:
             options.append(InteractionOption(
                 value=f"row:{row.index}", label=_profile_row_state(row), group=group, disabled=True,
             ))
-    if options and "none" in issued:
-        options.append(InteractionOption(value="none", label="都不需要", group="全部"))
+    if options and "none" in issued_labels:
+        options.append(InteractionOption(value="none", label=issued_labels["none"] or NONE_LABEL, group="全部"))
     return options
 
 

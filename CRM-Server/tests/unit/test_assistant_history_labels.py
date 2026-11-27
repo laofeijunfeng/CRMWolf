@@ -334,40 +334,47 @@ def test_command_label_profile_proposals_with_prefix_dedup_and_clipping():
     proposals = [
         ProfileProposalItem(kind="contact_create", summary="联系人：王敏 13800138000", quote="王敏负责对接"),
         ProfileProposalItem(kind="invoice_title_create", summary=long_summary, quote="开票信息如下"),
+        ProfileProposalItem(kind="contact_supplement", summary="补充 孙自豪（邮箱、备注）", quote="孙自豪邮箱换了"),
     ]
     waiting = _waiting(
         "PROFILE_PROPOSALS",
         field="profile_proposals",
         candidates=[
-            {"id": "go:0", "label": "去补充"},
+            {"id": "go:0", "label": "打开建档表单"},
             {"id": "skip:0", "label": "不保存"},
-            {"id": "go:1", "label": "去补充"},
+            {"id": "go:1", "label": "打开建档表单"},
             {"id": "skip:1", "label": "不保存"},
-            {"id": "none", "label": "都不需要"},
+            {"id": "go:2", "label": "打开补充表单"},
+            {"id": "skip:2", "label": "不保存"},
+            {"id": "none", "label": "全部不保存"},
         ],
     )
 
     assert (
         command_label(_req(kind="submit_field", choice="go:0"), waiting, profile_proposals=proposals)
-        == "去补充：联系人：王敏 13800138000"
+        == "打开建档表单：新建联系人：王敏 13800138000"
     )
     assert (
         command_label(_req(kind="submit_field", choice="skip:0"), waiting, profile_proposals=proposals)
-        == "不保存：联系人：王敏 13800138000"
+        == "不保存：新建联系人：王敏 13800138000"
+    )
+    assert (
+        command_label(_req(kind="submit_field", choice="go:2"), waiting, profile_proposals=proposals)
+        == "打开补充表单：更新已有联系人：孙自豪（邮箱、备注）"
     )
     clipped = command_label(
         _req(kind="submit_field", choice="go:1"),
         waiting,
         profile_proposals=proposals,
     )
-    assert clipped.startswith("去补充：开票抬头：这是一段")
-    assert len(clipped.removeprefix("去补充：")) == 40
+    assert clipped.startswith("打开建档表单：新建开票抬头：这是一段")
+    assert len(clipped.removeprefix("打开建档表单：")) == 40
     assert (
         command_label(_req(kind="submit_field", choice="none"), waiting, profile_proposals=proposals)
-        == "都不需要"
+        == "全部不保存"
     )
     # Without profile_proposals context, falls back cleanly to candidate label.
-    assert command_label(_req(kind="submit_field", choice="go:0"), waiting) == "去补充"
+    assert command_label(_req(kind="submit_field", choice="go:0"), waiting) == "打开建档表单"
 
 
 async def test_conversation_command_persists_profile_proposal_and_disposition_labels(db):
@@ -419,4 +426,7 @@ async def test_conversation_command_persists_profile_proposal_and_disposition_la
             ),
         ),
     )
-    assert any(m.role == "user" and m.text == "去补充：联系人：王敏（采购总监）" for m in reply.conversation.messages)
+    assert any(
+        m.role == "user" and m.text == "去补充：新建联系人：王敏（采购总监）"
+        for m in reply.conversation.messages
+    )

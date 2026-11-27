@@ -77,7 +77,7 @@ def _profile_rows(task: AssistantTask, db: Session) -> list[dict[str, object]] |
     """Each accepted item shows its own child task's status and receipt; the list never merges them."""
 
     from app.models.assistant import AssistantTask as TaskRow
-    from app.services.assistant.entity_forms import module_for
+    from app.services.assistant.profile_proposals import format_extracted_summary, profile_row_label
     from app.services.assistant.task_state import load_authority, load_waiting
 
     items = load_authority(task).profile_proposals
@@ -96,10 +96,11 @@ def _profile_rows(task: AssistantTask, db: Session) -> list[dict[str, object]] |
         child = children.get(item.child_task_public_id or "")
         waiting = load_waiting(child) if child is not None else None
         receipt = (child.committed_json or [None])[0] if child is not None else None
-        label = "补充已有联系人" if item.kind == "contact_supplement" else module_for(item.kind).LABEL
+        label = profile_row_label(item.kind)
         rows.append({
             "index": index, "kind": item.kind, "label": label, "summary": item.summary,
-            "quote": item.quote, "decision": item.decision, "child_task_public_id": item.child_task_public_id,
+            "quote": item.quote, "extracted_summary": format_extracted_summary(item.kind, item.extracted),
+            "decision": item.decision, "child_task_public_id": item.child_task_public_id,
             "child_status": child.status if child is not None else None,
             "child_waiting_type": waiting.type if waiting is not None else None,
             "child_receipt": receipt,

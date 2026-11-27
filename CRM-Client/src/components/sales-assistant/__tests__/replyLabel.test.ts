@@ -370,9 +370,32 @@ describe('assistantCommandReplyLabel', () => {
         },
       ],
     })).toBe('去补充：联系人：王敏 13800138000')
+
+    // New CRM-177 copy and contact_supplement prefix deduplication.
+    const newWaiting = makeWaiting('PROFILE_PROPOSALS', {
+      field: 'profile_proposals',
+      candidates: [
+        { id: 'go:0', label: '打开补充表单' },
+        { id: 'skip:0', label: '不保存' },
+        { id: 'none', label: '全部不保存' },
+      ],
+    })
+    expect(assistantCommandReplyLabel({ kind: 'submit_field', choice: 'go:0' }, newWaiting, {
+      profileProposals: [
+        {
+          index: 0,
+          kind: 'contact_supplement',
+          label: '更新已有联系人',
+          summary: '补充 孙自豪（邮箱、备注）',
+          quote: '孙自豪邮箱换了',
+          decision: 'pending',
+        },
+      ],
+    })).toBe('打开补充表单：更新已有联系人：孙自豪（邮箱、备注）')
+    expect(assistantCommandReplyLabel({ kind: 'submit_field', choice: 'none' }, newWaiting))
+      .toBe('全部不保存')
   })
 })
-
 describe('SalesAssistantChat optimistic user reply bubbles', () => {
   let mounted: VueWrapper | undefined
 

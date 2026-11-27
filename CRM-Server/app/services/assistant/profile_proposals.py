@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 from time import monotonic
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -37,6 +36,8 @@ from app.services.assistant.task_state import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from sqlalchemy.orm import Session
 
     from app.services.assistant.events import ProgressReporter
@@ -45,9 +46,125 @@ logger = logging.getLogger(__name__)
 
 NONE = "none"
 FIELD = "profile_proposals"
-PROMPT = "这次跟进里还提到了这些资料，要分别存下来吗？"
+PROMPT = "客户活动已保存；以下提到的客户资料，要分别建档或更新吗？"
+HINT = "每项将单独保存到对应客户资料模块，不影响已保存的客户活动；点「打开表单」后可先核对或补全再保存，不会直接写入。"
 CANCELLED_HINT = "资料可以直接让我单独保存"
+GO_CREATE_LABEL = "打开建档表单"
+GO_SUPPLEMENT_LABEL = "打开补充表单"
+GO_CONFIRM_CONTACT_LABEL = "去确认联系人"
+SKIP_LABEL = "不保存"
+NONE_LABEL = "全部不保存"
 _KINDS = ("contact_create", "invoice_title_create", "deployment_create")
+_ROW_LABELS: dict[str, str] = {
+    "contact_create": "新建联系人",
+    "contact_supplement": "更新已有联系人",
+    "invoice_title_create": "新建开票抬头",
+    "deployment_create": "新建部署信息",
+}
+_FIELD_LABELS: dict[str, dict[str, str]] = {
+    "contact_create": {
+        "name": "姓名",
+        "gender": "性别",
+        "position": "职位",
+        "mobile": "手机号",
+        "email": "邮箱",
+        "wechat_id": "微信",
+        "is_decision_maker": "关键决策人",
+        "reports_to": "汇报对象",
+        "remark": "备注",
+    },
+    "contact_supplement": {
+        "name": "姓名",
+        "mobile": "手机号",
+        "email": "邮箱",
+        "wechat_id": "微信",
+        "reports_to": "汇报对象",
+        "remark": "追加备注",
+    },
+    "invoice_title_create": {
+        "title_type": "抬头类型",
+        "title": "开票抬头",
+        "taxpayer_id": "纳税人识别号",
+        "bank_name": "开户行",
+        "bank_account": "开户账号",
+        "address": "开票地址",
+        "phone": "电话",
+    },
+    "deployment_create": {
+        "deployment_name": "部署名称",
+        "server_address": "服务器地址",
+        "is_default": "默认部署",
+        "authorized_users": "授权人数",
+    },
+}
+
+
+def profile_row_label(kind: str) -> str:
+    return _ROW_LABELS.get(kind) or module_for(kind).LABEL
+
+
+def go_action_label(item: ProfileProposalItem) -> str:
+    if item.kind == "contact_supplement":
+        if item.match_status in {"AMBIGUOUS_NAME", "MOBILE_CONFLICT"}:
+            return GO_CONFIRM_CONTACT_LABEL
+        return GO_SUPPLEMENT_LABEL
+    return GO_CREATE_LABEL
+
+
+def format_profile_group(
+    kind: str,
+    summary: str,
+    *,
+    row_label: str | None = None,
+    max_len: int = 40,
+) -> str:
+    label = row_label or profile_row_label(kind)
+    cleaned = summary.strip()
+    prefixes = [f"{label}：", f"{label}:"]
+    try:
+        module_label = module_for(kind).LABEL
+    except KeyError:
+        module_label = ""
+    if module_label and module_label != label:
+        prefixes.extend([f"{module_label}：", f"{module_label}:"])
+    if kind == "contact_supplement":
+        prefixes.extend(["补充已有联系人：", "补充已有联系人:", "补充 ", "更新 "])
+    for prefix in prefixes:
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+    text = f"{label}：{cleaned or summary.strip()}"
+    return text[:max_len]
+
+
+def format_extracted_summary(
+    kind: str,
+    extracted: Sequence[EntityQuote],
+    *,
+    max_items: int = 4,
+    max_len: int = 120,
+) -> str | None:
+    field_labels = _FIELD_LABELS.get(kind, {})
+    parts: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in extracted:
+        val = entry.value.strip()
+        if not val:
+            continue
+        label = field_labels.get(entry.key)
+        if not label:
+            continue
+        clipped_val = f"{val[:24]}…" if len(val) > 24 else val
+        key_pair = (label, clipped_val)
+        if key_pair in seen:
+            continue
+        seen.add(key_pair)
+        parts.append(f"{label} {clipped_val}")
+        if len(parts) >= max_items:
+            break
+    if not parts:
+        return None
+    text = f"已识别：{'、'.join(parts)}"
+    return f"{text[:max_len - 1]}…" if len(text) > max_len else text
 _MAX_ITEMS = 6
 _SYSTEM_PROMPT = (
     "你只从销售自己的话里找出值得单独存档的客户资料：联系人、开票抬头、部署信息。"
@@ -218,11 +335,14 @@ def _waiting(task: AssistantTask, items: list[ProfileProposalItem]) -> TaskWaiti
     candidates: list[dict[str, object]] = []
     for index, item in enumerate(items):
         if item.decision == "pending":
-            candidates += [{"id": f"go:{index}", "label": "去补充"}, {"id": f"skip:{index}", "label": "不保存"}]
-    candidates.append({"id": NONE, "label": "都不需要"})
+            candidates += [
+                {"id": f"go:{index}", "label": go_action_label(item)},
+                {"id": f"skip:{index}", "label": SKIP_LABEL},
+            ]
+    candidates.append({"id": NONE, "label": NONE_LABEL})
     return TaskWaiting(
         type=AssistantWaitingType.PROFILE_PROPOSALS, field=FIELD,
-        question_id=f"q_profile_{task.public_id}_{task.version}", prompt=PROMPT, candidates=candidates,
+        question_id=f"q_profile_{task.public_id}_{task.version}", prompt=PROMPT, hint=HINT, candidates=candidates,
     )
 
 

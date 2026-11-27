@@ -42,13 +42,26 @@ function candidateLabel(waiting: TaskWaiting | null, choice?: string): string | 
   return null
 }
 
-function stripKindPrefix(summary: string, label: string): string {
-  let result = summary
-  const fullPrefix = `${label}：`
-  if (result.startsWith(fullPrefix)) result = result.slice(fullPrefix.length)
-  const asciiPrefix = `${label}:`
-  if (result.startsWith(asciiPrefix)) result = result.slice(asciiPrefix.length)
-  return result.trim()
+function stripKindPrefix(summary: string, label: string, kind?: string): string {
+  let result = summary.trim()
+  const prefixes = [`${label}：`, `${label}:`]
+  const moduleLabels: Record<string, string> = {
+    contact_create: '联系人',
+    contact_supplement: '联系人',
+    invoice_title_create: '开票抬头',
+    deployment_create: '部署信息'
+  }
+  const moduleLabel = kind !== undefined ? moduleLabels[kind] : undefined
+  if (moduleLabel !== undefined && moduleLabel !== label) {
+    prefixes.push(`${moduleLabel}：`, `${moduleLabel}:`)
+  }
+  if (kind === 'contact_supplement') {
+    prefixes.push('补充已有联系人：', '补充已有联系人:', '补充 ', '更新 ')
+  }
+  for (const prefix of prefixes) {
+    if (result.startsWith(prefix)) result = result.slice(prefix.length).trim()
+  }
+  return result
 }
 
 function profileProposalLabel(
@@ -57,7 +70,7 @@ function profileProposalLabel(
   context?: ReplyLabelContext
 ): string {
   if (choice === 'none') {
-    return candidateLabel(waiting, choice) ?? '都不需要'
+    return candidateLabel(waiting, choice) ?? '全部不保存'
   }
   if (choice !== undefined && choice.includes(':')) {
     const sepIndex = choice.indexOf(':')
@@ -68,7 +81,7 @@ function profileProposalLabel(
       const optionLabel = option?.label.trim() ?? ''
       const actionLabel = optionLabel !== ''
         ? optionLabel
-        : (candidateLabel(waiting, choice) ?? (action === 'go' ? '去补充' : '不保存'))
+        : (candidateLabel(waiting, choice) ?? (action === 'go' ? '打开建档表单' : '不保存'))
       const optionGroup = option?.group?.trim() ?? ''
       if (optionGroup !== '') {
         return `${actionLabel}：${optionGroup}`
@@ -76,7 +89,7 @@ function profileProposalLabel(
       const idx = Number(rawIndex)
       const row = context?.profileProposals?.find((item) => item.index === idx) ?? context?.profileProposals?.[idx]
       if (row !== undefined) {
-        const stripped = stripKindPrefix(row.summary, row.label)
+        const stripped = stripKindPrefix(row.summary, row.label, row.kind)
         const rawGroup = `${row.label}：${stripped || row.summary}`
         const chars = Array.from(rawGroup)
         const group = chars.length <= 40 ? rawGroup : chars.slice(0, 40).join('')

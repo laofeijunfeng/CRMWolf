@@ -1131,7 +1131,7 @@ const submit = async (): Promise<void> => {
       </div>
 
       <template v-if="showsChoiceOptions && block.interaction_type === 'choice'">
-        <div v-if="block.hint" class="grid gap-space-1" data-agent-ui-kind-hint>
+        <div v-if="block.hint && block.business_action === 'select_activity_kind'" class="grid gap-space-1" data-agent-ui-kind-hint>
           <p class="m-0 flex flex-wrap items-center gap-space-2 text-caption text-muted-foreground">
             <span>原文提到：</span>
             <Badge v-for="channel in kindHintChannels" :key="channel" variant="secondary">{{ channel }}</Badge>
@@ -1141,6 +1141,13 @@ const submit = async (): Promise<void> => {
             <b class="font-semibold text-foreground">请按本次实际发生的沟通来选</b>；之后计划的会议不算本次活动。
           </p>
         </div>
+        <p
+          v-else-if="block.hint"
+          class="m-0 text-caption text-muted-foreground"
+          data-agent-ui-choice-hint
+        >
+          {{ block.hint }}
+        </p>
         <div class="grid gap-space-2" data-agent-ui-choice>
           <SegmentedChoiceControl
             v-if="block.selection_mode === 'multiple'"
