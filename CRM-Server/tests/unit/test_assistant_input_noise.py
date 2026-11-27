@@ -272,3 +272,24 @@ async def test_sample_note_reaches_confirmation_with_ignored_timestamps(db_sessi
     command = outcome.task.authority_json["frozen_activity_command"]
     assert command["next_follow_time"].startswith("2026-11-18")
     assert command["ignored_noise_summary"] == "已忽略 3 处发言时间"
+
+
+def test_verify_noise_resolves_omitted_offsets_sequentially() -> None:
+    from app.services.assistant.noise import verify_noise
+
+    text = "张总 13:45 同意推进；李工 13:45 补充细节"
+    decision = KindDecision(
+        kind="WECHAT_FOLLOW_UP",
+        noise_spans=[
+            {"kind": "SPEAKER_TIMESTAMP", "raw_text": "13:45"},
+            {"kind": "SPEAKER_TIMESTAMP", "raw_text": "13:45"},
+            {"kind": "SPEAKER_TIMESTAMP", "raw_text": "99:99"},
+        ],
+    )
+
+    verified = verify_noise("seg_1", text, decision)
+
+    assert [(item.start, item.end) for item in verified] == [
+        (text.index("13:45"), text.index("13:45") + 5),
+        (text.rindex("13:45"), text.rindex("13:45") + 5),
+    ]

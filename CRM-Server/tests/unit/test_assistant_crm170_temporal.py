@@ -1097,3 +1097,62 @@ async def test_non_regex_temporal_wait_and_confirmation_supplement_route_through
             assert resolved_sales_follow_up(final_draft) == (datetime(2027, 2, 26), "DATE")
     finally:
         engine.dispose()
+
+
+def test_bind_quote_spans_resolves_omitted_offsets_and_disambiguates_repeated_quotes() -> None:
+    from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention
+    from app.services.assistant.temporal_evidence import TemporalContractError, bind_quote_spans
+
+    text = "客户说下周三给反馈，我方也计划下周三电话确认进展。"
+    actions = [
+        ModelDraftAction(
+            action_ref="a1",
+            owner_role="CUSTOMER",
+            action_text="客户给反馈",
+            action_status="COMMITTED",
+            evidence_quote="客户说下周三给反馈",
+        ),
+        ModelDraftAction(
+            action_ref="a2",
+            owner_role="SALES",
+            action_text="电话确认进展",
+            action_status="PLANNED",
+            evidence_quote="我方也计划下周三电话确认进展",
+        ),
+    ]
+    mentions = [
+        ModelTemporalMention(
+            raw_text="下周三",
+            kind="RELATIVE_WEEKDAY",
+            role="SALES_FOLLOW_UP",
+            action_ref="a2",
+            week_offset=1,
+            weekday=3,
+        ),
+        ModelTemporalMention(
+            raw_text="下周三",
+            kind="RELATIVE_WEEKDAY",
+            role="CUSTOMER_COMMITMENT",
+            action_ref="a1",
+            week_offset=1,
+            weekday=3,
+        ),
+    ]
+
+    bound_mentions, bound_actions = bind_quote_spans(text, mentions, actions)
+
+    assert [text[a.quote_start : a.quote_end] for a in bound_actions] == [
+        "客户说下周三给反馈",
+        "我方也计划下周三电话确认进展",
+    ]
+    # action_ref locality binds a2's mention to the second "下周三" and a1's to the first.
+    assert bound_mentions[0].quote_start == text.rindex("下周三")
+    assert bound_mentions[1].quote_start == text.index("下周三")
+    assert all(text[m.quote_start : m.quote_end] == m.raw_text for m in bound_mentions)
+
+    with pytest.raises(TemporalContractError, match="temporal span is not in the source"):
+        bind_quote_spans(
+            text,
+            [ModelTemporalMention(raw_text="大后天", kind="RELATIVE_DAY", role="SALES_FOLLOW_UP")],
+            [],
+        )

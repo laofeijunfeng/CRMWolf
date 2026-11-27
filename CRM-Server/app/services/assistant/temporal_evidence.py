@@ -265,9 +265,41 @@ def resolve_deadline_text(
 def validate_temporal_quotes(text: str, mentions: list[object]) -> None:
     """Validate source truth, independently of scanner coverage or model kind."""
 
+    used_mentions: dict[str, set[int]] = {}
     for item in mentions:
-        _mention_span(text, item)
+        mention = _read_mention(item)
+        _snap_span(text, mention, used=used_mentions.setdefault(mention.raw_text, set()))
 
+
+def bind_quote_spans(
+    text: str,
+    mentions: list[ModelTemporalMention],
+    actions: list[ModelDraftAction],
+) -> tuple[list[ModelTemporalMention], list[ModelDraftAction]]:
+    """Resolve and validate verbatim quote offsets on the server before merging or storage."""
+
+    used_actions: dict[str, set[int]] = {}
+    action_spans: dict[str, tuple[int, int]] = {}
+    bound_actions: list[ModelDraftAction] = []
+    for action in actions:
+        try:
+            start, end = _action_span(text, action, used=used_actions.setdefault(action.evidence_quote, set()))
+        except ActionContractError:
+            bound_actions.append(action)
+            continue
+        action_spans.setdefault(action.action_ref, (start, end))
+        bound_actions.append(action.model_copy(update={"quote_start": start, "quote_end": end}))
+    used_mentions: dict[str, set[int]] = {}
+    bound_mentions: list[ModelTemporalMention] = []
+    for mention in mentions:
+        start, end = _snap_span(
+            text,
+            mention,
+            hint_span=action_spans.get(mention.action_ref) if mention.action_ref else None,
+            used=used_mentions.setdefault(mention.raw_text, set()),
+        )
+        bound_mentions.append(mention.model_copy(update={"quote_start": start, "quote_end": end}))
+    return bound_mentions, bound_actions
 
 def _noise_bounds(draft: TaskDraft, segment_id: str, segment_text: str) -> list[tuple[int, int]]:
     """Server-verified speaker timestamps of one segment that still match its text."""
@@ -339,10 +371,27 @@ def _build_segment_evidence(
 ) -> tuple[list[StoredMention], list[StoredAction]]:
     """Build source-local evidence before any answer is assigned to a waiting action."""
 
+    action_hints: dict[str, tuple[int, int]] = {}
+    hint_used_actions: dict[str, set[int]] = {}
+    for item in actions:
+        try:
+            action = _read_action(item)
+            a_start, a_end = _action_span(
+                segment_text, action, used=hint_used_actions.setdefault(action.evidence_quote, set())
+            )
+        except ActionContractError:
+            continue
+        action_hints.setdefault(action.action_ref, (a_start, a_end))
     quoted: list[ModelTemporalMention] = []
+    used_mentions: dict[str, set[int]] = {}
     for item in mentions:
         mention = _read_mention(item)
-        start, end = _snap_span(segment_text, mention)
+        start, end = _snap_span(
+            segment_text,
+            mention,
+            hint_span=action_hints.get(mention.action_ref) if mention.action_ref else None,
+            used=used_mentions.setdefault(mention.raw_text, set()),
+        )
         quoted.append(mention.model_copy(update={"quote_start": start, "quote_end": end}))
     # Verified recording noise (speaker timestamps) creates no mention and no action.
     noise = _noise_bounds(draft, segment_id, segment_text)
@@ -355,10 +404,11 @@ def _build_segment_evidence(
     action_ids: dict[str, str] = {}
     quoted_actions: dict[str, QuotedAction] = {}
     noise_refs: set[str] = set()
+    used_actions: dict[str, set[int]] = {}
     for item in actions:
         action = _read_action(item)
         quote = action.evidence_quote
-        start, end = _action_span(segment_text, action)
+        start, end = _action_span(segment_text, action, used=used_actions.setdefault(quote, set()))
         if _inside_noise(start, end, noise):
             noise_refs.add(action.action_ref)
             continue
@@ -726,11 +776,15 @@ def apply_temporal_answer(
         return None
 
     quoted_actions: dict[str, QuotedAction] = {}
+    action_full_spans: dict[str, tuple[int, int]] = {}
+    used_actions: dict[str, set[int]] = {}
     dropped_quotes = False
     for item in actions:
         try:
             action = _read_action(item)
-            start, end = _action_span(source_text, action, ranges)
+            start, end = _action_span(
+                source_text, action, ranges, used=used_actions.setdefault(action.evidence_quote, set())
+            )
             index = source_index(start, end)
         except (TemporalContractError, ActionContractError):
             dropped_quotes = True
@@ -738,6 +792,7 @@ def apply_temporal_answer(
         if index is None or action.action_ref in quoted_actions:
             dropped_quotes = True
             continue
+        action_full_spans[action.action_ref] = (start, end)
         quoted_actions[action.action_ref] = QuotedAction(
             source_segment_id=records[index].segment_id,
             action=action.model_copy(
@@ -758,10 +813,17 @@ def apply_temporal_answer(
 
     answer_record = next((record for record in records if record.segment_id == answer_segment_id), None)
     answer_index = next((index for index, record in enumerate(records) if record.segment_id == answer_segment_id), None)
+    used_mentions: dict[str, set[int]] = {}
     for item in mentions:
         try:
             mention = _read_mention(item)
-            start, end = _snap_span(source_text, mention, ranges)
+            start, end = _snap_span(
+                source_text,
+                mention,
+                ranges,
+                hint_span=action_full_spans.get(mention.action_ref) if mention.action_ref else None,
+                used=used_mentions.setdefault(mention.raw_text, set()),
+            )
             index = source_index(start, end)
         except (TemporalContractError, ActionContractError, ValueError) as exc:
             if answer_record is not None and mention_text_in_answer(item, answer_record.text):
@@ -2656,7 +2718,12 @@ def _mention_span(text: str, item: object) -> tuple[int, int]:
 
 
 def _snap_span(
-    text: str, mention: ModelTemporalMention, segments: list[tuple[int, int]] | None = None
+    text: str,
+    mention: ModelTemporalMention,
+    segments: list[tuple[int, int]] | None = None,
+    *,
+    hint_span: tuple[int, int] | None = None,
+    used: set[int] | None = None,
 ) -> tuple[int, int]:
     return locate_quote(
         text,
@@ -2666,10 +2733,18 @@ def _snap_span(
         segments,
         TemporalContractError,
         "temporal span is not in the source",
+        hint_span=hint_span,
+        used=used,
     )
 
 
-def _action_span(text: str, action: ModelDraftAction, segments: list[tuple[int, int]] | None = None) -> tuple[int, int]:
+def _action_span(
+    text: str,
+    action: ModelDraftAction,
+    segments: list[tuple[int, int]] | None = None,
+    *,
+    used: set[int] | None = None,
+) -> tuple[int, int]:
     return locate_quote(
         text,
         action.quote_start,
@@ -2678,41 +2753,69 @@ def _action_span(text: str, action: ModelDraftAction, segments: list[tuple[int, 
         segments,
         ActionContractError,
         "action quote is not in the source",
+        used=used,
     )
 
 
 def locate_quote(
     text: str,
-    start: int,
-    end: int,
+    start: int | None,
+    end: int | None,
     raw: str,
     segments: list[tuple[int, int]] | None,
     error: type[TemporalContractError],
     message: str,
+    *,
+    hint_span: tuple[int, int] | None = None,
+    used: set[int] | None = None,
 ) -> tuple[int, int]:
     """Bind a verbatim quote to source offsets; the model's offset is only a locality hint.
 
-    An exact slice wins. Otherwise the quote binds to the nearest occurrence that
-    lies inside one source segment; absence or an equidistant tie is fabricated.
+    An exact slice wins. When explicit offsets are supplied, the quote binds to the
+    nearest occurrence inside one source segment (absence or equidistant tie raises).
+    When offsets are omitted (``None``), the server binds verbatim occurrences using
+    optional action-span locality or sequential unused order.
     """
 
     if not raw:
         raise error(message)
-    if 0 <= start < end <= len(text) and text[start:end] == raw:
+    if start is not None and end is not None and 0 <= start < end <= len(text) and text[start:end] == raw:
+        if used is not None:
+            used.add(start)
         return start, end
     bounds = segments if segments is not None else [(0, len(text))]
-    distances: list[tuple[int, int]] = []
+    matches: list[int] = []
     found = text.find(raw)
     while found >= 0:
         if any(left <= found and found + len(raw) <= right for left, right in bounds):
-            distances.append((abs(found - start), found))
+            matches.append(found)
         found = text.find(raw, found + 1)
-    distances.sort()
-    if not distances or (len(distances) > 1 and distances[0][0] == distances[1][0]):
+    if not matches:
         raise error(message)
-    nearest = distances[0][1]
-    return nearest, nearest + len(raw)
-
+    if start is not None and end is not None:
+        distances = sorted((abs(pos - start), pos) for pos in matches)
+        if len(distances) > 1 and distances[0][0] == distances[1][0]:
+            raise error(message)
+        nearest = distances[0][1]
+        if used is not None:
+            used.add(nearest)
+        return nearest, nearest + len(raw)
+    if len(matches) == 1:
+        chosen = matches[0]
+    else:
+        pool = matches
+        if hint_span is not None:
+            hint_left, hint_right = hint_span
+            inside = [pos for pos in pool if hint_left <= pos and pos + len(raw) <= hint_right]
+            pool = inside or sorted(pool, key=lambda pos: abs(pos - hint_left))
+        if used is not None:
+            unused = [pos for pos in pool if pos not in used]
+            chosen = unused[0] if unused else pool[0]
+        else:
+            chosen = pool[0]
+    if used is not None:
+        used.add(chosen)
+    return chosen, chosen + len(raw)
 
 def _extend_clock(text: str, end: int) -> int:
     match = _CLOCK.match(text[end:])

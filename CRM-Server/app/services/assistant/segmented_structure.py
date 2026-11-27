@@ -159,8 +159,8 @@ def merge_structured(kind: str, parts: list[tuple[int, StructureDraftResult]]) -
         # Action refs are only unique inside one call.
         temporal_mentions=[
             mention.model_copy(update={
-                "quote_start": mention.quote_start + offset,
-                "quote_end": mention.quote_end + offset,
+                "quote_start": None if mention.quote_start is None else mention.quote_start + offset,
+                "quote_end": None if mention.quote_end is None else mention.quote_end + offset,
                 "action_ref": f"s{index}-{mention.action_ref}"[:64] if mention.action_ref else "",
             })
             for index, (offset, part) in enumerate(parts, start=1)
@@ -168,8 +168,8 @@ def merge_structured(kind: str, parts: list[tuple[int, StructureDraftResult]]) -
         ],
         actions=[
             action.model_copy(update={
-                "quote_start": action.quote_start + offset,
-                "quote_end": action.quote_end + offset,
+                "quote_start": None if action.quote_start is None else action.quote_start + offset,
+                "quote_end": None if action.quote_end is None else action.quote_end + offset,
                 "action_ref": f"s{index}-{action.action_ref}"[:64],
             })
             for index, (offset, part) in enumerate(parts, start=1)

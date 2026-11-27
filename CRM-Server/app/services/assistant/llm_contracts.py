@@ -32,8 +32,8 @@ class ModelNoiseSpan(BaseModel):
 
     kind: NoiseKind
     raw_text: str = Field(min_length=1, max_length=40)
-    quote_start: int = Field(ge=0)
-    quote_end: int = Field(ge=0)
+    quote_start: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
+    quote_end: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
 
 
 class KindDecision(BaseModel):
@@ -72,8 +72,8 @@ class ModelTemporalMention(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raw_text: str = Field(min_length=1, max_length=80)
-    quote_start: int = Field(ge=0)
-    quote_end: int = Field(ge=0)
+    quote_start: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
+    quote_end: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
     kind: TimeKind
     role: TimeRole
     owner: str = Field(default="", max_length=80)
@@ -104,8 +104,8 @@ class ModelDraftAction(BaseModel):
     action_text: str = Field(min_length=1, max_length=500)
     action_status: Literal["PLANNED", "COMPLETED", "COMMITTED", "UNKNOWN"]
     evidence_quote: str = Field(min_length=1, max_length=500)
-    quote_start: int = Field(ge=0)
-    quote_end: int = Field(ge=0)
+    quote_start: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
+    quote_end: int | None = Field(default=None, ge=0, description="服务端自动定位，填 null")
 
 
 class StructuredFollowUp(BaseModel):
@@ -113,10 +113,12 @@ class StructuredFollowUp(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    content: str = Field(default="", max_length=20000, description="整理后的跟进正文，保留全部事实点")
+    content: str = Field(default="", max_length=20000, description="留空，统一填写在 content_json.content 中")
     customer_name: str = Field(default="", max_length=500, description="客户名称文本，仅作查找线索")
-    next_action: str = Field(default="", max_length=4000, description="下一步动作，忠于原文")
-    next_follow_time_text: str = Field(default="", max_length=200, description="原文中的时间表达")
+    next_action: str = Field(default="", max_length=4000, description="留空，统一填写在 content_json.next_action 中")
+    next_follow_time_text: str = Field(
+        default="", max_length=200, description="留空，统一填写在 content_json.next_follow_time_text 中"
+    )
     temporal_mentions: list[ModelTemporalMention] = Field(default_factory=list)
     actions: list[ModelDraftAction] = Field(default_factory=list)
     content_json: FollowUpContent | None = None

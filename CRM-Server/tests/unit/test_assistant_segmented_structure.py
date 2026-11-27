@@ -255,3 +255,60 @@ async def test_reprocessing_a_kind_answer_resumes_the_segments_it_left_unread(db
     assert "".join(structurer.chunks[3:]) == text[len(structurer.chunks[0]) :]
     assert len(structurer.chunks) == 3 + total - 1
     assert task.draft_json["content"]["status"] != "MISSING"
+
+
+def test_merge_structured_preserves_none_offsets_and_shifts_bound_offsets() -> None:
+    from app.services.assistant.llm_contracts import ModelDraftAction, ModelTemporalMention
+    from app.services.assistant.segmented_structure import merge_structured
+
+    part0 = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content="第一段",
+        content_json={"content": "第一段", "next_action": ""},
+        temporal_mentions=[
+            ModelTemporalMention(raw_text="下周三", kind="RELATIVE_WEEKDAY", role="SALES_FOLLOW_UP", action_ref="a1")
+        ],
+        actions=[
+            ModelDraftAction(
+                action_ref="a1",
+                owner_role="SALES",
+                action_text="跟进",
+                action_status="PLANNED",
+                evidence_quote="下周三跟进",
+            )
+        ],
+    )
+    part1 = StructureDraftResult(
+        kind_confirmed="FOLLOW_UP",
+        content="第二段",
+        content_json={"content": "第二段", "next_action": "发报价"},
+        temporal_mentions=[
+            ModelTemporalMention(
+                raw_text="周五",
+                quote_start=2,
+                quote_end=4,
+                kind="RELATIVE_WEEKDAY",
+                role="SALES_FOLLOW_UP",
+                action_ref="a1",
+            )
+        ],
+        actions=[
+            ModelDraftAction(
+                action_ref="a1",
+                owner_role="SALES",
+                action_text="发报价",
+                action_status="PLANNED",
+                evidence_quote="周五发报价",
+                quote_start=2,
+                quote_end=7,
+            )
+        ],
+    )
+
+    merged = merge_structured("FOLLOW_UP", [(0, part0), (100, part1)])
+
+    assert merged.temporal_mentions[0].quote_start is None
+    assert merged.temporal_mentions[0].quote_end is None
+    assert merged.actions[0].quote_start is None
+    assert (merged.temporal_mentions[1].quote_start, merged.temporal_mentions[1].quote_end) == (102, 104)
+    assert (merged.actions[1].quote_start, merged.actions[1].quote_end) == (102, 107)

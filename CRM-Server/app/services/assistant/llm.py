@@ -45,7 +45,8 @@ KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断
 - channels 列出这次沟通和销售下一步使用的渠道；同时有电话和微信时都要列出，不能只留一个。
   跟进里销售自己写的联系方式（如「明天电话跟进」「再电话确认」）照常算渠道。
   会议纪要或会议转写里提到的电话、微信、邮件，以及「之前主要靠邮件沟通」这类过往习惯，不算渠道。
-- noise_spans 标出不属于沟通内容的片段，每项字段只有 kind、raw_text、quote_start、quote_end。
+- noise_spans 标出不属于沟通内容的片段，每项字段只有 kind、raw_text
+  （quote_start、quote_end 留 null，由服务端自动定位）。
   kind 只能是 SPEAKER_TIMESTAMP 或 CHANNEL_MENTION。
   SPEAKER_TIMESTAMP 是会议转写、聊天记录里发言人旁边的发言时间或录音时间戳，
   如「13:45 张总：」里的「13:45」、「[00:12:33]」、「说话人1 00:03」里的「00:03」、
@@ -53,7 +54,7 @@ KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断
   只标时间本身，不标发言人。
   CHANNEL_MENTION 是按上一条不算渠道的渠道词，只标渠道词本身（如「邮件」），不标整句。
   约定时间、截止时间、下次联系时间和本次实际使用的渠道不能标。拿不准就不标；没有就返回空列表。
-  raw_text 必须是原文连续片段，quote_start 与 quote_end 是它在原文里的字符位置。
+  raw_text 必须是原文连续片段；不要计算字符位置，quote_start、quote_end 填 null。
 - 没有渠道、多个渠道，或会议和跟进分不清时，kind 用 UNCLEAR，confidence 低于 0.8。
 
 只输出结构化结果，不要解释。"""
@@ -61,12 +62,12 @@ KIND_SYSTEM_PROMPT = """你是 CRM 销售助手的活动类型判断器。判断
 STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把用户的原话整理成一条跟进记录。
 
 规则：
-- content 覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实。
+- 顶层 content、next_action、next_follow_time_text 一律留空 ""，
+  所有正文与下一步统一填写在 content_json 中，不要重复输出。
 - customer_name 只填原文明确出现的客户名称，没有则留空。
-- next_action 忠于原文，没有则留空。
-- content_json 必须完整填写：content、customer_feedback、current_progress、risks、
-  next_action、next_action_absence_reason、next_follow_time_text；
-  没有对应事实的字段也必须返回空值，不得省略。
+- content_json 必须完整填写：content（覆盖原文全部事实点：客户反馈、进展、风险、承诺；可调整语序、去重，不得删减事实）、
+  customer_feedback、current_progress、risks、next_action（忠于原文，没有则留空）、
+  next_action_absence_reason、next_follow_time_text；没有对应事实的字段也必须返回空值，不得省略。
 - next_action_absence_reason 只记录用户明确暂无下一步的原因或复查条件；未明确表示暂无下一步时留空，
   不得把缺少行动推断成暂无行动。
 - 不确定的信息一律留空，禁止编造。
@@ -76,8 +77,9 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
   转写或记录元数据中的时间；COMPLETED_EVENT 仅用于已经完成的历史事件时间；
   NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
   但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
-  role、owner、action_ref、confidence 以及下面的结构化字段。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、kind、
+  role、owner、action_ref、confidence 以及下面的结构化字段（quote_start、quote_end 留 null）。
+  kind 只能是 EXPLICIT_DATE、MONTH_DAY、
   DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
   RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
   月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
@@ -92,10 +94,11 @@ STRUCTURE_FOLLOW_UP_PROMPT = """你是 CRM 销售助手的跟进整理器。把�
   中文数字一律换成阿拉伯数字，如「明年二月二十六号」填 year_offset=1、month=2、day=26；「2/26」填 month=2、day=26。
   只照原话填写，不要自己推算日历，不要纠正无效日期。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
-  action_status、evidence_quote、quote_start、quote_end。
+  action_status、evidence_quote（quote_start、quote_end 留 null）。
   owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、
   COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
-- quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
+- raw_text 与 evidence_quote 必须是用户原文里的连续原话；
+  不要计算字符位置，quote_start 与 quote_end 一律填 null（由服务端自动定位）。
 只输出结构化结果。"""
 
 STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。把用户的原话整理成一条会议纪要。
@@ -120,8 +123,9 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
   转写或记录元数据中的时间；COMPLETED_EVENT 仅用于已经完成的历史事件时间；
   NON_BUSINESS_TIME 仅用于与业务无关的背景时间；这三类都不得标为 SALES_FOLLOW_UP。OTHER 仅用于无法判断、
   但可能与业务有关的时间；不要用 OTHER 代替上述三类明确语义。
-- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、quote_start、quote_end、kind、
-  role、owner、action_ref、confidence 以及下面的结构化字段。kind 只能是 EXPLICIT_DATE、MONTH_DAY、
+- temporal_mentions 覆盖原文每一个时间表达，字段只有 raw_text、kind、
+  role、owner、action_ref、confidence 以及下面的结构化字段（quote_start、quote_end 留 null）。
+  kind 只能是 EXPLICIT_DATE、MONTH_DAY、
   DAY_OF_MONTH、MONTH_SEGMENT、FULL_MONTH、RELATIVE_DAY、RELATIVE_WEEK、
   RELATIVE_MONTH、RELATIVE_WEEKDAY、UNKNOWN。没有日、
   月段和时刻的「11月」「11月份」用 FULL_MONTH，不要当成某一天。月初、月中、月末、月底以及「11月初」用 MONTH_SEGMENT，
@@ -136,10 +140,11 @@ STRUCTURE_MEETING_PROMPT = """你是 CRM 销售助手的会议纪要整理器。
   中文数字一律换成阿拉伯数字，如「明年二月二十六号」填 year_offset=1、month=2、day=26；「2/26」填 month=2、day=26。
   只照原话填写，不要自己推算日历，不要纠正无效日期。
 - actions 保留每一个动作，字段只有 action_ref、owner_role、owner_text、action_text、
-  action_status、evidence_quote、quote_start、quote_end。
+  action_status、evidence_quote（quote_start、quote_end 留 null）。
   owner_role 只能是 CUSTOMER、SALES、INTERNAL、OTHER。action_status 只能是 PLANNED、
   COMPLETED、COMMITTED、UNKNOWN。客户承诺和销售下次联系必须分成两条，不能并进一个 next_action。
-- quote_start 与 quote_end 是这段用户原文里的字符位置，切片必须等于 raw_text 或 evidence_quote。
+- raw_text 与 evidence_quote 必须是用户原文里的连续原话；
+  不要计算字符位置，quote_start 与 quote_end 一律填 null（由服务端自动定位）。
 只输出结构化结果。"""
 
 
@@ -245,9 +250,11 @@ class AssistantLLM:
             retry_timeouts=True,
         )
         _require_complete_content(response.content_json)
-        from app.services.assistant.temporal_evidence import validate_temporal_quotes
+        from app.services.assistant.temporal_evidence import bind_quote_spans
 
-        validate_temporal_quotes(user_text, response.temporal_mentions)
+        bound_mentions, bound_actions = bind_quote_spans(
+            user_text, response.temporal_mentions, response.actions
+        )
         if meeting:
             return StructureDraftResult(
                 kind_confirmed=kind,
@@ -258,8 +265,8 @@ class AssistantLLM:
                 meeting_subject=response.meeting_subject or response.content_json.meeting_subject,
                 participants=response.participants,
                 content_json=response.content_json.model_dump(mode="json"),
-                temporal_mentions=response.temporal_mentions,
-                actions=response.actions,
+                temporal_mentions=bound_mentions,
+                actions=bound_actions,
                 structuring_model=model_name,
             )
         return StructureDraftResult(
@@ -269,8 +276,8 @@ class AssistantLLM:
             next_action=response.content_json.next_action,
             next_follow_time_text=response.content_json.next_follow_time_text,
             content_json=response.content_json.model_dump(mode="json"),
-            temporal_mentions=response.temporal_mentions,
-            actions=response.actions,
+            temporal_mentions=bound_mentions,
+            actions=bound_actions,
             structuring_model=model_name,
         )
 

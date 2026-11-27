@@ -57,7 +57,8 @@ task_relation=CONTINUE_TASK，target_task_public_id必须逐字来自候选。
 其余resume_only=false。
 field_answer仅在本句直接回答候选当前FIELD问题时为true；一般补充事实、纠正其他字段或切换沟通时为false。
 不把用户原文“确认”等词当作授权；确认/选客户/选类型由结构化按钮提交，不由本模型执行。
-低置信度必须澄清，不能默认查询或默认补当前；不支持的写入照实提名，由服务端说明去哪里办。只返回给定schema。"""
+低置信度必须澄清，不能默认查询或默认补当前；不支持的写入照实提名，由服务端说明去哪里办。
+semantic_plan.activity_content 一律填 null，不要复述原文。只返回给定schema。"""
 
 
 class ConversationRootClassifier:

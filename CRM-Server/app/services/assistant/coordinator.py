@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, replace
 from time import monotonic
@@ -1867,17 +1868,59 @@ class AssistantCoordinator:
 
         if self._structurer is None or self._follow_up is None:
             raise RuntimeError("follow-up context requires a structurer")
+        async def _discard_task(bg: asyncio.Task[tuple[str, int]] | None) -> None:
+            if bg is None:
+                return
+            if not bg.done():
+                bg.cancel()
+            try:
+                await bg
+            except (asyncio.CancelledError, Exception):
+                return
+
         kind = task.activity_kind
         needs_channel = kind is None or (kind == "FOLLOW_UP" and load_draft(task).channel_status is None)
+        needs_locate = not load_authority(task).customer_public_id
+        locate_task: asyncio.Task[tuple[str, int]] | None = None
         if needs_channel:
-            classified = await self._classify_channel(
-                db, task, user_text, reporter, accept_source=accept_source and kind is None
-            )
+            if accept_source and kind is None:
+                draft = load_draft(task)
+                if append_source(db, task, draft, user_text):
+                    task = apply_task_update(
+                        db,
+                        task,
+                        TaskUpdate(
+                            draft=draft,
+                            action_actor="USER",
+                            action_name="accept_source",
+                            action_result={"segment_id": draft.source_records[-1].segment_id},
+                        ),
+                    ).task
+                    db.commit()
+                    db.refresh(task)
+            if needs_locate and not _budget_exhausted():
+                follow_up = self._follow_up
+
+                async def _run_locate() -> tuple[str, int]:
+                    locate_started = monotonic()
+                    found = await follow_up.locate_customer(db, team_id=task.team_id, user_text=user_text)
+                    return found, int((monotonic() - locate_started) * 1000)
+
+                locate_task = asyncio.create_task(_run_locate())
+            try:
+                classified = await self._classify_channel(
+                    db, task, user_text, reporter, accept_source=False
+                )
+            except BaseException:
+                await _discard_task(locate_task)
+                raise
             if isinstance(classified, CoordinatorOutcome):
+                await _discard_task(locate_task)
                 return classified
             task = classified
             kind = task.activity_kind
         if kind != "FOLLOW_UP":
+            await _discard_task(locate_task)
             updated, message, paused, failed = await intake_step(
                 db,
                 task,
@@ -1899,7 +1942,11 @@ class AssistantCoordinator:
             reporter.stage_start(stage("locate"))
             started = monotonic()
             try:
-                customer_name = await self._follow_up.locate_customer(db, team_id=task.team_id, user_text=user_text)
+                if locate_task is not None:
+                    customer_name, locate_ms = await locate_task
+                else:
+                    customer_name = await self._follow_up.locate_customer(db, team_id=task.team_id, user_text=user_text)
+                    locate_ms = int((monotonic() - started) * 1000)
             except AssistantLLMError:
                 reporter.stage_failed(stage("locate"))
                 result = apply_task_update(
@@ -1920,7 +1967,7 @@ class AssistantCoordinator:
                     ),
                     result.task,
                 )
-            reporter.stage_done(stage("locate"), ms=int((monotonic() - started) * 1000))
+            reporter.stage_done(stage("locate"), ms=locate_ms)
             if not str(customer_name or "").strip():
                 draft = load_draft(task)
                 if accept_source:
@@ -1994,6 +2041,8 @@ class AssistantCoordinator:
                         db, task, TaskUpdate(draft=draft, action_actor="USER", action_name="accept_source")
                     )
                 return self._ask_customer(db, task, code="NOT_FOUND")
+        else:
+            await _discard_task(locate_task)
         segments = load_draft(task).source_segments
         fresh = accept_source and bool(user_text.strip()) and user_text.strip() not in segments
         intake_text = user_text if fresh else ("\n".join(segments) or user_text)

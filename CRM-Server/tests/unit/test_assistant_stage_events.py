@@ -271,3 +271,62 @@ async def test_cancel_emits_no_stages(db_session):
     await coordinator.handle_task(db_session, task, AssistantInput(kind="cancel"), reporter=reporter)
 
     assert stages_of(reporter) == []
+
+
+async def test_follow_up_runs_classify_and_locate_concurrently(db_session):
+    import asyncio
+
+    from app.services.assistant.follow_up_context import EvidencePack, RealFollowUpContext
+
+    classify_entered = asyncio.Event()
+    locate_entered = asyncio.Event()
+
+    class ParallelStructurer(Structurer):
+        async def classify(self, db, *, team_id, user_text):
+            classify_entered.set()
+            await asyncio.wait_for(locate_entered.wait(), timeout=2.0)
+            return KindDecision(kind="WECHAT_FOLLOW_UP", confidence=0.95)
+
+    class ParallelContext(RealFollowUpContext):
+        async def locate_customer(self, db, **kwargs):
+            locate_entered.set()
+            await asyncio.wait_for(classify_entered.wait(), timeout=2.0)
+            return "广州睿狐科技有限公司"
+
+        def read_evidence(self, db, **kwargs):
+            return EvidencePack(commitments_status="empty")
+
+    task = _task(db_session)
+    reporter = SSEProgressReporter()
+    coordinator = AssistantCoordinator(
+        Chooser(), structurer=ParallelStructurer(), quality_gate=PassGate(), follow_up=ParallelContext(None)
+    )
+    await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text="微信聊了 POC"), reporter=reporter)
+    stages = stages_of(reporter)
+    assert stages.index(("classify", "start")) < stages.index(("classify", "done"))
+    assert stages.index(("classify", "done")) < stages.index(("locate", "start"))
+    assert stages.index(("locate", "start")) < stages.index(("locate", "done"))
+
+
+async def test_meeting_discards_speculative_locate_without_emitting_locate_stage(db_session):
+    from app.services.assistant.follow_up_context import RealFollowUpContext
+    from app.services.assistant.model_transport import AssistantLLMError
+
+    class MeetingStructurer(Structurer):
+        async def classify(self, db, *, team_id, user_text):
+            return KindDecision(kind="ONLINE_MEETING", confidence=0.95)
+
+    class FailingContext(RealFollowUpContext):
+        async def locate_customer(self, db, **kwargs):
+            raise AssistantLLMError("should be ignored for meetings")
+
+    task = _task(db_session)
+    reporter = SSEProgressReporter()
+    coordinator = AssistantCoordinator(
+        Chooser(), structurer=MeetingStructurer(), quality_gate=PassGate(), follow_up=FailingContext(None)
+    )
+    await coordinator.handle_task(db_session, task, AssistantInput(kind="text", text="开了线上会议"), reporter=reporter)
+    stages = stages_of(reporter)
+    assert all(name != "locate" for name, _ in stages)
+    assert ("classify", "done") in stages
+    assert ("structure", "done") in stages

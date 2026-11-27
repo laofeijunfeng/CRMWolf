@@ -45,10 +45,18 @@ def verify_noise(segment_id: str, text: str, decision: KindDecision) -> list[Ver
     evidence = _occurrences(text, decision.evidence_quote.strip())
     verified: list[VerifiedNoiseSpan] = []
     seen: set[tuple[str, int, int]] = set()
+    used_by_text: dict[str, set[int]] = {}
     for label in decision.noise_spans:
         try:
             start, end = locate_quote(
-                text, label.quote_start, label.quote_end, label.raw_text, None, TemporalContractError, "noise"
+                text,
+                label.quote_start,
+                label.quote_end,
+                label.raw_text,
+                None,
+                TemporalContractError,
+                "noise",
+                used=used_by_text.setdefault(label.raw_text, set()),
             )
         except TemporalContractError:
             continue
