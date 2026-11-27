@@ -148,3 +148,42 @@ async def test_meeting_structuring_rejects_empty_structured_fields(monkeypatch):
                 "occurred_at": "2026-11-27T10:00:00",
             },
         })
+
+
+@pytest.mark.asyncio
+async def test_follow_up_structuring_unescapes_single_line_literal_newlines(monkeypatch):
+    from app.services.customer_activity_ai import structuring_agent as module
+
+    monkeypatch.setattr(module.ai_config_crud, "get_config", lambda db, team_id: SimpleNamespace(
+        api_host="https://example.com",
+        model_name="test-model",
+        temperature=0.1,
+    ))
+    monkeypatch.setattr(module.ai_config_crud, "get_decrypted_api_key", lambda db, team_id: "test-key")
+
+    class EscapedNewlineRuntime:
+        async def ainvoke_structured(self, **kwargs: Any):
+            return FollowUpStructuringResult.model_validate({
+                "title": "微信跟进",
+                "summary": "### 沟通进展\\n- **节奏**：9 月底挂网\\n\\n### 下一步\\n- 周四交材料",
+                "content_json": {
+                    "content": "### 沟通进展\\n- **节奏**：9 月底挂网\\n\\n### 下一步\\n- 周四交材料",
+                },
+            })
+
+    agent = ActivityStructuringAgent(runtime=EscapedNewlineRuntime())
+    payload = await agent.structure(None, team_id=1, context={
+        "current_activity": {
+            "activity_category": "FOLLOW_UP",
+            "activity_label": "微信跟进",
+            "activity_kind": "WECHAT_FOLLOW_UP",
+            "source_content": "9月底挂网，周四交材料。",
+            "next_action": "",
+            "occurred_at": "2026-11-27T10:00:00",
+        },
+    })
+
+    assert "\\n" not in payload["summary"]
+    assert payload["summary"].startswith("### 沟通进展\n- **节奏**")
+    assert "\\n" not in payload["content_json"]["content"]
+    assert payload["content_json"]["content"].startswith("### 沟通进展\n- **节奏**")

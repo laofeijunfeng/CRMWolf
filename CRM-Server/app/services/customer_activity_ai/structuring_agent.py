@@ -55,7 +55,7 @@ class ActivityStructuringAgent:
             payload = result.model_dump(mode="json")
         except AgentLangChainStructuredOutputError as exc:
             raise ActivityStructuringError(str(exc)) from exc
-        payload["summary"] = (payload.get("summary") or "").replace("\r\n", "\n").strip()[:4000] or None
+        payload["summary"] = self._normalize_markdown_text(payload.get("summary"))[:4000] or None
         payload["title"] = (payload.get("title") or "").strip() or None
         payload["next_action"] = (payload.get("next_action") or "").strip() or None
         if category != "MEETING":
@@ -121,18 +121,26 @@ class ActivityStructuringAgent:
             "</raw_activity>"
         )
 
+    @staticmethod
+    def _normalize_markdown_text(raw: Any) -> str:
+        text = str(raw or "").replace("\r\n", "\n").strip()
+        if not text:
+            return ""
+        if "\n" not in text and "\\n" in text:
+            text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+        return text.strip(" \n\t")
+
     def _clean_follow_up_content(self, payload: dict[str, Any]) -> None:
         content_json = payload.get("content_json")
         if not isinstance(content_json, dict):
             payload["content_json"] = {"content": ""}
             return
 
-        content = str(content_json.get("content") or "").replace("\r\n", "\n").strip()
+        content = self._normalize_markdown_text(content_json.get("content"))
         content = re.sub(r"活动类型：[^。\n]*[。\n]?", "", content)
         content = re.sub(r"发生时间：[^。\n]*[。\n]?", "", content)
         content = re.sub(r"。?已有下一步[^。\n]*[。\n]?", "", content)
         content_json["content"] = content.strip(" \n\t")
-
     @staticmethod
     def _validate_follow_up_payload(payload: dict[str, Any]) -> None:
         content_json = payload.get("content_json")
