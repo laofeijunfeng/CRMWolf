@@ -34,7 +34,7 @@ bash CRM-Docs/deployment/deploy.sh
 4. 停止旧版服务，并使用新后端镜像以一次性 Compose 容器执行 Alembic 数据库结构迁移。
 5. 迁移成功后，再执行 `docker compose -f docker-compose.yml -f docker-compose.server.yml up -d` 启动新版本。
 6. 执行销售承诺/跟进任务历史数据回填。
-7. 检查前后端健康状态；检查成功后删除本次替换下来的旧后端、前端镜像（失败时保留，便于回滚）。
+7. 检查前后端健康状态；检查成功后异步触发历史客户活动 Markdown 格式升级（`scripts/backfill_customer_activity_markdown.py`，幂等且不阻塞发布，日志输出至容器内 `/tmp/crm180_markdown_backfill.log`），并删除本次替换下来的旧后端、前端镜像（失败时保留，便于回滚）。
 
 先迁移后启动保证新代码依赖的新索引或字段已经存在，避免发布窗口内新后端先运行而查询失败。
 

@@ -19,14 +19,47 @@ logger = logging.getLogger(__name__)
 JSONPrimitive = str | int | float | bool | None
 JSONValue = JSONPrimitive | list["JSONValue"] | dict[str, "JSONValue"]
 JSONObject = dict[str, JSONValue]
+ACTIVITY_MARKDOWN_FORMAT_VERSION = 1
+_HISTORICAL_PRESERVED_CONTENT_KEYS = (
+    "next_action",
+    "next_follow_time_text",
+    "next_step_summary",
+    "action_items",
+    "next_action_absence_reason",
+)
+
+
+def has_markdown_format_version(
+    raw_content_json: str | dict[str, object] | None,
+    *,
+    min_version: int = ACTIVITY_MARKDOWN_FORMAT_VERSION,
+) -> bool:
+    parsed: object
+    if isinstance(raw_content_json, dict):
+        parsed = raw_content_json
+    elif isinstance(raw_content_json, str) and raw_content_json.strip():
+        try:
+            parsed = json.loads(raw_content_json)
+        except ValueError:
+            return False
+    else:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    version = parsed.get("markdown_format_version")
+    return isinstance(version, int) and not isinstance(version, bool) and version >= min_version
+
+
+def stamp_markdown_format_version(content_json: JSONObject | None) -> JSONObject:
+    stamped: JSONObject = dict(content_json) if isinstance(content_json, dict) else {}
+    stamped["markdown_format_version"] = ACTIVITY_MARKDOWN_FORMAT_VERSION
+    return stamped
 
 
 def _json_dumps(value: JSONValue) -> str | None:
     if value is None:
         return None
     return json.dumps(value, ensure_ascii=False)
-
-
 def _default_content_json(activity_kind: str, source_content: str, next_action: str | None = None) -> JSONObject:
     meta = get_activity_kind_meta(activity_kind)
     if meta["category"] == "MEETING":
@@ -219,7 +252,6 @@ class CustomerActivityCRUD:
             data["source_content"],
             data.get("next_action"),
         )
-        data["content_json"] = _json_dumps(content_json)
         data["customer_id"] = customer_id
         data["creator_id"] = creator_id
         data["owner_id"] = owner_id or creator_id
@@ -230,6 +262,7 @@ class CustomerActivityCRUD:
             or data.get("submission_source")
             or CustomerActivitySubmissionSource.FORM.value
         )
+        data["content_json"] = _json_dumps(content_json)
         data["submission_id"] = submission_id or data.get("submission_id")
         data["submission_fingerprint"] = submission_fingerprint
         data["occurred_at"] = data.get("occurred_at") or business_now()
@@ -392,13 +425,18 @@ class CustomerActivityCRUD:
             next_action_source = None
             next_follow_time = None
             next_follow_time_source = None
+        final_content_json = (
+            content_json
+            if activity.submission_source == CustomerActivitySubmissionSource.ASSISTANT_2.value
+            else stamp_markdown_format_version(content_json)
+        )
         resolved_summary = summary or self.build_summary(
             activity.activity_kind,
-            content_json,
+            final_content_json,
             activity.source_content,
         )
         structured_values: dict[str, object] = {
-            "content_json": content_json,
+            "content_json": final_content_json,
             "summary": resolved_summary,
         }
         if next_action is not None:
@@ -409,8 +447,8 @@ class CustomerActivityCRUD:
             structured_values["next_follow_time_source"] = next_follow_time_source or "AI_EXTRACTED"
 
         revision_changed = _post_commit_fields_changed(activity, structured_values)
-        activity.title = title or self.build_title(activity.activity_kind, content_json)
-        activity.content_json = _json_dumps(content_json)
+        activity.title = title or self.build_title(activity.activity_kind, final_content_json)
+        activity.content_json = _json_dumps(final_content_json)
         activity.summary = resolved_summary
         if next_action is not None:
             activity.next_action = next_action
@@ -440,6 +478,51 @@ class CustomerActivityCRUD:
             db.flush()
         return activity
 
+    def apply_historical_markdown_upgrade(
+        self,
+        db: Session,
+        activity: CustomerActivity,
+        *,
+        title: str | None,
+        content_json: JSONObject | None,
+        summary: str | None,
+        commit: bool = True,
+    ) -> CustomerActivity:
+        """Upgrade a legacy activity's Markdown summary while locking all historical facts."""
+
+        activity = self._lock_current_activity(db, activity)
+        existing_content: JSONObject = {}
+        if isinstance(activity.content_json, str) and activity.content_json.strip():
+            try:
+                parsed = json.loads(activity.content_json)
+                if isinstance(parsed, dict):
+                    existing_content = parsed
+            except ValueError:
+                existing_content = {}
+        merged_content = dict(existing_content)
+        if isinstance(content_json, dict):
+            merged_content.update(content_json)
+        for preserved_key in _HISTORICAL_PRESERVED_CONTENT_KEYS:
+            existing_val = existing_content.get(preserved_key)
+            if existing_val not in (None, "", []):
+                merged_content[preserved_key] = existing_val
+        stamped_content_json = stamp_markdown_format_version(merged_content)
+        resolved_summary = (summary or "").strip()[:4000] or activity.summary or self.build_summary(
+            activity.activity_kind,
+            stamped_content_json,
+            activity.source_content,
+        )
+        if not (activity.title or "").strip() and title:
+            activity.title = title.strip()[:255]
+        activity.content_json = _json_dumps(stamped_content_json)
+        activity.summary = resolved_summary
+        _upsert_customer_activity_evidence(db, activity, commit=False)
+        if commit:
+            db.commit()
+            db.refresh(activity)
+        else:
+            db.flush()
+        return activity
 
     def delete(
         self,
