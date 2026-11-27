@@ -7,7 +7,7 @@
  *
  * 导航：使用 ContextTabs（Segmented Control 模式）放在 Header
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import { DetailSheetHeader, DetailSheetFooter } from '@/components/ui/detail-sheet'
 import DetailSheetSurface from '@/components/ui/detail-sheet/DetailSheetSurface.vue'
 import { Button } from '@/components/ui/button'
@@ -155,6 +155,48 @@ const panelRequestIds: Record<CustomerDetailPanelKey, number> = {
   customerMembers: 0,
 }
 let latestLoadRequestId = 0
+const detailScrollAreaRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
+let followUpScrollPending = false
+let followUpPollingTimer: number | null = null
+
+const clearFollowUpPollingTimer = (): void => {
+  if (followUpPollingTimer !== null) {
+    window.clearTimeout(followUpPollingTimer)
+    followUpPollingTimer = null
+  }
+}
+
+const getDetailScrollViewport = (): HTMLElement | null => {
+  const target = detailScrollAreaRef.value
+  const root = target instanceof HTMLElement
+    ? target
+    : target?.$el instanceof HTMLElement
+      ? target.$el
+      : null
+  if (root === null) return null
+  const viewport = root.querySelector<HTMLElement>('[data-reka-scroll-area-viewport]')
+  return viewport ?? root
+}
+
+const scrollFollowUpListToBottom = async (): Promise<void> => {
+  await nextTick()
+  if (!props.visible || activePanel.value !== 'followup' || selectedJourneyId.value !== null || isSourceMode.value) {
+    return
+  }
+  const viewport = getDetailScrollViewport()
+  if (viewport !== null) {
+    viewport.scrollTop = viewport.scrollHeight
+  }
+}
+
+const flushPendingFollowUpScroll = async (): Promise<void> => {
+  if (!followUpScrollPending) return
+  if (!props.visible || activePanel.value !== 'followup') return
+  if (loading.value && customer.value === null) return
+  if (panelLoading.value.followUps) return
+  followUpScrollPending = false
+  await scrollFollowUpListToBottom()
+}
 
 // ==================== Navigation Tabs ====================
 interface NavTabItem {
@@ -254,6 +296,12 @@ const setActivePanel = (panel: string): void => {
   highlightedJourneyId.value = null
   restoreFocusJourneyId.value = null
   resetDetailContext()
+  if (panel === 'followup') {
+    followUpScrollPending = true
+    void flushPendingFollowUpScroll()
+  } else {
+    followUpScrollPending = false
+  }
 }
 
 // ==================== Helper Functions ====================
@@ -447,6 +495,7 @@ const loadAllData = async (customerId: string): Promise<boolean> => {
       CUSTOMER_DETAIL_PANELS.forEach((panel) => {
         if (isCurrentPanelLoad(panel) && panelLoading.value[panel]) setPanelLoading(panel, false)
       })
+      void flushPendingFollowUpScroll()
     }
   }
 }
@@ -509,10 +558,15 @@ const handleCustomerEditSuccess = async (): Promise<void> => {
 // FollowUp handlers
 const handleFollowUpSuccess = async (): Promise<void> => {
   followUpDialogOpen.value = false
+  clearFollowUpPollingTimer()
   if (props.customerId !== null) {
+    if (activePanel.value === 'followup') {
+      followUpScrollPending = true
+    }
     const refreshed = await loadAllData(props.customerId)
     warnIfCustomerDetailRefreshFailed(refreshed, '客户活动更新')
-    window.setTimeout(() => {
+    followUpPollingTimer = window.setTimeout(() => {
+      followUpPollingTimer = null
       if (props.visible && props.customerId !== null) {
         void loadAllData(props.customerId)
       }
@@ -814,11 +868,15 @@ const handleDeleteDeployment = async (deploymentId: number): Promise<void> => {
 // ==================== Watch ====================
 watch(() => props.visible, (visible): void => {
   if (visible && props.customerId !== null) {
+    clearFollowUpPollingTimer()
+    followUpScrollPending = false
     resetLocalNavigation()
     markNavigationTargetPending()
     applyNavigationTarget()
     loadAllData(props.customerId)
   } else if (!visible) {
+    clearFollowUpPollingTimer()
+    followUpScrollPending = false
     // 清理状态
     resetLocalNavigation()
     customer.value = null
@@ -835,8 +893,10 @@ watch(() => props.visible, (visible): void => {
 watch(() => props.customerId, (customerId, previousCustomerId): void => {
   if (customerId !== previousCustomerId) {
     deploymentDialogOpen.value = false
+    clearFollowUpPollingTimer()
   }
   if (!props.visible || customerId === null || customerId === previousCustomerId) return
+  followUpScrollPending = false
   resetLocalNavigation()
   markNavigationTargetPending()
   applyNavigationTarget()
@@ -854,6 +914,10 @@ watch(() => props.targetPanel, (panel): void => {
   const hasTargetOpportunity = props.targetOpportunityId !== undefined && props.targetOpportunityId !== null
   if (!props.visible || isSourceMode.value || panel === undefined || panel === null || hasTargetJourney || hasTargetOpportunity) return
   setActivePanel(resolveTargetPanel(panel))
+})
+
+onBeforeUnmount(() => {
+  clearFollowUpPollingTimer()
 })
 
 </script>
@@ -901,7 +965,7 @@ watch(() => props.targetPanel, (panel): void => {
         </DetailSheetHeader>
 
         <!-- Content -->
-        <ScrollArea class="flex-1" :class="isSourceMode ? 'min-h-0' : undefined">
+        <ScrollArea ref="detailScrollAreaRef" class="flex-1" :class="isSourceMode ? 'min-h-0' : undefined">
           <div v-if="loading && customer === null" class="customer-detail-loading" aria-busy="true" aria-live="polite">
             <div class="loading-spinner" />
             <span>正在加载客户详情…</span>

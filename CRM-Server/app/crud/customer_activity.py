@@ -156,6 +156,7 @@ class CustomerActivityCRUD:
             .limit(limit)
             .all()
         )
+        activities.reverse()
         return activities, total
 
     def get_latest_by_customer_id(self, db: Session, *, customer_id: int, team_id: int) -> CustomerActivity | None:

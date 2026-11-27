@@ -13,7 +13,7 @@
  * - 添加跟进记录 Dialog
  * - 编辑线索 Dialog
  */
-import { ref, reactive, watch } from 'vue'
+import { nextTick, ref, reactive, watch, type ComponentPublicInstance } from 'vue'
 import { handleApiError } from '@/utils/errorHandler'
 import { formatProductIntentName } from '@/utils/productIntent'
 import { toast } from 'vue-sonner'
@@ -70,6 +70,8 @@ const userStore = useUserStore()
 const loading = ref(false)
 const leadData = ref<LeadDetail | null>(null)
 const followUps = ref<LeadFollowUp[]>([])
+const followUpListContainerRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
+let latestFetchRequestId = 0
 
 // 添加跟进弹窗
 const followUpDialogOpen = ref(false)
@@ -102,19 +104,46 @@ const handleEditSuccess = (): void => {
 }
 
 // ==================== Methods ====================
-const fetchLeadDetail = async (): Promise<void> => {
+const scrollFollowUpsToBottom = async (): Promise<void> => {
+  await nextTick()
+  const target = followUpListContainerRef.value
+  const container = target instanceof HTMLElement
+    ? target
+    : target?.$el instanceof HTMLElement
+      ? target.$el
+      : null
+  if (container !== null) {
+    container.scrollTop = container.scrollHeight
+  }
+}
+
+const fetchLeadDetail = async (options: { scrollToBottom?: boolean } = {}): Promise<void> => {
   const leadId = props.leadId
   if (leadId == null) return
 
-  loading.value = true
+  const requestId = latestFetchRequestId + 1
+  latestFetchRequestId = requestId
+  const showSkeleton = leadData.value === null || leadData.value.id !== leadId
+  if (showSkeleton) {
+    loading.value = true
+  }
+  let succeeded = false
   try {
     const res = await leadApi.getLeadDetail(leadId)
+    if (requestId !== latestFetchRequestId) return
     leadData.value = res
-    followUps.value = [...(res.follow_ups ?? [])].reverse()
+    followUps.value = res.follow_ups ?? []
+    succeeded = true
   } catch (error) {
+    if (requestId !== latestFetchRequestId) return
     handleApiError(error, '获取线索详情')
   } finally {
-    loading.value = false
+    if (requestId === latestFetchRequestId) {
+      loading.value = false
+    }
+  }
+  if (succeeded && options.scrollToBottom === true && requestId === latestFetchRequestId) {
+    await scrollFollowUpsToBottom()
   }
 }
 
@@ -165,7 +194,7 @@ const handleFollowUpSubmit = async (): Promise<void> => {
     await leadApi.addFollowUp(leadId, data)
     toast.success('跟进记录添加成功')
     followUpDialogOpen.value = false
-    await fetchLeadDetail()
+    await fetchLeadDetail({ scrollToBottom: true })
   } catch (error) {
     handleApiError(error, '添加跟进')
   } finally {
@@ -221,11 +250,17 @@ const mapLeadStatus = (status: number): string => {
 }
 
 // ==================== Watch ====================
-watch(() => props.visible, (visible): void => {
-  if (visible && props.leadId != null) {
-    fetchLeadDetail()
-  }
-})
+watch(
+  () => [props.visible, props.leadId] as const,
+  ([visible, leadId], previous): void => {
+    const wasVisible = previous?.[0] ?? false
+    const previousLeadId = previous?.[1] ?? null
+    if (visible && leadId != null && (!wasVisible || leadId !== previousLeadId)) {
+      void fetchLeadDetail({ scrollToBottom: true })
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -326,7 +361,7 @@ watch(() => props.visible, (visible): void => {
                   添加跟进
                 </Button>
               </CardHeader>
-              <CardContent class="p-0 max-h-[400px] overflow-y-auto">
+              <CardContent ref="followUpListContainerRef" class="p-0 max-h-[400px] overflow-y-auto">
                 <FollowUpList
                   :follow-ups="followUps"
                   :loading="false"

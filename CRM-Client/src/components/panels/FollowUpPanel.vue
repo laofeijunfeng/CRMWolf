@@ -183,12 +183,15 @@ const handleProcess = (followUp: FollowUp): void => {
 .panel-content {
   flex: 1;
   overflow: auto;
-  padding: $space-3;
 }
 
 // Override FollowUpList container styles to fit panel layout
 :deep(.follow-up-list-container) {
   padding: 0;
   background: transparent;
+}
+
+:deep(.follow-up-item) {
+  padding-inline: 0;
 }
 </style>

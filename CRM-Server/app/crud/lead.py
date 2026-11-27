@@ -635,9 +635,16 @@ class LeadFollowUpCRUD:
         return db.query(LeadFollowUp).filter(LeadFollowUp.id == follow_up_id).first()
 
     def get_by_lead_id(self, db: Session, lead_id: int, skip: int = 0, limit: int = 100) -> list[LeadFollowUp]:
-        return db.query(LeadFollowUp).filter(
-            LeadFollowUp.lead_id == lead_id
-        ).order_by(LeadFollowUp.created_time.desc()).offset(skip).limit(limit).all()
+        follow_ups = (
+            db.query(LeadFollowUp)
+            .filter(LeadFollowUp.lead_id == lead_id)
+            .order_by(LeadFollowUp.created_time.desc(), LeadFollowUp.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        follow_ups.reverse()
+        return follow_ups
 
     def create(
         self,
