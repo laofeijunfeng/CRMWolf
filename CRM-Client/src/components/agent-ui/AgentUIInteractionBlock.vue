@@ -40,11 +40,14 @@ const props = defineProps<{
   locked?: boolean
   grouped?: boolean
   notice?: InteractionNotice | null
+  unknownCommit?: boolean | undefined
+  reconciling?: boolean | undefined
 }>()
 
 const emit = defineEmits<{
   submit: [actionId: string, values: JsonObject]
   'open-entity': [entityRef: EntityRef]
+  reconcile: []
 }>()
 
 const subject = computed(() => props.block.subject ?? null)
@@ -139,7 +142,6 @@ const isEntityForm = computed(() => (
 ))
 const canDefer = computed(() => isActive.value && isEntityForm.value)
 const readonly = computed(() => props.block.state === 'READ_ONLY')
-const isCollapsedEntityForm = computed(() => isEntityForm.value && props.block.state !== 'ACTIVE')
 const isCollapsedEntityFormDone = computed(() => props.block.prompt.startsWith('已提交'))
 const isCompactTaskCompletion = computed(() => (
   props.block.presentation === 'COMPACT_TASK_COMPLETION'
@@ -338,16 +340,50 @@ const confirmationOptions = computed(() => ({
 const confirmationDisabledHint = computed(() => (
   props.block.options.find((option) => option.disabled === true && option.description !== undefined && option.description !== null && option.description !== '')?.description ?? ''
 ))
-// 不再待处理的选择 / 确认折叠成一行摘要，不保留任何操作入口。
-const isCollapsedChoice = computed(() => (
-  isActivityConfirmation.value === false
-  && submittedChoiceValue.value !== null
+// 所有不再待处理的交互（含 confirm_activity_write）统一原地收敛为单行只读摘要条。
+const isCollapsedInteraction = computed(() => (
+  props.block.state !== 'ACTIVE'
   && !isCompactTaskCompletion.value
   && !isOpenFollowUpDisposition.value
 ))
 // 确认卡里选了「取消」也算已处理，但不该配成功色的对勾。
 const isDeclinedConfirmation = computed(() => (
   props.block.interaction_type === 'confirmation' && submittedChoiceValue.value === 'cancel'
+))
+const collapsedTitle = computed(() => (
+  isActivityConfirmation.value ? '确认写入客户活动' : props.block.prompt
+))
+const collapsedActionLabel = computed<string | null>(() => {
+  if ((submittedChoiceOption.value?.label ?? '') !== '') return submittedChoiceOption.value?.label ?? null
+  if (submittedChoiceValue.value === 'confirm') return '确认写入'
+  if (submittedChoiceValue.value === 'cancel') return '取消'
+  return submittedChoiceValue.value
+})
+const collapsedCustomerName = computed<string | null>(() => {
+  const name = subject.value?.display_name ?? activityFact('customer')?.value ?? null
+  return name !== null && name.trim() !== '' ? name.trim() : null
+})
+const collapsedSummary = computed(() => {
+  if (submittedTextField.value !== null) {
+    return `${submittedTextField.value.label}：${submittedTextField.value.value}`
+  }
+  if (isEntityForm.value) {
+    return collapsedTitle.value.trim()
+  }
+  const parts: string[] = []
+  const title = collapsedTitle.value.trim()
+  if (title !== '') parts.push(title)
+  if (collapsedActionLabel.value !== null && collapsedActionLabel.value !== '') {
+    parts.push(`已选「${collapsedActionLabel.value}」`)
+  }
+  if (collapsedCustomerName.value !== null && !title.includes(collapsedCustomerName.value)) {
+    parts.push(collapsedCustomerName.value)
+  }
+  return parts.join(' · ')
+})
+const collapsedIconSuccess = computed(() => (
+  (props.block.state === 'SUBMITTED' && !isDeclinedConfirmation.value)
+  || (isEntityForm.value && isCollapsedEntityFormDone.value)
 ))
 // 提交中：被点的那一块在瓦片里写明「处理中…」；瓦片是等宽网格，文字变长不改宽。
 const tileOption = (option: InteractionOption): TileOption => ({
@@ -627,9 +663,43 @@ const submit = async (): Promise<void> => {
 </script>
 
 <template>
+  <!-- UNKNOWN_COMMIT_RESULT：写入结果未知边界，禁止展示成功态或确认写入按钮 -->
+  <section
+    v-if="unknownCommit === true"
+    ref="interactionRef"
+    data-tone="warning"
+    role="status"
+    data-agent-ui-unknown-commit
+    class="agent-ui-interaction grid min-w-0 gap-space-3 rounded-lg border border-border px-space-4 py-space-4 text-foreground"
+    :aria-labelledby="`${block.id}-prompt`"
+    :aria-busy="reconciling === true"
+  >
+    <header class="flex items-start justify-between gap-space-3">
+      <p :id="`${block.id}-prompt`" class="m-0 min-w-0 text-body font-semibold text-foreground [overflow-wrap:anywhere]">
+        {{ collapsedTitle }}
+      </p>
+      <StatusBadge class="shrink-0" status="warning" type="generic" size="small" label="待核对" />
+    </header>
+    <p class="m-0 text-body text-foreground">
+      本次写入结果尚未确认，为避免重复写入已锁定提交。请先核对写入结果。
+    </p>
+    <div class="flex flex-wrap items-center gap-space-2">
+      <Button
+        type="button"
+        variant="outline"
+        class="max-sm:min-h-touch-target"
+        :disabled="reconciling === true"
+        :loading="reconciling === true"
+        @click="emit('reconcile')"
+      >
+        {{ reconciling === true ? '核对中...' : '核对写入结果' }}
+      </Button>
+    </div>
+  </section>
+
   <!-- 待办任务：列表单行 -->
   <section
-    v-if="isCompactTaskCompletion"
+    v-else-if="isCompactTaskCompletion"
     ref="interactionRef"
     class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 px-space-3 text-foreground"
     :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
@@ -744,13 +814,14 @@ const submit = async (): Promise<void> => {
       </ol>
     </component>
     <div v-if="isActive" class="flex flex-wrap gap-space-2 px-space-4 pb-space-4 pt-space-3">
-      <Button type="button" :disabled="controlsDisabled" @click="submitDisposition(false)">
+      <Button type="button" class="max-sm:min-h-touch-target" :disabled="controlsDisabled" @click="submitDisposition(false)">
         {{ block.submit_label }}
       </Button>
       <Button
         v-if="weeklySuppression"
         type="button"
         variant="outline"
+        class="max-sm:min-h-touch-target"
         :disabled="controlsDisabled || weeklySuppression.disabled"
         @click="submitDisposition(true)"
       >
@@ -759,48 +830,30 @@ const submit = async (): Promise<void> => {
     </div>
   </section>
 
-  <!-- 已处理的选择 / 确认：折叠成一行 -->
+  <!-- 所有非 ACTIVE 交互（含 confirm_activity_write / 选择 / 确认 / 建档表单）：原地收敛为单行只读摘要条 -->
   <section
-    v-else-if="isCollapsedChoice"
+    v-else-if="isCollapsedInteraction"
     ref="interactionRef"
-    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 overflow-hidden px-space-4 py-space-2 text-foreground"
-    :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
-    :aria-labelledby="`${block.id}-prompt`"
-  >
-    <component
-      :is="block.state === 'CANCELLED' || isDeclinedConfirmation ? Circle : Check"
-      class="size-icon-sm shrink-0"
-      :class="block.state === 'CANCELLED' || isDeclinedConfirmation ? 'text-muted-foreground' : 'text-tone-success'"
-      aria-hidden="true"
-    />
-    <p :id="`${block.id}-prompt`" class="m-0 min-w-0 truncate text-body font-medium text-muted-foreground">{{ block.prompt }}</p>
-    <p class="m-0 min-w-0 truncate text-body text-muted-foreground" data-agent-ui-submitted-choice>
-      已选择：<b class="font-medium text-foreground">{{ submittedChoiceOption?.label ?? submittedChoiceValue }}</b>
-    </p>
-    <StatusBadge class="ml-auto shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
-  </section>
-
-  <!-- 已处理的建档表单：折叠成一行摘要 -->
-  <section
-    v-else-if="isCollapsedEntityForm"
-    ref="interactionRef"
-    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-[767px]:min-h-touch-target items-center gap-space-2 overflow-hidden px-space-4 py-space-2 text-foreground"
+    class="agent-ui-interaction flex min-h-[var(--control-h-lg)] max-sm:min-h-touch-target items-center justify-between gap-space-2 overflow-hidden px-space-4 py-space-2 text-foreground"
     :class="grouped ? '' : 'rounded-lg border border-border bg-card'"
     :data-state="readonly ? 'readonly' : undefined"
     :aria-labelledby="`${block.id}-prompt`"
-    data-agent-ui-collapsed-form
   >
-    <component
-      :is="isCollapsedEntityFormDone ? Check : Circle"
-      class="size-icon-sm shrink-0"
-      :class="isCollapsedEntityFormDone ? 'text-tone-success' : 'text-muted-foreground'"
-      aria-hidden="true"
-    />
-    <p
-      :id="`${block.id}-prompt`"
-      class="m-0 min-w-0 truncate text-body font-medium text-muted-foreground"
-      :title="block.prompt"
-    >{{ block.prompt }}</p>
+    <div class="flex min-w-0 flex-1 items-center gap-space-2" :data-agent-ui-collapsed-form="isEntityForm ? '' : undefined">
+      <component
+        :is="collapsedIconSuccess ? Check : Circle"
+        class="size-icon-sm shrink-0"
+        :class="collapsedIconSuccess ? 'text-tone-success' : 'text-muted-foreground'"
+        aria-hidden="true"
+      />
+      <p
+        :id="`${block.id}-prompt`"
+        class="m-0 min-w-0 truncate text-body text-muted-foreground"
+        :data-agent-ui-submitted-choice="submittedChoiceValue !== null ? '' : undefined"
+        :title="collapsedSummary"
+      >{{ collapsedSummary }}</p>
+    </div>
+    <StatusBadge class="shrink-0" :status="stateStatus" type="agentInteraction" size="small" />
   </section>
 
   <!-- 通用卡片：标题行 + 正文 + 底部操作区 -->
@@ -1226,7 +1279,7 @@ const submit = async (): Promise<void> => {
           >
             <div class="flex items-center justify-between gap-space-2">
               <span class="text-caption font-medium text-muted-foreground">{{ field.label }}</span>
-              <Badge variant="outline" class="text-[11px] font-normal text-muted-foreground">只读</Badge>
+              <Badge variant="outline" class="text-caption font-normal text-muted-foreground">只读</Badge>
             </div>
             <div
               class="rounded-md border border-border bg-muted/40 px-space-3 py-space-2 text-body text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]"
@@ -1372,12 +1425,13 @@ const submit = async (): Promise<void> => {
           :key="reason.value"
           type="button"
           variant="outline"
+          class="max-sm:min-h-touch-target"
           :disabled="controlsDisabled || reason.disabled"
           @click="submitConfirmationCancel(reason.value)"
         >
           {{ reason.label }}
         </Button>
-        <Button type="button" variant="ghost" :disabled="controlsDisabled" @click="submitConfirmationCancel()">
+        <Button type="button" variant="ghost" class="max-sm:min-h-touch-target" :disabled="controlsDisabled" @click="submitConfirmationCancel()">
           跳过原因
         </Button>
       </div>
@@ -1399,7 +1453,7 @@ const submit = async (): Promise<void> => {
           :variant="option.value === 'confirm' ? 'default' : 'outline'"
           :loading="option.value === 'confirm' && submitting"
           :disabled="controlsDisabled || option.disabled"
-          :class="option.disabled ? 'border-border bg-muted text-muted-foreground opacity-100' : ''"
+          :class="['max-sm:min-h-touch-target', option.disabled ? 'border-border bg-muted text-muted-foreground opacity-100' : '']"
           :aria-expanded="option.value === 'cancel' && cancelReasons.length > 0 ? cancelReasonsOpen : undefined"
           :aria-controls="option.value === 'cancel' && cancelReasons.length > 0 ? `${block.id}-cancel-reasons` : undefined"
           @click="handleOptionClick(option.value)"
@@ -1411,6 +1465,7 @@ const submit = async (): Promise<void> => {
         <Button
           type="button"
           variant="outline"
+          class="max-sm:min-h-touch-target"
           :aria-expanded="cancelReasons.length > 0 ? cancelReasonsOpen : undefined"
           :aria-controls="cancelReasons.length > 0 ? `${block.id}-cancel-reasons` : undefined"
           :disabled="controlsDisabled || confirmationOptions.cancel?.disabled === true"
@@ -1420,6 +1475,7 @@ const submit = async (): Promise<void> => {
         </Button>
         <Button
           type="button"
+          class="max-sm:min-h-touch-target"
           :loading="submitting"
           :disabled="controlsDisabled || confirmationOptions.confirm?.disabled === true"
           @click="handleOptionClick('confirm')"
@@ -1432,6 +1488,7 @@ const submit = async (): Promise<void> => {
           v-if="canCancel"
           type="button"
           variant="outline"
+          class="max-sm:min-h-touch-target"
           :disabled="controlsDisabled"
           @click="cancel"
         >
@@ -1441,6 +1498,7 @@ const submit = async (): Promise<void> => {
           v-if="canDefer"
           type="button"
           variant="outline"
+          class="max-sm:min-h-touch-target"
           :disabled="controlsDisabled"
           @click="defer"
         >
@@ -1449,6 +1507,7 @@ const submit = async (): Promise<void> => {
         <Button
           v-if="isActive && !submitsOnOptionClick"
           type="button"
+          class="max-sm:min-h-touch-target"
           :loading="submitting"
           :disabled="controlsDisabled"
           @click="submit"
@@ -1460,6 +1519,7 @@ const submit = async (): Promise<void> => {
         v-if="confirmationEdit"
         type="button"
         variant="outline"
+        class="max-sm:min-h-touch-target"
         :disabled="controlsDisabled || confirmationEdit.disabled"
         @click="submitConfirmationEdit"
       >

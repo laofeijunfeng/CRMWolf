@@ -29,7 +29,7 @@ describe('owned historical conversation projection', () => {
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
     const meeting = wrapper.findAllComponents({ name: 'AgentUIMessage' })[0]
-    expect(meeting?.text()).toContain('原会议讨论')
+    expect(meeting?.text()).toContain('确认写入客户活动')
     expect(meeting?.text()).toContain('原客户')
     expect(meeting?.text()).not.toContain('新客户')
   })

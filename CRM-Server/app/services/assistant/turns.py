@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -25,7 +25,14 @@ from app.models.assistant_turn import AssistantRequest, AssistantTurn, Assistant
 from app.services.assistant.activity_channel import CANONICAL_KINDS
 from app.services.assistant.contracts import FORM_WAITING_TYPES
 from app.services.assistant.coordinator import AssistantInput
-from app.services.assistant.events import ProgressReporter, Segment, TurnStage, is_stage_name, stage_payload
+from app.services.assistant.events import (
+    ProgressReporter,
+    Segment,
+    TurnStage,
+    is_stage_name,
+    stage_payload,
+    text_delta_payload,
+)
 from app.services.assistant.failure_contract import (
     ACTIVITY_COMMIT_UNKNOWN_MESSAGE,
     ATTEMPT_DEADLINE_SECONDS,
@@ -926,13 +933,29 @@ async def _keep_lease(
 class DurableProgressReporter(ProgressReporter):
     """Commit progress independently of the model and task transaction."""
 
-    def __init__(self, factory: sessionmaker, *, turn_id: int, owner: str, version: int) -> None:
+    def __init__(
+        self,
+        factory: sessionmaker[Session],
+        *,
+        turn_id: int,
+        owner: str,
+        version: int,
+        turn_public_id: str | None = None,
+    ) -> None:
         self.factory = factory
         self.turn_id = turn_id
         self.owner = owner
         self.version = version
+        self.turn_public_id = turn_public_id
 
-    def _record(self, payload: dict[str, object]) -> None:
+    def _record_event(
+        self,
+        event: str,
+        payload: dict[str, object] | None = None,
+        *,
+        delta: str | None = None,
+        message_id: str | None = None,
+    ) -> None:
         try:
             with self.factory() as db:
                 now = business_now()
@@ -951,16 +974,28 @@ class DurableProgressReporter(ProgressReporter):
                 if changed.rowcount != 1:
                     db.rollback()
                     return
-                next_seq = db.execute(
-                    select(AssistantTurn.next_seq).where(AssistantTurn.id == self.turn_id)
-                ).scalar_one()
+                next_seq, public_id = db.execute(
+                    select(AssistantTurn.next_seq, AssistantTurn.public_id).where(AssistantTurn.id == self.turn_id)
+                ).one()
                 seq = next_seq - 1
+                if event == "text_delta":
+                    data_json = text_delta_payload(
+                        turn_id=self.turn_public_id or str(public_id),
+                        seq=seq,
+                        delta=delta or "",
+                        message_id=message_id,
+                    )
+                else:
+                    data_json = {**(payload or {}), "seq": seq}
                 db.add(
-                    AssistantTurnEvent(turn_id=self.turn_id, seq=seq, event="stage", data_json={**payload, "seq": seq})
+                    AssistantTurnEvent(turn_id=self.turn_id, seq=seq, event=event, data_json=data_json)
                 )
                 db.commit()
         except Exception:
-            logger.exception("assistant stage persistence failed: turn=%s", self.turn_id)
+            logger.exception("assistant %s persistence failed: turn=%s", event, self.turn_id)
+
+    def _record(self, payload: dict[str, object]) -> None:
+        self._record_event("stage", payload)
 
     def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         if stage is not None:
@@ -975,6 +1010,112 @@ class DurableProgressReporter(ProgressReporter):
     def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         if stage is not None:
             self._record(stage_payload(stage, "failed", segment=segment))
+
+    def emit_text_delta(self, delta: str, *, message_id: str | None = None) -> None:
+        if delta:
+            self._record_event("text_delta", delta=delta, message_id=message_id)
+
+
+_TERMINAL_TURN_STATUSES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "COMPLETED"})
+StopTurnReason = Literal["STOPPED", "ALREADY_TERMINAL", "WRITE_IN_PROGRESS"]
+
+
+def _has_write_stage_event(db: Session, turn: AssistantTurn) -> bool:
+    stage_events = db.query(AssistantTurnEvent).filter_by(turn_id=turn.id, event="stage").all()
+    return any(
+        isinstance(ev.data_json, dict) and ev.data_json.get("stage") == "write"
+        for ev in stage_events
+    )
+
+
+def stop_turn(
+    db: Session,
+    *,
+    task: AssistantTask,
+    turn_public_id: str,
+) -> tuple[bool, StopTurnReason]:
+    """Cancel an in-flight assistant turn unless it is already terminal or in the write phase."""
+    from app.services.assistant.presentation import task_view
+    from app.services.assistant.proposals import has_unresolved_proposal_claim
+
+    turn = (
+        db.query(AssistantTurn)
+        .filter_by(
+            public_id=turn_public_id,
+            task_id=task.id,
+            team_id=task.team_id,
+            user_id=task.user_id,
+        )
+        .one_or_none()
+    )
+    if turn is None:
+        raise LookupError("轮次不存在")
+
+    if turn.status in _TERMINAL_TURN_STATUSES:
+        return False, "ALREADY_TERMINAL"
+
+    if (
+        _open_stage(_latest_stage_event(db, turn)) == "write"
+        or has_unresolved_proposal_claim(db, task)
+        or _has_write_stage_event(db, turn)
+    ):
+        return False, "WRITE_IN_PROGRESS"
+
+    now = business_now()
+    changed = db.execute(
+        update(AssistantTurn)
+        .where(
+            AssistantTurn.id == turn.id,
+            AssistantTurn.status.in_(("PENDING", "RUNNING")),
+        )
+        .values(
+            status="CANCELLED",
+            lease_owner=None,
+            lease_expires_at=None,
+            last_modified_time=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if changed.rowcount != 1:
+        db.rollback()
+        db.refresh(turn)
+        if turn.status in _TERMINAL_TURN_STATUSES:
+            return False, "ALREADY_TERMINAL"
+        return False, "WRITE_IN_PROGRESS"
+
+    db.execute(
+        update(AssistantTask)
+        .where(
+            AssistantTask.id == task.id,
+            AssistantTask.active_turn_id == turn.id,
+        )
+        .values(active_turn_id=None)
+        .execution_options(synchronize_session=False)
+    )
+    db.refresh(turn)
+    db.refresh(task)
+    add_event(
+        db,
+        turn,
+        "done",
+        {
+            "turn_id": turn.public_id,
+            "status": "CANCELLED",
+            "stopped": True,
+            "task": task_view(task, db).model_dump(mode="json"),
+        },
+    )
+    db.commit()
+
+    with _workers_lock:
+        registered = _workers.get(turn.id)
+    if registered is not None:
+        _, worker = registered
+        if not worker.done():
+            with suppress(RuntimeError):
+                worker.get_loop().call_soon_threadsafe(worker.cancel)
+
+    return True, "STOPPED"
 
 
 def events_after(db: Session, *, turn_id: int, seq: int) -> list[AssistantTurnEvent]:
@@ -1031,6 +1172,17 @@ def create_continue_proposals_followup_turn(db: Session, task: AssistantTask) ->
     if claimed.rowcount != 1:
         raise AssistantStateConflict("活动后续轮次无法领取任务")
     return followup
+
+
+_TEXT_DELTA_CHUNK_SIZE = 24
+
+
+def _emit_reply_text_deltas(reporter: ProgressReporter, message: str | None) -> None:
+    """Emit reply copy as incremental text_delta SSE events before terminal waiting."""
+    if not message:
+        return
+    for index in range(0, len(message), _TEXT_DELTA_CHUNK_SIZE):
+        reporter.emit_text_delta(message[index : index + _TEXT_DELTA_CHUNK_SIZE])
 
 
 async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> None:
@@ -1112,13 +1264,20 @@ async def execute_turn(turn_id: int, *, factory: sessionmaker | None = None) -> 
                     "kind": "correct_activity", "values": {correction.field: value},
                     "correction_quote": correction.quote,
                 }
-            reporter = DurableProgressReporter(factory, turn_id=turn_id, owner=owner, version=version)
+            reporter = DurableProgressReporter(
+                factory,
+                turn_id=turn_id,
+                owner=owner,
+                version=version,
+                turn_public_id=turn.public_id,
+            )
             outcome = await _coordinator.handle_task(
                 db,
                 task,
                 AssistantInput.model_validate(input_data),
                 reporter=reporter,
             )
+            _emit_reply_text_deltas(reporter, outcome.reply.message)
             now = business_now()
             fence = db.execute(
                 update(AssistantTurn)

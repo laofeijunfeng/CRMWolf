@@ -374,11 +374,19 @@ export const ConversationLinkSchema = z.object({
   customer_public_id: z.string().min(1).max(64).nullable().optional()
 }).strict()
 export type ConversationLink = z.infer<typeof ConversationLinkSchema>
+export const ConversationAttachmentRefSchema = z.object({
+  file_url: z.string().min(1).max(2048),
+  file_name: z.string().min(1).max(255),
+  mime_type: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  size_bytes: z.number().int().min(1).max(10_485_760),
+}).strict()
+export type ConversationAttachmentRef = z.infer<typeof ConversationAttachmentRefSchema>
 export const ConversationMessageSchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant']), text: z.string(), at: z.string(),
   task: AssistantTaskViewSchema.nullable(), boundary: ConversationBoundarySchema.nullable(),
   outcome: z.enum(['activity_written', 'failure', 'follow_up_disposition', 'task_completed', 'proposal_unavailable']).nullable(),
   ui: AgentUIEnvelopeSchema.nullable(), links: z.array(ConversationLinkSchema).max(4).optional(),
+  attachments: z.array(ConversationAttachmentRefSchema).max(3).optional(),
   projection: ConversationProjectionSchema.nullable().optional()
 }).strict()
 export const ConversationViewSchema = z.object({
@@ -411,3 +419,42 @@ export const ConversationReplySchema = z.object({
   }).strict().nullable()
 }).strict()
 export type ConversationReply = z.infer<typeof ConversationReplySchema>
+
+export const StopTurnReasonSchema = z.enum(['STOPPED', 'ALREADY_TERMINAL', 'WRITE_IN_PROGRESS'])
+export type StopTurnReason = z.infer<typeof StopTurnReasonSchema>
+
+export const StopTurnResponseSchema = z.object({
+  stopped: z.boolean(),
+  reason: StopTurnReasonSchema,
+  task: AssistantTaskViewSchema,
+}).strict()
+export type StopTurnResponse = z.infer<typeof StopTurnResponseSchema>
+
+export const AssistantAsyncOperationStatusSchema = z.enum([
+  'QUEUED', 'RUNNING', 'DEGRADED', 'SUCCEEDED', 'FAILED',
+])
+export type AssistantAsyncOperationStatus = z.infer<typeof AssistantAsyncOperationStatusSchema>
+
+export const AssistantAsyncOperationSchema = z.object({
+  public_id: z.string().min(1),
+  operation_type: z.string().min(1),
+  resource_type: z.string().nullable(),
+  resource_public_id: z.string().nullable(),
+  status: AssistantAsyncOperationStatusSchema,
+  summary: z.string().nullable(),
+  current_step: z.string().nullable(),
+  error_message: z.string().nullable(),
+  started_time: z.string().nullable(),
+  finished_time: z.string().nullable(),
+  updated_time: z.string().nullable(),
+  created_time: z.string().nullable(),
+}).strict()
+export type AssistantAsyncOperation = z.infer<typeof AssistantAsyncOperationSchema>
+
+export const TextDeltaEventSchema = z.object({
+  turn_id: z.string().min(1),
+  seq: z.number().int().nonnegative(),
+  delta: z.string(),
+  message_id: z.string().min(1).optional(),
+}).strict()
+export type TextDeltaEvent = z.infer<typeof TextDeltaEventSchema>

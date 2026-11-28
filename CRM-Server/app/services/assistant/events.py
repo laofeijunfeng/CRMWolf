@@ -11,6 +11,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal, Protocol, get_args
 
 from app.utils.sse_encoder import SSEJsonEncoder
@@ -73,15 +74,43 @@ def stage_payload(
     ms: int | None = None,
     score: int | None = None,
     segment: Segment | None = None,
+    step_started_at: str | None = None,
 ) -> dict[str, object]:
     # ``TurnStage.payload`` carries the stage's subject; this only adds the measured fields.
     payload: dict[str, object] = stage.payload(phase)
+    if phase == "start":
+        payload["step_started_at"] = (
+            step_started_at
+            if step_started_at is not None
+            else datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        )
+    elif step_started_at is not None:
+        payload["step_started_at"] = step_started_at
     if ms is not None:
         payload["ms"] = ms
     if score is not None:
         payload["score"] = score
     if segment is not None:
         payload["segment"] = {"index": segment[0], "total": segment[1]}
+    return payload
+
+
+def text_delta_payload(
+    *,
+    turn_id: str,
+    seq: int,
+    delta: str,
+    message_id: str | None = None,
+) -> dict[str, object]:
+    """Structured payload for incremental assistant text_delta SSE events."""
+
+    payload: dict[str, object] = {
+        "turn_id": turn_id,
+        "seq": seq,
+        "delta": delta,
+    }
+    if message_id is not None:
+        payload["message_id"] = message_id
     return payload
 
 
@@ -103,6 +132,8 @@ class ProgressReporter(Protocol):
 
     def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None: ...
 
+    def emit_text_delta(self, delta: str, *, message_id: str | None = None) -> None: ...
+
 
 class NullProgressReporter:
     """Drop events; default for unit tests and in-process callers."""
@@ -118,6 +149,9 @@ class NullProgressReporter:
     def stage_failed(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         _ = stage, segment
 
+    def emit_text_delta(self, delta: str, *, message_id: str | None = None) -> None:
+        _ = delta, message_id
+
 
 class SSEProgressReporter:
     """Queue stage events for the streaming endpoint to drain.
@@ -126,11 +160,13 @@ class SSEProgressReporter:
     business flow. ``ms`` is measured with ``time.monotonic`` deltas.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, turn_id: str = "") -> None:
         import asyncio
 
         self._queue: asyncio.Queue[tuple[str, dict[str, object]] | None] = asyncio.Queue()
         self._started_at: dict[str, float] = {}
+        self._turn_id = turn_id
+        self._delta_seq = 0
 
     def stage_start(self, stage: TurnStage | None, *, segment: Segment | None = None) -> None:
         if stage is None:
@@ -160,6 +196,25 @@ class SSEProgressReporter:
             self._queue.put_nowait(("stage", stage_payload(stage, "failed", segment=segment)))
         except Exception:
             logger.exception("stage_failed reporting failed for %s", stage.name)
+
+    def emit_text_delta(self, delta: str, *, message_id: str | None = None) -> None:
+        if not delta:
+            return
+        try:
+            self._delta_seq += 1
+            self._queue.put_nowait(
+                (
+                    "text_delta",
+                    text_delta_payload(
+                        turn_id=self._turn_id,
+                        seq=self._delta_seq,
+                        delta=delta,
+                        message_id=message_id,
+                    ),
+                )
+            )
+        except Exception:
+            logger.exception("emit_text_delta reporting failed")
 
     def mark_done(self) -> None:
         """Signal the business flow finished; unblocks the drain loop."""

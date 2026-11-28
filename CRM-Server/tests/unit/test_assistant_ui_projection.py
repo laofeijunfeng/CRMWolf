@@ -1684,6 +1684,7 @@ def _proposal_wait(kind: str, payload: dict[str, object]) -> TaskWaiting:
             candidate=ProposalCandidate(
                 kind=kind, key="proposal_one", payload=payload, evidence_quote="客户同意下阶段方案",
                 activity_id=1, customer_id=2, source_revision=1,
+                due_date_granularity="DATETIME" if "due_date" in payload else None,
                 target_public_id="opp_bound" if kind == "opportunity_stage" else None,
             ),
         ),
@@ -1913,3 +1914,46 @@ def test_legacy_proposal_receipts_keep_their_titles_detail_and_customer_link() -
             assert result.status == "SUCCESS" and result.title == title
             assert result.message == expected
             assert result.entity_ref.resource == "customer" and result.entity_ref.public_id == _CUSTOMER_ID
+
+
+def test_finalize_assistant_ui_enforces_at_most_one_active_interaction_across_conversation() -> None:
+    first_waiting = TaskWaiting(
+        type="FIELD",
+        field="customer",
+        question_id="q_first",
+        prompt="请补充客户名称",
+        action_id="act_first",
+        expected_version=1,
+    )
+    second_waiting = TaskWaiting(
+        type="FIELD",
+        field="customer",
+        question_id="q_second",
+        prompt="请确认客户名称",
+        action_id="act_second",
+        expected_version=2,
+    )
+    first_task = _task(public_id="ast_first", waiting=first_waiting)
+    second_task = _task(public_id="ast_second", waiting=second_waiting)
+    m1 = _message(
+        "m_first",
+        "请选择",
+        first_task,
+        boundary=ConversationBoundary(entry_id="entry_1", prompt="要继续刚才的任务吗？"),
+    )
+    m2 = _message("m_second", second_waiting.prompt, second_task)
+
+    finalize_assistant_ui([m1, m2], focused_task=second_task, pending_choice=m1.boundary)
+
+    active_blocks = [
+        block
+        for msg in (m1, m2)
+        if msg.ui is not None
+        for block in msg.ui.blocks
+        if block.type == "interaction" and block.state == "ACTIVE"
+    ]
+    assert len(active_blocks) == 1
+    assert active_blocks[0].submit_action_id == "act_second"
+    first_interaction = next(block for block in m1.ui.blocks if block.type == "interaction")
+    assert first_interaction.state == "RESOLVED"
+    assert first_interaction.submit_action_id is None

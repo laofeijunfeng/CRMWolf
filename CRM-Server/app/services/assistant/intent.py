@@ -82,7 +82,7 @@ QUERY_REFUSAL_MESSAGE = not_written(f"销售助手不做查询，查询请到客
 
 @dataclass(frozen=True)
 class IntentVerdict:
-    route: Literal["activity", "entity", "intent_question", "refuse"]
+    route: Literal["activity", "entity", "intent_question", "query", "refuse"]
     task_kind: TaskKind = "customer_activity"
     message: str = ""
     links: tuple[ConversationLink, ...] = ()
@@ -107,7 +107,7 @@ def judge_intent(plan: AgentSemanticPlan, confidence: float) -> IntentVerdict:
             return IntentVerdict(route="intent_question", task_kind=entity_kind)
         return _refuse(UNCLEAR_MESSAGE)
     if plan.speech_act == "ASK_FACT" and operation == "READ":
-        return IntentVerdict(route="refuse", message=QUERY_REFUSAL_MESSAGE, links=QUERY_REFUSAL_LINKS)
+        return IntentVerdict(route="query")
     if obj == "CUSTOMER_MEMBER":
         return _refuse("设置客户负责人或成员请到客户详情处理", _CUSTOMERS)
     if obj == "INVOICE_TITLE" and operation == "TRANSITION":

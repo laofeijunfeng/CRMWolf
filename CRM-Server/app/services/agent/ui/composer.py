@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Literal, cast
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-    from app.services.agent.orchestrator import WorkflowContinuation
+    from app.services.agent.orchestrator import AgentExecutionError, WorkflowContinuation
+    from app.services.agent.query.agent import CRMQueryAgentResult
     from app.services.agent.query.registry import CustomerContextResult
     from app.services.agent.query.schemas import CRMQueryResult, EntityRef
     from app.services.agent.workflow import WorkflowInteraction, WorkflowProgress
@@ -60,6 +61,8 @@ _UI_ERROR_CODE_BY_INTERNAL_CODE = {
     "QUERY_EXECUTION_FAILED": "UPSTREAM_UNAVAILABLE",
     "WORKFLOW_EXECUTION_FAILED": "UPSTREAM_UNAVAILABLE",
 }
+
+_QUERY_FAILURE_TITLE = "查询没完成"
 
 _FAILURE_TITLE_BY_CODE = {
     "ROOT_DECISION_MODEL_TIMEOUT": "这次没处理成",
@@ -308,25 +311,56 @@ class AgentUIComposer:
         )
 
     def _compose_query(self, dispatch: QueryDispatchResult) -> AgentUIComposition:
-        response = dispatch.query_result.response
+        return self.compose_query_result(dispatch.query_result)
+
+    def compose_query_result(self, query_result: CRMQueryAgentResult) -> AgentUIComposition:
+        response = query_result.response
         text = response.answer or response.clarification_question
         if text is None:
             raise ValueError("Query result has no user-visible response")
 
-        query_projection = self._query_block(dispatch.query_result.query_results)
-        context_projection = None
-        if query_projection is None:
-            context_projection = self._authoritative_entity_block(
-                dispatch.query_result.authoritative_entity_refs
-            )
-        if context_projection is None and query_projection is None:
-            context_projection = self._customer_context_block(
-                dispatch.query_result.customer_context_results
-            )
-        block = query_projection or context_projection
+        query_projection = self._query_block(query_result.query_results)
+        if query_projection is not None:
+            return self._query_list_composition(text, query_projection)
+        context_projection = self._authoritative_entity_block(
+            query_result.authoritative_entity_refs
+        ) or self._customer_context_block(query_result.customer_context_results)
+        if context_projection is None:
+            return self._composition(text=text, route="QUERY")
+        return self._composition(
+            text=text,
+            route="QUERY",
+            blocks=(context_projection,),
+            result_set_id=context_projection.result_set_id,
+        )
+
+    def compose_query_text(self, text: str) -> AgentUIComposition:
+        """Answer a query turn with server-decided text and no engine result."""
+
+        return self._composition(text=text, route="QUERY")
+
+    def compose_query_page(self, result: CRMQueryResult, *, text: str) -> AgentUIComposition:
+        """Project one deterministic re-run page of an already-answered query."""
+
+        block = self._query_block([result])
         if block is None:
             return self._composition(text=text, route="QUERY")
-        if query_projection is not None and block.entity_type == "customer":
+        return self._query_list_composition(text, block)
+
+    def compose_query_failure(self, error: AgentExecutionError) -> AgentUIComposition:
+        return self._error_composition(
+            text=error.message,
+            route="QUERY",
+            block=self._error_block(
+                code=error.code,
+                title=_QUERY_FAILURE_TITLE,
+                message=error.message,
+                retryable=error.retryable,
+            ),
+        )
+
+    def _query_list_composition(self, text: str, block: EntityListBlock) -> AgentUIComposition:
+        if block.entity_type == "customer":
             text = f"共找到 {block.total} 家公司。"
         return self._composition(
             text=text,
@@ -415,7 +449,7 @@ class AgentUIComposer:
                 "MODEL_OUTPUT_INVALID",
             }
         ):
-            return "查询没完成"
+            return _QUERY_FAILURE_TITLE
         return _FAILURE_TITLE_BY_CODE.get(dispatch.error.code, "这次没处理成")
 
     @staticmethod

@@ -27,12 +27,17 @@ const props = defineProps<{
   disabled?: boolean
   lockedActionIds?: ReadonlySet<string>
   notices?: Readonly<Record<string, InteractionNotice>>
+  stepStartedAt?: string | null | undefined
+  unknownCommit?: boolean | undefined
+  reconciling?: boolean | undefined
 }>()
 
 const emit = defineEmits<{
   action: [actionId: string]
   interaction: [actionId: string, values: JsonObject]
   'open-entity': [entityRef: EntityRef]
+  reconcile: []
+  paginate: [actionId: string]
 }>()
 
 const forwardInteraction = (actionId: string, values: JsonObject): void => {
@@ -81,7 +86,11 @@ const isCompactTaskMessage = computed(() => (
       />
       <AgentUITableBlock v-else-if="block.type === 'table'" :block="block" />
       <AgentUITimelineBlock v-else-if="block.type === 'timeline'" :block="block" />
-      <AgentUIProcessBlock v-else-if="block.type === 'process'" :block="block" />
+      <AgentUIProcessBlock
+        v-else-if="block.type === 'process'"
+        :block="block"
+        :step-started-at="stepStartedAt"
+      />
       <AgentUIMetricGroupBlock v-else-if="block.type === 'metric_group'" :block="block" />
       <AgentUINoticeBlock v-else-if="block.type === 'notice'" :block="block" />
       <AgentUIErrorBlock v-else-if="block.type === 'error'" :block="block" />
@@ -91,8 +100,11 @@ const isCompactTaskMessage = computed(() => (
         :disabled="disabled === true"
         :locked="isInteractionLocked(block.submit_action_id)"
         :notice="(notices ?? EMPTY_NOTICES)[block.submit_action_id ?? block.interaction_id] ?? null"
+        :unknown-commit="unknownCommit === true"
+        :reconciling="reconciling === true"
         @submit="forwardInteraction"
         @open-entity="emit('open-entity', $event)"
+        @reconcile="emit('reconcile')"
       />
       <AgentUIActionResultBlock
         v-else-if="block.type === 'action_result'"
@@ -103,7 +115,7 @@ const isCompactTaskMessage = computed(() => (
         v-else
         :block="block"
         :disabled="disabled === true"
-        @action="emit('action', $event)"
+        @action="emit('paginate', $event)"
       />
     </template>
     <AgentUIActionBar

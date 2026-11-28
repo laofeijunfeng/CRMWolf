@@ -7,19 +7,21 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
 
 from app.core.database import get_db
-from app.core.deps import get_current_active_user, get_current_user_team
+from app.core.deps import get_current_active_user, get_current_user_team, security
 from app.crud.assistant_conversation import ConversationConflict
 from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_turn import AssistantTurn
 from app.models.team import UserTeam
 from app.schemas.assistant import (
+    AssistantAsyncOperationResponse,
+    AssistantAsyncOperationStatusLiteral,
     AssistantTaskReconcileResponse,
     AssistantTaskView,
     AssistantTurnEventView,
@@ -27,14 +29,17 @@ from app.schemas.assistant import (
     CreateTaskRequest,
     PendingEntityDraftView,
     RetryTurnRequest,
+    StopTurnResponse,
     SubmitInputRequest,
 )
 from app.schemas.assistant_conversation import (
+    AssistantAttachmentUploadResponse,
     ConversationChoiceRequest,
     ConversationCommandRequest,
     ConversationEntryRetryRequest,
     ConversationFocusRequest,
     ConversationKindRequest,
+    ConversationPaginationRequest,
     ConversationReply,
     ConversationRequestStatus,
     ConversationTextRequest,
@@ -56,11 +61,20 @@ from app.services.assistant.turns import (
     reprocess_allowed,
     retry_owned_turn,
     schedule_turn,
+    stop_turn,
+)
+from app.services.file_storage import (
+    ASSISTANT_ATTACHMENT_ROOT,
+    MAX_FILE_SIZE,
+    FileStorageError,
+    detect_image_mime,
+    file_storage_service,
 )
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from fastapi.security import HTTPAuthorizationCredentials
     from sqlalchemy.orm import Session
 
     from app.models.user import User
@@ -553,6 +567,101 @@ def retry_turn(
     )
 
 
+@router.post("/tasks/{public_id}/turns/{turn_id}/stop", response_model=StopTurnResponse)
+def stop_task_turn(
+    public_id: str,
+    turn_id: str,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> StopTurnResponse:
+    """Cancel an in-flight turn without cancelling the parent task; refuses during write phase."""
+    task = _owned_task(db, team_id=team_id, user_id=current_user.id, public_id=public_id)
+    try:
+        stopped, reason = stop_turn(db, task=task, turn_public_id=turn_id)
+    except (LookupError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="轮次不存在") from exc
+    db.refresh(task)
+    return StopTurnResponse(stopped=stopped, reason=reason, task=task_view(task, db))
+
+
+_ASYNC_OPERATION_STATUS_MAP: dict[str, AssistantAsyncOperationStatusLiteral] = {
+    "QUEUED": "QUEUED",
+    "RETRY_SCHEDULED": "QUEUED",
+    "RUNNING": "RUNNING",
+    "WAITING_USER": "RUNNING",
+    "DEGRADED": "DEGRADED",
+    "SUCCEEDED": "SUCCEEDED",
+    "FAILED": "FAILED",
+    "CANCELLED": "FAILED",
+}
+
+
+def _normalize_async_operation_status(raw_status: str) -> AssistantAsyncOperationStatusLiteral:
+    return _ASYNC_OPERATION_STATUS_MAP.get(raw_status, "QUEUED")
+
+
+@router.get("/operations", response_model=list[AssistantAsyncOperationResponse])
+def list_assistant_operations(
+    limit: int = Query(default=10, ge=1, le=50),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> list[AssistantAsyncOperationResponse]:
+    """List this user's durable async operations with read-repair, strictly scoped to team + user."""
+    from app.api.agent import (
+        _read_repair_customer_activity_post_commit_operations,
+        _read_repair_customer_intelligence_operations,
+        _read_repair_customer_opportunity_suggestion_operations,
+    )
+    from app.models.agent_async_operation import AgentAsyncOperation
+    from app.services.agent.async_operation_service import (
+        AgentAsyncOperationProjection,
+        agent_async_operation_service,
+    )
+
+    user_id = int(current_user.id)
+
+    def _query_projections() -> list[AgentAsyncOperationProjection]:
+        rows = (
+            db.query(AgentAsyncOperation)
+            .filter(
+                AgentAsyncOperation.team_id == team_id,
+                AgentAsyncOperation.user_id == user_id,
+            )
+            .order_by(AgentAsyncOperation.updated_time.desc(), AgentAsyncOperation.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [agent_async_operation_service._projection(row) for row in rows]
+
+    operations = _query_projections()
+    repaired = _read_repair_customer_intelligence_operations(db, operations)
+    if _read_repair_customer_activity_post_commit_operations(db, operations):
+        repaired = True
+    if _read_repair_customer_opportunity_suggestion_operations(db, operations):
+        repaired = True
+    if repaired:
+        operations = _query_projections()
+    return [
+        AssistantAsyncOperationResponse(
+            public_id=op.public_id,
+            operation_type=op.operation_type,
+            resource_type=op.resource_type,
+            resource_public_id=op.resource_public_id,
+            status=_normalize_async_operation_status(op.status),
+            summary=op.summary,
+            current_step=op.current_step,
+            error_message=op.error_message,
+            started_time=op.started_time,
+            finished_time=op.finished_time,
+            updated_time=op.updated_time,
+            created_time=op.created_time,
+        )
+        for op in operations
+    ]
+
+
 @router.post("/tasks/{public_id}/submit")
 def submit_input(
     public_id: str,
@@ -611,6 +720,7 @@ def submit_input(
             return [(event.seq, event.event, event.data_json) for event in emitted], current.status in {
                 "SUCCEEDED",
                 "FAILED",
+                "CANCELLED",
             }
 
     async def stream() -> AsyncIterator[str]:
@@ -637,6 +747,72 @@ def submit_input(
 # Conversation endpoints intentionally retain the existing task submit transport:
 # the service has already accepted its deterministic durable turn before SSE replay.
 _conversation_service = ConversationService()
+_required_attachment_file = File(..., description="销售助手图片附件（PNG/JPEG/WEBP，≤10MB）")
+
+
+@router.post("/attachments", response_model=AssistantAttachmentUploadResponse)
+async def upload_attachment(
+    file: UploadFile = _required_attachment_file,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+) -> AssistantAttachmentUploadResponse:
+    """Store one image under this team + user; the returned ref is the only file_url the text endpoint accepts."""
+    content = await file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=422, detail="单张图片大小不能超过 10MB。")
+    mime_type = detect_image_mime(content)
+    if mime_type is None:
+        raise HTTPException(status_code=422, detail="仅支持 PNG、JPEG、WEBP 格式图片。")
+    file_name = file.filename or ""
+    try:
+        file_url = file_storage_service.save_assistant_attachment(
+            team_id=team_id, user_id=int(current_user.id), filename=file_name, content=content
+        )
+    except FileStorageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AssistantAttachmentUploadResponse(
+        file_url=file_url, file_name=file_name, mime_type=mime_type, size_bytes=len(content)
+    )
+
+
+@router.get("/attachments/{stored_name}")
+def get_attachment(
+    stored_name: str = Path(min_length=1, max_length=128),
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+) -> Response:
+    """Serve one user-owned image attachment; fail closed across teams, users, and traversal paths."""
+    if stored_name in {".", ".."} or "/" in stored_name or "\\" in stored_name:
+        raise HTTPException(status_code=404, detail="附件不存在或无权访问")
+    file_url = f"{ASSISTANT_ATTACHMENT_ROOT}/{team_id}/{int(current_user.id)}/{stored_name}"
+    if not file_storage_service.file_exists(file_url):
+        raise HTTPException(status_code=404, detail="附件不存在或无权访问")
+    try:
+        full_path = file_storage_service.get_full_path(file_url)
+        with open(full_path, "rb") as fp:
+            content = fp.read()
+    except (FileStorageError, OSError) as exc:
+        raise HTTPException(status_code=404, detail="附件不存在或无权访问") from exc
+    mime_type = detect_image_mime(content)
+    if mime_type is None:
+        raise HTTPException(status_code=404, detail="附件不存在或无权访问")
+    return Response(content=content, media_type=mime_type, headers={"Cache-Control": "private, max-age=3600"})
+
+
+def _require_owned_attachments(request: ConversationTextRequest, *, team_id: int, user_id: int) -> None:
+    """Fail closed: every attachment must be a file this user uploaded and that still exists."""
+    prefix = f"{ASSISTANT_ATTACHMENT_ROOT}/{team_id}/{user_id}/"
+    for attachment in request.attachments:
+        stored_name = attachment.file_url.removeprefix(prefix)
+        if (
+            stored_name == attachment.file_url
+            or stored_name in {"", ".", ".."}
+            or "/" in stored_name
+            or "\\" in stored_name
+            or not file_storage_service.file_exists(attachment.file_url)
+        ):
+            raise HTTPException(status_code=422, detail="附件不存在或无权使用")
+
 
 
 @router.post('/conversation/open', response_model=ConversationView)
@@ -683,10 +859,16 @@ async def conversation_text(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> ConversationReply:
+    _require_owned_attachments(request, team_id=team_id, user_id=int(current_user.id))
     try:
         return await _conversation_service.submit_text(
-            db, team_id=team_id, user_id=int(current_user.id), request=request
+            db,
+            team_id=team_id,
+            user_id=int(current_user.id),
+            request=request,
+            authorization=f"Bearer {credentials.credentials}",
         )
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
@@ -728,6 +910,7 @@ async def retry_conversation_entry(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> ConversationReply:
     try:
         return await _conversation_service.retry_entry(
@@ -736,6 +919,7 @@ async def retry_conversation_entry(
             user_id=int(current_user.id),
             entry_id=entry_id,
             expected_version=request.expected_version,
+            authorization=f"Bearer {credentials.credentials}",
         )
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
@@ -747,9 +931,15 @@ async def resume_conversation(
     team_id: int = Depends(get_current_user_team),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> ConversationReply:
     try:
-        return await _conversation_service.resume(db, team_id=team_id, user_id=int(current_user.id))
+        return await _conversation_service.resume(
+            db,
+            team_id=team_id,
+            user_id=int(current_user.id),
+            authorization=f"Bearer {credentials.credentials}",
+        )
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -778,6 +968,27 @@ def conversation_change_kind(
 ) -> ConversationReply:
     try:
         return _conversation_service.change_kind(db, team_id=team_id, user_id=int(current_user.id), request=request)
+    except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/conversation/pagination", response_model=ConversationReply)
+async def conversation_pagination(
+    request: ConversationPaginationRequest,
+    team_id: int = Depends(get_current_user_team),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> ConversationReply:
+    try:
+        return await _conversation_service.paginate(
+            db,
+            team_id=team_id,
+            user_id=int(current_user.id),
+            request=request,
+            authorization=f"Bearer {credentials.credentials}",
+        )
     except (ConversationConflict, AssistantRequestConflict, AssistantStateConflict) as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

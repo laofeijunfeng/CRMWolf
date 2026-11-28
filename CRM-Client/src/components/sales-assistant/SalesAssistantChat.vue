@@ -2,9 +2,13 @@
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, shallowReactive, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { isAxiosError } from 'axios'
-import { ArrowDown, ArrowUp, Info, LoaderCircle, Lock, MessageSquare, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, AtSign, ChevronDown, ChevronUp, ImagePlus, Info, LoaderCircle, Lock, MessageSquare, Mic, RotateCcw, Square, X } from 'lucide-vue-next'
 import { assistantApi, parseStageEvent, StageNameSchema, submitInputStream } from '@/api/assistant'
-import type { AssistantTurn, StageEvent, StageName, StageSegment, SubmitAssistantInput } from '@/api/assistant'
+import type { AssistantAsyncOperation, AssistantAsyncOperationStatus, AssistantTurn, ConversationAttachmentRef, StageEvent, StageName, StageSegment, SubmitAssistantInput } from '@/api/assistant'
+import customerApi, { type CustomerResponse } from '@/api/customer'
+import { getActivePinia } from 'pinia'
+import { useUserStore } from '@/stores/user'
+import { useTeamStore } from '@/stores/team'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,6 +18,7 @@ import AgentUIBanner from '@/components/agent-ui/AgentUIBanner.vue'
 import AgentUIProcessBlock from '@/components/agent-ui/AgentUIProcessBlock.vue'
 import DataViewStatePanel from '@/components/crmwolf/DataViewStatePanel.vue'
 import FeedbackAlert from '@/components/crmwolf/FeedbackAlert.vue'
+import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import type { ProcessBlock, ProcessItemMeta, ProcessItemStatus } from '@/components/agent-ui/agentUIProcess'
 import type { FeedbackError } from '@/types/feedback'
 import type { InteractionNotice } from '@/components/agent-ui/interactionNotice'
@@ -44,11 +49,15 @@ interface ChatEntry {
   outcome?: NonNullable<ConversationView['messages'][number]['outcome']> | undefined
   ui?: AgentUIEnvelope | null | undefined
   links?: ConversationLink[] | undefined
+  attachments?: ConversationAttachmentRef[] | undefined
   projection?: ConversationProjection | null | undefined
 }
 
 const router = useRouter()
 
+const activePinia = getActivePinia()
+const userStore = activePinia !== undefined ? useUserStore(activePinia) : null
+const teamStore = activePinia !== undefined ? useTeamStore(activePinia) : null
 const task = shallowRef<AssistantTaskView | null>(null)
 let disposed = false
 let navigationVersion = 0
@@ -95,12 +104,18 @@ const syncComposerHeight = (): void => {
 watch(inputText, () => {
   void nextTick(syncComposerHeight)
 })
+const onVisualViewportResize = (): void => {
+  syncComposerHeight()
+  scrollIfPinned(false)
+}
 onMounted(() => {
   syncComposerHeight()
   window.addEventListener('resize', syncComposerHeight)
+  window.visualViewport?.addEventListener('resize', onVisualViewportResize)
 })
 onUnmounted(() => {
   window.removeEventListener('resize', syncComposerHeight)
+  window.visualViewport?.removeEventListener('resize', onVisualViewportResize)
 })
 const submitting = ref(false)
 const sendingText = ref(false)
@@ -254,11 +269,13 @@ const pushEntry = (
   role: 'user' | 'assistant',
   text: string,
   entryWaiting: TaskWaiting | null = null,
-  replayed = false
+  replayed = false,
+  attachments?: ConversationAttachmentRef[] | undefined
 ): void => {
   seq.value += 1
   entries.value.push(shallowReactive<ChatEntry>({
-    id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value
+    id: seq.value, role, text, waiting: entryWaiting, replayed, at: new Date(), ownTask: task.value,
+    ...(attachments !== undefined && attachments.length > 0 ? { attachments } : {}),
   }))
   if (role === 'user') scrollToBottomForce()
   else scrollIfPinned()
@@ -332,12 +349,25 @@ const startEpisode = (): void => {
   processing.value.authoritativeWrite = false
   processing.value.settlement = 'none'
 }
+const streamingText = ref('')
+const activeTurnId = ref<string | null>(null)
+const activeStepStartedAt = ref<string | null>(null)
+let streamAbortController: AbortController | null = null
+let userStoppedStream = false
+const stoppingTurn = ref(false)
+const stoppedGeneration = shallowRef<{ text: string; partialText: string } | null>(null)
+const stopWriteInProgressNotice = ref('')
+const lastSubmittedText = ref('')
+
 const resetProcessingEpisode = (): void => {
   processing.value.episode = 0
   processing.value.baselineIds = []
   processing.value.authoritativeWrite = false
   processing.value.settlement = 'none'
   processing.value.stages = []
+  streamingText.value = ''
+  activeStepStartedAt.value = null
+  activeTurnId.value = null
 }
 const noteEpisodeFailure = (code: string | undefined): void => {
   if (processing.value.episode === 0 || processing.value.authoritativeWrite) return
@@ -349,6 +379,11 @@ const beginProcessing = (): void => {
   processing.value.active = true
   processing.value.stages = []
   processing.value.startedAt = Date.now()
+  streamingText.value = ''
+  activeStepStartedAt.value = null
+  stoppedGeneration.value = null
+  stopWriteInProgressNotice.value = ''
+  userStoppedStream = false
 }
 const applyStageEvent = (event: StageEvent): void => {
   if (event.phase !== 'start' && event.phase !== 'done' && event.phase !== 'failed') return
@@ -362,23 +397,27 @@ const applyStageEvent = (event: StageEvent): void => {
   const segment = event.segment
   if (event.phase === 'start') {
     target.status = 'running'
+    activeStepStartedAt.value = event.step_started_at ?? new Date().toISOString()
     if (segment === undefined || segment.index === 1) target.ms = undefined
     target.score = undefined
     target.segment = segment === undefined ? undefined : { ...segment, done: false }
   } else if (event.phase === 'failed') {
     target.status = 'failed'
     target.segment = segment === undefined ? undefined : { ...segment, done: false }
+    if (!stages.some((item) => item.status === 'running')) activeStepStartedAt.value = null
   } else if (segment === undefined) {
     target.status = 'done'
     target.ms = event.ms
     target.score = event.score
     target.segment = undefined
+    if (!stages.some((item) => item.status === 'running')) activeStepStartedAt.value = null
   } else {
     // A finished segment before the last keeps the stage running.
     target.status = segment.index < segment.total ? 'running' : 'done'
     target.ms = (target.ms ?? 0) + (event.ms ?? 0)
     target.score = event.score
     target.segment = { ...segment, done: true }
+    if (!stages.some((item) => item.status === 'running')) activeStepStartedAt.value = null
   }
   scrollIfPinned()
 }
@@ -391,6 +430,9 @@ const markStageFailed = (stage: StageName | undefined): void => {
 const endProcessing = (): void => {
   // Keep stages. This also runs while recovery is still reading the turn.
   processing.value.active = false
+  activeStepStartedAt.value = null
+  activeTurnId.value = null
+  streamAbortController = null
 }
 const processingHint = computed(() => {
   if (!processing.value.active) return ''
@@ -529,6 +571,8 @@ onUnmounted(() => {
   stopAutoRecovery()
   stopAutoReconcile(true)
   stopOfflineSync()
+  streamAbortController?.abort()
+  streamAbortController = null
 })
 
 const adoptProcessingTurn = (updated: AssistantTaskView): void => {
@@ -794,6 +838,9 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
     const pending = { input: request, targetId, displayText, turnId: prepared.turn_id, cursor: 0 }
     pendingRequest.value = pending
     beginProcessing()
+    activeTurnId.value = prepared.turn_id
+    const controller = new AbortController()
+    streamAbortController = controller
     const active = (): boolean => !disposed && navigation === navigationVersion && pendingRequest.value === pending
     const acceptsStreamEvent = (): boolean => active() && task.value?.public_id === targetId && task.value.status === 'ACTIVE'
       && (task.value.processing_turn_id == null || task.value.processing_turn_id === prepared.turn_id)
@@ -807,6 +854,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
       onAccepted: (id, seq) => {
         if (!acceptsStreamEvent() || id !== prepared.turn_id) return
         turnId = id
+        activeTurnId.value = id
         cursor = Math.max(cursor, seq ?? 0)
         rememberEvent(id, seq)
         if (pendingRequest.value !== null) { pendingRequest.value.turnId = id; pendingRequest.value.cursor = cursor }
@@ -818,9 +866,18 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (pendingRequest.value !== null) pendingRequest.value.cursor = cursor
         applyStageEvent(event)
       },
+      onTextDelta: (event) => {
+        if (!acceptsStreamEvent()) return
+        cursor = Math.max(cursor, event.seq)
+        rememberEvent(turnId, event.seq)
+        if (pendingRequest.value !== null) pendingRequest.value.cursor = cursor
+        streamingText.value += event.delta
+        scrollIfPinned()
+      },
       onWaiting: (data) => {
         if (!acceptsStreamEvent()) return
         delivered = true
+        streamingText.value = ''
         cursor = Math.max(cursor, data.seq ?? 0)
         publishTask(data.task, data.message, !failed)
       },
@@ -828,6 +885,7 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
         if (!acceptsStreamEvent()) return
         delivered = true
         failed = true
+        streamingText.value = ''
         cursor = Math.max(cursor, event.seq ?? 0)
         markStageFailed(event.stage)
         pushEntry('assistant', event.message)
@@ -840,10 +898,10 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
           captureUnknownResult(targetId, turnId, cursor)
         }
       },
-      onNetworkLost: () => { if (active()) disconnected = true },
+      onNetworkLost: () => { if (active() && !userStoppedStream) disconnected = true },
       onTerminalInvalid: () => { if (active()) terminalInvalid = true }
-    })
-    if (!active()) return
+    }, { signal: controller.signal })
+    if (!active() || userStoppedStream) return
     if (!delivered && !disconnected && turnId !== '') {
       try {
         const previouslyFocused = task.value
@@ -900,8 +958,12 @@ const runPrepared = async (prepared: NonNullable<ConversationReply['submission']
 
 const submitText = async (): Promise<void> => {
   const text = inputText.value.trim()
-  if (!text || loadingConversation.value || busy.value || conversation.value === null || conversation.value.pending_choice !== null) return
+  if ((!text && pendingAttachments.value.length === 0) || sendingText.value || loadingConversation.value || busy.value || conversation.value === null || conversation.value.pending_choice !== null) return
   reconcileNotWrittenNotice.value = ''
+  stopWriteInProgressNotice.value = ''
+  stoppedGeneration.value = null
+  attachmentError.value = ''
+  closeMentionPopover()
   sendingText.value = true
   try {
     if (explicitNone.value && waiting.value?.type === 'FIELD' && waiting.value.field === 'next_action') {
@@ -910,13 +972,48 @@ const submitText = async (): Promise<void> => {
       return
     }
     explicitNone.value = false
+    let uploadedAttachments: ConversationAttachmentRef[] = []
+    if (pendingAttachments.value.length > 0) {
+      try {
+        uploadedAttachments = await uploadPendingAttachments()
+      } catch {
+        attachmentError.value = '图片上传失败，请重试。'
+        return
+      }
+    }
+    lastSubmittedText.value = text
     unacceptedText.value = text
-    const fingerprint = `text:${text}`
-    const request = { text, client_request_id: requestKey(fingerprint), expected_version: conversation.value.version }
-    pushEntry('user', text)
+    const mentioned = mentionedCustomer.value
+    const attachments = pendingAttachments.value
+    const fingerprint = `text:${text}:${mentioned?.public_id ?? ''}:${attachments.map((a) => a.file_name).join(',')}`
+    const request = {
+      text,
+      client_request_id: requestKey(fingerprint),
+      expected_version: conversation.value.version,
+      ...(mentioned !== null ? { mentioned_customer_public_id: mentioned.public_id } : {}),
+      ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
+    }
+    if (typeof window.URL.createObjectURL === 'function') {
+      for (const item of attachments) {
+        if (item.uploaded !== null && attachmentPreviewUrls.value[item.uploaded.file_url] === undefined) {
+          registerAttachmentPreviewUrl(item.uploaded.file_url, window.URL.createObjectURL(item.file))
+        }
+      }
+    }
+    pushEntry('user', text, null, false, uploadedAttachments)
     inputText.value = ''
+    mentionedCustomer.value = null
+    pendingAttachments.value = []
+    clearStoredDraft()
     await dispatchConversation(() => assistantApi.conversationText(request), text, {
-      key: request.client_request_id, fingerprint, cardNotice: false, onNotSaved: restoreUnacceptedText
+      key: request.client_request_id,
+      fingerprint,
+      cardNotice: false,
+      onNotSaved: () => {
+        restoreUnacceptedText()
+        if (mentioned !== null && mentionedCustomer.value === null) mentionedCustomer.value = mentioned
+        if (attachments.length > 0 && pendingAttachments.value.length === 0) pendingAttachments.value = attachments
+      }
     })
   } finally {
     sendingText.value = false
@@ -928,6 +1025,39 @@ const onInputEnter = (event: KeyboardEvent): void => {
   if (event.isComposing || event.keyCode === 229) return
   event.preventDefault()
   void submitText()
+}
+
+const onComposerKeydown = (event: KeyboardEvent): void => {
+  if (mentionOpen.value) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      if (mentionResults.value.length > 0) {
+        mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionResults.value.length
+      }
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (mentionResults.value.length > 0) {
+        mentionActiveIndex.value = (mentionActiveIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
+      }
+      return
+    }
+    if ((event.key === 'Enter' || event.keyCode === 13) && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault()
+      const selected = mentionResults.value[mentionActiveIndex.value]
+      if (selected !== undefined) selectMentionCustomer(selected)
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMentionPopover()
+      return
+    }
+  }
+  if ((event.key === 'Enter' || event.keyCode === 13) && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    onInputEnter(event)
+  }
 }
 
 const clearCardNotice = (key: string): void => {
@@ -981,6 +1111,7 @@ const submit = async (
     // The card cannot show this itself: the server confirmed the choice was never saved.
     if (noticeKey !== null && choice !== null) interactionNotices.value[noticeKey] = { kind: 'failed', choice, clientRequestId }
   }
+  holdAction(actionId)
   const dispatched = await dispatchConversation(() => assistantApi.conversationCommand(request), displayText, {
     key: clientRequestId, fingerprint, cardNotice: noticeKey !== null && choice !== null, onNotSaved,
     onAccepted: () => { releaseAction(actionId) }
@@ -1198,7 +1329,517 @@ const loadPendingDrafts = async (): Promise<void> => {
     // The list is a shortcut; the conversation itself stays usable without it.
   }
 }
-watch(() => conversation.value?.version, (version) => { if (version !== undefined) void loadPendingDrafts() })
+// Module B: Durable Async Operations (strictly isolated from Envelope/Process status enums)
+const ASYNC_OP_STATUS_PRESENTATION: Record<AssistantAsyncOperationStatus, { status: string; label: string }> = {
+  QUEUED: { status: 'inactive', label: '排队中' },
+  RUNNING: { status: 'active', label: '执行中' },
+  DEGRADED: { status: 'warning', label: '已降级' },
+  SUCCEEDED: { status: 'success', label: '已完成' },
+  FAILED: { status: 'danger', label: '失败' },
+}
+const asyncOperations = shallowRef<AssistantAsyncOperation[]>([])
+const asyncOperationsExpanded = ref(true)
+let asyncOperationsRequest = 0
+const loadAsyncOperations = async (): Promise<void> => {
+  const order = ++asyncOperationsRequest
+  try {
+    const items = await assistantApi.listOperations(10)
+    if (!disposed && order === asyncOperationsRequest) asyncOperations.value = items
+  } catch {
+    // Non-blocking background operations strip; silently ignore failures.
+  }
+}
+watch(() => conversation.value?.version, (version) => {
+  if (version !== undefined) {
+    void loadPendingDrafts()
+    void loadAsyncOperations()
+  }
+})
+onMounted(() => { void loadAsyncOperations() })
+
+const handlePagination = async (actionId: string): Promise<void> => {
+  if (disposed || busy.value || conversation.value === null || actionId.trim() === '') return
+  const fingerprint = `pagination:${actionId}`
+  const request = {
+    action_id: actionId,
+    expected_version: conversation.value.version,
+    client_request_id: requestKey(fingerprint),
+  }
+  const result = await dispatchConversation(() => assistantApi.conversationPagination(request), '', {
+    key: request.client_request_id,
+    fingerprint,
+    cardNotice: false,
+    onNotSaved: () => undefined,
+  })
+  if (result.outcome === 'accepted') scrollToBottomForce(true)
+}
+
+const canStopGeneration = computed(() => (
+  processingInFlight.value
+  && task.value !== null
+  && (activeTurnId.value ?? pendingRequest.value?.turnId ?? processingRecovery.value?.turnId ?? '') !== ''
+))
+// Module C: Dual-mode Stop Generation vs Cancel Task
+const stopGeneration = async (): Promise<void> => {
+  if (stoppingTurn.value || disposed) return
+  const currentTask = task.value
+  const turnId = activeTurnId.value ?? pendingRequest.value?.turnId ?? processingRecovery.value?.turnId ?? null
+  if (currentTask === null || turnId === null || turnId === '') return
+  stoppingTurn.value = true
+  stopWriteInProgressNotice.value = ''
+  const partialText = streamingText.value
+  const pendingDisplay = pendingRequest.value?.displayText ?? ''
+  const originalText = pendingDisplay !== '' ? pendingDisplay : lastSubmittedText.value
+  userStoppedStream = true
+  streamAbortController?.abort()
+  streamAbortController = null
+  try {
+    const res = await assistantApi.stopTurn(currentTask.public_id, turnId)
+    if (disposed) return
+    if (res.reason === 'WRITE_IN_PROGRESS') {
+      userStoppedStream = false
+      stopWriteInProgressNotice.value = '正在写入 CRM，无法中途停止，请等待写入完成。'
+      publishTask(res.task)
+      if (res.task.processing_turn_id != null) {
+        adoptProcessingTurn(res.task)
+        if (processingRecovery.value !== null) {
+          void startAutoRecovery(processingRecovery.value, '已受理，正在确认处理结果')
+        }
+      }
+      return
+    }
+    stopAutoRecovery()
+    processingRecovery.value = null
+    resultPending.value = false
+    pendingRequest.value = null
+    endProcessing()
+    streamingText.value = ''
+    publishTask(res.task, undefined, false)
+    stoppedGeneration.value = { text: originalText, partialText }
+    await refreshConversation()
+  } catch {
+    if (!disposed) await refreshConversation()
+  } finally {
+    if (!disposed) stoppingTurn.value = false
+  }
+}
+
+const cancelTaskDuringStream = async (): Promise<void> => {
+  if (stoppingTurn.value || disposed) return
+  await stopGeneration()
+  if (disposed || stopWriteInProgressNotice.value !== '') return
+  stoppedGeneration.value = null
+  await cancelTask()
+}
+
+const regenerateStopped = (): void => {
+  const stopped = stoppedGeneration.value
+  if (stopped === null || stopped.text.trim() === '' || busy.value) return
+  inputText.value = stopped.text
+  stoppedGeneration.value = null
+  void submitText()
+}
+
+// Module D: Composer Enhancements (D1 Local Draft, D2 @customer, D3 Multimodal Entry)
+interface MentionedCustomer {
+  public_id: string
+  account_name: string
+}
+interface StoredAssistantDraft {
+  text: string
+  mentionedCustomer: MentionedCustomer | null
+  updatedAt: string
+}
+const mentionedCustomer = shallowRef<MentionedCustomer | null>(null)
+const draftRestoredAt = ref<string | null>(null)
+let draftSaveTimer: ReturnType<typeof setTimeout> | null = null
+let restoringDraft = false
+
+const draftStorageKey = computed<string | null>(() => {
+  const teamId = teamStore?.currentTeam?.id
+  const userId = userStore?.userInfo?.id
+  const convId = conversation.value?.public_id
+  if (teamId === undefined || userId === undefined || convId === undefined || convId === '') return null
+  return `crmwolf:assistant:draft:${teamId}:${userId}:${convId}`
+})
+
+const formatDraftTime = (iso: string): string => {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+const clearStoredDraft = (keyOverride?: string | null): void => {
+  if (draftSaveTimer !== null) {
+    clearTimeout(draftSaveTimer)
+    draftSaveTimer = null
+  }
+  draftRestoredAt.value = null
+  const key = keyOverride === undefined ? draftStorageKey.value : keyOverride
+  if (key === null) return
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // Ignore storage quota/security errors.
+  }
+}
+
+const clearDraft = (): void => {
+  restoringDraft = true
+  inputText.value = ''
+  mentionedCustomer.value = null
+  clearStoredDraft()
+  restoringDraft = false
+}
+
+const scheduleDraftSave = (): void => {
+  if (restoringDraft || disposed) return
+  const key = draftStorageKey.value
+  if (key === null) return
+  if (draftSaveTimer !== null) clearTimeout(draftSaveTimer)
+  draftSaveTimer = setTimeout(() => {
+    draftSaveTimer = null
+    if (disposed || draftStorageKey.value !== key) return
+    const text = inputText.value
+    const customer = mentionedCustomer.value
+    try {
+      if (text.trim() === '' && customer === null) {
+        window.localStorage.removeItem(key)
+      } else {
+        const payload: StoredAssistantDraft = {
+          text,
+          mentionedCustomer: customer,
+          updatedAt: new Date().toISOString(),
+        }
+        window.localStorage.setItem(key, JSON.stringify(payload))
+      }
+    } catch {
+      // Ignore storage quota/security errors.
+    }
+  }, 300)
+}
+
+watch([inputText, mentionedCustomer], () => {
+  scheduleDraftSave()
+})
+
+watch(draftStorageKey, (nextKey, prevKey) => {
+  if (prevKey !== undefined && prevKey !== null && prevKey !== nextKey) {
+    if (draftSaveTimer !== null) {
+      clearTimeout(draftSaveTimer)
+      draftSaveTimer = null
+    }
+    restoringDraft = true
+    inputText.value = ''
+    mentionedCustomer.value = null
+    draftRestoredAt.value = null
+    restoringDraft = false
+  }
+  if (nextKey === null || inputText.value !== '' || mentionedCustomer.value !== null) return
+  try {
+    const raw = window.localStorage.getItem(nextKey)
+    if (raw === null) return
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== 'object' || parsed === null) return
+    const record = parsed as Record<string, unknown>
+    const savedText = typeof record['text'] === 'string' ? record['text'] : ''
+    const savedCustomerRaw = record['mentionedCustomer']
+    let savedCustomer: MentionedCustomer | null = null
+    if (typeof savedCustomerRaw === 'object' && savedCustomerRaw !== null) {
+      const customerRecord = savedCustomerRaw as Record<string, unknown>
+      if (typeof customerRecord['public_id'] === 'string' && typeof customerRecord['account_name'] === 'string') {
+        savedCustomer = {
+          public_id: customerRecord['public_id'],
+          account_name: customerRecord['account_name'],
+        }
+      }
+    }
+    const updatedAt = typeof record['updatedAt'] === 'string' ? record['updatedAt'] : ''
+    if (savedText.trim() === '' && savedCustomer === null) return
+    restoringDraft = true
+    inputText.value = savedText
+    mentionedCustomer.value = savedCustomer
+    draftRestoredAt.value = formatDraftTime(updatedAt) || '刚刚'
+    restoringDraft = false
+  } catch {
+    // Ignore malformed localStorage entries.
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (draftSaveTimer !== null) {
+    clearTimeout(draftSaveTimer)
+    draftSaveTimer = null
+  }
+})
+
+// D2: @customer quick mention
+const mentionOpen = ref(false)
+const mentionQuery = ref('')
+const mentionResults = shallowRef<CustomerResponse[]>([])
+const mentionLoading = ref(false)
+const mentionActiveIndex = ref(0)
+const mentionTriggerStart = ref<number | null>(null)
+let mentionDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let mentionRequestSeq = 0
+
+const closeMentionPopover = (): void => {
+  mentionOpen.value = false
+  mentionTriggerStart.value = null
+  mentionQuery.value = ''
+  mentionActiveIndex.value = 0
+  if (mentionDebounceTimer !== null) {
+    clearTimeout(mentionDebounceTimer)
+    mentionDebounceTimer = null
+  }
+}
+
+const fetchMentionCustomers = async (search: string): Promise<void> => {
+  const reqId = ++mentionRequestSeq
+  mentionLoading.value = true
+  try {
+    const trimmed = search.trim()
+    const res = await customerApi.getCustomers({ ...(trimmed !== '' ? { search: trimmed } : {}), limit: 8 })
+    if (disposed || reqId !== mentionRequestSeq) return
+    mentionResults.value = Array.isArray(res) ? res : res.items
+    mentionActiveIndex.value = 0
+  } catch {
+    if (!disposed && reqId === mentionRequestSeq) mentionResults.value = []
+  } finally {
+    if (!disposed && reqId === mentionRequestSeq) mentionLoading.value = false
+  }
+}
+
+const scheduleMentionSearch = (search: string): void => {
+  if (mentionDebounceTimer !== null) clearTimeout(mentionDebounceTimer)
+  mentionDebounceTimer = setTimeout(() => {
+    mentionDebounceTimer = null
+    void fetchMentionCustomers(search)
+  }, 200)
+}
+
+const openMentionPopover = (): void => {
+  if (inputDisabled.value) return
+  mentionTriggerStart.value = null
+  mentionQuery.value = ''
+  mentionOpen.value = true
+  void fetchMentionCustomers('')
+  void nextTick(() => { getComposerEl()?.focus({ preventScroll: true }) })
+}
+
+const detectMentionTrigger = (): void => {
+  if (inputDisabled.value) {
+    if (mentionOpen.value) closeMentionPopover()
+    return
+  }
+  const el = getComposerEl()
+  const caretPos = el?.selectionStart ?? inputText.value.length
+  const beforeCaret = inputText.value.slice(0, caretPos)
+  const match = /(?:^|\s)@([^\s@]*)$/.exec(beforeCaret)
+  if (match !== null) {
+    const query = match[1] ?? ''
+    mentionTriggerStart.value = caretPos - query.length - 1
+    mentionQuery.value = query
+    mentionOpen.value = true
+    scheduleMentionSearch(query)
+  } else if (mentionTriggerStart.value !== null) {
+    closeMentionPopover()
+  }
+}
+
+watch(inputText, () => {
+  detectMentionTrigger()
+})
+
+const selectMentionCustomer = (customer: CustomerResponse): void => {
+  mentionedCustomer.value = { public_id: customer.public_id, account_name: customer.account_name }
+  const start = mentionTriggerStart.value
+  if (start !== null) {
+    const el = getComposerEl()
+    const caretPos = el?.selectionStart ?? inputText.value.length
+    const end = Math.max(start + 1, caretPos)
+    const before = inputText.value.slice(0, start)
+    const after = inputText.value.slice(end)
+    inputText.value = `${before}${after}`.replace(/^\s+/, '')
+  }
+  closeMentionPopover()
+  void nextTick(() => { getComposerEl()?.focus({ preventScroll: true }) })
+}
+
+const removeMentionedCustomer = (): void => {
+  mentionedCustomer.value = null
+}
+
+onUnmounted(() => {
+  if (mentionDebounceTimer !== null) {
+    clearTimeout(mentionDebounceTimer)
+    mentionDebounceTimer = null
+  }
+})
+
+// D3: Multimodal entry (clipboard paste + file picker + validation)
+const ALLOWED_IMAGE_MIME_TYPES: ReadonlySet<ConversationAttachmentRef['mime_type']> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+])
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_ATTACHMENTS = 3
+interface PendingAttachment {
+  id: string
+  file: File
+  file_name: string
+  mime_type: ConversationAttachmentRef['mime_type']
+  size_bytes: number
+  /** Server ref once stored; a retried send reuses it instead of uploading again. */
+  uploaded: ConversationAttachmentRef | null
+}
+const pendingAttachments = shallowRef<PendingAttachment[]>([])
+const attachmentError = ref('')
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const attachmentPreviewUrls = ref<Record<string, string>>({})
+const attachmentPreviewFailed = ref<Record<string, boolean>>({})
+const loadingAttachmentUrls = new Set<string>()
+const createdAttachmentObjectUrls = new Set<string>()
+
+const registerAttachmentPreviewUrl = (fileUrl: string, objectUrl: string): void => {
+  createdAttachmentObjectUrls.add(objectUrl)
+  attachmentPreviewUrls.value = { ...attachmentPreviewUrls.value, [fileUrl]: objectUrl }
+}
+
+const ensureAttachmentPreviews = (items: ChatEntry[]): void => {
+  if (typeof assistantApi.fetchAttachmentBlobUrl !== 'function') return
+  for (const entry of items) {
+    if (entry.role !== 'user' || entry.attachments === undefined) continue
+    for (const att of entry.attachments) {
+      const url = att.file_url
+      if (
+        attachmentPreviewUrls.value[url] !== undefined
+        || attachmentPreviewFailed.value[url] === true
+        || loadingAttachmentUrls.has(url)
+      ) {
+        continue
+      }
+      loadingAttachmentUrls.add(url)
+      void assistantApi.fetchAttachmentBlobUrl(url).then((objectUrl) => {
+        if (disposed) {
+          window.URL.revokeObjectURL(objectUrl)
+          return
+        }
+        registerAttachmentPreviewUrl(url, objectUrl)
+      }).catch(() => {
+        if (!disposed) {
+          attachmentPreviewFailed.value = { ...attachmentPreviewFailed.value, [url]: true }
+        }
+      }).finally(() => {
+        loadingAttachmentUrls.delete(url)
+      })
+    }
+  }
+}
+onUnmounted(() => {
+  if (typeof window.URL.revokeObjectURL === 'function') {
+    for (const objectUrl of createdAttachmentObjectUrls) {
+      window.URL.revokeObjectURL(objectUrl)
+    }
+  }
+  createdAttachmentObjectUrls.clear()
+})
+
+const isAllowedImageMime = (mime: string): mime is ConversationAttachmentRef['mime_type'] => (
+  ALLOWED_IMAGE_MIME_TYPES.has(mime as ConversationAttachmentRef['mime_type'])
+)
+
+const uploadPendingAttachments = async (): Promise<ConversationAttachmentRef[]> => {
+  const stored = await Promise.all(pendingAttachments.value.map(async (item) => ({
+    ...item,
+    uploaded: item.uploaded ?? await assistantApi.uploadAttachment(item.file),
+  })))
+  pendingAttachments.value = stored
+  return stored.map((item) => item.uploaded)
+}
+
+// Attachments are frozen while a send uploads them, so the sent set is exactly the visible chips.
+const addAttachmentFiles = (files: FileList | File[]): void => {
+  if (sendingText.value) return
+  attachmentError.value = ''
+  const incoming = Array.from(files)
+  if (incoming.length === 0) return
+  const next = [...pendingAttachments.value]
+  for (const file of incoming) {
+    if (next.length >= MAX_ATTACHMENTS) {
+      attachmentError.value = '最多支持添加 3 张图片附件。'
+      break
+    }
+    if (!isAllowedImageMime(file.type)) {
+      attachmentError.value = '仅支持 PNG、JPEG、WEBP 格式图片。'
+      continue
+    }
+    if (file.size <= 0 || file.size > MAX_ATTACHMENT_BYTES) {
+      attachmentError.value = '单张图片大小不能超过 10MB。'
+      continue
+    }
+    next.push({
+      id: crypto.randomUUID(),
+      file,
+      file_name: file.name || `screenshot-${next.length + 1}.png`,
+      mime_type: file.type,
+      size_bytes: file.size,
+      uploaded: null,
+    })
+  }
+  pendingAttachments.value = next
+}
+
+const onComposerPaste = (event: ClipboardEvent): void => {
+  if (inputDisabled.value) return
+  const files: File[] = []
+  const items = event.clipboardData?.items
+  if (items !== undefined) {
+    for (const item of Array.from(items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file !== null) files.push(file)
+      }
+    }
+  }
+  if (files.length === 0 && event.clipboardData?.files !== undefined) {
+    for (const file of Array.from(event.clipboardData.files)) {
+      if (file.type.startsWith('image/')) files.push(file)
+    }
+  }
+  if (files.length > 0) {
+    event.preventDefault()
+    addAttachmentFiles(files)
+  }
+}
+
+const openFilePicker = (): void => {
+  if (inputDisabled.value) return
+  fileInputRef.value?.click()
+}
+
+const onFileInputChange = (event: Event): void => {
+  const input = event.target as HTMLInputElement | null
+  if (input?.files != null && input.files.length > 0) {
+    addAttachmentFiles(input.files)
+  }
+  if (input !== null) input.value = ''
+}
+
+const removeAttachment = (id: string): void => {
+  if (sendingText.value) return
+  pendingAttachments.value = pendingAttachments.value.filter((item) => item.id !== id)
+  attachmentError.value = ''
+}
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 const openPendingDraft = async (draft: PendingEntityDraft): Promise<void> => {
   const view = conversation.value
@@ -1426,7 +2067,7 @@ const entrySpacing = (index: number): string => {
 // 等待待办卡片时输入框被禁用；用一行文字说明原因，不靠边框变色。
 const cardLocked = computed(() => conversation.value?.pending_choice != null)
 const inputDisabled = computed(() => loadingConversation.value || busy.value || conversation.value?.pending_choice != null)
-const sendDisabled = computed(() => inputDisabled.value || inputText.value.trim() === '')
+const sendDisabled = computed(() => inputDisabled.value || (inputText.value.trim() === '' && pendingAttachments.value.length === 0))
 const applyEmptySuggestion = (suggestion: string): void => {
   if (inputDisabled.value) return
   inputText.value = suggestion
@@ -1635,8 +2276,14 @@ const isUnknownResult = (entry: ChatEntry): boolean => entryBlocks(entry).some((
   (block.type === 'error' && block.code === 'UNKNOWN_COMMIT_RESULT')
   || (block.type === 'notice' && block.title === '结果待核对'))
 const hasErrorUi = (entry: ChatEntry): boolean => entryBlocks(entry).some((block) => block.type === 'error')
+const isEntryUnknownCommit = (entry: ChatEntry): boolean => {
+  if (isUnknownResult(entry)) return true
+  if (!reconciliationRequired.value || task.value === null) return false
+  return entry.ownTask?.public_id === task.value.public_id && interactionBlock(entry) !== undefined
+}
 const isAuthoritativeWrite = (entry: ChatEntry): boolean => {
   if (entry.role !== 'assistant' || entry.outcome === 'failure' || isUnknownResult(entry) || hasErrorUi(entry)) return false
+  if (reconciliationRequired.value && task.value !== null && entry.ownTask?.public_id === task.value.public_id) return false
   if (entry.outcome === 'activity_written') return true
   return entryBlocks(entry).some((block) =>
     (block.type === 'action_result' && block.status === 'SUCCESS')
@@ -1827,13 +2474,38 @@ const applyConversation = (view: ConversationView, older = false, requestOrder =
   }
   if (older || !historyExtended) olderCursor.value = view.older_cursor
   const preserved = entries.value.filter((entry) => entry.serverId !== undefined && !entry.serverId.startsWith('current:'))
-  const mapped = view.messages.map((message) => shallowReactive<ChatEntry>({
-    id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
-    waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
-    at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
-    ui: message.role === 'assistant' ? message.ui : null, links: message.links,
-    projection: message.projection ?? null,
-  }))
+  const preservedByServerId = new Map<string, ChatEntry>()
+  for (const entry of preserved) {
+    if (entry.serverId !== undefined) preservedByServerId.set(entry.serverId, entry)
+  }
+  const mapped = view.messages.map((message) => {
+    const existing = preservedByServerId.get(message.id)
+    if (existing !== undefined) {
+      if (older) return existing
+      existing.role = message.role
+      existing.text = message.text
+      existing.waiting = message.task?.waiting ?? null
+      existing.ownTask = message.task
+      existing.boundary = message.boundary
+      existing.at = new Date(message.at)
+      existing.replayed = true
+      existing.outcome = message.outcome ?? undefined
+      existing.ui = message.role === 'assistant' ? message.ui : null
+      existing.links = message.links
+      existing.attachments = message.attachments
+      existing.projection = message.projection ?? null
+      return existing
+    }
+    return shallowReactive<ChatEntry>({
+      id: ++seq.value, serverId: message.id, role: message.role, text: message.text,
+      waiting: message.task?.waiting ?? null, ownTask: message.task, boundary: message.boundary,
+      at: new Date(message.at), replayed: true, outcome: message.outcome ?? undefined,
+      ui: message.role === 'assistant' ? message.ui : null, links: message.links,
+      attachments: message.attachments,
+      projection: message.projection ?? null,
+    })
+  })
+  ensureAttachmentPreviews(mapped)
   const incomingIds = new Set(mapped.map((entry) => entry.serverId))
   const preservedIds = new Set(preserved.map((entry) => entry.serverId))
   const uniqueMapped: ChatEntry[] = []
@@ -2016,7 +2688,7 @@ void loadConversation()
 </script>
 
 <template>
-  <div class="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-[var(--assistant-column)] flex-col">
+  <div class="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-[var(--assistant-column)] flex-col overflow-x-hidden">
     <FeedbackAlert
       v-if="historyErrorFeedback"
       class="mb-space-2"
@@ -2063,8 +2735,28 @@ void loadConversation()
         </DataViewStatePanel>
         <template v-for="(entry, index) in visibleEntries" :key="entry.id">
           <div v-if="entry.role === 'user'" data-turn-anchor class="flex justify-end" :class="entrySpacing(index)">
-            <div class="max-w-[72%] whitespace-pre-wrap rounded-lg bg-secondary px-space-3 py-space-2 text-body text-secondary-foreground [overflow-wrap:anywhere] max-[767px]:max-w-[88%]">
-              {{ entry.text }}
+            <div class="grid max-w-[72%] gap-space-2 rounded-lg bg-secondary px-space-3 py-space-2 text-body text-secondary-foreground [overflow-wrap:anywhere] max-[767px]:max-w-[88%]">
+              <div v-if="entry.attachments && entry.attachments.length > 0" class="flex flex-wrap gap-space-2" data-assistant-user-attachments>
+                <template v-for="att in entry.attachments" :key="att.file_url">
+                  <img
+                    v-if="attachmentPreviewUrls[att.file_url]"
+                    :src="attachmentPreviewUrls[att.file_url]"
+                    :alt="att.file_name"
+                    :title="att.file_name"
+                    class="max-h-40 max-w-40 rounded-md border border-border bg-background object-cover"
+                    data-assistant-user-attachment-img
+                  />
+                  <span
+                    v-else
+                    class="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-space-2 py-space-1 text-caption text-muted-foreground"
+                    :title="att.file_name"
+                    data-assistant-user-attachment-fallback
+                  >
+                    <span class="max-w-40 truncate">{{ att.file_name }}</span>
+                  </span>
+                </template>
+              </div>
+              <div v-if="entry.text" class="whitespace-pre-wrap">{{ entry.text }}</div>
             </div>
           </div>
           <div v-else-if="entry.outcome === 'task_completed'" role="separator" aria-label="本次任务已完成" class="flex items-center gap-space-3" :class="entrySpacing(index)">
@@ -2086,9 +2778,13 @@ void loadConversation()
                 :disabled="busy"
                 :locked-action-ids="heldActionIds"
                 :notices="interactionNotices"
+                :unknown-commit="isEntryUnknownCommit(entry)"
+                :reconciling="reconcilePhase === 'checking'"
                 @interaction="(actionId, values) => onAssistantInteraction(entry, actionId, values)"
                 @action="(actionId) => { void retryRootFailure(entry, actionId) }"
                 @open-entity="openAssistantEntity"
+                @reconcile="manualReconcileCheck"
+                @paginate="handlePagination"
               />
               <div v-else class="rounded-lg border border-border bg-card px-space-3 py-space-2 text-body text-foreground">这条结果暂时无法显示</div>
               <div v-if="(entry.links?.length ?? 0) > 0" class="flex flex-wrap gap-space-2" data-assistant-links>
@@ -2116,6 +2812,36 @@ void loadConversation()
             </div>
           </div>
         </template>
+        <div
+          v-if="streamingText !== '' && processing.active"
+          class="mt-space-4 flex items-start gap-space-2"
+          data-assistant-streaming-message
+        >
+          <div
+            class="grid h-space-6 w-space-6 shrink-0 place-items-center rounded-full bg-brand text-caption font-semibold leading-none text-brand-foreground select-none"
+            aria-hidden="true"
+          >AI</div>
+          <div class="min-w-0 flex-1 rounded-lg border border-border bg-card px-space-3 py-space-2 text-body text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+            <span>{{ streamingText }}</span>
+            <span
+              class="ml-0.5 inline-block h-4 w-0.5 align-middle bg-foreground animate-pulse motion-reduce:animate-none"
+              aria-hidden="true"
+            ></span>
+          </div>
+        </div>
+        <div
+          v-if="stoppedGeneration !== null && stoppedGeneration.partialText.trim() !== ''"
+          class="mt-space-4 flex items-start gap-space-2"
+          data-assistant-stopped-partial
+        >
+          <div
+            class="grid h-space-6 w-space-6 shrink-0 place-items-center rounded-full bg-muted text-caption font-semibold leading-none text-muted-foreground select-none"
+            aria-hidden="true"
+          >AI</div>
+          <div class="min-w-0 flex-1 rounded-lg border border-border bg-muted/40 px-space-3 py-space-2 text-body text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+            <span>{{ stoppedGeneration.partialText }}</span>
+          </div>
+        </div>
       </div>
       </div>
       <Button
@@ -2123,7 +2849,7 @@ void loadConversation()
         type="button"
         variant="outline"
         size="sm"
-        class="absolute bottom-space-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-1"
+        class="absolute bottom-space-3 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-1 max-[767px]:min-h-touch-target"
         aria-label="回到底部"
         data-assistant-scroll-bottom
         @click="scrollToBottomForce(false, true)"
@@ -2141,6 +2867,7 @@ void loadConversation()
         :summary="liveProcessSummary"
         :status="processChipStatus"
         :meta="liveStageMetaByKey"
+        :step-started-at="activeStepStartedAt"
       />
       <AgentUIBanner
         tone="info"
@@ -2151,6 +2878,114 @@ void loadConversation()
       />
     </section>
 
+    <div
+      v-if="canStopGeneration"
+      class="mt-space-3 flex flex-wrap items-center justify-between gap-space-2 rounded-lg border border-border bg-card px-space-3 py-space-2"
+      role="status"
+      aria-live="polite"
+      data-assistant-streaming-bar
+    >
+      <span class="text-caption text-muted-foreground">内容正在流式生成，尚未写入 CRM</span>
+      <div class="flex flex-wrap items-center gap-space-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          class="max-[767px]:min-h-touch-target"
+          :disabled="stoppingTurn"
+          :loading="stoppingTurn"
+          data-assistant-stop-generation
+          @click="stopGeneration"
+        >
+          <Square class="size-icon-sm" aria-hidden="true" />停止生成
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="max-[767px]:min-h-touch-target"
+          :disabled="stoppingTurn"
+          data-assistant-cancel-during-stream
+          @click="cancelTaskDuringStream"
+        >
+          <X class="size-icon-sm" aria-hidden="true" />算了（取消任务）
+        </Button>
+      </div>
+    </div>
+
+    <AgentUIBanner
+      v-if="stopWriteInProgressNotice !== ''"
+      class="mt-space-3"
+      tone="warning"
+      :icon="Info"
+      :title="stopWriteInProgressNotice"
+      role="status"
+      data-assistant-stop-write-lock
+    />
+
+    <AgentUIBanner
+      v-if="stoppedGeneration !== null"
+      class="mt-space-3"
+      tone="neutral"
+      :icon="Info"
+      title="已停止本次生成"
+      role="status"
+      data-assistant-stopped-banner
+    >
+      <p class="m-0 text-caption text-muted-foreground">未执行任何 CRM 写入操作。你可以直接补充说明，或基于原输入重新生成。</p>
+      <template #actions>
+        <Button
+          v-if="stoppedGeneration.text.trim() !== ''"
+          type="button"
+          variant="outline"
+          size="sm"
+          class="max-[767px]:min-h-touch-target"
+          :disabled="busy"
+          data-assistant-regenerate
+          @click="regenerateStopped"
+        >
+          <RotateCcw class="size-icon-sm" aria-hidden="true" />重新生成
+        </Button>
+      </template>
+    </AgentUIBanner>
+
+    <section
+      v-if="asyncOperations.length > 0"
+      class="mt-space-3 rounded-lg border border-border bg-card px-space-3 py-space-2"
+      aria-label="后台异步任务"
+      data-assistant-async-operations
+    >
+      <button
+        type="button"
+        class="flex w-full items-center justify-between gap-space-2 text-left text-caption font-medium text-foreground max-[767px]:min-h-touch-target"
+        :aria-expanded="asyncOperationsExpanded"
+        @click="asyncOperationsExpanded = !asyncOperationsExpanded"
+      >
+        <span>后台异步任务（{{ asyncOperations.length }}）</span>
+        <ChevronUp v-if="asyncOperationsExpanded" class="size-icon-sm text-muted-foreground" aria-hidden="true" />
+        <ChevronDown v-else class="size-icon-sm text-muted-foreground" aria-hidden="true" />
+      </button>
+      <ul v-if="asyncOperationsExpanded" class="m-0 mt-space-2 grid list-none gap-space-2 border-t border-border p-0 pt-space-2">
+        <li
+          v-for="op in asyncOperations"
+          :key="op.public_id"
+          class="flex flex-wrap items-center justify-between gap-space-2 text-caption"
+        >
+          <div class="min-w-0 flex-1">
+            <span class="font-medium text-foreground">{{ op.summary || op.operation_type }}</span>
+            <span v-if="op.current_step" class="ml-space-2 text-muted-foreground">{{ op.current_step }}</span>
+            <span v-else-if="op.error_message" class="ml-space-2 text-destructive">{{ op.error_message }}</span>
+          </div>
+          <StatusBadge
+            type="generic"
+            size="small"
+            :status="ASYNC_OP_STATUS_PRESENTATION[op.status].status"
+            :label="ASYNC_OP_STATUS_PRESENTATION[op.status].label"
+          />
+        </li>
+      </ul>
+    </section>
+
     <nav v-if="visiblePendingDrafts.length > 0" class="mt-space-4 flex flex-wrap items-center gap-space-2" aria-label="待补充" data-assistant-pending-drafts>
       <span class="text-caption text-muted-foreground">待补充</span>
       <Button
@@ -2159,7 +2994,7 @@ void loadConversation()
         type="button"
         variant="outline"
         size="sm"
-        class="min-h-11"
+        class="max-[767px]:min-h-touch-target"
         :disabled="busy || conversation?.pending_choice != null"
         @click="() => { void openPendingDraft(draft) }"
       >
@@ -2179,7 +3014,56 @@ void loadConversation()
       <p class="m-0 text-caption text-muted-foreground">{{ RECONCILE_BANNER_BODY }}</p>
     </AgentUIBanner>
 
-    <div class="mt-space-4 rounded-lg border border-input bg-card p-space-3 transition-colors hover:border-ring-input focus-within:border-ring-input">
+    <AgentUIBanner
+      v-if="draftRestoredAt !== null"
+      class="mt-space-3"
+      tone="info"
+      :icon="Info"
+      :title="`已恢复上次未发送的本地草稿（${draftRestoredAt} 自动保存）`"
+      role="status"
+      data-assistant-draft-banner
+    >
+      <template #actions>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="max-[767px]:min-h-touch-target"
+          data-assistant-clear-draft
+          @click="clearDraft"
+        >清空草稿</Button>
+      </template>
+    </AgentUIBanner>
+
+    <div class="relative mt-space-4 rounded-lg border border-input bg-card p-space-3 transition-colors hover:border-ring-input focus-within:border-ring-input">
+      <div
+        v-if="mentionOpen"
+        class="absolute bottom-full left-0 right-0 z-20 mb-space-2 rounded-lg border border-border bg-card p-space-2 shadow-2"
+        role="listbox"
+        aria-label="选择关联客户"
+        data-assistant-mention-popover
+      >
+        <div class="mb-space-1 px-space-2 text-caption text-muted-foreground">
+          选择关联客户 · 输入关键词筛选（↑↓ 选择，Enter 确认）
+        </div>
+        <div v-if="mentionLoading" class="px-space-2 py-space-2 text-caption text-muted-foreground">正在搜索客户…</div>
+        <div v-else-if="mentionResults.length === 0" class="px-space-2 py-space-2 text-caption text-muted-foreground">未找到匹配的客户</div>
+        <ul v-else class="m-0 grid max-h-56 list-none gap-space-1 overflow-y-auto p-0">
+          <li v-for="(customer, idx) in mentionResults" :key="customer.public_id">
+            <button
+              type="button"
+              role="option"
+              :aria-selected="idx === mentionActiveIndex"
+              class="flex w-full items-center justify-between rounded-md px-space-2 py-space-2 text-left text-body transition-colors max-[767px]:min-h-touch-target"
+              :class="idx === mentionActiveIndex ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted'"
+              @mousedown.prevent="selectMentionCustomer(customer)"
+              @mouseenter="mentionActiveIndex = idx"
+            >
+              <span class="truncate">{{ customer.account_name }}</span>
+            </button>
+          </li>
+        </ul>
+      </div>
       <p v-if="reconciliationRequired" class="mb-space-2 flex items-center gap-space-2 text-caption text-muted-foreground" data-assistant-reconcile-lock>
         <Lock class="size-icon-sm shrink-0" aria-hidden="true" />
         <span>{{ RECONCILE_LOCKED_HINT }}</span>
@@ -2220,6 +3104,56 @@ void loadConversation()
         <Info class="size-icon-sm shrink-0" aria-hidden="true" />
         <span>{{ PENDING_RESUME_FALLBACK_NOTICE }}</span>
       </p>
+      <p v-if="attachmentError !== ''" class="mb-space-2 text-caption text-destructive" role="alert" data-assistant-attachment-error>
+        {{ attachmentError }}
+      </p>
+      <div
+        v-if="mentionedCustomer !== null || pendingAttachments.length > 0"
+        class="mb-space-2 flex flex-wrap items-center gap-space-2"
+        data-assistant-composer-chips
+      >
+        <span
+          v-if="mentionedCustomer !== null"
+          class="inline-flex max-w-full items-center gap-space-1 rounded-md border border-border bg-secondary px-space-2 py-space-1 text-caption text-secondary-foreground"
+          data-assistant-mention-chip
+        >
+          <span class="max-w-[160px] truncate" :title="mentionedCustomer.account_name">@ {{ mentionedCustomer.account_name }}</span>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            aria-label="移除关联客户"
+            @click="removeMentionedCustomer"
+          >
+            <X class="size-icon-sm" aria-hidden="true" />
+          </button>
+        </span>
+        <span
+          v-for="att in pendingAttachments"
+          :key="att.id"
+          class="inline-flex max-w-full items-center gap-space-1 rounded-md border border-border bg-muted px-space-2 py-space-1 text-caption text-foreground"
+          data-assistant-attachment-chip
+        >
+          <span class="shrink-0 rounded-sm bg-secondary px-1 text-caption font-semibold text-secondary-foreground">IMG</span>
+          <span class="max-w-[160px] truncate" :title="att.file_name">{{ att.file_name }}</span>
+          <span class="shrink-0 text-muted-foreground">{{ formatFileSize(att.size_bytes) }}</span>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+            :aria-label="`移除附件 ${att.file_name}`"
+            @click="removeAttachment(att.id)"
+          >
+            <X class="size-icon-sm" aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+      <input
+        ref="fileInputRef"
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        multiple
+        class="sr-only"
+        @change="onFileInputChange"
+      />
       <Textarea
         ref="composerRef"
         aria-label="客户沟通内容"
@@ -2228,23 +3162,62 @@ void loadConversation()
         :disabled="inputDisabled"
         :placeholder="inputPlaceholder"
         class="resize-none border-0 p-0"
-        @keydown.enter.exact="onInputEnter"
+        @keydown="onComposerKeydown"
+        @paste="onComposerPaste"
       />
       <div class="mt-space-2 flex flex-wrap items-center justify-between gap-space-2">
-        <div class="flex flex-wrap items-center gap-space-2">
+        <div class="flex flex-wrap items-center gap-space-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="max-[767px]:min-h-touch-target max-[767px]:min-w-touch-target"
+            title="@ 指定客户"
+            aria-label="@ 指定客户"
+            :disabled="inputDisabled"
+            data-assistant-mention-trigger
+            @click="openMentionPopover"
+          >
+            <AtSign class="size-icon-sm" aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="max-[767px]:min-h-touch-target max-[767px]:min-w-touch-target"
+            title="上传微信截图/图片"
+            aria-label="上传微信截图/图片"
+            :disabled="inputDisabled || pendingAttachments.length >= MAX_ATTACHMENTS"
+            data-assistant-image-upload
+            @click="openFilePicker"
+          >
+            <ImagePlus class="size-icon-sm" aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="max-[767px]:min-h-touch-target max-[767px]:min-w-touch-target"
+            title="语音转写（即将支持）"
+            aria-label="语音转写（即将支持）"
+            disabled
+            data-assistant-voice-reserved
+          >
+            <Mic class="size-icon-sm" aria-hidden="true" />
+          </Button>
           <Badge v-if="activityBadge" variant="secondary">{{ activityBadge }}</Badge>
-          <span class="text-caption text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
+          <span class="hidden text-caption text-muted-foreground sm:inline">Enter 发送 · Shift+Enter 换行</span>
         </div>
         <div class="flex flex-wrap items-center gap-space-2">
           <p v-if="showReprocess" class="m-0 text-caption text-muted-foreground">使用同一条任务重新处理，不会重复写入。</p>
-          <Button v-if="showReprocess" variant="outline" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
-          <Button v-if="reconciliationRequired && reconcilePhase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="manualReconcileCheck">查看结果</Button>
-          <Button v-else-if="lostSend?.phase === 'unconfirmed'" variant="outline" :disabled="submitting" @click="checkLostSend">查看结果</Button>
-          <Button v-if="showContinuePending" variant="outline" :disabled="submitting" @click="retryPending">继续处理</Button>
-          <Button v-if="(!isTerminal && task !== null) || conversation?.pending_choice != null" variant="ghost" :disabled="busy || resultPending" @click="cancelTask()">
+          <Button v-if="showReprocess" variant="outline" class="max-[767px]:min-h-touch-target" :disabled="submitting" @click="reprocessTurn">重新处理</Button>
+          <Button v-if="reconciliationRequired && reconcilePhase === 'unconfirmed'" variant="outline" class="max-[767px]:min-h-touch-target" :disabled="submitting" @click="manualReconcileCheck">查看结果</Button>
+          <Button v-else-if="lostSend?.phase === 'unconfirmed'" variant="outline" class="max-[767px]:min-h-touch-target" :disabled="submitting" @click="checkLostSend">查看结果</Button>
+          <Button v-if="showContinuePending" variant="outline" class="max-[767px]:min-h-touch-target" :disabled="submitting" @click="retryPending">继续处理</Button>
+          <Button v-if="!canStopGeneration && ((!isTerminal && task !== null) || conversation?.pending_choice != null)" variant="ghost" class="max-[767px]:min-h-touch-target" :disabled="busy || resultPending" @click="cancelTask()">
             <X aria-hidden="true" />算了
           </Button>
-          <Button aria-label="发送" :loading="sendingText" :disabled="sendDisabled" @click="submitText">
+          <Button aria-label="发送" class="max-[767px]:min-h-touch-target" :loading="sendingText" :disabled="sendDisabled" @click="submitText">
             <ArrowUp aria-hidden="true" />发送
           </Button>
         </div>

@@ -66,7 +66,7 @@ from app.services.agent.orchestrator import (
 )
 from app.services.agent.orchestrator.runtime import get_root_orchestrator
 from app.services.agent.query import CRMQueryAgentModelConfig, CRMQueryAgentResult, EntityRef
-from app.services.agent.query.result_sets import AgentQueryResultSetRepository
+from app.services.agent.query.result_sets import AgentQueryResultSetRepository, sign_query_results
 from app.services.agent.run_log import build_turn_timeline
 from app.services.agent.sessions import new_session_key, require_owned_session
 from app.services.agent.turns import AgentTurnIdempotencyConflictError, AgentTurnRepository
@@ -99,7 +99,6 @@ from app.services.agent.ui.schemas import (
     TextBlock,
     UpsertBlockOperation,
 )
-from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -536,7 +535,7 @@ class AgentApplicationService:
                 db.commit()
                 return
             prepared = self._prepared_from_execution(execution)
-            root_model, query_model = _load_agent_model_configs(db, team_id=execution.team_id)
+            root_model, query_model = load_agent_model_configs(db, team_id=execution.team_id)
             current_permissions = self._current_permission_codes(
                 db, team_id=execution.team_id, user_id=execution.user_id
             )
@@ -1097,21 +1096,7 @@ class AgentApplicationService:
 
     @staticmethod
     def _sign_query_result_sets(dispatch: QueryDispatchResult) -> QueryDispatchResult:
-        signed_results = []
-        for result in dispatch.query_result.query_results:
-            if result.executed_query is None:
-                raise RuntimeError("completed CRM query result requires an executed query")
-            result_set_id = result.result_set_id or generate_public_id("rs")
-            signed_results.append(
-                result.model_copy(
-                    update={
-                        "result_set_id": result_set_id,
-                        "entity_refs": [
-                            ref.model_copy(update={"result_set_id": result_set_id}) for ref in result.entity_refs
-                        ],
-                    }
-                )
-            )
+        signed_results = sign_query_results(dispatch.query_result.query_results)
         return dispatch.model_copy(
             update={"query_result": dispatch.query_result.model_copy(update={"query_results": signed_results})}
         )
@@ -1691,7 +1676,7 @@ class AgentApplicationService:
 agent_application_service = AgentApplicationService(root_orchestrator=get_root_orchestrator())
 
 
-def _load_agent_model_configs(
+def load_agent_model_configs(
     db: Session,
     *,
     team_id: int,

@@ -78,7 +78,8 @@ def _merge_canonical(
     kind: str, previous: dict[str, object], incoming: dict[str, object], *, correction_text: str = ""
 ) -> dict[str, object]:
     schema = FollowUpContent if kind == "FOLLOW_UP" else MeetingContent
-    old = schema.model_validate(previous).model_dump(mode="json")
+    base_previous = {"content": "", **previous} if kind == "FOLLOW_UP" and "content" not in previous else previous
+    old = schema.model_validate(base_previous).model_dump(mode="json")
     new = schema.model_validate(incoming).model_dump(mode="json")
     merged = dict(old)
     for name in (

@@ -181,7 +181,7 @@ it('renders a submitted choice as immutable text and keeps the final choice visi
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：否')
+  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选「否」')
   expect(wrapper.text()).toContain('已处理')
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
@@ -326,7 +326,7 @@ it('keeps the follow-up prompt retryable after a failed cancellation and consume
     submit_action_id: null,
   }) })
   expect(wrapper.text()).toContain('已取消')
-  expect(wrapper.find('textarea').exists()).toBe(true)
+  expect(wrapper.find('textarea').exists()).toBe(false)
   expect(wrapper.findAll('button')).toHaveLength(0)
 })
 
@@ -843,22 +843,14 @@ it('replays a historical activity confirmation without write actions', async () 
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('h2').text()).toBe('客户活动')
+  expect(wrapper.text()).toContain('确认写入客户活动 · 上海期货信息技术有限公司')
   expect(wrapper.findAll('[role="status"]').filter(tag => tag.text() === '历史')).toHaveLength(1)
   expect(wrapper.text()).not.toContain('历史冻结')
-  expect(wrapper.text()).toContain('当时冻结的活动正文。')
-  // 只读卡只有两个折叠触发器，没有任何操作入口
-  expect(wrapper.findAll('button').map(button => button.text())).toEqual(['查看参考与依据', '内容评分与整理依据'])
-  expect(wrapper.text()).not.toContain('确认写入')
+  // 收敛为单行只读摘要条，没有任何操作按钮
+  expect(wrapper.findAll('button')).toHaveLength(0)
   expect(wrapper.text()).not.toContain('取消')
   expect(wrapper.text()).not.toContain('修改类型')
   expect(wrapper.text()).not.toContain('再次写入')
-
-  const basis = wrapper.get('[data-activity-basis]')
-  expect(basis.get('button').attributes('aria-expanded')).toBe('false')
-  await basis.get('button').trigger('click')
-  await basis.get('[data-activity-score] button').trigger('click')
-  expect(basis.text()).toContain('当时的识别来源')
 })
 
 const KIND_OPTIONS = [
@@ -930,7 +922,7 @@ it('keeps a resolved activity kind read-only with its origin', () => {
 
   const wrapper = mount(AgentUIInteractionBlock, { props: { block } })
 
-  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选择：微信跟进')
+  expect(wrapper.get('[data-agent-ui-submitted-choice]').text()).toContain('已选「微信跟进」')
   expect(wrapper.text()).toContain('已处理')
   expect(wrapper.find('[data-agent-ui-kind-hint]').exists()).toBe(false)
   expect(wrapper.findAll('button')).toHaveLength(0)

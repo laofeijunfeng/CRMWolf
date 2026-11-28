@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard, cast
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from app.schemas.assistant_conversation import (
     ConversationBoundary,
@@ -27,17 +27,26 @@ from app.services.agent.ui.schemas import (
     ActionResultBlock,
     AgentErrorCode,
     AgentUIAction,
+    AgentUIBlock,
     AgentUIEnvelope,
     AgentUIMetadata,
+    EntityCardBlock,
+    EntityListBlock,
     ErrorBlock,
     InteractionBlock,
     InteractionConfirmationFact,
     InteractionField,
     InteractionOption,
+    MetricGroupBlock,
     NoticeBlock,
     OpenFollowUpDispositionCardItem,
+    PaginationBlock,
+    ProcessBlock,
+    ProcessItem,
     RetryAction,
+    TableBlock,
     TextBlock,
+    TimelineBlock,
 )
 from app.services.assistant.activity_channel import CANONICAL_KINDS, kind_choice_candidates
 from app.services.assistant.activity_edit import activity_edit_time
@@ -70,6 +79,10 @@ _CUSTOMER_PUBLIC_ID_RE = re.compile(r"cus_[0-9a-f]{32}")
 _UNAVAILABLE = "这条结果暂时无法显示"
 _DEFAULT_VISIBLE_CANDIDATES = 10
 _UNKNOWN_TEXT = "客户活动写入结果待核对。请先刷新或查询结果，不要重复提交。"
+_BLOCK_ADAPTER: TypeAdapter[AgentUIBlock] = TypeAdapter(AgentUIBlock)
+_PROCESS_STATUSES: frozenset[str] = frozenset(
+    {"PENDING", "RUNNING", "COMPLETED", "WAITING", "FAILED", "CANCELLED", "SKIPPED"}
+)
 
 _ASSISTANT_ERROR_CODES: frozenset[str] = frozenset(
     {
@@ -181,6 +194,7 @@ def finalize_assistant_ui(
         except (ValidationError, ValueError):
             message.ui = _failure_envelope(message, code="INTERNAL_ERROR", retryable=False, text=_UNAVAILABLE)
         message.links = _message_links(message)
+    _enforce_conversation_single_active_interaction(messages)
 
 
 def _message_links(message: ConversationMessage) -> list[ConversationLink]:
@@ -521,7 +535,22 @@ def _project_message_blocks(
     submitted_kind: str | None,
     handled: HandledForm | None = None,
 ) -> AgentUIEnvelope:
-    prefix = (result,) if result is not None else ()
+    process = _process_block(message)
+    query_projection = _query_ui_blocks(message)
+    if query_projection is not None:
+        query_blocks, result_set_id = query_projection
+        combined: tuple[AgentUIBlock, ...] = (
+            (process, *query_blocks)
+            if process is not None and all(b.id != process.id for b in query_blocks)
+            else query_blocks
+        )
+        return _envelope(message, combined, route="QUERY", result_set_id=result_set_id)
+    prefix_items: list[AgentUIBlock] = []
+    if process is not None:
+        prefix_items.append(process)
+    if result is not None:
+        prefix_items.append(result)
+    prefix = tuple(prefix_items)
     if message.outcome == "proposal_unavailable":
         blocks = (*prefix, NoticeBlock(id="b_notice_1", type="notice", tone="warning", code="PROPOSAL_UNAVAILABLE",
                                        text=_plain(message.text) or _UNAVAILABLE))
@@ -545,10 +574,10 @@ def _project_message_blocks(
         blocks = _waiting_blocks(message, waiting, active=active_waiting, submitted_kind=submitted_kind,
                                  include_prose=result is None, handled=handled)
         return _envelope(message, (*prefix, *blocks), route="WORKFLOW")
-    if prefix:
+    if result is not None:
         return _envelope(message, prefix, route="WORKFLOW")
     text = _plain(message.text) or _UNAVAILABLE
-    return _envelope(message, (_text_block(text),), route="WORKFLOW" if message.task else "CHITCHAT")
+    return _envelope(message, (*prefix, _text_block(text)), route="WORKFLOW" if message.task else "CHITCHAT")
 
 
 def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
@@ -568,10 +597,12 @@ def _project_failure(message: ConversationMessage) -> AgentUIEnvelope:
     retryable = False
     title = _ERROR_TITLES.get(code, "遇到问题" if code == "INTERNAL_ERROR" else "这次没处理成")
     if is_root_failure_code(code) and trace_id is not None:
+        from app.services.assistant.vision import VISION_UNSUPPORTED_MESSAGE
+
         failure = root_failure_code(code)
         presentation = root_failure_presentation(failure)
-        title = presentation.title
-        text = presentation.message
+        title = "当前模型不支持图片识别" if text == VISION_UNSUPPORTED_MESSAGE else presentation.title
+        text = text if text == VISION_UNSUPPORTED_MESSAGE else presentation.message
         retryable = message.retryable is True and failure in ROOT_RETRYABLE_FAILURE_CODES
         if retryable:
             actions = (RetryAction(type="retry", action_id=f"retry:{trace_id}", label="重试"),)
@@ -1635,24 +1666,156 @@ def _failure_envelope(
     return _envelope(message, (result, error) if result is not None else (error,), route="WORKFLOW", state="failed")
 
 
+def _demote_interaction(block: InteractionBlock) -> InteractionBlock:
+    if block.state != "ACTIVE":
+        return block
+    return block.model_copy(
+        update={
+            "state": "RESOLVED",
+            "submit_action_id": None,
+            "secondary_action": None,
+            "cancel_reasons": [],
+        }
+    )
+
+
+def _enforce_single_active_interaction(blocks: tuple[AgentUIBlock, ...]) -> tuple[AgentUIBlock, ...]:
+    active_indices = [
+        index for index, block in enumerate(blocks) if isinstance(block, InteractionBlock) and block.state == "ACTIVE"
+    ]
+    if len(active_indices) <= 1:
+        return blocks
+    demote = set(active_indices[:-1])
+    return tuple(
+        _demote_interaction(block) if index in demote and isinstance(block, InteractionBlock) else block
+        for index, block in enumerate(blocks)
+    )
+
+
+def _enforce_conversation_single_active_interaction(messages: list[ConversationMessage]) -> None:
+    """Central post-projection invariant: at most 1 ACTIVE InteractionBlock across the conversation."""
+
+    active_refs: list[tuple[ConversationMessage, int]] = []
+    for message in messages:
+        if message.ui is None:
+            continue
+        for index, block in enumerate(message.ui.blocks):
+            if isinstance(block, InteractionBlock) and block.state == "ACTIVE":
+                active_refs.append((message, index))
+    if len(active_refs) <= 1:
+        return
+    demote_by_msg: dict[str, set[int]] = {}
+    for message, index in active_refs[:-1]:
+        demote_by_msg.setdefault(message.id, set()).add(index)
+    for message in messages:
+        indices = demote_by_msg.get(message.id)
+        if not indices or message.ui is None:
+            continue
+        updated_blocks = [
+            _demote_interaction(block) if idx in indices and isinstance(block, InteractionBlock) else block
+            for idx, block in enumerate(message.ui.blocks)
+        ]
+        message.ui = message.ui.model_copy(update={"blocks": updated_blocks})
+
+
+def _process_block(message: ConversationMessage) -> ProcessBlock | None:
+    raw_steps = message.process_steps
+    if not raw_steps:
+        return None
+    items: list[ProcessItem] = []
+    seen_keys: set[str] = set()
+    for idx, step in enumerate(raw_steps):
+        raw_key = step.get("key")
+        key = raw_key.strip().lower() if isinstance(raw_key, str) and raw_key.strip() else f"step_{idx + 1}"
+        if not _FIELD_KEY_RE.match(key):
+            key = f"step_{idx + 1}"
+        if key in seen_keys:
+            continue
+        raw_title = step.get("title")
+        title = _clip(_plain(raw_title), 200) if isinstance(raw_title, str) and raw_title.strip() else ""
+        if not title:
+            continue
+        raw_status = step.get("status")
+        status = raw_status if isinstance(raw_status, str) and raw_status in _PROCESS_STATUSES else "COMPLETED"
+        raw_desc = step.get("description")
+        description = _clip(_plain(raw_desc), 2000) if isinstance(raw_desc, str) and raw_desc.strip() else None
+        seen_keys.add(key)
+        items.append(
+            ProcessItem(
+                key=key,
+                title=title,
+                status=cast(
+                    "Literal['PENDING', 'RUNNING', 'COMPLETED', 'WAITING', 'FAILED', 'CANCELLED', 'SKIPPED']",
+                    status,
+                ),
+                description=description,
+            )
+        )
+        if len(items) == 20:
+            break
+    if not items:
+        return None
+    return ProcessBlock(id="b_process_1", type="process", title="处理过程", items=items)
+
+
+def _query_ui_blocks(message: ConversationMessage) -> tuple[tuple[AgentUIBlock, ...], str | None] | None:
+    payload = message.query_ui
+    if not isinstance(payload, dict):
+        return None
+    raw_blocks = payload.get("blocks")
+    if not isinstance(raw_blocks, list) or not raw_blocks:
+        return None
+    blocks: list[AgentUIBlock] = []
+    seen_ids: set[str] = set()
+    for item in raw_blocks:
+        if not isinstance(item, dict):
+            continue
+        try:
+            validated = _BLOCK_ADAPTER.validate_python(item)
+        except (ValidationError, ValueError):
+            continue
+        if validated.id in seen_ids:
+            continue
+        seen_ids.add(validated.id)
+        blocks.append(validated)
+        if len(blocks) == 28:
+            break
+    if not blocks:
+        return None
+    raw_result_set_id = payload.get("result_set_id")
+    result_set_id = (
+        _clip(raw_result_set_id.strip(), 128)
+        if isinstance(raw_result_set_id, str) and raw_result_set_id.strip()
+        else None
+    )
+    return tuple(blocks), result_set_id
+
+
 def _envelope(
     message: ConversationMessage,
-    blocks: tuple[TextBlock | NoticeBlock | InteractionBlock | ErrorBlock | ActionResultBlock, ...],
+    blocks: tuple[AgentUIBlock, ...],
     *,
     route: Literal["QUERY", "WORKFLOW", "CLARIFY", "CHITCHAT"] | None,
     state: Literal["streaming", "final", "failed"] = "final",
     actions: tuple[AgentUIAction, ...] = (),
+    result_set_id: str | None = None,
 ) -> AgentUIEnvelope:
-    label = _accessibility(blocks)
+    normalized_blocks = _enforce_single_active_interaction(blocks)
+    label = _accessibility(normalized_blocks)
     return AgentUIEnvelope(
         schema_version="crm.agent.ui.v1",
         message_id=_message_number(message.id),
         turn_id=_clip(message.id, 128),
         role="assistant",
         state=state,
-        blocks=list(blocks),
+        blocks=list(normalized_blocks),
         suggested_actions=list(actions),
-        metadata=AgentUIMetadata(display="MESSAGE", route=route, accessibility_label=label),
+        metadata=AgentUIMetadata(
+            display="MESSAGE",
+            route=route,
+            result_set_id=result_set_id,
+            accessibility_label=label,
+        ),
     )
 
 
@@ -1854,6 +2017,23 @@ def _accessibility(blocks: tuple[object, ...]) -> str:
         elif isinstance(block, ActionResultBlock):
             parts.append(block.title)
             parts.append(block.message)
+        elif isinstance(block, MetricGroupBlock):
+            parts.extend(f"{metric.label} {metric.value}" for metric in block.metrics)
+        elif isinstance(block, EntityListBlock):
+            parts.append(f"共 {block.total} 项")
+            parts.extend(item.entity_ref.display_name for item in block.items[:5])
+        elif isinstance(block, EntityCardBlock):
+            parts.append(block.title)
+        elif isinstance(block, TableBlock):
+            if block.caption:
+                parts.append(block.caption)
+            parts.append(f"共 {len(block.rows)} 行")
+        elif isinstance(block, TimelineBlock):
+            parts.extend(item.title for item in block.items[:5])
+        elif isinstance(block, PaginationBlock):
+            parts.append(f"第 {block.range_start}-{block.range_end} 条")
+        elif isinstance(block, ProcessBlock):
+            parts.append(block.title)
     label = " ".join(part for part in parts if part).strip()
     return _clip(label or _UNAVAILABLE, 10000)
 

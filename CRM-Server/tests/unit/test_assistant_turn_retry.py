@@ -976,3 +976,38 @@ def test_blocked_turn_runs_off_the_request_loop_and_finishes_its_kicks(monkeypat
         time.sleep(0.01)
     assert str(seen["thread"]).startswith("assistant-turn")
     assert seen.get("kick") is True
+
+
+@pytest.mark.asyncio
+async def test_execute_turn_emits_chunked_text_deltas_before_waiting(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retryable_turn: tuple[AssistantTask, AssistantTurn],
+) -> None:
+    from app.services.assistant.coordinator import CoordinatorOutcome, CoordinatorReply
+
+    _task, turn = retryable_turn
+    expected_message = "已为你整理好客户跟进记录，请确认核心内容后保存，稍后可继续补充后续计划。"  # noqa: RUF001
+
+    async def handle_task(db, current, user_input, reporter):
+        return CoordinatorOutcome(
+            task=current,
+            reply=CoordinatorReply(task_public_id=current.public_id, status=current.status, message=expected_message),
+        )
+
+    monkeypatch.setattr(api, "_coordinator", SimpleNamespace(handle_task=handle_task))
+    await turns.execute_turn(turn.id, factory=sessionmaker(bind=db_session.get_bind()))
+
+    db_session.expire_all()
+    events = (
+        db_session.query(AssistantTurnEvent)
+        .filter(AssistantTurnEvent.turn_id == turn.id)
+        .order_by(AssistantTurnEvent.seq.asc())
+        .all()
+    )
+    delta_events = [event for event in events if event.event == "text_delta"]
+    waiting_events = [event for event in events if event.event == "waiting"]
+    assert len(delta_events) >= 2
+    assert len(waiting_events) == 1
+    assert all(event.seq < waiting_events[0].seq for event in delta_events)
+    assert "".join(str(event.data_json.get("delta", "")) for event in delta_events) == expected_message

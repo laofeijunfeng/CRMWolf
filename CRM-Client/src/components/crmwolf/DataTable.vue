@@ -1547,7 +1547,7 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 }
 
 .data-table-card--embedded {
-  // 只读嵌入没有固定高度，也没有外层卡片兜住宽度：卡片自己裁圆角，表格只占容器宽。
+  // 只读嵌入没有固定高度，也没有外层卡片兜住宽度：卡片自己裁圆角，窄屏由 .data-table-content 横向滚动。
   overflow: hidden;
   border-radius: var(--radius-lg);
 
@@ -1558,7 +1558,8 @@ $sticky-row-hover-bg: linear-gradient(var(--wash-hover), var(--wash-hover)), hsl
 
   .data-table {
     width: 100%;
-    min-width: 0;
+    table-layout: auto;
+    min-width: max-content;
   }
 
   .data-table-cell {

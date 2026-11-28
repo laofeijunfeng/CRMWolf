@@ -4,17 +4,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from functools import cached_property
 from time import monotonic
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import get_settings
 from app.core.exceptions import is_database_schema_mismatch
 from app.core.logging import get_logger
 from app.crud import assistant_conversation as crud
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest
 from app.schemas.assistant_conversation import (
+    ConversationAttachmentRef,
     ConversationBoundary,
     ConversationChoiceRequest,
     ConversationCommandRequest,
@@ -24,6 +27,7 @@ from app.schemas.assistant_conversation import (
     ConversationKindRequest,
     ConversationLink,
     ConversationMessage,
+    ConversationPaginationRequest,
     ConversationProjection,
     ConversationReply,
     ConversationRequestStatus,
@@ -31,6 +35,11 @@ from app.schemas.assistant_conversation import (
     ConversationView,
     PreparedSubmission,
 )
+from app.services.agent.principal import AgentPrincipal
+from app.services.agent.query.cursor import decode_offset_cursor, encode_offset_cursor
+from app.services.agent.query.result_sets import sign_query_results
+from app.services.agent.query.schemas import CRMQuerySpec, EntityRef
+from app.services.agent.ui.schemas import PaginationBlock
 from app.services.assistant.contracts import (
     AcceptedProposalReceipt,
     DraftField,
@@ -64,6 +73,13 @@ from app.services.assistant.turns import (
     accept_submit,
     schedule_turn,
 )
+from app.services.assistant.vision import (
+    AttachmentVisionExtractor,
+    OpenAIAttachmentVisionExtractor,
+    VisionUnsupportedError,
+    compose_multimodal_text,
+)
+from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 logger = get_logger(__name__)
@@ -73,8 +89,13 @@ if TYPE_CHECKING:
 
     from app.models.assistant import AssistantTask
     from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
+    from app.models.customer import Customer
+    from app.services.agent.orchestrator.query_executor import CRMQueryAgentExecutor
+    from app.services.agent.query import CRMQueryAgentModelConfig
+    from app.services.agent.query.executor import CRMQueryExecutor
+    from app.services.agent.query.schemas import CRMQueryResult
+    from app.services.agent.ui.composer import AgentUIComposer, AgentUIComposition
     from app.services.assistant.contracts import TaskWaiting
-
 
 class RootClassifier(Protocol):
     async def classify(
@@ -97,9 +118,51 @@ def _stored_links(raw: object) -> list[ConversationLink]:
     return [ConversationLink.model_validate(item) for item in raw[:4]] if isinstance(raw, list) else []
 
 
+
+def _stored_attachments(raw: object) -> list[ConversationAttachmentRef]:
+    if not isinstance(raw, list):
+        return []
+    result: list[ConversationAttachmentRef] = []
+    for item in raw[:3]:
+        try:
+            result.append(ConversationAttachmentRef.model_validate(item))
+        except ValidationError:
+            continue
+    return result
+
+
+def _effective_text(entry: AssistantConversationEntry) -> str:
+    raw = entry.command_json.get("effective_text")
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    return compose_multimodal_text(entry.user_text, entry.command_json.get("vision_extract"))
+
+_QUERY_PROCESS_TITLES = (("route", "理解查询意图"), ("query", "查询 CRM 数据"))
+_UNVIEWABLE_MENTION_MESSAGE = "未找到该客户或你暂无查看权限，请确认客户名称后重新查询。"
+
+
 class ConversationService:
-    def __init__(self, classifier: RootClassifier | None = None) -> None:
+    def __init__(
+        self,
+        classifier: RootClassifier | None = None,
+        *,
+        query_executor: CRMQueryAgentExecutor | None = None,
+        query_spec_executor: CRMQueryExecutor | None = None,
+        vision_extractor: AttachmentVisionExtractor | None = None,
+    ) -> None:
         self.classifier = classifier or ConversationRootClassifier()
+        # The shared query runtime is resolved on first use: the API module builds
+        # this service at import time, before settings and model clients are needed.
+        self._query_executor = query_executor
+        self._query_spec_executor = query_spec_executor
+        self.vision_extractor: AttachmentVisionExtractor = vision_extractor or OpenAIAttachmentVisionExtractor()
+
+    # The shared Agent stack imports LangChain; only query paths may load it (X1 runtime isolation).
+    @cached_property
+    def _composer(self) -> AgentUIComposer:
+        from app.services.agent.ui.composer import AgentUIComposer
+
+        return AgentUIComposer()
 
     def open(self, db: Session, *, team_id: int, user_id: int) -> ConversationView:
         conversation, created = crud.open_conversation(db, team_id=team_id, user_id=user_id)
@@ -213,8 +276,17 @@ class ConversationService:
     ) -> list[ConversationMessage]:
         at = row.created_time.isoformat()
         result: list[ConversationMessage] = []
-        if row.user_text:
-            result.append(ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at))
+        attachments = _stored_attachments(row.command_json.get("attachments"))
+        if row.user_text or attachments:
+            result.append(
+                ConversationMessage(
+                    id=f"{row.public_id}:user",
+                    role="user",
+                    text=row.user_text,
+                    at=at,
+                    attachments=attachments,
+                )
+            )
         owned = crud.owned_task(db, conversation, row.task_public_id)
         if row.command_json.get("operation") == "legacy" and owned:
             result.extend(self._legacy_messages(db, conversation, row, owned))
@@ -230,6 +302,8 @@ class ConversationService:
                 and snapshot is not None
                 and any(r.kind == "customer_activity" for r in snapshot.committed)
             )
+            raw_query_ui = row.command_json.get("query_ui")
+            raw_process_steps = row.command_json.get("process_steps")
             result.append(
                 ConversationMessage(
                     id=f"{row.public_id}:reply",
@@ -245,6 +319,8 @@ class ConversationService:
                     error_code=row.error_code if root_failure else None,
                     retryable=bool(row.error_retryable) if root_failure else None,
                     projection=self._activity_projection(snapshot) if reconcile_activity else None,
+                    query_ui=raw_query_ui if isinstance(raw_query_ui, dict) else None,
+                    process_steps=raw_process_steps if isinstance(raw_process_steps, list) else [],
                 )
             )
         next_id = row.turn_public_id
@@ -255,8 +331,12 @@ class ConversationService:
             if turn is None:
                 break
             next_id = None
+            turn_stage_steps: dict[str, dict[str, object]] = {}
             for event in crud.turn_events(db, turn):
                 data = event.data_json
+                if event.event == "stage" and isinstance(data, dict):
+                    _collect_stage_step(turn_stage_steps, data)
+                    continue
                 if event.event not in {"waiting", "error"}:
                     continue
                 try:
@@ -309,6 +389,9 @@ class ConversationService:
                             projection=self._structured_projection(snapshot, card=card, is_activity=is_activity),
                             proposal_receipt=proposal_receipt,
                             entity_receipt=entity_receipt,
+                            process_steps=list(turn_stage_steps.values())
+                            if any(step.get("key") != "route" for step in turn_stage_steps.values())
+                            else [],
                         )
                     )
                     followup = data.get("next_turn_id")
@@ -384,8 +467,17 @@ class ConversationService:
     def _unavailable_messages(row: AssistantConversationEntry) -> list[ConversationMessage]:
         at = row.created_time.isoformat()
         messages: list[ConversationMessage] = []
-        if row.user_text:
-            messages.append(ConversationMessage(id=f"{row.public_id}:user", role="user", text=row.user_text, at=at))
+        attachments = _stored_attachments(row.command_json.get("attachments"))
+        if row.user_text or attachments:
+            messages.append(
+                ConversationMessage(
+                    id=f"{row.public_id}:user",
+                    role="user",
+                    text=row.user_text,
+                    at=at,
+                    attachments=attachments,
+                )
+            )
         messages.append(
             ConversationMessage(
                 id=f"{row.public_id}:unavailable",
@@ -482,33 +574,55 @@ class ConversationService:
         return self._reply(db, conversation, entry)
 
     async def submit_text(
-        self, db: Session, *, team_id: int, user_id: int, request: ConversationTextRequest
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        request: ConversationTextRequest,
+        authorization: str | None = None,
     ) -> ConversationReply:
         conversation = self._conversation(db, team_id, user_id)
         raw = request.text.strip()
-        if not raw:
+        if not raw and not request.attachments:
             raise crud.ConversationConflict("请输入这次客户沟通的内容。")
+        payload: dict[str, object] = {"operation": "text", "text": raw}
+        if request.mentioned_customer_public_id:
+            payload["mentioned_customer_public_id"] = request.mentioned_customer_public_id
+        if request.attachments:
+            payload["attachments"] = [item.model_dump(mode="json") for item in request.attachments]
         entry, execute, lease_version = crud.claim(
             db,
             conversation,
             key=request.client_request_id,
-            payload={"operation": "text", "text": raw},
+            payload=payload,
             text=raw,
             expected_version=request.expected_version,
         )
         if not execute:
             return self._reply(db, conversation, entry)
-        return await self._process_root_entry(db, conversation, entry, lease_version=lease_version)
+        return await self._process_root_entry(
+            db, conversation, entry, lease_version=lease_version, authorization=authorization
+        )
 
     async def retry_entry(
-        self, db: Session, *, team_id: int, user_id: int, entry_id: str, expected_version: int
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        entry_id: str,
+        expected_version: int,
+        authorization: str | None = None,
     ) -> ConversationReply:
         conversation = self._conversation(db, team_id, user_id)
         entry = crud.owned_entry(db, conversation, entry_id)
         if entry is None:
             raise crud.ConversationConflict("会话状态已变化，请刷新后重试。")
         lease_version = crud.claim_root_retry(db, conversation, entry, expected_version=expected_version)
-        return await self._process_root_entry(db, conversation, entry, lease_version=lease_version)
+        return await self._process_root_entry(
+            db, conversation, entry, lease_version=lease_version, authorization=authorization
+        )
 
     async def _process_root_entry(
         self,
@@ -517,6 +631,7 @@ class ConversationService:
         entry: AssistantConversationEntry,
         *,
         lease_version: int,
+        authorization: str | None,
     ) -> ConversationReply:
         stored = entry.command_json.get("root_deadline")
         deadline = (
@@ -527,7 +642,9 @@ class ConversationService:
             entry.command_json = {**entry.command_json, "root_deadline": deadline.isoformat()}
         token = bind_absolute_attempt_deadline(deadline)
         try:
-            return await self._process_root_attempt(db, conversation, entry, lease_version=lease_version)
+            return await self._process_root_attempt(
+                db, conversation, entry, lease_version=lease_version, authorization=authorization
+            )
         finally:
             reset_attempt_deadline(token)
 
@@ -538,6 +655,7 @@ class ConversationService:
         entry: AssistantConversationEntry,
         *,
         lease_version: int,
+        authorization: str | None,
     ) -> ConversationReply:
         if entry.state == "ROUTING":
             remaining = attempt_budget_remaining()
@@ -551,12 +669,29 @@ class ConversationService:
             recent = self.read(db, team_id=conversation.team_id, user_id=conversation.user_id).messages[-12:]
             recent_messages = [{"role": message.role, "text": message.text[:2000]} for message in recent]
             try:
+                attachments = _stored_attachments(entry.command_json.get("attachments"))
+                if attachments and not isinstance(entry.command_json.get("vision_extract"), str):
+                    vision_extract = await self.vision_extractor.extract(
+                        db,
+                        team_id=conversation.team_id,
+                        user_id=conversation.user_id,
+                        attachments=attachments,
+                        user_text=entry.user_text,
+                    )
+                    effective_text = compose_multimodal_text(entry.user_text, vision_extract)
+                    entry.command_json = {
+                        **entry.command_json,
+                        "vision_extract": vision_extract,
+                        "effective_text": effective_text,
+                    }
+                    crud.save(db, conversation, entry, lease_version=lease_version)
+                effective_text = _effective_text(entry)
                 decision = await self._classify_root(
                     db,
                     conversation,
                     entry,
                     lease_version=lease_version,
-                    text=entry.user_text,
+                    text=effective_text,
                     tasks=tasks,
                     recent_messages=recent_messages,
                 )
@@ -582,7 +717,7 @@ class ConversationService:
                             conversation,
                             entry,
                             lease_version=lease_version,
-                            text=entry.user_text,
+                            text=effective_text,
                             tasks=tasks,
                             recent_messages=recent_messages,
                         )
@@ -602,7 +737,7 @@ class ConversationService:
             entry.command_json = {**entry.command_json, "route_candidate_ids": [task.public_id for task in tasks]}
             entry.state = "ROUTED"
             crud.save(db, conversation, entry, lease_version=lease_version)
-        return self._route(db, conversation, entry, lease_version=lease_version)
+        return await self._route(db, conversation, entry, lease_version=lease_version, authorization=authorization)
 
     async def _classify_root(
         self,
@@ -692,7 +827,9 @@ class ConversationService:
             code.value,
             type(exc.cause).__name__ if exc.cause is not None else type(exc).__name__,
         )
-        entry.reply_text = root_failure_presentation(code).message
+        entry.reply_text = (
+            str(exc) if isinstance(exc, VisionUnsupportedError) else root_failure_presentation(code).message
+        )
         entry.error_code = code.value
         entry.error_retryable = root_failure_retryable(code)
         entry.state = "READY"
@@ -717,8 +854,14 @@ class ConversationService:
             )
         return context
 
-    def _route(
-        self, db: Session, conversation: AssistantConversation, entry: AssistantConversationEntry, *, lease_version: int
+    async def _route(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        lease_version: int,
+        authorization: str | None,
     ) -> ConversationReply:
         decision = ConversationDecision.model_validate(entry.decision_json)
         if entry.task_public_id and isinstance(entry.command_json.get("prepared_input"), dict):
@@ -743,6 +886,10 @@ class ConversationService:
         if verdict.route == "refuse":
             return self._finish_message(
                 db, conversation, entry, verdict.message, lease_version=lease_version, links=verdict.links
+            )
+        if verdict.route == "query":
+            return await self._handle_query(
+                db, conversation, entry, lease_version=lease_version, authorization=authorization
             )
         if verdict.route in {"entity", "intent_question"}:
             return self._create_entity_task(db, conversation, entry, verdict, lease_version=lease_version)
@@ -772,7 +919,8 @@ class ConversationService:
                 return self._finish_message(
                     db, conversation, entry, CORRECTION_UNCLEAR_MESSAGE, target, lease_version=lease_version,
                 )
-            if not correction.quote.strip() or correction.quote not in entry.user_text:
+            effective = _effective_text(entry)
+            if not correction.quote.strip() or correction.quote not in effective:
                 return self._finish_message(
                     db, conversation, entry, CORRECTION_UNCLEAR_MESSAGE, target, lease_version=lease_version,
                 )
@@ -782,7 +930,7 @@ class ConversationService:
                 )
             entry.command_json = {**entry.command_json, "correction": correction.model_dump(mode="json")}
             return self._accept(db, conversation, entry, target, SubmitInputRequest(
-                kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}",
+                kind="text", text=effective, client_request_id=f"conv-turn-{entry.public_id}",
                 action_id=waiting.action_id, expected_version=waiting.expected_version,
             ), lease_version=lease_version)
         if decision.boundary != "NEW" and (
@@ -823,7 +971,7 @@ class ConversationService:
         from app.services.assistant.intent import ENTITY_LABELS, ENTITY_TASK_KINDS
 
         plan = decision.semantic_plan
-        text = entry.user_text
+        text = _effective_text(entry)
         supplementing = plan.speech_act in {"PROVIDE_SUPPLEMENT", "CORRECT"}
         focused = crud.owned_task(db, conversation, decision.target_task_public_id) or crud.owned_task(
             db, conversation, conversation.focused_task_public_id
@@ -865,7 +1013,7 @@ class ConversationService:
         task: AssistantTask, waiting: TaskWaiting, *, lease_version: int,
     ) -> ConversationReply:
         return self._accept(db, conversation, entry, task, SubmitInputRequest(
-            kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}",
+            kind="text", text=_effective_text(entry), client_request_id=f"conv-turn-{entry.public_id}",
             action_id=waiting.action_id, expected_version=waiting.expected_version,
         ), lease_version=lease_version)
 
@@ -909,7 +1057,13 @@ class ConversationService:
             return self._finish_message(
                 db, conversation, entry, "原沟通状态已变化，请重新说明客户和沟通内容。", lease_version=lease_version
             )
-        entry.command_json = {**entry.command_json, "text": source.user_text, "choice_payload": choice_payload}
+        source_text = _effective_text(source)
+        entry.command_json = {
+            **entry.command_json,
+            "text": source_text,
+            "effective_text": source_text,
+            "choice_payload": choice_payload,
+        }
         entry.decision_json = source.decision_json
         entry.state = "ROUTED"
         crud.save(db, conversation, entry, lease_version=lease_version)
@@ -931,7 +1085,7 @@ class ConversationService:
         lease_version: int,
     ) -> ConversationReply:
         crud.save(db, conversation, entry, lease_version=lease_version)  # lease fence before any task acceptance
-        text = str(entry.command_json.get("text") or entry.user_text)
+        text = str(entry.command_json.get("effective_text") or entry.command_json.get("text") or entry.user_text)
         if ConversationDecision.model_validate(entry.decision_json).resume_only:
             if target is None:
                 return self._finish_message(
@@ -1004,6 +1158,29 @@ class ConversationService:
                             ),
                         ).task
                         db.commit()
+            if target.version == 0 and load_authority(target).customer_public_id is None:
+                mentioned_id = entry.command_json.get("mentioned_customer_public_id")
+                mentioned = self._resolve_mentioned_customer(
+                    db,
+                    team_id=conversation.team_id,
+                    user_id=conversation.user_id,
+                    public_id=mentioned_id if isinstance(mentioned_id, str) else None,
+                    require_write=True,
+                )
+                if mentioned is not None:
+                    target = apply_task_update(
+                        db,
+                        target,
+                        TaskUpdate(
+                            draft=TaskDraft(
+                                customer=DraftField(status="ACCEPTED", value=str(mentioned.account_name))
+                            ),
+                            authority=TaskAuthority(customer_public_id=str(mentioned.public_id)),
+                            action_actor="SYSTEM",
+                            action_name="bind_mentioned_customer",
+                        ),
+                    ).task
+                    db.commit()
         waiting = load_waiting(target)
         if target.active_turn_id is not None:
             return self._finish_message(
@@ -1090,7 +1267,7 @@ class ConversationService:
             team_id=conversation.team_id,
             user_id=conversation.user_id,
             key=f"conv-create-{entry.public_id}",
-            goal=entry.user_text,
+            goal=_effective_text(entry),
             verdict=verdict,
         )
         if verdict.route == "intent_question":
@@ -1102,7 +1279,9 @@ class ConversationService:
             conversation,
             entry,
             task,
-            SubmitInputRequest(kind="text", text=entry.user_text, client_request_id=f"conv-turn-{entry.public_id}"),
+            SubmitInputRequest(
+                kind="text", text=_effective_text(entry), client_request_id=f"conv-turn-{entry.public_id}"
+            ),
             lease_version=lease_version,
         )
 
@@ -1197,7 +1376,9 @@ class ConversationService:
         prepared = payload.model_copy(update={"client_request_id": f"conv-turn-{entry.public_id}"})
         return self._accept(db, conversation, entry, task, prepared, lease_version=lease_version)
 
-    async def resume(self, db: Session, *, team_id: int, user_id: int) -> ConversationReply:
+    async def resume(
+        self, db: Session, *, team_id: int, user_id: int, authorization: str | None = None
+    ) -> ConversationReply:
         """Resume only this owner's persisted request, using its original idempotency key."""
         conversation = self._conversation(db, team_id, user_id)
         entry = crud.owned_entry(db, conversation, conversation.busy_entry_id) if conversation.busy_entry_id else None
@@ -1206,11 +1387,27 @@ class ConversationService:
         stored = entry.command_json
         common = {"client_request_id": entry.client_request_id, "expected_version": conversation.version}
         if stored.get("operation") == "text":
+            text_payload: dict[str, object] = {**common, "text": entry.user_text}
+            if isinstance(stored.get("mentioned_customer_public_id"), str):
+                text_payload["mentioned_customer_public_id"] = stored["mentioned_customer_public_id"]
+            if isinstance(stored.get("attachments"), list):
+                text_payload["attachments"] = stored["attachments"]
             return await self.submit_text(
                 db,
                 team_id=team_id,
                 user_id=user_id,
-                request=ConversationTextRequest.model_validate({**common, "text": entry.user_text}),
+                request=ConversationTextRequest.model_validate(text_payload),
+                authorization=authorization,
+            )
+        if stored.get("operation") == "pagination":
+            return await self.paginate(
+                db,
+                team_id=team_id,
+                user_id=user_id,
+                request=ConversationPaginationRequest.model_validate(
+                    {**common, "action_id": stored.get("action_id")}
+                ),
+                authorization=authorization,
             )
         if stored.get("operation") == "choice":
             return await self.choose(
@@ -1305,6 +1502,428 @@ class ConversationService:
             task,
             lease_version=lease_version,
         )
+
+    async def paginate(
+        self,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        request: ConversationPaginationRequest,
+        authorization: str | None = None,
+    ) -> ConversationReply:
+        """Re-run a server-issued page of an earlier query: deterministic, no model call."""
+
+        conversation = self._conversation(db, team_id, user_id)
+        spec = self._lookup_pagination_action(db, conversation, request.action_id)
+        raw_query = spec.get("query") if spec is not None else None
+        cursor = spec.get("cursor") if spec is not None else None
+        result_set_id = spec.get("result_set_id") if spec is not None else None
+        page = spec.get("page") if spec is not None else None
+        if (
+            not isinstance(raw_query, str)
+            or not isinstance(result_set_id, str)
+            or (cursor is not None and not isinstance(cursor, str))
+            or not isinstance(page, int)
+            or isinstance(page, bool)
+        ):
+            raise crud.ConversationConflict("该分页操作已失效，请重新查询。")
+        entry, execute, lease_version = crud.claim(
+            db,
+            conversation,
+            key=request.client_request_id,
+            payload={"operation": "pagination", "action_id": request.action_id},
+            text=f"查看第 {page} 页",
+            expected_version=request.expected_version,
+        )
+        if not execute:
+            return self._reply(db, conversation, entry)
+        from app.services.agent.orchestrator.query_executor import QueryExecutionConfigurationError
+        from app.services.agent.tools.base import AgentToolContext
+
+        try:
+            if not authorization:
+                raise QueryExecutionConfigurationError("assistant pagination requires the caller's bearer credential")
+            query = CRMQuerySpec.model_validate_json(raw_query).model_copy(update={"cursor": cursor})
+            codes = self._user_permission_codes(db, team_id=conversation.team_id, user_id=conversation.user_id)
+            result = await self._crm_query_spec_executor().execute(
+                query,
+                AgentToolContext(
+                    db=db,
+                    team_id=conversation.team_id,
+                    user_id=conversation.user_id,
+                    session_id=conversation.id,
+                    authorization=authorization,
+                    permission_codes=frozenset(codes),
+                    deadline_at=monotonic() + self._query_budget_seconds(),
+                ),
+            )
+            result = sign_query_results([result.model_copy(update={"result_set_id": result_set_id})])[0]
+            composition = self._composer.compose_query_page(result, text=f"这是第 {page} 页结果。")
+            page_block, actions = self._query_pagination(composition, [result])
+        except Exception as exc:
+            return self._finish_query_failure(
+                db, conversation, entry, exc, lease_version=lease_version, process_status=None
+            )
+        return self._finish_query(
+            db,
+            conversation,
+            entry,
+            composition,
+            lease_version=lease_version,
+            page_block=page_block,
+            actions=actions,
+            process_status=None,
+        )
+
+    async def _handle_query(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        *,
+        lease_version: int,
+        authorization: str | None,
+    ) -> ConversationReply:
+        team_id, user_id = conversation.team_id, conversation.user_id
+        codes = self._user_permission_codes(db, team_id=team_id, user_id=user_id)
+        selected_entity: EntityRef | None = None
+        mentioned = entry.command_json.get("mentioned_customer_public_id")
+        if isinstance(mentioned, str) and mentioned.strip():
+            customer = self._resolve_mentioned_customer(
+                db, team_id=team_id, user_id=user_id, public_id=mentioned, permission_codes=codes
+            )
+            if customer is None:
+                return self._finish_query(
+                    db,
+                    conversation,
+                    entry,
+                    self._composer.compose_query_text(_UNVIEWABLE_MENTION_MESSAGE),
+                    lease_version=lease_version,
+                    process_status="COMPLETED",
+                )
+            selected_entity = EntityRef(
+                ref_id=f"eref_customer_{customer.public_id}",
+                resource="customer",
+                public_id=customer.public_id,
+                display_name=customer.account_name[:200],
+            )
+        from app.services.agent.orchestrator.contracts import QueryExecutionInput, RootRuntimeContext
+        from app.services.agent.orchestrator.query_executor import QueryExecutionConfigurationError
+
+        try:
+            if not authorization:
+                raise QueryExecutionConfigurationError("assistant query requires the caller's bearer credential")
+            result = await self._crm_query_agent_executor().execute(
+                QueryExecutionInput(
+                    text=_effective_text(entry),
+                    # The conversation id stands in for the Agent session id: both scope
+                    # one owner's audited tool calls and neither leaves the server.
+                    principal=AgentPrincipal(
+                        team_id=team_id,
+                        user_id=user_id,
+                        session_id=conversation.id,
+                        permission_codes=sorted(codes),
+                    ),
+                    selected_entity=selected_entity,
+                ),
+                runtime=RootRuntimeContext(
+                    db=db,
+                    authorization=authorization,
+                    permission_codes=frozenset(codes),
+                    query_model_config=self._query_model_config(db, team_id=team_id),
+                    deadline_at=monotonic() + self._query_budget_seconds(),
+                ),
+            )
+            signed = sign_query_results(result.query_results)
+            composition = self._composer.compose_query_result(result.model_copy(update={"query_results": signed}))
+            page_block, actions = self._query_pagination(composition, signed)
+        except Exception as exc:
+            return self._finish_query_failure(
+                db, conversation, entry, exc, lease_version=lease_version, process_status="FAILED"
+            )
+        return self._finish_query(
+            db,
+            conversation,
+            entry,
+            composition,
+            lease_version=lease_version,
+            page_block=page_block,
+            actions=actions,
+            process_status="COMPLETED",
+        )
+
+    def _crm_query_agent_executor(self) -> CRMQueryAgentExecutor:
+        if self._query_executor is None:
+            from app.services.agent.orchestrator.runtime import get_crm_query_agent_executor
+
+            self._query_executor = get_crm_query_agent_executor()
+        return self._query_executor
+
+    def _crm_query_spec_executor(self) -> CRMQueryExecutor:
+        if self._query_spec_executor is None:
+            from app.services.agent.orchestrator.runtime import get_crm_query_spec_executor
+
+            self._query_spec_executor = get_crm_query_spec_executor()
+        return self._query_spec_executor
+
+    @staticmethod
+    def _query_model_config(db: Session, *, team_id: int) -> CRMQueryAgentModelConfig:
+        from fastapi import HTTPException
+
+        from app.services.agent.application import load_agent_model_configs
+        from app.services.agent.orchestrator.query_executor import QueryExecutionConfigurationError
+
+        try:
+            return load_agent_model_configs(db, team_id=team_id)[1]
+        except HTTPException as exc:
+            raise QueryExecutionConfigurationError(str(exc.detail)) from exc
+
+    @staticmethod
+    def _query_budget_seconds() -> float:
+        limit = float(get_settings().AGENT_TIMEOUT)
+        remaining = attempt_budget_remaining()
+        return limit if remaining is None else min(limit, max(0.0, remaining))
+
+    @staticmethod
+    def _query_pagination(
+        composition: AgentUIComposition, results: list[CRMQueryResult]
+    ) -> tuple[dict[str, object] | None, dict[str, dict[str, object]]]:
+        """Issue previous/next actions for the listed result set, re-runnable without a model."""
+
+        result_set_id = composition.body.metadata.result_set_id
+        listed = any(
+            block.type == "entity_list" and block.result_set_id == result_set_id for block in composition.body.blocks
+        )
+        result = next((item for item in results if item.result_set_id == result_set_id), None)
+        if result_set_id is None or not listed or result is None or result.executed_query is None or not result.rows:
+            return None, {}
+        query = result.executed_query
+        if result.resource == "follow_up_task" and any(item.field == "tracking_content" for item in query.filters):
+            # Semantic task retrieval is server-mode dependent; a plain re-run would page another set.
+            return None, {}
+        actions: dict[str, dict[str, object]] = {}
+
+        def issue(cursor: str | None) -> str:
+            action_id = generate_public_id("pg")
+            actions[action_id] = {
+                "query": query.model_dump_json(),
+                "cursor": cursor,
+                "result_set_id": result_set_id,
+                "page": decode_offset_cursor(cursor) // query.page_size + 1,
+            }
+            return action_id
+
+        offset = decode_offset_cursor(query.cursor)
+        previous_offset = max(0, offset - query.page_size)
+        previous_id = (
+            issue(encode_offset_cursor(previous_offset) if previous_offset else None) if offset > 0 else None
+        )
+        next_id = issue(result.next_cursor) if result.next_cursor else None
+        if previous_id is None and next_id is None:
+            return None, {}
+        block = PaginationBlock(
+            id="b_pagination_1",
+            type="pagination",
+            result_set_id=result_set_id,
+            range_start=offset + 1,
+            range_end=offset + len(result.rows),
+            total=result.total,
+            previous_action_id=previous_id,
+            next_action_id=next_id,
+        )
+        return block.model_dump(mode="json"), actions
+
+    def _finish_query(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        composition: AgentUIComposition,
+        *,
+        lease_version: int,
+        process_status: Literal["COMPLETED", "FAILED"] | None,
+        page_block: dict[str, object] | None = None,
+        actions: dict[str, dict[str, object]] | None = None,
+    ) -> ConversationReply:
+        blocks = [block.model_dump(mode="json") for block in composition.body.blocks]
+        if page_block is not None:
+            blocks.append(page_block)
+        update: dict[str, object] = {
+            "query_ui": {"blocks": blocks, "result_set_id": composition.body.metadata.result_set_id},
+            "pagination_actions": actions or {},
+        }
+        if process_status is not None:
+            update["process_steps"] = [
+                {"key": key, "title": title, "status": "COMPLETED" if key == "route" else process_status}
+                for key, title in _QUERY_PROCESS_TITLES
+            ]
+        entry.command_json = {**entry.command_json, **update}
+        return self._finish_message(db, conversation, entry, composition.content, lease_version=lease_version)
+
+    def _finish_query_failure(
+        self,
+        db: Session,
+        conversation: AssistantConversation,
+        entry: AssistantConversationEntry,
+        exc: Exception,
+        *,
+        lease_version: int,
+        process_status: Literal["FAILED"] | None,
+    ) -> ConversationReply:
+        from app.services.agent.orchestrator.query_executor import query_execution_error
+
+        error = query_execution_error(exc)
+        if error.code == "QUERY_EXECUTION_FAILED":
+            logger.exception("assistant query failed: entry=%s", entry.public_id, exc_info=exc)
+        return self._finish_query(
+            db,
+            conversation,
+            entry,
+            self._composer.compose_query_failure(error),
+            lease_version=lease_version,
+            process_status=process_status,
+        )
+
+    @staticmethod
+    def _user_permission_codes(db: Session, *, team_id: int, user_id: int) -> set[str]:
+        from app.crud.permission import permission_crud
+
+        return {permission.code for permission in permission_crud.get_user_permissions(db, user_id, team_id)}
+
+    @classmethod
+    def _can_view_customer(
+        cls,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        customer: Customer,
+        permission_codes: set[str],
+    ) -> bool:
+        if "customer:view:all" in permission_codes:
+            return True
+        from app.crud.customer_member import customer_member_crud
+
+        if customer_member_crud.has_access(
+            db=db,
+            team_id=team_id,
+            customer_id=customer.id,
+            user_id=str(user_id),
+            required_level="VIEW",
+        ):
+            return True
+        return "customer:view:own" in permission_codes and customer.owner_id == str(user_id)
+
+    @classmethod
+    def _resolve_mentioned_customer(
+        cls,
+        db: Session,
+        *,
+        team_id: int,
+        user_id: int,
+        public_id: str | None,
+        require_write: bool = False,
+        permission_codes: set[str] | None = None,
+    ) -> Customer | None:
+        if not public_id or not public_id.strip():
+            return None
+        normalized = public_id.strip()
+        codes = (
+            permission_codes
+            if permission_codes is not None
+            else cls._user_permission_codes(db, team_id=team_id, user_id=user_id)
+        )
+        if require_write:
+            from app.services.customer_activity_access_policy import (
+                CustomerActivityAccessDeniedError,
+                CustomerActivityCustomerNotFoundError,
+                customer_activity_access_policy,
+            )
+
+            try:
+                return customer_activity_access_policy.resolve_customer(
+                    db,
+                    customer_identifier=normalized,
+                    team_id=team_id,
+                    user_id=user_id,
+                    permission_codes=codes,
+                )
+            except (CustomerActivityCustomerNotFoundError, CustomerActivityAccessDeniedError):
+                return None
+        from app.models.customer import Customer
+
+        customer = (
+            db.query(Customer)
+            .filter(Customer.team_id == team_id, Customer.public_id == normalized)
+            .one_or_none()
+        )
+        if customer is None:
+            return None
+        if not cls._can_view_customer(
+            db, team_id=team_id, user_id=user_id, customer=customer, permission_codes=codes
+        ):
+            return None
+        return customer
+
+    @staticmethod
+    def _lookup_pagination_action(
+        db: Session, conversation: AssistantConversation, action_id: str
+    ) -> dict[str, object] | None:
+        from app.models.assistant_conversation import AssistantConversationEntry
+
+        rows = (
+            db.query(AssistantConversationEntry)
+            .filter_by(
+                conversation_id=conversation.id,
+                team_id=conversation.team_id,
+                user_id=conversation.user_id,
+            )
+            .order_by(AssistantConversationEntry.id.desc())
+            .limit(40)
+            .all()
+        )
+        for row in rows:
+            actions = row.command_json.get("pagination_actions")
+            if isinstance(actions, dict):
+                spec = actions.get(action_id)
+                if isinstance(spec, dict):
+                    return spec
+        return None
+
+
+_STAGE_TITLES: dict[str, str] = {
+    "route": "理解意图",
+    "locate": "定位客户",
+    "context": "读取上下文",
+    "judge": "业务判断",
+    "propose": "生成建议",
+    "classify": "活动归类",
+    "structure": "结构化整理",
+    "quality_gate": "质量校验",
+    "write": "写入 CRM",
+}
+
+
+def _collect_stage_step(steps: dict[str, dict[str, object]], data: dict[str, object]) -> None:
+    stage = data.get("stage")
+    phase = data.get("phase")
+    if not isinstance(stage, str) or stage not in _STAGE_TITLES:
+        return
+    status = "COMPLETED" if phase == "done" else "FAILED" if phase == "failed" else "RUNNING"
+    subject = data.get("subject")
+    ms = data.get("ms")
+    desc_parts: list[str] = []
+    if isinstance(subject, str) and subject.strip():
+        desc_parts.append(subject.strip())
+    if isinstance(ms, int) and ms >= 0:
+        desc_parts.append(f"{ms}ms")
+    steps[stage] = {
+        "key": stage,
+        "title": _STAGE_TITLES[stage],
+        "status": status,
+        "description": " · ".join(desc_parts) if desc_parts else None,
+    }
 
 
 def _draft_customer(task: AssistantTask) -> str | None:

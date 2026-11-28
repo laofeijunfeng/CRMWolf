@@ -3,6 +3,7 @@
 
 import asyncio
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -16,7 +17,20 @@ from app.core.database import Base
 from app.models.assistant import AssistantAction, AssistantTask
 from app.models.assistant_conversation import AssistantConversation, AssistantConversationEntry
 from app.models.assistant_turn import AssistantRequest, AssistantTurn, AssistantTurnEvent
-from app.schemas.assistant_conversation import ConversationChoiceRequest, ConversationDecision, ConversationTextRequest
+from app.models.customer import Customer, CustomerMember, CustomerProduct
+from app.models.customer_activity import CustomerActivity
+from app.models.opportunity import Opportunity
+from app.models.sales_commitment import FollowUpTask
+from app.schemas.assistant_conversation import (
+    ConversationAttachmentRef,
+    ConversationChoiceRequest,
+    ConversationDecision,
+    ConversationPaginationRequest,
+    ConversationTextRequest,
+)
+from app.services.agent.query.agent import CRMQueryAgentResponse, CRMQueryAgentResult, CRMQueryAgentTrace
+from app.services.agent.query.cursor import decode_offset_cursor, encode_offset_cursor
+from app.services.agent.query.schemas import CRMQueryResult, CRMQuerySpec, EntityRef
 from app.services.assistant import conversation as module
 from app.services.assistant import conversation_router as router_module
 from app.services.assistant import failure_contract, model_transport
@@ -33,22 +47,43 @@ def sqlite_integer(element, compiler, **kw):
 @pytest.fixture
 def db(monkeypatch):
     engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            model.__table__
-            for model in (
-                AssistantTask,
-                AssistantAction,
-                AssistantRequest,
-                AssistantTurn,
-                AssistantTurnEvent,
-                AssistantConversation,
-                AssistantConversationEntry,
-            )
+    tables = [
+        model.__table__
+        for model in (
+            AssistantTask,
+            AssistantAction,
+            AssistantRequest,
+            AssistantTurn,
+            AssistantTurnEvent,
+            AssistantConversation,
+            AssistantConversationEntry,
+            Customer,
+            CustomerMember,
+            CustomerProduct,
+            CustomerActivity,
+            FollowUpTask,
+            Opportunity,
+        )
+    ]
+    renamed_indexes = []
+    for table in tables:
+        for index in table.indexes:
+            if index.name:
+                renamed_indexes.append((index, index.name))
+                index.name = f"{table.name}_{index.name}"
+    try:
+        Base.metadata.create_all(engine, tables=tables)
+    finally:
+        for index, original_name in renamed_indexes:
+            index.name = original_name
+    monkeypatch.setattr(module, "schedule_turn", lambda turn_id: None)
+    monkeypatch.setattr(
+        "app.crud.permission.permission_crud.get_user_permissions",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(code="customer:view:all"),
+            SimpleNamespace(code="customer:activity:create"),
         ],
     )
-    monkeypatch.setattr(module, "schedule_turn", lambda turn_id: None)
     with sessionmaker(bind=engine)() as session:
         yield session
     engine.dispose()
@@ -95,6 +130,97 @@ def task(db, **changes):
     db.commit()
     db.refresh(result)
     return result
+
+
+QUERY_MODEL_CONFIG = object()
+
+
+@pytest.fixture
+def query_model(monkeypatch):
+    """Resolve the team's query model without a configured provider."""
+
+    monkeypatch.setattr(
+        "app.services.agent.application.load_agent_model_configs",
+        lambda _db, *, team_id: (None, QUERY_MODEL_CONFIG),
+    )
+    return QUERY_MODEL_CONFIG
+
+
+class QueryAgent:
+    """Shared CRMQueryAgentExecutor seam: records each turn and answers from ``respond``."""
+
+    def __init__(self, respond):
+        self.respond = respond
+        self.calls = []
+
+    async def execute(self, request, *, runtime):
+        self.calls.append((request, runtime))
+        return self.respond(request)
+
+
+class CustomerPages:
+    """Deterministic CRMQueryExecutor seam over ``total`` customers."""
+
+    def __init__(self, total=12):
+        self.total = total
+        self.calls = []
+
+    async def execute(self, spec, context):
+        self.calls.append((spec, context))
+        return customer_page(decode_offset_cursor(spec.cursor), total=self.total)
+
+
+def customer_page(offset, *, total=12, page_size=10):
+    refs = [
+        EntityRef(
+            ref_id=f"eref_customer_cus_{index:02d}",
+            resource="customer",
+            public_id=f"cus_{index:02d}",
+            display_name=f"客户{index:02d}",
+        )
+        for index in range(offset, min(offset + page_size, total))
+    ]
+    end = offset + len(refs)
+    return CRMQueryResult(
+        query_id="query_customers",
+        resource="customer",
+        status="SUCCESS" if refs else "EMPTY",
+        executed_query=CRMQuerySpec(
+            resource="customer",
+            projection=["account_name"],
+            page_size=page_size,
+            cursor=encode_offset_cursor(offset) if offset else None,
+        ),
+        rows=[{"public_id": ref.public_id, "account_name": ref.display_name} for ref in refs],
+        entity_refs=refs,
+        total=total,
+        next_cursor=encode_offset_cursor(end) if end < total else None,
+    )
+
+
+def answered(text, *, query_results=(), entity_refs=()):
+    return CRMQueryAgentResult(
+        response=CRMQueryAgentResponse(status="ANSWERED", answer=text, evidence_refs=["query_customers"]),
+        query_results=list(query_results),
+        authoritative_entity_refs=list(entity_refs),
+        trace=CRMQueryAgentTrace(
+            model="test-model", tool_call_count=1, total_entity_count=0, elapsed_ms=1, stop_reason="COMPLETED"
+        ),
+    )
+
+
+class _NoopVisionExtractor:
+    async def extract(self, db, *, team_id, user_id, attachments, user_text):
+        return ""
+
+
+def query_service(agent, pages=None):
+    return ConversationService(
+        classifier=Classifier(decision(speech="ASK_FACT", obj="CUSTOMER", operation="READ")),
+        query_executor=agent,
+        query_spec_executor=pages,
+        vision_extractor=_NoopVisionExtractor(),
+    )
 
 
 def test_open_is_shared_by_owner_but_isolated_by_team_and_user(db):
@@ -160,21 +286,26 @@ async def test_ambiguity_asks_once_without_writing_and_choice_consumes_original(
         ("REQUEST_ACTION", "CONTRACT", "TRANSITION"),
     ],
 )
-async def test_query_and_unsupported_writes_never_create_activity_task(db, speech, obj, operation):
-    service = ConversationService(classifier=Classifier(decision(speech=speech, obj=obj, operation=operation)))
+async def test_query_and_unsupported_writes_never_create_activity_task(db, query_model, speech, obj, operation):
+    service = ConversationService(
+        classifier=Classifier(decision(speech=speech, obj=obj, operation=operation)),
+        query_executor=QueryAgent(lambda _request: answered("最近没有新的跟进记录。")),
+    )
     initial = service.open(db, team_id=1, user_id=2)
-    response = await service.submit_text(db, team_id=1, user_id=2, request=text(initial.version))
+    response = await service.submit_text(
+        db, team_id=1, user_id=2, request=text(initial.version), authorization="Bearer caller-token"
+    )
     assert response.submission is None
     assert db.query(AssistantTask).count() == db.query(AssistantTurn).count() == 0
     reply = response.conversation.messages[-1]
     assert "AI Agent" not in reply.text
     assert reply.ui is not None
-    assert [block.type for block in reply.ui.blocks] == ["text"]
     assert reply.ui.suggested_actions == []
     if operation == "READ":
-        assert "客户管理或客户追踪页面" in reply.text
-        assert "这次没有写入" in reply.text
-
+        assert reply.ui.metadata.route == "QUERY"
+        assert [block.type for block in reply.ui.blocks] == ["process", "text"]
+    else:
+        assert [block.type for block in reply.ui.blocks] == ["text"]
 
 async def test_root_cannot_route_to_another_team_task(db):
     foreign = task(db, team_id=9)
@@ -1938,3 +2069,339 @@ async def test_double_click_with_same_key_saves_once(db):
     assert db.query(AssistantConversationEntry).count() == 1
     assert db.query(AssistantTurn).count() == 1
     assert len(classifier.calls) == 1
+
+
+async def test_query_route_lists_customers_and_paginates_by_server_action(db, query_model):
+    agent = QueryAgent(lambda _request: answered("已找到客户", query_results=[customer_page(0)]))
+    pages = CustomerPages()
+    service = query_service(agent, pages)
+    initial = service.open(db, team_id=1, user_id=2)
+    first = await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationTextRequest(
+            text="查看我的客户列表",
+            expected_version=initial.version,
+            client_request_id="query-customers-001",
+        ),
+        authorization="Bearer caller-token",
+    )
+    assert first.submission is None
+    request, runtime = agent.calls[0]
+    assert request.text == "查看我的客户列表"
+    assert (request.principal.team_id, request.principal.user_id) == (1, 2)
+    assert request.selected_entity is None
+    assert runtime.authorization == "Bearer caller-token"
+    assert runtime.query_model_config is query_model
+
+    reply = first.conversation.messages[-1]
+    assert reply.ui is not None and reply.ui.metadata.route == "QUERY"
+    blocks = {block.type: block for block in reply.ui.blocks}
+    process_items = [(item.key, item.status) for item in blocks["process"].items]
+    assert process_items == [("route", "COMPLETED"), ("query", "COMPLETED")]
+    entity_list = blocks["entity_list"]
+    assert (entity_list.total, len(entity_list.items)) == (12, 10)
+    pagination = blocks["pagination"]
+    assert pagination.result_set_id == entity_list.result_set_id
+    assert (pagination.range_start, pagination.range_end, pagination.total) == (1, 10, 12)
+    assert pagination.previous_action_id is None and pagination.next_action_id is not None
+
+    page2_request = ConversationPaginationRequest(
+        action_id=pagination.next_action_id,
+        expected_version=first.conversation.version,
+        client_request_id="query-customers-page2",
+    )
+    page2 = await service.paginate(
+        db, team_id=1, user_id=2, request=page2_request, authorization="Bearer caller-token"
+    )
+    spec, context = pages.calls[0]
+    assert spec.cursor == encode_offset_cursor(10)
+    assert (context.team_id, context.user_id, context.authorization) == (1, 2, "Bearer caller-token")
+    page2_blocks = {block.type: block for block in page2.conversation.messages[-1].ui.blocks}
+    assert [item.entity_ref.public_id for item in page2_blocks["entity_list"].items] == ["cus_10", "cus_11"]
+    assert page2_blocks["entity_list"].result_set_id == entity_list.result_set_id
+    page2_pagination = page2_blocks["pagination"]
+    assert (page2_pagination.range_start, page2_pagination.range_end, page2_pagination.total) == (11, 12, 12)
+    assert page2_pagination.previous_action_id is not None and page2_pagination.next_action_id is None
+
+    replay = await service.paginate(
+        db, team_id=1, user_id=2, request=page2_request, authorization="Bearer caller-token"
+    )
+    assert replay.conversation.version == page2.conversation.version
+    assert len(pages.calls) == 1
+
+    page1 = await service.paginate(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationPaginationRequest(
+            action_id=page2_pagination.previous_action_id,
+            expected_version=page2.conversation.version,
+            client_request_id="query-customers-page1",
+        ),
+        authorization="Bearer caller-token",
+    )
+    assert pages.calls[1][0].cursor is None
+    page1_pagination = next(b for b in page1.conversation.messages[-1].ui.blocks if b.type == "pagination")
+    assert (page1_pagination.range_start, page1_pagination.range_end) == (1, 10)
+    assert len(agent.calls) == 1
+
+    with pytest.raises(module.crud.ConversationConflict):
+        await service.paginate(
+            db,
+            team_id=1,
+            user_id=2,
+            request=ConversationPaginationRequest(
+                action_id="pg_unknown_action",
+                expected_version=page1.conversation.version,
+                client_request_id="query-customers-invalid",
+            ),
+            authorization="Bearer caller-token",
+        )
+
+
+async def test_mentioned_customer_query_binds_selected_entity_and_attachments_validate(db, query_model):
+    db.add(
+        Customer(
+            public_id="cus_mention_01",
+            team_id=1,
+            account_name="星海科技有限公司",
+            industry="互联网",
+            city="杭州",
+            status=0,
+            creator_id="2",
+        )
+    )
+    db.commit()
+
+    agent = QueryAgent(lambda request: answered("客户概览如下", entity_refs=[request.selected_entity]))
+    service = query_service(agent)
+    initial = service.open(db, team_id=1, user_id=2)
+    reply = await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationTextRequest(
+            text="查看客户概览",
+            expected_version=initial.version,
+            client_request_id="query-mention-001",
+            mentioned_customer_public_id="cus_mention_01",
+            attachments=[
+                ConversationAttachmentRef(
+                    file_url="https://files.example.com/a.png",
+                    file_name="a.png",
+                    mime_type="image/png",
+                    size_bytes=2048,
+                )
+            ],
+        ),
+        authorization="Bearer caller-token",
+    )
+    selected = agent.calls[0][0].selected_entity
+    assert (selected.resource, selected.public_id, selected.display_name) == (
+        "customer",
+        "cus_mention_01",
+        "星海科技有限公司",
+    )
+    message = reply.conversation.messages[-1]
+    assert message.ui is not None and message.ui.metadata.route == "QUERY"
+    entity_list = next(block for block in message.ui.blocks if block.type == "entity_list")
+    assert [item.entity_ref.public_id for item in entity_list.items] == ["cus_mention_01"]
+    assert all(block.type != "pagination" for block in message.ui.blocks)
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ConversationTextRequest(
+            text="too many",
+            expected_version=0,
+            client_request_id="attach-limit-001",
+            attachments=[
+                ConversationAttachmentRef(
+                    file_url=f"https://files.example.com/{i}.png",
+                    file_name=f"{i}.png",
+                    mime_type="image/png",
+                    size_bytes=1024,
+                )
+                for i in range(4)
+            ],
+        )
+
+
+async def test_query_carries_caller_permissions_and_hidden_mention_never_reaches_engine(db, monkeypatch, query_model):
+    monkeypatch.setattr(
+        "app.crud.permission.permission_crud.get_user_permissions",
+        lambda *_args, **_kwargs: [SimpleNamespace(code="customer:view:own")],
+    )
+    shared_customer = Customer(
+        public_id="cus_perm_shared",
+        team_id=1,
+        account_name="协作客户",
+        city="杭州",
+        status=0,
+        creator_id="3",
+        owner_id="3",
+    )
+    hidden_customer = Customer(
+        public_id="cus_perm_hidden",
+        team_id=1,
+        account_name="他人客户",
+        city="北京",
+        status=0,
+        creator_id="3",
+        owner_id="3",
+    )
+    db.add_all([shared_customer, hidden_customer])
+    db.flush()
+    db.add(
+        CustomerMember(
+            team_id=1,
+            customer_id=shared_customer.id,
+            user_id="2",
+            access_level="VIEW",
+            created_by="3",
+            is_active=True,
+        )
+    )
+    db.commit()
+
+    agent = QueryAgent(lambda request: answered("客户概览如下", entity_refs=[request.selected_entity]))
+    service = query_service(agent)
+    initial = service.open(db, team_id=1, user_id=2)
+
+    denied = await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationTextRequest(
+            text="查看这个客户概览",
+            expected_version=initial.version,
+            client_request_id="perm-mention-denied-001",
+            mentioned_customer_public_id="cus_perm_hidden",
+        ),
+        authorization="Bearer caller-token",
+    )
+    denied_message = denied.conversation.messages[-1]
+    assert "暂无查看权限" in denied_message.text
+    assert "他人客户" not in denied_message.text
+    assert all(block.type != "entity_list" for block in denied_message.ui.blocks)
+    assert agent.calls == []
+
+    await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationTextRequest(
+            text="查看这个客户概览",
+            expected_version=denied.conversation.version,
+            client_request_id="perm-mention-member-001",
+            mentioned_customer_public_id="cus_perm_shared",
+        ),
+        authorization="Bearer caller-token",
+    )
+    request, runtime = agent.calls[0]
+    assert request.selected_entity.public_id == "cus_perm_shared"
+    assert request.principal.permission_codes == ["customer:view:own"]
+    assert runtime.permission_codes == frozenset({"customer:view:own"})
+
+
+class QueryEngineDown(RuntimeError):
+    pass
+
+
+def unconfigured_query_model(_db, *, team_id):
+    from fastapi import HTTPException
+
+    raise HTTPException(status_code=503, detail="AI 模型未配置")
+
+
+def engine_down(_request):
+    raise QueryEngineDown("upstream unavailable")
+
+
+@pytest.mark.parametrize(
+    "authorization,load_model,respond",
+    [
+        (None, None, None),
+        ("Bearer caller-token", unconfigured_query_model, None),
+        ("Bearer caller-token", None, engine_down),
+    ],
+    ids=["missing-bearer", "model-unconfigured", "engine-error"],
+)
+async def test_query_failure_fails_closed_without_write_copy_or_error_code(
+    db, monkeypatch, query_model, authorization, load_model, respond
+):
+    if load_model is not None:
+        monkeypatch.setattr("app.services.agent.application.load_agent_model_configs", load_model)
+    agent = QueryAgent(respond or (lambda _request: answered("不应出现")))
+    service = query_service(agent)
+    initial = service.open(db, team_id=1, user_id=2)
+    reply = await service.submit_text(
+        db, team_id=1, user_id=2, request=text(initial.version, "查看我的客户"), authorization=authorization
+    )
+    message = reply.conversation.messages[-1]
+    assert message.ui is not None and message.ui.metadata.route == "QUERY"
+    blocks = {block.type: block for block in message.ui.blocks}
+    process_items = [(item.key, item.status) for item in blocks["process"].items]
+    assert process_items == [("route", "COMPLETED"), ("query", "FAILED")]
+    assert blocks["error"].title == "查询没完成"
+    assert "客户活动" not in message.text
+    assert "不应出现" not in message.text
+    assert all(entry.error_code is None for entry in db.query(AssistantConversationEntry))
+    assert len(agent.calls) == (1 if respond is not None else 0)
+
+
+async def test_query_clarification_answers_with_text_and_no_pagination(db, query_model):
+    clarification = CRMQueryAgentResult(
+        response=CRMQueryAgentResponse(
+            status="CLARIFICATION_REQUIRED", clarification_question="你想看哪个城市的客户？"
+        ),
+        trace=CRMQueryAgentTrace(
+            model="test-model", tool_call_count=0, total_entity_count=0, elapsed_ms=1, stop_reason="COMPLETED"
+        ),
+    )
+    service = query_service(QueryAgent(lambda _request: clarification))
+    initial = service.open(db, team_id=1, user_id=2)
+    reply = await service.submit_text(
+        db, team_id=1, user_id=2, request=text(initial.version, "查看客户"), authorization="Bearer caller-token"
+    )
+    message = reply.conversation.messages[-1]
+    assert message.text == "你想看哪个城市的客户？"
+    assert [block.type for block in message.ui.blocks] == ["process", "text"]
+
+
+async def test_workflow_mention_does_not_bind_unauthorized_customer(db, monkeypatch):
+    monkeypatch.setattr(
+        "app.crud.permission.permission_crud.get_user_permissions",
+        lambda *_args, **_kwargs: [SimpleNamespace(code="customer:view:own")],
+    )
+    db.add(
+        Customer(
+            public_id="cus_wf_hidden",
+            team_id=1,
+            account_name="不可写客户",
+            city="北京",
+            status=0,
+            creator_id="3",
+            owner_id="3",
+        )
+    )
+    db.commit()
+
+    service = ConversationService(classifier=Classifier(decision()))
+    initial = service.open(db, team_id=1, user_id=2)
+    reply = await service.submit_text(
+        db,
+        team_id=1,
+        user_id=2,
+        request=ConversationTextRequest(
+            text="今天电话沟通了方案",
+            expected_version=initial.version,
+            client_request_id="perm-wf-mention-001",
+            mentioned_customer_public_id="cus_wf_hidden",
+        ),
+    )
+    assert reply.submission is not None
+    created_task = db.query(AssistantTask).filter_by(public_id=reply.submission.task_public_id).one()
+    assert created_task.authority_json.get("customer_public_id") is None

@@ -37,16 +37,16 @@ onUnmounted(clearHeader)
 .sales-assistant-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: min(100vh, 100dvh);
   flex: 1;
   min-height: 0;
-  padding: var(--page-padding) var(--page-padding) var(--page-padding);
+  padding: var(--page-padding) var(--page-padding) calc(var(--page-padding) + var(--safe-bottom));
   background: hsl(var(--card));
 }
 
 @media (max-width: $bp-sm - 1) {
   .sales-assistant-page {
-    padding: var(--page-padding);
+    padding: var(--page-padding) var(--page-padding) calc(var(--page-padding) + var(--safe-bottom));
   }
 }
 </style>

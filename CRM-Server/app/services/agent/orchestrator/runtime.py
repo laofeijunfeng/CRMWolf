@@ -74,20 +74,43 @@ class CRMRootSemanticPlanResolver:
 
 
 @lru_cache(maxsize=1)
+def get_query_semantic_intent_resolver() -> LLMQuerySemanticIntentResolver:
+    return LLMQuerySemanticIntentResolver(timeout_seconds=get_settings().AGENT_QUERY_SEMANTIC_TIMEOUT)
+
+
+@lru_cache(maxsize=1)
+def _internal_crm_api_client() -> InternalCRMAPIClient:
+    return InternalCRMAPIClient()
+
+
+@lru_cache(maxsize=1)
+def get_crm_query_spec_executor() -> DefaultCRMQueryExecutor:
+    """Deterministic, policy-validated QuerySpec executor (no model call)."""
+
+    return DefaultCRMQueryExecutor(api_client=_internal_crm_api_client())
+
+
+@lru_cache(maxsize=1)
+def get_crm_query_agent_executor() -> CRMQueryAgentExecutor:
+    """The one read-only CRM Query Agent seam shared by every channel."""
+
+    query_agent = CRMQueryAgent(
+        CRMReadToolRegistry(
+            executor=get_crm_query_spec_executor(),
+            customer_context_reader=DefaultCustomerContextReader(),
+            follow_up_task_detail_reader=FollowUpTaskDetailAPIAdapter(_internal_crm_api_client()),
+        )
+    )
+    return CRMQueryAgentExecutor(
+        query_agent=query_agent,
+        semantic_intent_resolver=get_query_semantic_intent_resolver(),
+    )
+
+
+@lru_cache(maxsize=1)
 def get_root_orchestrator() -> RootOrchestrator:
     """Build the one production execution graph used by every Agent channel."""
 
-    semantic_intent_resolver = LLMQuerySemanticIntentResolver(
-        timeout_seconds=get_settings().AGENT_QUERY_SEMANTIC_TIMEOUT
-    )
-    api_client = InternalCRMAPIClient()
-    query_agent = CRMQueryAgent(
-        CRMReadToolRegistry(
-            executor=DefaultCRMQueryExecutor(api_client=api_client),
-            customer_context_reader=DefaultCustomerContextReader(),
-            follow_up_task_detail_reader=FollowUpTaskDetailAPIAdapter(api_client),
-        )
-    )
     workflow_subgraph = build_workflow_subgraph(
         planner=CRMWorkflowPlanner(),
         effect_executor=CRMWorkflowEffectExecutor(),
@@ -96,13 +119,10 @@ def get_root_orchestrator() -> RootOrchestrator:
         checkpointer=agent_checkpoint_saver,
         context_resolver=DatabaseRootContextResolver(),
         decision_classifier=LangChainRootDecisionClassifier(),
-        query_executor=CRMQueryAgentExecutor(
-            query_agent=query_agent,
-            semantic_intent_resolver=semantic_intent_resolver,
-        ),
+        query_executor=get_crm_query_agent_executor(),
         interaction_resolver=DatabaseInteractionResolver(),
         workflow_subgraph=workflow_subgraph,
-        semantic_intent_resolver=semantic_intent_resolver,
+        semantic_intent_resolver=get_query_semantic_intent_resolver(),
         semantic_plan_resolver=CRMRootSemanticPlanResolver(),
         pending_case_ranker=agent_semantic_parser,
     )

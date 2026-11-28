@@ -1,13 +1,27 @@
 import { z } from 'zod'
 
 import {
+  AssistantAsyncOperationSchema,
   AssistantTaskViewSchema,
-  ConversationViewSchema, ConversationReplySchema, ConversationRequestStatusSchema,
+  ConversationAttachmentRefSchema, ConversationViewSchema, ConversationReplySchema, ConversationRequestStatusSchema,
   AssistantTurnStatusSchema, PendingEntityDraftSchema,
+  StopTurnResponseSchema, TextDeltaEventSchema,
 } from '@/schemas/assistant-contracts'
 import type {
-  AssistantInputKind, AssistantRejectReason, AssistantTaskView, ConversationReply, ConversationRequestStatus, ConversationView, PendingEntityDraft
+  AssistantAsyncOperation, AssistantAsyncOperationStatus,
+  AssistantInputKind, AssistantRejectReason, AssistantTaskView,
+  ConversationAttachmentRef, ConversationReply, ConversationRequestStatus, ConversationView,
+  PendingEntityDraft, StopTurnReason, StopTurnResponse, TextDeltaEvent,
 } from '@/schemas/assistant-contracts'
+
+export type {
+  AssistantAsyncOperation,
+  AssistantAsyncOperationStatus,
+  ConversationAttachmentRef,
+  StopTurnReason,
+  StopTurnResponse,
+  TextDeltaEvent,
+}
 import type { JsonObject } from '@/schemas/agent-contracts/common'
 import { useUserStore } from '@/stores/user'
 import request from '@/utils/request'
@@ -29,6 +43,7 @@ export interface StageEvent {
   /** What the stage works on (e.g. 部署信息); absent for generic stages. */
   subject?: string | undefined
   segment?: StageSegment | undefined
+  step_started_at?: string | undefined
 }
 
 // Stage events are progress only: a malformed one is dropped, never fatal.
@@ -43,7 +58,8 @@ export const parseStageEvent = (data: Record<string, unknown>): StageEvent | nul
     ms: typeof data['ms'] === 'number' ? data['ms'] : undefined,
     score: typeof data['score'] === 'number' ? data['score'] : undefined,
     subject: typeof data['subject'] === 'string' && data['subject'] !== '' ? data['subject'] : undefined,
-    segment: segment.success ? segment.data : undefined
+    segment: segment.success ? segment.data : undefined,
+    step_started_at: typeof data['step_started_at'] === 'string' && data['step_started_at'] !== '' ? data['step_started_at'] : undefined,
   }
 }
 
@@ -58,10 +74,15 @@ export interface SubmitStreamError {
 export interface SubmitStreamHandlers {
   onAccepted(turnId: string, seq?: number | undefined): void
   onStage(event: StageEvent & { seq?: number | undefined }): void
+  onTextDelta?(event: TextDeltaEvent): void
   onWaiting(data: { task: AssistantTaskView; message: string; seq?: number | undefined }): void
   onError(event: SubmitStreamError): void
   onNetworkLost(): void
   onTerminalInvalid?(detail: { event: string; turnId: string; seq?: number | undefined; issues: string[] }): void
+}
+
+export interface SubmitInputStreamOptions {
+  signal?: AbortSignal | undefined
 }
 
 const TurnEventSchema = z.object({
@@ -159,7 +180,8 @@ export function createSseSplitter(): SseSplitter {
 export async function submitInputStream(
   publicId: string,
   input: SubmitAssistantInput,
-  handlers: SubmitStreamHandlers
+  handlers: SubmitStreamHandlers,
+  options?: SubmitInputStreamOptions
 ): Promise<void> {
   const userStore = useUserStore()
   const base = resolveAssistantApiBase(import.meta.env.VITE_API_BASE_URL as string | undefined)
@@ -190,6 +212,11 @@ export async function submitInputStream(
     if (parsed.event === 'stage') {
       const stageEvent = parseStageEvent(payload)
       if (stageEvent !== null) handlers.onStage({ ...stageEvent, seq: sequence })
+      return false
+    }
+    if (parsed.event === 'text_delta') {
+      const delta = TextDeltaEventSchema.safeParse(payload)
+      if (delta.success) handlers.onTextDelta?.(delta.data)
       return false
     }
     if (parsed.event === 'waiting') {
@@ -247,7 +274,8 @@ export async function submitInputStream(
         action_id: input.action_id, expected_version: input.expected_version,
         values: input.values, form_revision: input.form_revision, choices: input.choices,
         suppress_week: input.suppress_week, reason: input.reason
-      })
+      }),
+      signal: options?.signal ?? null
     })
     if (!response.ok || response.body === null) {
       logAssistantClient('warn', 'sse_disconnect', {
@@ -272,8 +300,14 @@ export async function submitInputStream(
     for (const block of split.flush()) {
       if (deliver(block)) return
     }
-    if (!settled) handlers.onNetworkLost()
-  } catch {
+    if (!settled && options?.signal?.aborted !== true) handlers.onNetworkLost()
+  } catch (err: unknown) {
+    const isAbort = options?.signal?.aborted === true
+      || (err instanceof Error && err.name === 'AbortError')
+    if (isAbort) {
+      finish()
+      return
+    }
     if (!settled) {
       logAssistantClient('warn', 'sse_disconnect', {
         task: publicId, turn_id: streamTurnId, client_request_id: input.client_request_id ?? '',
@@ -322,9 +356,48 @@ export const assistantApi = {
     )
     return ConversationRequestStatusSchema.parse(payload)
   },
-  async conversationText(input: { text: string; client_request_id: string; expected_version: number }): Promise<ConversationReply> {
+  async conversationText(input: {
+    text: string
+    client_request_id: string
+    expected_version: number
+    mentioned_customer_public_id?: string | null | undefined
+    attachments?: ConversationAttachmentRef[] | undefined
+  }): Promise<ConversationReply> {
     // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
     const payload: unknown = await request.post('/v1/assistant/conversation/messages', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
+    return ConversationReplySchema.parse(payload)
+  },
+  /** Store one image server-side; only the returned ref may be sent in `conversationText.attachments`. */
+  async uploadAttachment(file: File): Promise<ConversationAttachmentRef> {
+    const formData = new FormData()
+    formData.append('file', file)
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/attachments', formData)
+    return ConversationAttachmentRefSchema.parse(payload)
+  },
+  /** Fetch one user-owned image attachment with auth header and return a local blob URL. */
+  async fetchAttachmentBlobUrl(fileUrl: string): Promise<string> {
+    const storedName = fileUrl.split('/').pop() ?? ''
+    if (storedName === '' || storedName === '.' || storedName === '..') {
+      throw new Error('Invalid attachment path')
+    }
+    // eslint-disable-next-line crmwolf/require-zod-schema -- binary image blob response
+    const payload: unknown = await request.get<unknown>(
+      `/v1/assistant/attachments/${encodeURIComponent(storedName)}`,
+      { responseType: 'blob' }
+    )
+    if (!(payload instanceof Blob)) {
+      throw new Error('Invalid attachment blob response')
+    }
+    return window.URL.createObjectURL(payload)
+  },
+  async conversationPagination(input: {
+    action_id: string
+    expected_version: number
+    client_request_id: string
+  }): Promise<ConversationReply> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- parsed at this boundary
+    const payload: unknown = await request.post('/v1/assistant/conversation/pagination', input, { timeout: CONVERSATION_UNDERSTANDING_TIMEOUT_MS })
     return ConversationReplySchema.parse(payload)
   },
   async retryConversationEntry(entryId: string, expectedVersion: number): Promise<ConversationReply> {
@@ -391,5 +464,23 @@ export const assistantApi = {
       `/v1/assistant/tasks/${encodeURIComponent(publicId)}/reconcile`
     )
     return AssistantTaskReconcileResponseSchema.parse(payload)
+  },
+  async stopTurn(publicId: string, turnId: string): Promise<StopTurnResponse> {
+    // keepalive lets the stop reach the server even when the page is being closed mid-generation.
+    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
+    const payload: unknown = await request.post(
+      `/v1/assistant/tasks/${encodeURIComponent(publicId)}/turns/${encodeURIComponent(turnId)}/stop`,
+      undefined,
+      { adapter: 'fetch', fetchOptions: { keepalive: true } }
+    )
+    return StopTurnResponseSchema.parse(payload)
+  },
+  async listOperations(limit?: number): Promise<AssistantAsyncOperation[]> {
+    // eslint-disable-next-line crmwolf/require-zod-schema -- payload is parsed below
+    const payload: unknown = await request.get(
+      '/v1/assistant/operations',
+      limit !== undefined ? { params: { limit } } : undefined
+    )
+    return z.array(AssistantAsyncOperationSchema).parse(payload)
   },
 }

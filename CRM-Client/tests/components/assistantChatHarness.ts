@@ -5,7 +5,8 @@ import type * as AssistantApiModule from '@/api/assistant'
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), get: vi.fn(), text: vi.fn(), choice: vi.fn(), command: vi.fn(),
-  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), resume: vi.fn(), stream: vi.fn(), retryEntry: vi.fn(), requestStatus: vi.fn()
+  turn: vi.fn(), retry: vi.fn(), task: vi.fn(), resume: vi.fn(), stream: vi.fn(), retryEntry: vi.fn(), requestStatus: vi.fn(),
+  reconcile: vi.fn()
 }))
 export { mocks }
 vi.mock('@/api/assistant', async (importOriginal) => ({
@@ -16,7 +17,7 @@ vi.mock('@/api/assistant', async (importOriginal) => ({
     resumeConversation: mocks.resume,
     conversationRequestStatus: mocks.requestStatus,
     retryConversationEntry: mocks.retryEntry,
-    getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task
+    getTurn: mocks.turn, retryTurn: mocks.retry, getTask: mocks.task, reconcileTask: mocks.reconcile
   },
   submitInputStream: mocks.stream
 }))
@@ -210,4 +211,5 @@ beforeEach(() => {
   Object.values(mocks).forEach((mock) => mock.mockReset())
   show(view())
   mocks.command.mockResolvedValue(reply(view()))
+  mocks.reconcile.mockRejectedValue(new Error('reconcile unavailable'))
 })

@@ -77,7 +77,7 @@ class AssistantTaskView(BaseModel):
     version: int
     last_modified_time: str | None = None
     processing_turn_id: str | None = None
-    processing_turn_status: TurnStatus | None = None
+    processing_turn_status: TurnStatus | Literal["CANCELLED"] | None = None
     reprocess_turn_id: str | None = None
     follow_up_disposition: dict[str, object] | None = None
     proposal_outcome: Literal["proposal_failed", "proposal_rejected"] | None = None
@@ -112,7 +112,7 @@ class AssistantTurnView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     turn_id: str
-    status: TurnStatus
+    status: TurnStatus | Literal["CANCELLED"]
     lease_version: int = Field(ge=0)
     reprocess_allowed: bool = False
     events: list[AssistantTurnEventView]
@@ -212,3 +212,31 @@ class AssistantTaskReconcileResponse(BaseModel):
     task: AssistantTaskView
     message: str = Field(min_length=1, max_length=2000)
     followup_turn_id: str | None = None
+
+
+class StopTurnResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stopped: bool
+    reason: Literal["STOPPED", "ALREADY_TERMINAL", "WRITE_IN_PROGRESS"]
+    task: AssistantTaskView
+
+
+AssistantAsyncOperationStatusLiteral = Literal["QUEUED", "RUNNING", "DEGRADED", "SUCCEEDED", "FAILED"]
+
+
+class AssistantAsyncOperationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public_id: str
+    operation_type: str
+    resource_type: str | None = None
+    resource_public_id: str | None = None
+    status: AssistantAsyncOperationStatusLiteral
+    summary: str | None = None
+    current_step: str | None = None
+    error_message: str | None = None
+    started_time: datetime | None = None
+    finished_time: datetime | None = None
+    updated_time: datetime | None = None
+    created_time: datetime | None = None

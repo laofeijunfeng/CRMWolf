@@ -1,15 +1,20 @@
 """Adapter from Root query execution input to the stateless CRM Query Agent."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, cast
 
+from app.services.agent.orchestrator.contracts import AgentExecutionError
 from app.services.agent.query import (
     CRMFilter,
+    CRMQueryAgentExecutionError,
     CRMQueryAgentRequest,
     CRMQueryAgentResponse,
     CRMQueryAgentResult,
     CRMQueryAgentTrace,
+    CRMQueryExecutionError,
 )
 from app.services.agent.query.identity import (
     CustomerBinding,
@@ -51,6 +56,56 @@ class QueryIdentityResolutionUnavailableError(RuntimeError):
 
 class QuerySemanticResolutionUnavailableError(RuntimeError):
     """The LLM semantic query boundary could not complete."""
+
+
+_QUERY_ERROR_MESSAGES = {
+    "QUERY_INVALID": "我还没看懂你要查什么，请补充客户、时间或内容。",
+    "QUERY_UNSUPPORTED": "暂不支持查询这类信息。",
+    "QUERY_EMPTY": "没有找到符合条件的数据。",
+    "PERMISSION_DENIED": "没有权限查看相关数据。",
+    "QUERY_LIMIT_EXCEEDED": "查询结果较多，已按系统上限返回。",
+    "UPSTREAM_TIMEOUT": "查询响应超时了，请再试一次。",
+    "UPSTREAM_UNAVAILABLE": "查询暂时没有回应，请稍后再试。",
+    "MODEL_OUTPUT_INVALID": "我还没看懂你要查什么，请换一种说法试试。",
+    "INTERNAL_ERROR": "查询暂时没完成，请稍后再试。",
+}
+
+
+def query_execution_error(exc: Exception) -> AgentExecutionError:
+    """Map one Query seam failure to the user-safe error every channel shows.
+
+    ``QUERY_EXECUTION_FAILED`` marks an unexpected exception; callers log it.
+    """
+
+    if isinstance(exc, QueryExecutionConfigurationError):
+        return AgentExecutionError(
+            code="QUERY_EXECUTION_NOT_CONFIGURED",
+            message="查询服务配置不完整, 无法执行本次请求。",
+            retryable=False,
+        )
+    if isinstance(exc, QueryIdentityResolutionUnavailableError):
+        return AgentExecutionError(
+            code="QUERY_IDENTITY_UNAVAILABLE",
+            message="暂时没法确认客户信息，请稍后再试。",
+            retryable=True,
+        )
+    if isinstance(exc, QuerySemanticResolutionUnavailableError):
+        return AgentExecutionError(
+            code="QUERY_SEMANTIC_INTENT_UNAVAILABLE",
+            message="查询条件暂时没解析出来，请稍后再试。",
+            retryable=True,
+        )
+    if isinstance(exc, (CRMQueryAgentExecutionError, CRMQueryExecutionError)):
+        return AgentExecutionError(
+            code=exc.error.code,
+            message=_QUERY_ERROR_MESSAGES.get(exc.error.code, "查询服务暂时不可用，请稍后重试。"),
+            retryable=exc.error.retryable,
+        )
+    return AgentExecutionError(
+        code="QUERY_EXECUTION_FAILED",
+        message="查询暂时没完成，请稍后再试。",
+        retryable=True,
+    )
 
 
 class CRMQueryAgentExecutor:
@@ -385,7 +440,7 @@ class CRMQueryAgentExecutor:
             response=CRMQueryAgentResponse(
                 status="CLARIFICATION_REQUIRED",
                 clarification_question=(
-                    "我还不能确定你要查询哪类 CRM 信息，请补充客户、事项或时间范围。"  # noqa: RUF001
+                    "我还不能确定你要查询哪类 CRM 信息，请补充客户、事项或时间范围。"
                 ),
             ),
             trace=CRMQueryAgentTrace(
@@ -451,7 +506,7 @@ class CRMQueryAgentExecutor:
             names = "、".join(ref.display_name for ref in binding.candidates[:5])
             question = f"请确认你要查询哪家客户\uff1a{names}。"
         else:
-            question = f"未找到与“{binding.query_text or '该客户'}”匹配的客户，请补充完整名称或客户简称。"  # noqa: RUF001
+            question = f"未找到与“{binding.query_text or '该客户'}”匹配的客户，请补充完整名称或客户简称。"
         return CRMQueryAgentResult(
             response=CRMQueryAgentResponse(
                 status="CLARIFICATION_REQUIRED",

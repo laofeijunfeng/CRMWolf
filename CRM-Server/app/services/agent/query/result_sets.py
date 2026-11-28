@@ -14,7 +14,8 @@ from app.schemas.agent_persistence import (
     AgentQueryResultSetRecord,
     AgentResultPage,
 )
-from app.services.agent.query.schemas import CRMQuerySpec, CRMResource, EntityRef
+from app.services.agent.query.schemas import CRMQueryResult, CRMQuerySpec, CRMResource, EntityRef
+from app.utils.public_id import generate_public_id
 from app.utils.time import business_now
 
 if TYPE_CHECKING:
@@ -24,6 +25,27 @@ _RESULT_SET_TTL = timedelta(hours=24)
 _RESULT_SET_RETENTION = timedelta(days=7)
 _ENTITY_REFS_ADAPTER = TypeAdapter(list[EntityRef])
 _RESOURCE_ADAPTER: TypeAdapter[CRMResource] = TypeAdapter(CRMResource)
+
+
+def sign_query_results(results: list[CRMQueryResult]) -> list[CRMQueryResult]:
+    """Stamp each completed result and its entity refs with one public result-set id."""
+
+    signed: list[CRMQueryResult] = []
+    for result in results:
+        if result.executed_query is None:
+            raise RuntimeError("completed CRM query result requires an executed query")
+        result_set_id = result.result_set_id or generate_public_id("rs")
+        signed.append(
+            result.model_copy(
+                update={
+                    "result_set_id": result_set_id,
+                    "entity_refs": [
+                        ref.model_copy(update={"result_set_id": result_set_id}) for ref in result.entity_refs
+                    ],
+                }
+            )
+        )
+    return signed
 
 
 class ResultSetError(RuntimeError):

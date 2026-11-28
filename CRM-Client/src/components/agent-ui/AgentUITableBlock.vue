@@ -41,16 +41,25 @@ const pageSize = computed(() => Math.max(props.block.rows.length, 1))
 <template>
   <div class="grid min-w-0 gap-space-2">
     <p v-if="block.caption" class="m-0 text-body font-medium text-foreground">{{ block.caption }}</p>
-    <DataTable
-      v-if="rows.length > 0"
-      embedded
-      :fields="fields"
-      :data="rows"
-      :total="rows.length"
-      :page="1"
-      :page-size="pageSize"
-      height-strategy="auto"
-    />
+    <div v-if="rows.length > 0" class="w-full max-w-full overflow-x-auto">
+      <DataTable
+        embedded
+        :fields="fields"
+        :data="rows"
+        :total="rows.length"
+        :page="1"
+        :page-size="pageSize"
+        height-strategy="auto"
+      >
+        <template
+          v-for="column in block.columns"
+          :key="column.key"
+          #[`cell-${column.key}`]="{ value }"
+        >
+          <span class="whitespace-nowrap">{{ value ?? '-' }}</span>
+        </template>
+      </DataTable>
+    </div>
     <p v-else class="m-0 text-caption text-muted-foreground">没有可展示的数据。</p>
   </div>
 </template>

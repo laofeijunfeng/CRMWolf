@@ -69,7 +69,8 @@ def client(db_session, override_auth, monkeypatch):
     # Direct task intake asks the root classifier first; default it to an activity verdict.
     monkeypatch.setattr(api._conversation_service, "classifier", Classifier(decision()))
     app.dependency_overrides[get_db] = _get_db_override
-    yield TestClient(app)
+    # The browser always sends the session bearer; conversation routes forward it to CRM reads.
+    yield TestClient(app, headers={"Authorization": "Bearer test-token"})
     app.dependency_overrides.pop(get_db, None)
 
 

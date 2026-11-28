@@ -61,6 +61,7 @@ Thumbs.db
 CRM-Server/uploads/**.tar
 CRM-Server/uploads/invoices/
 CRM-Server/uploads/contracts/
+CRM-Server/uploads/assistant_attachments/
 # Ignore all uploaded files except .gitkeep
 uploads/*
 !uploads/.gitkeep

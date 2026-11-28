@@ -9,7 +9,7 @@ import {
   LoaderCircle,
   XCircle,
 } from 'lucide-vue-next'
-import { computed, ref, watch, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type Component } from 'vue'
 
 import StatusBadge from '@/components/crmwolf/StatusBadge.vue'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -30,6 +30,8 @@ interface Props {
   status?: 'processing' | 'updated' | null | undefined
   /** 每个步骤行右侧的元信息，键为步骤 key。 */
   meta?: Readonly<Record<string, ProcessItemMeta>> | undefined
+  /** 当前运行步骤的 ISO-8601 开始时间戳；运行中时显示实时经过秒数。 */
+  stepStartedAt?: string | null | undefined
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -39,6 +41,7 @@ const props = withDefaults(defineProps<Props>(), {
   summary: null,
   status: null,
   meta: undefined,
+  stepStartedAt: null,
 })
 
 const userOverride = ref<boolean | null>(null)
@@ -49,6 +52,50 @@ const onOpenChange = (next: boolean): void => {
 watch(() => props.episodeKey, () => {
   userOverride.value = null
 })
+
+const elapsedSeconds = ref<number | null>(null)
+let elapsedTimer: number | null = null
+
+const stopElapsedTimer = (): void => {
+  if (elapsedTimer !== null) {
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+}
+
+const syncElapsedSeconds = (): void => {
+  const startedAt = props.stepStartedAt
+  if (!props.running || startedAt === undefined || startedAt === null || startedAt === '') {
+    elapsedSeconds.value = null
+    return
+  }
+  const startedMs = Date.parse(startedAt)
+  if (Number.isNaN(startedMs)) {
+    elapsedSeconds.value = null
+    return
+  }
+  elapsedSeconds.value = Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+}
+
+watch(
+  () => [props.running, props.stepStartedAt] as const,
+  ([running, stepStartedAt]) => {
+    stopElapsedTimer()
+    if (!running || (stepStartedAt ?? '') === '' || Number.isNaN(Date.parse(stepStartedAt ?? ''))) {
+      elapsedSeconds.value = null
+      return
+    }
+    syncElapsedSeconds()
+    elapsedTimer = window.setInterval(syncElapsedSeconds, 1000)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(stopElapsedTimer)
+
+const elapsedLabel = computed<string | null>(() => (
+  elapsedSeconds.value !== null ? `${elapsedSeconds.value}s` : null
+))
 const latestItem = computed(() => props.block.items[props.block.items.length - 1])
 
 const statusIcon = (status: ProcessItem['status']): Component => ({
@@ -69,7 +116,14 @@ const statusClass = (status: ProcessItem['status']): string => {
   return 'text-tone-success'
 }
 
-const itemMeta = (item: ProcessItem): ProcessItemMeta => props.meta?.[item.key] ?? { text: processStatusLabel(item.status) }
+const itemMeta = (item: ProcessItem): ProcessItemMeta => {
+  const explicit = props.meta?.[item.key]
+  if (explicit !== undefined) return explicit
+  if (item.status === 'RUNNING' && elapsedLabel.value !== null) {
+    return { text: elapsedLabel.value, tone: 'brand' }
+  }
+  return { text: processStatusLabel(item.status) }
+}
 const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.title} · 共 ${props.block.items.length} 步` : ''))
 </script>
 
@@ -101,6 +155,11 @@ const fallbackSummary = computed(() => (latestItem.value ? `${latestItem.value.t
         <span class="min-w-0 flex-1 truncate text-caption text-muted-foreground">
           {{ summary ?? fallbackSummary }}
         </span>
+        <span
+          v-if="elapsedLabel"
+          class="shrink-0 text-caption tabular-nums text-muted-foreground"
+          data-agent-ui-elapsed
+        >{{ elapsedLabel }}</span>
         <StatusBadge v-if="status" class="shrink-0" :status="status" type="agentInteraction" size="small" />
       </button>
     </CollapsibleTrigger>

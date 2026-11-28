@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.assistant import AssistantTaskView, SubmitInputRequest  # noqa: TC001 -- Pydantic runtime models.
 from app.services.agent.semantic_plan import AgentSemanticPlan  # noqa: TC001 -- Pydantic runtime model.
@@ -43,10 +43,35 @@ class ConversationDecision(ConversationModel):
     correction: ActivityCorrection | None = None
 
 
+class ConversationAttachmentRef(ConversationModel):
+    file_url: str = Field(min_length=1, max_length=2048)
+    file_name: str = Field(min_length=1, max_length=255)
+    mime_type: Literal["image/png", "image/jpeg", "image/webp"]
+    size_bytes: int = Field(ge=1, le=10_485_760)
+
+
+class AssistantAttachmentUploadResponse(ConversationAttachmentRef):
+    """Server-issued reference to an uploaded image; sent back verbatim in ConversationTextRequest.attachments."""
+
+
 class ConversationTextRequest(ConversationModel):
-    text: str = Field(min_length=1, max_length=100_000)
+    text: str = Field(default="", max_length=100_000)
     client_request_id: str = Field(min_length=8, max_length=128)
     expected_version: int = Field(ge=0)
+    mentioned_customer_public_id: str | None = Field(default=None, max_length=64)
+    attachments: list[ConversationAttachmentRef] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def _require_text_or_attachments(self) -> ConversationTextRequest:
+        if not self.text.strip() and not self.attachments:
+            raise ValueError("text or attachments is required")
+        return self
+
+
+class ConversationPaginationRequest(ConversationModel):
+    action_id: str = Field(min_length=1, max_length=128)
+    expected_version: int = Field(ge=0)
+    client_request_id: str = Field(min_length=8, max_length=128)
 
 
 class ConversationChoiceRequest(ConversationModel):
@@ -121,12 +146,15 @@ class ConversationMessage(ConversationModel):
     ] | None = None
     ui: AgentUIEnvelope | None = None
     links: list[ConversationLink] = Field(default_factory=list, max_length=4)
+    attachments: list[ConversationAttachmentRef] = Field(default_factory=list, max_length=3)
     projection: ConversationProjection | None = None
     proposal_receipt: AcceptedProposalReceipt | None = Field(default=None, exclude=True)
     entity_receipt: EntityCreateReceipt | None = Field(default=None, exclude=True)
     # Read-model inputs. The Web UI uses ui.blocks, not these fields.
     error_code: str | None = Field(default=None, exclude=True)
     retryable: bool | None = Field(default=None, exclude=True)
+    query_ui: dict[str, object] | None = Field(default=None, exclude=True)
+    process_steps: list[dict[str, object]] = Field(default_factory=list, exclude=True)
 
 
 class ConversationView(ConversationModel):

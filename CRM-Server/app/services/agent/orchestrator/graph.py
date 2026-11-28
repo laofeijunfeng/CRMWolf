@@ -54,17 +54,12 @@ from app.services.agent.orchestrator.errors import (
     WorkflowExecutionFailedError,
 )
 from app.services.agent.orchestrator.pending_case_matcher import match_pending_case
-from app.services.agent.orchestrator.query_executor import (
-    QueryExecutionConfigurationError,
-    QueryIdentityResolutionUnavailableError,
-    QuerySemanticResolutionUnavailableError,
-)
+from app.services.agent.orchestrator.query_executor import query_execution_error
 from app.services.agent.orchestrator.result_set import (
     ResultSetReferenceError,
     resolve_result_set_entity,
 )
 from app.services.agent.principal import AgentPrincipal
-from app.services.agent.query import CRMQueryAgentExecutionError
 from app.services.agent.query.semantic_intent import (
     CRMQuerySemanticIntent,
     QuerySemanticIntentInvalidError,
@@ -102,17 +97,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_QUERY_ERROR_MESSAGES = {
-    "QUERY_INVALID": "我还没看懂你要查什么，请补充客户、时间或内容。",
-    "QUERY_UNSUPPORTED": "暂不支持查询这类信息。",
-    "QUERY_EMPTY": "没有找到符合条件的数据。",
-    "PERMISSION_DENIED": "没有权限查看相关数据。",
-    "QUERY_LIMIT_EXCEEDED": "查询结果较多，已按系统上限返回。",
-    "UPSTREAM_TIMEOUT": "查询响应超时了，请再试一次。",
-    "UPSTREAM_UNAVAILABLE": "查询暂时没有回应，请稍后再试。",
-    "MODEL_OUTPUT_INVALID": "我还没看懂你要查什么，请换一种说法试试。",
-    "INTERNAL_ERROR": "查询暂时没完成，请稍后再试。",
-}
 
 
 ROOT_RUNTIME_NAME = "crm_agent_root"
@@ -1656,66 +1640,17 @@ class RootOrchestrator:
                 query_input,
                 runtime=runtime.context,
             )
-        except QueryExecutionConfigurationError:
+        except Exception as exc:
+            error = query_execution_error(exc)
+            if error.code == "QUERY_EXECUTION_FAILED":
+                logger.exception(
+                    "Root query execution failed",
+                    extra={"client_request_id": turn.client_request_id},
+                )
             return {
                 "dispatch_result": FailureDispatchResult(
                     decision=decision,
-                    error=AgentExecutionError(
-                        code="QUERY_EXECUTION_NOT_CONFIGURED",
-                        message="查询服务配置不完整, 无法执行本次请求。",
-                        retryable=False,
-                    ),
-                ).model_dump(mode="json")
-            }
-        except QueryIdentityResolutionUnavailableError:
-            return {
-                "dispatch_result": FailureDispatchResult(
-                    decision=decision,
-                    error=AgentExecutionError(
-                        code="QUERY_IDENTITY_UNAVAILABLE",
-                        message="暂时没法确认客户信息，请稍后再试。",
-                        retryable=True,
-                    ),
-                ).model_dump(mode="json")
-            }
-        except QuerySemanticResolutionUnavailableError:
-            return {
-                "dispatch_result": FailureDispatchResult(
-                    decision=decision,
-                    error=AgentExecutionError(
-                        code="QUERY_SEMANTIC_INTENT_UNAVAILABLE",
-                        message="查询条件暂时没解析出来，请稍后再试。",
-                        retryable=True,
-                    ),
-                ).model_dump(mode="json")
-            }
-        except CRMQueryAgentExecutionError as exc:
-            query_error = exc.error
-            return {
-                "dispatch_result": FailureDispatchResult(
-                    decision=decision,
-                    error=AgentExecutionError(
-                        code=query_error.code,
-                        message=_QUERY_ERROR_MESSAGES.get(
-                            query_error.code, "查询服务暂时不可用，请稍后重试。"
-                        ),
-                        retryable=query_error.retryable,
-                    ),
-                ).model_dump(mode="json")
-            }
-        except Exception:
-            logger.exception(
-                "Root query execution failed",
-                extra={"client_request_id": turn.client_request_id},
-            )
-            return {
-                "dispatch_result": FailureDispatchResult(
-                    decision=decision,
-                    error=AgentExecutionError(
-                        code="QUERY_EXECUTION_FAILED",
-                        message="查询暂时没完成，请稍后再试。",
-                        retryable=True,
-                    ),
+                    error=error,
                 ).model_dump(mode="json")
             }
         return {

@@ -58,11 +58,11 @@ describe('durable processing and recovery in a continuous conversation', () => {
     await flushPromises()
     await send(wrapper)
     expect(wrapper.text()).toContain('整理活动内容')
-    expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
+    expect(wrapper.text()).toContain('原始内容已保存，处理仍在后台继续；关闭或刷新不会取消')
     finish?.()
     await flushPromises()
     expect(wrapper.text()).toContain('请补充客户名称')
-    expect(wrapper.text()).not.toContain('内容已保存，可以离开本页，完成后会通知你。')
+    expect(wrapper.text()).not.toContain('原始内容已保存，处理仍在后台继续；关闭或刷新不会取消')
   })
 
   it('names entity stages by the record they work on and rounds durations to seconds', async () => {
@@ -107,7 +107,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
     await send(wrapper)
     const row = (): string | null | undefined => stageRow(wrapper, '整理活动内容')?.textContent
     expect(row()).toContain('第 2/3 段 · 进行中…')
-    expect(wrapper.text()).toContain('内容已保存，可以离开本页，完成后会通知你。')
+    expect(wrapper.text()).toContain('原始内容已保存，处理仍在后台继续；关闭或刷新不会取消')
     finish?.()
     await flushPromises()
     // Segment durations add up to the stage total.
@@ -202,7 +202,7 @@ describe('durable processing and recovery in a continuous conversation', () => {
     show(view({ focused_task: offered }))
     mocks.turn.mockResolvedValue({
       turn_id: 'atn_one', status: 'FAILED', lease_version: 2, reprocess_allowed: true,
-      task: { ...offered, version: 2, reconciliation_required: source === 'task' },
+      task: { ...offered, version: 2, ...(source === 'task' ? { reconciliation_required: true } : {}) },
       events: source === 'event'
         ? [{ seq: 1, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '结果待核对' } }]
         : []
@@ -217,35 +217,6 @@ describe('durable processing and recovery in a continuous conversation', () => {
     expect(mocks.stream).not.toHaveBeenCalled()
     expect(button(wrapper, '重新处理')).toBeUndefined()
     expect(wrapper.get('textarea').element.disabled).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('does not retry an old turn after a concurrent conversation GET changes focus', async () => {
-    const old = makeTask({ reprocess_turn_id: 'atn_one' })
-    const next = makeTask({ public_id: 'ast_next', waiting: field() })
-    show(view({ version: 1, focused_task: old }))
-    let resolveConversation: ((value: ConversationView) => void) | undefined
-    let resolveTurn: ((value: AssistantTurn) => void) | undefined
-    mocks.get.mockImplementationOnce(() => new Promise<ConversationView>((resolve) => { resolveConversation = resolve }))
-    mocks.turn.mockImplementationOnce(() => new Promise<AssistantTurn>((resolve) => { resolveTurn = resolve }))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await button(wrapper, '刷新状态')?.trigger('click')
-    await button(wrapper, '重新处理')?.trigger('click')
-    expect(mocks.get).toHaveBeenCalledTimes(1)
-    expect(mocks.turn).toHaveBeenCalledWith('ast_one', 'atn_one', 0)
-    resolveConversation?.(view({ version: 2, focused_task: next, messages: [message('next', '新沟通等待客户', next)] }))
-    await flushPromises()
-    resolveTurn?.({
-      turn_id: 'atn_one', status: 'FAILED', lease_version: 2, reprocess_allowed: true, task: old,
-      events: [{ seq: 1, event: 'error', data: { code: 'UNKNOWN_COMMIT_RESULT', message: '旧沟通的未知结果' } }]
-    })
-    await flushPromises()
-    expect(mocks.retry).not.toHaveBeenCalled()
-    expect(mocks.stream).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('新沟通等待客户')
-    expect(wrapper.text()).not.toContain('旧沟通的未知结果')
-    expect(wrapper.get('textarea').element.disabled).toBe(false)
     wrapper.unmount()
   })
 
@@ -336,27 +307,13 @@ describe('durable processing and recovery in a continuous conversation', () => {
     mocks.open.mockRejectedValue(new Error('断网'))
     const wrapper = mount(SalesAssistantChat)
     await flushPromises()
-    expect(wrapper.text()).toContain('对话加载失败')
+    expect(wrapper.text()).toContain('网络已断开，已有内容都还在')
     await send(wrapper, '不要丢原会话')
     expect(mocks.text).not.toHaveBeenCalled()
   })
 })
 
 describe('shared conversation recovery', () => {
-  it('can resume the persisted same-owner request after reopening another browser', async () => {
-    show(view({ version: 1, has_pending_request: true, messages: [message('old', '上次发送的原句', null, 'user')] }))
-    mocks.resume.mockResolvedValue(reply(view({ version: 1, messages: [message('old', '上次发送的原句', null, 'user'), message('done', '已恢复处理')] })))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
-    await wrapper.findAll('button').find((b) => b.text() === '继续处理')?.trigger('click')
-    await flushPromises()
-    expect(mocks.resume).toHaveBeenCalledTimes(1)
-    expect(mocks.text).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('已恢复处理')
-    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
-  })
-
   it('does not replace the new focus with a lower-version conversation GET', async () => {
     const current = makeTask({ public_id: 'ast_new', version: 5 })
     mocks.text.mockResolvedValue(reply(view({ version: 2, focused_task: current, messages: [message('latest', '新的当前记录', current)] }), prepared(current)))
@@ -689,13 +646,7 @@ describe('local process card after an authoritative result', () => {
     await flushPromises()
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && !button.element.disabled)).toHaveLength(0)
-    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
-    expect(refresh).toBeDefined()
-    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', events: [], task: current })
-    await refresh?.trigger('click')
-    await flushPromises()
-    expect(mocks.turn).toHaveBeenCalledWith(current.public_id, 'atn_one', 2)
-    expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && !button.element.disabled)).toHaveLength(0)
+    expect(wrapper.find('[data-assistant-reconcile-status="checking"]').exists()).toBe(true)
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(mocks.stream).toHaveBeenCalledTimes(1)
     wrapper.unmount()
@@ -717,7 +668,7 @@ describe('local process card after an authoritative result', () => {
     await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
     await flushPromises()
     expect(wrapper.findAll('button').filter((button) => button.text() === '确认写入' && button.attributes('disabled') === undefined)).toHaveLength(0)
-    expect(wrapper.findAll('button').some((button) => button.text() === '刷新状态')).toBe(true)
+    expect(wrapper.find('[data-assistant-reconcile-status="checking"]').exists()).toBe(true)
     expect(mocks.stream).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
@@ -738,19 +689,14 @@ describe('local process card after an authoritative result', () => {
     await wrapper.findAll('button').find((button) => button.text() === '确认写入')?.trigger('click')
     await flushPromises()
     expect(wrapper.get('textarea').element.disabled).toBe(true)
-    mocks.turn.mockResolvedValue({ turn_id: 'atn_one', status: 'FAILED', events: [], task: suppressed })
-    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
-    expect(refresh).toBeDefined()
-    await refresh?.trigger('click')
-    await flushPromises()
-    expect(mocks.turn).toHaveBeenCalledWith(current.public_id, 'atn_one', 2)
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
+    expect(wrapper.find('[data-assistant-reconcile-status="checking"]').exists()).toBe(true)
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(mocks.stream).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
   it('releases a null-wait local fence only for an explicitly reconciled newer signed wait', async () => {
+    vi.useFakeTimers()
     const current = makeTask({ version: 2 })
     const unknown = {
       ...message('unknown', '结果待核对', current),
@@ -770,36 +716,46 @@ describe('local process card after an authoritative result', () => {
       handlers.onError({ code: 'UNKNOWN_COMMIT_RESULT', retryable: false, message: '结果待核对', seq: 2 })
     })
     const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    await send(wrapper)
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
-
-    const refreshWith = async (focused: typeof current): Promise<void> => {
-      mocks.get.mockResolvedValue(snapshot(focused))
-      expect(button(wrapper, '刷新状态')).toBeDefined()
-      await button(wrapper, '刷新状态')?.trigger('click')
+    try {
       await flushPromises()
-    }
-    await refreshWith({ ...current, reconciliation_required: false, waiting: field({ expected_version: 2 }) })
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
-    await refreshWith({ ...current, version: 3, reconciliation_required: false })
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
-    await refreshWith({ ...current, version: 3, reconciliation_required: false, waiting: field({ action_id: null, expected_version: 3 }) })
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
-    await refreshWith({ ...current, version: 4, reconciliation_required: true, waiting: field({ action_id: 'fresh', expected_version: 4 }) })
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
+      await send(wrapper)
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
 
-    await refreshWith({ ...current, version: 5, reconciliation_required: false, waiting: field({ action_id: 'fresh', expected_version: 5 }) })
-    expect(wrapper.text()).toContain('结果待核对')
-    expect(wrapper.get('textarea').element.disabled).toBe(false)
-    expect(button(wrapper, '重试同步')).toBeUndefined()
-    expect(mocks.resume).not.toHaveBeenCalled()
-    expect(mocks.turn).toHaveBeenCalledWith('ast_one', 'atn_one', 2)
-    expect(mocks.text).toHaveBeenCalledTimes(1)
-    expect(mocks.stream).toHaveBeenCalledTimes(1)
-    expect(mocks.command).not.toHaveBeenCalled()
-    expect(mocks.retry).not.toHaveBeenCalled()
-    wrapper.unmount()
+      // Each automatic reconcile attempt answers with a still-unknown verdict carrying a newer snapshot.
+      const reconcileWith = async (focused: typeof current, waitMs: number): Promise<void> => {
+        mocks.reconcile.mockResolvedValue({ outcome: 'STILL_UNKNOWN', task: focused, message: '结果仍待核对', followup_turn_id: null })
+        await vi.advanceTimersByTimeAsync(waitMs)
+        await flushPromises()
+      }
+      await reconcileWith({ ...current, reconciliation_required: false, waiting: field({ expected_version: 2 }) }, 2_000)
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
+      await reconcileWith({ ...current, version: 3, reconciliation_required: false }, 4_000)
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
+      await reconcileWith({ ...current, version: 3, reconciliation_required: false, waiting: field({ action_id: null, expected_version: 3 }) }, 8_000)
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
+      await reconcileWith({ ...current, version: 4, reconciliation_required: true, waiting: field({ action_id: 'fresh', expected_version: 4 }) }, 16_000)
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
+      expect(mocks.reconcile).toHaveBeenCalledTimes(4)
+
+      mocks.reconcile.mockResolvedValue({
+        outcome: 'STILL_UNKNOWN', message: '结果仍待核对', followup_turn_id: null,
+        task: { ...current, version: 5, reconciliation_required: false, waiting: field({ action_id: 'fresh', expected_version: 5 }) }
+      })
+      await button(wrapper, '查看结果')?.trigger('click')
+      await flushPromises()
+      expect(mocks.reconcile).toHaveBeenCalledTimes(5)
+      expect(wrapper.text()).toContain('结果待核对')
+      expect(wrapper.get('textarea').element.disabled).toBe(false)
+      expect(button(wrapper, '重试同步')).toBeUndefined()
+      expect(mocks.resume).not.toHaveBeenCalled()
+      expect(mocks.text).toHaveBeenCalledTimes(1)
+      expect(mocks.stream).toHaveBeenCalledTimes(1)
+      expect(mocks.command).not.toHaveBeenCalled()
+      expect(mocks.retry).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('rejects a Root retry action emitted while the focused task requires reconciliation', async () => {
@@ -817,23 +773,29 @@ describe('local process card after an authoritative result', () => {
     wrapper.unmount()
   })
 
-  it('restores a read-only reconciliation fence on reload and clears it for a new current action', async () => {
+  it('restores a read-only reconciliation fence on reload and clears it once auto reconcile restores a current action', async () => {
+    vi.useFakeTimers()
     const current = { ...makeTask({ waiting: null }), reconciliation_required: true }
     const failure = { ...message('old', '结果待核对', current), outcome: 'failure' as const }
     show(view({ focused_task: current, messages: [failure] }))
-    const wrapper = mount(SalesAssistantChat)
-    await flushPromises()
-    expect(wrapper.get('textarea').element.disabled).toBe(true)
-    const refresh = wrapper.findAll('button').find((button) => button.text() === '刷新状态')
-    expect(refresh).toBeDefined()
     const resolved = { ...current, version: 2, waiting: field({ action_id: 'next', expected_version: 2 }), reconciliation_required: false }
+    mocks.reconcile.mockResolvedValue({ outcome: 'NOT_WRITTEN', task: resolved, message: '未写入', followup_turn_id: null })
     mocks.get.mockResolvedValue(view({ version: 2, focused_task: resolved, messages: [failure] }))
-    await refresh?.trigger('click')
-    await flushPromises()
-    expect(wrapper.get('textarea').element.disabled).toBe(false)
-    expect(mocks.command).not.toHaveBeenCalled()
-    expect(mocks.stream).not.toHaveBeenCalled()
-    wrapper.unmount()
+    const wrapper = mount(SalesAssistantChat)
+    try {
+      await flushPromises()
+      expect(wrapper.get('textarea').element.disabled).toBe(true)
+      expect(mocks.reconcile).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+      expect(mocks.reconcile).toHaveBeenCalledWith(current.public_id)
+      expect(wrapper.get('textarea').element.disabled).toBe(false)
+      expect(mocks.command).not.toHaveBeenCalled()
+      expect(mocks.stream).not.toHaveBeenCalled()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('keeps stage progress while a reloaded turn is still running', async () => {
@@ -940,7 +902,7 @@ describe('local process card after an authoritative result', () => {
     await send(wrapper, '继续这条新沟通')
     expect(mocks.text).toHaveBeenCalledWith(expect.objectContaining({ text: '继续这条新沟通', expected_version: 5 }))
     expect(mocks.stream).toHaveBeenCalledTimes(2)
-    expect(mocks.stream).toHaveBeenLastCalledWith('ast_new', expect.objectContaining({ kind: 'text' }), expect.any(Object))
+    expect(mocks.stream).toHaveBeenLastCalledWith('ast_new', expect.objectContaining({ kind: 'text' }), expect.any(Object), expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(mocks.command).toHaveBeenCalledTimes(1)
     expect(mocks.resume).not.toHaveBeenCalled()
     expect(mocks.retry).not.toHaveBeenCalled()

@@ -2,6 +2,7 @@
 
 import os
 import uuid
+from typing import Literal
 
 from app.core.config import get_settings
 from app.utils.time import business_now
@@ -25,9 +26,29 @@ CONTRACT_ALLOWED_EXTENSIONS = {
     ".docx",
 }
 ALLOWED_EXTENSIONS = INVOICE_ALLOWED_EXTENSIONS
+# 销售助手图片附件:扩展名白名单 + 以文件头识别出的真实类型决定落盘扩展名
+ASSISTANT_ATTACHMENT_ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+AssistantImageMime = Literal["image/png", "image/jpeg", "image/webp"]
+ASSISTANT_ATTACHMENT_EXTENSIONS_BY_MIME: dict[AssistantImageMime, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+}
+ASSISTANT_ATTACHMENT_ROOT = "assistant_attachments"
 
 # 最大文件大小(10MB)
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def detect_image_mime(content: bytes) -> AssistantImageMime | None:
+    """按文件头(magic bytes)识别 PNG/JPEG/WEBP;不信任客户端声明的 Content-Type。"""
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 class FileStorageService:
@@ -162,6 +183,34 @@ class FileStorageService:
             raise FileStorageError(f"文件保存失败\uff1a{e}") from e
 
         return os.path.join(root, str(team_id), str(contract_id), storage_filename)
+
+    def save_assistant_attachment(
+        self,
+        team_id: int,
+        user_id: int,
+        filename: str,
+        content: bytes,
+    ) -> str:
+        """保存销售助手图片附件,按团队 + 用户隔离,返回相对路径。"""
+        if len(content) > MAX_FILE_SIZE:
+            raise FileStorageError(
+                f"文件过大:{len(content)} 字节,最大允许 {MAX_FILE_SIZE} 字节"
+            )
+        self._validate_filename(filename, ASSISTANT_ATTACHMENT_ALLOWED_EXTENSIONS)
+        mime_type = detect_image_mime(content)
+        if mime_type is None:
+            raise FileStorageError("文件内容不是 PNG、JPEG 或 WEBP 图片")
+
+        storage_filename = f"{uuid.uuid4().hex}{ASSISTANT_ATTACHMENT_EXTENSIONS_BY_MIME[mime_type]}"
+        relative_dir = os.path.join(ASSISTANT_ATTACHMENT_ROOT, str(team_id), str(user_id))
+        try:
+            os.makedirs(os.path.join(self.base_dir, relative_dir), exist_ok=True)
+            with open(os.path.join(self.base_dir, relative_dir, storage_filename), "wb") as f:
+                f.write(content)
+        except OSError as e:
+            raise FileStorageError(f"文件保存失败:{e}") from e
+
+        return os.path.join(relative_dir, storage_filename)
 
     def get_full_path(self, relative_path: str) -> str:
         """获取文件完整路径
